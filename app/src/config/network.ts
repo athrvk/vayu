@@ -65,7 +65,8 @@ export const STATS_PAGE_LIMIT = 5000;
  * one tick a second) comes back raw; a longer one comes back folded into this
  * many buckets, so a 24 h soak is one response of about 2,000 ticks instead of
  * 18 pages of 5,000. Two or more, so a bucketed series always has the two
- * points a chart needs.
+ * points a chart needs. The same budget is the `maxPoints` of the run's
+ * server-vitals read (`GET /runs/:id/monitor`, #2611).
  */
 export const HISTORY_SERIES_MAX_POINTS = 2000;
 

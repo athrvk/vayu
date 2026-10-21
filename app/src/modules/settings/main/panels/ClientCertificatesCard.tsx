@@ -165,8 +165,8 @@ const EMPTY_DRAFT = {
 /**
  * A file the user picks, reduced to its absolute path.
  *
- * `getFilePath` is a preload-local read of the `File` object, not an IPC
- * channel - the renderer gains no ability to name paths of its own. Outside
+ * `getFilePath` reads the path off the `File` object and reports it to main as
+ * a picked file - the renderer gains no ability to name paths of its own. Outside
  * Electron it answers `""`, and the field then stays empty rather than being
  * filled with a path that does not exist.
  */

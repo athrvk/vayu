@@ -29,7 +29,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { useSpecFileStore } from "@/stores";
-import type { Collection, Request, SpecMatchResponse } from "@/types";
+import type { Collection, Request, RequestSummary, SpecMatchResponse } from "@/types";
 
 const updateCollection = {
 	mutate: vi.fn(),
@@ -95,7 +95,7 @@ const specDescribeQuery = {
 /** The arguments the tab passed to the match query on its last render. */
 let matchArgs: unknown[] = [];
 
-let requests: Request[] = [];
+let requests: RequestSummary[] = [];
 /** Whether the subtree's request lists have answered - the mapped count's input. */
 let requestsLoading = false;
 
@@ -201,34 +201,24 @@ const collection = (openapi?: Collection["openapi"]): Collection =>
 		updatedAt: "2026-01-01T00:00:00.000Z",
 	}) as Collection;
 
-const request = (id: string, url: string, specOperation?: Request["specOperation"]): Request =>
-	({
-		id,
-		collectionId: "col_1",
-		name: id,
-		description: "",
-		method: "GET",
-		url,
-		params: [],
-		headers: [],
-		body: { mode: "none" },
-		bodyType: "none",
-		auth: { mode: "inherit" },
-		elements: [],
-		followRedirects: true,
-		maxRedirects: 10,
-		verifySSL: true,
-		disableCookies: false,
-		disabledSystemHeaders: [],
-		disableUrlEncoding: false,
-		httpVersion: "auto",
-		stream: false,
-		mockResponseMode: "first",
-		specOperation,
-		order: 0,
-		createdAt: "2026-01-01T00:00:00.000Z",
-		updatedAt: "2026-01-01T00:00:00.000Z",
-	}) as Request;
+/**
+ * A tree row as the tab reads it: a summary (#2546), the only shape its
+ * request lists hold. The mapped count and the match read nothing else.
+ */
+const request = (
+	id: string,
+	url: string,
+	specOperation?: RequestSummary["specOperation"]
+): RequestSummary => ({
+	id,
+	collectionId: "col_1",
+	name: id,
+	method: "GET",
+	url,
+	...(specOperation ? { specOperation } : {}),
+	order: 0,
+	createdAt: "2026-01-01T00:00:00.000Z",
+});
 
 /** Drive the hidden <input type="file"> the way the browser would. */
 async function pickFile(name: string, text: string) {

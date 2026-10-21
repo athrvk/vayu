@@ -56,6 +56,8 @@ vi.mock("@/queries", () => ({
 		refetch: vi.fn(),
 	}),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: requests }),
+	// The run dialog's column audit reads whole rows (#2546).
+	useFullCollectionRequests: () => ({ requestsByCollection: requests, isLoading: false }),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),

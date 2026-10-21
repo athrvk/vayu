@@ -170,9 +170,9 @@ export interface DisplayMetrics {
 	// The latest tick's status map.
 	status_codes?: Record<string, number>;
 	current_rps: number;
-	latency_p50_ms: number;
-	latency_p95_ms: number;
-	latency_p99_ms: number;
+	latency_p50_ms?: number | null;
+	latency_p95_ms?: number | null;
+	latency_p99_ms?: number | null;
 	// The run's percentiles so far, on a live tick (`LoadTestMetrics`'s own docs).
 	cumulative_p50_ms?: number | null;
 	cumulative_p95_ms?: number | null;

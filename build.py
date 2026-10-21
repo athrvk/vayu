@@ -1054,19 +1054,19 @@ def setup_environment(project_root: Path):
 
     print()
 
-    # ── Git pre-commit hook ───────────────────────────────────────────────────
-    # Installed here rather than left to the contributor: the hook is the only
-    # thing that runs clang-format 19 and clang-tidy over staged C++ before a
-    # commit exists, and every clone starts without it - `.git/hooks` is not
-    # tracked. A session that never ran `scripts/install-git-hooks.sh` by hand
-    # commits unformatted, and the first anyone hears of it is a red
-    # `Engine formatting` job. `--setup` is every entry point's front door
+    # ── Git hooks ─────────────────────────────────────────────────────────────
+    # Installed here rather than left to the contributor: the pre-commit hook
+    # runs clang-format 19 over staged C++ and the pre-push hook runs clang-tidy
+    # over what a push carries, and every clone starts without them -
+    # `.git/hooks` is not tracked. A session that never ran
+    # `scripts/install-git-hooks.sh` by hand commits unformatted, and the first
+    # anyone hears of it is a red `Engine formatting` job. `--setup` is every entry point's front door
     # (`.claude/hooks/session-start.sh` calls it too), so one call here covers
     # a fresh contributor and a fresh cloud session alike.
     #
     # Non-fatal by design. A worktree, a tarball with no `.git`, or a hook the
     # user deliberately replaced should not stop an environment from coming up.
-    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Installing git pre-commit hook...')
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Installing git hooks...')
     hook_installer = project_root / "scripts" / "install-git-hooks.sh"
     try:
         result = subprocess.run(
@@ -1076,15 +1076,15 @@ def setup_environment(project_root: Path):
             text=True,
         )
         if result.returncode == 0:
-            log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Pre-commit hook installed')
+            log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Git hooks installed')
         else:
             detail = (result.stderr or result.stdout or "").strip().splitlines()
             reason = detail[-1] if detail else f"exit {result.returncode}"
-            log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} Pre-commit hook not installed ({reason})')
-            log('    Commits will not be format-checked; CI still is.')
+            log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} Git hooks not installed ({reason})')
+            log('    Commits will not be format-checked or pushes linted; CI still does both.')
     except OSError as exc:
-        log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} Pre-commit hook not installed ({exc})')
-        log('    Commits will not be format-checked; CI still is.')
+        log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} Git hooks not installed ({exc})')
+        log('    Commits will not be format-checked or pushes linted; CI still does both.')
 
     print()
     log(f'{Style.GREEN}{Style.CHECK} Environment ready.{Style.RESET} Build with:  python build.py --dev')

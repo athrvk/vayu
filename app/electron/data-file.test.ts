@@ -6,13 +6,13 @@
  */
 
 /**
- * The gates on the one channel that lets the renderer name a file path
- * (issue #599).
+ * The gates on the channel that lets the renderer name a file path (issue
+ * #599).
  *
- * This channel is a deliberate widening of the "the renderer never names paths"
- * posture, so what keeps it narrow is the whole value of the module: an
- * extension allowlist, and the engine's *fetched* byte cap. Both are driven here
- * against an injected filesystem, so a regression in either shows up as a test
+ * What keeps it from being "read any file" is the whole value of the module: an
+ * extension allowlist, the grant on the path (#2357: only files the user
+ * picked, dropped or opened) and the engine's *fetched* byte cap. All are driven
+ * here against an injected filesystem, so a regression in any shows up as a test
  * rather than as a file the app should never have opened.
  */
 
@@ -20,7 +20,9 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { FileNotGrantedError, NOT_GRANTED_MESSAGE } from "./file-grants";
 import {
+	createDataFileSystem,
 	DataFileMissingError,
 	hashDataFile,
 	hashDataFileReply,
@@ -39,7 +41,120 @@ const system = (overrides: Partial<DataFileSystem> = {}): DataFileSystem => ({
 	fetchConfig: vi.fn(async () => ({
 		entries: [{ key: "maxScenarioDataBytes", value: "1024" }],
 	})),
+	isGranted: vi.fn(async () => true),
 	...overrides,
+});
+
+/*
+ * The grant (#2357): a path the user never picked, dropped or opened is refused
+ * however well it passes the other gates.
+ *
+ * Mutation check: drop `assertGranted` from `statOpenableDataFile` (or make the
+ * injected `isGranted` answer true) and every "never granted" case fails; move
+ * the grant after the stat and the "same answer whether or not it exists" case
+ * fails.
+ */
+describe("the grant on the path (#2357)", () => {
+	const ungranted = () => system({ isGranted: vi.fn(async () => false) });
+
+	it("refuses a read of a file that exists with an allowed extension but was never granted", async () => {
+		const io = ungranted();
+		await expect(readDataFile("/home/u/rows.csv", io)).rejects.toThrow(NOT_GRANTED_MESSAGE);
+		await expect(readDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		expect(io.isGranted).toHaveBeenCalledWith("/home/u/rows.csv");
+		expect(io.readFile).not.toHaveBeenCalled();
+	});
+
+	it("tells the user to pick the file again", () => {
+		expect(NOT_GRANTED_MESSAGE).toMatch(/Pick the file again\.$/);
+	});
+
+	it("reads a granted file", async () => {
+		const io = system({ isGranted: vi.fn(async (p: string) => p === "/home/u/rows.csv") });
+		await expect(readDataFile("/home/u/rows.csv", io)).resolves.toMatchObject({
+			fileName: "rows.csv",
+		});
+	});
+
+	it("answers a hash request for an ungranted path as missing, never as a digest", async () => {
+		const io = ungranted();
+		await expect(hashDataFileReply("/home/u/rows.csv", io)).resolves.toEqual({
+			status: "missing",
+		});
+		expect(io.hashFile).not.toHaveBeenCalled();
+	});
+
+	it("rejects hashDataFile itself for an ungranted path, so a caller outside IPC can tell", async () => {
+		const io = ungranted();
+		await expect(hashDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		expect(io.hashFile).not.toHaveBeenCalled();
+	});
+
+	it("hashes a granted file", async () => {
+		await expect(hashDataFileReply("/home/u/rows.csv", system())).resolves.toEqual({
+			status: "found",
+			hash: "f".repeat(64),
+		});
+	});
+
+	it("answers an ungranted path the same whether or not a file is there", async () => {
+		const missing = system({
+			isGranted: vi.fn(async () => false),
+			stat: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(readDataFile("/home/u/rows.csv", missing)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		expect(missing.stat).not.toHaveBeenCalled();
+		await expect(readDataFile("/home/u/rows.csv", ungranted())).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+	});
+
+	it("reports a granted path with no file as moved", async () => {
+		const io = system({
+			stat: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(readDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			DataFileMissingError
+		);
+		await expect(hashDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			DataFileMissingError
+		);
+	});
+
+	it("does not consult the registry for a refused extension or an empty path", async () => {
+		const io = ungranted();
+		await expect(readDataFile("/home/u/.ssh/id_rsa", io)).rejects.toThrow(
+			/only opens data files/
+		);
+		await expect(readDataFile("", io)).rejects.toThrow(/No data file path/);
+		expect(io.isGranted).not.toHaveBeenCalled();
+	});
+
+	it("fails closed when the registry itself rejects", async () => {
+		const io = system({
+			isGranted: vi.fn(async () => {
+				throw new Error("engine unreachable");
+			}),
+		});
+		await expect(readDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		await expect(hashDataFileReply("/home/u/rows.csv", io)).resolves.toEqual({
+			status: "missing",
+		});
+		expect(io.readFile).not.toHaveBeenCalled();
+		expect(io.hashFile).not.toHaveBeenCalled();
+	});
 });
 
 describe("readDataFile - the extension allowlist", () => {
@@ -157,7 +272,9 @@ describe("the allowlist and the picker agree", () => {
 		// remember a file it then refuses to re-open, every time, with no way for
 		// the user to tell why. Duplicated across the process boundary out of
 		// necessity - this is what keeps the two copies honest.
-		expect([...DATA_FILE_EXTENSIONS].sort()).toEqual(DATA_FILE_ACCEPT.split(",").sort());
+		const offered = DATA_FILE_ACCEPT.split(",");
+		expect(offered.length).toBeGreaterThan(0);
+		expect([...DATA_FILE_EXTENSIONS].sort()).toEqual(offered.sort());
 	});
 });
 
@@ -193,6 +310,7 @@ describe("the hash and the picker's agree (#2051)", () => {
  * a refused extension or empty path and the refusal cases fail.
  */
 describe("hashDataFile", () => {
+	const onDisk = createDataFileSystem(async () => true);
 	let dir: string;
 
 	beforeEach(async () => {
@@ -207,7 +325,7 @@ describe("hashDataFile", () => {
 		const file = path.join(dir, "abc.csv");
 		await fs.writeFile(file, "abc");
 
-		const hash = await hashDataFile(file);
+		const hash = await hashDataFile(file, onDisk);
 
 		// The FIPS 180-2 "abc" vector, a value this codebase did not compute.
 		expect(hash).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -221,13 +339,13 @@ describe("hashDataFile", () => {
 	it("answers a different digest once the file is edited", async () => {
 		const file = path.join(dir, "rows.csv");
 		await fs.writeFile(file, "id\n1\n");
-		const before = await hashDataFile(file);
+		const before = await hashDataFile(file, onDisk);
 		await fs.writeFile(file, "id\n2\n");
-		expect(await hashDataFile(file)).not.toBe(before);
+		expect(await hashDataFile(file, onDisk)).not.toBe(before);
 	});
 
 	it("reports a missing file the way a read does", async () => {
-		await expect(hashDataFile(path.join(dir, "gone.csv"))).rejects.toThrow(
+		await expect(hashDataFile(path.join(dir, "gone.csv"), onDisk)).rejects.toThrow(
 			/The file is no longer at .*gone\.csv - pick it again\./
 		);
 	});

@@ -1561,6 +1561,23 @@ int64_t limit,
 int64_t offset,
 std::optional<int64_t> max_points = std::nullopt);
 
+/**
+ * Testable core of `GET /runs/:id/monitor`: one `{data, pagination}` page of
+ * the server-vitals samples scraped during the run, 404 for a missing run, an
+ * empty `data` for a run that configured no monitor. Defined in metrics.cpp.
+ *
+ * @p max_points behaves as it does for `run_time_series_response`, with
+ * `MonitorSampleBucket` folding the samples: @p limit and @p offset are
+ * ignored, a series of at most @p max_points samples comes back raw, and the
+ * envelope adds `bucketed` and `ticksPerBucket` (the samples a bucket folds,
+ * named for the key the tick series already uses).
+ */
+std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
+const std::string& run_id,
+int64_t limit,
+int64_t offset,
+std::optional<int64_t> max_points = std::nullopt);
+
 /// The most ticks one `run_time_series_response` page returns.
 constexpr int64_t RUN_TIME_SERIES_PAGE_MAX = 50000;
 
@@ -1585,7 +1602,11 @@ std::optional<int64_t> parse_max_points (std::string_view raw);
  *   the max is an upper bound on the bucket's percentile, never an estimate of
  *   it; `0` is a second with no completion.
  * - `current_concurrency`, `backpressure`: the max.
- * - `current_rps`: the mean of the bucket's ticks.
+ * - `current_rps`, `current_send_rate`: the mean of the bucket's ticks.
+ * - `window_avg_latency_ms`, `window_avg_queue_wait_ms` (#2393): the mean over
+ *   the ticks that carried a number, `null` when none did (every second idle).
+ *   The run's own mean over the bucket would weight each second by its
+ *   completions; this one weights the seconds equally, as the chart plots them.
  *
  * Any other key, recognised or not, is the last tick's. A key no tick in the
  * bucket carried is never added, and a bucket of one tick is that tick
@@ -1603,8 +1624,39 @@ class MetricTickBucket {
     nlohmann::json last_;
     nlohmann::json maxima_ = nlohmann::json::object ();
     size_t ticks_          = 0;
-    size_t rps_ticks_      = 0;
-    double rps_sum_        = 0.0;
+
+    /// A key averaged over the ticks that carried a number for it.
+    struct Mean {
+        double sum    = 0.0;
+        size_t ticks  = 0;
+        bool seen_key = false; // Present (maybe null) on some tick.
+    };
+    std::map<std::string, Mean, std::less<>> means_;
+};
+
+/**
+ * Folds consecutive stored samples of `GET /runs/:id/monitor` into one (#2611).
+ *
+ * A sample is `{timestamp, series: {name: number}}` with no cumulative field,
+ * so the folded sample takes the *last* sample's `timestamp` and, for every
+ * `series` name, the max over the bucket's samples that carried it. The max
+ * suits a gauge (cpu, memory, queue depth: the bucket's worst moment, which a
+ * mean would hide) and equals the last value for a monotone counter. A name no
+ * sample in the bucket carried is never added, a non-number value is skipped,
+ * and a bucket of one sample is that sample unchanged. Defined in metrics.cpp.
+ */
+class MonitorSampleBucket {
+    public:
+    /// Fold in the next sample, in stored order.
+    void add (nlohmann::json sample);
+    [[nodiscard]] bool empty () const;
+    /// The folded sample. The bucket is empty again afterwards.
+    [[nodiscard]] nlohmann::json take ();
+
+    private:
+    nlohmann::json last_;
+    nlohmann::json maxima_ = nlohmann::json::object ();
+    size_t samples_        = 0;
 };
 
 /**

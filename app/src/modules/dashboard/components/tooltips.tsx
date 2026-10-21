@@ -90,9 +90,9 @@ export const TOOLTIPS = {
 
 	// ---- Chart cards ----
 	throughputOverTime:
-		"Per-tick (100ms) snapshot of send rate (dispatched) and throughput (received). Divergence between the two lines indicates the server is saturating. The dashed reference is the configured target.",
+		"Send rate (dispatched) and throughput (received) over the last second, one point per tick. Divergence between the two lines indicates the server is saturating. The dashed reference is the configured target.",
 	latencyOverTime:
-		"Per-tick latency over the run. The amber gap between Latency and Wire shows generator-side queue wait. When the gap grows, your generator is the bottleneck. Identity: latency = wire + queue wait.",
+		"Average latency of the requests that completed over the last second, one point per tick; a second with no completions adds no point. The amber gap between Latency and Wire shows generator-side queue wait. When the gap grows, your generator is the bottleneck. Identity: latency = wire + queue wait.",
 	percentilesOverTime:
 		"p50 / p95 / p99 latency of each second of the run. p50 is what most users felt; p99 is the tail - heavy-tail divergence shows up as p99 climbing while p50 stays flat. At wider chart intervals each point shows the worst second in its interval. Sourced from HdrHistogram snapshots merged over each second.",
 	responseTimeVsConcurrency:

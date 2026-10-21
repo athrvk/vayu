@@ -268,7 +268,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
-| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
+| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
@@ -1817,8 +1817,12 @@ keeping only an absolute path with an extension `dataFile:read` would open).
 `list_collections` and `vayu://collections` hash the file as it is **at call
 time** (`hashDataFile` in `electron/data-file.ts`, behind the same path gates
 as `dataFile:read`, streamed and never returned), so an edit made after a run
-shows up without the app re-reading anything. A file that cannot be read -
-moved, deleted - is never an error: the row keeps the hash the app last read
+shows up without the app re-reading anything. One of those gates is the grant
+registry (#2357): only a file the user picked, dropped or opened through the
+app is hashed, so the digest is no oracle over a path the renderer merely
+named. A file that cannot be read - moved, deleted, or never granted (a data
+file picked before grants existed is granted once it is picked again) - is
+never an error: the row keeps the hash the app last read
 the file with (picked in the Data tab, or re-read by a run dialog,
 Send-with-row or the Data tab), or none for a location it has not read since
 hashes were recorded. A write tool's echoed collection row carries that stored
@@ -2494,8 +2498,8 @@ collection tree until some unrelated mutation happened to refetch the lists.
 Each tool declares the data families it changes (`invalidates` in `tools/*.tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
-(`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`,
-`oauth`, `variables`)
+(`collection`, `collectionRow`, `request`, `environment`, `run`, `cookie`,
+`config`, `service`, `oauth`, `variables`)
 plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call
 itself named; it carries no engine data, so the
 renderer still reads every row through its query layer. The five hints are read
@@ -2524,7 +2528,14 @@ runners - `run_request`, `run_collection_smoke` and `run_collection` - because
 a script or extractor that sets a variable has the engine write it back to the
 environment, globals or collection row once the send finishes. It carries no
 hint: the event cannot say which of the three scopes moved. `start_load_run`
-persists nothing and stays `run` alone.
+persists nothing and stays `run` alone. `collectionRow` (issue #2546) is
+declared by `create_collection`, `update_collection` and `unbind_spec`, the
+writes that touch one collection row and nothing beneath it; the renderer
+refetches the collections and their compositions and no request list. Every
+other collection write (`delete_collection`, `move_item`, `import_document`,
+`bind_spec`, `sync_spec`, the two trash tools) declares `collection`, which
+refetches every request list, because what it changes reaches past the
+collection it names.
 
 **One field on the event is not a hint at all.** `startedRun` rides the `run`
 event of the two tools that *create* a run - `start_load_run` and

@@ -58,12 +58,7 @@ import {
 } from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
 import type { SampleDestination, SampleFilter } from "./sample-filter";
-import {
-	RUN_TYPE_NAME,
-	type LoadTestDetailProps,
-	type MonitorSeriesResponse,
-	type SeriesFailure,
-} from "../types";
+import { RUN_TYPE_NAME, type LoadTestDetailProps, type SeriesFailure } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
@@ -133,49 +128,26 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// Server vitals, only for a run that actually recorded some: the report's
 	// `monitor` section is the run's own record of what the scrape did, so a run
 	// that monitored nothing (or whose every scrape failed) never issues the
-	// fetch at all.
+	// fetch at all. One request, never paged and folded by the engine when the
+	// run scraped more than the History point budget (#2611), like the ticks.
 	const hasMonitorSamples = (report.monitor?.samples ?? 0) > 0;
 	const {
 		data: monitorData,
 		isError: isMonitorError,
 		error: monitorError,
-		isFetchingNextPage: isFetchingMonitorPage,
-		hasNextPage: hasMoreMonitor,
-		fetchNextPage: fetchMoreMonitor,
 		refetch: refetchMonitor,
 	} = useRunMonitorSeriesQuery(runId ?? null, hasMonitorSamples, report.metadata?.status);
 
-	// Auto-page through every scrape. Not while the query is in error (#2062): a
-	// failed page leaves `hasNextPage` true and `isFetchingNextPage` back at
-	// false, which is exactly this effect's trigger, so it would re-request the
-	// failing page in a tight loop. The failure's Retry calls `fetchMoreMonitor`
-	// itself, and a success clears the error and resumes the paging.
-	useEffect(() => {
-		if (hasMoreMonitor && !isFetchingMonitorPage && !isMonitorError) {
-			fetchMoreMonitor();
-		}
-	}, [hasMoreMonitor, isFetchingMonitorPage, isMonitorError, fetchMoreMonitor]);
-
 	const monitorFailure = useMemo<SeriesFailure | undefined>(() => {
 		if (!isMonitorError) return undefined;
-		const resumable = hasMoreMonitor && !!monitorData?.pages?.length;
 		return {
 			message: monitorError?.message ?? "The engine returned no server-vitals data.",
-			retry: () => void (resumable ? fetchMoreMonitor() : refetchMonitor()),
+			retry: () => void refetchMonitor(),
 		};
-	}, [
-		isMonitorError,
-		monitorError,
-		hasMoreMonitor,
-		monitorData,
-		fetchMoreMonitor,
-		refetchMonitor,
-	]);
+	}, [isMonitorError, monitorError, refetchMonitor]);
 
-	const monitorSamples = useMemo(
-		() => monitorData?.pages?.flatMap((page: MonitorSeriesResponse) => page.data) ?? [],
-		[monitorData]
-	);
+	const monitorSamples = useMemo(() => monitorData?.data ?? [], [monitorData]);
+	const monitorTicksPerBucket = monitorData?.bucketed ? monitorData.ticksPerBucket : undefined;
 
 	/*
 	 * The breakpoint and the anomaly windows are derived from the series the
@@ -420,6 +392,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									monitorFailure={monitorFailure}
 									isLoadingSeries={isLoadingSeries}
 									ticksPerBucket={ticksPerBucket}
+									monitorTicksPerBucket={monitorTicksPerBucket}
 								/>
 								{/* Not part of PerformanceTab: that is a view of this run's report
 								    and renders without a QueryClient in tests; this reads the request's other runs. */}

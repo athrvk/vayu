@@ -46,6 +46,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -56,6 +57,7 @@
 #include "sibling_listing.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/core/postman_export.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
@@ -2290,6 +2292,173 @@ TEST (PostmanImport, ACollectionShapedLikeTwitterReportsEveryRequestThatLosesOAu
     EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
 }
 
+/// One Insomnia v4 resource under @p parent: a folder when @p type is
+/// "request_group", else a request.
+json insomnia_resource (const char* type,
+const std::string& id,
+const std::string& parent,
+const std::string& name,
+const json& authentication = nullptr) {
+    json resource = { { "_id", id }, { "_type", type }, { "parentId", parent },
+        { "name", name } };
+    if (std::string_view (type) == "request") {
+        resource["method"] = "GET";
+        resource["url"]    = "https://x.com/" + name;
+    }
+    if (!authentication.is_null ()) {
+        resource["authentication"] = authentication;
+    }
+    return resource;
+}
+
+json insomnia_request (const std::string& id,
+const std::string& parent,
+const std::string& name,
+const json& authentication = nullptr) {
+    return insomnia_resource ("request", id, parent, name, authentication);
+}
+
+json insomnia_folder (const std::string& id,
+const std::string& parent,
+const std::string& name,
+const json& authentication = nullptr) {
+    return insomnia_resource ("request_group", id, parent, name, authentication);
+}
+
+/// A v4 export of workspace "W" (under @p workspace_auth when given) holding
+/// @p resources. When @p ranked every resource carries a `metaSortKey` (its
+/// place in the list), so the importer stamps each draft's `order`; otherwise
+/// none does and the folders-first listing stands.
+ImportParse parse_insomnia_tree (json resources, bool ranked, const json& workspace_auth = nullptr) {
+    json workspace = { { "_id", "wrk" }, { "_type", "workspace" }, { "name", "W" } };
+    if (!workspace_auth.is_null ()) {
+        workspace["authentication"] = workspace_auth;
+    }
+    json list = json::array ({ std::move (workspace) });
+    int key   = 0;
+    for (json& resource : resources) {
+        if (ranked) {
+            resource["metaSortKey"] = key++;
+        }
+        list.push_back (std::move (resource));
+    }
+    return parse_import (
+    json{ { "_type", "export" }, { "__export_format", 4 }, { "resources", list } }
+    .dump (),
+    {}, {});
+}
+
+/// The requests that lose a data-only auth are those whose *resolved* auth is
+/// one (#2610): the folder declaring it is named beside them, not counted, and
+/// a request that inherits it is. Both tree shapes run, because an unranked
+/// Insomnia tree has no `order` and lists a folder's sub-folders first.
+/// Mutation checks: make an `inherit` request stop at its own mode in
+/// `walk_data_only_auth` and the inheriting names go missing; drop the
+/// `ordered` guard in `items_in_document_order` and the unranked case fails to
+/// parse.
+TEST (InsomniaImport, CountsTheRequestsThatLoseADataOnlyAuthNotTheFolderDeclaringIt) {
+    const json iam = { { "type", "iam" }, { "accessKeyId", "AK" } };
+    for (const bool ranked : { true, false }) {
+        SCOPED_TRACE (ranked ? "ranked" : "unranked");
+        const ImportParse parsed = parse_insomnia_tree (
+        json::array ({ insomnia_folder ("signed", "wrk", "Signed", iam),
+        insomnia_request ("a", "signed", "Inherits"),
+        insomnia_request ("b", "signed", "Opted out", json{ { "type", "none" } }),
+        insomnia_folder ("deeper", "signed", "Deeper"),
+        insomnia_request ("c", "deeper", "Inherits deep"),
+        insomnia_request ("d", "signed", "Own digest", json{ { "type", "digest" } }),
+        insomnia_request ("e", "signed", "Own bearer", json{ { "type", "bearer" } }),
+        insomnia_request ("f", "wrk", "Outside") }),
+        ranked);
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const json meta = json::parse (parsed.result.at ("meta").dump ());
+        EXPECT_EQ (meta.at ("nonExecutableAuth"), 3);
+        EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+        ranked ? (Names{ "Inherits", "Inherits deep", "Own digest" }) :
+                 (Names{ "Inherits deep", "Inherits", "Own digest" }));
+        EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"), Names{ "Signed" });
+        EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
+    }
+}
+
+/// A folder set to Insomnia's No Authentication ends the walk for what is
+/// under it, however deep, as `noauth` does in Postman; a folder with no auth,
+/// an empty one or a disabled one says nothing and the walk passes through to
+/// the workspace's. The workspace is named apart from the folders. Mutation
+/// check: drop the `noauth` branch of `insomnia_collection_auth` and "Shielded"
+/// and "Shielded deep" are counted.
+TEST (InsomniaImport, AFolderSetToNoAuthenticationEndsTheWalkForDataOnlyAuth) {
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("public", "wrk", "Public", json{ { "type", "none" } }),
+    insomnia_folder ("nested", "public", "Nested"), insomnia_request ("a", "nested", "Shielded deep"),
+    insomnia_request ("b", "public", "Shielded"), insomnia_folder ("plain", "wrk", "Plain"),
+    insomnia_request ("c", "plain", "Through plain"),
+    insomnia_folder ("empty", "wrk", "Empty", json::object ()),
+    insomnia_request ("d", "empty", "Through empty"),
+    insomnia_folder ("off", "wrk", "Off", json{ { "type", "bearer" }, { "disabled", true } }),
+    insomnia_request ("e", "off", "Through disabled"), insomnia_request ("f", "wrk", "Top") }),
+    true, json{ { "type", "iam" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 4);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+    (Names{ "Through plain", "Through empty", "Through disabled", "Top" }));
+    EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "W");
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthFolders"));
+
+    const json& folders = parsed.result.at ("collections")[0].at ("children");
+    EXPECT_EQ (folders[0].at ("auth").at ("mode"), "noauth");
+    for (const size_t plain : { 1U, 2U, 3U }) {
+        EXPECT_EQ (folders[plain].at ("auth").at ("mode"), "none") << plain;
+    }
+}
+
+/// A workspace set to No Authentication stays `none`: nothing sits above it
+/// for a `noauth` to shut out.
+TEST (InsomniaImport, AWorkspaceSetToNoAuthenticationStaysNone) {
+    const ImportParse parsed =
+    parse_insomnia_tree (json::array ({ insomnia_request ("a", "wrk", "Top") }),
+    true, json{ { "type", "none" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("collections")[0].at ("auth").at ("mode"), "none");
+}
+
+/// A v5 export reaches the same walk: a folder holding one inheriting request
+/// and one explicitly set to No Authentication loses one.
+TEST (InsomniaV5Import, CountsTheRequestsThatLoseADataOnlyAuthNotTheFolderDeclaringIt) {
+    const ImportParse parsed = parse_import (R"({"type":"collection.insomnia.rest/5.0",
+        "name":"W","collection":[
+          {"name":"Signed","authentication":{"type":"iam"},"children":[
+            {"name":"Inherits","url":"https://x.example/a","method":"GET"},
+            {"name":"Opted out","url":"https://x.example/b","method":"GET",
+             "authentication":{"type":"none"}}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 1);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), Names{ "Inherits" });
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"), Names{ "Signed" });
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
+}
+
+/// Several workspaces in one export are one document: the requests of each
+/// count, and the first workspace that declares the auth is the one named.
+TEST (InsomniaImport, CountsTheRequestsOfEveryWorkspaceInTheExport) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"w1","_type":"workspace","name":"One"},
+        {"_id":"w2","_type":"workspace","name":"Two","authentication":{"type":"digest"}},
+        {"_id":"w3","_type":"workspace","name":"Three","authentication":{"type":"ntlm"}},
+        {"_id":"r1","_type":"request","parentId":"w1","name":"Plain","method":"GET","url":"https://x.test"},
+        {"_id":"r2","_type":"request","parentId":"w2","name":"Digest","method":"GET","url":"https://x.test"},
+        {"_id":"r3","_type":"request","parentId":"w3","name":"Ntlm","method":"GET","url":"https://x.test"}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), (Names{ "Digest", "Ntlm" }));
+    EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "Two");
+}
+
 /// One Postman request with a single `prerequest` script whose lines are
 /// @p exec, an already-JSON array.
 std::string request_with_script (const std::string& name, const std::string& exec) {
@@ -2444,6 +2613,264 @@ TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
     parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},"paths":{}})", {}, {});
     ASSERT_TRUE (spec.ok ()) << spec.error;
     EXPECT_FALSE (spec.result.at ("meta").contains ("unsupportedScriptApis"));
+}
+
+/// A script Postman would run but Vayu cannot import is counted and its owner
+/// named, rather than vanishing (#2541): a `script.src` (Postman reads it as a
+/// URL and ignores `exec` beside it) and a `listen` Vayu has no phase for. A
+/// folder and the collection are named like a request, the collection last. A
+/// blank unknown-listen script is nothing to lose, and `script.packages` stays
+/// with `unsupportedScriptApis` alone. Mutation check: dropping the count in
+/// `set_event_elements`, or the naming in `pm_folder`, reds the count or the
+/// list; counting a packages-only event reds the last assertion.
+TEST (PostmanImport, CountsAScriptItCannotImportAndNamesItsOwner) {
+    const ImportParse parsed = parse_import (
+    R"j({"info":{"name":"Signed API","schema":")j" + std::string (POSTMAN_SCHEMA) + R"j("},
+        "event":[{"listen":"afterResponse","script":{"exec":["pm.test('x', () => {});"]}}],
+        "item":[
+        {"name":"Reports",
+         "event":[{"listen":"test","script":{"type":"text/javascript","src":"https://example.com/folder.js"}}],
+         "item":[
+           {"name":"From URL","event":[{"listen":"test","script":{"src":"https://example.com/check.js"}}],
+            "request":{"method":"GET","url":"https://x.com/r"}},
+           {"name":"Both","event":[{"listen":"prerequest","script":{
+              "src":"https://example.com/both.js","exec":["pm.environment.set('a', 1);"]}}],
+            "request":{"method":"GET","url":"https://x.com/b"}},
+           {"name":"Odd listen","event":[{"listen":"beforeRequest","script":{"exec":["pm.test('x', () => {});"]}}],
+            "request":{"method":"GET","url":"https://x.com/o"}}]},
+        {"name":"Blank odd listen","event":[{"listen":"beforeRequest","script":{"exec":["  "]}}],
+         "request":{"method":"GET","url":"https://x.com/blank"}},
+        {"name":"Packages only","event":[{"listen":"test","script":{
+            "exec":["pm.test('x', () => {});"],"packages":{"abc":{"id":"abc"}}}}],
+         "request":{"method":"GET","url":"https://x.com/p"}},
+        {"name":"Fine","event":[{"listen":"test","script":{"exec":["pm.test('x', () => {});"]}}],
+         "request":{"method":"GET","url":"https://x.com/f"}}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const json& meta = parsed.result.at ("meta");
+    // From URL, Both, Odd listen, the folder and the collection: one event each.
+    EXPECT_EQ (skip_counts (meta.at ("skipped")).at ("script_unsupported"), 5);
+    EXPECT_EQ (skipped_named (parsed, "script_unsupported"),
+    (Names{ "From URL", "Both", "Odd listen", "Reports", "Signed API" }));
+
+    // Nothing of an event with no phase or a `src` is imported, `exec` beside
+    // a `src` included: Postman would not run it.
+    const json& root     = parsed.result.at ("collections")[0];
+    const json& reports  = root.at ("children")[0];
+    const json& requests = reports.at ("requests");
+    EXPECT_FALSE (root.contains ("elements"));
+    EXPECT_FALSE (reports.contains ("elements"));
+    for (const json& request : requests) {
+        EXPECT_FALSE (request.contains ("elements")) << request.at ("name");
+    }
+    EXPECT_EQ (root.at ("requests")[2].at ("elements")[0].at ("kind"), "script.post");
+
+    // The packages are named once, by the scan that already reported them.
+    EXPECT_EQ (meta.at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (
+    R"j([{"request":"Packages only","names":["script.packages"]}])j"));
+}
+
+/// A disabled event runs nothing so it counts nothing, and with the scripts
+/// option off no script is read at all. Mutation check: counting before the
+/// `disabled` test, or outside the `import_scripts` gate, reds one of the two.
+TEST (PostmanImport, ScriptUnsupportedIsNotCountedWhenTheEventWouldNotRun) {
+    const std::string items =
+    R"j({"name":"Off","event":[{"listen":"test","disabled":true,"script":{"src":"https://example.com/a.js"}},
+                                   {"listen":"beforeRequest","disabled":true,"script":{"exec":["x();"]}}],
+         "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"On","event":[{"listen":"test","script":{"src":"https://example.com/a.js"}}],
+         "request":{"method":"GET","url":"https://x.com"}})j";
+
+    const ImportParse counted = parse_postman_items (items);
+    ASSERT_TRUE (counted.ok ()) << counted.error;
+    EXPECT_EQ (
+    skip_counts (counted.result.at ("meta").at ("skipped")).at ("script_unsupported"), 1);
+    EXPECT_EQ (skipped_named (counted, "script_unsupported"), Names{ "On" });
+
+    ImportOptions off;
+    off.import_scripts      = false;
+    const ImportParse gated = parse_postman_items (items, off);
+    ASSERT_TRUE (gated.ok ()) << gated.error;
+    EXPECT_FALSE (
+    skip_counts (gated.result.at ("meta").at ("skipped")).contains ("script_unsupported"));
+}
+
+/// An event whose `exec` is blank still declares its packages, and the early
+/// `continue` on a blank script used to skip naming them. Mutation check:
+/// moving the packages note back below the blank-script `continue` reds this.
+TEST (PostmanImport, NamesPackagesOnAnEventWithNoScriptText) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"Blank with packages","event":[{"listen":"test","script":{
+            "exec":[""],"packages":{"abc":{"id":"abc","type":"collection"}}}}],
+         "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Disabled with packages","event":[{"listen":"test","disabled":true,"script":{
+            "exec":[""],"packages":{"abc":{"id":"abc"}}}}],
+         "request":{"method":"GET","url":"https://x.com"}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (
+    R"j([{"request":"Blank with packages","names":["script.packages"]}])j"));
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("script_unsupported"));
+}
+
+using HeaderPairs = std::vector<std::pair<std::string, std::string>>;
+
+/// @p headers as `{key, value}` pairs, in order.
+HeaderPairs header_pairs (const json& headers) {
+    HeaderPairs pairs;
+    for (const json& row : headers) {
+        pairs.emplace_back (row.at ("key").get<std::string> (),
+        row.at ("value").get<std::string> ());
+        EXPECT_TRUE (row.at ("enabled").get<bool> ()) << row.dump ();
+    }
+    return pairs;
+}
+
+json header_request (const std::string& name, const std::string& header) {
+    return { { "name", name },
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.com" }, { "header", header } } } };
+}
+
+/// The v2.1 schema allows `request.header` to be the text of the headers pane;
+/// it used to import as no headers at all. Read as postman-collection's
+/// `Header.parse` reads it: a line is `name: value` with the value trimmed,
+/// lines with no colon, leading whitespace or a space before the colon name
+/// nothing, folded lines join, and CRLF and LF both end a line. The Hawk line
+/// keeps its own colons. Mutation check: reading only an array reds this.
+TEST (PostmanImport, ReadsAStringRequestHeaderTheWayPostmanParsesIt) {
+    const std::string hawk =
+    R"(Hawk id="dh37fgj492je", ts="1353832234", nonce="j4h3g2", )"
+    R"(ext="some-app-ext-data", mac="6R4rV5iE+NPoym+WwjeHzjAGXUtLNIxmo1vpMofpLAE=")";
+    const json document      = { { "info", { { "schema", POSTMAN_SCHEMA } } },
+             { "item",
+             json::array ({ header_request ("Crlf",
+                            "Authorization: " + hawk +
+                            "\r\nContent-Type: application/json\r\n"
+                                 "X-Folded: one\r\n  two\r\n\tthree\r\n"
+                                 "no colon here\r\n"
+                                 "\r\n"
+                                 " Indented: skipped\r\n"
+                                 "Spaced : skipped\r\n"
+                                 "Empty:\r\n"
+                                 "X-Time:   12:30:45  \r\n"),
+             header_request ("Lf", "A: 1\nB:{{ token }}\n") }) } };
+    const ImportParse parsed = parse_import (document.dump (), {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+
+    EXPECT_EQ (header_pairs (requests[0].at ("headers")),
+    (HeaderPairs{ { "Authorization", hawk }, { "Content-Type", "application/json" },
+    { "X-Folded", "one two three" }, { "Empty", "" }, { "X-Time", "12:30:45" } }));
+    EXPECT_EQ (header_pairs (requests[1].at ("headers")),
+    (HeaderPairs{ { "A", "1" }, { "B", "{{token}}" } }));
+}
+
+/// A saved response's `header` takes the same string form (the same helper
+/// reads it), so its Content-Type is still found. Mutation check: reading only
+/// an array leaves the example with no headers and no content type.
+TEST (PostmanImport, ReadsAStringHeaderOnASavedResponse) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
+         "response":[{"name":"ok","code":200,
+            "header":"Content-Type: application/json\nX-Trace: a:b\n","body":"{}"}]})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& example =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("examples")[0];
+    EXPECT_EQ (header_pairs (example.at ("headers")),
+    (HeaderPairs{ { "Content-Type", "application/json" }, { "X-Trace", "a:b" } }));
+    EXPECT_EQ (example.at ("contentType"), "application/json");
+}
+
+/// The fragment is the URL's, never a query value's: it is cut at the first
+/// `#` before the query is looked for, kept on the url, and the query joined
+/// before it. `url.hash` supplies it when `raw` has none. Mutation check:
+/// splitting at `?` first leaves `#{{search}}` in the last row's key; ignoring
+/// `url.hash` drops the `#top` of the no-raw shape.
+TEST (PostmanImport, KeepsAUrlFragmentOffTheQueryRows) {
+    const ImportParse parsed = parse_postman_items (
+    // A bare string with the query before the fragment (collection-v2.json).
+    R"j({"name":"Bare","request":{"method":"GET",
+            "url":"https://x.com/p?query=string&a=b&abcd#{{ search }}"}},
+        {"name":"Raw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p?q=1&flag#top","query":[{"key":"q","value":"1"},{"key":"flag","value":null}]}}},
+        {"name":"RawOnly","request":{"method":"GET","url":{
+            "raw":"https://x.com/p#top?not=query"}}},
+        {"name":"NoRaw","request":{"method":"GET","url":{
+            "protocol":"https","host":["x","com"],"path":["p"],"hash":"top",
+            "query":[{"key":"q","value":"1"}]}}},
+        {"name":"HashBeyondRaw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p?q=1","hash":"top"}}},
+        {"name":"HashAlreadyInRaw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p#top","hash":"top"}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+
+    EXPECT_EQ (requests[0].at ("url"), "https://x.com/p?query=string&a=b&abcd#{{search}}");
+    EXPECT_EQ (requests[0].at ("params").size (), 3u);
+    EXPECT_EQ (requests[0].at ("params")[2].at ("key"), "abcd");
+    EXPECT_EQ (requests[1].at ("url"), "https://x.com/p?q=1&flag#top");
+    // The first `#` ends the URL: what follows it is the fragment, `?` included,
+    // so there is no query to read.
+    EXPECT_EQ (requests[2].at ("url"), "https://x.com/p#top?not=query");
+    EXPECT_TRUE (requests[2].at ("params").empty ());
+    EXPECT_EQ (requests[3].at ("url"), "https://x.com/p?q=1#top");
+    EXPECT_EQ (requests[4].at ("url"), "https://x.com/p?q=1#top");
+    EXPECT_EQ (requests[5].at ("url"), "https://x.com/p#top");
+
+    // The export splits the same URL back to the hash it was read from.
+    EXPECT_EQ (vayu::core::postman_url_parts (requests[0].at ("url")).at ("hash"), "{{search}}");
+}
+
+/// The shape of postman-collection's own `collection-v2.json` fixture: script
+/// events as bare strings, a `packages` member beside the root events, a header
+/// string carrying a Hawk `Authorization` and a `Content-Type`, and a bare URL
+/// whose fragment is a variable. Every piece reads, and the one thing Vayu
+/// cannot take (a `src`) is counted rather than lost. Mutation check: reverting
+/// any one of the string-script, header-string, fragment or `src` fixes reds a
+/// distinct assertion here.
+TEST (PostmanImport, ReadsTheShapeOfPostmansOwnV2Fixture) {
+    const ImportParse parsed = parse_import (
+    R"j({"info":{"_postman_id":"4455f5e6-5f6a-4b9b-8f2a-9f4b9c8d1111","name":"Sample","version":"1.0.0",
+            "schema":")j" +
+    std::string (POSTMAN_SCHEMA) + R"j("},
+        "event":[{"listen":"prerequest","script":"console.log('root pre');",
+                  "id":"e1"},
+                 {"listen":"test","script":{"id":"e2","exec":["pm.test('root', () => {});"],
+                  "packages":{"p1":{"id":"p1","name":"shared"}}}}],
+        "item":[
+        {"id":"i1","name":"Folded","item":[
+           {"id":"i2","name":"Echo","event":[{"listen":"test","script":{"src":"https://example.com/echo.js"}}],
+            "request":{"url":"https://postman-echo.com/get?query=string&a=b&abcd#{{search}}",
+                       "method":"GET",
+                       "header":"Authorization: Hawk id=\"dh37fgj492je\", ts=\"1353832234\", mac=\"abc=\"\r\nContent-Type: application/json"}}]}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& root    = parsed.result.at ("collections")[0];
+    const json& request = root.at ("children")[0].at ("requests")[0];
+
+    ASSERT_EQ (root.at ("elements").size (), 2u);
+    EXPECT_EQ (root.at ("elements")[0].at ("kind"), "script.pre");
+    EXPECT_EQ (root.at ("elements")[0].at ("config").at ("script"), "console.log('root pre');");
+    EXPECT_EQ (root.at ("elements")[1].at ("kind"), "script.post");
+
+    EXPECT_EQ (request.at ("url"),
+    "https://postman-echo.com/get?query=string&a=b&abcd#{{search}}");
+    ASSERT_EQ (request.at ("headers").size (), 2u);
+    EXPECT_EQ (request.at ("headers")[0].at ("key"), "Authorization");
+    EXPECT_EQ (request.at ("headers")[0].at ("value"),
+    R"(Hawk id="dh37fgj492je", ts="1353832234", mac="abc=")");
+    EXPECT_EQ (request.at ("headers")[1].at ("value"), "application/json");
+
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (skipped_named (parsed, "script_unsupported"), Names{ "Echo" });
+    EXPECT_EQ (meta.at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([{"request":"Sample","names":["script.packages"]}])j"));
 }
 
 /**

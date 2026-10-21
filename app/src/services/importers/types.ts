@@ -252,6 +252,16 @@ export interface SkippedItem {
 		 */
 		| "protocol_behavior"
 		/**
+		 * A Postman event whose script has no element to become (issue #2541): a
+		 * `script.src` (a URL to fetch it from; neither it nor the `exec` beside it
+		 * is imported), or script text under a `listen` other than `prerequest` /
+		 * `test`. Counted once per enabled event. `requests` names the request,
+		 * folder or collection that declares it, so unlike every other kind here
+		 * an entry is not always a request. `script.packages` is not this kind:
+		 * `ImportMeta.unsupportedScriptApis` reports it.
+		 */
+		| "script_unsupported"
+		/**
 		 * The same, declared on a Postman folder or on the collection itself (issue
 		 * #2538), counted once per declaring node with its name under `names`. The
 		 * settings Vayu applies (redirects, TLS verification, cookies, URL encoding,
@@ -383,27 +393,26 @@ export interface ImportMeta {
 	 * `POST /oauth2/token` executes it. Counted rather than skipped: the
 	 * request imports and sends, only its credentials do not travel. Postman
 	 * counts a request by its resolved auth, so one that inherits the mode from a
-	 * folder or the collection counts (#2537); Insomnia counts each declaration,
-	 * folders and the workspace included, without naming the folders. Shown by
-	 * `importNotices` beside the skip counts.
+	 * folder or the collection counts (#2537), and so does an Insomnia one
+	 * (#2610). Shown by `importNotices` beside the skip counts.
 	 */
 	nonExecutableAuth: number;
 	/**
-	 * Those requests by name, when the walk had them in hand (Postman and
-	 * Insomnia) - so the preview names where credentials will not travel, rather
-	 * than only counting them.
+	 * Those requests by name, in document order - so the preview names where
+	 * credentials will not travel, rather than only counting them.
 	 */
 	nonExecutableAuthRequests?: string[];
 	/**
-	 * Postman only (#2537): the sub-folders that declare a data-only auth
-	 * themselves, by name. Beside the request names, not among them - a
-	 * declaration site is not a request that loses its auth. Absent when empty.
+	 * Postman and Insomnia (#2537, #2610): the sub-folders that declare a
+	 * data-only auth themselves, by name. Beside the request names, not among
+	 * them - a declaration site is not a request that loses its auth. Absent
+	 * when empty.
 	 */
 	nonExecutableAuthFolders?: string[];
 	/**
-	 * Postman only (#2537): the root collection's name when the collection
-	 * declares a data-only auth itself. Absent when it does not; the notice says
-	 * "the collection", so only its presence is read.
+	 * Postman and Insomnia (#2537, #2610): the root collection's name when the
+	 * collection declares a data-only auth itself. Absent when it does not; the
+	 * notice says "the collection", so only its presence is read.
 	 */
 	nonExecutableAuthCollection?: string;
 	/**

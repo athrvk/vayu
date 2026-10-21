@@ -11309,8 +11309,9 @@ describe("OpenAPI spec binding tools", () => {
 		expect(tools.get("export_postman")?.annotations.readOnlyHint).toBe(true);
 		expect(tools.get("unbind_spec")?.category).toBe("write");
 		// The Spec tab reads the binding off the collection row, so the family that
-		// refetches collections is the one that refreshes it - no `spec` entity.
-		expect(tools.get("unbind_spec")?.invalidates).toEqual(["collection"]);
+		// refetches that row is the one that refreshes it - no `spec` entity, and
+		// no request list, since the stamps stay where they are.
+		expect(tools.get("unbind_spec")?.invalidates).toEqual(["collectionRow"]);
 		// Nothing it names is destroyed: the document stays and so do the stamps.
 		expect(tools.get("unbind_spec")?.annotations.destructiveHint).toBe(false);
 	});

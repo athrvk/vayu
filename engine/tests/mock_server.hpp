@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -42,6 +43,25 @@ class SlowMockServer {
         svr.Get ("/stall-once", [this] (const httplib::Request&, httplib::Response& res) {
             if (++stall_hits == STALL_AT) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (STALL_MS));
+            }
+            res.set_content ("{}", "application/json");
+        });
+        // Fast, except that its STALL_AT-th request opens a STALL_WINDOW_MS
+        // window and every request arriving inside it is held until it
+        // closes: a target that answers nothing for that long, then all of it.
+        svr.Get ("/stall-window", [this] (const httplib::Request&, httplib::Response& res) {
+            const auto arrived = std::chrono::steady_clock::now ();
+            std::chrono::steady_clock::time_point closes;
+            {
+                const std::lock_guard<std::mutex> lock (stall_window_mutex);
+                if (++stall_window_hits == STALL_AT) {
+                    stall_window_closes =
+                    arrived + std::chrono::milliseconds (STALL_WINDOW_MS);
+                }
+                closes = stall_window_closes;
+            }
+            if (arrived < closes) {
+                std::this_thread::sleep_until (closes);
             }
             res.set_content ("{}", "application/json");
         });
@@ -131,6 +151,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/stall-once";
     }
 
+    std::string stall_window_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/stall-window";
+    }
+
     std::string hang_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang";
     }
@@ -158,6 +182,8 @@ class SlowMockServer {
     /// Which request to `/stall-once` stalls, and for how long.
     static constexpr int STALL_AT = 10;
     static constexpr int STALL_MS = 300;
+    /// How long `/stall-window` answers nothing, from its STALL_AT-th request.
+    static constexpr int STALL_WINDOW_MS = 3000;
 
     /// How many times either vitals endpoint has been scraped.
     int scrape_count () const {
@@ -178,6 +204,9 @@ class SlowMockServer {
     std::atomic<bool> released{ false };
     std::atomic<int> scrapes{ 0 };
     std::atomic<int> stall_hits{ 0 };
+    std::mutex stall_window_mutex;
+    int stall_window_hits = 0; // stall_window_mutex
+    std::chrono::steady_clock::time_point stall_window_closes; // stall_window_mutex
     /// Read through `live_connection_count()`. Shared with the task queue
     /// httplib owns, which is why it is not a plain member.
     std::shared_ptr<std::atomic<int>> live_connections =

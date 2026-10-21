@@ -21,11 +21,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 import { useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useTreeCrud } from "./useTreeCrud";
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 
 const updateCollection = vi.fn();
 const updateRequest = vi.fn();
@@ -45,16 +47,22 @@ vi.mock("@/queries", () => ({
 const collections = [{ id: "c-1", name: "Acme", order: 0 }] as Collection[];
 const requests = [
 	{ id: "r-1", collectionId: "c-1", name: "List users", method: "GET", order: 0 },
-] as Request[];
+] as RequestSummary[];
 const requestsByCollection = new Map([["c-1", requests]]);
 
 function renderCrud() {
-	return renderHook(() =>
-		useTreeCrud({
-			collections,
-			requestsByCollection,
-			getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
-		})
+	const client = new QueryClient();
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+	);
+	return renderHook(
+		() =>
+			useTreeCrud({
+				collections,
+				requestsByCollection,
+				getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
+			}),
+		{ wrapper }
 	);
 }
 

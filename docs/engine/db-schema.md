@@ -1656,7 +1656,9 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
   "timestamp": 1730000001000, "elapsed_seconds": 1.0,
   "requests_completed": 120, "requests_failed": 2,
   "http_errors": 0, "no_response": 2, "cancelled": 0,
-  "current_rps": 118.4, "current_concurrency": 10, "send_rate": 120.0,
+  "current_rps": 118.4, "current_send_rate": 120.2,
+  "window_avg_latency_ms": 8.9, "window_avg_queue_wait_ms": 0.2,
+  "current_concurrency": 10, "send_rate": 120.0,
   "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
   "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
   "status_codes": { "200": 118, "0": 2 },
@@ -1670,6 +1672,15 @@ absent from a tick an engine older than issue #2124 stored, whose `requests_fail
 no-response failures only. `cancelled` is the requests a user stop has cancelled so far, which
 none of the three counts (issue #2136); absent from a tick stored before that issue.
 
+`current_rps`, `current_send_rate`, `window_avg_latency_ms` and `window_avg_queue_wait_ms` read
+the **trailing window** of the row's tick (`vayu::core::TrailingWindow`, issue #2393): at least the
+last second, divided by its actual span, from the differences of the run's cumulative counters
+across it. They are the same values the live frame of that tick carries, so a chart drawn live
+and one drawn from these rows agree. The two means are `null` for a window in which nothing
+completed. The three keys besides `current_rps` are absent from a tick stored before that issue,
+whose `current_rps` was the completions since the previous row over the time since it. No schema
+version marks the change: they are keys inside `payload`, which `sync_schema()` never reads.
+
 Two consequences of the row being the tick:
 
 - **Pagination is tick-aligned.** `GET /runs/:runId/metrics` pages rows, and a row is a whole
@@ -1680,8 +1691,8 @@ Two consequences of the row being the tick:
 
 The stored series has its own origin: the 1 Hz gate puts the first persisted tick about one
 second into the run, and that tick is `elapsed_seconds: 0`. It is not the live stream's origin.
-The cumulative rates in the same row, `send_rate` and `throughput`, divide by the time since
-**load start**, the instant the report's `test_duration` is measured from, after the request is
+The cumulative rates in the same row, `send_rate` and `throughput`, are requests sent and
+completed since load start, divided by the time since **load start**, the instant the report's `test_duration` is measured from, after the request is
 built and any `script.setup` has run (issue #2395). A tick written while setup is still running
 stores both as `0`. Ticks an engine older than that issue stored divided by the time since the
 run was registered, so a run with a slow setup understated both in its early rows.
@@ -1689,9 +1700,12 @@ run was registered, so a run with a slow setup understated both in its early row
 Latency percentiles in a tick (`latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`) cover the
 **row's second**: every 100 ms window the `hdr_interval_recorder` handed back since the previous
 row, merged as histograms before the percentile is read (issue #2385). The row stores no sample
-count; a second with no completion stores `0`. The whole-run cumulative percentiles live in
+count; a second with no completion stores **none of the three keys** (issue #2386), absent rather
+than `null` because the run export types them as numbers. Rows an engine older than issue #2386
+stored keep `0` for such a second: nothing rewrites them, so a reader of an older run still meets
+a `0` that means "no completion", not "answered in 0 ms". The whole-run cumulative percentiles live in
 [`runs.summary`](#runs), never here. The partial second between the last row and the end of the
-run is stored nowhere: it reaches only the final live frame. Rows an engine older than that issue
+run is stored nowhere: it reaches only the final live frame. Rows an engine older than issue #2385
 stored hold the **last 100 ms window** of their second instead, about a tenth of its completions.
 
 ---

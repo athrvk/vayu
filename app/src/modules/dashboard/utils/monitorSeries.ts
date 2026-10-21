@@ -79,8 +79,10 @@ export function monitorSeriesNames(samples: MonitorSample[]): string[] {
  * A downsampled history series (#2547) needs nothing different: a bucket's
  * `timestamp` is its last tick's, so it takes the reading as of the bucket's
  * end, as a tick does. Readings between two bucket ends are not drawn, which
- * is the point-reading rule above at the bucket's width; the scrapes
- * themselves are fetched whole and never downsampled.
+ * is the point-reading rule above at the bucket's width. The scrapes are
+ * folded too when a run stored more than the History budget (#2611): a
+ * folded sample is stamped with its last scrape's time, and the staleness
+ * window is derived from the samples' own spacing, so it widens to match.
  */
 export function joinMonitorToTimeline(
 	history: LoadTestMetrics[],

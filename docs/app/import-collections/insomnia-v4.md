@@ -145,7 +145,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `map_key_v
 
 `insomniaAuth(authentication, ctx)`:
 
-| Insomnia `authentication.type` | Vayu `RequestAuth` | `nonExecutableAuth`? |
+| Insomnia `authentication.type` | Vayu `RequestAuth` | Counted? |
 |--------------------------------|--------------------|----------------------|
 | (absent / no `type`) | `{ mode: "inherit" }` | no |
 | any type with `disabled === true` | `{ mode: "none" }` | no |
@@ -164,8 +164,9 @@ Notes:
 - **Bearer PREFIX.** Insomnia sends `Authorization: <prefix> <token>`, defaulting an empty PREFIX to `Bearer`. Vayu's bearer mode always writes `Bearer`, so a different scheme is preserved as an explicit `Authorization` header through the `apikey` mode - the engine writes an `apikey` header value verbatim, so the wire bytes match what Insomnia sent. A prefix differing only in case (`bearer`) keeps the native bearer mode: HTTP auth schemes are case-insensitive (RFC 7235 §2.1). The prefix itself goes through `normalize_template_vars` and the composed value is trimmed, so an empty token yields just the scheme.
 - **OAuth2 `tokenPrefix`** maps to `OAuth2Config.headerPrefix` (absent or empty → `"Bearer"`), matching `map_postman_oauth2`'s `headerPrefix`. Vayu executes OAuth2, so an unread prefix would send `Bearer` and 401 against a server expecting another scheme.
 - **`disabled` takes precedence over `type`.** If `authentication.disabled === true`, the result is `{ mode: "none" }` regardless of `type`. If `authentication` is missing or has no `type` (and is not disabled), the result is `{ mode: "inherit" }`.
-- `oauth2` is mapped to an executable `OAuth2Config` (`map_insomnia_oauth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - each occurrence increments `meta.nonExecutableAuth`.
-- The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. This is a count per declaration and not per resolved request, which is how [Postman](./postman.md#auth-mapping) counts since #2537; the Insomnia rule is unchanged. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
+- `oauth2` is mapped to an executable `OAuth2Config` (`map_insomnia_oauth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - a request whose resolved auth is one of them counts toward `meta.nonExecutableAuth` (see below).
+- The same mapping is used for **collection-level** auth (workspace/request_group; `insomnia_collection_auth`). For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit), which the send-time walk passes through. A **folder** whose `authentication` is an explicit `{ type: "none" }` (Insomnia's No Authentication, not disabled) maps to `{ mode: "noauth" }` instead: the walk ends there, so a request set to inherit under it sends without auth rather than taking an outer folder's. An absent, empty or disabled folder auth stays `none` (transparent), and the workspace's stays `none` because nothing sits above it.
+- **`nonExecutableAuth` counts requests, not declarations** (#2610), the way [Postman](./postman.md#auth-mapping) does since #2537. After the tree is built one pass over the drafts (`find_data_only_auth`, shared with Postman) resolves each request's auth: its own mode, or for `inherit` the nearest ancestor's concrete mode (`none` transparent, `noauth` terminal). A request whose resolved mode is `aws` (from `iam`), `digest` or `ntlm` counts and is named in `meta.nonExecutableAuthRequests`, in document order (the folders-first listing when the siblings have no `metaSortKey`). Folders that declare such an auth themselves are named in `meta.nonExecutableAuthFolders` and a workspace that declares one in `meta.nonExecutableAuthCollection` (the first such workspace when an export holds several); neither is counted, each member is absent when empty. A request set to No Authentication under an `iam` folder is not counted; one inheriting through it is.
 
 ## Environments
 
@@ -192,12 +193,12 @@ Lossy / dropped, summary:
 
 - gRPC, WebSocket, API spec, unit test, and unit-test-suite resources are dropped and counted in `meta.skipped` (only when encountered as direct children of a workspace/request_group during the tree walk; see counting nuance above).
 - Binary bodies import as `binary` bodies naming the file, unresolved, and are counted as `file_body`; a file param **with** a path imports as an unresolved file row, and one with no path as a file row with no file chosen. An unresolved path is sent only once the file is chosen again in the request, or lies under a folder allowed in Settings > Files.
-- Non-executable auth types (`digest`, `ntlm`, `iam→aws`) are stored but not run; each occurrence (request or collection level) increments `meta.nonExecutableAuth`. `oauth2` is executable and excluded.
+- Non-executable auth types (`digest`, `ntlm`, `iam→aws`) are stored but not run; every request whose resolved auth (its own, or inherited from a folder or the workspace) is one increments `meta.nonExecutableAuth`. `oauth2` is executable and excluded.
 - Nunjucks tags and filtered template expressions are preserved as literal text.
 - request_group inline environments and resource `_id`s are not carried into the draft model.
 - No per-request redirect **limit** is imported (Insomnia keeps that as an app-wide setting), and no other `setting*` field is read - cookie handling, URL encoding and timeline size have no Vayu equivalent.
 
-`meta`: `{ format: "Insomnia Export v4", requestCount, folderCount, environmentCount, globalCount: 0, skipped, nonExecutableAuth }` (no `fileName` set by the parser itself; `globals` is always `{}` - Insomnia has no globals scope).
+`meta`: `{ format: "Insomnia Export v4", requestCount, folderCount, environmentCount, globalCount: 0, skipped, nonExecutableAuth, nonExecutableAuthRequests?, nonExecutableAuthFolders?, nonExecutableAuthCollection? }` (no `fileName` set by the parser itself; `globals` is always `{}` - Insomnia has no globals scope).
 
 ## Malformed exports
 

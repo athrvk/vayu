@@ -85,6 +85,68 @@ describe("mapSseMetrics", () => {
 		expect(m.cumulative_p99_ms).toBeNull();
 	});
 
+	it("keeps a window with no completion as null percentiles, not 0 ms (issue #2386)", () => {
+		// As the engine sends it, `latencySamples` included, which the app does not read.
+		const frame = {
+			timestamp: 1,
+			totalRequests: 40,
+			latencySamples: 0,
+			latencyP50Ms: null,
+			latencyP95Ms: null,
+			latencyP99Ms: null,
+		};
+		const m = mapSseMetrics(frame);
+		expect(m.requests_completed).toBe(40);
+		expect(m.latency_p50_ms).toBeNull();
+		expect(m.latency_p95_ms).toBeNull();
+		expect(m.latency_p99_ms).toBeNull();
+	});
+
+	it("still maps a populated window's percentiles, a 0 ms one included", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			latencyP50Ms: 0,
+			latencyP95Ms: 9.5,
+			latencyP99Ms: 41,
+		});
+		expect([m.latency_p50_ms, m.latency_p95_ms, m.latency_p99_ms]).toEqual([0, 9.5, 41]);
+	});
+
+	it("maps the trailing window's send rate and means (issue #2393)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			currentRps: 480,
+			currentSendRate: 500,
+			windowAvgLatencyMs: 12.5,
+			windowAvgQueueWaitMs: 0,
+		});
+		expect(m.current_rps).toBe(480);
+		expect(m.current_send_rate).toBe(500);
+		expect(m.window_avg_latency_ms).toBe(12.5);
+		// A measured zero stays a zero.
+		expect(m.window_avg_queue_wait_ms).toBe(0);
+	});
+
+	it("leaves the window's keys absent when the frame has none, never 0 (issue #2393)", () => {
+		const m = mapSseMetrics({ timestamp: 1, currentRps: 480 });
+		expect(m.current_send_rate).toBeUndefined();
+		expect(m.window_avg_latency_ms).toBeUndefined();
+		expect(m.window_avg_queue_wait_ms).toBeUndefined();
+	});
+
+	it("keeps an idle window's null means as null, not 0 (issue #2393)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			currentRps: 0,
+			currentSendRate: 0,
+			windowAvgLatencyMs: null,
+			windowAvgQueueWaitMs: null,
+		});
+		expect(m.current_send_rate).toBe(0);
+		expect(m.window_avg_latency_ms).toBeNull();
+		expect(m.window_avg_queue_wait_ms).toBeNull();
+	});
+
 	it("maps the error count and its HTTP errors / No response split (issue #2124)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,

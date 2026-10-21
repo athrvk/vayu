@@ -12,7 +12,7 @@ import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import { requestEntity } from "./tree-rows";
 import { requestRowMenu, requestRowReference } from "./tree-row-menu";
-import type { Request } from "@/types";
+import type { RequestSummary } from "@/types";
 import { Input } from "@/components/ui";
 import { useInlineRename } from "@/hooks/useInlineRename";
 import { useCopy } from "@/hooks/useCopy";
@@ -31,7 +31,7 @@ import { rowInsetPx } from "@/constants/layout";
  * below skips a row whose request did not change (#2543).
  */
 export interface RequestItemProps {
-	request: Request;
+	request: RequestSummary;
 	collectionId: string;
 	/** Tree depth, so the row can indent itself and still span full width. */
 	depth?: number;

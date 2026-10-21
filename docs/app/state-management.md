@@ -410,7 +410,7 @@ The path is written when the user declares a contract by picking a file, on
 the Data tab or in either run dialog (`hooks/useDataContractWriter.ts`), obtained through the preload's
 existing `getFilePath` bridge, and dropped when the collection is deleted or
 purged, its contract cleared (Clear or Remove), or a later pick carries no path. Reading it back needs the gated `dataFile:read` IPC
-(`electron/data-file.ts`), because the renderer otherwise cannot name a path.
+(`electron/data-file.ts`), because the renderer otherwise cannot name a path. The gate includes the main process's grant registry (#2357): a path is read only if the user picked, dropped or opened it through the app, which `getFilePath` records with the engine (`file_grants`, so it survives a restart). A data file declared before that registry existed holds no grant and must be picked once more; until then `dataFile:read` rejects with a "pick the file again" message and `dataFile:hash` answers `{ status: "missing" }`. The renderer does not seed grants from its own persisted paths - that is the input being gated.
 
 `hash` is the SHA-256 of the file's bytes the last time the app read it (issue
 #2051), the same digest a run records as `dataFileHash`. A pick writes it with
@@ -420,7 +420,7 @@ was declared. It is optional because a location remembered before hashes were
 recorded has none until its next read. Nothing that only *compares* writes it:
 `useDataFileStatus` and MCP's `list_collections` ask the main process for the
 file's current digest (`dataFile:hash`, which answers `{ status: "found", hash }`
-or `{ status: "missing" }` for a file that has moved) and fall back to this one
+or `{ status: "missing" }` for a file that has moved or holds no grant) and fall back to this one
 only when they cannot.
 
 `castNumbers` is how the file's CSV/TSV values are read (issue #2540), the
@@ -479,8 +479,11 @@ binds a picked file, obtained through the preload's existing `getFilePath`
 bridge, and dropped on unbind. Reading the files a picked document *references*
 needs the gated `specFile:read` IPC (`electron/spec-file.ts`), which takes the
 document's path plus the reference and resolves one against the other in the
-main process - the renderer names no directory of its own, the same posture
-`dataFile:read` holds. It is normalized through **both** `migrate` and
+main process. The document path must be one the user picked, dropped or opened
+(the grant registry, #2357) - a path the renderer merely remembers is refused
+with a "pick the file again" message, so a binding made before grants existed
+needs one more pick - and the reference may not leave that document's
+directory. The same grant gate holds `dataFile:read`. It is normalized through **both** `migrate` and
 `merge`, for the reason spelled out for `data-file-store` above. Deleting or
 purging the collection drops its entry (#1890), as for the data-file store.
 
@@ -1760,7 +1763,17 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 - **`useCollectionsQuery()`** - Fetch all collections (there is no
   single-collection query: a collection is read out of this list)
-- **`useRequestsQuery(collectionId)`** - Fetch requests in a collection
+- **`useRequestsQuery(collectionId)`** - Fetch requests in a collection, as
+  `RequestSummary` rows (`types/domain.ts`, #2546): `id`, `collectionId`,
+  `name`, `method`, `url`, `order`, `createdAt` and `specOperation`, from
+  `GET /requests?fields=summary` (`apiService.listRequestSummaries`). Every
+  `listByCollection` cache holds that shape, and its type is what makes a
+  reader that wants a body, headers, auth or scripts fail to compile rather
+  than read `undefined`. `createdAt` is `compareTreeOrder`'s tie-break and
+  `specOperation` the Spec tab's mapping count; the rest is what a tree row,
+  the palette and "Copy for agent" draw. A write that already holds the whole
+  row (a create, a reorder's settle) stores it as it stands, since a `Request`
+  is a `RequestSummary`
 - **`useMultipleCollectionRequests(collectionIds)`** - The same list for several
   collections at once, as parallel queries. Its `requestsByCollection` map is
   **referentially stable** while the underlying results are unchanged (built in
@@ -1769,9 +1782,22 @@ from `@/queries/runs`); everything with more than one is in the barrel.
   dependencies; when it was rebuilt on every call, the collection tree's reveal
   effect (`useRevealActiveSelection`) re-ran on every render and re-expanded a
   collection the user had just collapsed
+- **`useFullCollectionRequests(collectionIds)`** - The same map over whole
+  `Request` rows (`GET /requests?collectionId=`), for the column audit
+  (`useColumnAudit`), which reads what each request sends. Mounted only by the
+  audit's callers (the Data tab, the run dialog), so nothing fetches whole rows
+  at launch. Its key, `requests.fullListByCollection(id)`, sits under that
+  collection's `listByCollection` key, so every invalidation of the tree's list
+  reaches it; a reorder therefore removes a moved request from *every* list
+  its old collection has cached, not the first one a scan of `lists()` meets
 - **`useRequestQuery(requestId)`** / **`requestDetailOptions(requestId)`** - One
-  request by id (`GET /requests/:id`), used by a restored request tab and by a
-  design-run copy on cold start. Only an `ApiError` with `statusCode === 404`
+  request by id (`GET /requests/:id`): what a request tab opens, what a
+  restored tab and a design-run copy read on cold start, and what the tree's
+  Duplicate copies (`queryClient.fetchQuery(requestDetailOptions(id))` in
+  `useTreeCrud.ts`). Never seeded from a list row - a summary is not the
+  request. The detail route also never substitutes a default for a column over
+  the field cap, where a full list row can (`truncatedFields`, #1485), so a
+  copy made from it is the whole request. Only an `ApiError` with `statusCode === 404`
   becomes **`RequestNotFoundError`** (test it with `isRequestNotFound`); a 5xx or
   an unreachable engine is rethrown untouched, because a transport failure must
   not read as "this request was deleted"
@@ -1779,7 +1805,9 @@ from `@/queries/runs`); everything with more than one is in the barrel.
   including itself, root first, derived from the collections list rather than
   fetched
 - **`usePrefetchCollectionsAndRequests()`** - Warm-cache pass over every
-  collection's requests at startup
+  collection's requests at startup: one `GET /requests?fields=summary` for the
+  whole workspace (10.7 MB of whole rows on a 6,000-request workspace before
+  #2546), split into each collection's `listByCollection` entry
 
 **Sorting:** every tree list - roots, a collection's children, a collection's
 requests - sorts with the single exported `compareTreeOrder` (`types/domain.ts`):
@@ -1807,7 +1835,9 @@ the sub-folder sits - which is pinned across the render and the engine's plan by
 engine's `scenario_plan_test.cpp` (issues #431, #2535).
 
 **Mutations:**
-- **`useCreateCollectionMutation()`** - Create collection
+- **`useCreateCollectionMutation()`** - Create collection: appends the row to
+  the collections list and seeds the new collection's request list with `[]`,
+  so the tree mounting it makes no list call and no other list refetches
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
@@ -1818,10 +1848,12 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
   that invalidates **all** the request lists does it through
   `invalidateAllRequestLists` (`queries/collections.ts`): `prefetch.allRequests()`
   *before* `requests.all`, so the per-collection lists that refetch join the one
-  `GET /requests` instead of each making a call of their own. It is used by this
+  `GET /requests?fields=summary` instead of each making a call of their own. It is used by this
   mutation, `useImportMutation`, `useBindSpecMutation`, `useSyncSpecMutation`,
   `useRestoreTrashMutation` and the MCP `collection` family
-- **`useCreateRequestMutation()`** - Create request
+- **`useCreateRequestMutation()`** - Create request: appends the engine's row
+  to the tree's list, to the whole-row list only where one is cached, and
+  writes its detail
 - **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
   that can have changed, see below)
 - **`useDeleteRequestMutation()`** - Soft-delete a request into the trash (also
@@ -1938,8 +1970,7 @@ click; refetching either removes it or proves it real.
 
 - **`useRunsQuery(q?, pinnedOnly?, origin?)`** - Run history as an **infinite
   query** over the paginated `GET /runs` `{data, pagination}` envelope, newest
-  first. Mirrors `useRunMonitorSeriesQuery`'s `getNextPageParam` on the same
-  envelope shape; `fetchNextPage` pages older runs in on demand. `q` is the
+  first. `fetchNextPage` pages older runs in on demand. `q` is the
   optional server-side search; `origin` (`"app"` or `"mcp"`, `undefined` for
   all) is `GET /runs?origin=`.
   - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
@@ -2052,9 +2083,19 @@ click; refetching either removes it or proves it real.
   in-progress `status` the ticks written so far are stale at once. `gcTime` is
   the short `RUN_SERIES_GC_TIME_MS` (1m): the entry is small and one request to
   read again. Not polled; the live ticks have the dashboard's stream.
-  `useRunMonitorSeriesQuery(runId, enabled, status?)` is still an infinite query
-  over the raw `{data, pagination}` pages (`LoadTestDetail` pages it in whole),
-  with the same staleness and `RUNS_GC_TIME_MS`.
+- **`useRunMonitorSeriesQuery(runId, enabled, status?)`** (`@/queries/runs`) - The
+  server vitals scraped during the run, in **one request** the same way:
+  `GET /runs/:id/monitor?maxPoints=HISTORY_SERIES_MAX_POINTS` (#2611). A run
+  with at most 2,000 scrapes comes back raw; a longer one is folded into
+  buckets (each series the bucket's max, the timestamp its last scrape's) with
+  `bucketed: true` and `ticksPerBucket`, which the Server vitals card states in
+  its own note, apart from the tick series' note. A plain query keyed
+  `runs.monitorSeriesDownsampled(id, maxPoints)`, under the `runs.monitorSeries(id)`
+  prefix the run-scoped invalidation and removal use, with the time series'
+  staleness and `RUN_SERIES_GC_TIME_MS`. `enabled` is the report's
+  `monitor.samples > 0`, so a run that scraped nothing issues no request. A
+  failed read is a `monitorFailure` whose Try again refetches it; nothing
+  requests it again on its own.
 
 **Mutations:**
 - **Stopping a run is not a mutation hook.** It is
@@ -2142,7 +2183,8 @@ collections: {
 requests: {
   all: ["requests"],
   lists: () => ["requests", "list"],
-  listByCollection: (collectionId) => ["requests", "list", { collectionId }],
+  listByCollection: (collectionId) => ["requests", "list", { collectionId }],  // RequestSummary[]
+  fullListByCollection: (collectionId) => ["requests", "list", { collectionId }, "full"],  // Request[], the column audit's
   details: () => ["requests", "detail"],
   detail: (id) => ["requests", "detail", id],
   examples: (id) => ["requests", "detail", id, "examples"],  // saved example responses (#481)
@@ -2170,7 +2212,8 @@ runs: {
   report: (id) => ["runs", "report", id],
   timeSeries: (id) => ["runs", "timeSeries", id],          // prefix: every read of the run's tick series
   timeSeriesDownsampled: (id, maxPoints) => ["runs", "timeSeries", id, { maxPoints }], // the History charts' one read
-  monitorSeries: (id) => ["runs", "monitorSeries", id],   // scraped server vitals, when the run had a monitor
+  monitorSeries: (id) => ["runs", "monitorSeries", id],   // prefix: scraped server vitals, when the run had a monitor
+  monitorSeriesDownsampled: (id, maxPoints) => ["runs", "monitorSeries", id, { maxPoints }], // the History charts' one read
   samples: (id) => ["runs", "samples", id],               // captured response bodies, fetched lazily
 },
 // environments mirrors collections; globals / cookies / health / config /
@@ -2277,9 +2320,10 @@ key rather than a stale entry under this one.
   from the `requests.detail` cache, which still holds the pre-update row at that
   point - the response carries only the new owner.
 - **The warm-cache prefetch is a query too.** `usePrefetchCollectionsAndRequests`
-  is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
-  creating a collection can invalidate it - it succeeds once at startup and
-  would otherwise never re-run for a collection created mid-session.
+  is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so a
+  write that can change any collection's requests re-runs it as one call
+  (`invalidateAllRequestLists`). Creating a collection does not: a new
+  collection holds no requests, so its list is seeded empty instead (#2546).
 - **...but warming a *polled* list must not be a query.** `usePrefetchRuns` is a
   one-shot `prefetchInfiniteQuery` on mount, not an observer, because
   `useRunsQuery` carries a `refetchInterval` and observing it from the root
@@ -2298,8 +2342,9 @@ to keys through `lib/mcp-invalidation.ts`:
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` because the warm-cache pass succeeds once and would stay fresh forever, so a collection created mid-session never gets one - the same invalidation `useCreateCollectionMutation` and `useRestoreTrashMutation` do (#1438) |
-| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it fans out one list fetch per collection, and this is the family an agent loops over row by row (#1438) |
+| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry`. A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
+| `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it: a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place. So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all. The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546) |
+| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
 | `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
@@ -2396,7 +2441,7 @@ is how this section drifted before. The current shape:
 | Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once and mutations invalidate it |
 | Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable. While the run's status is `running` or `pending` the detail polls every 3s, and a report given that status is `staleTime: 0` and polls too (#1934) |
 | Run time series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
-| Run monitor series (raw pages) | `staleTime: Infinity`, `RUNS_GC_TIME_MS` (30m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
+| Run monitor series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
 | Engine config | `CONFIG_STALE_TIME_MS` (1m) |
 | Script completions | `SCRIPT_COMPLETIONS_STALE_TIME_MS` (1h), same gc time |
 | Health | `staleTime: 0`, refetched every `TIMING.HEALTH_CHECK_INTERVAL_MS` (30s) |

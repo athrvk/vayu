@@ -426,7 +426,7 @@ export const READ_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. " +
+			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. A tick's latency_p50_ms / latency_p95_ms / latency_p99_ms cover its second, and are absent from a second in which nothing completed: a stall, not a 0 ms answer. A run stored by an older engine has 0 there instead. " +
 			`${RUN_ERROR_DEFINITION_POINTER} ` +
 			`BOUNDED: ${DEFAULT_RUN_SERIES_LIMIT} ticks per call by default, ${MAX_RUN_SERIES_LIMIT} at most - a larger \`limit\` is refused, not clamped, and the engine's own 5000-row default is far past what a tool result can carry. \`pagination\` says how many exist; read the rest with \`offset\`.`,
 		annotations: {

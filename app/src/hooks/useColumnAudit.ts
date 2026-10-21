@@ -23,7 +23,7 @@
 
 import { useMemo } from "react";
 
-import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries";
+import { useCollectionsQuery, useFullCollectionRequests } from "@/queries";
 import { auditDataColumns, type AuditableRequest, type ColumnAudit } from "@/services/data-files";
 import { scriptTextFor } from "@/lib/elements";
 import { resolveEffectiveAuth } from "@/modules/request-builder/utils/auth-resolution";
@@ -74,7 +74,8 @@ export function useColumnAudit(
 	columns: readonly string[]
 ): ColumnAuditResult {
 	const { data: collections = [] } = useCollectionsQuery();
-	const { requestsByCollection, isLoading } = useMultipleCollectionRequests(
+	// Whole rows: the tree's summaries carry none of what a request sends.
+	const { requestsByCollection, isLoading } = useFullCollectionRequests(
 		"requests" in subject ? NO_COLLECTIONS : subject
 	);
 

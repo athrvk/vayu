@@ -26,12 +26,7 @@ import type { RunReport } from "@/types";
 
 vi.mock("@/queries/runs", () => ({
 	useRunTimeSeriesQuery: () => ({ data: undefined, isLoading: false }),
-	useRunMonitorSeriesQuery: () => ({
-		data: undefined,
-		isFetchingNextPage: false,
-		fetchNextPage: vi.fn(),
-		hasNextPage: false,
-	}),
+	useRunMonitorSeriesQuery: () => ({ data: undefined }),
 	useRunQuery: () => ({ data: undefined }),
 	useBaselineRunQuery: () => ({ data: undefined }),
 	useRunReportQuery: () => ({ data: undefined }),

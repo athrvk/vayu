@@ -338,11 +338,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   upgrade sweep) wants older ports: copy the overlay and run
   `VAYU_ENGINE_DIR=<checkout>/engine VCPKG_OVERLAY_PORTS=<copy> vcpkg-fix-port
   <ports>`, then `touch engine/vcpkg.json` so ninja re-runs the configure.
-- **The git pre-commit hook installs itself** with `python build.py --setup`,
-  which `.claude/hooks/session-start.sh` also runs - `.git/hooks` is not tracked,
-  so every clone and every cloud session would otherwise start without the one
-  thing that format-checks a commit before it exists. `bash
-  scripts/install-git-hooks.sh` still installs it directly, which is what a
+- **The git hooks install themselves** with `python build.py --setup`, which
+  `.claude/hooks/session-start.sh` also runs - `.git/hooks` is not tracked, so
+  every clone and every cloud session would otherwise start without the
+  pre-commit hook (clang-format) and the pre-push hook (clang-tidy). `bash
+  scripts/install-git-hooks.sh` still installs them directly, which is what a
   Windows checkout needs: `--setup` refuses to run there.
 
 ## Formatting and linting
@@ -368,12 +368,14 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   case is pinned at the site the same way, never by turning the sorter off.
 - **clang-tidy 19 or newer** (`.clang-tidy` in `engine/`, `engine/src/runtime/`,
   `engine/tests/`; the root config uses `ExcludeHeaderFilterRegex`, which an
-  older binary rejects). The hook finds it as `clang-tidy-19` or plain
-  `clang-tidy` through the same `find_llvm_tool` the formatter uses (`exact`
-  there, `minimum` here), because apt splits the names and Homebrew does not
-  (#918). **A finding is a failure** (#885): `WarningsAsErrors: '*'` in
-  `engine/.clang-tidy`, and both consumers read the exit status. The pre-commit
-  hook refuses the commit; the `Lint changed engine sources` step in
+  older binary rejects). The pre-push hook finds it as `clang-tidy-19` or
+  plain `clang-tidy` through the same `find_llvm_tool`
+  (`scripts/lib/llvm-tools.sh`) the pre-commit formatter uses (`exact` there,
+  `minimum` here), because apt splits the names and Homebrew does not (#918).
+  It runs at push, not commit, because whole-file clang-tidy costs 20-90s a
+  file: it lints every C++ file in the commits no remote-tracking ref reaches. **A finding is a failure** (#885): `WarningsAsErrors: '*'` in
+  `engine/.clang-tidy`, and both consumers read the exit status. The pre-push
+  hook refuses the push; the `Lint changed engine sources` step in
   `pr-tests.yml` fails the engine job on Linux and Windows. Windows is gated
   because a `#ifdef _WIN32` branch is preprocessed away before a Linux run sees
   it (#1023); macOS is excluded because clang-tidy 19 and 20 both SIGILL on the
@@ -386,7 +388,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   header has no `compile_commands.json` entry, so clang-tidy would guess a
   command and parse the wrong STL. A header's findings surface through every
   changed translation unit that includes it; a header-only change relies on
-  the hook, which lints a staged header against the local build tree, and on
+  the pre-push hook, which lints a pushed header against the local build tree,
+  and on
   `.github/workflows/engine-tidy-scan.yml`, the weekly whole-tree scan on both
   legs (plus `workflow_dispatch`) and the only thing that reads a header. The
   scan's report fails when it parses no finding out of a log that holds
@@ -422,6 +425,7 @@ Key endpoints:
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
+| GET | `/runs/:runId/monitor` | The server-vitals samples scraped during the run (#2611), same envelope; `maxPoints` folds it server-side too, each series to its bucket max (`MonitorSampleBucket`) |
 | DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
@@ -611,7 +615,8 @@ logged as a warning: it means a client skipped composition.
   to load a restored request tab or a design-run copy on cold start. A `404`
   means the request was genuinely deleted; anything else is a transport failure,
   and callers (`DesignRunView`) keep those apart: only a real 404 becomes
-  `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's.
+  `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's;
+  `?fields=summary` answers only the columns a tree is built from (#2546).
 - **A streaming request is a different execution model, declared not detected**
   (#573). `POST /execute` with `"stream": true` creates the run row, hands the
   transfer to `SseStreamManager` (declared before `server_`, like the listener

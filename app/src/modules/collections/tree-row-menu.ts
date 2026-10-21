@@ -17,7 +17,7 @@
 import { Copy, CopyPlus, Edit2, Trash2 } from "lucide-react";
 import type { RowAction } from "@/components/shared";
 import { requestReference } from "@/lib/agent-reference";
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 import type {
 	CollectionTreeCrudHandlers,
 	CollectionTreeHandlers,
@@ -69,7 +69,7 @@ export function collectionRowMenu(
 }
 
 /** The line a request row's "Copy for agent" puts on the clipboard, folders included. */
-export function requestRowReference(request: Request, allCollections: Collection[]): string {
+export function requestRowReference(request: RequestSummary, allCollections: Collection[]): string {
 	return requestReference(request, collectionNamePath(request.collectionId, allCollections));
 }
 
@@ -86,7 +86,7 @@ export interface RequestMenuSources {
 }
 
 /** A request row's menu. */
-export function requestRowMenu(request: Request, sources: RequestMenuSources): RowMenu {
+export function requestRowMenu(request: RequestSummary, sources: RequestMenuSources): RowMenu {
 	const { handlers, reference, copy, moveActions, isDeleting } = sources;
 	const own: RowAction[] = [
 		{ label: "Rename", icon: Edit2, onSelect: () => handlers.onStartRequestRename(request) },

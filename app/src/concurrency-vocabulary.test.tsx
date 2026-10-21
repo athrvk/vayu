@@ -74,7 +74,7 @@ vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
 	useConfigQuery: () => ({ data: { entries: [] } }),
 	useCollectionsQuery: () => ({ data: [] }),
-	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
+	useFullCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
 	useRequestDefaultsQuery: () => ({ data: { headers: [] } }),
 	useStartScenarioRunMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 	useRunQuery: () => ({ data: runUnderConfig, isLoading: false }),

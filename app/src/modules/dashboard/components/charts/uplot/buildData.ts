@@ -14,17 +14,27 @@
 
 import type { LoadTestMetrics } from "@/types";
 import { DEFAULT_CHART_BUCKET_SECONDS } from "@/constants/client-settings";
-import { hasSecondPercentiles, secondPercentiles } from "../../../utils/tickPercentiles";
+import {
+	hasSecondPercentiles,
+	secondPercentiles,
+	worstReading,
+} from "../../../utils/tickPercentiles";
+
+/**
+ * A column value: a number, or `null` for a tick that holds no reading (a gap,
+ * which uPlot leaves unjoined, never a 0).
+ */
+export type Sample = number | null;
 
 /** Bucket several fields at once; returns a shared time axis + one column each. */
-export function bucketColumns(
+export function bucketColumns<T extends Sample = number>(
 	history: LoadTestMetrics[],
-	picks: Array<(m: LoadTestMetrics) => number>,
+	picks: Array<(m: LoadTestMetrics) => T>,
 	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS
-): { times: number[]; cols: number[][] } {
+): { times: number[]; cols: T[][] } {
 	const bucket = bucketSeconds > 0 ? bucketSeconds : DEFAULT_CHART_BUCKET_SECONDS;
 	const bucketTime = (elapsed: number) => Math.round(elapsed / bucket) * bucket;
-	const map = new Map<number, number[]>();
+	const map = new Map<number, T[]>();
 	for (const m of history) {
 		const t = bucketTime(m.elapsed_seconds);
 		map.set(
@@ -33,7 +43,7 @@ export function bucketColumns(
 		);
 	}
 	const times = Array.from(map.keys()).sort((a, b) => a - b);
-	const cols: number[][] = picks.map(() => []);
+	const cols: T[][] = picks.map(() => []);
 	for (const t of times) {
 		const row = map.get(t)!;
 		row.forEach((v, i) => cols[i].push(v));
@@ -53,25 +63,30 @@ export type BucketMerge = "last" | "max";
  * {@link bucketColumns}, or the largest per column. A percentile series takes
  * `"max"`: a 5 s bucket holding five per-second p99s shows the worst second,
  * where "last" would hide a stall in the first four and an average of
- * percentiles is not a percentile of anything.
+ * percentiles is not a percentile of anything. A `null` is no reading
+ * ({@link worstReading}): it loses to any number and survives only a bucket
+ * that held nothing else, so an empty second stays a gap (issue #2386).
  */
-export function rebucket(
+export function rebucket<T extends Sample = number>(
 	times: number[],
-	cols: number[][],
+	cols: T[][],
 	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS,
 	merge: BucketMerge = "last"
-): { times: number[]; cols: number[][] } {
+): { times: number[]; cols: T[][] } {
 	const bucket = bucketSeconds > 0 ? bucketSeconds : DEFAULT_CHART_BUCKET_SECONDS;
 	const bucketTime = (elapsed: number) => Math.round(elapsed / bucket) * bucket;
-	const map = new Map<number, number[]>();
+	const map = new Map<number, T[]>();
 	for (let i = 0; i < times.length; i++) {
 		const t = bucketTime(times[i]);
 		const row = cols.map((c) => c[i]);
 		const prev = map.get(t);
-		map.set(t, merge === "max" && prev ? row.map((v, k) => Math.max(prev[k], v)) : row);
+		map.set(
+			t,
+			merge === "max" && prev ? row.map((v, k) => worstReading(prev[k], v) as T) : row
+		);
 	}
 	const outTimes = Array.from(map.keys()).sort((a, b) => a - b);
-	const outCols: number[][] = cols.map(() => []);
+	const outCols: T[][] = cols.map(() => []);
 	for (const t of outTimes) {
 		const row = map.get(t)!;
 		row.forEach((v, i) => outCols[i].push(v));
@@ -79,8 +94,25 @@ export function rebucket(
 	return { times: outTimes, cols: outCols };
 }
 
-export const pickThroughput = (m: LoadTestMetrics): number => m.throughput ?? m.current_rps ?? 0;
-export const pickSendRate = (m: LoadTestMetrics): number => m.send_rate ?? 0;
+/**
+ * The tick's completions per second over its trailing window. Never
+ * `throughput`, which is the run's cumulative rate: a line plotted from it
+ * would lag a real step by the run's age (#2393).
+ */
+export const pickThroughput = (m: LoadTestMetrics): number => m.current_rps ?? 0;
+/**
+ * The tick's dispatches per second over the same window, or `null` where the
+ * tick holds none. A tick stored before the window existed has only the
+ * cumulative `send_rate`, which is a different quantity under this label.
+ */
+export const pickSendRate = (m: LoadTestMetrics): Sample => m.current_send_rate ?? null;
+/**
+ * Whether the send-rate line has anything to plot. Decided over the whole data
+ * set, so the series set (and the chart that keys on it) does not change as
+ * ticks accumulate.
+ */
+export const hasSendRate = (history: LoadTestMetrics[]): boolean =>
+	history.some((m) => m.current_send_rate != null);
 export const pickConcurrency = (m: LoadTestMetrics): number => m.current_concurrency ?? 0;
 /** The tick's whole-second p99, 0 where it holds none (the scatter drops those ticks first). */
 export const pickLatencyP99 = (m: LoadTestMetrics): number => secondPercentiles(m)?.p99 ?? 0;

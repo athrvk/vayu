@@ -595,7 +595,9 @@ collection run's header adds "(file changed since this run)": the app hashes
 the file when the tab opens and again whenever its window regains focus, so an
 edit made in another program shows up on return. A file that has moved or been
 deleted adds "(file no longer at that path)" instead, whether or not the run
-recorded a hash; the desktop app is the only place that can tell, so the
+recorded a hash, and so does a file the app was never given by a pick, drop or
+open (a data file declared before that rule, #2357, reads again once it is
+picked once more); the desktop app is the only place that can tell, so the
 browser build never shows it. A file the app cannot hash for any other reason
 adds nothing; the hash itself is never shown. A file whose name holds a `\`
 (legal on macOS and Linux) is run without its name, because a name with a

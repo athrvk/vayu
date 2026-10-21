@@ -67,7 +67,7 @@ vi.mock("@/queries", () => ({
 	// The picker and the pre-fill both read the caps through `useDataFileLimits`.
 	useConfigQuery: () => ({ data: { entries: configEntries } }),
 	useCollectionsQuery: () => ({ data: collections }),
-	useMultipleCollectionRequests: () => ({ requestsByCollection, isLoading: false }),
+	useFullCollectionRequests: () => ({ requestsByCollection, isLoading: false }),
 }));
 
 /**

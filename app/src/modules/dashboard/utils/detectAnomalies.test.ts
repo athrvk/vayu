@@ -78,7 +78,7 @@ describe("detectAnomalies - a clean run", () => {
 		 * factor is loosened to 1. A flat series would pass either way and so
 		 * could not tell a working threshold from a broken one.
 		 */
-		const p99 = healthyRun(60).map((m) => m.latency_p99_ms);
+		const p99 = healthyRun(60).map((m) => m.latency_p99_ms ?? 0);
 		const trailingMedian = (i: number) =>
 			[...p99.slice(i - BASELINE_TICKS, i)].sort((a, b) => a - b)[BASELINE_TICKS >> 1];
 
@@ -144,6 +144,60 @@ describe("detectAnomalies - latency spikes", () => {
 		expect(found).toHaveLength(1);
 		expect(found[0].startSeconds).toBe(20);
 		expect(found[0].endSeconds).toBe(24);
+	});
+});
+
+/** A stored second in which nothing completed: the engine writes no percentile keys (#2386). */
+function emptySecond(m: LoadTestMetrics): LoadTestMetrics {
+	const out = { ...m, current_rps: 0 };
+	delete out.latency_p50_ms;
+	delete out.latency_p95_ms;
+	delete out.latency_p99_ms;
+	return out;
+}
+
+/** `run` with the seconds `from`..`to` (inclusive) emptied. */
+function stalled(run: LoadTestMetrics[], from: number, to: number): LoadTestMetrics[] {
+	return run.map((m, i) => (i >= from && i <= to ? emptySecond(m) : m));
+}
+
+describe("detectAnomalies - a second with no completion (#2386)", () => {
+	it("leaves the stall out of the baseline of the spike that follows it", () => {
+		// Ticks 10-17 stall, 25-26 run at 4x. The baseline at 25 is the median of
+		// the readings among ticks 10-24 (118…124 → 121). Read as 0 ms, the eight
+		// stalled seconds would be the median, and a 0 baseline judges nothing.
+		const run = stalled(
+			healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 480 } : {})),
+			10,
+			17
+		);
+		expect(run.filter((m) => m.latency_p99_ms === undefined)).toHaveLength(8);
+
+		const found = detectAnomalies(run).filter((a) => a.kind === "latency_spike");
+		expect(found).toHaveLength(1);
+		expect(found[0].startSeconds).toBe(25);
+		expect(found[0].magnitude).toBeCloseTo(480 / 121, 3);
+	});
+
+	it("does not read a stall inside a spike as its recovery", () => {
+		// Ticks 20-21 open the spike, 22-24 complete nothing, 25 is back to normal.
+		const run = stalled(
+			healthyRun(40, (i) => (i === 20 || i === 21 ? { latency_p99_ms: 480 } : {})),
+			22,
+			24
+		);
+
+		const found = detectAnomalies(run).filter((a) => a.kind === "latency_spike");
+		expect(found).toHaveLength(1);
+		expect(found[0].startSeconds).toBe(20);
+		expect(found[0].endSeconds).toBe(24);
+		expect(found[0].magnitude).toBeCloseTo(480 / 112, 3);
+	});
+
+	it("reports a stall as a throughput drop, never as a latency spike", () => {
+		const found = detectAnomalies(stalled(healthyRun(40), 20, 22));
+		expect(found.map((a) => a.kind)).toEqual(["throughput_drop"]);
+		expect(found[0]).toMatchObject({ startSeconds: 20, endSeconds: 22 });
 	});
 });
 
@@ -439,6 +493,23 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 			"latency_spike",
 			"throughput_drop",
 		]);
+	});
+
+	it("agrees over a randomized sequence whose run stalls now and then (#2386)", () => {
+		const rand = mulberry32(2386);
+		const run = noisyRun(900, rand);
+		// Stalls of one to four seconds, so a baseline, a hot run and a recovery
+		// tail each meet a second with no reading.
+		for (let i = BASELINE_TICKS; i < run.length; i++) {
+			if (rand() >= 0.03) continue;
+			const length = 1 + Math.floor(rand() * 4);
+			for (let k = i; k < Math.min(run.length, i + length); k++) run[k] = emptySecond(run[k]);
+		}
+		expect(run.filter((m) => m.latency_p99_ms === undefined).length).toBeGreaterThan(30);
+
+		const { commits, kinds } = replay(run, rand, { windowSeconds: 60, cap: 5000 });
+		expect(commits).toBeGreaterThan(100);
+		expect(kinds.has("latency_spike")).toBe(true);
 	});
 
 	it("falls silent for a window whose lead-in has rolled out, exactly as a rescan does", () => {
@@ -785,14 +856,29 @@ function windowFrame(previous: LoadTestMetrics, next: LoadTestMetrics, k: number
 }
 
 /**
- * The gate frame for a stored tick: the tick's second in `second_*`, its own
- * `latency_p99_ms` a 30 ms window, and its own `current_rps` the last ~100 ms.
+ * The gate frame for a stored tick: the tick's second in `second_*` and its own
+ * `latency_p99_ms` a 30 ms window. Its `current_rps` is the stored tick's, as
+ * the engine reads both off one trailing window (#2393). A stored second with
+ * no completion is a gate with `second_samples` 0 and null percentiles, and a
+ * null window (#2386).
  */
-function gateFrame(m: LoadTestMetrics, ownRps: number): LoadTestMetrics {
+function gateFrame(m: LoadTestMetrics): LoadTestMetrics {
+	if (m.latency_p99_ms === undefined) {
+		return {
+			...m,
+			live: true,
+			latency_p50_ms: null,
+			latency_p95_ms: null,
+			latency_p99_ms: null,
+			second_samples: 0,
+			second_p50_ms: null,
+			second_p95_ms: null,
+			second_p99_ms: null,
+		};
+	}
 	return {
 		...m,
 		live: true,
-		current_rps: ownRps,
 		latency_p99_ms: 30,
 		second_samples: 500,
 		second_p50_ms: m.latency_p50_ms,
@@ -804,19 +890,16 @@ function gateFrame(m: LoadTestMetrics, ownRps: number): LoadTestMetrics {
 /**
  * The live stream a stored series was recorded from: nine window frames leading
  * up to each stored tick after the first, then its gate at the tick's elapsed
- * time. `gateRps` is the gate's own 100 ms throughput, which no stored tick holds.
+ * time.
  */
-function liveStream(
-	stored: LoadTestMetrics[],
-	gateRps: (m: LoadTestMetrics, i: number) => number = (m) => m.current_rps
-): LoadTestMetrics[] {
+function liveStream(stored: LoadTestMetrics[]): LoadTestMetrics[] {
 	const frames: LoadTestMetrics[] = [];
 	stored.forEach((m, i) => {
 		const previous = stored[i - 1];
 		if (previous) {
 			for (let k = 1; k < FRAMES_PER_SECOND; k++) frames.push(windowFrame(previous, m, k));
 		}
-		frames.push(gateFrame(m, gateRps(m, i)));
+		frames.push(gateFrame(m));
 	});
 	return frames;
 }
@@ -833,10 +916,6 @@ function recorded(run: LoadTestMetrics[]): LoadTestMetrics[] {
 	let completed = 0;
 	return run.map((m) => ({ ...m, requests_completed: (completed += m.current_rps) }));
 }
-
-/** A gate's own 100 ms throughput dipping to a fifth for two seconds in every eight. */
-const lullingGateRps = (m: LoadTestMetrics, i: number) =>
-	i % 8 >= 6 ? m.current_rps * 0.2 : m.current_rps;
 
 /** A stored run that trips every rule once: a drop, a burst, a spike, then a 5xx. */
 function eventfulRun(): LoadTestMetrics[] {
@@ -862,7 +941,7 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 			"throughput_drop",
 		]);
 
-		const live = liveStream(stored, lullingGateRps);
+		const live = liveStream(stored);
 		expect(detectAnomalies(wholeSecondTicks(live))).toEqual(expected);
 	});
 
@@ -883,11 +962,27 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 		expect(found[0]).toMatchObject({ kind: "latency_spike", startSeconds: BASELINE_TICKS });
 	});
 
-	it("restates a gate's throughput over the interval since the previous gate", () => {
-		// The gate's own figure is a 100 ms delta, which lulls two seconds in eight
-		// here; read as it is, that would be a throughput drop every eight seconds.
+	it("reads an empty gate as its stored empty second, never as 0 ms (#2386)", () => {
+		// The stall at 10-17 would be a 0 ms baseline under the spike at 25-26 if
+		// either view read an empty second as a reading.
+		const stored = recorded(
+			stalled(
+				healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 480 } : {})),
+				10,
+				17
+			)
+		);
+		const expected = detectAnomalies(stored);
+		expect(expected.filter((a) => a.kind === "latency_spike")).toHaveLength(1);
+
+		const series = wholeSecondTicks(liveStream(stored));
+		expect(series.filter((m) => m.second_samples === 0)).toHaveLength(8);
+		expect(detectAnomalies(series)).toEqual(expected);
+	});
+
+	it("reads a gate's own current_rps, the figure its stored row holds (#2393)", () => {
 		const stored = eventfulRun();
-		const series = wholeSecondTicks(liveStream(stored, lullingGateRps));
+		const series = wholeSecondTicks(liveStream(stored));
 
 		expect(series.map((m) => m.current_rps)).toEqual(stored.map((m) => m.current_rps));
 		const drops = detectAnomalies(series).filter((a) => a.kind === "throughput_drop");
@@ -895,32 +990,19 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 		expect(drops[0]).toMatchObject({ startSeconds: 25, endSeconds: 27 });
 	});
 
-	it("restates the final gate over its own part of a second", () => {
-		// The final frame closes whatever followed the last gate, here 0.3 s at
-		// the run's steady 500/s, and reports a 100 ms figure of its own.
+	it("keeps the final gate, which closes less than a second", () => {
 		const stored = recorded(healthyRun(30));
 		const last = stored[stored.length - 1];
 		const final = {
-			...gateFrame(last, 40),
+			...gateFrame(last),
 			elapsed_seconds: last.elapsed_seconds + 0.3,
-			requests_completed: last.requests_completed + 150,
 			second_samples: 150,
 		};
 
 		const series = wholeSecondTicks([...liveStream(stored), final]);
 		expect(series).toHaveLength(stored.length + 1);
-		expect(series[series.length - 1].current_rps).toBeCloseTo(500, 6);
+		expect(series[series.length - 1]).toBe(final);
 		expect(detectAnomalies(series)).toEqual([]);
-	});
-
-	it("restates the first gate over the time since the run started", () => {
-		// No gate precedes it, and its stored row is completions over the
-		// elapsed time, not the 100 ms figure the frame carries.
-		const stored = recorded(healthyRun(5));
-		const first = { ...gateFrame(stored[0], 40), elapsed_seconds: 1, requests_completed: 600 };
-
-		const [restated] = wholeSecondTicks([first]);
-		expect(restated.current_rps).toBeCloseTo(600, 6);
 	});
 
 	it("passes a stored series through as it is", () => {
@@ -931,16 +1013,13 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 	});
 
 	it("maps a gate to the same object after the gate before it is trimmed", () => {
-		// The detector recognises the next buffer by tick identity, and a gate's
-		// figure depends on the gate before it, which the front trim removes.
-		const live = liveStream(recorded(healthyRun(30)), lullingGateRps);
+		// The detector recognises the next buffer by tick identity.
+		const live = liveStream(recorded(healthyRun(30)));
 		const full = wholeSecondTicks(live);
 		const trimmed = wholeSecondTicks(live.slice(gateIndex(6)));
 
 		expect(trimmed).toHaveLength(full.length - 6);
 		trimmed.forEach((m, i) => expect(m).toBe(full[i + 6]));
-		// Gate 6 lulls on its own figure; it keeps the one it was restated to.
-		expect(trimmed[0].current_rps).toBe(500);
 	});
 });
 

@@ -62,6 +62,12 @@ using Json = nlohmann::json;
 const vayu::http::FileAccessPolicy& files);
 
 /**
+ * @brief Serialize a request summary to JSON (#2546): each key spelled and
+ * valued as the full request serializers write it, and nothing else.
+ */
+[[nodiscard]] Json serialize (const vayu::db::RequestSummary& summary);
+
+/**
  * @brief Serialize a saved example response to JSON (issue #481)
  */
 [[nodiscard]] Json serialize (const vayu::db::RequestExample& example);

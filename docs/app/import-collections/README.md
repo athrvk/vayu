@@ -118,7 +118,9 @@ failures and are not errors:
 | parsed but empty | Parsed fine, but the options left nothing to create. Included stays available; Import stays disabled while it is the only file. |
 
 **Siblings come from the batch first.** `bundleExternalRefs` reads a referenced
-file through the gated `specFile:read` IPC; when that file is already in the
+file through the gated `specFile:read` IPC (which reads beside a document the
+user picked, dropped or opened, #2357; a spec bound before that rule needs one
+more pick before it can be re-read); when that file is already in the
 batch its text is right here, so the batch answers and nothing touches disk. Ref
 targets are resolved with the bundler's own `joinRelative` / `dirOf` against the
 entry's `webkitRelativePath`, rather than a second normalizer that could disagree
@@ -209,7 +211,8 @@ read as a space; a request with `disableUrlEncoding` as written. The OpenAPI
 parsers join their own drafts, also with `encodeURIComponent`, because the
 spec sync diff compares stored URLs against that form. It **appends**, so a URL
 that arrived with a query of its own keeps it -
-which is what Insomnia's own send does with its two sources. Each parser's
+which is what Insomnia's own send does with its two sources. The query is
+written before a `#fragment` the URL carries, never inside it (issue #2541). Each parser's
 mapping stays as documented: `params[]` is still exactly what the source
 declared, and only the enabled rows reach `url`.
 
@@ -357,7 +360,7 @@ That is deliberate, and it is the line the bundler sits on: **fetch-time `$ref`
 assembly is deterministic re-serialization, not an opinion about what a document
 declares.** It stays renderer-side because it reaches the network through
 `POST /import/fetch` and the local filesystem through the main-process-gated
-`specFile:read` IPC, and an engine that read sibling files off disk on an
+`specFile:read` IPC (granted documents only, #2357), and an engine that read sibling files off disk on an
 import's behalf would be a wider capability than any of this needs.
 
 ---
@@ -471,7 +474,8 @@ they already have their own segments in the count line.
 "url_without_raw" | "variable_metadata", count, requests?, names? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 `requests` names the requests a count applies to, when the walk had one in hand (every
-per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bodies and the
+per-operation OpenAPI count, Postman's per-request counters - `script_unsupported` also names
+the folder or collection that declares the script - Insomnia's file bodies and the
 resources it cannot import), so the Preview can say which request to finish rather than only
 how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
 parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
@@ -625,9 +629,9 @@ OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
   OpenAPI v3 / Swagger v2 `oauth2` security scheme (client id/secret seeded as `{{variables}}`).
 
 Grant/field normalization is shared here so the parsers agree. Only the data-only modes (`digest`/`aws`/`ntlm`/`hawk`/`oauth1`/`edgegrid`/`jwt`)
-remain non-executable and are reported in `meta.nonExecutableAuth`: Postman counts the requests whose resolved auth is one of them
-(declaring folders and the collection go in `nonExecutableAuthFolders` / `nonExecutableAuthCollection`),
-Insomnia counts each declaration (see [Postman](./postman.md#auth-mapping)).
+remain non-executable and are reported in `meta.nonExecutableAuth`: Postman and Insomnia count the requests whose resolved auth is one of
+them (declaring folders and the collection go in `nonExecutableAuthFolders` / `nonExecutableAuthCollection`; see
+[Postman](./postman.md#auth-mapping) and [Insomnia v4](./insomnia-v4.md#auth-mapping), which also says why a folder set to No Authentication ends the walk).
 
 ### postman_raw_body
 `postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map

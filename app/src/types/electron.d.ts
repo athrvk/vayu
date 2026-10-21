@@ -110,7 +110,8 @@ export type OsIconSignal =
  *
  * `import` carries a path, not the document: the renderer reads it back through
  * `readSpecFile`, which is the gated door onto the file system that already
- * exists, rather than main growing a second one.
+ * exists, rather than main growing a second one. Main records the path as
+ * granted when it hands the intent over, so that read is allowed.
  */
 export type OpenIntent =
 	| { kind: "import"; path: string }
@@ -400,7 +401,8 @@ interface ElectronAPI {
 	/**
 	 * Re-read a collection's declared data file by path (issue #599). Rejects
 	 * with a message the dialog can show as-is when the extension is not one
-	 * Vayu opens, the file has moved, or it is over the engine's
+	 * Vayu opens, the file has moved, it is not a file the user picked, dropped
+	 * or opened (#2357: pick it again), or it is over the engine's
 	 * `maxScenarioDataBytes`.
 	 *
 	 * Bytes rather than text: `services/data-files/decode.ts` owns decoding, and
@@ -416,7 +418,8 @@ interface ElectronAPI {
 	 * hex (issue #2051), without transferring them: the same digest
 	 * `readDataFile` answers. A file that has moved resolves
 	 * `{ status: "missing" }` (issue #2057) rather than rejecting, since a
-	 * rejection reaches the renderer as a bare message. Rejects for a refused
+	 * rejection reaches the renderer as a bare message; so does a path the user
+	 * never picked, dropped or opened (#2357). Rejects for a refused
 	 * extension or an empty path; there is no byte cap. Absent outside Electron.
 	 */
 	hashDataFile: (path: string) => Promise<DataFileHashReply>;
@@ -449,8 +452,9 @@ interface ElectronAPI {
 	 * picked document's path and the `$ref` target as the document wrote it - the
 	 * main process resolves the second against the first's directory. Rejects
 	 * with a message the import dialog can show as-is when the reference is
-	 * absolute, names an extension Vayu does not open, is not there, or is over
-	 * the engine's `maxSpecDocumentBytes`.
+	 * absolute, names an extension Vayu does not open, is not there, is over
+	 * the engine's `maxSpecDocumentBytes`, or the document path is not a file the
+	 * user picked, dropped or opened (#2357: pick the file again).
 	 *
 	 * Bytes rather than text, matching `readDataFile`. Absent outside Electron,
 	 * where a multi-file spec simply reports its refs as unresolved.

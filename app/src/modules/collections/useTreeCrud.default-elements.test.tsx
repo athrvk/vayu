@@ -22,6 +22,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 import { useTreeCrud } from "./useTreeCrud";
 import type { Collection } from "@/types";
@@ -45,12 +47,18 @@ const collections = [{ id: "c-1", name: "Acme", order: 0 }] as Collection[];
 const requestsByCollection = new Map();
 
 function renderCrud() {
-	return renderHook(() =>
-		useTreeCrud({
-			collections,
-			requestsByCollection,
-			getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
-		})
+	const client = new QueryClient();
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+	);
+	return renderHook(
+		() =>
+			useTreeCrud({
+				collections,
+				requestsByCollection,
+				getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
+			}),
+		{ wrapper }
 	);
 }
 

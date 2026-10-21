@@ -36,19 +36,20 @@ import { ResponseTimeVsConcurrencyChart } from "./ScatterAndDistribution";
 
 const mockState = vi.hoisted(() => ({
 	constructions: 0,
-	series: [] as { label: string }[],
+	series: [] as { label: string; bandTo?: number }[],
 	markers: [] as { label: string }[],
-	props: {} as { yMin?: number | null; y2Label?: string },
+	props: {} as { yMin?: number | null; y2Label?: string; data?: (number | null)[][] },
 }));
 
 // Hoisted above these imports by vitest, so `RequestRateChart` above resolves
 // against this mock, not the real `UPlotChart`.
 vi.mock("./UPlotChart", () => ({
 	UPlotChart: (props: {
-		series: { label: string }[];
+		series: { label: string; bandTo?: number }[];
 		markers?: { label: string }[];
 		yMin?: number | null;
 		y2Label?: string;
+		data?: (number | null)[][];
 	}) => {
 		const { series, markers } = props;
 		mockState.props = props;
@@ -80,6 +81,9 @@ function tick(elapsedSeconds: number): LoadTestMetrics {
 		bytes_received: 0,
 		send_rate: 100,
 		throughput: 100,
+		current_send_rate: 100,
+		window_avg_latency_ms: 25,
+		window_avg_queue_wait_ms: 0,
 	};
 }
 
@@ -124,6 +128,60 @@ describe("RequestRateChart - ramp overlay chart identity (#1717)", () => {
 
 		rerender(<RequestRateChart history={historyOf(4)} rampOverlay={null} />);
 		expect(mockState.constructions).toBe(1);
+	});
+});
+
+/** A stored run from before the trailing window: only the run-cumulative rates. */
+function withoutSendRate(history: LoadTestMetrics[]): LoadTestMetrics[] {
+	return history.map(({ current_send_rate: _dropped, ...rest }) => rest);
+}
+
+describe("RequestRateChart - the send-rate line (#2393)", () => {
+	it("plots throughput and the per-tick send rate when the ticks carry one", () => {
+		render(<RequestRateChart history={historyOf(4)} rampOverlay={null} />);
+		expect(mockState.series.map((s) => s.label)).toEqual(["throughput", "send rate"]);
+	});
+
+	it("omits the send-rate line for ticks stored without one, leaving the cumulative send_rate unplotted", () => {
+		render(<RequestRateChart history={withoutSendRate(historyOf(4))} rampOverlay={null} />);
+		expect(mockState.series.map((s) => s.label)).toEqual(["throughput"]);
+		// Column 1 is throughput alone; nothing of `send_rate` (100) was added.
+		expect(mockState.props.data).toHaveLength(2);
+	});
+
+	it("keeps the send-rate line when only some ticks carry the figure, leaving a gap for the rest", () => {
+		const mixed = historyOf(4);
+		mixed[1] = withoutSendRate([mixed[1]])[0];
+		render(<RequestRateChart history={mixed} rampOverlay={null} />);
+		expect(mockState.series.map((s) => s.label)).toEqual(["throughput", "send rate"]);
+		expect(mockState.props.data?.[2]).toEqual([100, null, 100, 100]);
+	});
+
+	it("closes the ramp band on the achieved column whether or not a send-rate column precedes", () => {
+		const bandsOf = (history: LoadTestMetrics[]) => {
+			render(<RequestRateChart history={history} rampOverlay={rampOverlayOf(3)} />);
+			const labels = mockState.series.map((s) => s.label);
+			const configured = mockState.series.find((s) => s.label === "configured");
+			// Series i is data column i + 1.
+			return { target: labels.indexOf("achieved") + 1, actual: configured?.bandTo };
+		};
+		const withSend = bandsOf(historyOf(4));
+		expect(withSend.actual).toBe(withSend.target);
+		const without = bandsOf(withoutSendRate(historyOf(4)));
+		expect(without.actual).toBe(without.target);
+		expect(without.target).toBe(withSend.target - 1);
+	});
+
+	it("does not remount as the series grows, send rate or not", () => {
+		for (const shape of [(h: LoadTestMetrics[]) => h, withoutSendRate]) {
+			mockState.constructions = 0;
+			const { rerender, unmount } = render(
+				<RequestRateChart history={shape(historyOf(2))} rampOverlay={null} />
+			);
+			rerender(<RequestRateChart history={shape(historyOf(5))} rampOverlay={null} />);
+			expect(mockState.constructions).toBe(1);
+			unmount();
+		}
 	});
 });
 

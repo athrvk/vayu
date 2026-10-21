@@ -65,7 +65,7 @@ vi.mock("@/queries", () => ({
 	// collections means no subtree to audit, and no requests means every
 	// declared column reports as unreferenced.
 	useCollectionsQuery: () => ({ data: [] }),
-	useMultipleCollectionRequests: () => ({
+	useFullCollectionRequests: () => ({
 		requestsByCollection: new Map(),
 		isLoading: false,
 	}),

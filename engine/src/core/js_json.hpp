@@ -391,6 +391,11 @@ append_params (const std::string& url, const std::vector<Row>& params, QueryEnco
     if (query.empty ()) {
         return url;
     }
+    // The query sits before a fragment, never inside it.
+    if (const std::size_t hash_at = url.find ('#'); hash_at != std::string::npos) {
+        return append_params (url.substr (0, hash_at), params, encoding) +
+        url.substr (hash_at);
+    }
     if (url.find ('?') == std::string::npos) {
         return url + "?" + query;
     }

@@ -49,7 +49,13 @@ export interface UserInput {
  * a new entity fails to compile until it has a reader.
  */
 export const MCP_DATA_ENTITIES = [
+	// A write that can reach any collection's requests or the trash: a cascade
+	// delete, a move, an import, a spec bind or sync, a trash restore or purge.
 	"collection",
+	// A write to one collection row and nothing under it (#2546): create, update,
+	// unbind. Its own family so an agent looping over collections refetches the
+	// collections and not every request list in the workspace once per call.
+	"collectionRow",
 	"request",
 	"environment",
 	"run",

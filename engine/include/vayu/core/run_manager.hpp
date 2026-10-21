@@ -945,7 +945,10 @@ struct RunContext {
         /// last one it saw to tell a fresh tick from a re-read of the same one;
         /// a wall-clock timestamp cannot, since two ticks can share a
         /// millisecond and the clock can step.
-        uint64_t sequence  = 0;
+        uint64_t sequence = 0;
+        /// Completions per second since the previous reading at least 100 ms
+        /// old. Not the frame's `currentRps`, a trailing second (#2393): a
+        /// level's first counted ticks must not average in the level before.
         double current_rps = 0.0;
         size_t in_flight   = 0;
         /// Every window since the level histogram adopted `level.epoch`, this
@@ -1074,25 +1077,35 @@ struct MetricTickSample {
     double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
     size_t requests_completed = 0; // Responses received (success + error)
     size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
-    size_t http_errors         = 0; // Of the errors, those that got a response
-    size_t no_response         = 0; // Of the errors, those that got none
-    size_t cancelled           = 0; // By a Stop; in none of the above (#2136)
-    double current_rps         = 0.0;
+    size_t http_errors = 0;     // Of the errors, those that got a response
+    size_t no_response = 0;     // Of the errors, those that got none
+    size_t cancelled   = 0;     // By a Stop; in none of the above (#2136)
+    // The trailing window of the live frame of the same tick (TrailingWindow,
+    // #2393): completions and dispatches per second over at least the last
+    // second, and the window's mean latency and queue wait, absent (stored as
+    // null) when the window completed nothing.
+    double current_rps       = 0.0;
+    double current_send_rate = 0.0;
+    std::optional<double> window_avg_latency_ms;
+    std::optional<double> window_avg_queue_wait_ms;
     size_t current_concurrency = 0;
-    double send_rate           = 0.0;
-    double throughput          = 0.0;
-    size_t backpressure        = 0;   // In flight, think-timer slots included
-    double error_rate          = 0.0; // Percent
-    size_t dropped_requests    = 0;
-    size_t bytes_sent          = 0;
-    size_t bytes_received      = 0;
+    // Cumulative means since load start, the hero card's figures.
+    double send_rate        = 0.0;
+    double throughput       = 0.0;
+    size_t backpressure     = 0;   // In flight, think-timer slots included
+    double error_rate       = 0.0; // Percent
+    size_t dropped_requests = 0;
+    size_t bytes_sent       = 0;
+    size_t bytes_received   = 0;
     std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
     // The second since the previous row, every 100 ms window merged
     // (MetricsCollector::take_second_percentiles, #2385); neither the last
-    // window alone nor the run so far.
-    double latency_p50_ms = 0.0;
-    double latency_p95_ms = 0.0;
-    double latency_p99_ms = 0.0;
+    // window alone nor the run so far. Zero samples leaves the three keys out
+    // of the row (#2386): a second with no completion has no latency.
+    size_t latency_samples = 0;
+    double latency_p50_ms  = 0.0;
+    double latency_p95_ms  = 0.0;
+    double latency_p99_ms  = 0.0;
     // This run's `metric.record` / `pm.metrics` values so far (issue #1500),
     // snapshotted at the same 1 Hz gate as the rest of this tick. Absent
     // when the run has recorded none, which is what keeps the stored row's

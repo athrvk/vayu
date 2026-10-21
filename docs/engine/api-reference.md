@@ -1490,10 +1490,35 @@ tiebreak is part of the contract.
 - `collectionId` (optional): Collection ID to fetch requests from. Absent, the
   response is every live request of every live collection, grouped by
   `collectionId` and ordered within each group exactly as that collection's own
-  list is - nothing in the trash. The app builds its whole tree from this one
-  call at launch instead of one call per collection.
+  list is - nothing in the trash.
+- `fields` (optional): `summary` answers each row cut to the keys a tree is
+  built from (#2546), described below; absent (or empty), the full request
+  objects. Any other value is a `400` with code `invalid_fields`, never the
+  full list. The app builds its whole tree at launch from one
+  `GET /requests?fields=summary` call.
 
-**Response:** An array of request objects, each in the same shape as a
+**Summary response** (`fields=summary`): the same rows in the same order as
+the full form, each carrying exactly `id`, `collectionId`, `name`, `method`,
+`url`, `order`, `createdAt` and `specOperation`, spelled and valued as the full
+row writes them (`specOperation` is the object or `null`). Nothing else is read
+from the database, so a large body, header set, auth block or element list
+costs its row nothing, and no row carries `truncatedFields`.
+```json
+[
+  {
+    "id": "req_1234567890",
+    "collectionId": "col_1234567890",
+    "name": "Get Users",
+    "method": "GET",
+    "url": "{{baseUrl}}/users",
+    "order": 0,
+    "createdAt": 1234567890,
+    "specOperation": null
+  }
+]
+```
+
+**Response** (no `fields`): An array of request objects, each in the same shape as a
 `GET /requests/:id` response: `params`/`headers` are arrays of
 `{key, value, enabled}` entries and `body` is a JSON discriminated union
 (see the `requests` table in [db-schema.md](db-schema.md)) - with one
@@ -1557,8 +1582,8 @@ every collection's request list and scanning them for the id.
 **Path Parameters:**
 - `id` (required): The request ID to fetch
 
-**Response:** The request object, in the same shape as a `GET /requests` list
-entry.
+**Response:** The request object, in the same shape as a full `GET /requests`
+list entry.
 ```json
 {
   "id": "req_1234567890",
@@ -1801,7 +1826,7 @@ keys present (even `null` is accepted as a no-op, but a real value is not) is a
 rule: absent keeps the stored list; `null` resets it to `[]`; a present value
 must be an array the element registry accepts (see [Elements](elements.md)) or
 the write is a `400` naming the index, the kind and the field. The only script
-source - `GET /requests/:id` and every list response carry it and no longer
+source - `GET /requests/:id` and every full list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
 **`auth.postman`**, the Postman block an import kept beside the mapped auth
@@ -3560,8 +3585,9 @@ other format, is not a `meta.skipped` kind, and never changes what is imported;
 **`meta.skipped`** is one `{kind, count}` per kind the parse counted, in a fixed
 kind order. **`requests`**, when present, names the requests the count applies
 to, in the order the walk met them: every count an OpenAPI parse takes while on
-an operation, Postman's per-request counters, and Insomnia's file bodies and
-the resources it cannot import. A count that belongs to the document (a second
+an operation, Postman's per-request counters (and, for `script_unsupported`,
+the folder or collection that declares the script), and Insomnia's file bodies
+and the resources it cannot import. A count that belongs to the document (a second
 server URL, a malformed section) has none. **`names`**, when present, names
 what the count dropped, never its value: `oauth2_unmapped_param`, whose
 `names` are the keys of the OAuth 2.0 request parameters a Postman parse did
@@ -4265,7 +4291,7 @@ breaking change bumps the integer and is noted here):
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
-| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics)); absent for `series: "none"` |
+| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
@@ -8765,12 +8791,12 @@ one number - the MCP tool's cap does.
 
 The search steers by what the metrics thread publishes each live tick rather
 than sampling the collector itself, so it takes nothing away from what `GET
-/runs/:id/live` streams. A level in which no request was timed is not judged and
-stays open: its percentiles are the empty-histogram zeros and reading those as
-"answered instantly" would climb straight past the limit. A request that timed
-out is timed (see [Latency population](#latency-population)), so a level of
-nothing but timeouts has samples, is judged, and reports a p99 near the timeout -
-the level fails its latency limit, which is the right verdict.
+/runs/:id/live` streams. A level in which no request was timed (`latencySamples`
+`0`, percentiles `null` on the frame) is not judged and stays open: reading it
+as "answered instantly" would climb straight past the limit. A request that
+timed out is timed (see [Latency population](#latency-population)), so a level
+of nothing but timeouts has samples, is judged, and reports a p99 near the
+timeout - the level fails its latency limit, which is the right verdict.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 p99 per level and a sequence has one per step.
 
@@ -8877,6 +8903,7 @@ the same way). The set feeds the report's `latency` block (`p50` to `p999`,
 `max`), the live tick's windowed `latencyP50Ms` / `latencyP95Ms` /
 `latencyP99Ms`, its per-second `secondP*Ms` and cumulative `cumulativeP*Ms`,
 the stored ticks' `latency_p*_ms`, `avgLatencyMs` and `avgQueueWaitMs`, the
+trailing-window means (`windowAvg*Ms` live, `window_avg_*_ms` stored), the
 exports, and the
 `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
 The mean is the sum over the set divided by the set's size, so it agrees
@@ -8926,9 +8953,12 @@ history view can rebuild the percentiles-over-time chart, the
 response-time-vs-concurrency scatter, and the capacity-breakpoint / saturation
 stats from stored data. The live tick that wrote a row carries the same three
 figures as `secondP50Ms` / `secondP95Ms` / `secondP99Ms`. A row stores no
-sample count, and a second with no completion stores `0`. Rows an engine
-older than issue #2385 stored hold the last 100 ms window of their second
-instead.
+sample count, and a second with no completion has **none of the three keys**
+(issue #2386), the frame's `secondSamples` `0` and `null` percentiles: absent
+rather than `null` because the [run export](#post-exportrun-report) types
+them as numbers. Rows an engine older than issue #2386 stored hold `0` for
+such a second, and rows older than issue #2385 hold the last 100 ms window of
+their second instead.
 
 **Response:**
 ```json
@@ -8943,6 +8973,9 @@ instead.
       "no_response": 0,
       "cancelled": 0,
       "current_rps": 150.5,
+      "current_send_rate": 151.0,
+      "window_avg_latency_ms": 44.8,
+      "window_avg_queue_wait_ms": 0.3,
       "current_concurrency": 100,
       "send_rate": 150.0,
       "throughput": 149.5,
@@ -8971,6 +9004,22 @@ outside all three (issue #2136); a tick stored before that issue has no
 rows came back in, and reported 0 failed requests for every bucket of every run.
 A tick an engine older than issue #2124 stored has no `http_errors` /
 `no_response`, and its `requests_failed` counted no-response failures only.
+
+`current_rps` and `current_send_rate` are completions and dispatches per
+second over the **trailing window** ending at the row's tick (issue #2393):
+at least the last second, divided by the window's actual span (one second
+plus up to one tick interval), and until a run has a second of ticks,
+everything since its first tick. `window_avg_latency_ms` and
+`window_avg_queue_wait_ms` are the mean latency and queue wait of the
+[latency population](#latency-population) that completed in the same window,
+`null` when nothing did. The live frame of the same tick carries the same
+four values as `currentRps`, `currentSendRate`, `windowAvgLatencyMs` and
+`windowAvgQueueWaitMs`. `send_rate` and `throughput` are **cumulative**:
+requests sent and completed since load start, divided by the time since load
+start, so they flatten a change of rate the window shows within a second. A
+tick stored before issue #2393 has none of the three new keys, and its
+`current_rps` divided the completions since the previous row by the time
+since it.
 
 A missing run returns `404` with the message `Run not found`.
 
@@ -9024,21 +9073,28 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` | The **max** over the bucket, its worst second |
 | `current_concurrency`, `backpressure` | The max over the bucket |
 | `current_rps` | The mean over the bucket's ticks |
+| `current_send_rate` | The mean over the bucket's ticks (#2393) |
+| `window_avg_latency_ms`, `window_avg_queue_wait_ms` | The mean over the bucket's ticks that carried a number, `null` when none did (#2393) |
 | Any other key | The last tick's |
 
 The latency fields are never averaged: each row's percentile is of its own
 second, so the bucket's max is an **upper bound** on the bucket's percentile,
 not an estimate of it, and a one-second spike survives into the bucket that
-holds it. `0` still means a second with no completion, so a bucket reads `0`
-only when none of its seconds completed anything. Rows an engine older than
+holds it. A second with no completion carries none of the three keys
+(issue #2386) and so takes no part in the max: a bucket has them only when one
+of its seconds completed something. A bucket of rows an engine older than
+issue #2386 stored reads `0` only when none of its seconds completed anything,
+which is what those rows store for such a second. Rows an engine older than
 issue #2385 stored hold the last 100 ms window of their second instead, and
 the max is then taken over those windows. A key no tick in the bucket carried
 (`http_errors` on an older row, `custom_metrics` on a run that recorded none)
 is never added.
 
-Only `GET /runs/:runId/metrics` downsamples. The run-report export
-([`POST /export/run-report`](#post-exportrun-report)), the MCP
-`get_run_timeseries` tool and `GET /runs/:runId/monitor` read the raw ticks.
+Only `GET /runs/:runId/metrics` and `GET /runs/:runId/monitor`
+([the same parameter, folded differently](#downsampling-the-monitor-series))
+downsample. The run-report export
+([`POST /export/run-report`](#post-exportrun-report)) and the MCP
+`get_run_timeseries` and `get_run_monitor` tools read the raw rows.
 
 ### GET /runs/:runId/monitor
 
@@ -9046,6 +9102,14 @@ Paginated **server vitals** scraped during the run - the samples the
 [`monitor` block](#the-monitor-block-server-vitals) collected. Same
 `{data, pagination}` envelope and the same `limit` / `offset` rules as
 `GET /runs/:runId/metrics`, so one pagination reader covers both.
+
+**Query parameters:**
+- `limit` - max records per page (default 5000, invalid/&le;0 falls back to 5000, capped at 50000).
+- `offset` - skip N records (default 0, negative floored to 0).
+- `maxPoints` - return the **whole series as at most this many samples**
+  (capped at 50000; anything but a positive integer is treated as absent).
+  `limit` and `offset` are then ignored. See
+  [Downsampling the monitor series](#downsampling-the-monitor-series).
 
 Its own endpoint rather than extra keys on the tick objects: that key set is the
 `/metrics` contract, and these samples land on the user's scrape cadence rather
@@ -9083,6 +9147,39 @@ A run that configured no monitor returns `200` with an empty `data` array; only
 a run that does not exist is a `404`. Samples are deleted with the run, like
 every other child row.
 
+#### Downsampling the monitor series
+
+`maxPoints` here is the same contract as
+[on `/metrics`](#downsampling-with-maxpoints) (issue #2611), read from the
+same `monitor_samples` rows in stored order (by `timestamp`, then insertion):
+
+- Without it the answer is exactly the paged series above; no key is added.
+- With a series of at most `maxPoints` samples, every sample comes back
+  unchanged and `bucketed` is `false`.
+- Otherwise each run of `ticksPerBucket = ceil(total / maxPoints)` consecutive
+  samples is folded into one (the key keeps the tick series' name, though a
+  bucket here holds samples); the last bucket may be shorter, and a one-sample
+  bucket is that sample unchanged.
+
+The envelope is the one the tick series answers with: `pagination.total` is the
+stored sample count, `limit` echoes `maxPoints`, `offset` is `0`, `hasMore` is
+`false`, `returned` is the number of `data` entries, plus `bucketed` and
+`ticksPerBucket` on this path only.
+
+A folded sample is `{timestamp, series}` like any other:
+
+| Field | Folded value |
+|-------|--------------|
+| `timestamp` | The last sample's |
+| each `series.<name>` | The **max** over the bucket's samples that carried it |
+
+The max keeps a one-scrape spike in a gauge (cpu, memory, a queue depth) that a
+mean would flatten, and for a monotone counter it equals the last reading. A
+name no sample in the bucket carried is never added to the folded `series`, so
+a gap in the target's reporting stays a gap; a non-number value is skipped.
+The MCP `get_run_monitor` tool does not pass `maxPoints` and reads the raw
+samples.
+
 ### GET /runs/:runId/live
 
 Stream live metrics for a run via Server-Sent Events, replayed from a retained
@@ -9101,10 +9198,12 @@ id: 0
 data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "totalRequests":1500,"totalSuccess":1495,"totalErrors":5,"errorRate":0.33,
        "httpErrors":5,"noResponse":0,"cancelled":0,
-       "currentRps":150.5,"sendRate":150.0,"throughput":149.5,
+       "currentRps":150.5,"currentSendRate":151.0,
+       "sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
-       "latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
+       "windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
+       "latencySamples":15,"latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
        "cumulativeP50Ms":36.0,"cumulativeP95Ms":90.2,"cumulativeP99Ms":160.4,
        "bytesSent":48000,"bytesReceived":1920000,
        "requestsSent":1500,"requestsExpected":0,
@@ -9134,7 +9233,11 @@ no `status` at all.
 Until then the run is still setting up, and every frame carries
 `elapsedSeconds: 0` with `sendRate` and `throughput` at `0`, because both divide
 by it. The last frame, published just after load ends, therefore reads within
-a fraction of a second of the report's `testDuration`. An engine older than that issue
+a fraction of a second of the report's `testDuration`. `currentRps` and
+`currentSendRate` do not divide by it: they divide by the trailing window's own
+span on the monotonic clock (issue #2393), so they read `0` while nothing is
+sent, and a window that reaches back before load start counts that idle time in
+its span. An engine older than that issue
 counted from when the run was registered, so a slow setup ran its live clock
 ahead of the report and dragged the rates down. The last frame's `sendRate` is
 still not the report's: the report divides requests sent by the sending
@@ -9236,7 +9339,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the `second*` keys, which the metrics thread adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -9244,15 +9347,17 @@ no frame.
 | `httpErrors` / `noResponse` | `totalErrors` split: an error status came back, or no response did |
 | `cancelled` | Requests a Stop cancelled before they answered; in none of the counts above ([issue #2136](#what-counts-as-an-error)) |
 | `errorRate` | `totalErrors` as a percentage of the status-code distribution's total |
-| `currentRps` | Instantaneous RPS (delta over the tick window) |
-| `sendRate` | Rate requests are dispatched (open model) |
-| `throughput` | Rate responses are received |
+| `currentRps` / `currentSendRate` | Completions / dispatches per second over the **trailing window** (issue #2393): at least the last second (`LIVE_RATE_WINDOW_MS`), divided by its actual span, and everything since the first frame until the stream has a second of frames. `0` for a window with nothing in it. A gate frame's pair is its [stored row](#get-runsrunidmetrics)'s `current_rps` / `current_send_rate` |
+| `sendRate` | Requests dispatched per second, **cumulative**: `requestsSent` over the time since load start |
+| `throughput` | Responses received per second, **cumulative**: `totalRequests` over the time since load start |
 | `activeConnections` | Current in-flight requests |
 | `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `0` for a window with no completion. The capacity search steers by these |
+| `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
+| `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |

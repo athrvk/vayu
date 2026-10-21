@@ -43,6 +43,40 @@ import type { IpcSenderLike } from "./ipc-sender.js";
  */
 export const FILE_PICKED_CHANNEL = "file:picked";
 
+/**
+ * What a reader that acts on a renderer-named path says when the path is not
+ * one the user picked, dropped or opened. Fixed text with no path in it, so a
+ * test, a doc and the dialog that shows it all mean the same sentence.
+ */
+export const NOT_GRANTED_MESSAGE =
+	"Vayu only reads files you picked, dropped or opened with the app, and this one was not. Pick the file again.";
+
+/** Thrown by {@link assertGranted}; the message is {@link NOT_GRANTED_MESSAGE}. */
+export class FileNotGrantedError extends Error {
+	constructor() {
+		super(NOT_GRANTED_MESSAGE);
+		this.name = "FileNotGrantedError";
+	}
+}
+
+/** The question a reader asks of the registry: `FileGrants.isGranted`, injected. */
+export type IsGranted = (filePath: string) => Promise<boolean>;
+
+/**
+ * Refuse with {@link FileNotGrantedError} unless @p isGranted says yes. A
+ * registry that itself fails (a rejection, not a "no") refuses too: a gate that
+ * opens when it cannot answer is no gate.
+ */
+export async function assertGranted(isGranted: IsGranted, filePath: string): Promise<void> {
+	let granted = false;
+	try {
+		granted = await isGranted(filePath);
+	} catch {
+		// Fail closed.
+	}
+	if (!granted) throw new FileNotGrantedError();
+}
+
 export interface FileGrantsDeps {
 	client: Pick<FileTrustClient, "createFileGrant" | "listFileGrants">;
 	/**

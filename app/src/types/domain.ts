@@ -941,19 +941,22 @@ export interface Request {
 	order: number;
 	createdAt: string;
 	updatedAt: string;
-	/**
-	 * Names which of `params` / `headers` / `body` / `auth` the engine
-	 * substituted a default for on this row, because the stored column is over
-	 * its field cap (issue #1485). Only `GET /requests?collectionId=` (the tree
-	 * list) can carry this - `GET /requests/:id` always answers with the
-	 * genuine, whole value, however large, so a request opened in the builder is
-	 * never affected. Typed here because Duplicate reads it: a list-derived
-	 * record carrying this must not be copied, or the copy silently drops
-	 * whatever was substituted. Absent for a row with nothing over the cap, and
-	 * for one written before the engine had this field.
-	 */
-	truncatedFields?: string[];
 }
+
+/**
+ * A request as the tree lists it: one row of `GET /requests?fields=summary`
+ * (#2546), the shape every `listByCollection` cache holds. A `Request` is one,
+ * so a write that has the whole row (a create, a reorder's settle) may store it
+ * as it stands; a reader that needs anything else fetches the row through
+ * `requestDetailOptions`.
+ *
+ * `createdAt` is here for `compareTreeOrder`'s tie-break and `specOperation`
+ * for the Spec tab's mapping count; the rest is what a tree row draws.
+ */
+export type RequestSummary = Pick<
+	Request,
+	"id" | "collectionId" | "name" | "method" | "url" | "order" | "createdAt" | "specOperation"
+>;
 
 /**
  * A saved example response stored against a request (issue #481).
@@ -2365,17 +2368,38 @@ export interface LoadTestMetrics {
 	http_errors?: number;
 	/** The part of `requests_failed` that got none (status code 0). Absent on a tick stored by an older engine. */
 	no_response?: number;
+	/**
+	 * Completions per second over the trailing window (at least one second)
+	 * ending at this tick, a live frame's and a stored tick's alike (issue #2393).
+	 */
 	current_rps: number;
+	/**
+	 * Dispatches per second over the same trailing window as `current_rps`.
+	 * Absent on a tick stored before the window existed: `send_rate` is the
+	 * run-cumulative figure and must not stand in for it.
+	 */
+	current_send_rate?: number;
+	/**
+	 * Mean latency and queue wait of the requests that completed in that
+	 * window. `null` for a window in which nothing completed, absent on a tick
+	 * stored before the window existed; `avg_latency_ms` is the run-cumulative
+	 * mean and must not stand in for either.
+	 */
+	window_avg_latency_ms?: number | null;
+	window_avg_queue_wait_ms?: number | null;
 	current_concurrency: number;
 	/**
 	 * Latency percentiles of the tick. A stored tick's are its whole second's,
 	 * merged (issue #2385). A live frame's are only the last ~100 ms window, so
 	 * a chart or a threshold must read them through `utils/tickPercentiles.ts`
 	 * (`secondPercentiles`, `cumulativePercentiles`) and never off these keys.
+	 * An interval with no completion has none (issue #2386): `null` on a live
+	 * frame, absent from a stored tick. A tick stored by an older engine holds
+	 * `0` there instead.
 	 */
-	latency_p50_ms: number;
-	latency_p95_ms: number;
-	latency_p99_ms: number;
+	latency_p50_ms?: number | null;
+	latency_p95_ms?: number | null;
+	latency_p99_ms?: number | null;
 	/**
 	 * Set by `mapSseMetrics` on every frame that came off the live stream and
 	 * absent on a stored tick. It is what tells a live frame with no
@@ -2399,13 +2423,17 @@ export interface LoadTestMetrics {
 	cumulative_p50_ms?: number | null;
 	cumulative_p95_ms?: number | null;
 	cumulative_p99_ms?: number | null;
+	/** Mean latency over the whole run so far, not the tick's window. */
 	avg_latency_ms: number;
 	bytes_sent: number;
 	bytes_received: number;
+	/** Dispatches per second over the whole run so far (see `current_send_rate`). */
 	send_rate?: number;
+	/** Completions per second over the whole run so far (see `current_rps`). */
 	throughput?: number;
 	backpressure?: number;
 	dropped_requests?: number;
+	/** Mean queue wait over the whole run so far. */
 	avg_queue_wait_ms?: number;
 	// Run progress - feeds the iterations-mode ETA stat. requests_expected is 0
 	// for open-ended modes (constant_rps), in which case ETA is not shown.
@@ -3483,7 +3511,10 @@ export interface McpConnectResult {
  * `electron/mcp/data-changed.conformance.test.ts`.
  */
 export type McpDataEntity =
+	/** Collections, and anything under them: request lists, trash, compositions. */
 	| "collection"
+	/** One collection row and nothing under it: a create, an update, an unbind. */
+	| "collectionRow"
 	| "request"
 	| "environment"
 	| "run"

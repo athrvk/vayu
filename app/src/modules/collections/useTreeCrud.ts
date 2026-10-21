@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Edit2, Copy, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
 import {
 	useTabsStore,
@@ -25,6 +26,7 @@ import {
 	useRestoreTrashMutation,
 	useMockServersQuery,
 	useStopMockServerMutation,
+	requestDetailOptions,
 } from "@/queries";
 import { restoreNotice } from "@/modules/trash";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
@@ -38,15 +40,15 @@ import type {
 	CollectionTreeFolderDraft,
 } from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";
-import type { Collection, Request } from "@/types";
+import type { Collection, Request, RequestSummary } from "@/types";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
 import { ICON_MOTION } from "@/components/ui";
 
 export interface TreeCrudOptions {
 	collections: Collection[];
-	requestsByCollection: Map<string, Request[]>;
-	getRequestsByCollection: (collectionId: string) => Request[];
+	requestsByCollection: Map<string, RequestSummary[]>;
+	getRequestsByCollection: (collectionId: string) => RequestSummary[];
 }
 
 /** What the tree's own chrome renders: the create form, the toolbar, the dialog. */
@@ -144,6 +146,7 @@ export function useTreeCrud({
 	const deleteRequestMutation = useDeleteRequestMutation();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const restoreTrashMutation = useRestoreTrashMutation();
+	const queryClient = useQueryClient();
 	const stopMockServerMutation = useStopMockServerMutation();
 	const { data: mockServers = [] } = useMockServersQuery();
 	const showToast = useToastStore((s) => s.showToast);
@@ -323,7 +326,7 @@ export function useTreeCrud({
 		}
 	});
 
-	const handleStartRequestRename = useCallback((request: Request) => {
+	const handleStartRequestRename = useCallback((request: RequestSummary) => {
 		setRenamingRequestId(request.id);
 	}, []);
 
@@ -336,7 +339,7 @@ export function useTreeCrud({
 
 		// Find the original request to check if name actually changed
 		// Search through all collections to find the request
-		let originalRequest: Request | undefined;
+		let originalRequest: RequestSummary | undefined;
 		for (const requests of requestsByCollection.values()) {
 			const found = requests.find((r) => r.id === requestId);
 			if (found) {
@@ -375,20 +378,16 @@ export function useTreeCrud({
 	 * collection "Duplicate" only created an empty folder named "(Copy)",
 	 * which read as a working clone and was not one, so it was removed rather
 	 * than left misleading.
+	 *
+	 * The copy is made from `GET /requests/:id`, never from the tree's row: that
+	 * row is a summary (#2546), and the detail route answers every column whole
+	 * however large, where a full list row substitutes a default for a column
+	 * over the field cap (#1485) - so neither can be copied as the request.
 	 */
-	const handleDuplicateRequest = useStableCallback(async (request: Request) => {
+	const handleDuplicateRequest = useStableCallback(async (row: RequestSummary) => {
 		if (createRequestMutation.isPending) return;
-		// The list row this came from substituted a default for a column over
-		// the engine's field cap (issue #1485) - spreading it below would copy
-		// the substitution, not the request, with no sign anything was lost.
-		if (request.truncatedFields?.length) {
-			showToast({
-				message: `Can't duplicate "${request.name}": its ${request.truncatedFields.join(", ")} is too large to copy. Open it to fix or reduce it first.`,
-				variant: "error",
-			});
-			return;
-		}
 		try {
+			const request = await queryClient.fetchQuery(requestDetailOptions(row.id));
 			// Spread the source record rather than a hand-written field list
 			// (#1519): a named list drops every field added after it was
 			// written, which is how the previous version silently reset

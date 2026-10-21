@@ -830,6 +830,72 @@ describe("useRunTimeSeriesQuery", () => {
 	});
 });
 
+/*
+ * The History charts' server vitals are one downsampled read too (#2611).
+ *
+ * Mutation check: put the hook back on `useInfiniteQuery` with `limit`/`offset`
+ * pages and the first case reddens on the call's arguments; key it outside
+ * `monitorSeries(id)` and the second does, because the run-scoped removal
+ * (`mcp-invalidation.ts`, `load-test-service.ts`) would no longer reach it.
+ */
+describe("useRunMonitorSeriesQuery", () => {
+	const bucketed = {
+		data: [
+			{ timestamp: 44_000, series: { cpu: 40 } },
+			{ timestamp: 88_000, series: { cpu: 80 } },
+		],
+		pagination: { total: 86_400, limit: 2000, offset: 0, hasMore: false, returned: 2 },
+		bucketed: true,
+		ticksPerBucket: 44,
+	};
+
+	it("asks once for the whole series at the History point budget", async () => {
+		getRunMonitorSeries.mockResolvedValue(bucketed);
+		const client = makeClient();
+
+		const { result } = renderHook(() => useRunMonitorSeriesQuery("run_1", true, "completed"), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		expect(getRunMonitorSeries).toHaveBeenCalledTimes(1);
+		expect(getRunMonitorSeries).toHaveBeenCalledWith("run_1", {
+			maxPoints: HISTORY_SERIES_MAX_POINTS,
+		});
+		expect(result.current.data).toEqual(bucketed);
+	});
+
+	it("is cached under the run's monitorSeries prefix, for a minute rather than half an hour", async () => {
+		getRunMonitorSeries.mockResolvedValue(bucketed);
+		const client = makeClient();
+		const key = queryKeys.runs.monitorSeriesDownsampled("run_1", HISTORY_SERIES_MAX_POINTS);
+
+		const { result } = renderHook(() => useRunMonitorSeriesQuery("run_1", true, "completed"), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		expect(client.getQueryCache().find({ queryKey: key })?.options.gcTime).toBe(
+			QUERY_CACHE.RUN_SERIES_GC_TIME_MS
+		);
+		expect(QUERY_CACHE.RUN_SERIES_GC_TIME_MS).toBeLessThan(QUERY_CACHE.RUNS_GC_TIME_MS);
+
+		client.removeQueries({ queryKey: queryKeys.runs.monitorSeries("run_1") });
+		expect(client.getQueryData(key)).toBeUndefined();
+	});
+
+	it("makes no request for a run that scraped nothing", async () => {
+		const client = makeClient();
+
+		const { result } = renderHook(() => useRunMonitorSeriesQuery("run_1", false, "completed"), {
+			wrapper: wrapper(client),
+		});
+
+		expect(result.current.fetchStatus).toBe("idle");
+		expect(getRunMonitorSeries).not.toHaveBeenCalled();
+	});
+});
+
 /**
  * The engine answers a run's report and series for a live run too, so what a
  * pane read mid-run must not be cached as the final copy (#1934). Every case
@@ -951,10 +1017,11 @@ describe("a run's data while it is in progress", () => {
 		"monitor series for status %s refetches a cached copy on mount %i time(s)",
 		async (status, calls) => {
 			const client = makeClient();
-			seed(client, queryKeys.runs.monitorSeries("run_1"), {
-				pages: [emptyPage()],
-				pageParams: [0],
-			});
+			seed(
+				client,
+				queryKeys.runs.monitorSeriesDownsampled("run_1", HISTORY_SERIES_MAX_POINTS),
+				emptyPage()
+			);
 			getRunMonitorSeries.mockResolvedValue(emptyPage());
 
 			renderHook(() => useRunMonitorSeriesQuery("run_1", true, status), {
