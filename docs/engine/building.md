@@ -473,11 +473,13 @@ builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
 beside its licence and a `README.md` naming the package, the exact version,
 the tarball URL and its registry integrity. They are compiled into `vayu_core`
 as data and evaluated on a script's first `require` of them, never when a
-context is built ([#2650](https://github.com/athrvk/vayu/issues/2650)).
+context is built ([#2650](https://github.com/athrvk/vayu/issues/2650),
+[#2651](https://github.com/athrvk/vayu/issues/2651)).
 
 | Library | Version | Licence | Vendored file |
 |---------|---------|---------|---------------|
 | uuid | 8.3.2 | MIT | `engine/vendor/uuid/uuid.min.js` (`dist/umd/uuid.min.js`, 8,160 bytes) |
+| lodash | 4.17.21 | MIT | `engine/vendor/lodash/lodash.min.js` (the package's `lodash.min.js`, 73,015 bytes) |
 
 `vayu_embed_js(<target> <symbol> <file>)` (`engine/cmake/embed_js.cmake`) is
 the embed step, one call per library inside the QuickJS block of
@@ -490,7 +492,8 @@ bytes (C2026) and a concatenation over 65,535 (C1091). The file is a configure
 dependency, so editing it re-runs CMake, and the header is rewritten only when
 its content changes. The header asserts that it holds as many bytes as the file
 has, so an embed that came out short is a compile error. The cost is linear:
-about 10 ms of configure for uuid's 8 KB and 90 ms per 70 KB.
+about 10 ms of configure for uuid's 8 KB and 90 ms per 70 KB; lodash's 73 KB
+measured 40 ms of the two regex passes on the cloud dev box.
 
 The vendored files are excluded from every formatter and linter
 (`engine/vendor/.clang-format`, the repo-JS ESLint config's ignores) and must

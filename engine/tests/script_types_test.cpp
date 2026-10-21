@@ -583,8 +583,8 @@ std::string documentation_above (const std::string& dts, const std::string& decl
 // itself names (`LEGACY_GLOBS_ALTERNATIVES` in postman-sandbox). A script
 // imported from Postman reaches for these by habit, and the editor says what
 // to write instead on hover. Postman's pre-`pm.*` globals left this list when
-// they started running (#2577), and `CryptoJS` when the require() shelf did
-// (#2578).
+// they started running (#2577), `CryptoJS` when the require() shelf did
+// (#2578), and `_` when lodash joined it (#2651).
 //
 // The pairs are pinned here rather than read from the table, so a name dropped
 // from it, or reworded until it no longer names the replacement, fails. A name
@@ -597,7 +597,6 @@ TEST (ScriptTypesTest, EveryPostmanBundledLibraryIsAbsentAndNamesItsReplacement)
         const char* replacement;
     };
     constexpr auto globals = std::to_array<Legacy> ({
-    { "_", "require('lodash')" },
     { "tv4", "require('ajv')" },
     { "xml2Json", "require('xml2js')" },
     { "cheerio", "require('cheerio')" },
@@ -702,7 +701,8 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     "Not available in the Vayu script sandbox."));
     EXPECT_TRUE (contains (dts,
     "interface VayuShelfModules {\n\t'crypto-js': typeof import('crypto-js');\n"
-    "\t'uuid': typeof import('uuid');\n}\n"));
+    "\t'uuid': typeof import('uuid');\n"
+    "\t'lodash': typeof import('lodash');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -716,6 +716,21 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     EXPECT_TRUE (contains (dts, "\t\tBase64: {\n"));
     // `const lib = require('crypto-js')`, which the editor reads as an import.
     EXPECT_TRUE (contains (dts, "declare module 'crypto-js' {\n\texport = CryptoJS;\n}\n"));
+}
+
+// lodash runs (#2651): `_` is declared as a value, not as an absent name, and
+// `require('lodash')` answers the same declaration. `any`, because a partial
+// list of lodash's members would flag the rest on correct code.
+TEST (ScriptTypesTest, LodashIsDeclaredAsTheGlobalAndTheModule) {
+    const std::string dts = generate_script_typedefs ();
+
+    const std::string lodash = "declare const _: any;\n";
+    EXPECT_TRUE (contains (dts, lodash));
+    const std::string doc = documentation_above (dts, lodash);
+    EXPECT_TRUE (contains (doc, "lodash 4.17.21")) << doc;
+    EXPECT_FALSE (contains (doc, "Not available in the Vayu script sandbox."));
+    EXPECT_FALSE (contains (dts, "declare const _: never;"));
+    EXPECT_TRUE (contains (dts, "declare module 'lodash' {\n\texport = _;\n}\n"));
 }
 
 // uuid has no global to point at (#2650), so its module carries the whole

@@ -8454,7 +8454,7 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (refusal.find ("(crypto-js, uuid)"), std::string::npos)
+    EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash)"), std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
     << refusal;
@@ -8614,6 +8614,98 @@ TEST_F (ScriptEngineTest, RequireShelfUuidEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (shelf_answer (engine, request, "require('uuid').v4().length + require('uuid')().length"),
     "72");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+}
+
+// require('lodash') and the `_` global are npm's lodash 4.17.21, vendored (#2651).
+
+TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "_.get({ a: [{ b: 3 }] }, 'a[0].b')", "3" },
+    { "require('lodash').get({ a: [{ b: 3 }] }, ['a', '0', 'b'])", "3" },
+    { "_.get({}, 'a.b', 'fallback')", "fallback" },
+    { "JSON.stringify(_.chunk(['a', 'b', 'c', 'd', 'e'], 2))", R"([["a","b"],["c","d"],["e"]])" },
+    { "JSON.stringify(_.groupBy([6.1, 4.2, 6.3], Math.floor))", R"({"4":[4.2],"6":[6.1,6.3]})" },
+    { "JSON.stringify(_.groupBy(['one', 'two', 'three'], 'length'))", R"({"3":["one","two"],"5":["three"]})" },
+    { "_.isEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })", "true" },
+    { "_.isEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 3 }] })", "false" },
+    { "(function () { var o = { a: [{ b: 1 }] }, c = _.cloneDeep(o); "
+      "c.a[0].b = 2; return [o.a[0].b, c.a[0].b, c.a !== o.a].join(); })()",
+    "1,2,true" },
+    { "_.map([1, 2, 3], function (n) { return n * 2; }).join()", "2,4,6" },
+    { "_([1, 2, 3, 4]).filter(function (n) { return n % 2 === 0; }).sum()", "6" },
+    { "_.VERSION", "4.17.21" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// One module for the global and the require, whichever the script reaches first.
+TEST_F (ScriptEngineTest, RequireShelfLodashIsOneModuleForRequireAndTheGlobal) {
+    EXPECT_EQ (shelf_answer (engine, request,
+               "typeof _ + ' ' + (require('lodash') === _) + ' ' + "
+               "(require('lodash') === require('lodash'))"),
+    "function true true");
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "(function () { var l = require('lodash'); return (l === _) + ' ' + "
+    "typeof l.get; })()"),
+    "true function");
+}
+
+// lodash takes its CommonJS branch inside the glue, so it assigns no global
+// of its own, and the sandbox gives it no Node to find: no `module`, `exports`,
+// `process` or `global` is in a built context, before or after it loads.
+TEST_F (ScriptEngineTest, RequireShelfLodashLeavesNoGlobalBehind) {
+    const std::string probe =
+    "[typeof module, typeof exports, typeof process, typeof global, typeof "
+    "define].join(' ')";
+    EXPECT_EQ (shelf_answer (engine, request, probe),
+    "undefined undefined undefined undefined undefined");
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('lodash').get({}, 'a'); _.noop(); return "
+    "Object.getOwnPropertyNames(globalThis).sort().join() === before; })()"),
+    "true");
+    EXPECT_EQ (shelf_answer (engine, request, "(require('lodash'), " + probe + ")"),
+    "undefined undefined undefined undefined undefined");
+}
+
+// An assignment replaces `_` as it would any global, without loading lodash,
+// and a script's own `_` is its own.
+TEST_F (ScriptEngineTest, RequireShelfLodashGlobalCanBeReassigned) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "(_ = 1, _ + 1)"), "2");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before);
+    EXPECT_EQ (shelf_answer (engine, request, "(function () { var _ = 'mine'; return _; })()"),
+    "mine");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before);
+}
+
+// lodash reads the `_` global while it evaluates (its noConflict value), which
+// is the shelf's own accessor mid-load. Read through either door, the library
+// is evaluated once and the global ends up as the library. Mutations: evaluate
+// the shelf in `setup_require_shelf` and the first count fails; let the getter
+// replace itself with the mid-load `undefined` and the last answer does; drop
+// the in-progress entry in `load_library` and that read recurses until the
+// stack runs out, so every lodash case throws.
+TEST_F (ScriptEngineTest, RequireShelfLodashEvaluatesOnlyOnFirstUse) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (engine, request,
+               "_.get({ a: 1 }, 'a') + require('lodash').get({ a: 1 }, 'a')"),
+    "2");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    EXPECT_EQ (shelf_answer (engine, request,
+               "(require('lodash'), typeof _ + (_ === require('lodash')))"),
+    "functiontrue");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
 }
 
 // The defect #2578 measured: a crypto-js signing script failed and the request

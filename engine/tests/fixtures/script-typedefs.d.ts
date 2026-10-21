@@ -752,6 +752,16 @@ declare const CryptoJS: {
 };
 
 /**
+ * Postman's bundled lodash: npm's lodash 4.17.21, the whole library, and the same object as require('lodash').
+ * 
+ * Loaded the first time a script reads it.
+ * 
+ * Example:
+ * const id = _.get(pm.response.json(), 'data.items[0].id');
+ */
+declare const _: any;
+
+/**
  * Decode base64 to a binary string - one character per byte. Throws on input that is not valid base64.
  */
 declare function atob(encoded: string): string;
@@ -2364,15 +2374,17 @@ declare const request: {
 interface VayuShelfModules {
 	'crypto-js': typeof import('crypto-js');
 	'uuid': typeof import('uuid');
+	'lodash': typeof import('lodash');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
  * const uuid = require('uuid');
  * const id = uuid();
+ * const _ = require('lodash');
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2553,13 +2565,6 @@ declare const alert: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled lodash. Its replacement is require('lodash'), which Vayu's require() does not load either. The Array and Object built-ins (map, filter, flatMap, Object.entries, Object.fromEntries) cover most uses.
- */
-declare const _: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
  * Postman's bundled JSON Schema validator. Its replacement is require('ajv'), which Vayu's require() does not load either.
  */
 declare const tv4: never;
@@ -2631,4 +2636,8 @@ declare module 'uuid' {
 		version(uuid: string): number;
 	};
 	export = uuid;
+}
+
+declare module 'lodash' {
+	export = _;
 }

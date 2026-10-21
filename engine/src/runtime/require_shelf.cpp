@@ -14,10 +14,10 @@
  * there is no loader behind it, so nothing reads a file or the network. A
  * library is Vayu's own source (the crypto-js shim) or a vendored npm build
  * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
- * around it (`uuid`, #2650). A library global (`CryptoJS`) is an accessor that
- * loads its library on first read and then replaces itself with the value, as
- * `responseCookies` does; a library with no global is reached only through
- * `require`, as in Postman.
+ * around it (`uuid`, #2650; `lodash`, #2651). A library global (`CryptoJS`,
+ * `_`) is an accessor that loads its library on first read and then replaces
+ * itself with the value, as `responseCookies` does; a library with no global
+ * is reached only through `require`, as in Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
  * context is built: every script gets a freshly built context
@@ -42,7 +42,9 @@
 #include <sodium.h>
 
 #include "crypto_js_shim.hpp"
+#include "lodash_glue.hpp"
 #include "uuid_glue.hpp"
+#include "vayu/embedded/lodash_js.hpp"
 #include "vayu/embedded/uuid_js.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/digest.hpp"
@@ -159,13 +161,14 @@ struct ShelfLibrary {
     std::string_view open;
     std::string_view library;
     std::string_view close;
+    /// The factory's one argument; null for a library that needs no natives.
     JSValue (*natives) (JSContext* ctx);
 };
 
-// crypto-js stays first: SHELF_GLOBALS names it by index.
 constexpr auto SHELF = std::to_array<ShelfLibrary> ({
 { CRYPTO_JS_MODULE, {}, CRYPTO_JS_SHIM, {}, crypto_js_natives },
 { UUID_MODULE, UUID_GLUE_OPEN, vayu::runtime::embedded::UUID_JS, UUID_GLUE_CLOSE, uuid_natives },
+{ LODASH_MODULE, LODASH_GLUE_OPEN, vayu::runtime::embedded::LODASH_JS, LODASH_GLUE_CLOSE, nullptr },
 });
 
 // The import scan reads SHELF_MODULE_NAMES; a library here that is not there
@@ -181,14 +184,36 @@ static_assert (
 }(),
 "SHELF and SHELF_MODULE_NAMES list different modules");
 
+/// The index of the library @p name in SHELF, or SHELF's size when none has it.
+constexpr std::size_t shelf_index (std::string_view name) {
+    for (std::size_t i = 0; i < SHELF.size (); ++i) {
+        if (SHELF.at (i).name == name) {
+            return i;
+        }
+    }
+    return SHELF.size ();
+}
+
 struct ShelfGlobal {
     const char* name;
     std::size_t library; ///< An index into SHELF.
 };
 
 constexpr auto SHELF_GLOBALS = std::to_array<ShelfGlobal> ({
-{ "CryptoJS", 0 },
+{ "CryptoJS", shelf_index (CRYPTO_JS_MODULE) },
+{ "_", shelf_index (LODASH_MODULE) },
 });
+
+static_assert (
+[] {
+    for (const auto& shelf_global : SHELF_GLOBALS) {
+        if (shelf_global.library >= SHELF.size ()) {
+            return false;
+        }
+    }
+    return true;
+}(),
+"a library global names a library that is not on the shelf");
 
 constinit std::atomic<std::size_t> library_loads{ 0 };
 
@@ -217,14 +242,17 @@ JSValue evaluate_library (JSContext* ctx, const ShelfLibrary& library) {
         return JS_EXCEPTION;
     }
     library_loads.fetch_add (1, std::memory_order_relaxed);
-    JSValue natives  = library.natives (ctx);
+    JSValue natives = library.natives != nullptr ? library.natives (ctx) : JS_UNDEFINED;
     JSValue exported = JS_Call (ctx, factory.get (), JS_UNDEFINED, 1, &natives);
     JS_FreeValue (ctx, natives);
     return exported;
 }
 
 /// The module SHELF[@p index] evaluates to in this execution, evaluating it on
-/// the first call.
+/// the first call. While it evaluates, its entry holds `undefined`, so a
+/// library that reads its own global or requires itself as it loads (lodash
+/// reads `_`) gets `undefined`, as it would in a fresh Node, and is evaluated
+/// once. No module is `undefined`: a factory returns its exports.
 JSValue load_library (JSContext* ctx, std::size_t index) {
     auto* data = get_context_data (ctx);
     if (data == nullptr) {
@@ -235,11 +263,13 @@ JSValue load_library (JSContext* ctx, std::size_t index) {
     loaded != data->shelf_modules.end ()) {
         return JS_DupValue (ctx, loaded->second);
     }
+    const auto slot = data->shelf_modules.emplace (library.name, JS_UNDEFINED).first;
     JSValue exported = evaluate_library (ctx, library);
     if (JS_IsException (exported)) {
+        data->shelf_modules.erase (slot);
         return exported;
     }
-    data->shelf_modules.emplace (library.name, JS_DupValue (ctx, exported));
+    slot->second = JS_DupValue (ctx, exported);
     return exported;
 }
 
@@ -275,7 +305,9 @@ JSValueConst* /*argv*/,
 int magic) {
     const ShelfGlobal& shelf_global = SHELF_GLOBALS.at (static_cast<std::size_t> (magic));
     JSValue exported = load_library (ctx, shelf_global.library);
-    if (JS_IsException (exported)) {
+    // `undefined` is a read from inside the library's own evaluation, which
+    // must leave the accessor for the read that comes after it.
+    if (JS_IsException (exported) || JS_IsUndefined (exported)) {
         return exported;
     }
     if (replace_global (ctx, shelf_global.name, JS_DupValue (ctx, exported)) < 0) {

@@ -168,8 +168,8 @@ TEST (ScriptApiScan, APropertyOfSomethingElseIsNotTheGlobal) {
 }
 
 TEST (ScriptApiScan, NamesRequireInBothSpellings) {
-    EXPECT_EQ (names_in ("const c = require('lodash');"), Names{ "require()" });
-    EXPECT_EQ (names_in ("const c = require ( \"lodash\" );"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const c = require('moment');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const c = require ( \"moment\" );"), Names{ "require()" });
     EXPECT_EQ (names_in ("const lib = pm.require('@scope/pkg');"), Names{ "pm.require" });
     EXPECT_EQ (
     names_in ("// require('x')\nrequirement(1); const r = 'require(';"), Names{});
@@ -273,7 +273,7 @@ TEST (ScriptApiScan, ANameThatIsNotTheNamespaceIsNotRead) {
     // A call's result and an unrelated value hold no namespace to read members off.
     EXPECT_EQ (names_in ("const h = CryptoJS.MD5(a); h.AES;"), Names{});
     EXPECT_EQ (names_in ("const C = other; C.AES; const { AES } = other;"), Names{});
-    EXPECT_EQ (names_in ("const C = require('lodash'); C.AES;"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const C = require('moment'); C.AES;"), Names{ "require()" });
     EXPECT_EQ (names_in ("const C = CryptoJS; x.C.AES; C2.AES;"), Names{});
     EXPECT_EQ (names_in ("const C = CryptoJS; // C.AES\nconst s = 'C.AES';"), Names{});
 }
@@ -323,9 +323,25 @@ TEST (ScriptApiScan, AShelfModuleOtherThanCryptoJsIsNotReadAsTheNamespace) {
     Names{ "CryptoJS" });
 }
 
+// lodash runs (#2651), as the `_` global and as require('lodash'): neither is
+// named, and its members are not read as crypto-js's.
+TEST (ScriptApiScan, LodashIsNotNamedAsTheGlobalOrTheModule) {
+    for (const char* script : { "_.each(a, f);",
+         "const id = _.get(body, 'items[0].id');", "_(list).map(f).value();",
+         "require('lodash');", "const _ = require('lodash'); _.chunk(a, 2);",
+         "const { groupBy } = require('lodash');", "require('lodash').AES;",
+         "const l = require('lodash'); l.AES.encrypt(m, k);" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+    // Beside it, what does not run is still named.
+    EXPECT_EQ (
+    names_in ("_.each(a, f); require('lodash/fp'); tv4.validate(x);"),
+    (Names{ "require()", "tv4" }));
+}
+
 TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
     // Off the shelf, or a name that only starts like one.
-    EXPECT_EQ (names_in ("require('lodash');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require('moment');"), Names{ "require()" });
     EXPECT_EQ (names_in ("require('crypto-js/aes');"), Names{ "require()" });
     EXPECT_EQ (names_in ("require('CRYPTO-JS');"), Names{ "require()" });
     EXPECT_EQ (names_in ("require('crypto');"), Names{ "require()" });
@@ -341,22 +357,21 @@ TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
 
 TEST (ScriptApiScan, AnyOffShelfRequireNamesEvenBesideAShelfOne) {
     EXPECT_EQ (
-    names_in ("const c = require('crypto-js'); const l = require('lodash');"),
+    names_in ("const c = require('crypto-js'); const m = require('moment');"),
     Names{ "require()" });
     EXPECT_EQ (
-    names_in ("const l = require('lodash'); const c = require('crypto-js');"),
+    names_in ("const m = require('moment'); const c = require('crypto-js');"),
     Names{ "require()" });
 }
 
 TEST (ScriptApiScan, ARequireInACommentOrStringIsReadFromTheOriginalText) {
     // The name inside the literal is blanked in the stripped view, so the scan
     // reads it from the original: this one is not a shelf name.
-    EXPECT_EQ (names_in ("require('lodash'); // require('crypto-js')"), Names{ "require()" });
-    EXPECT_EQ (names_in ("const s = \"require('lodash')\";"), Names{});
+    EXPECT_EQ (names_in ("require('moment'); // require('crypto-js')"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const s = \"require('moment')\";"), Names{});
 }
 
 TEST (ScriptApiScan, NamesEachBundledLibrary) {
-    EXPECT_EQ (names_in ("_.each(a, f);"), Names{ "_" });
     EXPECT_EQ (names_in ("tv4.validate(a, s);"), Names{ "tv4" });
     EXPECT_EQ (names_in ("const o = xml2Json(xml);"), Names{ "xml2Json" });
     EXPECT_EQ (names_in ("const $ = cheerio.load(html);"), Names{ "cheerio" });
@@ -559,10 +574,10 @@ TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
         tv4.validate(b);
         tv4.validate(a);
         const c = require("x");
-        _.each(list, f);
+        xml2Json(text);
         Buffer.from(again);
     )"),
-    (Names{ "require()", "_", "tv4", "Buffer" }));
+    (Names{ "require()", "tv4", "xml2Json", "Buffer" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
@@ -642,9 +657,9 @@ TEST (ScriptApiScan, ManyDeclaredNamesAreLookedUpWithoutScanningThemAll) {
     for (int i = 1; i < 150000; ++i) {
         script += ",p" + std::to_string (i);
     }
-    script += "){}var _=0;" + repeated ("_.x;", 100000);
+    script += "){}var tv4=0;" + repeated ("tv4.x;", 100000);
     EXPECT_EQ (names_within_budget (script), Names{});
-    EXPECT_EQ (names_within_budget (repeated ("_.x;", 100000)), Names{ "_" });
+    EXPECT_EQ (names_within_budget (repeated ("tv4.x;", 100000)), Names{ "tv4" });
 }
 
 TEST (ScriptApiScan, PairsBracketsOfMixedKindsAsTheScanAlwaysDid) {

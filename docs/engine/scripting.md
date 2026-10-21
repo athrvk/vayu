@@ -2783,8 +2783,8 @@ carry from one script to the next belongs in a variable scope
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
 four timer functions, Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...) and two bundled libraries, `crypto-js` and `uuid`
-([below](#the-require-shelf)).
+`responseBody`, ...) and three bundled libraries, `crypto-js`, `uuid` and
+`lodash` ([below](#the-require-shelf)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2798,8 +2798,9 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')` and `require('uuid')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')` and `require('lodash')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
+| `_` | The same `lodash` module as a global, loaded on first read |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
 | `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
 
@@ -2821,9 +2822,9 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Of the libraries Postman bundles, only `CryptoJS` and `uuid` run (`uuid` has no
-global, it is `require('uuid')` only). The others (`_`,
-`moment`, `tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
+Of the libraries Postman bundles, `CryptoJS`, `_` (lodash) and `uuid` run
+(`uuid` has no global, it is `require('uuid')` only). The others (`moment`,
+`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2835,8 +2836,9 @@ lists them.
 There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`). Today the shelf
-holds two libraries, `crypto-js` and `uuid`. `CryptoJS` is the `crypto-js`
-module bound as a global, so both spellings of a Postman signing script work:
+holds three libraries, `crypto-js`, `uuid` and `lodash`. `CryptoJS` is the
+`crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
+a Postman script work:
 
 ```javascript
 const CryptoJS = require('crypto-js');
@@ -2918,7 +2920,41 @@ pays nothing, and nothing is shared between executions.
 The Postman import's script scan reads `require('uuid')` as the library it is,
 so a collection that uses it is not named in `meta.unsupportedScriptApis`.
 
-The libraries Postman also lets a script `require` - `lodash`, `moment`, `ajv`,
+#### `lodash`
+
+`require('lodash')` and the `_` global are **the npm `lodash` package itself**,
+version 4.17.21, the full build (`lodash.min.js`, 73,015 bytes) vendored
+unmodified (`engine/vendor/lodash/`, MIT; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+It is the whole library, not a subset, so every lodash 4 function is there,
+chaining (`_(list).filter(f).sum()`) included:
+
+```javascript
+const items = pm.response.json().items;
+pm.environment.set('firstId', _.get(items, '[0].id'));
+pm.environment.set('pages', _.chunk(items, 10).length);
+const byStatus = require('lodash').groupBy(items, 'status');
+pm.test('every item is grouped', () => pm.expect(_.sumBy(_.values(byStatus), 'length')).to.equal(items.length));
+```
+
+`_` and `require('lodash')` are one object within an execution, whichever the
+script reaches first. Assigning `_` (`_ = something`) replaces the global
+without loading lodash, and a script's own `const _ = ...` is its own. lodash
+takes its CommonJS branch inside the shelf's glue, so loading it adds no global
+and finds no Node: the sandbox has no `module`, `exports`, `process` or
+`global`.
+
+**Cost.** Evaluated on first read of `_` or first `require('lodash')` in an
+execution, never when a context is built, so a script that touches neither pays
+nothing. First use costs about 10 ms in a `-O2` build and 24 ms in a Debug
+build (QuickJS parsing and running the 73 KB library, measured in a fresh
+context, best of 20); the evaluated module then holds about 800 KB of the
+script's 64 MB limit until the execution ends. Nothing is shared between
+executions, so the next script that uses it pays again.
+
+The Postman import's script scan does not name `_` or `require('lodash')`.
+
+The libraries Postman also lets a script `require` - `moment`, `ajv`,
 `tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins - are
 **not** on the shelf: `require` of one throws, and a Postman import names the
 script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
@@ -3162,7 +3198,7 @@ The **language** is current; what is missing is the **host environment**:
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: `require()` answers only the
-  [shelf](#the-require-shelf) (`crypto-js`, `uuid`); `fs`, `http`, `crypto`
+  [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`); `fs`, `http`, `crypto`
   and every other module throw `Cannot find module`.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at

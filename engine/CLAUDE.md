@@ -13,7 +13,7 @@ engine/
 ├── src/utils/     # shared primitives (encoding, ascii_case, parse, reentrant)
 ├── include/vayu/  # Public headers
 ├── tests/         # Google Test suite; tests/fixtures/ holds the conformance tables
-└── vendor/        # quickjs-ng, hdrhistogram, and the JS libraries `require()` embeds (uuid)
+└── vendor/        # quickjs-ng, hdrhistogram, and the JS libraries `require()` embeds (uuid, lodash)
 ```
 
 ## Conventions

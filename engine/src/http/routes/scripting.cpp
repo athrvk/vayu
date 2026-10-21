@@ -2055,7 +2055,7 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_atob" } });
 
     // ========================================
-    // require() and the library it loads (#2578)
+    // require() and the libraries it loads (#2578)
     // ========================================
     // One entry for every module. `detail` is display text (the return type is
     // the module itself, which differs per name); script_types.cpp declares
@@ -2068,11 +2068,24 @@ nlohmann::json get_script_completions () {
     "Load a library Vayu bundles. On the shelf: " + shelf_names ("", ", ") +
     ". crypto-js answers the same object as the CryptoJS global. uuid is npm's "
     "uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and "
-    "the module is itself callable, so uuid() is a v4. Any other name throws "
-    "\"Cannot find module\" and lists the shelf: nothing is read from disk or "
-    "fetched.\n\nExample:\nconst CryptoJS = require('crypto-js');\n"
-    "const uuid = require('uuid');\nconst id = uuid();" },
+    "the module is itself callable, so uuid() is a v4. lodash is npm's lodash "
+    "4.17.21 and answers the same object as the _ global. Any other name "
+    "throws \"Cannot find module\" and lists the shelf: nothing is read from "
+    "disk or fetched.\n\nExample:\nconst CryptoJS = require('crypto-js');\n"
+    "const uuid = require('uuid');\nconst id = uuid();\n"
+    "const _ = require('lodash');" },
     { "sortText", "2_require" } });
+
+    // `any`: lodash's few hundred members are not restated here, and a partial
+    // list would flag the ones it left out on correct code.
+    completions.push_back ({ { "label", "_" }, { "kind", KIND_VARIABLE },
+    { "insertText", "_" }, { "detail", "any (lodash 4.17.21)" },
+    { "documentation",
+    "Postman's bundled lodash: npm's lodash 4.17.21, the whole library, and "
+    "the same object as require('lodash').\n\nLoaded the first time a script "
+    "reads it.\n\nExample:\nconst id = _.get(pm.response.json(), "
+    "'data.items[0].id');" },
+    { "sortText", "2__" } });
 
     completions.push_back ({ { "label", "CryptoJS" }, { "kind", KIND_VARIABLE },
     { "insertText", "CryptoJS" }, { "detail", "crypto-js, as Vayu provides it" },
