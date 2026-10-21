@@ -51,20 +51,16 @@ import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
 import { DetailSkeleton, ErrorState, SentBodyFileNote } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
-import { bodyModeHeaders, toHeaderRows } from "@/modules/request-builder/utils/key-value";
 import {
-	buildExecBody,
 	disabledDefaults,
-	protocolSettings,
-	execIdentity,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
 } from "@/modules/request-builder/utils/execute-mapping";
+import { buildComposeBody } from "@/modules/request-builder/utils/compose-body";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { ApiError } from "@/services";
 import { seedFromRun, scriptPartToElement } from "./design-run-seed";
-import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
 import SaveAgentRunButton from "./SaveAgentRunButton";
 import { isUnsavedAgentRun } from "./save-run-as-request";
@@ -218,22 +214,16 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const handleExecute = useCallback(
 		async (request: RequestState): Promise<ResponseState | null> => {
 			try {
-				// The copy's own headers and nothing else: what Vayu adds is the
-				// engine's since issue #1229, so a replay is not handed a header
-				// set the builder's Send would not produce.
-				const headerRows = toHeaderRows(request.headers);
-
-				// Shared with the builder's own send path - see execute-mapping.ts.
-				// Raw: the engine resolves {{variables}} and inherit auth at compose
-				// time (#226), against *today's* variables and chain - which is what
-				// a replay has always meant here (D14). The detached copy is exactly
-				// why replay uses the inline compose shape: there is no saved row
-				// behind an edited copy for a by-id compose to load.
-				const execBody = buildExecBody(request, (s) => s);
-
 				/*
+				 * The same builder as the builder's own Send (issue #2638), raw:
+				 * the engine resolves {{variables}} and inherit auth at compose
+				 * time (#226), against *today's* variables and chain - which is
+				 * what a replay has always meant here (D14). The detached copy is
+				 * exactly why replay uses the inline compose shape: there is no
+				 * saved row behind an edited copy for a by-id compose to load.
+				 *
 				 * When the request is gone there is nothing to resolve: the seed
-				 * put the recorded `Authorization` into the headers above and
+				 * put the recorded `Authorization` into the headers and
 				 * `auth: { mode: "none" }` on the copy, so the replay goes out
 				 * exactly as it ran - the engine drops a none-auth at compose.
 				 */
@@ -254,43 +244,15 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					})),
 				];
 
-				const composed = await engineComposeRequest({
-					request: {
-						method: request.method,
-						url: request.url,
-						params: composePathParams(request.params),
-						headers: headerRows,
-						// Which of those the body mode wrote (issue #1765).
-						...bodyModeHeaders(request.headers),
-						body: execBody,
-						auth: { ...request.auth },
-						elements: elements.length > 0 ? elements : undefined,
-						// Always sent, never elided - the engine defaults to
-						// following, so an omitted `false` would follow the
-						// redirect the run was recorded not following.
-						followRedirects: request.followRedirects,
-						maxRedirects: request.maxRedirects,
-						// Same rule - a resend must use the protocol the run
-						// actually used (seeded by design-run-seed.ts), not
-						// whatever the engine would default to.
-						httpVersion: request.httpVersion,
-						// And the TLS verification the run was recorded with -
-						// a resend that verified where the run did not would
-						// fail against the host the run was aimed at.
-						verifySSL: request.verifySSL,
-						// And the protocol switches it ran with (issue #1765):
-						// the jar, the stored header opt-outs, the encoding.
-						...protocolSettings(request),
-						// Identity for the script sandbox (pm.info), not an HTTP
-						// field. A replay copy is detached, so its name is the
-						// only one the engine can be told about.
-						...execIdentity(request),
-					},
-					// Scopes the inherit walk and the variable chain; undefined for
-					// an orphaned run, which resolves against environment + globals.
+				const { body } = buildComposeBody({
+					request,
+					elements: { resolved: elements.length > 0 ? elements : undefined },
+					// Undefined for an orphaned run, which resolves against
+					// environment + globals.
 					collectionId: liveCollectionId,
-					environmentId: activeEnvironmentId || undefined,
+					environmentId: activeEnvironmentId,
 				});
+				const composed = await engineComposeRequest(body);
 
 				const result = await engineExecuteRequest(
 					{

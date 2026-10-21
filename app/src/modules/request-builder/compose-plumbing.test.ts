@@ -15,23 +15,36 @@
  * `useVariableResolver`'s preview semantics silently become execution
  * semantics again. Nothing errors, nothing fails to type-check.
  *
+ * Every send site builds its compose body through `buildComposeBody`
+ * (`utils/compose-body.ts`, issue #2638), so the raw-state rule is scanned in
+ * that one file, and the send sites are scanned for building through it rather
+ * than spelling a payload of their own - a second literal is a copy that can
+ * drift into composing a different request.
+ *
  * A scan, not a render: same rationale as `request-settings-plumbing.test.ts` -
  * the send sites live inside `useCallback`s wired to queries, stores and the
  * engine service, and standing that up tests the mocks. The behavioural half
  * (composed payload forwarded unchanged, empty auth dropped) is asserted by
- * `DesignRunView.test.tsx` against a compose mock and, for the composition
- * itself, by the engine's request_composer_test.cpp.
+ * `DesignRunView.test.tsx` against a compose mock, the body's fields by
+ * `compose-body.test.ts`, and the composition itself by the engine's
+ * request_composer_test.cpp.
  */
 
 import { describe, it, expect } from "vitest";
 
 const sources = import.meta.glob(
-	["/src/modules/request-builder/index.tsx", "/src/modules/history/main/DesignRunView.tsx"],
+	[
+		"/src/modules/request-builder/index.tsx",
+		"/src/modules/history/main/DesignRunView.tsx",
+		"/src/modules/request-builder/utils/compose-body.ts",
+	],
 	{ query: "?raw", import: "default", eager: true }
 );
 
 const builder = sources["/src/modules/request-builder/index.tsx"] as string | undefined;
 const runView = sources["/src/modules/history/main/DesignRunView.tsx"] as string | undefined;
+const composeBody = sources["/src/modules/request-builder/utils/compose-body.ts"] as
+	string | undefined;
 
 describe("every send site composes engine-side and never resolves client-side", () => {
 	it("found both send-site sources (guards the scan itself)", () => {
@@ -40,6 +53,9 @@ describe("every send site composes engine-side and never resolves client-side", 
 			expect((src ?? "").length).toBeGreaterThan(1000);
 			expect(src).toContain("engineExecuteRequest");
 		}
+		expect(typeof composeBody).toBe("string");
+		expect((composeBody ?? "").length).toBeGreaterThan(1000);
+		expect(composeBody).toContain("export function buildComposeBody");
 	});
 
 	it("the builder composes for Send and for a load test", () => {
@@ -48,10 +64,14 @@ describe("every send site composes engine-side and never resolves client-side", 
 		 * buffered Send and the streaming one (issue #574) - they differ only in
 		 * which endpoint answer they take, so a second composer for the stream
 		 * would be a copy that could drift into measuring a different request.
-		 * The other site is `handleConfirmLoadTest`.
+		 * The other site is `handleConfirmLoadTest`. Both compose the shared
+		 * builder's body; an inline `engineComposeRequest({` literal is a send
+		 * site that stopped going through it.
 		 */
-		const calls = (builder ?? "").match(/engineComposeRequest\(\{/g) ?? [];
+		const calls = (builder ?? "").match(/engineComposeRequest\(/g) ?? [];
 		expect(calls).toHaveLength(2);
+		expect(builder).not.toMatch(/engineComposeRequest\(\{/);
+		expect((builder ?? "").match(/buildComposeBody\(\{/g) ?? []).toHaveLength(2);
 		/*
 		 * The composed result is what gets executed / started, not a rebuilt one.
 		 *
@@ -79,12 +99,18 @@ describe("every send site composes engine-side and never resolves client-side", 
 	});
 
 	it("the run view composes for replay", () => {
-		const calls = (runView ?? "").match(/engineComposeRequest\(\{/g) ?? [];
+		const calls = (runView ?? "").match(/engineComposeRequest\(/g) ?? [];
 		expect(calls).toHaveLength(1);
+		expect(runView).not.toMatch(/engineComposeRequest\(\{/);
+		expect((runView ?? "").match(/buildComposeBody\(\{/g) ?? []).toHaveLength(1);
 		expect(runView).toContain("...composed,");
 	});
 
 	it("no send site resolves variables or inherit auth client-side anymore", () => {
+		// The shared builder is every send site's payload, so it resolves nothing.
+		for (const resolver of ["resolveString", "resolveObject", "resolveAuthForSend"]) {
+			expect(composeBody ?? "").not.toContain(resolver);
+		}
 		// `resolveString` was the execution-time interpolation.
 		expect(runView ?? "").not.toContain("resolveString");
 		// It survives in the builder only for the load dialog's target preview
@@ -112,10 +138,13 @@ describe("every send site composes engine-side and never resolves client-side", 
 	});
 
 	it("raw editor state goes into compose - buildExecBody with the identity resolver", () => {
-		// `buildExecBody(request, (s) => s)` twice in the builder (Send + load),
-		// once in the run view. A resolver hooked back in here is the
-		// double-interpolation regression.
-		expect((builder ?? "").match(/buildExecBody\(\w+, \(s\) => s\)/g) ?? []).toHaveLength(2);
-		expect((runView ?? "").match(/buildExecBody\(\w+, \(s\) => s\)/g) ?? []).toHaveLength(1);
+		// Once, in the shared builder. A resolver hooked back in there is the
+		// double-interpolation regression; a `buildExecBody` call back at a send
+		// site is that site building a body of its own again.
+		expect((composeBody ?? "").match(/buildExecBody\(\w+, \(s\) => s\)/g) ?? []).toHaveLength(
+			1
+		);
+		expect(builder ?? "").not.toContain("buildExecBody(");
+		expect(runView ?? "").not.toContain("buildExecBody(");
 	});
 });

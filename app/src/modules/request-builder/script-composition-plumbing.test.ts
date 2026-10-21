@@ -16,10 +16,12 @@
  *
  * `elementsParts(collectionAncestors, requestId, requestElements)` resolves
  * the whole chain - root to leaf, then the request's own, minus
- * `inherit.disable` - the same call `handleSendRequest`'s own compose call
- * makes. Delete the `elementsParts(...)` call and fall back to
- * `pendingLoadTestRequest.elements` alone and: it still type-checks, the
- * rest of the suite still passes, and a load run silently stops validating
+ * `inherit.disable`. Since issue #2638 the call lives in `buildComposeBody`
+ * (`utils/compose-body.ts`), which Send and the load test both build through:
+ * the load test hands it the chain and reads the resolved list back as its
+ * `requestElements`. Hand it `{ resolved: pendingLoadTestRequest.elements }`
+ * instead, or drop the chain, and: it still type-checks, the rest of the
+ * suite still passes, and a load run silently stops validating
  * collection-level elements again - a "written but never read" regression
  * with no error, no type failure, and no visibly broken screen.
  *
@@ -37,6 +39,14 @@ const sources = import.meta.glob("/src/modules/request-builder/index.tsx", {
 
 const source = Object.values(sources)[0] as string | undefined;
 
+const composeBodySources = import.meta.glob("/src/modules/request-builder/utils/compose-body.ts", {
+	query: "?raw",
+	import: "default",
+	eager: true,
+});
+
+const composeBody = Object.values(composeBodySources)[0] as string | undefined;
+
 describe("load test's step-level elements are built from the collection chain", () => {
 	it("found the request builder source (guards the scan itself)", () => {
 		// vitest stubs some imports to "", and a moved file would make every
@@ -44,39 +54,40 @@ describe("load test's step-level elements are built from the collection chain", 
 		expect(typeof source).toBe("string");
 		expect((source ?? "").length).toBeGreaterThan(1000);
 		expect(source).toContain("startLoadTest");
+		expect(typeof composeBody).toBe("string");
+		expect((composeBody ?? "").length).toBeGreaterThan(1000);
+		expect(composeBody).toContain("export function buildComposeBody");
 	});
 
-	it("calls elementsParts() for the load test's requestElements, exactly once", () => {
-		const src = source ?? "";
-		// If the load payload reverts to sending `pendingLoadTestRequest.elements`
-		// directly, this trips to zero.
-		const calls = src.match(/const requestElements = elementsParts\(/g) ?? [];
+	it("the shared compose body resolves its elements from the chain with elementsParts()", () => {
+		const shared = composeBody ?? "";
+		const calls = shared.match(/elementsParts\(/g) ?? [];
 		expect(calls).toHaveLength(1);
+		expect(shared).toMatch(
+			/elementsParts\(input\.elements\.chain, input\.elements\.ownerId, request\.elements\)/
+		);
 	});
 
-	it("passes the collection chain and the request's own elements into that call", () => {
+	it("takes the load test's requestElements from the shared body, built over the chain", () => {
 		const src = source ?? "";
-		const callStart = src.indexOf("const requestElements = elementsParts(");
+		const callStart = src.indexOf(
+			"const { body, elements: requestElements } = buildComposeBody({"
+		);
 		expect(callStart).toBeGreaterThan(-1);
 
-		// A window bounded well past any real call's argument list, not the
-		// rest of the file - `indexOf`'s `fromIndex` alone would find a match
-		// anywhere after `callStart`, including one that has nothing to do
-		// with this call, and still report a position "greater than"
-		// `callStart` by construction.
+		// A window bounded well past the call's own argument list, not the rest
+		// of the file - a match anywhere after `callStart` could belong to
+		// something that has nothing to do with this call.
 		const CALL_WINDOW = 400;
 		const window = src.slice(callStart, callStart + CALL_WINDOW);
 
-		// The request's own elements, as the call's last argument. If the
-		// chain were dropped in favour of the request's own elements alone,
-		// this would disappear from the bounded window entirely.
-		const ownElementsCall = "pendingLoadTestRequest.elements";
-		const ownElementsIndex = window.indexOf(ownElementsCall);
-		expect(ownElementsIndex).toBeGreaterThan(-1);
-
-		const callBlock = window.slice(0, ownElementsIndex + ownElementsCall.length);
-		expect(callBlock).toContain("collectionAncestors");
-		expect(callBlock).toContain("fetchedRequest.id");
+		// The chain and the owning request, not a pre-resolved list: a
+		// `{ resolved: ... }` source here is the request's own elements alone.
+		expect(window).toContain("request: pendingLoadTestRequest,");
+		expect(window).toContain(
+			"elements: { chain: collectionAncestors, ownerId: fetchedRequest.id }"
+		);
+		expect(window).not.toContain("resolved:");
 	});
 
 	it("sends the resolved elements to compose, not the retired tests field", () => {
@@ -84,6 +95,7 @@ describe("load test's step-level elements are built from the collection chain", 
 		// The legacy field `POST /runs` now refuses by name (issue #1594) must
 		// not still be built for this payload.
 		expect(src).not.toMatch(/tests:\s*scriptParts\(/);
-		expect(src).toContain("elements: requestElements");
+		// And the shared body carries the resolved list it returns.
+		expect(composeBody ?? "").toMatch(/\n\t+elements,\n/);
 	});
 });
