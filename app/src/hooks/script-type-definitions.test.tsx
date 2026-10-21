@@ -89,7 +89,7 @@ describe("useScriptTypeDefinitions", () => {
 
 	/*
 	 * The sandbox has no DOM and no Node. Including `dom` in the lib list would
-	 * have the editor confidently offer `fetch` and `setTimeout`, which do not
+	 * have the editor confidently offer `fetch` and `URL`, which do not
 	 * exist at runtime - the failure would surface only when the script ran.
 	 */
 	it("configures the worker for the sandbox: es2022, no dom", async () => {

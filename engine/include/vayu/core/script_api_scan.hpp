@@ -12,15 +12,15 @@
  * @brief Which Postman script APIs an imported script uses that Vayu does not
  *        run (issues #2576, #2527).
  *
- * A Postman script written before `pm.*`, or one that leans on a bundled
- * library, imports with a clean preview and throws at first use - and a signing
- * pre-request that throws still lets the request go out unsigned. This is the
- * notice's source: a fixed, table-driven list of names, found by reading the
- * script as tokens rather than as text.
+ * A Postman script that leans on a bundled library or a module imports with a
+ * clean preview and throws at first use - and a signing pre-request that throws
+ * still lets the request go out unsigned. This is the notice's source: a fixed,
+ * table-driven list of names, found by reading the script as tokens rather than
+ * as text.
  *
- * It is a notice, so it errs toward naming too much: a property called `tests`
- * on an object, or a `data` the script reads from somewhere unusual, may be
- * named. What it must not do is miss one of the listed names, and the two
+ * It is a notice, so it errs toward naming too much: a `moment` the script
+ * reads from somewhere unusual may be named. What it must not do is miss one of
+ * the listed names, and the two
  * places a plain text search would miss or invent one - a name that only
  * appears in a comment or a string, and a name the script declares itself - are
  * why the text is stripped first and a declared name is not counted.
