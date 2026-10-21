@@ -74,6 +74,21 @@ on a variable that already exists updates its value and keeps the existing `secr
 `type`, but makes the row **enabled**: a script that sets a name means to use it, so a row
 unticked in the variables editor is ticked again by the `set` (and persisted that way). A
 `set` on a new name creates it with the defaults (not secret, enabled, `type: "string"`).
+
+`set` takes Postman's optional third argument (issue #2664, postman-collection 5.3.0), in
+either of its two shapes: a string is a type, `set('n', 1, 'number')`, and an object
+contributes `type` when it is a string and `secret` when it is a boolean,
+`set('token', t, { secret: true })`. Anything else is ignored. `string`, `number`,
+`boolean` and `json` declare their own type, `object` and `array` declare `json`, and any
+other type name (`any`, `default`) leaves the type as it was. `"secret"` - as the string or as
+`type` - marks the variable secret and leaves the type alone: Postman has no such type, this
+is the reading the importer gives a variable of `type: "secret"`. An explicit `secret`
+boolean wins over it, and `{ secret: false }` clears the flag. Both fields apply to a new
+and to an existing row; a field the argument does not name keeps what the row has. The
+text stored follows the type the set declares, so `set('o', {a: 1}, 'json')` stores the
+JSON document. A flag reaches disk with the run, and run snapshots mask a secret from the
+next run on, not within the run that set it. `pm.variables.set` takes the argument too,
+but the local scope is never stored or masked, so a flag there has no effect.
 `unset(name)` removes it outright, which is not the same as setting it to `""`: an emptied
 variable is still an enabled row that `{{name}}` resolves to.
 
