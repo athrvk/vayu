@@ -150,6 +150,7 @@ describe("checkMonitorHost", () => {
 		"http://172.31.255.1:9100/metrics",
 		"http://192.168.1.50:9100/metrics",
 		"http://[fd00::1]:9100/metrics",
+		"http://[fd00:ec2::255]/metrics",
 		// WHATWG URL normalises the alternate IPv4 spellings, so the guard reads
 		// 127.0.0.1 here rather than a string it would not recognise.
 		"http://2130706433:9100/metrics",

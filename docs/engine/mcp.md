@@ -2018,11 +2018,11 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   on AWS, GCP and Azure), `fe80::/10` and AWS's IPv6 `fd00:ec2::254` need an
   allowlist entry like a public host, because a scrape of one reads
   credentials rather than the user's exporter. The rest of `fc00::/7` stays
-  exempt. The allowlist exists to stop an agent
-  generating traffic against third parties it was never pointed at, and a
-  private address is by definition the user's own network - which is also the
-  feature's own case, since the endpoint a load run wants beside it is the
-  target's own `localhost:9100`. The test is textual, like the allowlist itself:
+  exempt. The allowlist exists to stop an agent generating traffic against third
+  parties it was never pointed at, and a private address, link-local aside, is
+  the user's own network - which is also the feature's own case, since the
+  endpoint a load run wants beside it is the target's own `localhost:9100`. The
+  test is textual, like the allowlist itself:
   a DNS name that *resolves* to a private address still needs an entry, because
   resolving it here would make the answer depend on the network it was asked on.
   The renderer's load-test dialog uses the same classification to tell a local

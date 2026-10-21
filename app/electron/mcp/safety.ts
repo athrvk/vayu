@@ -218,7 +218,7 @@ export function isLinkLocalHost(host: string): boolean {
  * **The decision, stated rather than implied:** a loopback or private-network
  * monitor URL is exempt from the allowlist; a public one is not. The allowlist
  * exists to stop an agent generating traffic against third parties it was never
- * pointed at, and a private address is by definition the user's own network -
+ * pointed at, and a private address, link-local aside, is the user's own network -
  * which is also the whole feature, since the endpoint a load run wants beside it
  * is the target's own `localhost:9100`. Requiring that host to be allowlisted
  * would make the capability unreachable in the case it was built for.
