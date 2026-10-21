@@ -432,7 +432,9 @@ through `useDataContractWriter`'s `rememberReading`, which changes nothing
 unless the binding still names the toggled file's path; a hash refresh keeps
 it. Every re-read (`readDeclaredDataFile`, which requires the flag) parses
 with it, so the Run dialog's pre-fill, the load dialog's, Send-with-row and
-the Data tab all read the file the way the user last chose.
+the Data tab all read the file the way the user last chose. A run sends it
+beside the rows as `dataFileCastNumbers` and its snapshot records it, so a
+re-run that reads the binding reads the file the way the recorded run did.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:
 `migrate` runs only on a version mismatch, and the common case is a

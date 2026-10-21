@@ -843,7 +843,8 @@ trust rule (see [Security](#security)) - binds row
 The rows ride the `ScenarioExecution` the worker holds and are never
 persisted: the snapshot keeps the row
 count (`dataRowCount`) plus the file's name and content hash (`dataFileName`,
-`dataFileHash`), never its path or rows, and every step's stored row and `step` event keeps
+`dataFileHash`) and how it was read (`dataFileCastNumbers`, issue #2540), never
+its path or rows, and every step's stored row and `step` event keeps
 `dataRowIndex`, so which row a wrapped pass re-used stays answerable without
 storing the row itself.
 

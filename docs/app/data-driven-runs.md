@@ -115,6 +115,18 @@ it describes how *that* file is read; Remove (or clearing the contract) forgets
 it with the file. A load test of a request in no collection has no binding, so
 the setting lasts for that run only.
 
+**The run records it too.** The setting rides the run beside the file's name and
+hash (`dataFileCastNumbers` on `POST /runs`), and the run's snapshot keeps it.
+The hash is of the file's bytes, so it cannot tell a file read as text from the
+same file read with numbers cast; the stored setting can. Wherever a past run
+names its file - the dashboard's config summary, History's Test config box and
+hover card, a collection run's header and context bar, a run tab's tooltip -
+the name is followed by "(numbers read as numbers)" when the run cast them, and
+comparing two runs of one file read both ways reports a data-file difference. A
+run recorded before the setting existed reads as text, which is how every such
+run was read. Running the collection again reads the file through its binding,
+so it casts the same way unless you change the checkbox.
+
 This is the integer and decimal subset of what Newman's `--csv-auto-parse`
 reads. Newman is looser: it also casts `1e3`, `.5` and padded cells, so a file
 that leans on those arrives as text here and as a number there. How the Postman
@@ -189,7 +201,8 @@ The engine never opens a file. The app parses it and sends the rows inline on
 the run payload, because the script sandbox has no filesystem access by design
 and handing the daemon a user-supplied path would be a new trust boundary. The
 row set itself is never stored on either side - a run's snapshot records its
-count plus the file's name and content hash, never its path or a row - but a
+count plus the file's name, content hash and whether its numbers were read as
+numbers, never its path or a row - but a
 cell bound into a request travels with that request, and a run stores the
 requests it sent. See [What is stored](#what-is-stored).
 
@@ -465,7 +478,8 @@ run:
   file cannot be read), the same digest a run records, so an agent can tell
   whether the file is still the one a past run used. `castNumbers: true` on it
   says the app reads the file with **Read numbers as numbers** on, so the agent
-  can type its rows the same way; absent, every cell is text. A run's file name is a
+  can type its rows the same way and say so on the run with
+  `dataFileCastNumbers: true`; absent, every cell is text. A run's file name is a
   name, never a path: one holding a `/` or `\` is refused. A collection that declares nothing has neither -
   the ancestor walk above is left to the reader, the same as it is for
   variables. The rows never go over MCP: Vayu does not read the file for the
@@ -568,7 +582,8 @@ from the declared path. Declaring a contract does not change this: what is saved
 with the collection is the _shape_ of the file - its column names, and its name
 for display - never a cell of it. A run's stored snapshot records the row count
 plus the file's name and content hash (the SHA-256 of its bytes, so two runs
-can be told apart by the file that drove them), never its path or a row. The
+can be told apart by the file that drove them) and, when it was on, **Read
+numbers as numbers**, never its path or a row. The
 count and the file's name are what a reader sees afterwards: the
 dashboard's header prints "N rows from users.csv" in its config summary, live
 from the launch config and then from the report, and History's Test config box

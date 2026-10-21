@@ -862,13 +862,16 @@ apiService.startScenarioRun(data): Promise<StartLoadTestResponse>
 the same `202 {runId}` answer** - the payload is what selects the executor. A
 scenario states its work as an ordered collection
 (`{scenario: {source: "collection", collectionId, recursive?, iterations?, data?,
-dataFileName?, dataFileHash?}}`),
+dataFileName?, dataFileHash?, dataFileCastNumbers?}}`),
 so it carries no `method`/`url`, and its iteration count lives
 inside the block rather than beside a load-test mode. `data` is the parsed rows
 of a data file (`services/data-files/`), sent inline because the engine never
 opens a file, and `dataFileName` / `dataFileHash` name that file beside them
 (issue #2051): the picked file's name and the SHA-256 of its bytes, never its
-path, so the run records which file drove it. `iterations` is **omitted** when the user left it blank, so the
+path, so the run records which file drove it. `dataFileCastNumbers` (issue
+#2540) is the picker's **Read numbers as numbers** (`parsed.castNumbers`), sent
+beside them on every run with a file, so the run records how its rows were
+typed; the engine stores it only when `true`. `iterations` is **omitted** when the user left it blank, so the
 engine's "absent means one pass per row" rule stays in one place. Both send `allowScriptRequests`,
 for the same reason: every step runs the scripts a Send of that request would
 run. The engine resolves the whole plan before answering, so an empty
@@ -970,14 +973,15 @@ yet.
 What comes back for one differs in two places worth knowing. `GET /runs/:id`
 returns the **resolved manifest** in place of the block that was sent
 (`{source, collectionId, recursive, iterations, dataRowCount, dataFileName?,
-dataFileHash?, steps[]}`, the two file keys present only when the run named
-its data file, each
+dataFileHash?, dataFileCastNumbers?, steps[]}`, the two file keys present only
+when the run named its data file and the flag only when its numbers were cast,
+each
 step `{index, requestId, name, method, url}` with the *stored* url, never a
 composed one) - that is what the run tab's context bar reads, through
 `run-scenario.ts`. The paginated `GET /runs` list row cannot carry the manifest
 and instead carries `summary.scenario`
 (`{collectionId, iterations, recursive, stepCount, dataFileName?,
-dataFileHash?}`), present on any row whose
+dataFileHash?, dataFileCastNumbers?}`), present on any row whose
 snapshot carries a scenario block - so a scenario *load* run gets it too. The
 history row reads it because a run whose work is a sequence has no `url` or
 `method` for the ordinary row to show, and that is true of both executors.
@@ -1863,9 +1867,11 @@ await apiService.startLoadTest({
   // picker holds no file.
   data: [{ id: "1" }, { id: "2" }],
   // The file those rows came from: its name and the SHA-256 of its bytes,
-  // never its path (issue #2051). Undefined exactly when `data` is.
+  // never its path (issue #2051), and whether its numbers were read as
+  // numbers (issue #2540). Undefined exactly when `data` is.
   dataFileName: "users.csv",
-  dataFileHash: "<64 lowercase hex>"
+  dataFileHash: "<64 lowercase hex>",
+  dataFileCastNumbers: false
 });
 ```
 

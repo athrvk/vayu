@@ -4311,7 +4311,9 @@ answers. Its members:
   ramp the start level and ramp time too), `target_rps`, `duration` (only past
   a 2x ratio; an unfinished run's status is appended, `"3 s, stopped"`),
   `status`, `http_version` (`auto` differs from nothing), `data_file` (name and
-  the first 8 characters of its hash; none against one *is* a difference),
+  the first 8 characters of its hash, then `, numbers read as numbers` when
+  `dataFileCastNumbers` is set; none against one *is* a difference, and so is
+  one file read both ways, #2540, since the hash is of the bytes),
   `request` (method and URL with the query, fragment and userinfo cut),
   `compression` and `expect_continue` (#2516; `allowed` against `not allowed`,
   an absent key reading as `not allowed`). The two values are strings formatted
@@ -7243,6 +7245,7 @@ Start a load test run (Vayu Mode).
   "data": [],                // Optional data rows, one object per row - see below
   "dataFileName": "users.csv",  // Optional, only beside data: the file's display name - see below
   "dataFileHash": "<sha256>",   // Optional, only beside data: 64 lowercase hex chars - see below
+  "dataFileCastNumbers": true,  // Optional, only beside data: the file's numbers were read as numbers - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
   "carriedBudgets": [],      // Optional, which of those budgets were carried over rather than set - see below
   "elements": {},            // Optional element-pipeline override, either run shape - see below
@@ -7382,9 +7385,21 @@ a `400` when sent without `data` (refused, not ignored). A
 top-level one beside a `scenario` block is a `400` naming its
 `scenario.dataFileName` / `scenario.dataFileHash` counterpart, as `data` is.
 
+**How the client read that file** (issue #2540) rides beside them as
+`dataFileCastNumbers`, a boolean: `true` when the client typed the file's
+unquoted numeric cells as numbers (the app's **Read numbers as numbers**). The
+rows arrive already typed and the engine never converts them; it records the
+flag because the hash is of the file's bytes and cannot tell two readings of one
+file apart. `null` is absent; any other non-boolean is a `400`
+`invalid_run_config`, any value (`false` included) without `data` is a `400`,
+and a top-level one beside a `scenario` block is a `400` naming
+`scenario.dataFileCastNumbers`, on the same rules as the two strings.
+
 The rows are **never persisted**: the stored run snapshot records the row count
 (`dataRowCount`) plus the file's `dataFileName` and `dataFileHash` when they
-were sent, never its path or rows, exactly as a scenario manifest does. A cell
+were sent, and `dataFileCastNumbers: true` when the numbers were cast (absent,
+never `false`, otherwise, so a run recorded before the flag reads as text),
+never its path or rows, exactly as a scenario manifest does. A cell
 that *binds* travels in the request that carried it, so it is stored with
 whatever traces the run retains.
 
@@ -7814,7 +7829,8 @@ inside the block rather than through `mode` / `duration` / `iterations`:
     "iterations": 1,                // optional; defaults to the data row count, else 1
     "data": [ { "user": "a" } ],    // optional inline rows; see maxScenarioDataRows
     "dataFileName": "users.csv",    // optional, only beside data: the file's display name, never a path
-    "dataFileHash": "<sha256>"      // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
+    "dataFileHash": "<sha256>",     // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
+    "dataFileCastNumbers": true     // optional, only beside data: the file's numbers were read as numbers
   },
   "environmentId": "env_123",       // optional, and what {{variables}} resolve against
   "stopOnError": false              // optional, default false - see Outcomes under Scenario runs
@@ -7868,7 +7884,8 @@ as a smaller one:
 | `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
 | `dataFileName` holding a `/` or `\` | A display name, never a path (issue #2051): a path would be stored and listed back to every reader of the run. Send the file's name alone. |
-| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
+| `dataFileCastNumbers` present and not a boolean, or sent without `data` (`false` included) | How the client read the file (issue #2540), stored beside its name and hash; on the same rules, so a value that is not an answer, or one describing rows the run never bound, is refused rather than recorded. `null` is absent. |
+| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `dataFileCastNumbers`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
@@ -7953,7 +7970,8 @@ iteration `i`, and the run's scripts read it as `pm.iterationData` -
 both given the explicit count wins and the index wraps. The rows reach the run's
 worker and nowhere else: they are not persisted, and the snapshot records the
 row count (`dataRowCount`) plus the file's `dataFileName` and `dataFileHash`
-when they were sent, never its path or rows. The full contract is in
+when they were sent, and `dataFileCastNumbers: true` when its numbers were read
+as numbers, never its path or rows. The full contract is in
 [scripting.md](scripting.md#data-rows-pmiterationdata).
 
 **`{{data.column}}` puts the row into the request itself.** `pm.iterationData`
@@ -9420,12 +9438,12 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these sixteen snapshot keys: `url`, `method`,
+**`summary`** carries exactly these seventeen snapshot keys: `url`, `method`,
 `mode`, `duration`, `concurrency`, `iterations`, `targetRps`,
 `startConcurrency`, `rampUpDuration`, `comment`, `followRedirects`,
-`maxRedirects`, `requestName`, `dataFileName`, `dataFileHash`, and
-`httpVersion`.
-The first fifteen are each **omitted** when absent from the snapshot (a
+`maxRedirects`, `requestName`, `dataFileName`, `dataFileHash`,
+`dataFileCastNumbers`, and `httpVersion`.
+The first sixteen are each **omitted** when absent from the snapshot (a
 malformed snapshot yields an empty `summary`, never a `500`); `httpVersion`
 alone is always present. `iterations` and `targetRps` (issue #2437) are what
 the run was sent, never a default the engine filled in: an iterations run's
@@ -9451,8 +9469,9 @@ renderer sends it from `execIdentity` (`execute-mapping.ts`), the same field
 script sandbox's `pm.info.requestName`. `dataFileName` and `dataFileHash`
 (issue #2051) name the file a single-request run's `data` rows came from, by
 display name and SHA-256 of its bytes (64 lowercase hex), never its path; a run
-sent without a file name has neither. Every run since issue #1488 adds a
-seventeenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+sent without a file name has neither. `dataFileCastNumbers` (issue #2540) is
+`true` when that file's numbers were read as numbers, and absent otherwise.
+Every run since issue #1488 adds an eighteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -9468,15 +9487,15 @@ lost it". Do not read `"auto"` on an old run as the protocol it used: a load
 run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`. That route does not build a `summary` row at all: it returns
-the full `configSnapshot`, which already holds every key above. The same sixteen
+the full `configSnapshot`, which already holds every key above. The same seventeen
 keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
 with, since both are built by one function; that row carries no
 `resultSummary`.
 
 A **collection run** (`type: "scenario"`) carries none of the single-request
-keys above (`url` through `dataFileHash`): its work is a sequence, so there is no
+keys above (`url` through `dataFileCastNumbers`): its work is a sequence, so there is no
 single `url`, `method` or `mode` to report. Its row instead carries a
-eighteenth key, `scenario`, present on scenario runs only:
+nineteenth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -9485,18 +9504,20 @@ eighteenth key, `scenario`, present on scenario runs only:
   "recursive": true,
   "stepCount": 12,
   "dataFileName": "users.csv",
-  "dataFileHash": "<sha256>"
+  "dataFileHash": "<sha256>",
+  "dataFileCastNumbers": true
 }
 ```
 
 `stepCount` is the length of the snapshot's step manifest, not the manifest
 itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
-six keys is omitted when the stored snapshot has no such key: `dataFileName` and
+seven keys is omitted when the stored snapshot has no such key: `dataFileName` and
 `dataFileHash` (issue #2051) are the data file a run's `scenario.data` came
-from, so a run sent without one has neither.
+from, so a run sent without one has neither, and `dataFileCastNumbers` (issue
+#2540) is present, as `true`, only when that file's numbers were read as numbers.
 
-**`hasWarnings`** (issue #1527) is `summary`'s nineteenth key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s twentieth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys
@@ -9922,6 +9943,7 @@ named it.
       "dataRowCount": 2,
       "dataFileName": "users.csv",
       "dataFileHash": "<sha256>",
+      "dataFileCastNumbers": true,
       "carriedBudgets": ["latencyP99Ms"],
       "acceptEncoding": true,
       "expectContinue": false
@@ -10392,10 +10414,11 @@ and `rps` is read first (`targetRps` is the rate only when `rps` is absent,
 null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /
 `dataFileHash` (issue #2051) the file it came from, by display name and
-SHA-256 of its bytes, never its path. A single-request run's are read off the
-snapshot's top level; a collection run's off its `scenario` manifest, so every
-report of a run that named a file carries them here, and a run that named none
-has neither key. `carriedBudgets` (issue #2195) is the list of `thresholds`
+SHA-256 of its bytes, never its path, with `dataFileCastNumbers: true` (issue
+#2540) when that file's numbers were read as numbers. A single-request run's
+are read off the snapshot's top level; a collection run's off its `scenario`
+manifest, so every report of a run that named a file carries them here, and a
+run that named none has no such key. `carriedBudgets` (issue #2195) is the list of `thresholds`
 keys the client sent as carried over from an earlier run rather than set for
 this one, echoed as sent and omitted when the run sent none (see
 [Carried-over budgets](#carried-over-budgets-carriedbudgets)); `GET /runs`'s
