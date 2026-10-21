@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <memory>
 #include <regex>
 #include <sstream>
@@ -34,6 +35,7 @@
 #include "vayu/http/server.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include "mock_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "wait_until.hpp"
@@ -407,6 +409,52 @@ TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
     EXPECT_TRUE (std::regex_search (written,
     std::regex (R"("level":"info".*GET /health 403 \d+(\.\d+)?ms \d+B)")))
     << written;
+}
+
+// `stop()` returns only once the request it found in flight has been answered,
+// because the daemon tears down the run manager, curl's global state and the
+// database right after it (#2667). The upstream holds the engine's `/execute`
+// handler inside its transfer until it is released, which happens from another
+// thread as `stop()` begins, so the handler is still running when the listener
+// closes. Under ASan a handler that outlived `stop()` is also reported writing
+// through the destroyed Server. Mutation check: make `stop()` detach the
+// listener thread instead of waiting for it, and the result row is missing when
+// it returns.
+TEST_F (ServerBindTest, StopAnswersTheRequestInFlightBeforeReturning) {
+    vayu::tests::SlowMockServer upstream;
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    // `std::async` futures wait for their task on destruction, so no assertion
+    // below can leave a thread running past the objects it uses.
+    auto call = std::async (std::launch::async, [port, url = upstream.hang_url ()] () {
+        httplib::Client client ("127.0.0.1", port);
+        client.set_read_timeout (20, 0);
+        const nlohmann::json payload{ { "method", "GET" }, { "url", url } };
+        const auto response = client.Post ("/execute", payload.dump (), "application/json");
+        return response ? response->status : -1;
+    });
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&upstream] () { return upstream.live_connection_count () > 0; }))
+    << "the /execute handler never reached the upstream";
+
+    auto release = std::async (
+    std::launch::async, [&upstream] () { upstream.released.store (true); });
+    server.stop ();
+    release.get ();
+
+    // The buffered `/execute` stores its result row before it answers.
+    const auto runs = db_->get_runs_paginated (vayu::db::RunFilter{}, 1, 0);
+    EXPECT_FALSE (runs.empty () || db_->get_results (runs.front ().id).empty ())
+    << "stop() returned with the /execute handler still running";
+    EXPECT_EQ (call.get (), 200);
 }
 
 #if defined(__linux__)
