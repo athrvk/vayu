@@ -8849,7 +8849,7 @@ TEST_F (ScriptEngineTest, RequireShelfRestoresTheScriptsStackBudgetAfterALibrary
     const auto after  = std::stoul (shallow_env["after"].value);
     ASSERT_GT (before, 0u);
     // Raised and never restored, the budget is 768 KB / 24 KB = 32 times deeper.
-    EXPECT_LE (after, before + before / 2)
+    EXPECT_LE (after, before + (before / 2))
     << "recursion after require() ran under the library's budget, not the "
        "script's";
 }
