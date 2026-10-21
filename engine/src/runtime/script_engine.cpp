@@ -250,8 +250,6 @@ const std::string& encoding) {
     const std::string_view raw = vayu::utils::byte_view (digest);
 
     if (encoding == "bytes") {
-        // Constructed through the global Uint8Array rather than a helper, for
-        // the same cross-vendor reason as read_crypto_bytes.
         JSValue global = JS_GetGlobalObject (ctx);
         JSValue ctor   = JS_GetPropertyStr (ctx, global, "Uint8Array");
         JS_FreeValue (ctx, global);
@@ -553,10 +551,9 @@ std::mutex& class_id_registration_mutex () {
 // bytes as they are. Anything else throws rather than being stringified -
 // hashing the text "[object Object]" would be a silent wrong answer, and the
 // digest gives the author no clue that it happened.
-// Deliberately built from JS_GetTypedArrayBuffer + JS_GetArrayBuffer rather
-// than JS_GetUint8Array: the engine vendors Bellard's QuickJS on Linux and
-// macOS and quickjs-ng on Windows, and only the latter has the Uint8Array
-// shortcuts. These two calls exist in both.
+// Built from JS_GetTypedArrayBuffer + JS_GetArrayBuffer rather than
+// JS_GetUint8Array because the first reports the element size, which the
+// byte-order refusal below needs.
 bool read_crypto_bytes (JSContext* ctx, JSValueConst value, const char* what, std::string& out) {
     if (JS_IsString (value)) {
         out = js_to_string (ctx, value);

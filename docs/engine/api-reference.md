@@ -3542,7 +3542,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
     "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
     "nonExecutableAuth": 0, "unattachedFileParts": 0,
-    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "CryptoJS"] } ]
+    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "moment"] } ]
   }
 }
 ```
@@ -3550,9 +3550,9 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 **`meta.unsupportedScriptApis`** (Postman only, issue
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
-Postman script API Vayu does not run, and which ones - `require()`,
-`script.packages`, a bundled library such as `CryptoJS`, and the other rows of
-the table in
+Postman script API Vayu does not run, and which ones - `require()` of a module
+off the `crypto-js` shelf, `script.packages`, a bundled library such as
+`moment`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
 `docs/app/import-collections/postman.md#scripts` has the rules.
@@ -10682,9 +10682,11 @@ so a client may cache on `version`.
 
 The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
-Node (`fetch`, `require`, `URL`, `Buffer`, ...), and the libraries Postman
-bundles (`CryptoJS`, `_`, ...), whose hover names the replacement Postman itself
-gives (`_` is `require('lodash')`). Postman's `postman` object and its pre-`pm.*`
+Node (`fetch`, `URL`, `Buffer`, ...), and the libraries Postman bundles that
+the `require()` shelf does not carry (`_`, `moment`, ...), whose hover names the
+replacement Postman itself gives (`_` is `require('lodash')`). `require` and
+`CryptoJS` are declared as what they are, with `declare module 'crypto-js'`
+(#2578). Postman's `postman` object and its pre-`pm.*`
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
 as the value it is.

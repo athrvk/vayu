@@ -59,8 +59,8 @@ export const SCRIPT_LIB = ["es2022"];
  *
  * What suppressing 2304 costs is every undeclared name drawing nothing. The
  * engine keeps the names a script is likeliest to reach for by declaring them
- * as `never` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`, `require`,
- * Postman's bundled `CryptoJS`), so using one is a type error with the
+ * as `never` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`, `URL`,
+ * Postman's bundled `_` and `moment`), so using one is a type error with the
  * replacement on hover.
  *
  * Narrow this list rather than widening it: every code here is a real mistake
@@ -93,9 +93,9 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	 * The engine runs a script inside a function, so a top-level
 	 * `const data = pm.response.json()` is local to it and shadows any global of
 	 * that name. As a script file, the editor saw the same line as a second
-	 * declaration of the global `data` that the engine declares absent
-	 * (`ABSENT_GLOBALS`) and reported "Cannot redeclare block-scoped variable"
-	 * (2451) on correct code - and would have for `const URL` or `function fetch`
+	 * declaration of the legacy global `data` that the engine declares and
+	 * reported "Cannot redeclare block-scoped variable" (2451) on correct code -
+	 * and would have for `const URL` or `function fetch` (`ABSENT_GLOBALS`)
 	 * already. The declarations the engine registers are a `.d.ts`, which stays
 	 * a global script whatever this says.
 	 *

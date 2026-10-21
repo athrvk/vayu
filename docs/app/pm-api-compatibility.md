@@ -37,6 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
+| Modules             | `require('crypto-js')` and the `CryptoJS` global - a Vayu-written shim, any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -387,9 +388,49 @@ strings**, one byte per code unit, so `btoa` throws on a code point above U+00FF
 instead of silently UTF-8 encoding it. A signature over quietly-substituted
 bytes verifies nowhere.
 
-Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, MD5,
-SHA-1, and any asymmetric algorithm. The engine-side detail is in
+Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, and
+any asymmetric algorithm. `pm.crypto` is SHA-256 and HMAC-SHA256 only; MD5, SHA-1
+and the other SHA-2 hashers are the `crypto-js` shelf's, see
+[The `require` shelf](#the-require-shelf). The engine-side detail is in
 [scripting.md](../engine/scripting.md#what-a-script-can-compute).
+
+### The `require` shelf
+
+`require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
+`Cannot find module '<name>'` for any other name; it reads no file and fetches
+nothing. The shelf holds one library, `crypto-js`, which is also bound as the
+global `CryptoJS`, so both spellings of Postman's signing scripts run:
+
+```javascript
+const CryptoJS = require('crypto-js');
+const sig = CryptoJS.HmacSHA256(canonical, secret).toString(CryptoJS.enc.Base64);
+```
+
+**It is a Vayu-written shim of crypto-js's shape, not the crypto-js library.**
+The shim is 6 KB of JavaScript over OpenSSL's digests, so a digest is exact; the
+surface around it is deliberately small. Covered:
+
+- `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384`, `SHA512` and `HmacMD5` ...
+  `HmacSHA512` (`HmacSHA256(message, key)`), over a string (UTF-8) or a
+  `WordArray`
+- `enc.Hex`, `enc.Latin1`, `enc.Utf8`, `enc.Base64`, each `parse` and `stringify`
+- `lib.WordArray` (`create`, `toString(encoder?)`, `concat`, `clone`)
+
+Anything else of crypto-js reads as `undefined` and throws when called: `AES`,
+`DES`, `TripleDES`, `Rabbit`, `RC4`, `PBKDF2`, `EvpKDF`, `SHA3`, `RIPEMD160`,
+`enc.Utf16`, the progressive `algo.*` hashers and `WordArray.random`. A wrong
+argument type is a `TypeError`, never a hash of something else.
+
+It costs nothing until used: the shim is evaluated the first time a script reads
+`require` or `CryptoJS`, not when a script starts. First use is about 0.55 to
+0.75 ms and about 22 KB of the script's memory, per execution; the engine binary
+grew by 0.2 % (debug build) for it.
+
+**Not on the shelf:** `lodash` (`_`), `moment`, `uuid`, `ajv` and `tv4`, `xml2js`
+(`xml2Json`), `cheerio`, `csv-parse`, `chai` and Node's built-ins (`crypto`, `fs`,
+`buffer`, ...). `require` of one throws, the editor underlines `_`, `moment`,
+`tv4`, `xml2Json`, `cheerio` and `Backbone` as unusable, and a Postman import
+names the request in `meta.unsupportedScriptApis`.
 
 ### Timers run before the script ends, and do not wait
 
@@ -1290,10 +1331,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
   show the template in
 - `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
-- **`require(...)`, `script.packages` and the libraries Postman bundles** -
-  `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
-  The sandbox has no module system and none of those libraries; `pm.crypto` covers
-  SHA-256 and HMAC-SHA256 and nothing else of `CryptoJS`
+- **`require(...)` of anything but `crypto-js`, `script.packages` and the
+  libraries Postman bundles beyond `CryptoJS`** - `_` (lodash), `tv4`,
+  `xml2Json`, `cheerio`, `moment` and `Backbone`. The sandbox has no module
+  system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
+  covers the hashers and their HMACs and nothing else of `CryptoJS`
 - `Buffer` - the sandbox is not Node. A top-level `await` runs, as it does in
   Postman: the script body is an async function (see
   [what a script can compute](../engine/scripting.md#what-a-script-can-compute)).
@@ -1574,19 +1616,21 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 **declares the names a script is likeliest to reach for that the sandbox lacks**
 (`ABSENT_GLOBALS` in `script_types.cpp`), and the editor underlines a use:
 
-- the host globals of a browser or Node: `fetch`, `require`, `URL`, `Buffer`, ...
-- the libraries Postman bundles: `CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
-  `moment` and `Backbone`
+- the host globals of a browser or Node: `fetch`, `URL`, `Buffer`, ...
+- the libraries Postman bundles that the [`require` shelf](#the-require-shelf)
+  does not carry: `_`, `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`
+  (`CryptoJS` and `require` are declared as the real thing, with
+  `declare module 'crypto-js'` so `require('crypto-js')` types)
 
-Hover names the replacement Postman itself gives: `_` is `require('lodash')`, `CryptoJS`
-is the global `crypto` object, and says what Vayu has instead. The `postman` object is
+Hover names the replacement Postman itself gives: `_` is `require('lodash')`, and
+says what Vayu has instead. The `postman` object is
 declared as the methods it has, each hover naming the `pm.*` method it aliases, and
 Postman's pre-`pm.*` globals (`tests`, `responseBody`, ...) as the values they are
 (`string`, `number`, an object), so `JSON.parse(responseBody)` and `responseTime < 200`
 are correct code to the editor as they are to the engine.
 
 A name is declared `never`, so a call, a member access or an assignment is an error
-(`_.map(...)`, `CryptoJS.MD5(x)`). `never` is assignable to everything, so a bare read
+(`_.map(...)`, `moment().format()`). `never` is assignable to everything, so a bare read
 into something that takes anything (`console.log(moment)`) is left unflagged: hover
 still names the replacement there.
 

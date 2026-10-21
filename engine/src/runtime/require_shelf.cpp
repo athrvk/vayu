@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "crypto_js_shim.hpp"
+#include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/digest.hpp"
 
 namespace vayu::runtime::pm_detail {
@@ -107,8 +108,21 @@ struct ShelfLibrary {
 };
 
 constexpr auto SHELF = std::to_array<ShelfLibrary> ({
-{ "crypto-js", CRYPTO_JS_SHIM, crypto_js_natives },
+{ CRYPTO_JS_MODULE, CRYPTO_JS_SHIM, crypto_js_natives },
 });
+
+// The import scan reads SHELF_MODULE_NAMES; a library here that is not there
+// would be reported as unsupported although it runs.
+static_assert (
+[] {
+    for (const auto& library : SHELF) {
+        if (!is_shelf_module (library.name)) {
+            return false;
+        }
+    }
+    return SHELF.size () == SHELF_MODULE_NAMES.size ();
+}(),
+"SHELF and SHELF_MODULE_NAMES list different modules");
 
 struct ShelfGlobal {
     const char* name;
