@@ -9892,27 +9892,32 @@ a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sa
 rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
 first - see "`results[]` is not a uniform sample" below). A run with no summary has either not
 reached a terminal status yet (`metadata.status` is `pending` or `running`) or never will because
-the engine died mid-run; its report is built from those sampled `results` alone rather than
-erroring. **The response shape is the same either way.**
+the engine died mid-run; its report is built without it rather than erroring. **The response
+shape is the same either way.**
 
-A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
-come from whatever results have been stored so far, `metadata.status` says the run is still in
-flight, and `thresholdValidation` is absent even when the run declared budgets, because the
-verdict is computed from the summary written at the end. Read `metadata.status` before treating a
-report as final.
+A report read while the run is `pending` or `running` is therefore **partial**: `metadata.status`
+says the run is still in flight, and `thresholdValidation` is absent even when the run declared
+budgets, because the verdict is computed from the summary written at the end. Read
+`metadata.status` before treating a report as final.
 
-A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A load
-run writes them in chunks of 250, so a poll that lands during that write waits for one chunk
-rather than the whole flush and may count part of the rows (see [`results`](db-schema.md#results)).
-A partial report of a **load** run also never reads the rows' stored traces (issue #2548), because
-it is the one a client re-reads on a timer (a design or scenario run stores its rows just before
-the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
-traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
-`errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
-unless the run recorded `phases`) and `slowRequests` is absent: with no trace read there is no
-threshold to report, and the exact count arrives with the summary. The status distribution, latency
-percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
-a finished run.
+A design or scenario run stores its `results` rows just before its status flips, and a client
+fetching once in that gap needs them with their traces, so its partial report is built from the
+rows stored so far. A partial report of a **load** run reads no `results` row at all (issue
+#2659): it is the one a client re-reads on a timer, and a load run writes its rows only as it
+finishes, in chunks (see [`results`](db-schema.md#results)), so a report built from them is all
+zeros while the run sends and a growing prefix of the flush after. Its figures come from the
+run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive) reads:
+`summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
+`noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
+`errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
+`bytesReceived`, `httpVersionDowngraded`, and `avgRps`, `throughput` and `sendRate` over the time
+since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
+still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
+(`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
+`timingBreakdown` and `slowRequests` are absent. In the moment between the summary write and the
+status flip the aggregates are the summary's, as for a finished run, still with no row read. A
+run whose row says `running` but which the engine no longer holds answers the same shape with
+every count at zero.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is

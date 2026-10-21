@@ -150,6 +150,22 @@ class RunsRouteTest : public ::testing::Test {
         db_->add_result (result);
     }
 
+    /// Renames `results` away behind the open connection, so any read of a
+    /// run's rows throws: what proves a report read none (#2659).
+    static void make_results_unreadable () {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (DB_PATH, &handle), SQLITE_OK);
+        sqlite3_busy_timeout (handle, 5000);
+        char* err = nullptr;
+        if (sqlite3_exec (handle, "ALTER TABLE results RENAME TO results_unreadable",
+            nullptr, nullptr, &err) != SQLITE_OK) {
+            ADD_FAILURE () << "could not rename results: "
+                           << (err != nullptr ? err : "(no message)");
+            sqlite3_free (err);
+        }
+        sqlite3_close (handle);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     /// One per test, like the database beside it: the cache is keyed by run id
     /// and these cases reuse ids across tests, so a shared one would answer a
@@ -1915,9 +1931,9 @@ TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
 }
 
 // #2436: `summary` is written only at terminal status, so a report read while
-// the run is still going stands on its sampled results alone. `metadata.status`
-// is what tells a reader it is partial; the verdict, which needs the summary, is
-// absent until the same run completes.
+// the run is still going has no verdict, and `metadata.status` is what tells a
+// reader it is partial. A load run's rows are read only once it is terminal
+// (#2659).
 TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
     seed ({ .id = "run_live", .status = vayu::RunStatus::Running, .start_time = 1000 });
     seed_result ("run_live", 200, 12.0);
@@ -1925,7 +1941,7 @@ TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
     auto [live_status, live] = vayu::http::routes::run_report_response (*db_, "run_live");
     ASSERT_EQ (live_status, 200);
     EXPECT_EQ (live["metadata"]["status"].get<std::string> (), "running");
-    EXPECT_EQ (live["resultsStored"].get<size_t> (), 1u);
+    EXPECT_EQ (live["resultsStored"].get<size_t> (), 0u);
     EXPECT_FALSE (live.contains ("thresholdValidation"));
 
     auto inputs       = summary_inputs ();
@@ -1938,66 +1954,138 @@ TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
     auto [done_status, done] = vayu::http::routes::run_report_response (*db_, "run_live");
     ASSERT_EQ (done_status, 200);
     EXPECT_EQ (done["metadata"]["status"].get<std::string> (), "completed");
+    EXPECT_EQ (done["resultsStored"].get<size_t> (), 1u);
     ASSERT_TRUE (done.contains ("thresholdValidation"));
     EXPECT_EQ (done["thresholdValidation"]["verdict"].get<std::string> (), "passed");
 }
 
-// #2548: a report polled while the run is in flight never reads `trace_data`.
-// The same rows, once the run is terminal, are read with their traces, so the
-// two reports differ in exactly what only a trace can say.
-TEST_F (RunsRouteTest, ALiveRunsReportReadsNoTraceAndTheFinishedOneDoes) {
-    seed ({ .id = "run_traced", .status = vayu::RunStatus::Running, .start_time = 1000 });
-    seed_traced_result ("run_traced", 200, 10.0,
-    R"({"dnsMs":1,"connectMs":2,"tlsMs":3,"firstByteMs":4,"downloadMs":5,"isSlow":true,"thresholdMs":8})");
-    seed_traced_result ("run_traced", 0, 0.0, R"({"error_type":"timeout"})");
-    // Not JSON: a report that read this column would carry it back as a string.
-    constexpr std::string_view UNPARSEABLE = "not json {";
-    seed_traced_result ("run_traced", 503, 30.0, std::string (UNPARSEABLE));
+// #2659: a load run that is not terminal is reported from its collector, the
+// counts the live stream reads, and never from `results`, which is renamed away
+// here so a report that read a row would throw. Mutation check: read the rows
+// for a live load run again and this test fails on the throw.
+TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
+    seed ({ .id = "run_live", .status = vayu::RunStatus::Running, .start_time = 1000 });
+    seed_result ("run_live", 200, 12.0);
 
-    auto [live_status, live] = vayu::http::routes::run_report_response (*db_, "run_traced");
-    ASSERT_EQ (live_status, 200);
+    vayu::core::RunManager runs;
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("run_live", nlohmann::json::object ());
+    auto& collector = *context->metrics_collector;
+    collector.record_success (200, 10.0, 1.0);
+    collector.record_success (200, 12.0, 3.0);
+    collector.record_success (503, 30.0, 2.0);
+    collector.record_error (vayu::ErrorCode::ConnectionFailed, "refused");
+    collector.record_cancelled ();
+    collector.record_bytes (100, 400);
+    context->peak_in_flight = 3;
+    runs.register_run ("run_live", context);
+
+    make_results_unreadable ();
+    EXPECT_ANY_THROW (db_->get_results ("run_live"));
+
+    auto [status, live] =
+    vayu::http::routes::run_report_response (*db_, "run_live", &runs);
+    ASSERT_EQ (status, 200);
     EXPECT_EQ (live["metadata"]["status"].get<std::string> (), "running");
-    EXPECT_TRUE (live["errors"]["types"].empty ());
-    EXPECT_EQ (live["errors"]["withDetails"].get<size_t> (), 0u);
-    EXPECT_FALSE (live.contains ("timingBreakdown"));
-    EXPECT_FALSE (live.contains ("slowRequests"));
-    ASSERT_EQ (live["results"].size (), 3u);
-    for (const auto& row : live["results"]) {
-        EXPECT_FALSE (row.contains ("trace")) << row.dump ();
-    }
+    const auto& summary = live["summary"];
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 4u);
+    EXPECT_EQ (summary["successfulRequests"].get<size_t> (), 2u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 2u);
+    EXPECT_EQ (summary["httpErrorRequests"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["noResponseRequests"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["cancelledRequests"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 50.0);
+    EXPECT_EQ (summary["bytesSent"].get<size_t> (), 100u);
+    EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 400u);
+    EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 3u);
+    EXPECT_GT (summary["avgRps"].get<double> (), 0.0);
+    EXPECT_EQ (live["statusCodes"], nlohmann::json::parse ("[[0,1],[200,2],[503,1]]"));
+    EXPECT_EQ (live["errors"]["byStatusCode"], nlohmann::json::parse ("[[0,1],[503,1]]"));
+    // The percentiles are read from histograms the run is still writing.
+    EXPECT_FALSE (live.contains ("latency"));
+    EXPECT_TRUE (live["results"].empty ());
+    EXPECT_EQ (live["resultsStored"].get<size_t> (), 0u);
+    EXPECT_EQ (live["resultsCap"].get<size_t> (), 100u);
+    // ~RunManager waits out its stop grace for a run still active.
+    runs.unregister_run ("run_live");
+}
 
-    db_->update_run_status ("run_traced", vayu::RunStatus::Completed);
-    auto [done_status, done] = vayu::http::routes::run_report_response (*db_, "run_traced");
-    ASSERT_EQ (done_status, 200);
-    EXPECT_EQ (done["errors"]["types"]["timeout"].get<size_t> (), 1u);
-    EXPECT_EQ (done["errors"]["withDetails"].get<size_t> (), 1u);
-    EXPECT_DOUBLE_EQ (done["timingBreakdown"]["avgDnsMs"].get<double> (), 1.0);
-    EXPECT_EQ (done["slowRequests"]["count"].get<size_t> (), 1u);
-    ASSERT_EQ (done["results"].size (), 3u);
-    for (const auto& row : done["results"]) {
+// Between the summary write and the status flip the report is the summary's,
+// latency included, as a finished run's is - and still reads no row.
+TEST_F (RunsRouteTest, ALiveLoadRunsStoredSummaryIsReportedWithoutARowRead) {
+    seed ({ .id = "run_settling", .status = vayu::RunStatus::Running, .start_time = 1000 });
+    seed_result ("run_settling", 200, 12.0);
+
+    vayu::core::RunManager runs;
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run_settling", nlohmann::json::object ());
+    context->metrics_collector->record_success (200, 10.0, 0.0);
+    runs.register_run ("run_settling", context);
+    db_->update_run_summary ("run_settling",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+    make_results_unreadable ();
+
+    auto [status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_settling", &runs);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (report["metadata"]["status"].get<std::string> (), "running");
+    EXPECT_EQ (report["summary"]["totalRequests"].get<size_t> (), 100u);
+    ASSERT_TRUE (report.contains ("latency"));
+    EXPECT_DOUBLE_EQ (report["latency"]["p99"].get<double> (), 30.0);
+    EXPECT_EQ (report["resultsStored"].get<size_t> (), 0u);
+    runs.unregister_run ("run_settling");
+}
+
+// A load run the engine holds no context for - none registered yet, or no
+// manager to ask - is answered with zeros, never with its rows.
+TEST_F (RunsRouteTest, ALiveLoadRunWithNoContextIsReportedAsZerosWithoutARowRead) {
+    seed ({ .id = "run_pending", .status = vayu::RunStatus::Pending, .start_time = 1000 });
+    seed_result ("run_pending", 503, 12.0);
+    make_results_unreadable ();
+
+    vayu::core::RunManager runs;
+    for (auto* manager : { &runs, static_cast<vayu::core::RunManager*> (nullptr) }) {
+        auto [status, report] =
+        vayu::http::routes::run_report_response (*db_, "run_pending", manager);
+        ASSERT_EQ (status, 200);
+        EXPECT_EQ (report["metadata"]["status"].get<std::string> (), "pending");
+        EXPECT_EQ (report["summary"]["totalRequests"].get<size_t> (), 0u);
+        EXPECT_TRUE (report["statusCodes"].empty ());
+        EXPECT_FALSE (report.contains ("latency"));
+        EXPECT_EQ (report["resultsStored"].get<size_t> (), 0u);
+    }
+}
+
+// A terminal load run is reported from its rows and summary whatever its
+// context still holds: retention keeps a finished run's collector for a while,
+// and the report must not change while it does.
+TEST_F (RunsRouteTest, AFinishedLoadRunsReportIgnoresItsRetainedCollector) {
+    seed ({ .id = "run_done", .start_time = 1000 });
+    seed_traced_result ("run_done", 200, 10.0,
+    R"({"dnsMs":1,"connectMs":2,"tlsMs":3,"firstByteMs":4,"downloadMs":5,"isSlow":true,"thresholdMs":8})");
+    seed_traced_result ("run_done", 0, 0.0, R"({"error_type":"timeout"})");
+
+    vayu::core::RunManager runs;
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("run_done", nlohmann::json::object ());
+    for (int i = 0; i < 5; ++i) {
+        context->metrics_collector->record_success (201, 99.0, 0.0);
+    }
+    runs.register_run ("run_done", context);
+    runs.retain_run ("run_done");
+
+    auto [plain_status, plain] = vayu::http::routes::run_report_response (*db_, "run_done");
+    auto [held_status, held] =
+    vayu::http::routes::run_report_response (*db_, "run_done", &runs);
+    ASSERT_EQ (plain_status, 200);
+    ASSERT_EQ (held_status, 200);
+    EXPECT_EQ (held, plain);
+    EXPECT_EQ (held["resultsStored"].get<size_t> (), 2u);
+    EXPECT_EQ (held["errors"]["types"]["timeout"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (held["timingBreakdown"]["avgDnsMs"].get<double> (), 1.0);
+    for (const auto& row : held["results"]) {
         EXPECT_TRUE (row.contains ("trace")) << row.dump ();
     }
-    EXPECT_EQ (done["results"][2]["trace"].get<std::string> (), UNPARSEABLE);
-
-    // Everything else is the same report: the status distribution, the latency
-    // percentiles, the selected rows and the stored count. `end_time` and the
-    // duration derived from it moved when the status did.
-    auto expected                     = done;
-    expected["metadata"]["status"]    = "running";
-    expected["errors"]["types"]       = nlohmann::json::object ();
-    expected["errors"]["withDetails"] = 0;
-    expected.erase ("timingBreakdown");
-    expected.erase ("slowRequests");
-    for (auto& row : expected["results"]) {
-        row.erase ("trace");
-    }
-    for (auto* report : { &live, &expected }) {
-        (*report)["metadata"].erase ("endTime");
-        for (const char* key : { "avgRps", "testDuration", "totalDurationSeconds" }) {
-            (*report)["summary"].erase (key);
-        }
-    }
-    EXPECT_EQ (live, expected);
 }
 
 namespace {
@@ -2067,7 +2155,7 @@ TEST_F (RunsRouteTest, ReportSlowCountFallsBackToTracesOnlyWhenTheSummaryHasNone
     EXPECT_EQ (legacy["slowRequests"]["thresholdMs"].get<size_t> (), 500u);
 }
 
-// #2548: only a load run is read trace-free. A design or scenario run stores
+// #2659: only a load run's live report skips its rows. A design or scenario run stores
 // its rows just before the status flips, and a one-shot reader (response
 // restore, the step list) fetching in that gap needs `trace`.
 TEST_F (RunsRouteTest, ARunningScenarioOrDesignRunsReportKeepsItsTraces) {
