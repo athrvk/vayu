@@ -419,7 +419,10 @@ surface around it is deliberately small. Covered:
 Anything else of crypto-js reads as `undefined` and throws when called: `AES`,
 `DES`, `TripleDES`, `Rabbit`, `RC4`, `PBKDF2`, `EvpKDF`, `SHA3`, `RIPEMD160`,
 `enc.Utf16`, the progressive `algo.*` hashers and `WordArray.random`. A wrong
-argument type is a `TypeError`, never a hash of something else.
+argument type is a `TypeError`, never a hash of something else. The Postman
+import's notice for [scripts that use an API Vayu does not run](import-collections/postman.md)
+names `CryptoJS` for exactly these members and for a computed `CryptoJS[name]`,
+and stays silent for the covered ones.
 
 It costs nothing until used: the shim is evaluated the first time a script reads
 `require` or `CryptoJS`, not when a script starts. First use is about 0.55 to
@@ -1335,7 +1338,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   libraries Postman bundles beyond `CryptoJS`** - `_` (lodash), `tv4`,
   `xml2Json`, `cheerio`, `moment` and `Backbone`. The sandbox has no module
   system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
-  covers the hashers and their HMACs and nothing else of `CryptoJS`
+  covers the hashers and their HMACs and nothing else of `CryptoJS`, so a
+  `CryptoJS` member outside that list is named by the import notice and one
+  inside it is not
 - `Buffer` - the sandbox is not Node. A top-level `await` runs, as it does in
   Postman: the script body is an async function (see
   [what a script can compute](../engine/scripting.md#what-a-script-can-compute)).

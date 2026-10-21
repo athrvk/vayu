@@ -2791,6 +2791,13 @@ without that module, so calling it throws a `TypeError`: no ciphers (`AES`, `DES
 A wrong argument type (a number where a string or `WordArray` belongs) throws
 a `TypeError` rather than hashing something other than what was written.
 
+The covered members are one list, `CRYPTO_JS_MEMBERS`
+(`include/vayu/runtime/shelf_modules.hpp`), which the Postman import's script
+scan reads: a collection that uses a `CryptoJS` member outside it is named
+`CryptoJS` in `meta.unsupportedScriptApis`, and one that stays inside it is not.
+`script_completions_test.cpp` fails when the list and the shim, or the list and
+the editor's completions, disagree.
+
 **Cost.** The shim is evaluated on first use in an execution, never when a
 context is built, so a script that does not touch `require` or `CryptoJS` pays
 nothing. First use costs about 0.55 to 0.75 ms; the evaluated module then lives

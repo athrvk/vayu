@@ -22,10 +22,12 @@
 #include <regex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "chai_conformance_table.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http::routes {
@@ -692,6 +694,100 @@ TEST (ScriptCompletions, EveryOfferedCryptoJsMemberIsBoundInTheRuntime) {
     }
     EXPECT_EQ (offered, 30)
     << "the crypto-js surface changed - update this test and the docs";
+}
+
+// `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
+// calls supported, so it must say what the runtime defines and what the editor
+// offers: a member in the list the shim lacks is a script that throws with no
+// notice, and one the shim has but the list lacks is a notice on a script that
+// runs.
+std::vector<std::string> children_of (std::string_view parent) {
+    std::vector<std::string> names;
+    for (const std::string_view member : vayu::runtime::CRYPTO_JS_MEMBERS) {
+        const std::string prefix = parent.empty () ? "" : std::string (parent) + ".";
+        if (!member.starts_with (prefix) || member.size () == prefix.size ()) {
+            continue;
+        }
+        const std::string_view rest = member.substr (prefix.size ());
+        if (rest.find ('.') == std::string_view::npos) {
+            names.emplace_back (rest);
+        }
+    }
+    std::ranges::sort (names);
+    return names;
+}
+
+std::string reference_to (std::string_view path) {
+    return path.empty () ? std::string ("CryptoJS") : "CryptoJS." + std::string (path);
+}
+
+TEST (ScriptCompletions, TheCryptoJsMemberListIsExactlyWhatTheRuntimeDefines) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+
+    for (const std::string_view member : vayu::runtime::CRYPTO_JS_MEMBERS) {
+        const std::string reference = reference_to (member);
+        const auto result           = engine.execute_test (
+        "if (typeof " + reference + " === 'undefined') throw new Error('undefined');",
+        request, response, env);
+        EXPECT_TRUE (result.success) << reference << " is listed: " << result.error_message;
+    }
+
+    // Nothing the runtime defines is missing from the list: each namespace
+    // holds exactly the members listed under it.
+    for (const std::string_view parent : { "", "enc", "lib", "lib.WordArray" }) {
+        std::string expected;
+        for (const std::string& name : children_of (parent)) {
+            expected += (expected.empty () ? "" : ",") + name;
+        }
+        const auto result = engine.execute_test ("const keys = Object.keys(" +
+        reference_to (parent) + ").sort().join(','); if (keys !== '" +
+        expected + "') throw new Error('the runtime defines ' + keys);",
+        request, response, env);
+        EXPECT_TRUE (result.success) << reference_to (parent) << " should hold "
+                                     << expected << ": " << result.error_message;
+    }
+}
+
+TEST (ScriptCompletions, EveryCryptoJsCompletionIsAMemberTheImportScanKnows) {
+    const auto completions = get_script_completions ();
+    std::set<std::string> offered;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("CryptoJS.", 0) == 0) {
+            offered.insert (label.substr (std::string_view ("CryptoJS.").size ()));
+        }
+    }
+    EXPECT_FALSE (offered.empty ());
+
+    for (const std::string& path : offered) {
+        // Walk down the dotted path to the first leaf: what follows it
+        // (`stringify`, `parse`) is the value's own.
+        std::string prefix;
+        std::size_t at = 0;
+        bool known     = false;
+        while (at < path.size ()) {
+            const std::size_t dot = path.find ('.', at);
+            prefix                = path.substr (0, dot);
+            known                 = vayu::runtime::is_crypto_js_member (prefix);
+            if (!known || !vayu::runtime::is_crypto_js_namespace (prefix) ||
+            dot == std::string::npos) {
+                break;
+            }
+            at = dot + 1;
+        }
+        EXPECT_TRUE (known) << "CryptoJS." << path
+                            << " is offered but the import scan would name it";
+    }
+
+    // And every listed member is offered, so the editor and the scan agree.
+    for (const std::string_view member : vayu::runtime::CRYPTO_JS_MEMBERS) {
+        EXPECT_TRUE (offered.contains (std::string (member)))
+        << "CryptoJS." << member << " runs but the editor does not offer it";
+    }
 }
 
 // The timers (#2577): every one offered is a function the runtime binds, and a

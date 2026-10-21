@@ -2328,20 +2328,25 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Shelf",
     R"j(["const c = require('crypto-js');","const h = CryptoJS.MD5('x');"])j") +
     "," +
+    request_with_script ("Cipher",
+    R"j(["const c = require('crypto-js');","const e = CryptoJS.AES.encrypt('x', 'k');"])j") +
+    "," +
     request_with_script ("Mentions only",
     R"j(["// CryptoJS.MD5(x); tests[0]","const s = 'require(x) postman.x';"])j");
     const ImportParse parsed = parse_postman_items (items);
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
 
-    // Postman's pre-pm.* globals and pm.visualizer run (#2577), and so does
-    // crypto-js (#2578), as the global and as `require('crypto-js')`, so
-    // "Legacy tests" and "Shelf" are not named.
+    // Postman's pre-pm.* globals and pm.visualizer run (#2577), and so do
+    // the crypto-js members the shim defines (#2578), as the global and as
+    // `require('crypto-js')`, so "Legacy tests" and "Shelf" are not named;
+    // "Cipher" reaches past the shim and is.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
         {"request":"Library","names":["tv4"]},
         {"request":"Module","names":["require()"]},
         {"request":"Host","names":["Buffer"]},
-        {"request":"Chai","names":[".postmanRequest / .postmanResponse / .postmanRequestOrResponse"]}
+        {"request":"Chai","names":[".postmanRequest / .postmanResponse / .postmanRequestOrResponse"]},
+        {"request":"Cipher","names":["CryptoJS"]}
     ])j"));
     // A notice, not a drop: the scripts still import verbatim.
     EXPECT_EQ (parsed.result.at ("collections")[0]

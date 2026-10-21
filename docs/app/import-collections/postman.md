@@ -139,8 +139,14 @@ computed name such as `require(name)` is named) and `pm.require`, a non-empty
 chai-postman's `.postmanRequest`, `.postmanResponse` and `.postmanRequestOrResponse`
 (named as one row). Every other chai and chai-postman member runs, so none is named
 (`engine/tests/fixtures/chai-conformance.json` is the authority, and
-`script_api_scan_test.cpp` holds the table to it). `CryptoJS` and
-`require('crypto-js')` run (#2578), so neither is named. Postman's pre-`pm.*` globals
+`script_api_scan_test.cpp` holds the table to it). `require('crypto-js')` and the
+`CryptoJS` members the shim defines run (#2578), so they are not named; the rest of
+crypto-js is, under the one name `CryptoJS` (`CryptoJS.AES`, `PBKDF2`, `SHA3`,
+`RIPEMD160`, `algo.*`, `enc.Base64url`, `lib.WordArray.random`, a computed
+`CryptoJS[name]`, ...). The supported members are one list,
+`CRYPTO_JS_MEMBERS` in `engine/include/vayu/runtime/shelf_modules.hpp`, that
+`script_completions_test.cpp` holds to what the runtime defines and the editor
+offers. Postman's pre-`pm.*` globals
 (`tests[...]`, `responseBody`, `environment`, ...) and the `postman.*` methods
 run (see [Postman's legacy globals](../pm-api-compatibility.md#postmans-legacy-globals)),
 and `pm.visualizer` is accepted with a console warning (see

@@ -175,11 +175,58 @@ TEST (ScriptApiScan, NamesRequireInBothSpellings) {
     names_in ("// require('x')\nrequirement(1); const r = 'require(';"), Names{});
 }
 
-// Vayu runs crypto-js (#2578), as the global and as a shelf module, so a script
-// that uses either is not named.
-TEST (ScriptApiScan, CryptoJsIsNotNamed) {
+// Vayu runs part of crypto-js (#2578), as the global and as a shelf module: a
+// script that stays inside what the shim defines is not named, one that reaches
+// past it is, under the one name `CryptoJS`.
+TEST (ScriptApiScan, CryptoJsMembersThatRunAreNotNamed) {
     EXPECT_EQ (names_in ("CryptoJS.MD5('x');"), Names{});
     EXPECT_EQ (names_in ("const sig = `sig=${CryptoJS.HmacSHA256(m, k)}`;"), Names{});
+    EXPECT_EQ (names_in ("CryptoJS.SHA512(m).toString(CryptoJS.enc.Base64);"), Names{});
+    EXPECT_EQ (
+    names_in ("CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(s));"), Names{});
+    EXPECT_EQ (names_in ("const w = CryptoJS.lib.WordArray.create([1, 2], 8);"), Names{});
+    EXPECT_EQ (names_in ("CryptoJS\n  .HmacSHA1(m, k);"), Names{});
+    // The shelf's own binding is the same object, declared or not.
+    EXPECT_EQ (
+    names_in ("const CryptoJS = require('crypto-js'); CryptoJS.MD5(x);"), Names{});
+    // A bare reference is not a member.
+    EXPECT_EQ (
+    names_in ("const c = CryptoJS; const { MD5 } = CryptoJS; use(CryptoJS);"), Names{});
+    EXPECT_EQ (names_in ("CryptoJS.enc;"), Names{});
+}
+
+TEST (ScriptApiScan, CryptoJsMembersThatThrowAreNamedAsCryptoJs) {
+    const Names expected{ "CryptoJS" };
+    for (const char* script : { "CryptoJS.AES.encrypt(m, k);",
+         "CryptoJS.SHA3(m);", "CryptoJS.RIPEMD160(m);", "CryptoJS.HmacSHA3(m, k);",
+         "CryptoJS.HmacRIPEMD160(m, k);", "CryptoJS.PBKDF2(p, s, { keySize: 8 });",
+         "CryptoJS.algo.SHA256.create();", "CryptoJS.enc.Base64url.stringify(w);",
+         "CryptoJS.enc.Utf16.parse(s);", "CryptoJS.lib.WordArray.random(16);",
+         "CryptoJS.lib.Cipher;", "CryptoJS.mode.CBC;", "CryptoJS.pad.Pkcs7;",
+         "CryptoJS.Hmac(m, k);", "CryptoJS.hmacSHA256(m, k);", "CryptoJS?.AES;" }) {
+        EXPECT_EQ (names_in (script), expected) << script;
+    }
+}
+
+TEST (ScriptApiScan, AComputedCryptoJsMemberIsNamed) {
+    EXPECT_EQ (names_in ("CryptoJS[algorithm](m);"), Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("CryptoJS.enc[encoding].parse(s);"), Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("CryptoJS.lib['WordArray'].create();"), Names{ "CryptoJS" });
+}
+
+TEST (ScriptApiScan, AnUnsupportedCryptoJsMemberIsNamedBesideSupportedOnes) {
+    EXPECT_EQ (
+    names_in ("CryptoJS.MD5(a); CryptoJS.AES.decrypt(b, k); CryptoJS.SHA1(c);"),
+    Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("const CryptoJS = require('crypto-js'); "
+                         "CryptoJS.AES.encrypt(m, k);"),
+    Names{ "CryptoJS" });
+}
+
+TEST (ScriptApiScan, ACryptoJsMentionInACommentOrStringIsNotNamed) {
+    EXPECT_EQ (
+    names_in ("// CryptoJS.AES.encrypt(m, k)\nconst s = 'CryptoJS.SHA3';"), Names{});
+    EXPECT_EQ (names_in ("a.CryptoJS.AES; CryptoJSX.AES; myCryptoJS.AES;"), Names{});
 }
 
 TEST (ScriptApiScan, ARequireOfAShelfModuleIsNotNamed) {

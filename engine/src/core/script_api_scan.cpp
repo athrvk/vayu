@@ -469,6 +469,9 @@ enum class Exemption : std::uint8_t {
     /// `require('<a module on the shelf>')`: the call's argument is a string
     /// literal naming one of `vayu::runtime::SHELF_MODULE_NAMES`.
     ShelfModule,
+    /// A bare `CryptoJS`, or a path of members the shim defines
+    /// (`vayu::runtime::CRYPTO_JS_MEMBERS`); anything else under it throws.
+    CryptoJsMember,
 };
 
 /**
@@ -503,6 +506,8 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.
 { "Buffer", Anchor::Bare, "Buffer", "" },
+// Only the members the crypto-js shim lacks (#2578); the ones it has are exempt.
+{ "CryptoJS", Anchor::Bare, "CryptoJS", "", Exemption::CryptoJsMember },
 // `pm.*` members Vayu does not have.
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
@@ -617,26 +622,6 @@ bool requires_shelf_module (std::string_view script, std::string_view code, std:
     next_significant (code, after) == ')';
 }
 
-/// Whether the use of @p rule whose path ends at @p path_end (a byte offset) is one Vayu runs.
-bool is_exempt_use (const ApiRule& rule,
-std::string_view script,
-std::string_view code,
-std::size_t path_end) {
-    switch (rule.exempt) {
-    case Exemption::None: break;
-    case Exemption::ShelfModule:
-        return requires_shelf_module (script, code, path_end);
-    }
-    return false;
-}
-
-/// A rule of one bare word names a global; it does not when the script has its
-/// own variable of that name.
-bool is_declared_global (const ApiRule& rule, const Declarations& declared) {
-    return rule.anchor == Anchor::Bare &&
-    rule.path.find ('.') == std::string_view::npos && declared.contains (rule.path);
-}
-
 /// The script being read: its text, the stripped view of it, and what both hold.
 struct ScanInput {
     std::string_view script;
@@ -644,6 +629,50 @@ struct ScanInput {
     const std::vector<Token>& tokens;
     const Declarations& declared;
 };
+
+/// Whether the `CryptoJS` at token @p root is used the way the shim supports:
+/// bare, or followed by a path of listed members. Whatever follows the first
+/// leaf of the list (`CryptoJS.enc.Hex.stringify`) belongs to the value, so the
+/// walk stops there. A computed member (`CryptoJS[name]`, `CryptoJS.enc[name]`)
+/// cannot be read, and a notice errs toward naming.
+bool crypto_js_use_is_supported (const ScanInput& in, std::size_t root) {
+    std::string path;
+    std::size_t last = root;
+    while (path.empty () || vayu::runtime::is_crypto_js_namespace (path)) {
+        const std::size_t next = last + 1;
+        if (next >= in.tokens.size () || !in.tokens.at (next).chained) {
+            return next_significant (in.code, in.tokens.at (last).end) != '[';
+        }
+        path += (path.empty () ? "" : ".");
+        path += word_of (in.code, in.tokens.at (next));
+        if (!vayu::runtime::is_crypto_js_member (path)) {
+            return false;
+        }
+        last = next;
+    }
+    return true;
+}
+
+/// Whether the use of @p rule whose path ends before token @p end is one Vayu runs.
+bool is_exempt_use (const ApiRule& rule, const ScanInput& in, std::size_t end) {
+    switch (rule.exempt) {
+    case Exemption::None: break;
+    case Exemption::ShelfModule:
+        return requires_shelf_module (in.script, in.code, in.tokens.at (end - 1).end);
+    case Exemption::CryptoJsMember:
+        return crypto_js_use_is_supported (in, end - 1);
+    }
+    return false;
+}
+
+/// A rule of one bare word names a global; it does not when the script has its
+/// own variable of that name. `CryptoJS` is the exception: a script declares it
+/// as `const CryptoJS = require('crypto-js')`, which is the same object, so the
+/// declaration says nothing about which members it has.
+bool is_declared_global (const ApiRule& rule, const Declarations& declared) {
+    return rule.exempt != Exemption::CryptoJsMember && rule.anchor == Anchor::Bare &&
+    rule.path.find ('.') == std::string_view::npos && declared.contains (rule.path);
+}
 
 /// Whether @p rule's path starts at token @p first and is a use Vayu does not run.
 bool is_unsupported_use (const ScanInput& in, std::size_t first, const ApiRule& rule) {
@@ -654,7 +683,7 @@ bool is_unsupported_use (const ScanInput& in, std::size_t first, const ApiRule& 
     if (!end || is_declared_global (rule, in.declared)) {
         return false;
     }
-    return !is_exempt_use (rule, in.script, in.code, in.tokens.at (*end - 1).end);
+    return !is_exempt_use (rule, in, *end);
 }
 
 } // namespace
