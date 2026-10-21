@@ -9,7 +9,9 @@
  * Keeps the two host classifiers honest.
  *
  * `isPrivateHost` in `electron/mcp/safety.ts` decides which monitor endpoints
- * skip the MCP allowlist; `isLocalHost` in `src/lib/host-locality.ts` decides
+ * are the user's own network (minus the link-local and metadata hosts that
+ * `isLinkLocalHost` there takes back out, which this classification does not
+ * model); `isLocalHost` in `src/lib/host-locality.ts` decides
  * which load-test targets the dialog calls local (#2117). They are the same
  * classification, mirrored on purpose because the process boundary forbids
  * sharing a source file (see `compare.conformance.test.ts`); change both.

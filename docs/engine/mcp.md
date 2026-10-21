@@ -2011,9 +2011,14 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   which is what a URL parses to.
   A run's **`monitor.url` is a second host** and gets its own check, with one
   deliberate exemption: a **loopback or private-network** monitor endpoint
-  (`localhost`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`,
-  `::1`, `fc00::/7`, `fe80::/10`) needs no allowlist entry, while a public one
-  is checked exactly as the target URL is. The allowlist exists to stop an agent
+  (`localhost`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `::1`,
+  `fc00::/7`) needs no allowlist entry, while a public one is checked exactly as
+  the target URL is. **Link-local and cloud-metadata addresses are not exempt**
+  (#2370): `169.254.0.0/16` (which holds `169.254.169.254`, the metadata service
+  on AWS, GCP and Azure), `fe80::/10` and AWS's IPv6 `fd00:ec2::254` need an
+  allowlist entry like a public host, because a scrape of one reads
+  credentials rather than the user's exporter. The rest of `fc00::/7` stays
+  exempt. The allowlist exists to stop an agent
   generating traffic against third parties it was never pointed at, and a
   private address is by definition the user's own network - which is also the
   feature's own case, since the endpoint a load run wants beside it is the

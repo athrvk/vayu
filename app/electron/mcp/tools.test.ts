@@ -4504,6 +4504,22 @@ describe("start_load_run scenario runs", () => {
 		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
+	test("refuses a cloud-metadata monitor URL before anything is started", async () => {
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				monitor: { url: "http://169.254.169.254/latest/meta-data/", series: ["up"] },
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/not on the MCP allowlist/i);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
 	test("applies the load caps to virtual users, duration and iterations", async () => {
 		const client = scenarioLoadClient();
 		const vus = await dispatchTool(
@@ -6030,6 +6046,31 @@ describe("dispatchTool", () => {
 		expect(firstText(res)).toMatch(/monitor endpoint is a second host/i);
 		expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
 	});
+
+	test.each([
+		"http://169.254.169.254/latest/meta-data/",
+		"http://[fd00:ec2::254]/latest/meta-data/",
+	])(
+		"start_load_run refuses the cloud-metadata monitor %s before starting the run",
+		async (url) => {
+			// A private address, but one that serves credentials rather than the
+			// user's exporter, so it needs the allowlist entry a public host does (#2370).
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				parseArgs("start_load_run", {
+					url: "https://api.example.com",
+					confirmed: true,
+					monitor: { url, series: ["up"] },
+				}),
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/not on the MCP allowlist/i);
+			expect((client.startRun as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+		}
+	);
 
 	test("start_load_run leaves the monitor block's ranges to the engine", () => {
 		// Deliberate: `monitor.series`' ceiling is the `monitorMaxSeries` setting,

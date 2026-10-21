@@ -186,6 +186,30 @@ function isPrivateIpv4(address: string): boolean {
 	return false;
 }
 
+/** AWS's IMDS endpoint over IPv6, the one metadata address outside link-local space. */
+const IPV6_METADATA_ADDRESS = "fd00:ec2::254";
+
+/**
+ * Whether `host` is a link-local address, or the one IPv6 cloud-metadata
+ * address that sits outside link-local space. Same canonical-form input as
+ * `isPrivateHost`; this is deliberately a separate predicate so that one stays
+ * the mirror `host-locality.conformance.test.ts` pins.
+ *
+ * These hosts count as private for "is this the user's own network" (the
+ * dialog's label) but are the ones an agent could aim a scrape at to read
+ * credentials: 169.254.169.254 is the metadata service on AWS, GCP and Azure,
+ * and `fd00:ec2::254` is AWS's IPv6 spelling of it. Only that one address is
+ * named from fc00::/7; the rest of the block is ordinary LAN space.
+ */
+export function isLinkLocalHost(host: string): boolean {
+	if (!host.startsWith("[") || !host.endsWith("]")) {
+		return /^169\.254\.\d+\.\d+$/.test(host);
+	}
+	const address = unmapIpv4(host.slice(1, -1));
+	if (/^\d+\.\d+\.\d+\.\d+$/.test(address)) return address.startsWith("169.254.");
+	return /^fe[89ab][0-9a-f]:/.test(address) || address === IPV6_METADATA_ADDRESS;
+}
+
 /**
  * Enforce the allowlist against a run's **monitor** endpoint - the second host
  * a monitored run contacts, which is not the target's and is not covered by the
@@ -197,9 +221,14 @@ function isPrivateIpv4(address: string): boolean {
  * pointed at, and a private address is by definition the user's own network -
  * which is also the whole feature, since the endpoint a load run wants beside it
  * is the target's own `localhost:9100`. Requiring that host to be allowlisted
- * would make the capability unreachable in the case it was built for. The
- * engine draws the same line for the same reason (`read_monitor_block`,
- * `engine/src/core/monitor.cpp`).
+ * would make the capability unreachable in the case it was built for.
+ *
+ * **The exception (#2370):** link-local addresses (169.254.0.0/16, fe80::/10)
+ * and `fd00:ec2::254` are not exempt. They are where cloud metadata services
+ * answer, so a scrape of one is a credential read, not the user's exporter.
+ * They go through the allowlist like a public host. The engine's own monitor
+ * validation (`read_monitor_block`, `engine/src/core/monitor.cpp`) is
+ * unchanged; this gate is the MCP layer's.
  *
  * A public monitor host is a request to some third party at one GET per scrape
  * for the life of the run, which is exactly what the allowlist is for, so it
@@ -213,12 +242,12 @@ export function checkMonitorHost(url: string, config: McpSafetyConfig, host: Mcp
 			error: "Could not determine the host of `monitor.url` (it may be empty or contain unresolved {{variables}}). Resolve it before retrying.",
 		};
 	}
-	if (isPrivateHost(monitorHost)) return OK;
+	if (isPrivateHost(monitorHost) && !isLinkLocalHost(monitorHost)) return OK;
 	const gate = checkAllowlist(url, config, host);
 	if (gate.ok) return OK;
 	return {
 		ok: false,
-		error: `The monitor endpoint is a second host this run would contact, once per scrape: ${gate.error} (A loopback or private-network monitor URL needs no allowlist entry.)`,
+		error: `The monitor endpoint is a second host this run would contact, once per scrape: ${gate.error} (A loopback or private-network monitor URL needs no allowlist entry, except link-local and cloud-metadata addresses, which do.)`,
 	};
 }
 

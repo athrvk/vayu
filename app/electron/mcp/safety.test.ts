@@ -136,6 +136,8 @@ describe("checkMonitorHost", () => {
 	// The feature exists to scrape the target's own localhost:9100, so requiring
 	// an entry for that would make it unreachable in its own case; a public
 	// monitor host is third-party traffic and gets the check the target gets.
+	// Link-local and cloud-metadata addresses are private but not exempt: they
+	// are where credentials are served, not where the user's exporter is (#2370).
 	const empty = DEFAULT_MCP_SAFETY_CONFIG;
 
 	test.each([
@@ -147,9 +149,7 @@ describe("checkMonitorHost", () => {
 		"http://172.16.0.9:9100/metrics",
 		"http://172.31.255.1:9100/metrics",
 		"http://192.168.1.50:9100/metrics",
-		"http://169.254.10.1:9100/metrics",
 		"http://[fd00::1]:9100/metrics",
-		"http://[fe80::1]:9100/metrics",
 		// WHATWG URL normalises the alternate IPv4 spellings, so the guard reads
 		// 127.0.0.1 here rather than a string it would not recognise.
 		"http://2130706433:9100/metrics",
@@ -171,6 +171,25 @@ describe("checkMonitorHost", () => {
 		const res = checkMonitorHost(url, empty, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/monitor endpoint is a second host/i);
+	});
+
+	// Each spelling reaches the guard as the canonical host `URL` reports, so the
+	// last two rows prove the mapped and decimal forms cannot skirt the check.
+	test.each([
+		["http://169.254.10.1:9100/metrics", "169.254.10.1"],
+		["http://169.254.169.254/latest/meta-data/", "169.254.169.254"],
+		["http://[fe80::1]:9100/metrics", "[fe80::1]"],
+		["http://[febf::1]:9100/metrics", "[febf::1]"],
+		["http://[fd00:ec2::254]/latest/meta-data/", "[fd00:ec2::254]"],
+		["http://[::ffff:a9fe:a9fe]/latest/meta-data/", "[::ffff:a9fe:a9fe]"],
+		["http://2852039166/latest/meta-data/", "169.254.169.254"],
+	])("requires an allowlist entry for the link-local or metadata endpoint %s", (url, host) => {
+		const refused = checkMonitorHost(url, empty, "app");
+		expect(refused.ok).toBe(false);
+		expect(refused.error).toMatch(/allowlist/i);
+
+		const config = resolveSafetyConfig({ allowlist: [host] });
+		expect(checkMonitorHost(url, config, "app").ok).toBe(true);
 	});
 
 	test("accepts a public monitor host that is on the allowlist", () => {
