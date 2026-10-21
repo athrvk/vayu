@@ -16,8 +16,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -37,6 +41,10 @@ get_request_response (vayu::db::Database& db, const std::string& id);
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
 // Defined in requests.cpp; the GET /requests body with no `collectionId`.
 std::string list_all_requests_body (vayu::db::Database& db);
+// Defined in requests.cpp; the whole GET /requests route, {status, body_text}.
+std::pair<int, std::string> list_requests_response (vayu::db::Database& db,
+const std::optional<std::string>& collection_id,
+std::string_view fields);
 // Defined in requests.cpp; each returns {http_status, json_body}.
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
@@ -46,6 +54,23 @@ const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
+
+// The keys a `fields=summary` row carries (#2546), and the only ones.
+constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> ({ "id",
+"collectionId", "name", "method", "url", "order", "createdAt", "specOperation" });
+
+// A full list projected onto the summary keys: what the summary must equal.
+json project_onto_summary_keys (const json& full_rows) {
+    json projected = json::array ();
+    for (const auto& row : full_rows) {
+        json kept = json::object ();
+        for (const auto key : SUMMARY_KEYS) {
+            kept[std::string (key)] = row.at (std::string (key));
+        }
+        projected.push_back (std::move (kept));
+    }
+    return projected;
+}
 
 class RequestsRouteTest : public ::testing::Test {
     protected:
@@ -214,6 +239,130 @@ TEST_F (RequestsRouteTest, AllRequestsBodyIsEveryLiveCollectionsListAndNothingTr
     }
     ASSERT_EQ (expected.size (), 3u) << "the fixture seeded the wrong rows";
     EXPECT_EQ (all, expected);
+}
+
+// -- `fields=summary` (#2546) ------------------------------------------------
+
+// The summary is the full list, row for row and in the same order, with each
+// row cut to the tree keys: compared against the full body rather than a
+// hand-written expectation, in both the all-live and the per-collection form.
+// Mutation check: drop `deleted_at` from either summary read's filter, or
+// order either by anything but the full read's keys, and this reds.
+TEST_F (RequestsRouteTest, SummaryIsTheFullListCutToTheTreeKeys) {
+    seed_collection_at ("col_b", "", 0);
+    seed_collection_at ("col_a", "", 1);
+    seed_collection_at ("col_gone", "", 2);
+    struct Seed {
+        const char* id;
+        const char* collection;
+        int order;
+        int64_t created_at;
+    };
+    // `req_a_tie_*` tie on order and created_at, so only `id` places them.
+    for (const auto& seed : { Seed{ "req_a1", "col_a", 1, 1 },
+         Seed{ "req_a_tie_b", "col_a", 0, 5 }, Seed{ "req_a_tie_a", "col_a", 0, 5 },
+         Seed{ "req_a_later", "col_a", 0, 9 }, Seed{ "req_b0", "col_b", 0, 1 },
+         Seed{ "req_deleted", "col_b", 1, 1 }, Seed{ "req_gone", "col_gone", 0, 1 } }) {
+        vayu::db::Request r;
+        r.id            = seed.id;
+        r.collection_id = seed.collection;
+        r.name          = seed.id;
+        r.method        = vayu::HttpMethod::POST;
+        r.url           = std::string ("https://example.test/") + seed.id;
+        r.headers       = R"([{"key":"Accept","value":"*/*","enabled":true}])";
+        r.body          = R"({"mode":"raw","content":"{}"})";
+        r.order         = seed.order;
+        r.created_at    = seed.created_at;
+        r.spec_operation = R"({"operationId":"op","method":"POST","path":"/x"})";
+        db_->save_request (r);
+    }
+    db_->delete_request ("req_deleted");
+    db_->delete_collection ("col_gone");
+
+    auto [status, body] =
+    vayu::http::routes::list_requests_response (*db_, std::nullopt, "summary");
+    ASSERT_EQ (status, 200) << body;
+    const auto summary = json::parse (body);
+    EXPECT_EQ (summary,
+    project_onto_summary_keys (
+    json::parse (vayu::http::routes::list_all_requests_body (*db_))));
+
+    std::vector<std::string> ids;
+    ids.reserve (summary.size ());
+    for (const auto& row : summary) {
+        ids.push_back (row.at ("id").get<std::string> ());
+    }
+    EXPECT_EQ (ids,
+    (std::vector<std::string>{ "req_a_tie_a", "req_a_tie_b", "req_a_later", "req_a1", "req_b0" }));
+    ASSERT_FALSE (summary.empty ());
+    EXPECT_EQ (summary[0]["method"], "POST");
+    EXPECT_EQ (summary[0]["specOperation"]["operationId"], "op");
+
+    for (const char* collection : { "col_a", "col_b", "col_gone" }) {
+        auto [one_status, one_body] =
+        vayu::http::routes::list_requests_response (*db_, collection, "summary");
+        ASSERT_EQ (one_status, 200) << one_body;
+        EXPECT_EQ (json::parse (one_body),
+        project_onto_summary_keys (
+        json::parse (vayu::http::routes::list_requests_body (*db_, collection))))
+        << collection;
+    }
+}
+
+// No `fields` is the route as it was before it took one.
+TEST_F (RequestsRouteTest, NoFieldsAnswersTheFullListByteForByte) {
+    seed_request ();
+
+    // The handler reads an absent parameter as empty.
+    EXPECT_EQ (vayu::http::routes::list_requests_response (*db_, std::nullopt, ""),
+    std::make_pair (200, vayu::http::routes::list_all_requests_body (*db_)));
+    EXPECT_EQ (vayu::http::routes::list_requests_response (*db_, "col_1", ""),
+    std::make_pair (200, vayu::http::routes::list_requests_body (*db_, "col_1")));
+}
+
+// The point of the summary: a large body costs its row nothing. One row's
+// summary is about 200 bytes and the full row carries the whole 5 MiB body;
+// the bound sits between them. Mutation check: answer the summary with the
+// full rows and this reds.
+TEST_F (RequestsRouteTest, ALargeBodyDoesNotEnlargeTheSummary) {
+    seed_collection_at ("col_big", "", 0);
+    vayu::db::Request r;
+    r.id            = "req_big";
+    r.collection_id = "col_big";
+    r.name          = "big";
+    r.url           = "https://example.test/";
+    r.body =
+    json{ { "mode", "raw" }, { "content", std::string (5U << 20U, 'x') } }.dump ();
+    db_->save_request (r);
+
+    constexpr std::size_t SUMMARY_BOUND = 4096;
+    for (const auto& collection_id :
+    { std::optional<std::string>{}, std::optional<std::string>{ "col_big" } }) {
+        auto [status, body] =
+        vayu::http::routes::list_requests_response (*db_, collection_id, "summary");
+        ASSERT_EQ (status, 200);
+        EXPECT_LT (body.size (), SUMMARY_BOUND);
+        EXPECT_EQ (json::parse (body).size (), 1U);
+    }
+}
+
+// A `fields` the route does not know is refused, not served as the full list.
+TEST_F (RequestsRouteTest, UnknownFieldsIs400) {
+    seed_request ();
+
+    for (const char* fields : { "full", "Summary", "summary,body" }) {
+        for (const auto& collection_id :
+        { std::optional<std::string>{}, std::optional<std::string>{ "col_1" } }) {
+            auto [status, body] =
+            vayu::http::routes::list_requests_response (*db_, collection_id, fields);
+            EXPECT_EQ (status, 400) << fields;
+            const auto error = json::parse (body);
+            EXPECT_EQ (error["error"]["code"], "invalid_fields") << fields;
+            EXPECT_NE (error["error"]["message"].get<std::string> ().find (fields),
+            std::string::npos)
+            << fields;
+        }
+    }
 }
 
 TEST_F (RequestsRouteTest, PresentRequestIs200WithSerializedShape) {

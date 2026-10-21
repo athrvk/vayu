@@ -1487,10 +1487,35 @@ tiebreak is part of the contract.
 - `collectionId` (optional): Collection ID to fetch requests from. Absent, the
   response is every live request of every live collection, grouped by
   `collectionId` and ordered within each group exactly as that collection's own
-  list is - nothing in the trash. The app builds its whole tree from this one
-  call at launch instead of one call per collection.
+  list is - nothing in the trash.
+- `fields` (optional): `summary` answers each row cut to the keys a tree is
+  built from (#2546), described below; absent (or empty), the full request
+  objects. Any other value is a `400` with code `invalid_fields`, never the
+  full list. The app builds its whole tree at launch from one
+  `GET /requests?fields=summary` call.
 
-**Response:** An array of request objects, each in the same shape as a
+**Summary response** (`fields=summary`): the same rows in the same order as
+the full form, each carrying exactly `id`, `collectionId`, `name`, `method`,
+`url`, `order`, `createdAt` and `specOperation`, spelled and valued as the full
+row writes them (`specOperation` is the object or `null`). Nothing else is read
+from the database, so a large body, header set, auth block or element list
+costs its row nothing, and no row carries `truncatedFields`.
+```json
+[
+  {
+    "id": "req_1234567890",
+    "collectionId": "col_1234567890",
+    "name": "Get Users",
+    "method": "GET",
+    "url": "{{baseUrl}}/users",
+    "order": 0,
+    "createdAt": 1234567890,
+    "specOperation": null
+  }
+]
+```
+
+**Response** (no `fields`): An array of request objects, each in the same shape as a
 `GET /requests/:id` response: `params`/`headers` are arrays of
 `{key, value, enabled}` entries and `body` is a JSON discriminated union
 (see the `requests` table in [db-schema.md](db-schema.md)) - with one
@@ -1554,8 +1579,8 @@ every collection's request list and scanning them for the id.
 **Path Parameters:**
 - `id` (required): The request ID to fetch
 
-**Response:** The request object, in the same shape as a `GET /requests` list
-entry.
+**Response:** The request object, in the same shape as a full `GET /requests`
+list entry.
 ```json
 {
   "id": "req_1234567890",
@@ -1798,7 +1823,7 @@ keys present (even `null` is accepted as a no-op, but a real value is not) is a
 rule: absent keeps the stored list; `null` resets it to `[]`; a present value
 must be an array the element registry accepts (see [Elements](elements.md)) or
 the write is a `400` naming the index, the kind and the field. The only script
-source - `GET /requests/:id` and every list response carry it and no longer
+source - `GET /requests/:id` and every full list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
 **`auth.postman`**, the Postman block an import kept beside the mapped auth

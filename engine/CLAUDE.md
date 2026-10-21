@@ -610,7 +610,8 @@ logged as a warning: it means a client skipped composition.
   to load a restored request tab or a design-run copy on cold start. A `404`
   means the request was genuinely deleted; anything else is a transport failure,
   and callers (`DesignRunView`) keep those apart: only a real 404 becomes
-  `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's.
+  `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's;
+  `?fields=summary` answers only the columns a tree is built from (#2546).
 - **A streaming request is a different execution model, declared not detected**
   (#573). `POST /execute` with `"stream": true` creates the run row, hands the
   transfer to `SseStreamManager` (declared before `server_`, like the listener
