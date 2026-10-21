@@ -7,9 +7,9 @@
 #
 # - Which files a push carries: the commits no remote-tracking ref reaches,
 #   for every pushed ref but a deletion or a tag.
-# - The version probe (#659): `engine/.clang-tidy` needs clang-tidy 19, and an
-#   older one rejects the config, lints nothing and still exits 0.
-# - Discovery (#918): `apt install clang-tidy-19` leaves the plain name at 18.
+# - The version probe (#659): CI lints with clang-tidy 22, the hook's floor; one
+#   before 19 rejects the config, lints nothing and still exits 0.
+# - Discovery (#918): `apt install clang-tidy-22` leaves the plain name at 18.
 # - The verdict (#885): every file's status is kept, and any finding refuses.
 # - The scope (#946): whole files, never a line filter.
 # - The PCH flag (#912): on the hook's command line, never in the shared config.
@@ -114,7 +114,7 @@ git -C "$repo" update-ref refs/remotes/origin/master HEAD
 printf 'int fresh() { return 0; }\n' > "$repo/fresh.cpp"
 git -C "$repo" add fresh.cpp
 git -C "$repo" commit --quiet -m "fresh"
-stub="$(make_stub 19.1.0 old.cpp)"
+stub="$(make_stub 22.1.8 old.cpp)"
 set +e
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$PATH" bash "$HOOK" origin url 2>&1)"
 status=$?
@@ -132,7 +132,7 @@ repo="$(make_repo)"
 printf 'int later() { return 0; }\n' > "$repo/later.cpp"
 git -C "$repo" add later.cpp
 git -C "$repo" commit --quiet -m "later"
-stub="$(make_stub 19.1.0 helper.cpp)"
+stub="$(make_stub 22.1.8 helper.cpp)"
 set +e
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$PATH" bash "$HOOK" origin url 2>&1)"
 status=$?
@@ -150,7 +150,7 @@ repo="$(make_repo)"
 printf '#pragma once\nint header_fn();\n' > "$repo/api.hpp"
 git -C "$repo" add api.hpp
 git -C "$repo" commit --quiet -m "header"
-stub="$(make_stub 19.1.0)"
+stub="$(make_stub 22.1.8)"
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$PATH" bash "$HOOK" origin url 2>&1)"
 rm -rf "$repo" "$stub"
 if [[ "$out" == *"STUB_LINTED"*"api.hpp"* ]]; then
@@ -181,7 +181,7 @@ fi
 
 # A branch deletion and a tag carry no new code.
 repo="$(make_repo)"
-stub="$(make_stub 19.1.0 main.cpp)"
+stub="$(make_stub 22.1.8 main.cpp)"
 sha="$(git -C "$repo" rev-parse HEAD)"
 set +e
 out="$(cd "$repo" && printf '(delete) %s refs/heads/gone %s\nrefs/tags/v1 %s refs/tags/v1 %s\n' \
@@ -198,7 +198,7 @@ fi
 # The hook runs as `.git/hooks/pre-push`, a symlink, and must still find the
 # helper it sources next to the real script.
 repo="$(make_repo)"
-stub="$(make_stub 19.1.0)"
+stub="$(make_stub 22.1.8)"
 mkdir -p "$repo/.git/hooks"
 ln -sf "$HOOK" "$repo/.git/hooks/pre-push"
 set +e
@@ -217,7 +217,7 @@ echo
 echo "pre-push clang-tidy version probe"
 
 out="$(run_hook_with_version 18.1.3)"
-if [[ "$out" == *"NOTHING WAS LINTED"* && "$out" == *"18.1.3"* && "$out" == *">= 19"* ]]; then
+if [[ "$out" == *"NOTHING WAS LINTED"* && "$out" == *"18.1.3"* && "$out" == *"clang-tidy 22"* ]]; then
     pass "clang-tidy 18 is refused loudly, naming the version and the requirement"
 else
     fail "clang-tidy 18 is refused loudly" "got: $out"
@@ -229,28 +229,36 @@ else
     fail "clang-tidy 18 lints nothing" "the hook invoked clang-tidy anyway: $out"
 fi
 
-out="$(run_hook_with_version 19.1.0)"
-if [[ "$out" == *"STUB_LINTED"* && "$out" == *"main.cpp"* && "$out" != *"NOTHING WAS LINTED"* ]]; then
-    pass "clang-tidy 19 lints the pushed file, with no warning"
+# One below the floor: it reads the config, but answers differently from CI.
+out="$(run_hook_with_version 21.1.8)"
+if [[ "$out" == *"NOTHING WAS LINTED"* && "$out" == *"21.1.8"* && "$out" != *"STUB_LINTED"* ]]; then
+    pass "clang-tidy 21 is refused, one major below the clang-tidy 22 CI lints with"
 else
-    fail "clang-tidy 19 lints the pushed file" "got: $out"
+    fail "clang-tidy 21 is refused" "got: $out"
 fi
 
-# A string compare would put "20" before "19".
-out="$(run_hook_with_version 20.0.0)"
-if [[ "$out" == *"STUB_LINTED"* && "$out" != *"NOTHING WAS LINTED"* ]]; then
-    pass "clang-tidy 20 is newer than 19, not alphabetically before it"
+out="$(run_hook_with_version 22.1.8)"
+if [[ "$out" == *"STUB_LINTED"* && "$out" == *"main.cpp"* && "$out" != *"NOTHING WAS LINTED"* ]]; then
+    pass "clang-tidy 22 lints the pushed file, with no warning"
 else
-    fail "clang-tidy 20 is accepted" "got: $out"
+    fail "clang-tidy 22 lints the pushed file" "got: $out"
+fi
+
+# A string compare would put "100" before "22".
+out="$(run_hook_with_version 100.0.0)"
+if [[ "$out" == *"STUB_LINTED"* && "$out" != *"NOTHING WAS LINTED"* ]]; then
+    pass "clang-tidy 100 is newer than 22, not alphabetically before it"
+else
+    fail "clang-tidy 100 is accepted" "got: $out"
 fi
 
 # An unparseable --version is a refusal, not a pass. Both names, because the
-# hook looks under `clang-tidy-19` first and a real one on PATH would answer.
+# hook looks under `clang-tidy-22` first and a real one on PATH would answer.
 repo="$(make_repo)"
 stub="$(mktemp -d)"
 printf '#!/usr/bin/env bash\necho "clang-tidy from somewhere"\nexit 0\n' > "$stub/clang-tidy"
 chmod +x "$stub/clang-tidy"
-cp "$stub/clang-tidy" "$stub/clang-tidy-19"
+cp "$stub/clang-tidy" "$stub/clang-tidy-22"
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$PATH" bash "$HOOK" origin url 2>&1)"
 rm -rf "$repo" "$stub"
 if [[ "$out" == *"NOTHING WAS LINTED"* ]]; then
@@ -264,22 +272,22 @@ echo
 echo "pre-push clang-tidy discovery"
 
 # Ubuntu 24.04's shape: the plain name is an 18, placed *earlier* on PATH than
-# the versioned 19, so what is under test is preferring the versioned name.
+# the versioned 22, so what is under test is preferring the versioned name.
 # Mutation-check: revert the clang-tidy discovery to the plain name and both
 # cases below redden.
 repo="$(make_repo)"
 plain="$(make_stub 18.1.3 "" 1 clang-tidy)"
-versioned="$(make_stub 19.1.0 main.cpp 1 clang-tidy-19)"
+versioned="$(make_stub 22.1.8 main.cpp 1 clang-tidy-22)"
 sandbox="$(make_sandbox_path)"
 set +e
 out="$(cd "$repo" && push_line "$repo" | PATH="$plain:$versioned:$sandbox" bash "$HOOK" origin url 2>&1)"
 status=$?
 set -e
 rm -rf "$repo" "$plain" "$versioned" "$sandbox"
-if [[ "$out" == *"Running clang-tidy-19 "* && "$out" == *"STUB_LINTED"* ]]; then
-    pass "clang-tidy-19 is preferred over a plain clang-tidy that is 18"
+if [[ "$out" == *"Running clang-tidy-22 "* && "$out" == *"STUB_LINTED"* ]]; then
+    pass "clang-tidy-22 is preferred over a plain clang-tidy that is 18"
 else
-    fail "clang-tidy-19 is found beside an 18" "exit $status: $out"
+    fail "clang-tidy-22 is found beside an 18" "exit $status: $out"
 fi
 
 if [[ "$status" -ne 0 && "$out" != *"NOTHING WAS LINTED"* ]]; then
@@ -292,14 +300,14 @@ fi
 echo
 echo "pre-push exit status"
 
-run_hook 19.1.0
+run_hook 22.1.8
 if [[ "$HOOK_STATUS" -eq 0 ]]; then
     pass "a clean lint lets the push through"
 else
     fail "a clean lint lets the push through" "exit $HOOK_STATUS: $HOOK_OUTPUT"
 fi
 
-run_hook 19.1.0 main.cpp
+run_hook 22.1.8 main.cpp
 if [[ "$HOOK_STATUS" -ne 0 ]]; then
     pass "a clang-tidy finding refuses the push"
 else
@@ -314,7 +322,7 @@ fi
 
 # A finding on the first of two files: the second is still linted, and the run
 # still fails - accumulating the status, not keeping only the last one.
-run_hook 19.1.0 helper.cpp
+run_hook 22.1.8 helper.cpp
 if [[ "$HOOK_OUTPUT" == *"STUB_LINTED"*"main.cpp"* && "$HOOK_STATUS" -ne 0 ]]; then
     pass "a finding in one file neither stops the others nor is lost"
 else
@@ -335,7 +343,7 @@ echo "pre-push whole-file scope"
 
 # Mutation-check: pass a `--line-filter` built from the pushed hunks and the
 # stub, honouring it, reports nothing on line 1 - this case reddens.
-run_hook 19.1.0 legacy.cpp 1 make_repo_with_history
+run_hook 22.1.8 legacy.cpp 1 make_repo_with_history
 if [[ "$HOOK_STATUS" -ne 0 ]]; then
     pass "a finding on a line the push did not touch still refuses it"
 else
@@ -348,7 +356,7 @@ else
     fail "the invocation carries no line filter" "got: $HOOK_OUTPUT"
 fi
 
-run_hook 19.1.0 legacy.cpp 3 make_repo_with_history
+run_hook 22.1.8 legacy.cpp 3 make_repo_with_history
 if [[ "$HOOK_STATUS" -ne 0 ]]; then
     pass "a finding on a line the push changes refuses it"
 else
@@ -360,7 +368,7 @@ repo="$(make_repo_with_history)"
 git -C "$repo" reset --quiet --hard HEAD~1
 printf 'int a() { return 0; }\nint b() { return 0; }\n' > "$repo/legacy.cpp"
 git -C "$repo" commit --quiet -am "delete lines"
-stub="$(make_stub 19.1.0 legacy.cpp 1)"
+stub="$(make_stub 22.1.8 legacy.cpp 1)"
 set +e
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$PATH" bash "$HOOK" origin url 2>&1)"
 status=$?
@@ -381,7 +389,7 @@ echo "pre-push PCH flag placement"
 repo="$(make_repo)"
 mkdir -p "$repo/engine/build"
 printf '[]\n' > "$repo/engine/build/compile_commands.json"
-stub="$(make_stub 19.1.0)"
+stub="$(make_stub 22.1.8)"
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$PATH" bash "$HOOK" origin url 2>&1)"
 rm -rf "$repo" "$stub"
 
@@ -409,7 +417,7 @@ echo "pre-push lint without xargs"
 # make_sandbox_path has no xargs. Mutation-check: remove the `command -v xargs`
 # branch in scripts/pre-push and both cases redden with "command not found".
 repo="$(make_repo)"
-stub="$(make_stub 19.1.0)"
+stub="$(make_stub 22.1.8)"
 sandbox="$(make_sandbox_path)"
 set +e
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$sandbox" bash "$HOOK" origin url 2>&1)"
@@ -423,7 +431,7 @@ else
 fi
 
 repo="$(make_repo)"
-stub="$(make_stub 19.1.0 main.cpp)"
+stub="$(make_stub 22.1.8 main.cpp)"
 sandbox="$(make_sandbox_path)"
 set +e
 out="$(cd "$repo" && push_line "$repo" | PATH="$stub:$sandbox" bash "$HOOK" origin url 2>&1)"

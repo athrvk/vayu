@@ -36,12 +36,13 @@ hook_source_dir() {
 # shellcheck source=scripts/lib/llvm-tools.sh
 source "$(hook_source_dir)/lib/llvm-tools.sh"
 
-# The oldest clang-tidy that can parse engine/.clang-tidy. `ExcludeHeaderFilterRegex`
-# landed in LLVM 19; an older binary rejects the whole config file, so it lints
-# *nothing* and still exits 0 - a hook that scans an empty set and reports success
-# (issue #659 item 4). Ubuntu 24.04 ships 18 by default, so this is the common case,
-# not an exotic one.
-MIN_CLANG_TIDY_MAJOR=19
+# The clang-tidy CI gates with (`scripts/install-clang-tidy.sh`), as a floor.
+# An older binary answers differently in both directions: 19 and 20 cannot see
+# some checks 22 runs, and anything before 19 rejects engine/.clang-tidy outright
+# (`ExcludeHeaderFilterRegex`), so it lints *nothing* and still exits 0 - a hook
+# that scans an empty set and reports success (issue #659 item 4). Ubuntu 24.04
+# ships 18 by default, so an old one is the common case, not an exotic one.
+MIN_CLANG_TIDY_MAJOR=$CLANG_TIDY_MAJOR
 
 # What the push carries: every commit reachable from a pushed ref that no
 # remote-tracking ref already reaches. One rule for every shape - a new branch
@@ -104,18 +105,18 @@ STATUS=0
 # (issue #918).
 #
 # The `Lint changed engine sources` step in .github/workflows/pr-tests.yml lints
-# the same files whole on clang-tidy 19 before a pull request can merge, so this
+# the same files whole on clang-tidy 22 before a pull request can merge, so this
 # stays a skip rather than a refusal to push - a missing or old local toolchain
 # costs a contributor nothing but the early warning.
 find_llvm_tool clang-tidy "$MIN_CLANG_TIDY_MAJOR" minimum
 CLANG_TIDY="$LLVM_TOOL"
 if [ -z "$CLANG_TIDY" ]; then
     echo "WARNING: no clang-tidy ${MIN_CLANG_TIDY_MAJOR} or newer found${LLVM_TOOL_NEAREST:+ (nearest: ${LLVM_TOOL_NEAREST})}."
-    echo "         engine/.clang-tidy uses ExcludeHeaderFilterRegex, which needs clang-tidy"
-    echo "         >= ${MIN_CLANG_TIDY_MAJOR}; an older binary rejects the whole config and lints nothing."
-    echo "         NOTHING WAS LINTED. Install it ('apt install clang-tidy-${MIN_CLANG_TIDY_MAJOR}',"
-    echo "         'brew install llvm@${MIN_CLANG_TIDY_MAJOR}') or rely on CI, which lints the same"
-    echo "         files on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
+    echo "         CI lints with clang-tidy ${MIN_CLANG_TIDY_MAJOR}, and an older one answers differently"
+    echo "         (before 19 it rejects engine/.clang-tidy and lints nothing)."
+    echo "         NOTHING WAS LINTED. Install the LLVM project's build ('clang-tidy-${MIN_CLANG_TIDY_MAJOR}'"
+    echo "         from apt.llvm.org, 'brew install llvm@${MIN_CLANG_TIDY_MAJOR}', or the LLVM ${MIN_CLANG_TIDY_MAJOR}"
+    echo "         Windows installer) or rely on CI, which lints the same files on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
     exit 0
 fi
 
@@ -163,7 +164,7 @@ lint_one_file() {
     # lands in input position and fails the job. CI needs no flag, because it
     # regenerates its compile database with precompiled headers off.
     #
-    # `$CLANG_TIDY`, not `clang-tidy`: discovery can settle on `clang-tidy-19`
+    # `$CLANG_TIDY`, not `clang-tidy`: discovery can settle on `clang-tidy-22`
     # while the plain name is an 18 that cannot read the config at all.
     if [ -f "engine/build/compile_commands.json" ]; then
         "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \

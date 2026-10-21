@@ -367,6 +367,8 @@ jobs:
               - 'scripts/check-linux-glibc.sh'
               - 'scripts/check-macos-min-version.sh'
               - '.github/actions/linux-release-toolchain/**'
+              # The clang-tidy the engine job's lint step installs.
+              - 'scripts/install-clang-tidy.sh'
               - '.github/workflows/pr-tests.yml'
               - '!*.md'
               - '!**/*.md'
@@ -869,6 +871,21 @@ jobs:
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
 
+      # The Windows leg's clang-tidy is extracted from a 455 MB LLVM installer
+      # (`scripts/install-clang-tidy.sh`); the 73 MB it keeps is cached, so
+      # only the first run after the pin moves downloads it. The key is the
+      # script, which holds the version and the hash. Linux installs from apt
+      # and caches nothing.
+      - name: Restore clang-tidy (Windows)
+        if: >-
+          github.event_name == 'pull_request'
+          && runner.os == 'Windows'
+          && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/clang-tidy
+          key: clang-tidy-windows-${{ hashFiles('scripts/install-clang-tidy.sh') }}
+
       # The clang-tidy gate (#885). It rides this job rather than standing up its
       # own because it needs `compile_commands.json` and a configured tree - a
       # separate job would pay the vcpkg install and the configure a second time
@@ -937,19 +954,13 @@ jobs:
       # usage error and exits 1, so the directory that is meant to be exempt
       # would be the one that fails.
       #
-      # The two legs run different clang-tidy versions, and neither is a free
-      # choice. Linux pins 19 from apt, which is what CONTRIBUTING.md tells
-      # contributors to install, so a local run and this one answer the same.
-      # Windows takes the 20.1.8 its image already ships: chocolatey refuses to
-      # downgrade to 19 ("A newer version of llvm is already installed"), and
-      # using the image's copy costs no install time.
-      #
-      # 19 is the floor `engine/.clang-tidy` needs (`ExcludeHeaderFilterRegex`),
-      # and it is asserted below rather than trusted, because an image is a pin
-      # somebody else controls. The cost of the spread is that a finding on one
-      # leg alone may be a version difference rather than a platform one - worth
-      # knowing when you read a failure, and much cheaper than having no
-      # coverage of the per-OS branches at all.
+      # Both legs run the LLVM project's own clang-tidy 22, installed by
+      # `scripts/install-clang-tidy.sh` (apt.llvm.org on Linux, the attested
+      # release installer on Windows), so a finding on one leg alone is a
+      # platform difference, not a version one. 22 is also what the pre-push
+      # hook and CONTRIBUTING.md ask for, so a local run answers the same.
+      # The runner images' own LLVM is not used: it is whatever version the
+      # image ships (20.1.8 on Windows today) and moves when the image does.
       - name: Lint changed engine sources
         if: >-
           github.event_name == 'pull_request'
@@ -1037,41 +1048,15 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Installed here rather than in a step of its own so a pull request
-          # that changed no engine source pays for none of it. Both legs now
-          # name the binary and nothing else: `clang-tidy-diff.py` went with
-          # #1023, which was the last thing that needed a driver script and a
-          # Python beside it.
-          case "$RUNNER_OS" in
-            Linux)
-              sudo apt-get install -y --no-install-recommends clang-tidy-19
-              tidy=clang-tidy-19
-              ;;
-            Windows)
-              # Nothing to install: the image ships LLVM 20.1.8, and asking
-              # chocolatey for 19.1.1 failed outright rather than downgrading
-              # ("A newer version of llvm is already installed").
-              tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
-              ;;
-            *)
-              echo "::error::No clang-tidy 19 recipe for $RUNNER_OS"
-              exit 1
-              ;;
-          esac
+          # that changed no engine source pays for none of it. Both legs name
+          # the binary and nothing else: `clang-tidy-diff.py` went with #1023,
+          # which was the last thing that needed a driver script and a Python
+          # beside it. The script asserts the version it installed.
+          tidy="$(bash scripts/install-clang-tidy.sh)"
 
           # Named before anything depends on it: a clang-tidy that resolved to
           # the wrong place would otherwise surface as an unrelated shell error.
           "$tidy" --version
-
-          # The floor, asserted rather than assumed. Two of the three legs take
-          # whatever LLVM their runner image ships, so an image that rolled
-          # backwards would lint with a binary that cannot read
-          # `engine/.clang-tidy` at all - which is issue #659's silent empty
-          # scan arriving by a new route.
-          major="$("$tidy" --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1)"
-          if [[ -z "$major" ]] || [[ "$major" -lt 19 ]]; then
-            echo "::error::clang-tidy ${major:-(version unreadable)} is below the 19 that engine/.clang-tidy requires"
-            exit 1
-          fi
 
           # clang-tidy replays the compile command, precompiled header and all -
           # and that PCH was written by the *build's* compiler, not by
@@ -1126,10 +1111,10 @@ jobs:
           # answers on both legs.
           #
           # `-Wno-unused-command-line-argument`: the MSVC compile database
-          # carries `/Zc:preprocessor`, which the image's clang-tidy 20.1.8
-          # does not consume in its clang-cl mode, and `WarningsAsErrors: '*'`
-          # makes that diagnostic fail every file before any check runs. The
-          # flag is a build-time one with no bearing on what is linted.
+          # carries `/Zc:preprocessor`, which clang-tidy does not consume in
+          # its clang-cl mode, and `WarningsAsErrors: '*'` makes that
+          # diagnostic fail every file before any check runs. The flag is a
+          # build-time one with no bearing on what is linted.
           printf '%s\0' "${changed[@]}" \
             | xargs -0 -n 1 -P "$(nproc)" \
                 "$tidy" -p engine/build-release --quiet --allow-no-checks \
