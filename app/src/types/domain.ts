@@ -956,6 +956,21 @@ export interface Request {
 }
 
 /**
+ * A request as the tree lists it: one row of `GET /requests?fields=summary`
+ * (#2546), the shape every `listByCollection` cache holds. A `Request` is one,
+ * so a write that has the whole row (a create, a reorder's settle) may store it
+ * as it stands; a reader that needs anything else fetches the row through
+ * `requestDetailOptions`.
+ *
+ * `createdAt` is here for `compareTreeOrder`'s tie-break and `specOperation`
+ * for the Spec tab's mapping count; the rest is what a tree row draws.
+ */
+export type RequestSummary = Pick<
+	Request,
+	"id" | "collectionId" | "name" | "method" | "url" | "order" | "createdAt" | "specOperation"
+>;
+
+/**
  * A saved example response stored against a request (issue #481).
  *
  * What an importer found next to the request - Postman's saved responses, an

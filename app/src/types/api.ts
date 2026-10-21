@@ -153,6 +153,12 @@ export interface UpdateCollectionRequest {
 // Requests API
 export interface ListRequestsParams {
 	collectionId?: string;
+	/**
+	 * `"summary"` answers each row as a `RequestSummary` (#2546). Set only by
+	 * `apiService.listRequestSummaries`, so the row type follows the method
+	 * called rather than a flag a caller could pass to the wrong one.
+	 */
+	fields?: "summary";
 }
 
 export interface ListRequestsResponse {

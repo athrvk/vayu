@@ -672,7 +672,8 @@ on the action that needs it, where the wait is something the user started.
 #### Requests
 
 ```typescript
-apiService.listRequests(params?): Promise<Request[]>
+apiService.listRequestSummaries(params?): Promise<RequestSummary[]>  // GET /requests?fields=summary
+apiService.listRequests(params?): Promise<Request[]>     // GET /requests, whole rows
 apiService.getRequest(id): Promise<Request>
 apiService.createRequest(data): Promise<Request>         // POST /requests
 apiService.updateRequest(data): Promise<Request>         // PUT  /requests/:id

@@ -221,6 +221,54 @@ describe("RequestTransformer truncated fields", () => {
 });
 
 /**
+ * A summary row (#2546) carries exactly the tree's keys, read the way the full
+ * row reads them - a list row and a detail row of one request must agree on
+ * every column they share, or the tree and the builder disagree about it.
+ */
+describe("RequestTransformer summary", () => {
+	const summaryRow = {
+		id: "req_1",
+		collectionId: "col_1",
+		name: "Example",
+		method: "POST",
+		url: "https://example.com",
+		order: 3,
+		createdAt: 1_700_000_000_000,
+		specOperation: { operationId: "createPet", method: "post", path: "/pets" },
+	};
+
+	it("reads exactly the summary's keys", () => {
+		expect(RequestTransformer.toSummary(summaryRow)).toEqual({
+			id: "req_1",
+			collectionId: "col_1",
+			name: "Example",
+			method: "POST",
+			url: "https://example.com",
+			order: 3,
+			createdAt: new Date(1_700_000_000_000).toISOString(),
+			specOperation: { operationId: "createPet", method: "post", path: "/pets" },
+		});
+	});
+
+	it("reads the engine's null as no operation, with the key absent", () => {
+		const summary = RequestTransformer.toSummary({ ...summaryRow, specOperation: null });
+		expect("specOperation" in summary).toBe(false);
+	});
+
+	it("agrees with the full row on every key they share", () => {
+		const full = RequestTransformer.toFrontend({ ...base, ...summaryRow });
+		const summary = RequestTransformer.toSummary(summaryRow);
+		for (const [key, value] of Object.entries(summary)) {
+			expect(full[key as keyof typeof summary]).toEqual(value);
+		}
+	});
+
+	it("refuses a row with no id, as the full read does", () => {
+		expect(() => RequestTransformer.toSummary({ ...summaryRow, id: undefined })).toThrow();
+	});
+});
+
+/**
  * `mockResponseMode` / `mockExampleId` (issue #481 phase 3) name which saved
  * example a mock server answers with. `mockResponseMode` is always present,
  * same "unrecognized reads as the default" rule as `httpVersion` above; a row
