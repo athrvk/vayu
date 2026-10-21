@@ -2101,7 +2101,13 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   in front of it; the protocol test that calls a withheld name is what holds
   that to the SDK across an upgrade. The
   server instructions say the same thing up front, in the sessions where the
-  toggle is off. Withholding the schema rather than only the call is what makes
+  toggle is off, and name the task families that need write access (saving or
+  deleting collections and requests, environments and globals, an import or a
+  spec bind, clearing cookies, changing engine config) so an agent that sees no
+  write tool does not conclude the MCP cannot save (#2442). They name families,
+  never tools, and `protocol.integration.test.ts` classifies every write tool
+  into one, so a new write tool fails until its family is in the sentence.
+  Withholding the schema rather than only the call is what makes
   the toggle free: those tools are 66,077 of the 181,447 bytes (36%) of the
   `tools/list` an agent is sent (app host, reveal off, measured at #2441), and
   on a default install none of them could have succeeded.

@@ -326,6 +326,84 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await on.server.close();
 	});
 
+	/*
+	 * Written out here rather than imported from `server.ts`: a family deleted
+	 * from the sentence must fail this table, and a table built from the same
+	 * constant would shrink with it. Naming a family, never a tool, is the point:
+	 * an agent that does not guess tool names concluded the MCP cannot save (#2442).
+	 */
+	const SAVE = "saving, editing, moving or deleting collections, requests and examples";
+	const TRASH = "restoring or purging trashed items";
+	const ENVIRONMENTS = "creating, editing, activating or deleting environments and globals";
+	const IMPORT = "importing a document";
+	const SPEC = "binding, syncing or unbinding an OpenAPI spec";
+	const BASELINE = "pinning a run baseline";
+	const RUNS = "deleting runs";
+	const CLEARING = "clearing cookies, cached OAuth 2.0 tokens or webhook inbox captures";
+	const INBOXES = "deleting webhook inboxes";
+	const CONFIG = "changing engine config";
+
+	const WRITE_TOOL_FAMILY: Record<string, string> = {
+		create_collection: SAVE,
+		update_collection: SAVE,
+		delete_collection: SAVE,
+		create_request: SAVE,
+		update_request: SAVE,
+		delete_request: SAVE,
+		create_request_example: SAVE,
+		update_request_example: SAVE,
+		delete_request_example: SAVE,
+		move_item: SAVE,
+		restore_trash_entry: TRASH,
+		purge_trash_entry: TRASH,
+		create_environment: ENVIRONMENTS,
+		update_environment: ENVIRONMENTS,
+		activate_environment: ENVIRONMENTS,
+		delete_environment: ENVIRONMENTS,
+		update_globals: ENVIRONMENTS,
+		import_document: IMPORT,
+		bind_spec: SPEC,
+		sync_spec: SPEC,
+		unbind_spec: SPEC,
+		set_run_baseline: BASELINE,
+		delete_run: RUNS,
+		clear_cookies: CLEARING,
+		clear_oauth2_token: CLEARING,
+		clear_inbox_captures: CLEARING,
+		delete_webhook_inbox: INBOXES,
+		update_engine_config: CONFIG,
+	};
+
+	it("classifies every write tool into a task family the write-gate sentence names", async () => {
+		const writeTools = TOOLS.filter((t) => t.category === "write").map((t) => t.name);
+		// Both sides must be non-empty or the comparison below proves nothing.
+		expect(writeTools.length).toBeGreaterThan(20);
+		expect([...writeTools].sort()).toEqual(Object.keys(WRITE_TOOL_FAMILY).sort());
+
+		const off = await connectClient();
+		const instructions = off.client.getInstructions() ?? "";
+		await off.server.close();
+		const unnamed = writeTools.filter(
+			(name) => !instructions.includes(WRITE_TOOL_FAMILY[name])
+		);
+		expect(unnamed).toEqual([]);
+	});
+
+	it("names the task families that need write access only while writes are off", async () => {
+		const families = [...new Set(Object.values(WRITE_TOOL_FAMILY))];
+		expect(families.length).toBeGreaterThan(5);
+
+		const off = await connectClient();
+		const offInstructions = off.client.getInstructions() ?? "";
+		await off.server.close();
+		for (const family of families) expect(offInstructions).toContain(family);
+
+		const on = await connectClient({ safety: { allowWrites: true } });
+		const onInstructions = on.client.getInstructions() ?? "";
+		await on.server.close();
+		for (const family of families) expect(onInstructions).not.toContain(family);
+	});
+
 	it("says read tools withhold secrets, and names the setting only while it is off", async () => {
 		const off = await connectClient();
 		const offInstructions = off.client.getInstructions() ?? "";
