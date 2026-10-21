@@ -15,29 +15,37 @@
  * picked arrives as a `File`; its neighbours never do, so this is the channel
  * that reads them.
  *
- * **The renderer never names a directory here.** It passes the picked
- * document's path (which it already holds from `getFilePath`) and the ref's own
- * text, and the resolution happens *in this process*. That is the difference
- * between "read a file this document asked for" and "read a path the web layer
- * composed", and it is why the two arguments are not one.
+ * **The document must be one the user picked, dropped or opened** (#2357). The
+ * renderer passes that document's path (which it holds from `getFilePath`, or
+ * from the OS open-file door) and the ref's own text. The path is a claim, so
+ * the first gate is main's grant registry (`file-grants.ts`): a `specPath` the
+ * engine holds no grant for is refused, whatever its extension, before its
+ * directory is used for anything. The registry is persisted by the engine's
+ * `file_grants` table, so a document picked in an earlier session still
+ * reads; one declared before grants existed must be picked once more. The ref
+ * is then resolved *in this process*, against the granted document's
+ * directory, which is the difference between "read a file this document asked
+ * for" and "read a path the web layer composed".
  *
- * The gates are `data-file.ts`'s, for the same reasons stated there at length:
+ * The remaining gates are `data-file.ts`'s, for the same reasons stated there:
  *
  *  1. **Extension allowlist** - the three a spec can be written in and nothing
- *     else, so the channel cannot be pointed at a key, a database or a dotfile.
+ *     else. It keeps keys, databases and dotfiles out of a *ref*; it does not
+ *     keep out a credentials `.json`, which is what the grant and the
+ *     containment below are for.
  *  2. **The engine's `maxSpecDocumentBytes`, fetched** - never a second copy of
  *     the rule. The bundle has to fit what `POST /specs` will store, and a user
  *     who raises the setting can import the bigger spec the same session.
  *
- * **A ref may not leave the picked document's directory** (#1782). A spec from
+ * **A ref may not leave the granted document's directory** (#1782). A spec from
  * the internet can name `../../.config/<tool>/credentials.json`, and the bundle
  * is stored: the file would be inlined into the stored document with no one
- * having chosen it. The extension allowlist keeps keys and databases out but not
- * a credentials `.json`, so the rule is containment: the ref, resolved, must sit
- * under `dirname(specPath)`, compared component-wise and again after symlinks
- * are resolved. Siblings of a picked *folder* are served from the batch itself
- * (`importers/batch.ts`) before this channel is asked, so `spec/a.yaml` ->
- * `../shared/b.yaml` still bundles when the folder was picked.
+ * having chosen it. The rule is containment: the ref, resolved, must sit under
+ * `dirname(specPath)`, compared component-wise and again after symlinks are
+ * resolved. The siblings it reads are not themselves granted; the document's
+ * grant is what reaches them. Siblings of a picked *folder* are served from the
+ * batch itself (`importers/batch.ts`) before this channel is asked, so
+ * `spec/a.yaml` -> `../shared/b.yaml` still bundles when the folder was picked.
  *
  * Bytes, not text, again matching `dataFile:read`: decoding belongs to one place
  * on the renderer side, so a sibling read here cannot disagree with the picked
@@ -50,6 +58,7 @@ import path from "path";
 import { SPEC_DOCUMENT_MAX_BYTES_SEED } from "./constants.js";
 import { engineOrigin } from "./engine-endpoint.js";
 import { engineFetch } from "./engine-fetch.js";
+import { assertGranted, type IsGranted } from "./file-grants.js";
 
 /** Extensions this channel will open, lower-cased and with the dot. */
 export const SPEC_FILE_EXTENSIONS: readonly string[] = [".json", ".yaml", ".yml"];
@@ -66,18 +75,28 @@ export interface SpecFileSystem {
 	readFile: (filePath: string) => Promise<Buffer>;
 	realpath: (filePath: string) => Promise<string>;
 	fetchConfig: () => Promise<unknown>;
+	/**
+	 * Whether the user picked, dropped or opened this path (`FileGrants.isGranted`).
+	 * Required, so a reader wired without the registry fails type-check rather
+	 * than reading anything.
+	 */
+	isGranted: IsGranted;
 }
 
-const defaultSystem: SpecFileSystem = {
-	stat: (filePath) => fs.stat(filePath),
-	readFile: (filePath) => fs.readFile(filePath),
-	realpath: (filePath) => fs.realpath(filePath),
-	fetchConfig: async () => {
-		const response = await engineFetch(`${engineOrigin()}/config`);
-		if (!response.ok) throw new Error(`config responded ${response.status}`);
-		return await response.json();
-	},
-};
+/** The real filesystem and engine, gated by @p isGranted. */
+export function createSpecFileSystem(isGranted: IsGranted): SpecFileSystem {
+	return {
+		stat: (filePath) => fs.stat(filePath),
+		readFile: (filePath) => fs.readFile(filePath),
+		realpath: (filePath) => fs.realpath(filePath),
+		fetchConfig: async () => {
+			const response = await engineFetch(`${engineOrigin()}/config`);
+			if (!response.ok) throw new Error(`config responded ${response.status}`);
+			return await response.json();
+		},
+		isGranted,
+	};
+}
 
 /**
  * The live `maxSpecDocumentBytes`, or the seed when the engine cannot answer.
@@ -122,14 +141,16 @@ class OutsideFolderError extends Error {
  * Read one file referenced by an imported spec, or throw a message the import
  * dialog can show as-is.
  *
- * @param specPath the document the user picked - only its directory is used.
+ * @param specPath the document the user picked, which must hold a grant; only
+ * its directory is used.
  * @param refPath the `$ref` target as the document wrote it, relative to that
  * directory.
+ * @throws FileNotGrantedError when @p specPath is not a granted file.
  */
 export async function readSpecFile(
 	specPath: string,
 	refPath: string,
-	system: SpecFileSystem = defaultSystem
+	system: SpecFileSystem
 ): Promise<SpecFileReadResult> {
 	if (typeof specPath !== "string" || specPath.trim() === "") {
 		throw new Error("No spec file path was given.");
@@ -143,6 +164,8 @@ export async function readSpecFile(
 		// differently on the author's machine than on anyone else's.
 		throw new Error(`"${refPath}" is an absolute path, and a spec reference must be relative.`);
 	}
+
+	await assertGranted(system.isGranted, specPath);
 
 	const specDir = path.dirname(specPath);
 	const resolved = path.resolve(specDir, refPath);

@@ -36,10 +36,15 @@ import {
 import { engineOrigin, enginePort, enginePortFixed, fixEnginePort } from "./engine-endpoint.js";
 import { appLinkUrl } from "./app-links.js";
 import { resolveAppPaths } from "./app-paths.js";
-import { hashDataFile, hashDataFileReply, readDataFile } from "./data-file.js";
+import {
+	createDataFileSystem,
+	hashDataFile,
+	hashDataFileReply,
+	readDataFile,
+} from "./data-file.js";
 import { AppFocusStore } from "./app-focus.js";
 import { DataFileLocations } from "./data-file-locations.js";
-import { readSpecFile } from "./spec-file.js";
+import { createSpecFileSystem, readSpecFile } from "./spec-file.js";
 import {
 	defaultProxyResolutionSystem,
 	refreshSystemProxy,
@@ -1071,7 +1076,11 @@ async function startMcp() {
 					safety: loadPersistedSafety(),
 					onDataChanged: sendMcpDataChanged,
 					dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
-					currentDataFileHash: (filePath) => hashDataFile(filePath),
+					currentDataFileHash: (filePath) =>
+						hashDataFile(
+							filePath,
+							createDataFileSystem((p) => fileGrants.isGranted(p))
+						),
 					appFocus: () => appFocus.get(),
 					log: mcpLogger(),
 				});
@@ -1512,20 +1521,27 @@ function setupIpcHandlers() {
 	// this handler cannot drift from the sidecar's own data directory.
 	ipcMain.handle("app:getPaths", () => resolveAppPaths());
 
-	// Re-open a collection's declared data file (issue #599). The one channel on
-	// which the renderer names a path of its own, gated by an extension
-	// allowlist and the engine's fetched byte cap - the rationale, and the
-	// alternative that was rejected, are in data-file.ts.
+	// Re-open a collection's declared data file (issue #599). The renderer names
+	// the path, so a read passes the extension allowlist, the grant registry (a
+	// file the user picked, dropped or opened, #2357) and the engine's fetched
+	// byte cap; the rationale is in data-file.ts.
 	ipcMain.handle("dataFile:read", async (_event, filePath: unknown) => {
-		return await readDataFile(String(filePath ?? ""));
+		return await readDataFile(
+			String(filePath ?? ""),
+			createDataFileSystem((p) => fileGrants.isGranted(p))
+		);
 	});
 
 	// The same file's SHA-256 as it is now, without its bytes (#2051): what a
 	// run's `dataFileHash` is compared against. Same path gates as the read. A
-	// file that has moved is a reply, `{ status: "missing" }` (#2057), because an
-	// error would reach the renderer as a bare message.
+	// file that has moved, or was never granted, is a reply, `{ status:
+	// "missing" }` (#2057), because an error would reach the renderer as a bare
+	// message.
 	ipcMain.handle("dataFile:hash", async (_event, filePath: unknown) => {
-		return await hashDataFileReply(String(filePath ?? ""));
+		return await hashDataFileReply(
+			String(filePath ?? ""),
+			createDataFileSystem((p) => fileGrants.isGranted(p))
+		);
 	});
 
 	// The renderer's whole map of remembered data-file paths, on launch and on
@@ -1542,11 +1558,15 @@ function setupIpcHandlers() {
 	});
 
 	// Read a file an imported OpenAPI document references (issue #649). The
-	// renderer passes the picked document's path and the ref's own text; this
-	// process resolves one against the other, so the web layer still names no
-	// directory of its own. Gates and the rejected alternative are in spec-file.ts.
+	// renderer passes the document's path and the ref's own text; the document
+	// must hold a grant (#2357), and this process resolves the ref against its
+	// directory. Gates are in spec-file.ts.
 	ipcMain.handle("specFile:read", async (_event, specPath: unknown, refPath: unknown) => {
-		return await readSpecFile(String(specPath ?? ""), String(refPath ?? ""));
+		return await readSpecFile(
+			String(specPath ?? ""),
+			String(refPath ?? ""),
+			createSpecFileSystem((p) => fileGrants.isGranted(p))
+		);
 	});
 
 	// Re-resolve the operating system's proxy and push it to the engine (#708).

@@ -118,7 +118,9 @@ failures and are not errors:
 | parsed but empty | Parsed fine, but the options left nothing to create. Included stays available; Import stays disabled while it is the only file. |
 
 **Siblings come from the batch first.** `bundleExternalRefs` reads a referenced
-file through the gated `specFile:read` IPC; when that file is already in the
+file through the gated `specFile:read` IPC (which reads beside a document the
+user picked, dropped or opened, #2357; a spec bound before that rule needs one
+more pick before it can be re-read); when that file is already in the
 batch its text is right here, so the batch answers and nothing touches disk. Ref
 targets are resolved with the bundler's own `joinRelative` / `dirOf` against the
 entry's `webkitRelativePath`, rather than a second normalizer that could disagree
@@ -357,7 +359,7 @@ That is deliberate, and it is the line the bundler sits on: **fetch-time `$ref`
 assembly is deterministic re-serialization, not an opinion about what a document
 declares.** It stays renderer-side because it reaches the network through
 `POST /import/fetch` and the local filesystem through the main-process-gated
-`specFile:read` IPC, and an engine that read sibling files off disk on an
+`specFile:read` IPC (granted documents only, #2357), and an engine that read sibling files off disk on an
 import's behalf would be a wider capability than any of this needs.
 
 ---
