@@ -208,6 +208,7 @@ export default function HeadersPanel() {
 				allowDisable={true}
 				keySuggestions={STANDARD_HEADERS}
 				variables={variables}
+				fieldContext="header"
 			/>
 		</BulkEditor>
 	);

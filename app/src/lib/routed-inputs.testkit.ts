@@ -322,6 +322,12 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/mcp/variable-origins.conformance.test.ts",
 		paths: ["engine/tests/fixtures/variable-resolution-conformance.json"],
 	},
+	/* How a bound row's cell is escaped for the field it lands in (#2639): the
+	   Send-with-row preview restates the engine's bind. */
+	dataBindEscaping: {
+		reader: "app/src/lib/variable-resolution.row.test.ts",
+		paths: ["engine/tests/fixtures/data-bind-escaping-conformance.json"],
+	},
 	/*
 	 * The `vayu://elements/kinds` resource and the `elements` argument's `kind`
 	 * examples both name element kinds by string (issue #1517); this is what

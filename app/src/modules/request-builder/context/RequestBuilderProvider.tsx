@@ -653,6 +653,7 @@ export default function RequestBuilderProvider({
 	// Variable resolution
 	const {
 		resolveString,
+		resolveField,
 		resolveObject,
 		getVariable: resolverGetVariable,
 		getAllVariables: resolverGetAllVariables,
@@ -1259,6 +1260,7 @@ export default function RequestBuilderProvider({
 			hasUnsavedChanges,
 			saveStatus,
 			resolveString,
+			resolveField,
 			resolveVariables: resolveString,
 			resolvedAuth,
 			getVariable,
@@ -1301,6 +1303,7 @@ export default function RequestBuilderProvider({
 			hasUnsavedChanges,
 			saveStatus,
 			resolveString,
+			resolveField,
 			resolvedAuth,
 			getVariable,
 			getAllVariables,
@@ -1328,7 +1331,7 @@ export default function RequestBuilderProvider({
 			 * interpolates variables is somewhere under here.
 			 *
 			 * `contextValue` already carries every field `VariableSupport` needs
-			 * (`resolveString`, `getAllVariables`, `getVariableOrigins`,
+			 * (`resolveField`, `getAllVariables`, `getVariableOrigins`,
 			 * `updateVariable`, `writableScopes`, `dataColumns`), so it is handed
 			 * straight through as `support` rather than read back via
 			 * `useVariableSupport()` - that hook reaches for

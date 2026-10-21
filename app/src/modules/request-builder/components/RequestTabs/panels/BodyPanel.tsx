@@ -70,6 +70,7 @@ import {
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { Callout } from "@/components/shared/Callout";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { BodyMode } from "../../../types";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
@@ -78,6 +79,7 @@ import { toHeaderRows } from "../../../utils/key-value";
 import { composePathParams, substitutePathVariables } from "../../../utils/path-variables";
 import { resolveUrlTemplate } from "../../../utils/query-encoding";
 import { containsVariableToken } from "@/constants/variables";
+import { bodyFieldContext, refusalsText, type BoundField } from "@/lib/data-bind-escaping";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { graphqlOperationReference } from "@/lib/agent-reference";
@@ -126,12 +128,15 @@ function GraphQLBody(props: GraphQLBodyProps) {
  */
 const EDITOR_BOX = "min-h-40 flex-1 overflow-hidden rounded-md border border-input";
 
+const NO_BODY: BoundField = { text: "", refusals: [] };
+
 export default function BodyPanel() {
 	const {
 		request,
 		setRequest,
 		updateField,
 		resolveString,
+		resolveField,
 		getBodyDrafts,
 		setBodyDrafts,
 		getVariablesDraft,
@@ -307,16 +312,22 @@ export default function BodyPanel() {
 	// Memoized for the same reason as `resolvedGqlUrl` above, and a `useMemo`
 	// for the same reason too: an unmemoized call rerolled every
 	// `{{$randomInt}}`-style value in the body on every render this panel took,
-	// not only on an actual edit.
+	// not only on an actual edit. A picked row's cell is written as the mode's
+	// bind writes it - escaped in a JSON string or XML (issue #2639).
 	const resolvedBody = useMemo(
-		() => (request.body ? resolveString(request.body) : ""),
-		[request.body, resolveString]
+		() =>
+			request.body
+				? resolveField(request.body, bodyFieldContext(request.bodyMode, request.body))
+				: NO_BODY,
+		[request.body, request.bodyMode, resolveField]
 	);
 	// Masked at render, after the memo: the memo keeps a dynamic variable's value
 	// stable across renders, and `maskSecrets` reads the secrets as of this render
 	// (#1813). Only the preview needs it, so the Source view builds no masker.
 	const shownResolvedBody =
-		showResolved && variables.maskSecrets ? variables.maskSecrets(resolvedBody) : resolvedBody;
+		showResolved && variables.maskSecrets
+			? variables.maskSecrets(resolvedBody.text)
+			: resolvedBody.text;
 	const isCodeMode =
 		request.bodyMode === "json" ||
 		request.bodyMode === "text" ||
@@ -411,6 +422,12 @@ export default function BodyPanel() {
 					onUndo={undoContentType}
 					onDismiss={() => setAddedContentType(null)}
 				/>
+			)}
+
+			{isCodeMode && showResolved && resolvedBody.refusals.length > 0 && (
+				<Callout severity="warning" title="Sending with this row is refused">
+					{refusalsText(resolvedBody.refusals)}
+				</Callout>
 			)}
 
 			{isCodeMode && (

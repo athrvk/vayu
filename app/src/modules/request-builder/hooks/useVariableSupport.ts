@@ -38,7 +38,7 @@ import { useRequestBuilderContext } from "../context/RequestBuilderContext";
 
 export function useVariableSupport(): VariableSupport {
 	const {
-		resolveString,
+		resolveField,
 		getAllVariables,
 		getVariableOrigins,
 		updateVariable,
@@ -47,7 +47,7 @@ export function useVariableSupport(): VariableSupport {
 	} = useRequestBuilderContext();
 	return useMemo(
 		() => ({
-			resolveString,
+			resolveField,
 			getAllVariables,
 			getVariableOrigins,
 			updateVariable,
@@ -62,7 +62,7 @@ export function useVariableSupport(): VariableSupport {
 				).apply(text),
 		}),
 		[
-			resolveString,
+			resolveField,
 			getAllVariables,
 			getVariableOrigins,
 			updateVariable,

@@ -54,6 +54,7 @@ import { RequestBuilderContext } from "../../../../context";
 import type { RequestBuilderContextValue, RequestState, BodyMode } from "../../../../types";
 import { createDefaultRequestState } from "../../../../utils/request-state";
 import { emptyDrafts } from "../../../../utils/body-drafts";
+import { fieldResolverOf } from "@/test/variable-support";
 
 /** Every `language` a `CodeEditor` mounted with during a render. */
 const mounted: string[] = [];
@@ -102,6 +103,7 @@ async function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> =
 		getVariablesDraft: () => null,
 		setVariablesDraft: () => {},
 		resolveString: (s: string) => s,
+		resolveField: fieldResolverOf((s: string) => s),
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		writableScopes: [],

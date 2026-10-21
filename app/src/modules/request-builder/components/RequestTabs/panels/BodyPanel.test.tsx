@@ -37,6 +37,7 @@ import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { emptyDrafts } from "../../../utils/body-drafts";
 import type { RequestState } from "../../../types";
+import { fieldResolverOf } from "@/test/variable-support";
 
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
@@ -79,6 +80,9 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 		getVariablesDraft: () => null,
 		setVariablesDraft: () => {},
 		resolveString: (s: string) => s.replace(VARIABLE_PATTERN, (_m, n) => `resolved-${n}`),
+		resolveField: fieldResolverOf((s: string) =>
+			s.replace(VARIABLE_PATTERN, (_m, n) => `resolved-${n}`)
+		),
 		// The form-data / urlencoded modes render the key/value table, which
 		// reaches VariableInput for every cell.
 		getAllVariables: () => ({}),

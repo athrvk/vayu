@@ -11,7 +11,7 @@
 /**
  * The Body panel's Resolved view hides a secret variable's value (#1813).
  *
- * The view prints `resolveString(request.body)`, so `{"token":"{{secretVar}}"}`
+ * The view prints `resolveField(request.body)`, so `{"token":"{{secretVar}}"}`
  * sat on screen as plain text beside a variable the user marked secret - the
  * same leak the Params "Sends" line (#1806) and the table peeks (#1810) closed.
  * It is a wiring defect, so the panel is rendered with the real
@@ -30,6 +30,7 @@ import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { emptyDrafts } from "../../../utils/body-drafts";
+import { fieldResolverOf } from "@/test/variable-support";
 
 // Monaco does not run in jsdom and the GraphQL pane is not what this guards.
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -66,6 +67,7 @@ function mount(request: Partial<RequestState>) {
 		getVariablesDraft: () => null,
 		setVariablesDraft: () => {},
 		resolveString,
+		resolveField: fieldResolverOf(resolveString),
 		getAllVariables,
 		getVariableOrigins,
 		updateVariable,

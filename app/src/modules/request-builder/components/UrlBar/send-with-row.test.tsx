@@ -91,6 +91,7 @@ function ctx(
 		hasUnsavedChanges: false,
 		saveStatus: "idle",
 		resolveString: (s: string) => s,
+		resolveField: (s: string) => ({ text: s, refusals: [] }),
 		resolveVariables: (s: string) => s,
 		resolvedAuth: null,
 		getVariable: () => null,

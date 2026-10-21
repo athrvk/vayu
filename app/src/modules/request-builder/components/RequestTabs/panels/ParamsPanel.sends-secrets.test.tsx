@@ -24,6 +24,7 @@ import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import ParamsPanel from "./ParamsPanel";
+import { fieldResolverOf } from "@/test/variable-support";
 
 afterEach(cleanup);
 
@@ -42,6 +43,7 @@ function sendsLine(url: string, overrides: Partial<RequestState> = {}): string {
 		},
 		updateField: () => {},
 		resolveString: resolve,
+		resolveField: fieldResolverOf(resolve),
 		getAllVariables: () => ({
 			token: { value: SECRET, scope: "environment", secret: true },
 			region: { value: "eu-1", scope: "environment" },

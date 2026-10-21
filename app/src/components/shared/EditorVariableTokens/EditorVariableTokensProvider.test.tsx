@@ -28,7 +28,7 @@ import { useEditorVariableTokensContext, type EditorVariableTokensValue } from "
 const updateVariable = vi.fn();
 
 const support: VariableSupport = {
-	resolveString: (input) => input,
+	resolveField: (input) => ({ text: input, refusals: [] }),
 	getAllVariables: () => ({
 		baseUrl: { value: "https://api.example.com", scope: "environment", sourceName: "Staging" },
 		token: { value: "s3cr3t", scope: "environment", secret: true },

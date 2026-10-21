@@ -57,26 +57,26 @@
  * magnitude several other caches in the app keep.
  */
 
-interface CacheEntry {
+interface CacheEntry<T> {
 	input: string;
 	/** The `resolveString` that produced `resolved`, compared by identity. */
-	resolve: (input: string) => string;
-	resolved: string;
+	resolve: (input: string) => T;
+	resolved: T;
 }
 
 /**
  * Resolve `input` for the field identified by `key`, reusing the last value
  * unless the text or the resolver changed.
  */
-export type StableResolve = (
+export type StableResolve<T = string> = (
 	key: string,
 	input: string,
-	resolve: (input: string) => string
-) => string;
+	resolve: (input: string) => T
+) => T;
 
 /** One cache, for one field. Call it once at module scope, never in render. */
-export function createStableResolve(): StableResolve {
-	const cache = new Map<string, CacheEntry>();
+export function createStableResolve<T = string>(): StableResolve<T> {
+	const cache = new Map<string, CacheEntry<T>>();
 	return (key, input, resolve) => {
 		const cached = cache.get(key);
 		if (cached && cached.input === input && cached.resolve === resolve) return cached.resolved;

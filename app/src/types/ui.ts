@@ -11,6 +11,7 @@
 // (DrawerView in layout-store, TabType in tabs-store).
 
 import type { ReactNode } from "react";
+import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
 import type {
 	DataContractScope,
 	FormFieldEntry,
@@ -49,8 +50,12 @@ export type { ColorScheme } from "@/constants/color-schemes";
  * nowhere.
  */
 export interface VariableSupport {
-	/** `{{name}}` substituted, for a preview of what will actually be sent. */
-	resolveString: (input: string) => string;
+	/**
+	 * `{{name}}` substituted, for a preview of what will actually be sent: a
+	 * picked row's cell written for the field's @p context as the send's bind
+	 * writes it, and why the send would refuse the row (issue #2639).
+	 */
+	resolveField: (input: string, context?: DataFieldContext) => BoundField;
 	/** Every name in scope, for token rendering and the `{{` autocomplete. */
 	getAllVariables: () => Record<string, ResolvedVariable>;
 	/** Every definition of a name, winner and losers alike. Display-only. */
@@ -168,6 +173,12 @@ export interface KeyValueEditorProps {
 	 * anywhere else (#564).
 	 */
 	variables?: VariableSupport;
+	/**
+	 * What kind of field every key and value is, for the bind a picked row's
+	 * preview shows: `header` for the Headers table, `plain` (the default) for
+	 * the rest, as the engine's bind treats them.
+	 */
+	fieldContext?: DataFieldContext;
 	canEdit?: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;
 	canRemove?: (item: KeyValueItem) => boolean;
 	canDisable?: (item: KeyValueItem) => boolean;

@@ -23,6 +23,7 @@ import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
 import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-viewer/wire-headers";
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
+import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
@@ -612,6 +613,11 @@ export interface RequestBuilderContextValue {
 
 	// Variable Resolution
 	resolveString: (input: string) => string;
+	/**
+	 * A preview of one field of a known kind, with why the send would refuse
+	 * the picked row over it. See `useVariableResolver`'s `resolveField`.
+	 */
+	resolveField: (input: string, context?: DataFieldContext) => BoundField;
 	resolveVariables: (input: string) => string;
 	/**
 	 * The auth this request will actually send - `inherit` walked through the

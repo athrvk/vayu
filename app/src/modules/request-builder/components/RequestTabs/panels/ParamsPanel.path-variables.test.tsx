@@ -25,6 +25,7 @@ import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import ParamsPanel from "./ParamsPanel";
+import { fieldResolverOf } from "@/test/variable-support";
 
 afterEach(cleanup);
 
@@ -48,6 +49,7 @@ function renderPanel(
 		},
 		updateField,
 		resolveString,
+		resolveField: fieldResolverOf(resolveString),
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		updateVariable: () => {},

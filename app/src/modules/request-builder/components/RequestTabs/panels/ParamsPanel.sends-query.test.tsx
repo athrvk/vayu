@@ -24,6 +24,7 @@ import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import ParamsPanel from "./ParamsPanel";
+import { fieldResolverOf } from "@/test/variable-support";
 
 afterEach(cleanup);
 
@@ -45,6 +46,7 @@ function sendsLine(url: string, disableUrlEncoding: boolean, params: KeyValueIte
 		},
 		updateField: () => {},
 		resolveString: resolve,
+		resolveField: fieldResolverOf(resolve),
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		updateVariable: () => {},

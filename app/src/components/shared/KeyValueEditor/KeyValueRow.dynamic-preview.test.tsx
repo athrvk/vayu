@@ -48,7 +48,10 @@ afterEach(cleanup);
  */
 function makeRerollingResolver() {
 	let n = 0;
-	return vi.fn((input: string) => input.replace("{{$randomInt}}", String(++n)));
+	return vi.fn((input: string) => ({
+		text: input.replace("{{$randomInt}}", String(++n)),
+		refusals: [],
+	}));
 }
 
 function renderRow(scope: VariableSupport, id: string, value: string) {
@@ -89,8 +92,8 @@ describe("the resolved-value peek", () => {
 		// `TabsContent` and these panels are not force-mounted, so the second
 		// visit is a *new row instance*, not a re-render - which is why a memo
 		// could not hold this and the module-scope cache can.
-		const resolveString = makeRerollingResolver();
-		const scope = variableSupportStub({}, { resolveString });
+		const resolveField = makeRerollingResolver();
+		const scope = variableSupportStub({}, { resolveField });
 
 		const first = renderRow(scope, "row_remount", VALUE);
 		const before = await peekText(first.container);
@@ -103,11 +106,11 @@ describe("the resolved-value peek", () => {
 	});
 
 	it("does not re-resolve the row on a re-render with nothing about it changed", () => {
-		const resolveString = makeRerollingResolver();
-		const scope = variableSupportStub({}, { resolveString });
+		const resolveField = makeRerollingResolver();
+		const scope = variableSupportStub({}, { resolveField });
 
 		const { rerender, container } = renderRow(scope, "row_rerender", VALUE);
-		const callsForValue = () => resolveString.mock.calls.filter(([s]) => s === VALUE).length;
+		const callsForValue = () => resolveField.mock.calls.filter(([s]) => s === VALUE).length;
 		expect(callsForValue()).toBe(1);
 
 		// A re-render triggered by something unrelated to this row - a sibling
@@ -134,8 +137,8 @@ describe("the resolved-value peek", () => {
 	});
 
 	it("draws again once the row's text actually changes", async () => {
-		const resolveString = makeRerollingResolver();
-		const scope = variableSupportStub({}, { resolveString });
+		const resolveField = makeRerollingResolver();
+		const scope = variableSupportStub({}, { resolveField });
 
 		const first = renderRow(scope, "row_edit", VALUE);
 		const before = await peekText(first.container);
@@ -150,8 +153,8 @@ describe("the resolved-value peek", () => {
 		// Byte-identical templates on two different rows. Keying the cache on the
 		// text alone would collapse them, which is the collision the resolver
 		// conformance fixture forbids for two distinct occurrences.
-		const resolveString = makeRerollingResolver();
-		const scope = variableSupportStub({}, { resolveString });
+		const resolveField = makeRerollingResolver();
+		const scope = variableSupportStub({}, { resolveField });
 
 		const a = renderRow(scope, "row_a", VALUE);
 		const aText = await peekText(a.container);

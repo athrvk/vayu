@@ -1117,8 +1117,13 @@ the engine's by `engine/tests/fixtures/variable-resolution-conformance.json`,
 read by `request_composer_test.cpp` and
 `variable-resolution.conformance.test.ts`; change resolution semantics in the
 engine, the renderer lib and the fixture together, and a case added to the
-fixture fails whichever side forgot. The dynamic-variable name set (`$guid`,
-`$timestamp`, …) is part of that contract (C++ table in `request_composer.cpp`,
+fixture fails whichever side forgot. The Send-with-row preview restates the
+bind's per-field escaping too (`lib/data-bind-escaping.ts`: the JSON and XML
+placement scans and leaf escapers of `core/scenario_data.cpp`, the header
+refusal, the URL join), pinned the same way by
+`engine/tests/fixtures/data-bind-escaping-conformance.json`, read by
+`scenario_data_test.cpp` and `variable-resolution.row.test.ts` (#2639). The
+dynamic-variable name set (`$guid`, `$timestamp`, …) is part of that contract (C++ table in `request_composer.cpp`,
 renderer table in `lib/dynamic-variables.ts`), as are the D17 malformed-data
 rules (absent or non-boolean `enabled` = enabled; non-string `value` = "") in
 `parse_variables` and `variable-resolution.ts`. Compose resolves strictly
