@@ -7,7 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { cumulativePercentiles, hasSecondPercentiles, secondPercentiles } from "./tickPercentiles";
+import {
+	coversSecond,
+	cumulativePercentiles,
+	hasSecondPercentiles,
+	secondPercentiles,
+	worstReading,
+} from "./tickPercentiles";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -65,6 +71,44 @@ describe("secondPercentiles (issue #2385)", () => {
 	it("holds nothing for a gate frame whose percentiles are null despite a count", () => {
 		const odd = tick({ live: true, second_samples: 5, second_p99_ms: null });
 		expect(secondPercentiles(odd)).toBeNull();
+	});
+
+	it("holds nothing for a stored second with no completion, whose keys are absent (#2386)", () => {
+		const empty = tick({ elapsed_seconds: 4 });
+		delete empty.latency_p50_ms;
+		delete empty.latency_p95_ms;
+		delete empty.latency_p99_ms;
+		expect(secondPercentiles(empty)).toBeNull();
+		expect(hasSecondPercentiles(empty)).toBe(false);
+		// Still a whole second: a chart draws it as a gap, not as nothing at all.
+		expect(coversSecond(empty)).toBe(true);
+	});
+
+	it("still reads the 0 an older engine stored for such a second as a number", () => {
+		const old = tick({ latency_p50_ms: 0, latency_p95_ms: 0, latency_p99_ms: 0 });
+		expect(secondPercentiles(old)).toEqual({ p50: 0, p95: 0, p99: 0 });
+	});
+});
+
+describe("coversSecond", () => {
+	it("is true for a stored tick and a gate frame, false for a frame between gates", () => {
+		expect(coversSecond(tick({}))).toBe(true);
+		expect(coversSecond(tick({ live: true, second_samples: 0 }))).toBe(true);
+		expect(coversSecond(tick({ live: true }))).toBe(false);
+	});
+});
+
+describe("worstReading", () => {
+	it("takes the larger of two readings", () => {
+		expect(worstReading(40, 900)).toBe(900);
+		expect(worstReading(900, 40)).toBe(900);
+	});
+
+	it("keeps a reading over no reading, and no reading only when neither has one", () => {
+		expect(worstReading(null, 40)).toBe(40);
+		expect(worstReading(40, null)).toBe(40);
+		expect(worstReading(0, null)).toBe(0);
+		expect(worstReading(null, null)).toBeNull();
 	});
 });
 

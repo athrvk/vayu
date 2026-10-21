@@ -450,7 +450,7 @@ JavaScript execution engine for pre-request and test scripts:
 - **Signing**: `pm.crypto.sha256` / `.hmacSha256` plus the `btoa` / `atob` globals, so
   a pre-request script can sign the request it just rewrote. Backed by **libsodium**
   through `utils/sha256.hpp` (shared with PKCE) and `utils/encoding.hpp` - the engine
-  hand-maintains no hash, HMAC or alphabet table, and OpenSSL is still not linked.
+  hand-maintains no hash, HMAC or alphabet table.
   Synchronous: Web Crypto covers algorithms the sandbox does not implement, so the surface is `pm.crypto`, not `crypto.subtle`.
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
@@ -1567,3 +1567,6 @@ record shape, the category list, the redaction rule and the file layout
 - **sqlite-orm**: C++ ORM for SQLite
 - **QuickJS**: JavaScript engine (vendored)
 - **libsodium**: SHA-256, HMAC-SHA256, base64 and hex (ISC)
+- **OpenSSL** (libcrypto): MD5, SHA-1, the SHA-2 family and their HMACs for the
+  `crypto-js` shim, through `utils/digest.hpp`; already in the binary as libcurl's
+  TLS backend

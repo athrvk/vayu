@@ -8,7 +8,7 @@
 /**
  * The main process's writes to file trust (#2356): the four engine routes that
  * decide which files a request body may send - `POST`/`DELETE /file-grants` and
- * `POST`/`DELETE /file-roots` - and the read of the grants beside them.
+ * `POST`/`DELETE /file-roots` - and the reads of the grants and the allowed folders beside them.
  *
  * The engine refuses those writes without the grant secret the sidecar spawned
  * it with, and this module is the one holder of that secret and the one place
@@ -52,6 +52,7 @@ export interface FileTrustClient {
 	setSecret(secret: string): void;
 	createFileGrant(filePath: string): Promise<EngineWrite<FileTrustRow>>;
 	listFileGrants(): Promise<EngineWrite<FileTrustRow[]>>;
+	listFileRoots(): Promise<EngineWrite<FileTrustRow[]>>;
 	createFileRoot(folder: string): Promise<EngineWrite<FileTrustRow>>;
 	deleteFileRoot(id: string): Promise<EngineWrite<null>>;
 }
@@ -124,6 +125,13 @@ export function createFileTrustClient(deps: FileTrustClientDeps): FileTrustClien
 		listFileGrants: () =>
 			call(
 				"/file-grants",
+				{ method: "GET", gated: false },
+				async (response) => (await response.json()) as FileTrustRow[]
+			),
+
+		listFileRoots: () =>
+			call(
+				"/file-roots",
 				{ method: "GET", gated: false },
 				async (response) => (await response.json()) as FileTrustRow[]
 			),

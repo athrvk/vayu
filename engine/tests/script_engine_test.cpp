@@ -18,9 +18,13 @@
 #include <tuple>
 #include <vector>
 
+#include "echo_server.hpp"
+#include "step_elements_test_helper.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/request_builder.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/diagnostics.hpp"
@@ -4155,10 +4159,10 @@ TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
 //
 // `scripting.md` now teaches request rewriting, so what a script can *compute*
 // is part of the contract. Installed on top of QuickJS's built-ins: `console`,
-// `pm`, and `btoa` / `atob` (#187). Still absent: a URL parser and anything
-// asynchronous. This pins both halves so a doc example cannot come to rely on
-// something that was never there (`scripting.md` used to show a `computeHash`
-// that does not exist).
+// `pm`, `btoa` / `atob` (#187), and `require` / `CryptoJS` (#2578). Still
+// absent: a URL parser and `fetch`. This pins both halves so a doc example
+// cannot come to rely on something that was never there (`scripting.md` used
+// to show a `computeHash` that does not exist).
 
 TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
     auto result = engine.execute_prerequest (R"JS(
@@ -4177,11 +4181,12 @@ TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
     << "a built-in the docs rely on disappeared";
 }
 
-TEST_F (ScriptEngineTest, NoUrlParserFetchOrModuleLoaderIsExposed) {
+// `require` is not among them: it answers a fixed shelf and loads nothing
+// else (#2578, the RequireShelf tests below).
+TEST_F (ScriptEngineTest, NoUrlParserOrFetchIsExposed) {
     auto result = engine.execute_prerequest (R"JS(
         var present = [];
-        var absent = ['crypto', 'TextEncoder', 'URL', 'URLSearchParams',
-                      'require', 'fetch'];
+        var absent = ['crypto', 'TextEncoder', 'URL', 'URLSearchParams', 'fetch'];
         for (var i = 0; i < absent.length; i++) {
             if (typeof globalThis[absent[i]] !== 'undefined') present.push(absent[i]);
         }
@@ -8314,4 +8319,248 @@ TEST_F (ScriptEngineTest, VisualizerIsAvailableInAPreRequestScript) {
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (warnings_of (result).size (), 2u);
+}
+
+// ============================================================================
+// require() and its shelf (#2578)
+// ============================================================================
+//
+// Known answers, as for pm.crypto: FIPS 180's "abc" for each digest, the empty
+// string's MD5, and RFC 2202 / RFC 4231 test case 2 (key "Jefe") for each
+// HMAC.
+
+namespace {
+
+constexpr const char* JEFE_MESSAGE = "what do ya want for nothing?";
+
+struct ShelfAnswer {
+    const char* expression;
+    const char* expected;
+};
+
+/// What @p expression, run as a pre-request script, stringifies to; the
+/// script's error when it throws.
+std::string shelf_answer (ScriptEngine& engine, Request& request, const std::string& expression) {
+    Environment env;
+    const auto result = engine.execute_prerequest ("var JEFE = '" +
+    std::string (JEFE_MESSAGE) + "'; pm.environment.set('out', String(" + expression + "));",
+    request, env);
+    return result.success ? env["out"].value : "threw: " + result.error_message;
+}
+
+} // namespace
+
+// The acceptance case: Postman's signing call, through require.
+TEST_F (ScriptEngineTest, RequireShelfHmacSha256MatchesTheReferenceDigest) {
+    auto result = engine.execute_prerequest (R"JS(
+        var CryptoJS = require('crypto-js');
+        var signature = CryptoJS.HmacSHA256('what do ya want for nothing?', 'Jefe');
+        pm.environment.set('signature', signature.toString(CryptoJS.enc.Hex));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["signature"].value,
+    "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfDigestsMatchKnownVectors) {
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "CryptoJS.MD5('')", "d41d8cd98f00b204e9800998ecf8427e" },
+    { "CryptoJS.SHA1('abc')", "a9993e364706816aba3e25717850c26c9cd0d89d" },
+    { "CryptoJS.SHA224('abc')", "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7" },
+    { "CryptoJS.SHA256('abc')", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" },
+    { "CryptoJS.SHA384('abc')",
+    "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072"
+    "ba1e7cc2358baeca134c825a7" },
+    { "CryptoJS.SHA512('abc')",
+    "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992"
+    "a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f" },
+    { "CryptoJS.HmacMD5(JEFE, 'Jefe')", "750c783e6ab0b503eaa86e310a5db738" },
+    { "CryptoJS.HmacSHA1(JEFE, 'Jefe')", "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79" },
+    { "CryptoJS.HmacSHA224(JEFE, 'Jefe')", "a30e01098bc6dbbf45690f3a7e9e6d0f8bbea2a39e6148008fd05e44" },
+    { "CryptoJS.HmacSHA256(JEFE, 'Jefe')", "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843" },
+    { "CryptoJS.HmacSHA384(JEFE, 'Jefe')",
+    "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e8e2240"
+    "ca5e69e2c78b3239ecfab21649" },
+    { "CryptoJS.HmacSHA512(JEFE, 'Jefe')",
+    "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf"
+    "75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737" },
+    // A WordArray message hashes its bytes, as the same string does.
+    { "CryptoJS.SHA256(CryptoJS.enc.Utf8.parse('abc'))",
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" },
+    // The digest as base64, the other form a signature header takes.
+    { "CryptoJS.SHA256('abc').toString(CryptoJS.enc.Base64)", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=" },
+    { "CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA1(JEFE, 'Jefe'))", "7/zfauXrL6LSdBbV8YTfnCWafHk=" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+TEST_F (ScriptEngineTest, RequireShelfEncodersMatchKnownAnswers) {
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    // Base64's three padding cases, RFC 4648 section 10.
+    { "CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse('f'))", "Zg==" },
+    { "CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse('fo'))", "Zm8=" },
+    { "CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse('foo'))", "Zm9v" },
+    { "CryptoJS.enc.Base64.parse('Zm8=').toString(CryptoJS.enc.Utf8)", "fo" },
+    { "CryptoJS.enc.Base64.parse('Zm9v\\nYmFy').toString(CryptoJS.enc.Utf8)", "foobar" },
+    { "CryptoJS.enc.Hex.parse('00ff10').toString(CryptoJS.enc.Base64)", "AP8Q" },
+    // UTF-8 both ways, through a two- and a three-byte character.
+    { "CryptoJS.enc.Utf8.parse('\\u00e9\\u20ac').toString()", "c3a9e282ac" },
+    { "CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse('c3a9e282ac'))", "\xc3\xa9\xe2\x82\xac" },
+    { "CryptoJS.enc.Latin1.stringify(CryptoJS.enc.Hex.parse('48e9'))", "H\xc3\xa9" },
+    { "CryptoJS.enc.Latin1.parse('H\\u00e9').toString()", "48e9" },
+    { "CryptoJS.lib.WordArray.create(new Uint8Array([1, 2, 255])).toString()", "0102ff" },
+    { "CryptoJS.lib.WordArray.create([0x01020304], 3).toString()", "010203" },
+    { "CryptoJS.enc.Utf8.parse('ab').concat(CryptoJS.enc.Utf8.parse('c'))"
+      ".toString(CryptoJS.enc.Utf8)",
+    "abc" },
+    { "CryptoJS.SHA1('abc').clone().sigBytes", "20" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// A digest is a key: the AWS SigV4 signing-key chain Postman scripts write with
+// crypto-js, against the published example key DigestBytesCanBeFedBackAsAKey
+// checks pm.crypto against.
+TEST_F (ScriptEngineTest, RequireShelfHmacTakesAWordArrayKey) {
+    auto result = engine.execute_prerequest (R"JS(
+        var kDate = CryptoJS.HmacSHA256('20150830', 'AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY');
+        var kRegion = CryptoJS.HmacSHA256('us-east-1', kDate);
+        var kService = CryptoJS.HmacSHA256('iam', kRegion);
+        pm.environment.set('kSigning', CryptoJS.HmacSHA256('aws4_request', kService).toString());
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["kSigning"].value,
+    "c4afb1cc5771d871763a393e44b703571b55cc28424d1a5e86da6ed3c154a4b9");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "typeof CryptoJS + ' ' + (require('crypto-js') === CryptoJS) + ' ' + "
+    "(require('crypto-js') === require('crypto-js'))"),
+    "object true true");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
+    const std::string refusal = shelf_answer (engine, request, "require('nope')");
+    EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
+    EXPECT_NE (refusal.find ("crypto-js"), std::string::npos)
+    << "the refusal names the shelf: " << refusal;
+    EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
+    << refusal;
+
+    // A script that catches the refusal goes on, as it would under Node.
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "(function () { try { require('fs'); } catch (e) { return e instanceof "
+    "Error; } })()"),
+    "true");
+
+    const std::string not_a_name = shelf_answer (engine, request, "require(42)");
+    EXPECT_NE (not_a_name.find ("TypeError"), std::string::npos) << not_a_name;
+    EXPECT_NE (not_a_name.find ("module name string"), std::string::npos) << not_a_name;
+}
+
+// Hashing the text "[object Object]" or "42" would be a digest that looks
+// right; every one of these throws, naming the call.
+TEST_F (ScriptEngineTest, RequireShelfRefusesInputItCannotHashHonestly) {
+    constexpr auto REFUSED = std::to_array<ShelfAnswer> ({
+    { "CryptoJS.SHA256(42)", "CryptoJS.SHA256 takes a string or a WordArray, not number" },
+    { "CryptoJS.MD5({})", "CryptoJS.MD5 takes a string or a WordArray, not object" },
+    { "CryptoJS.HmacSHA256('m', null)", "CryptoJS.HmacSHA256 key takes a string or a WordArray, not null" },
+    { "CryptoJS.HmacSHA1(undefined, 'k')",
+    "CryptoJS.HmacSHA1 message takes a string or a WordArray, not undefined" },
+    { "CryptoJS.enc.Hex.parse('abc')", "is not an even number of hex digits" },
+    { "CryptoJS.enc.Hex.parse('zz')", "is not an even number of hex digits" },
+    { "CryptoJS.enc.Base64.parse('Zm9v!')", "is not a base64 digit" },
+    { "CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse('ff'))", "Malformed UTF-8 data" },
+    { "CryptoJS.enc.Hex.stringify('abc')", "CryptoJS.enc.Hex.stringify takes a WordArray, not string" },
+    });
+    for (const auto& refused : REFUSED) {
+        const std::string answer = shelf_answer (engine, request, refused.expression);
+        EXPECT_NE (answer.find ("threw: "), std::string::npos)
+        << refused.expression << " answered " << answer;
+        EXPECT_NE (answer.find (refused.expected), std::string::npos)
+        << refused.expression << ": " << answer;
+    }
+}
+
+// Every script gets a context built for it, so a library evaluated at build
+// would be paid for by every element. Mutation: evaluate the shelf in
+// `setup_require_shelf` and the first expectation fails.
+TEST_F (ScriptEngineTest, RequireShelfEvaluatesALibraryOnlyOnFirstUse) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "1 + 1"), "2");
+    EXPECT_EQ (shelf_answer (engine, request, "typeof require"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    // One evaluation however many times the execution reaches for it.
+    EXPECT_EQ (shelf_answer (engine, request,
+               "typeof CryptoJS + require('crypto-js').MD5('').sigBytes + "
+               "typeof require('crypto-js')"),
+    "object16object");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    // The next script's context is a new one, which loads its own copy.
+    EXPECT_EQ (shelf_answer (engine, request, "typeof require('crypto-js').SHA1"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
+// An assignment replaces the global as it would any other, without loading
+// the library it replaces; a script's own `var CryptoJS = require(...)` is
+// function-local, as in Postman.
+TEST_F (ScriptEngineTest, RequireShelfGlobalCanBeReassigned) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "(CryptoJS = 5, CryptoJS + 1)"), "6");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before);
+
+    auto result = engine.execute_prerequest (R"JS(
+        var CryptoJS = require('crypto-js');
+        pm.environment.set('out', CryptoJS.MD5('').toString());
+    )JS",
+    request, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["out"].value, "d41d8cd98f00b204e9800998ecf8427e");
+}
+
+// The defect #2578 measured: a crypto-js signing script failed and the request
+// went out unsigned. Asserted on what the server received.
+TEST_F (ScriptEngineTest, RequireShelfSignedHeaderReachesTheWire) {
+    vayu::http::global_init ();
+    {
+        const vayu::tests::EchoServer server;
+        Request signed_request;
+        signed_request.method       = HttpMethod::POST;
+        signed_request.url          = server.url ();
+        signed_request.body.mode    = BodyMode::Text;
+        signed_request.body.content = JEFE_MESSAGE;
+
+        vayu::http::CookieJar jar;
+        vayu::http::routes::ScriptVariableScopes scopes;
+        vayu::http::routes::ExchangeInputs inputs;
+        inputs.request     = std::move (signed_request);
+        inputs.elements    = vayu::tests::step_elements_with_pre_script (R"JS(
+            var CryptoJS = require('crypto-js');
+            var signature = CryptoJS.HmacSHA256(pm.request.body.toString(), 'Jefe');
+            pm.request.headers.upsert({ key: 'X-Signature', value: signature.toString(CryptoJS.enc.Hex) });
+        )JS");
+        const auto outcome = vayu::http::routes::execute_exchange (
+        engine, jar, "", scopes, std::move (inputs));
+
+        ASSERT_EQ (outcome.response.status_code, 200);
+        EXPECT_EQ (server.header ("X-Signature"),
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+    }
+    vayu::http::global_cleanup ();
 }

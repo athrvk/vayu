@@ -128,9 +128,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 "await pm.sendRequest(request), which is synchronous and allowed only when "
 "the run's allowScriptRequests setting is on." },
 { "XMLHttpRequest", "No XMLHttpRequest in the sandbox. Use pm.sendRequest." },
-{ "require",
-"No module system - QuickJS here has no loader, and there is "
-"no filesystem to load from." },
 { "process", "Not Node. There is no process, no argv and no env." },
 { "Buffer", "Not Node. Use btoa/atob, or pm.crypto for hashing." },
 { "URL",
@@ -153,31 +150,48 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 "Not a browser. Use console.log, shown in the response pane's "
 "Console tab." },
 
-// The libraries Postman bundles. Its replacement for most is a require() this
-// sandbox has no loader for, so each says what Vayu has instead.
+// The libraries Postman bundles that Vayu's require() shelf does not carry,
+// each saying what Vayu has instead. One that ships leaves this list (#2578).
 { "_",
-"Postman's bundled lodash. Its replacement is require('lodash'); Vayu has "
-"neither. The Array and Object built-ins (map, filter, flatMap, "
-"Object.entries, Object.fromEntries) cover most uses." },
-{ "CryptoJS",
-"Postman's bundled crypto-js; its replacement is the global crypto object. "
-"Vayu has pm.crypto.sha256(data) and pm.crypto.hmacSha256(key, data), and "
-"no other hash or cipher." },
+"Postman's bundled lodash. Its replacement is require('lodash'), which "
+"Vayu's require() does not load either. The Array and Object built-ins "
+"(map, filter, flatMap, Object.entries, Object.fromEntries) cover most "
+"uses." },
 { "tv4",
 "Postman's bundled JSON Schema validator. Its replacement is "
-"require('ajv'); Vayu has neither." },
+"require('ajv'), which Vayu's require() does not load either." },
 { "xml2Json",
-"Postman's bundled XML parser. Its replacement is require('xml2js'); Vayu "
-"has neither." },
+"Postman's bundled XML parser. Its replacement is require('xml2js'), "
+"which Vayu's require() does not load either." },
 { "cheerio",
-"Postman's bundled HTML parser. Its replacement is require('cheerio'); "
-"Vayu has neither." },
+"Postman's bundled HTML parser. Its replacement is require('cheerio'), "
+"which Vayu's require() does not load either." },
 { "moment",
-"Postman's bundled moment. Its replacement is require('moment'); Vayu has "
-"neither. The Date built-in is what a script has." },
+"Postman's bundled moment. Its replacement is require('moment'), which "
+"Vayu's require() does not load either. The Date built-in is what a "
+"script has." },
 { "Backbone",
 "Postman's bundled Backbone, which it names no replacement for. Vayu has "
 "no Backbone." },
+});
+
+/**
+ * @brief The modules `require()` loads (#2578), each with the global whose
+ *        type it answers.
+ *
+ * The editor checks a script as JavaScript, where `const lib =
+ * require('crypto-js')` is an import TypeScript resolves as a module rather
+ * than a call to the declared `require`; undeclared, that line is "Cannot find
+ * module" on the very idiom Postman scripts open with. So each name is also
+ * declared as a module. `script_types_test.cpp` runs `require(name)` in the
+ * real script engine for every module the file declares.
+ */
+struct ShelfModule {
+    const char* name;
+    const char* global;
+};
+constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
+{ "crypto-js", "CryptoJS" },
 });
 
 /**
@@ -927,6 +941,10 @@ std::string generate_script_typedefs () {
     "// (GET /scripting/types). Do not edit - add to the table instead.\n\n";
     out += render_chain (chain_root);
     out += render_globals (global_root);
+    for (const auto& shelf_module : SHELF_MODULES) {
+        out += std::format ("\ndeclare module '{}' {{\n\texport = {};\n}}\n",
+        shelf_module.name, shelf_module.global);
+    }
     return out;
 }
 

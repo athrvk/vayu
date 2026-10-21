@@ -3567,7 +3567,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
     "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
     "nonExecutableAuth": 0, "unattachedFileParts": 0,
-    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "CryptoJS"] } ]
+    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "moment"] } ]
   }
 }
 ```
@@ -3575,9 +3575,9 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 **`meta.unsupportedScriptApis`** (Postman only, issue
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
-Postman script API Vayu does not run, and which ones - `require()`,
-`script.packages`, a bundled library such as `CryptoJS`, and the other rows of
-the table in
+Postman script API Vayu does not run, and which ones - `require()` of a module
+off the `crypto-js` shelf, `script.packages`, a bundled library such as
+`moment`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
 `docs/app/import-collections/postman.md#scripts` has the rules.
@@ -4287,7 +4287,7 @@ breaking change bumps the integer and is noted here):
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
-| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics)); absent for `series: "none"` |
+| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
@@ -8768,12 +8768,12 @@ one number - the MCP tool's cap does.
 
 The search steers by what the metrics thread publishes each live tick rather
 than sampling the collector itself, so it takes nothing away from what `GET
-/runs/:id/live` streams. A level in which no request was timed is not judged and
-stays open: its percentiles are the empty-histogram zeros and reading those as
-"answered instantly" would climb straight past the limit. A request that timed
-out is timed (see [Latency population](#latency-population)), so a level of
-nothing but timeouts has samples, is judged, and reports a p99 near the timeout -
-the level fails its latency limit, which is the right verdict.
+/runs/:id/live` streams. A level in which no request was timed (`latencySamples`
+`0`, percentiles `null` on the frame) is not judged and stays open: reading it
+as "answered instantly" would climb straight past the limit. A request that
+timed out is timed (see [Latency population](#latency-population)), so a level
+of nothing but timeouts has samples, is judged, and reports a p99 near the
+timeout - the level fails its latency limit, which is the right verdict.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 p99 per level and a sequence has one per step.
 
@@ -8930,9 +8930,12 @@ history view can rebuild the percentiles-over-time chart, the
 response-time-vs-concurrency scatter, and the capacity-breakpoint / saturation
 stats from stored data. The live tick that wrote a row carries the same three
 figures as `secondP50Ms` / `secondP95Ms` / `secondP99Ms`. A row stores no
-sample count, and a second with no completion stores `0`. Rows an engine
-older than issue #2385 stored hold the last 100 ms window of their second
-instead.
+sample count, and a second with no completion has **none of the three keys**
+(issue #2386), the frame's `secondSamples` `0` and `null` percentiles: absent
+rather than `null` because the [run export](#post-exportrun-report) types
+them as numbers. Rows an engine older than issue #2386 stored hold `0` for
+such a second, and rows older than issue #2385 hold the last 100 ms window of
+their second instead.
 
 **Response:**
 ```json
@@ -9054,8 +9057,11 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 The latency fields are never averaged: each row's percentile is of its own
 second, so the bucket's max is an **upper bound** on the bucket's percentile,
 not an estimate of it, and a one-second spike survives into the bucket that
-holds it. `0` still means a second with no completion, so a bucket reads `0`
-only when none of its seconds completed anything. Rows an engine older than
+holds it. A second with no completion carries none of the three keys
+(issue #2386) and so takes no part in the max: a bucket has them only when one
+of its seconds completed something. A bucket of rows an engine older than
+issue #2386 stored reads `0` only when none of its seconds completed anything,
+which is what those rows store for such a second. Rows an engine older than
 issue #2385 stored hold the last 100 ms window of their second instead, and
 the max is then taken over those windows. A key no tick in the bucket carried
 (`http_errors` on an older row, `custom_metrics` on a run that recorded none)
@@ -9174,7 +9180,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
        "windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
-       "latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
+       "latencySamples":15,"latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
        "cumulativeP50Ms":36.0,"cumulativeP95Ms":90.2,"cumulativeP99Ms":160.4,
        "bytesSent":48000,"bytesReceived":1920000,
        "requestsSent":1500,"requestsExpected":0,
@@ -9327,7 +9333,8 @@ no frame.
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `0` for a window with no completion. The capacity search steers by these |
+| `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
@@ -10780,9 +10787,11 @@ so a client may cache on `version`.
 
 The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
-Node (`fetch`, `require`, `URL`, `Buffer`, ...), and the libraries Postman
-bundles (`CryptoJS`, `_`, ...), whose hover names the replacement Postman itself
-gives (`_` is `require('lodash')`). Postman's `postman` object and its pre-`pm.*`
+Node (`fetch`, `URL`, `Buffer`, ...), and the libraries Postman bundles that
+the `require()` shelf does not carry (`_`, `moment`, ...), whose hover names the
+replacement Postman itself gives (`_` is `require('lodash')`). `require` and
+`CryptoJS` are declared as what they are, with `declare module 'crypto-js'`
+(#2578). Postman's `postman` object and its pre-`pm.*`
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
 as the value it is.

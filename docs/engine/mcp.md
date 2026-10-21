@@ -426,7 +426,8 @@ Notes:
   sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
   an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. A Postman script that
-  calls an API Vayu does not run (`require()`, a bundled library) imports
+  calls an API Vayu does not run (`require()` of anything but `crypto-js`, a
+  bundled library such as `moment`) imports
   and throws at first run, so `meta.unsupportedScriptApis` (issue
   [#2576](https://github.com/athrvk/vayu/issues/2576); `[{request, names}]`, absent
   when empty) names those requests in both tools' result, `meta` riding whole.
@@ -1813,8 +1814,12 @@ keeping only an absolute path with an extension `dataFile:read` would open).
 `list_collections` and `vayu://collections` hash the file as it is **at call
 time** (`hashDataFile` in `electron/data-file.ts`, behind the same path gates
 as `dataFile:read`, streamed and never returned), so an edit made after a run
-shows up without the app re-reading anything. A file that cannot be read -
-moved, deleted - is never an error: the row keeps the hash the app last read
+shows up without the app re-reading anything. One of those gates is the grant
+registry (#2357): only a file the user picked, dropped or opened through the
+app is hashed, so the digest is no oracle over a path the renderer merely
+named. A file that cannot be read - moved, deleted, or never granted (a data
+file picked before grants existed is granted once it is picked again) - is
+never an error: the row keeps the hash the app last read
 the file with (picked in the Data tab, or re-read by a run dialog,
 Send-with-row or the Data tab), or none for a location it has not read since
 hashes were recorded. A write tool's echoed collection row carries that stored

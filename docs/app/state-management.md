@@ -406,7 +406,7 @@ The path is written when the user declares a contract by picking a file, on
 the Data tab or in either run dialog (`hooks/useDataContractWriter.ts`), obtained through the preload's
 existing `getFilePath` bridge, and dropped when the collection is deleted or
 purged, its contract cleared (Clear or Remove), or a later pick carries no path. Reading it back needs the gated `dataFile:read` IPC
-(`electron/data-file.ts`), because the renderer otherwise cannot name a path.
+(`electron/data-file.ts`), because the renderer otherwise cannot name a path. The gate includes the main process's grant registry (#2357): a path is read only if the user picked, dropped or opened it through the app, which `getFilePath` records with the engine (`file_grants`, so it survives a restart). A data file declared before that registry existed holds no grant and must be picked once more; until then `dataFile:read` rejects with a "pick the file again" message and `dataFile:hash` answers `{ status: "missing" }`. The renderer does not seed grants from its own persisted paths - that is the input being gated.
 
 `hash` is the SHA-256 of the file's bytes the last time the app read it (issue
 #2051), the same digest a run records as `dataFileHash`. A pick writes it with
@@ -416,7 +416,7 @@ was declared. It is optional because a location remembered before hashes were
 recorded has none until its next read. Nothing that only *compares* writes it:
 `useDataFileStatus` and MCP's `list_collections` ask the main process for the
 file's current digest (`dataFile:hash`, which answers `{ status: "found", hash }`
-or `{ status: "missing" }` for a file that has moved) and fall back to this one
+or `{ status: "missing" }` for a file that has moved or holds no grant) and fall back to this one
 only when they cannot.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:
@@ -462,8 +462,11 @@ binds a picked file, obtained through the preload's existing `getFilePath`
 bridge, and dropped on unbind. Reading the files a picked document *references*
 needs the gated `specFile:read` IPC (`electron/spec-file.ts`), which takes the
 document's path plus the reference and resolves one against the other in the
-main process - the renderer names no directory of its own, the same posture
-`dataFile:read` holds. It is normalized through **both** `migrate` and
+main process. The document path must be one the user picked, dropped or opened
+(the grant registry, #2357) - a path the renderer merely remembers is refused
+with a "pick the file again" message, so a binding made before grants existed
+needs one more pick - and the reference may not leave that document's
+directory. The same grant gate holds `dataFile:read`. It is normalized through **both** `migrate` and
 `merge`, for the reason spelled out for `data-file-store` above. Deleting or
 purging the collection drops its entry (#1890), as for the data-file store.
 

@@ -20,10 +20,10 @@ import { render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import { useClientSettingsStore } from "@/stores";
 
-const captured = vi.hoisted(() => ({ data: [] as number[][] }));
+const captured = vi.hoisted(() => ({ data: [] as (number | null)[][] }));
 
 vi.mock("./UPlotChart", () => ({
-	UPlotChart: (props: { data: number[][] }) => {
+	UPlotChart: (props: { data: (number | null)[][] }) => {
 		captured.data = props.data;
 		return <div data-testid="uplot-mock" />;
 	},
@@ -95,5 +95,26 @@ describe("LatencyPercentilesChart on a live series", () => {
 		expect(p99[1]).toBe(900);
 		expect(p95[1]).toBe(450);
 		expect(p50[1]).toBe(90);
+	});
+
+	it("hands the chart a null for a second that completed nothing (#2386)", () => {
+		const history = liveRun(5, (s) => 10 * s).map((m) =>
+			m.elapsed_seconds === 3
+				? {
+						...m,
+						second_samples: 0,
+						second_p50_ms: null,
+						second_p95_ms: null,
+						second_p99_ms: null,
+					}
+				: m
+		);
+		render(<LatencyPercentilesChart history={history} />);
+		const [times, p50, p95, p99] = captured.data;
+		// A null, not a skipped x: uPlot joins the neighbours of a missing x.
+		expect(times).toEqual([1, 2, 3, 4, 5]);
+		expect(p99).toEqual([10, 20, null, 40, 50]);
+		expect(p95[2]).toBeNull();
+		expect(p50[2]).toBeNull();
 	});
 });

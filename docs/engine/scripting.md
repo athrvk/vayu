@@ -2711,8 +2711,9 @@ carry from one script to the next belongs in a variable scope
 ### What a script can compute
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
-four timer functions and Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...).
+four timer functions, Postman's legacy globals (`postman`, `tests`,
+`responseBody`, ...) and one bundled library, `crypto-js`
+([below](#the-require-shelf-crypto-js)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2726,6 +2727,8 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
+| `require(name)` | The [shelf](#the-require-shelf-crypto-js): `require('crypto-js')` answers the library, any other name throws |
+| `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
 | `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
 
@@ -2734,10 +2737,11 @@ and the rest of the ES2020 built-ins, plus:
 silently falling back to hex.
 
 **Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
-`URLSearchParams`, `require`, `fetch`. The practical
+`URLSearchParams`, `fetch`, and any module other than the shelf's. The practical
 consequences: no general URL constructor - the request's own URL is already
-parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
-other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host I/O:
+parsed for you, see [URL parts](#url-parts-pmrequesturl) - no asymmetric
+algorithm and no cipher (the digests are `pm.crypto.sha256` and the
+[`crypto-js` hashers](#the-require-shelf-crypto-js)), and no host I/O:
 `Promise`, `async`/`await` (a [top-level `await`](#top-level-await) included)
 and the timers run, on queues drained before the script ends, but nothing
 settles a promise after it has.
@@ -2746,10 +2750,66 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-The libraries Postman bundles (`CryptoJS`, `_`, `moment`, ...) are absent too.
-The editor declares each as unusable, so a use is underlined and the hover names
-the replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
+Of the libraries Postman bundles, only `CryptoJS` runs. The others (`_`,
+`moment`, `tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
+declares each as unusable, so a use is underlined and the hover names the
+replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
+
+### The `require` shelf (`crypto-js`)
+
+`require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
+`Cannot find module '<name>'` for any other name, listing what is on the shelf.
+There is no loader behind it: nothing is read from disk, nothing is fetched, and
+a relative path or a package name that is not on the shelf is the same refusal.
+The argument must be a string (anything else is a `TypeError`). Today the shelf
+holds one library, `crypto-js`, and `CryptoJS` is the same module bound as a
+global, so both spellings of a Postman signing script work:
+
+```javascript
+const CryptoJS = require('crypto-js');
+const signature = CryptoJS.HmacSHA256(payload, secret).toString(CryptoJS.enc.Hex);
+pm.request.headers.upsert({ key: 'X-Signature', value: signature });
+```
+
+**It is Vayu's own code with crypto-js's shape, not the crypto-js library.** The
+source is a 6 KB JavaScript shim; the hashing runs in OpenSSL through
+`vayu/utils/digest.hpp`, so a digest is exact. What it covers, and all of it:
+
+- the hashers `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384`, `SHA512` and their
+  `Hmac*` forms (`HmacSHA256(message, key)`, the argument order crypto-js
+  uses), each taking a string (read as UTF-8) or a `WordArray`;
+- `enc.Hex`, `enc.Latin1`, `enc.Utf8` and `enc.Base64`, each with `parse` and
+  `stringify`;
+- `lib.WordArray` (`create`, `toString`, `concat`, `clone`; `words` and
+  `sigBytes`).
+
+A member outside that list reads as `undefined`, as it does in a crypto-js build
+without that module, so calling it throws a `TypeError`: no ciphers (`AES`, `DES`,
+...), no `PBKDF2` or `EvpKDF`, no progressive `algo.*` hashers, no `SHA3` or
+`RIPEMD160`, no `WordArray.random`, no `enc.Utf16`.
+A wrong argument type (a number where a string or `WordArray` belongs) throws
+a `TypeError` rather than hashing something other than what was written.
+
+The covered members are one list, `CRYPTO_JS_MEMBERS`
+(`include/vayu/runtime/shelf_modules.hpp`), which the Postman import's script
+scan reads: a collection that uses a `CryptoJS` member outside it is named
+`CryptoJS` in `meta.unsupportedScriptApis`, and one that stays inside it is not.
+`script_completions_test.cpp` fails when the list and the shim, or the list and
+the editor's completions, disagree.
+
+**Cost.** The shim is evaluated on first use in an execution, never when a
+context is built, so a script that does not touch `require` or `CryptoJS` pays
+nothing. First use costs about 0.55 to 0.75 ms; the evaluated module then lives
+for the rest of that execution (about 22 KB of the script's 64 MB limit) and is
+freed with the context. Nothing is shared between executions, so the next script
+that uses it pays the first-use cost again.
+
+The libraries Postman also lets a script `require` - `lodash`, `moment`, `uuid`,
+`ajv`, `tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins -
+are **not** on the shelf: `require` of one throws, and a Postman import names
+the script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
+has the same list from the Postman side.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
 is Promise-based and covers algorithms this sandbox does not implement, so a
@@ -2988,7 +3048,9 @@ The **language** is current; what is missing is the **host environment**:
   `structuredClone` or `crypto.subtle` - see the table above for what replaces
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
-- **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
+- **No Node.js APIs**: `require()` answers only the
+  [shelf](#the-require-shelf-crypto-js) (`crypto-js`); `fs`, `http`, `crypto`
+  and every other module throw `Cannot find module`.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
   10 requests per script, bounded by the script's own deadline and by the

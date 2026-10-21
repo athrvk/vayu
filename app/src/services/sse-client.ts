@@ -33,9 +33,10 @@ interface RawSseMetrics {
 	windowAvgLatencyMs?: number | null;
 	windowAvgQueueWaitMs?: number | null;
 	activeConnections?: number;
-	latencyP50Ms?: number;
-	latencyP95Ms?: number;
-	latencyP99Ms?: number;
+	/** The tick's window; `null` for a window with no completion (issue #2386). */
+	latencyP50Ms?: number | null;
+	latencyP95Ms?: number | null;
+	latencyP99Ms?: number | null;
 	/** Gate frames only (issue #2385); the percentiles are `null` for an idle second. */
 	secondSamples?: number;
 	secondP50Ms?: number | null;
@@ -77,13 +78,13 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		window_avg_latency_ms: m.windowAvgLatencyMs,
 		window_avg_queue_wait_ms: m.windowAvgQueueWaitMs,
 		current_concurrency: m.activeConnections || 0,
-		latency_p50_ms: m.latencyP50Ms || 0,
-		latency_p95_ms: m.latencyP95Ms || 0,
-		latency_p99_ms: m.latencyP99Ms || 0,
 		live: true,
-		// Passed through as sent, never `|| 0`: an absent key is "not a gate
-		// frame" and a null is "an idle second", and a 0 would read as a
-		// measured instant answer.
+		// Every percentile is passed through as sent, never `|| 0`: a null is an
+		// interval with no completion, an absent second is "not a gate frame",
+		// and a 0 would read as a measured instant answer.
+		latency_p50_ms: m.latencyP50Ms,
+		latency_p95_ms: m.latencyP95Ms,
+		latency_p99_ms: m.latencyP99Ms,
 		second_samples: m.secondSamples,
 		second_p50_ms: m.secondP50Ms,
 		second_p95_ms: m.secondP95Ms,
@@ -306,11 +307,11 @@ export class SSEClient {
 			// No `current_send_rate` or `window_avg_*`: this is no reading, and an
 			// absent key is what says so (a 0 would be a measured idle second).
 			current_concurrency: 0,
-			latency_p50_ms: 0,
-			latency_p95_ms: 0,
-			latency_p99_ms: 0,
 			// Stands in for a frame that never arrived, so it is a live tick with
-			// no second behind it, not a stored second of 0 ms.
+			// no window and no second behind it, not a measured 0 ms.
+			latency_p50_ms: null,
+			latency_p95_ms: null,
+			latency_p99_ms: null,
 			live: true,
 			avg_latency_ms: 0,
 			bytes_sent: 0,

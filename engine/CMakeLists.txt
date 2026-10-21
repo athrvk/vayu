@@ -364,6 +364,10 @@ find_package(re2 CONFIG REQUIRED)
 # `url.domainToASCII` is built on: a non-ASCII host is sent by the punycode
 # name Postman sends it by (http/url_parts.cpp, `ascii_host`).
 find_package(ada CONFIG REQUIRED)
+# Already in every binary as libcurl's TLS backend; named here because
+# utils/digest.cpp calls libcrypto itself (issue #2578: the digests libsodium
+# does not have, for the script sandbox's crypto-js).
+find_package(OpenSSL REQUIRED)
 
 if(VAYU_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -548,6 +552,7 @@ add_library(vayu_core STATIC
     src/utils/metrics_helper.cpp
     src/utils/ordered_json.cpp
     src/utils/id.cpp
+    src/utils/digest.cpp
     src/db/database.cpp
     src/db/db_collections.cpp
     src/db/db_requests.cpp
@@ -647,6 +652,7 @@ target_link_libraries(vayu_core PUBLIC
     # Same reasoning: only core/elements/user_regex.cpp includes re2.h.
     re2::re2
     ada::ada
+    OpenSSL::Crypto
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
     hdrhistogram
@@ -684,6 +690,7 @@ if(QUICKJS_FOUND)
     # script_engine.cpp (issue #2092); they share pm/pm_internal.hpp.
     set(VAYU_QUICKJS_SOURCES
         src/runtime/script_engine.cpp
+        src/runtime/require_shelf.cpp
         src/runtime/pm/pm_cookies.cpp
         src/runtime/pm/pm_execution_metrics.cpp
         src/runtime/pm/pm_expect.cpp

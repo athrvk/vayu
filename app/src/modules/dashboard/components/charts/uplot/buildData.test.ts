@@ -199,6 +199,20 @@ describe("rebucket with merge: max", () => {
 		const { cols } = rebucket([1, 2], [[100, 300]], 2, "max");
 		expect(cols[0]).toEqual([300]);
 	});
+
+	it("keeps a bucket of empty seconds empty, not 0 ms (#2386)", () => {
+		// Both seconds of the middle bucket completed nothing; those either side measured.
+		const times = [2.9, 3.1, 5.9, 6.1, 8.9, 9.1];
+		const p99 = [40, 900, null, null, 60, 70];
+		const { times: outT, cols } = rebucket(times, [p99], 3, "max");
+		expect(outT).toEqual([3, 6, 9]);
+		expect(cols[0]).toEqual([900, null, 70]);
+	});
+
+	it("takes the worst reading of a bucket that mixes empty and measured seconds", () => {
+		const { cols } = rebucket([4, 5, 6], [[null, 30, null]], 5, "max");
+		expect(cols[0]).toEqual([30]);
+	});
 });
 
 describe("buildConcurrencyScatter on a live series (issue #2385)", () => {

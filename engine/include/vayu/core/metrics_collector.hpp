@@ -31,6 +31,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hdr/hdr_histogram.h>
@@ -943,7 +944,8 @@ class MetricsCollector {
      * level_latency() reads and adopt_level_epoch() resets.
      *
      * @note Mutating (samples and resets the window). Call once per metrics tick
-     *       from the producer thread only. Returns zeros when the window is empty.
+     *       from the producer thread only. An empty window is all zeros with
+     *       `count` 0; a JSON writer turns that into null, never into 0 ms.
      */
     [[nodiscard]] Percentiles sample_window_percentiles ();
 
@@ -1098,10 +1100,9 @@ class MetricsCollector {
      *        already snapshotted the distribution this tick. When null the
      *        distribution is computed internally.
      * @param window_percentiles Optional windowed (rolling) percentiles for the
-     *        `latencyP50Ms`/`latencyP95Ms`/`latencyP99Ms` fields. When non-null the
-     *        live tick carries these recent-window values (see
-     *        sample_window_percentiles). When null the fields fall back to the
-     *        cumulative-from-start histogram - kept for callers/tests that don't
+     *        `latencySamples` and `latencyP50Ms`/`latencyP95Ms`/`latencyP99Ms`
+     *        fields (see put_interval_percentiles). When null they are read from
+     *        the cumulative-from-start histogram instead, for callers that do not
      *        drive the interval recorder.
      * @return JSON object with current metrics. `cumulativeP50Ms` /
      *         `cumulativeP95Ms` / `cumulativeP99Ms` are every window sampled so
@@ -1389,5 +1390,17 @@ class MetricsCollector {
     // share, so the mean and the percentiles cannot count different requests.
     void record_latency_sample (double latency_ms, double queue_wait_ms);
 };
+
+/**
+ * @brief A live frame's `<prefix>Samples` and `<prefix>P50Ms` / `P95Ms` /
+ *        `P99Ms` from one interval's percentiles (#2385, #2386).
+ *
+ * The three percentiles are null, not 0, when the interval held no completion,
+ * so an idle interval never reads as an instant answer. The one writer for the
+ * windowed (`latency`) and the per-second (`second`) keys.
+ */
+void put_interval_percentiles (nlohmann::json& stats,
+std::string_view prefix,
+const MetricsCollector::Percentiles& interval);
 
 } // namespace vayu::core

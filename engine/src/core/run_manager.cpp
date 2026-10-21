@@ -2351,9 +2351,12 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["bytes_sent"]          = sample.bytes_sent;
     payload["bytes_received"]      = sample.bytes_received;
     payload["status_codes"]        = codes;
-    payload["latency_p50_ms"]      = sample.latency_p50_ms;
-    payload["latency_p95_ms"]      = sample.latency_p95_ms;
-    payload["latency_p99_ms"]      = sample.latency_p99_ms;
+    // Absent rather than null: the export schema types these as numbers.
+    if (sample.latency_samples > 0) {
+        payload["latency_p50_ms"] = sample.latency_p50_ms;
+        payload["latency_p95_ms"] = sample.latency_p95_ms;
+        payload["latency_p99_ms"] = sample.latency_p99_ms;
+    }
     if (sample.custom_metrics.has_value ()) {
         payload["custom_metrics"] = build_custom_metrics_payload (*sample.custom_metrics);
     }
@@ -2540,26 +2543,6 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
 }
 
 /**
- * A gate frame's `second*` keys (#2385): the percentiles of every window since
- * the previous gate, which the stored row of the same tick also carries. Null
- * rather than 0 when nothing completed, so an idle second never reads as an
- * instant answer.
- */
-void put_second_percentiles (nlohmann::json& stats,
-const MetricsCollector::Percentiles& second) {
-    stats["secondSamples"] = second.count;
-    if (second.count == 0) {
-        stats["secondP50Ms"] = nullptr;
-        stats["secondP95Ms"] = nullptr;
-        stats["secondP99Ms"] = nullptr;
-        return;
-    }
-    stats["secondP50Ms"] = second.p50;
-    stats["secondP95Ms"] = second.p95;
-    stats["secondP99Ms"] = second.p99;
-}
-
-/**
  * A frame's trailing-window keys (#2393). A gate tick's stored row carries
  * the same reading under snake_case names, so the two cannot disagree.
  */
@@ -2691,10 +2674,11 @@ int64_t& first_tick_steady_ms) {
         // response-time-vs-concurrency scatter and the breakpoint /
         // saturation derivations read these. The gate frame of this tick
         // carries the same figures as `second*`.
-        sample.latency_p50_ms = gate.second.p50;
-        sample.latency_p95_ms = gate.second.p95;
-        sample.latency_p99_ms = gate.second.p99;
-        sample.custom_metrics = mc.custom_metric_summaries ();
+        sample.latency_samples = gate.second.count;
+        sample.latency_p50_ms  = gate.second.p50;
+        sample.latency_p95_ms  = gate.second.p95;
+        sample.latency_p99_ms  = gate.second.p99;
+        sample.custom_metrics  = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
         build_metric_tick_payload (sample).dump () });
@@ -2772,7 +2756,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         std::optional<GateReadings> gate;
         if (closes_second) {
             gate = GateReadings{ mc.take_second_percentiles (), rates };
-            put_second_percentiles (stats, gate->second);
+            put_interval_percentiles (stats, "second", gate->second);
         }
 
         auto now_steady = std::chrono::steady_clock::now ();

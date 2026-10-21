@@ -78,17 +78,16 @@ const std::string& run_id) {
     }
 }
 
-/// `<prefix>P50Ms` / `P95Ms` / `P99Ms` from @p histogram, each @p when_empty
-/// when it holds nothing.
+/// `<prefix>P50Ms` / `P95Ms` / `P99Ms` from @p histogram, each null when it
+/// holds nothing.
 void put_tick_percentiles (nlohmann::json& stats,
 std::string_view prefix,
-const struct hdr_histogram* histogram,
-const nlohmann::json& when_empty) {
+const struct hdr_histogram* histogram) {
     const std::string name (prefix);
     if (histogram == nullptr || histogram->total_count == 0) {
-        stats[name + "P50Ms"] = when_empty;
-        stats[name + "P95Ms"] = when_empty;
-        stats[name + "P99Ms"] = when_empty;
+        stats[name + "P50Ms"] = nullptr;
+        stats[name + "P95Ms"] = nullptr;
+        stats[name + "P99Ms"] = nullptr;
         return;
     }
     stats[name + "P50Ms"] = us_to_ms (hdr_value_at_percentile (histogram, 50.0));
@@ -979,6 +978,22 @@ const std::map<std::string, CustomMetricSummary>& metrics) {
     return out;
 }
 
+void put_interval_percentiles (nlohmann::json& stats,
+std::string_view prefix,
+const MetricsCollector::Percentiles& interval) {
+    const std::string name (prefix);
+    stats[name + "Samples"] = interval.count;
+    if (interval.count == 0) {
+        stats[name + "P50Ms"] = nullptr;
+        stats[name + "P95Ms"] = nullptr;
+        stats[name + "P99Ms"] = nullptr;
+        return;
+    }
+    stats[name + "P50Ms"] = interval.p50;
+    stats[name + "P95Ms"] = interval.p95;
+    stats[name + "P99Ms"] = interval.p99;
+}
+
 void MetricsCollector::record_stream_completion (size_t events, bool capped) {
     if (!config_.stream_metrics) {
         // Off means the report has no `stream` section at all, not a section of
@@ -1327,20 +1342,12 @@ const Percentiles* window_percentiles) const {
         stats["customMetrics"] = build_custom_metrics_payload (*custom);
     }
 
-    // Per-tick latency percentiles. When the caller supplies windowed (rolling)
-    // percentiles - the live producer samples the interval recorder each tick -
-    // emit those so the "percentiles over time" chart tracks the recent window
-    // instead of flattening. When absent (callers/tests that don't drive the
-    // interval recorder), fall back to the cumulative-from-start histogram.
-    if (window_percentiles != nullptr) {
-        stats["latencyP50Ms"] = window_percentiles->p50;
-        stats["latencyP95Ms"] = window_percentiles->p95;
-        stats["latencyP99Ms"] = window_percentiles->p99;
-    } else {
-        put_tick_percentiles (stats, "latency", latency_histogram_, 0.0);
-    }
+    // The live producer's window, so the percentiles-over-time chart tracks
+    // the recent window instead of flattening.
+    put_interval_percentiles (stats, "latency",
+    window_percentiles != nullptr ? *window_percentiles : percentiles_of (latency_histogram_));
     // The span avgLatencyMs covers, so a card can show both on one line.
-    put_tick_percentiles (stats, "cumulative", run_so_far_histogram_.get (), nullptr);
+    put_tick_percentiles (stats, "cumulative", run_so_far_histogram_.get ());
 
     // Wire byte counts (cumulative) - client diffs consecutive ticks for MB/s.
     stats["bytesSent"]     = total_bytes_sent ();

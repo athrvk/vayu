@@ -87,6 +87,27 @@ describe("file trust writes", () => {
 		expect(headersOf(fetch)[ENGINE_GRANT_SECRET_HEADER]).toBeUndefined();
 	});
 
+	it("reads the allowed folders without the secret, and reports an unreachable engine", async () => {
+		const answering = clientAnswering(() => json(200, [{ ...ROW, id: "froot_1" }]));
+		answering.client.setSecret(SECRET);
+
+		await expect(answering.client.listFileRoots()).resolves.toEqual({
+			outcome: "done",
+			value: [{ ...ROW, id: "froot_1" }],
+		});
+		expect(answering.fetch.mock.calls[0]?.[0]).toBe(`${ORIGIN}/file-roots`);
+		expect(answering.fetch.mock.calls[0]?.[1]).toMatchObject({ method: "GET" });
+		expect(headersOf(answering.fetch)[ENGINE_GRANT_SECRET_HEADER]).toBeUndefined();
+
+		const down = clientAnswering(() => {
+			throw new Error("connect ECONNREFUSED");
+		});
+		await expect(down.client.listFileRoots()).resolves.toEqual({
+			outcome: "unreachable",
+			message: "connect ECONNREFUSED",
+		});
+	});
+
 	it("does not call the engine for a write before any engine was spawned", async () => {
 		const { client, fetch } = clientAnswering(() => json(201, ROW));
 

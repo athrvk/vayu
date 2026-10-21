@@ -9,16 +9,19 @@
  * The gates on the channel that reads the files an imported spec references
  * (issue #649).
  *
- * Same shape as `data-file.test.ts`, because the channel is the same widening of
- * the same posture: the renderer hands over a document path and a reference, and
- * what keeps that from being "read any file" is an extension allowlist plus the
- * engine's fetched cap. Both are driven against an injected filesystem, so a
- * regression in either shows up here rather than as a file the app should never
- * have opened.
+ * Same shape as `data-file.test.ts`: the renderer hands over a document path and
+ * a reference, and what keeps that from being "read any file" is the grant on
+ * the document (#2357), an extension allowlist and the engine's fetched cap. All
+ * are driven against an injected filesystem, so a regression in any shows up
+ * here rather than as a file the app should never have opened.
+ *
+ * Mutation check: drop `assertGranted` from `readSpecFile` (or make the injected
+ * `isGranted` answer true) and the "grant on the document" refusals fail.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import path from "path";
+import { FileNotGrantedError, NOT_GRANTED_MESSAGE } from "./file-grants";
 import { readSpecFile, SPEC_FILE_EXTENSIONS, type SpecFileSystem } from "./spec-file";
 
 const system = (overrides: Partial<SpecFileSystem> = {}): SpecFileSystem => ({
@@ -28,6 +31,7 @@ const system = (overrides: Partial<SpecFileSystem> = {}): SpecFileSystem => ({
 	fetchConfig: vi.fn(async () => ({
 		entries: [{ key: "maxSpecDocumentBytes", value: "1024" }],
 	})),
+	isGranted: vi.fn(async () => true),
 	...overrides,
 });
 
@@ -96,6 +100,63 @@ describe("readSpecFile - resolving the reference", () => {
 		await expect(readSpecFile("", "./pet.json", io)).rejects.toThrow(/No spec file path/);
 		await expect(readSpecFile(SPEC, "  ", io)).rejects.toThrow(/No referenced file/);
 		expect(io.stat).not.toHaveBeenCalled();
+	});
+});
+
+describe("readSpecFile - the grant on the document (#2357)", () => {
+	it("refuses a document the user never picked, though it exists with an allowed extension", async () => {
+		const io = system({ isGranted: vi.fn(async () => false) });
+		await expect(readSpecFile(SPEC, "./openapi.yaml", io)).rejects.toThrow(NOT_GRANTED_MESSAGE);
+		await expect(readSpecFile(SPEC, "./schemas/pet.json", io)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		expect(io.isGranted).toHaveBeenCalledWith(SPEC);
+		expect(io.stat).not.toHaveBeenCalled();
+		expect(io.readFile).not.toHaveBeenCalled();
+	});
+
+	it("tells the user to pick the file again", () => {
+		expect(NOT_GRANTED_MESSAGE).toMatch(/Pick the file again\.$/);
+	});
+
+	it("reads a granted document's sibling, asking about the document and not the sibling", async () => {
+		const io = system({ isGranted: vi.fn(async (p: string) => p === SPEC) });
+		await expect(readSpecFile(SPEC, "./schemas/pet.json", io)).resolves.toBeTruthy();
+		expect(io.isGranted).toHaveBeenCalledTimes(1);
+		expect(io.isGranted).toHaveBeenCalledWith(SPEC);
+	});
+
+	it("reads the granted document itself, by naming it as its own sibling", async () => {
+		const io = system({ isGranted: vi.fn(async (p: string) => p === SPEC) });
+		await readSpecFile(SPEC, "openapi.yaml", io);
+		expect(io.readFile).toHaveBeenCalledWith(path.resolve(SPEC));
+	});
+
+	it("still refuses a ref that escapes the granted document's directory", async () => {
+		const io = system({ isGranted: vi.fn(async (p: string) => p === SPEC) });
+		await expect(readSpecFile(SPEC, "../../secret.json", io)).rejects.toThrow(
+			/outside the folder/
+		);
+		expect(io.readFile).not.toHaveBeenCalled();
+	});
+
+	it("fails closed when the registry itself rejects", async () => {
+		const io = system({
+			isGranted: vi.fn(async () => {
+				throw new Error("engine unreachable");
+			}),
+		});
+		await expect(readSpecFile(SPEC, "./pet.json", io)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		expect(io.readFile).not.toHaveBeenCalled();
+	});
+
+	it("does not ask the registry about a request that is malformed", async () => {
+		const io = system();
+		await expect(readSpecFile("", "./pet.json", io)).rejects.toThrow(/No spec file path/);
+		await expect(readSpecFile(SPEC, "/etc/hosts.json", io)).rejects.toThrow(/absolute path/);
+		expect(io.isGranted).not.toHaveBeenCalled();
 	});
 });
 

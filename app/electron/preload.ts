@@ -387,13 +387,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	statFile: (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
 		ipcRenderer.invoke("file:stat", path),
 
-	// Re-read a collection's declared data file by path (issue #599) - the one
-	// channel on which the renderer *does* name a path, because the Run dialog
-	// has to re-open a file the user picked in an earlier session and the `File`
-	// is long gone. Gated in the main process (extension allowlist + the
-	// engine's fetched byte cap); see electron/data-file.ts for why that gate is
-	// the whole answer. Bytes, not text: the renderer decodes with the same
-	// module the picker uses, so the two paths cannot disagree about a file.
+	// Re-read a collection's declared data file by path (issue #599) - a channel
+	// on which the renderer names a path, because the Run dialog has to re-open a
+	// file the user picked in an earlier session and the `File` is long gone.
+	// Gated in the main process: an extension allowlist, the grant registry (the
+	// file must have been picked, dropped or opened through the app, #2357; a
+	// refusal rejects with a "pick the file again" message) and the engine's
+	// fetched byte cap; see electron/data-file.ts. Bytes, not text: the renderer
+	// decodes with the same module the picker uses, so the two paths cannot
+	// disagree about a file.
 	// `hash` is the SHA-256 of those bytes (issue #2051), what a run records.
 	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string; hash: string }> =>
 		ipcRenderer.invoke("dataFile:read", path).catch((e: unknown) => {
@@ -402,9 +404,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
 	// The same file's SHA-256 as it is now, without carrying its bytes (issue
 	// #2051): what a run's `dataFileHash` is compared against. Same gates. A file
-	// that is no longer at the path resolves `{ status: "missing" }` (#2057) and
-	// does not reject: an IPC rejection arrives as a bare message (see
-	// `unwrapIpcError`), so the renderer could not tell "gone" from "refused".
+	// that is no longer at the path, or was never granted, resolves
+	// `{ status: "missing" }` (#2057) and does not reject: an IPC rejection
+	// arrives as a bare message (see `unwrapIpcError`), so the renderer could not
+	// tell "gone" from "refused".
 	hashDataFile: (
 		path: string
 	): Promise<{ status: "found"; hash: string } | { status: "missing" }> =>
@@ -424,12 +427,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	publishAppFocus: (focus: unknown): void => ipcRenderer.send("app:focus", focus),
 
 	// Read a file an imported OpenAPI document references (issue #649). Two
-	// arguments and not a composed path: the renderer holds the picked
-	// document's path and the ref's text, and the main process resolves one
-	// against the other, so this channel reads files a *document* named rather
-	// than paths the web layer built. Gated there (extension allowlist + the
-	// engine's fetched `maxSpecDocumentBytes`); bytes, not text, for the same
-	// reason `readDataFile` returns bytes.
+	// arguments and not a composed path: the renderer holds the document's path
+	// and the ref's text, and the main process resolves one against the other, so
+	// this channel reads files a *document* named rather than paths the web layer
+	// built. The document itself must be a file the user picked, dropped or
+	// opened (#2357); an ungranted one rejects with a "pick the file again"
+	// message. Also gated by the extension allowlist and the engine's fetched
+	// `maxSpecDocumentBytes`; bytes, not text, for the same reason `readDataFile`
+	// returns bytes.
 	readSpecFile: (
 		specPath: string,
 		refPath: string

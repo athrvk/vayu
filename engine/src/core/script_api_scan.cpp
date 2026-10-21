@@ -10,11 +10,14 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include "vayu/runtime/shelf_modules.hpp"
 
 namespace vayu::core {
 
@@ -452,12 +455,23 @@ class Declarations {
 
 /// Where a row's first word may stand.
 enum class Anchor : std::uint8_t {
-    /// Not a property of something: a name in scope (`CryptoJS`, `pm`).
+    /// Not a property of something: a name in scope (`Buffer`, `pm`).
     Bare,
     /// A property: after a `.` (`.postmanRequest`).
     Member,
     /// Not found by the token pass; `UnsupportedScriptApis` sets it directly.
     Elsewhere,
+};
+
+/// A use of a rule's path that Vayu does run.
+enum class Exemption : std::uint8_t {
+    None,
+    /// `require('<a module on the shelf>')`: the call's argument is a string
+    /// literal naming one of `vayu::runtime::SHELF_MODULE_NAMES`.
+    ShelfModule,
+    /// A bare `CryptoJS`, or a path of members the shim defines
+    /// (`vayu::runtime::CRYPTO_JS_MEMBERS`); anything else under it throws.
+    CryptoJsMember,
 };
 
 /**
@@ -467,22 +481,23 @@ enum class Anchor : std::uint8_t {
  * `|` separates alternatives for a word (`include|contain.keys`).
  * @p follow, when set, lists the characters one of which must come next (after
  * whitespace): `require` is the module loader only as `require(`.
+ * @p exempt names a use the rule still lets through.
  */
 struct ApiRule {
     std::string_view name;
     Anchor anchor;
     std::string_view path;
     std::string_view follow;
+    Exemption exempt = Exemption::None;
 };
 
 /// The table, in the order names are reported. The name is what the person
 /// sees: the spelling to search for in their script.
 constexpr auto API_RULES = std::to_array<ApiRule> ({
 // Modules and the libraries Postman bundles.
-{ "require()", Anchor::Bare, "require", "(" },
+{ "require()", Anchor::Bare, "require", "(", Exemption::ShelfModule },
 { "pm.require", Anchor::Bare, "pm.require", "" },
 { "script.packages", Anchor::Elsewhere, "", "" },
-{ "CryptoJS", Anchor::Bare, "CryptoJS", "" },
 { "_", Anchor::Bare, "_", "" },
 { "tv4", Anchor::Bare, "tv4", "" },
 { "xml2Json", Anchor::Bare, "xml2Json", "" },
@@ -491,6 +506,8 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.
 { "Buffer", Anchor::Bare, "Buffer", "" },
+// Only the members the crypto-js shim lacks (#2578); the ones it has are exempt.
+{ "CryptoJS", Anchor::Bare, "CryptoJS", "", Exemption::CryptoJsMember },
 // `pm.*` members Vayu does not have.
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
@@ -545,35 +562,128 @@ bool anchored_at (Anchor anchor, const Token& token) {
     return false;
 }
 
-/// Whether @p rule's path starts at token @p first.
-bool path_matches (std::string_view code,
+/// The index one past the last token of @p rule's path when it starts at token
+/// @p first, or nothing when it does not.
+std::optional<std::size_t> path_end (std::string_view code,
 const std::vector<Token>& tokens,
 std::size_t first,
 const ApiRule& rule) {
     if (!anchored_at (rule.anchor, tokens.at (first))) {
-        return false;
+        return std::nullopt;
     }
     std::string_view path = rule.path;
     std::size_t at        = first;
     while (!path.empty ()) {
         if (at >= tokens.size () || (at > first && !tokens.at (at).chained) ||
         !is_one_of (take_word (path), word_of (code, tokens.at (at)))) {
-            return false;
+            return std::nullopt;
         }
         ++at;
     }
     if (rule.follow.empty ()) {
-        return true;
+        return at;
     }
     const char next = next_significant (code, tokens.at (at - 1).end);
-    return next != '\0' && rule.follow.find (next) != std::string_view::npos;
+    if (next == '\0' || rule.follow.find (next) == std::string_view::npos) {
+        return std::nullopt;
+    }
+    return at;
+}
+
+/// The text of the string literal that opens at @p quote, read from @p script:
+/// the stripped @p code keeps the quotes and blanks what lies between, so the
+/// closing quote is the next one in it. Empty when the literal never closes.
+std::string_view
+literal_text (std::string_view script, std::string_view code, std::size_t quote) {
+    const std::size_t close = code.find (code[quote], quote + 1);
+    if (close == std::string_view::npos) {
+        return {};
+    }
+    return script.substr (quote + 1, close - quote - 1);
+}
+
+/// Whether the call whose `(` follows @p callee_end passes one string literal
+/// that names a module on the shelf. A computed name (`require(name)`), a
+/// template with a `${ }` and a second argument are all refused: the scan
+/// cannot say what they load, and a notice errs toward naming.
+bool requires_shelf_module (std::string_view script, std::string_view code, std::size_t callee_end) {
+    const std::size_t open = code.find_first_not_of (WHITESPACE, callee_end);
+    if (open == std::string_view::npos || code[open] != '(') {
+        return false;
+    }
+    const std::size_t quote = code.find_first_not_of (WHITESPACE, open + 1);
+    if (quote == std::string_view::npos ||
+    std::string_view ("'\"`").find (code[quote]) == std::string_view::npos) {
+        return false;
+    }
+    const std::string_view name = literal_text (script, code, quote);
+    const std::size_t after     = quote + name.size () + 2;
+    return !name.empty () && vayu::runtime::is_shelf_module (name) &&
+    next_significant (code, after) == ')';
+}
+
+/// The script being read: its text, the stripped view of it, and what both hold.
+struct ScanInput {
+    std::string_view script;
+    std::string_view code;
+    const std::vector<Token>& tokens;
+    const Declarations& declared;
+};
+
+/// Whether the `CryptoJS` at token @p root is used the way the shim supports:
+/// bare, or followed by a path of listed members. Whatever follows the first
+/// leaf of the list (`CryptoJS.enc.Hex.stringify`) belongs to the value, so the
+/// walk stops there. A computed member (`CryptoJS[name]`, `CryptoJS.enc[name]`)
+/// cannot be read, and a notice errs toward naming.
+bool crypto_js_use_is_supported (const ScanInput& in, std::size_t root) {
+    std::string path;
+    std::size_t last = root;
+    while (path.empty () || vayu::runtime::is_crypto_js_namespace (path)) {
+        const std::size_t next = last + 1;
+        if (next >= in.tokens.size () || !in.tokens.at (next).chained) {
+            return next_significant (in.code, in.tokens.at (last).end) != '[';
+        }
+        path += (path.empty () ? "" : ".");
+        path += word_of (in.code, in.tokens.at (next));
+        if (!vayu::runtime::is_crypto_js_member (path)) {
+            return false;
+        }
+        last = next;
+    }
+    return true;
+}
+
+/// Whether the use of @p rule whose path ends before token @p end is one Vayu runs.
+bool is_exempt_use (const ApiRule& rule, const ScanInput& in, std::size_t end) {
+    switch (rule.exempt) {
+    case Exemption::None: break;
+    case Exemption::ShelfModule:
+        return requires_shelf_module (in.script, in.code, in.tokens.at (end - 1).end);
+    case Exemption::CryptoJsMember:
+        return crypto_js_use_is_supported (in, end - 1);
+    }
+    return false;
 }
 
 /// A rule of one bare word names a global; it does not when the script has its
-/// own variable of that name.
+/// own variable of that name. `CryptoJS` is the exception: a script declares it
+/// as `const CryptoJS = require('crypto-js')`, which is the same object, so the
+/// declaration says nothing about which members it has.
 bool is_declared_global (const ApiRule& rule, const Declarations& declared) {
-    return rule.anchor == Anchor::Bare &&
+    return rule.exempt != Exemption::CryptoJsMember && rule.anchor == Anchor::Bare &&
     rule.path.find ('.') == std::string_view::npos && declared.contains (rule.path);
+}
+
+/// Whether @p rule's path starts at token @p first and is a use Vayu does not run.
+bool is_unsupported_use (const ScanInput& in, std::size_t first, const ApiRule& rule) {
+    if (in.tokens.at (first).number) {
+        return false;
+    }
+    const auto end = path_end (in.code, in.tokens, first, rule);
+    if (!end || is_declared_global (rule, in.declared)) {
+        return false;
+    }
+    return !is_exempt_use (rule, in, *end);
 }
 
 } // namespace
@@ -586,13 +696,12 @@ void UnsupportedScriptApis::scan (std::string_view script) {
     const std::string code          = strip_comments_and_literals (script);
     const std::vector<Token> tokens = tokenize (code);
     const Declarations declared (code, tokens);
+    const ScanInput in{ script, code, tokens, declared };
 
     for (std::size_t first = 0; first < tokens.size (); ++first) {
         for (std::size_t row = 0; row < API_RULES.size (); ++row) {
-            const ApiRule& rule = API_RULES.at (row);
-            if (!used_.contains (row) && !tokens.at (first).number &&
-            path_matches (code, tokens, first, rule) &&
-            !is_declared_global (rule, declared)) {
+            if (!used_.contains (row) &&
+            is_unsupported_use (in, first, API_RULES.at (row))) {
                 used_.insert (row);
             }
         }
