@@ -56,6 +56,13 @@ export interface DeleteConfirmDialogProps {
 	 * when `description` is also given.
 	 */
 	name?: string;
+	/**
+	 * The refusal of a delete that failed, rendered between the description and
+	 * the actions - a `Callout severity="blocking"`. A slot of its own rather
+	 * than part of `description`: `DialogDescription` is a `<p>` and a `Callout`
+	 * is a `<div>`, so nesting one in the other is invalid HTML.
+	 */
+	error?: React.ReactNode;
 	/** See `DeleteScope`. Ignored without `name`. */
 	scope?: DeleteScope;
 	onConfirm: () => void | Promise<void>;
@@ -104,6 +111,7 @@ export function DeleteConfirmDialog({
 	description,
 	name,
 	scope,
+	error,
 	onConfirm,
 	isDeleting = false,
 	confirmLabel = "Delete",
@@ -152,6 +160,7 @@ export function DeleteConfirmDialog({
 					<DialogTitle>{resolvedTitle}</DialogTitle>
 					<DialogDescription>{resolvedDescription}</DialogDescription>
 				</DialogHeader>
+				{error}
 				<DialogFooter onKeyDown={handleFooterKeyDown} className="gap-2 sm:gap-0">
 					<DialogCancelButton
 						ref={cancelRef}
