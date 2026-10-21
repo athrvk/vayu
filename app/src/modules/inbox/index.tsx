@@ -56,6 +56,7 @@ import {
 	EmptyState,
 	ErrorState,
 	ListSkeleton,
+	MethodBadge,
 	NonLoopbackBadge,
 	TruncatedText,
 } from "@/components/shared";
@@ -144,7 +145,7 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 			)}
 		>
 			<span className="flex w-full items-center gap-2">
-				<span className="font-mono text-xs font-semibold">{capture.method}</span>
+				<MethodBadge method={capture.method} variant="text" size="sm" className="w-[5ch]" />
 				<span className="truncate font-mono text-xs">{capture.path}</span>
 				<span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
 					<TimeValue value={capture.receivedAt} style="time" />

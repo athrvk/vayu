@@ -430,3 +430,24 @@ describe("the first fetch of the capture list", () => {
 		expect(screen.queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
 	});
 });
+
+/**
+ * The row draws its method through `MethodBadge` (#2317): a bare span showed
+ * every verb in one colour and spelled `DELETE` out against a five-character
+ * column. The inline `color` is the chip's colour signal and `title` its
+ * full-name hover, so either one missing means a hand-drawn copy is back.
+ */
+describe("the method on a capture row", () => {
+	it("is the coloured, abbreviated MethodBadge, with the full method on hover", async () => {
+		listInboxCaptures.mockResolvedValueOnce({
+			data: [capture(9, { method: "DELETE" })],
+			pagination: { total: 1, limit: 50, offset: 0, returned: 1, hasMore: false },
+		});
+		renderTab();
+
+		const row = (await screen.findByText("/hook/9")).closest("button")!;
+		const badge = within(row).getByText("DEL");
+		expect(badge).toHaveAttribute("title", "DELETE");
+		expect(badge.style.color).toContain("--method-delete");
+	});
+});

@@ -59,6 +59,16 @@ describe("the step table", () => {
 		expect(within(rows[1]).getByText("120ms")).toBeTruthy();
 	});
 
+	it("draws each step's method as the coloured, abbreviated MethodBadge", () => {
+		// A step's method went through an outline `Badge` with no method colour
+		// and no `DEL` abbreviation (#2317).
+		render(<ScenarioStepsTab steps={[{ ...STEPS[0], method: "DELETE" }]} virtualUsers={1} />);
+		// The badge variant wraps its label; the title and colour sit on the chip.
+		const badge = within(rowFor("Log in")).getByText("DEL").parentElement!;
+		expect(badge).toHaveAttribute("title", "DELETE");
+		expect(badge.style.color).toContain("--method-delete");
+	});
+
 	it("shows a sub-millisecond latency rather than rounding it to 0ms", () => {
 		// A loopback step's p50 is routinely a fraction of a millisecond, and a
 		// whole-number format would render every one of them "0ms" - a table of
