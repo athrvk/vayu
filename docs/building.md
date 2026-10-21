@@ -431,12 +431,14 @@ The project uses GitHub Actions for automated builds:
     engine's release configuration for all three platforms, so all three exist
     in the **default-branch cache scope** a release tag reads
 
-- **Linux runners name their Ubuntu release** (`ubuntu-24.04`, and
-  `ubuntu-22.04` where the release's glibc floor needs it), never
+- **Linux runners name their Ubuntu release** (`ubuntu-24.04`), never
   `ubuntu-latest`. That label moves to a new image over a weeks-long rollout,
   during which each job lands on either image at random: a new compiler on
   some runs and not others. A `Script lint` step refuses the moving label, so
   moving to a new release is a pull request of its own (#2633 for 26.04).
+  Where the release's glibc floor needs 22.04, the job runs in the
+  `ubuntu:22.04` container on an `ubuntu-24.04` runner (see
+  [the release baseline](engine/building.md#the-release-is-built-on-the-oldest-supported-ubuntu-lts)).
 
 These workflows use the same CMakePresets as local development for consistency.
 
