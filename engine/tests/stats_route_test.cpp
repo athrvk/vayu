@@ -351,6 +351,7 @@ nlohmann::json cumulative_tick (int i) {
     sample.backpressure        = 2;
     sample.bytes_received      = completed * 100;
     sample.status_codes        = { { 200, completed } };
+    sample.latency_samples     = 10;
     sample.latency_p50_ms      = 5.0;
     sample.latency_p95_ms      = 8.0;
     sample.latency_p99_ms      = 12.0;
