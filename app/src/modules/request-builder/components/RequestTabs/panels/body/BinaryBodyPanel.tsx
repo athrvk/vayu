@@ -29,9 +29,10 @@
  * canonical paths and is the one that decides.
  *
  * **The size line asks the main process** (`statFile`), which answers size
- * and modification time for an absolute path and never reads the file. A
- * path that resolves nowhere on this machine says so here rather than at
- * Send.
+ * and modification time for an absolute path and never reads the file. It
+ * answers only for a picked file or one under an allowed folder (#2357), and
+ * null for everything else, so "Not found on this machine" also covers a typed
+ * path outside every allowed folder that was never picked.
  */
 
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";

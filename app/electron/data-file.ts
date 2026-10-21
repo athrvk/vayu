@@ -8,32 +8,33 @@
 /**
  * Reading a collection's declared data file back from disk (issue #599).
  *
- * **This widens a documented posture, deliberately.** Until now the renderer
- * could never name a path: `getFilePath` (preload.ts) turns a `File` the user
- * picked into a path *inside the preload*, synchronously, so there is no channel
- * on which the web layer can ask for a file of its own choosing. This module
- * adds exactly that channel, because the Run dialog has to re-open a file the
- * user picked in an earlier session and the `File` object is long gone.
- *
- * What keeps it from being "read any file": every read passes two gates, in this
- * order, before a byte is touched.
+ * A channel on which the renderer names a path. The Run dialog has to re-open a
+ * file the user picked in an earlier session and the `File` object is long
+ * gone, so the web layer hands back the path it remembered. A remembered path is
+ * a claim, not proof, so every read passes three gates in this order before a
+ * byte is touched.
  *
  *  1. **Extension allowlist** - the same extensions the picker accepts and
- *     nothing else, so the channel cannot be pointed at a key, a database or a
- *     dotfile. Parity with the picker is test-pinned
- *     (`data-file.parity.test.ts`); an allowlist narrower than the picker would
- *     be worse than none, because it would remember a file it then refuses.
- *  2. **The engine's `maxScenarioDataBytes`, fetched** - never a second copy of
+ *     nothing else, so the channel is not pointed at a key, a database or a
+ *     dotfile. Parity with the picker is test-pinned (`data-file.test.ts`); an
+ *     allowlist narrower than the picker would be worse than none, because it
+ *     would remember a file it then refuses.
+ *  2. **The grant** (#2357) - the path must be one the user picked, dropped or
+ *     opened, as main's registry knows it (`file-grants.ts`). The extension
+ *     allowlist cannot tell a data file from a credentials `.json`; the grant
+ *     can, because it is recorded when the user chooses the file, by the
+ *     preload from a real `File` and never from a string the renderer
+ *     supplies. The registry is persisted by the engine's `file_grants` table,
+ *     so it survives a restart; a data file declared before grants existed
+ *     must be picked once more. It is checked *before* the stat, so a path
+ *     that holds no grant answers the same whether or not a file is there; the
+ *     registry cannot resolve a file that has moved, so that file also reads as
+ *     not picked, and the cure is the same.
+ *  3. **The engine's `maxScenarioDataBytes`, fetched** - never a second copy of
  *     the rule. A user who raises the setting can pre-fill the bigger file the
  *     same session; a user who lowers it is refused here rather than at
  *     `POST /runs`. The seed below stands only while the engine is unreachable,
  *     and is the number the engine itself seeds.
- *
- * **Rejected alternative, for the record:** a main-process allowlist of paths
- * registered when the user picks a file. It reads like a stronger gate and is
- * not one - provenance cannot actually be verified across restarts (the
- * registry would be persisted renderer-side, which is the thing being gated),
- * so it is ceremony over a check that the extension allowlist already makes.
  *
  * The handler returns **bytes, not text**. Decoding is
  * `services/data-files/decode.ts`'s job on the renderer side, and it does more
@@ -44,7 +45,10 @@
  * `dataFile:hash` (issue #2051) is the same channel answering a digest instead
  * of bytes, behind the same path gates: `hashDataFile`. Its reply says
  * "missing" as data rather than as an exception (issue #2057): an error crossing
- * IPC keeps only its message, and a surface cannot branch on a sentence.
+ * IPC keeps only its message, and a surface cannot branch on a sentence. A path
+ * that holds no grant answers the same `missing` (the surface shows "pick it
+ * again", which is the cure), while `hashDataFile` itself rejects with
+ * `FileNotGrantedError`, so a caller outside IPC can tell the two apart.
  */
 
 import { createHash } from "crypto";
@@ -54,6 +58,7 @@ import path from "path";
 import { DATA_FILE_MAX_BYTES_SEED } from "./constants.js";
 import { engineOrigin } from "./engine-endpoint.js";
 import { engineFetch } from "./engine-fetch.js";
+import { assertGranted, FileNotGrantedError, type IsGranted } from "./file-grants.js";
 
 /**
  * Extensions this channel will open, lower-cased and with the dot.
@@ -117,22 +122,32 @@ export interface DataFileSystem {
 	/** SHA-256 hex of the file's bytes, streamed rather than read whole. */
 	hashFile: (filePath: string) => Promise<string>;
 	fetchConfig: () => Promise<unknown>;
+	/**
+	 * Whether the user picked, dropped or opened this path (`FileGrants.isGranted`).
+	 * Required, so a reader wired without the registry fails type-check rather
+	 * than reading anything.
+	 */
+	isGranted: IsGranted;
 }
 
-const defaultSystem: DataFileSystem = {
-	stat: (filePath) => fs.stat(filePath),
-	readFile: (filePath) => fs.readFile(filePath),
-	hashFile: async (filePath) => {
-		const hash = createHash("sha256");
-		for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
-		return hash.digest("hex");
-	},
-	fetchConfig: async () => {
-		const response = await engineFetch(`${engineOrigin()}/config`);
-		if (!response.ok) throw new Error(`config responded ${response.status}`);
-		return await response.json();
-	},
-};
+/** The real filesystem and engine, gated by @p isGranted. */
+export function createDataFileSystem(isGranted: IsGranted): DataFileSystem {
+	return {
+		stat: (filePath) => fs.stat(filePath),
+		readFile: (filePath) => fs.readFile(filePath),
+		hashFile: async (filePath) => {
+			const hash = createHash("sha256");
+			for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+			return hash.digest("hex");
+		},
+		fetchConfig: async () => {
+			const response = await engineFetch(`${engineOrigin()}/config`);
+			if (!response.ok) throw new Error(`config responded ${response.status}`);
+			return await response.json();
+		},
+		isGranted,
+	};
+}
 
 /**
  * The live `maxScenarioDataBytes`, or the seed when the engine cannot answer.
@@ -158,13 +173,15 @@ async function maxDataFileBytes(system: DataFileSystem): Promise<number> {
 /**
  * Read a declared data file, or throw a message the dialog can show as-is.
  *
+ * @throws FileNotGrantedError when @p filePath is not a granted file.
+ *
  * Every refusal names what is wrong with *the file*, because that is what the
  * user can act on: a wrong extension, a file that has moved, a file over the
  * engine's cap - naming the setting, so "raise it" is actionable.
  */
 export async function readDataFile(
 	filePath: string,
-	system: DataFileSystem = defaultSystem
+	system: DataFileSystem
 ): Promise<DataFileReadResult> {
 	const size = await statOpenableDataFile(filePath, system);
 
@@ -193,10 +210,7 @@ export async function readDataFile(
  * renderer and the stream hashes in constant memory, and a file that has
  * outgrown the cap has still changed.
  */
-export async function hashDataFile(
-	filePath: string,
-	system: DataFileSystem = defaultSystem
-): Promise<string> {
+export async function hashDataFile(filePath: string, system: DataFileSystem): Promise<string> {
 	await statOpenableDataFile(filePath, system);
 	try {
 		return await system.hashFile(filePath);
@@ -207,23 +221,30 @@ export async function hashDataFile(
 
 /**
  * {@link hashDataFile} as the `dataFile:hash` reply: a file that is not at the
- * path is the answer `{ status: "missing" }`, not a rejection. Every other
- * refusal (extension, empty path) still rejects, because those are faults in
- * the request and say nothing about the file.
+ * path, or not one the user granted, is the answer `{ status: "missing" }`, not
+ * a rejection - the surface's cure for both is to pick the file again. Every
+ * other refusal (extension, empty path) still rejects, because those are faults
+ * in the request and say nothing about the file.
  */
 export async function hashDataFileReply(
 	filePath: string,
-	system: DataFileSystem = defaultSystem
+	system: DataFileSystem
 ): Promise<DataFileHashReply> {
 	try {
 		return { status: "found", hash: await hashDataFile(filePath, system) };
 	} catch (error) {
-		if (error instanceof DataFileMissingError) return { status: "missing" };
+		if (error instanceof DataFileMissingError || error instanceof FileNotGrantedError) {
+			return { status: "missing" };
+		}
 		throw error;
 	}
 }
 
-/** The gates both channels pass before a byte is touched; answers the file's size. */
+/**
+ * The gates both channels pass before a byte is touched; answers the file's
+ * size. The grant comes before the stat, so a path the user never picked
+ * answers the same whether or not a file is there.
+ */
 async function statOpenableDataFile(filePath: string, system: DataFileSystem): Promise<number> {
 	if (typeof filePath !== "string" || filePath.trim() === "") {
 		throw new Error("No data file path was given.");
@@ -235,6 +256,8 @@ async function statOpenableDataFile(filePath: string, system: DataFileSystem): P
 			`Vayu only opens data files (${DATA_FILE_EXTENSIONS.join(", ")}), and this one is "${extension || "extensionless"}".`
 		);
 	}
+
+	await assertGranted(system.isGranted, filePath);
 
 	try {
 		const stats = await system.stat(filePath);

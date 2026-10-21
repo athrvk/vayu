@@ -323,10 +323,12 @@ in are Shift-dragging the file onto the taskbar button or Open with > Choose ano
 buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.
-Main carries the path and never reads the file; the renderer reads it back
-through the gated `specFile:read` channel the import batch already uses, so
-nothing here becomes a second door onto the file system, and the document lands
-in the Import dialog's ledger exactly as a picked file does.
+Main carries the path and never reads the file, but it does record the path as
+one the user opened (`electron/file-grants.ts`, #2357); the renderer reads it
+back through the gated `specFile:read` channel the import batch already uses,
+which reads only a document holding such a grant, so nothing here becomes a
+second door onto the file system, and the document lands in the Import dialog's
+ledger exactly as a picked file does.
 
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 

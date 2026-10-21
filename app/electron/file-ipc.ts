@@ -23,11 +23,15 @@
  *   general file-read channel this feature does not need.
  *
  * `file:stat` is a channel on which the renderer names a path, like
- * `dataFile:read` (data-file.ts). What it can learn is whether a regular file
- * exists at an absolute path and how big it is - the size the editor shows -
- * and nothing about its contents. A relative path, a non-string and anything
- * that is not a regular file answer null, so the line says "not found" rather
- * than describing a directory or a device.
+ * `dataFile:read` (data-file.ts), and it holds the same line (#2357): it
+ * answers only for a file the user picked, dropped or opened (`file-grants.ts`)
+ * or one under an allowed folder (`file-roots.ts`), the two things the engine
+ * would send. Anything else answers null, so a path typed into the field that
+ * was never picked and sits outside every allowed folder reads "not found",
+ * and the channel cannot be used to probe the disk for what exists or how big
+ * it is. A relative path, a non-string and anything that is not a regular file
+ * answer null as well, so the line says "not found" rather than describing a
+ * directory or a device.
  *
  * The two folder channels answer only the app window's main frame
  * (`ipc-sender.ts`). Kept out of main.ts so it can be tested; the Electron
@@ -36,8 +40,11 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { assertGranted, type IsGranted } from "./file-grants.js";
+import type { FileRoots } from "./file-roots.js";
 import type { EngineWrite, FileTrustRow } from "./file-trust-client.js";
 import type { IpcSenderLike } from "./ipc-sender.js";
+import { isWithin } from "./path-within.js";
 
 /** What `file:stat` answers for a regular file. */
 export interface FileStat {
@@ -83,18 +90,44 @@ export interface FileIpcDeps {
 	stat?: (filePath: string) => Promise<{ size: number; mtimeMs: number; isFile: () => boolean }>;
 	/** The host's absolute-path rule; injectable so both platforms' answers are testable. */
 	isAbsolute?: (filePath: string) => boolean;
+	/** `fs.promises.realpath` by default: the engine stores a root with symlinks resolved. */
+	realpath?: (filePath: string) => Promise<string>;
+	/**
+	 * Whether the user picked, dropped or opened this path (`FileGrants.isGranted`).
+	 * Required, so `file:stat` wired without the registry fails type-check.
+	 */
+	isGranted: IsGranted;
+	/** The allowed folders (`createFileRoots`); `file:allowFolder` and the delete refresh it. */
+	roots: FileRoots;
+}
+
+/** Whether @p filePath, with symlinks resolved, lies under an allowed folder. */
+async function isUnderAllowedFolder(
+	filePath: string,
+	deps: Pick<FileIpcDeps, "realpath" | "roots">
+): Promise<boolean> {
+	const canonical = await (deps.realpath ?? fs.realpath)(filePath);
+	const roots = await deps.roots.list();
+	return roots.some((root) => isWithin(root, canonical));
 }
 
 /** `file:stat`'s whole decision, exported for the test. */
 export async function statFile(
 	filePath: unknown,
-	deps: Pick<FileIpcDeps, "stat" | "isAbsolute"> = {}
+	deps: Pick<FileIpcDeps, "stat" | "isAbsolute" | "realpath" | "isGranted" | "roots">
 ): Promise<FileStat | null> {
 	const isAbsolute = deps.isAbsolute ?? path.isAbsolute;
 	const stat = deps.stat ?? fs.stat;
 	if (typeof filePath !== "string" || !filePath || filePath.includes("\0")) return null;
 	if (!isAbsolute(filePath)) return null;
 	try {
+		// A registry or roots read that fails is a "no": a gate that opens when it
+		// cannot answer is no gate.
+		const granted = await assertGranted(deps.isGranted, filePath).then(
+			() => true,
+			() => false
+		);
+		if (!granted && !(await isUnderAllowedFolder(filePath, deps))) return null;
 		const info = await stat(filePath);
 		if (!info.isFile()) return null;
 		return { size: info.size, mtimeMs: info.mtimeMs };
@@ -141,11 +174,13 @@ function assertAppFrame(event: IpcSenderLike, deps: Pick<FileIpcDeps, "isAppFram
 export function registerFileIpc(ipc: IpcLike, deps: FileIpcDeps): void {
 	ipc.handle("file:allowFolder", (event, options: unknown) => {
 		assertAppFrame(event, deps);
-		return allowFolder(options, deps);
+		return allowFolder(options, deps).finally(() => deps.roots.invalidate());
 	});
 	ipc.handle("file:removeAllowedFolder", (event, id: unknown): Promise<RemoveFolderReply> => {
 		assertAppFrame(event, deps);
-		return deps.deleteFileRoot(typeof id === "string" ? id : "");
+		return deps
+			.deleteFileRoot(typeof id === "string" ? id : "")
+			.finally(() => deps.roots.invalidate());
 	});
 	ipc.handle("file:stat", (_event, filePath: unknown) => statFile(filePath, deps));
 }

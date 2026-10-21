@@ -478,8 +478,8 @@ export function ImportModal() {
 	const readDocument = (file: File): Promise<BatchDocument> =>
 		new Promise((resolve) => {
 			// The path at pick time, while there is still a `File` to take it from -
-			// `getFilePath` is a preload-local read of the object, not a channel the
-			// renderer can name a path on. Empty outside Electron and for a
+			// `getFilePath` reads the path off the object and reports it to main as a
+			// picked file; the renderer cannot name a path itself. Empty outside Electron and for a
 			// drag-and-drop of remote content, which is the state "no remembered
 			// file" already means. It is also what a `$ref` to a sibling file on
 			// disk is resolved against, in the main process - see `readSpecFile`.
