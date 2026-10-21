@@ -115,7 +115,7 @@ void apply_latency_percentiles (std::vector<double>& latencies, DetailedReport& 
         size_t idx =
         static_cast<size_t> (std::ceil (p * static_cast<double> (latencies.size ()))) - 1U;
         // Clamp index to valid range
-        idx = std::max (size_t (0), std::min (idx, latencies.size () - 1));
+        idx = std::max (size_t{ 0 }, std::min (idx, latencies.size () - 1));
         return latencies[idx];
     };
 

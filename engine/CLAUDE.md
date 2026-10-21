@@ -68,7 +68,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   exempted `getenv` reads (`transport_policy.cpp`, `grant_secret.cpp`) unsafe.
   The one write exempted, per (file, call), is `grant_secret.cpp` removing
   `VAYU_GRANT_SECRET` once at start, before any thread exists (#2356).
-- **Nothing at namespace scope is built at run time** (#945, `cert-err58-cpp`).
+- **Nothing at namespace scope is built at run time** (#945, `cert-err58-cpp`,
+  which clang-tidy 22 reports as `bugprone-throwing-static-initialization`).
   A constant is `constexpr` (`std::string_view`, `std::array`, `const char*`);
   an object that cannot be one (`std::regex`, `nlohmann::json`, `std::mt19937`,
   anything holding a `std::string`) is a function-local `static` an accessor

@@ -80,7 +80,7 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
                     vayu::db::MetricTick tick;
                     tick.run_id = "run_1";
                     tick.timestamp =
-                    1000 + (w * kBatchesPerWriter + b) * kRowsPerBatch + i;
+                    1000 + (((w * kBatchesPerWriter) + b) * kRowsPerBatch) + i;
                     tick.payload = R"({"requests_completed":)" + std::to_string (i) + "}";
                     db_->add_metric_tick (tick);
                 }
@@ -91,7 +91,8 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
                 for (int i = 0; i < kRowsPerBatch; ++i) {
                     vayu::db::Result r;
                     r.run_id = "run_1";
-                    r.timestamp = 1000 + (w * kBatchesPerWriter + b) * kRowsPerBatch + i;
+                    r.timestamp =
+                    1000 + (((w * kBatchesPerWriter) + b) * kRowsPerBatch) + i;
                     r.status_code = 200;
                     r.latency_ms  = static_cast<double> (i);
                     batch.push_back (r);

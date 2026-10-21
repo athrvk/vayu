@@ -29,18 +29,30 @@ Checks: '
   -cert-ctr56-cpp,
   -cert-dcl16-c,
   -cert-dcl37-c,
+  -cert-dcl50-cpp,
   -cert-dcl51-cpp,
+  -cert-dcl58-cpp,
+  -cert-env33-c,
   -cert-err09-cpp,
+  -cert-err34-c,
+  -cert-err52-cpp,
+  -cert-err58-cpp,
+  -cert-err60-cpp,
   -cert-exp42-c,
+  -cert-flp30-c,
   -cert-flp37-c,
   -cert-int09-c,
+  -cert-mem57-cpp,
   -cert-msc24-c,
   -cert-msc30-c,
   -cert-msc32-c,
   -cert-msc33-c,
+  -cert-msc51-cpp,
   -cert-msc54-cpp,
   -cert-oop11-cpp,
   -cert-oop54-cpp,
+  -cert-oop57-cpp,
+  -cert-oop58-cpp,
   -cert-pos44-c,
   -cert-pos47-c,
   -cert-sig30-c,
@@ -65,7 +77,9 @@ Checks: '
   -readability-qualified-auto,
   -readability-else-after-return,
   -readability-use-anyofallof,
-  -readability-named-parameter
+  -readability-named-parameter,
+  -readability-use-concise-preprocessor-directives,
+  -readability-inconsistent-ifelse-braces
 '
 # The enabled set is the #928 decision (owner, 2026-08-23): the families that
 # catch real defects - safety, memory, undefined behaviour, concurrency, CPU
@@ -76,10 +90,18 @@ Checks: '
 #
 # The `-cert-*` block is not a family opt-out - it is alias handling. Most
 # `cert-*` checks are second names for a check that already runs here under
-# its canonical name (`cert-str34-c` IS `bugprone-signed-char-misuse`), and
-# clang-tidy reports once per enabled NAME, so leaving both names on reports
-# every such defect twice. The rule for which name survives: the canonical
-# name wins wherever its family is enabled (all the `bugprone-*`,
+# its canonical name (`cert-str34-c` IS `bugprone-signed-char-misuse`). With
+# both names on, clang-tidy 22 reports the defect once but names both, and a
+# `NOLINT` silences only the name it lists (both measured), so a suppression
+# would have to spell every alias. LLVM 22 also moved twelve `cert-*` checks
+# to canonical `bugprone-*` and `modernize-*` names, keeping the cert names as
+# aliases: `cert-dcl50-cpp`, `-dcl58-cpp`, `-env33-c`, `-err34-c`,
+# `-err52-cpp`, `-err58-cpp`, `-err60-cpp`, `-flp30-c`, `-mem57-cpp`,
+# `-msc51-cpp`, `-oop57-cpp` and `-oop58-cpp` are off below for that reason,
+# and still run under their new names.
+#
+# The rule for which name survives: the canonical name wins wherever its
+# family is enabled (all the `bugprone-*`,
 # `concurrency-*`, `performance-*`, `readability-*` aliases below); a cert
 # alias whose canonical lives in a family this config does not enable
 # (`misc-*`, `google-*`) stays ON under its cert name, because there one name
@@ -217,6 +239,14 @@ Checks: '
 #   readability-named-parameter
 #     Demands `/*name*/` on deliberately unnamed parameters. C++ allows the
 #     unnamed form to *mean* unused; the comment adds nothing. Declined in #942.
+#   readability-use-concise-preprocessor-directives
+#     `#ifdef X` for `#if defined(X)` - the same condition respelled, new in
+#     clang-tidy 22. Declined on #942's rule for spelling-only checks when CI
+#     moved to 22.
+#   readability-inconsistent-ifelse-braces
+#     Braces on an `else` because its `if` has them - brace layout, the same
+#     payload as readability-braces-around-statements above. New in
+#     clang-tidy 22, where it reported 729 sites; declined with it.
 #
 # `readability-function-cognitive-complexity` is ON since #1021, and the enable
 # is the whole of that decision: the check anchors on the *function declaration*,
@@ -258,6 +288,14 @@ Checks: '
 # this one.
 CheckOptions:
   bugprone-empty-catch.IgnoreCatchWithKeywords: '@TODO;@FIXME;@deliberate'
+  # `modernize-use-scoped-lock` (new in clang-tidy 22) for the defect, not the
+  # spelling. Two `std::lock_guard`s taken one after the other can deadlock
+  # against a thread that takes them in the other order, which one
+  # `std::scoped_lock` over both cannot; that case stays reported. One
+  # `lock_guard` over one mutex behaves exactly as a `scoped_lock` would, and
+  # so does an alias naming one, so those are #942's spelling-only case.
+  modernize-use-scoped-lock.WarnOnSingleLocks: false
+  modernize-use-scoped-lock.WarnOnUsingAndTypedef: false
 
 # No `ExtraArgs` here, deliberately (issue #912). `-Wno-ignored-gch` used to
 # live on this line, for the git hook's benefit. It broke CI for every

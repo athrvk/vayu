@@ -2440,10 +2440,14 @@ void write_into_media (Json& media, BodyExample body) {
     // The schema is read off the value before the value moves; it is still
     // written second, so the members land in the order they always have.
     std::optional<Json> schema;
-    if (!media.contains ("schema")) {
-        schema = body.file ? file_schema () :
-        body.form_schema   ? std::move (*body.form_schema) :
-                             schema_from_example (body.value);
+    if (media.contains ("schema")) {
+        // The document's own schema stays.
+    } else if (body.file) {
+        schema = file_schema ();
+    } else if (body.form_schema) {
+        schema = std::move (*body.form_schema);
+    } else {
+        schema = schema_from_example (body.value);
     }
     if (!body.file && !media.contains ("examples") &&
     !(body.value.is_object () && body.value.empty ())) {
