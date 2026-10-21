@@ -182,9 +182,10 @@ int extract_port (const std::string& url);
  * a URL whose scheme is not `http` or `https` (`vayu::http::unsendable_scheme`;
  * libcurl is built with other protocols and would read a `file://` URL), a
  * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
- * drops the body, so honouring both is impossible), a binary body whose file
- * no plan checked (`vayu::http::FilePlan` - the file rule runs once per send or
- * run, before this, and a body that skipped it is refused rather than read),
+ * drops the body, so honouring both is impossible), a binary body or file
+ * part whose file no plan checked (`vayu::http::unplanned_file_ref` - the file
+ * rule runs once per send or run, before this, and a body that skipped it is
+ * refused rather than read),
  * header text carrying a byte no header line can hold - see
  * `vayu::http::unsendable_header_text` - and a non-ASCII host with no ASCII
  * name (`vayu::http::unsendable_host`), and a URL naming Vayu's own engine or
@@ -228,6 +229,13 @@ Response error_response (const Error& error);
  * to rewind the body for a redirect or the second leg of Digest/NTLM - without
  * it that leg fails rather than resending. `UPLOAD` means PUT to libcurl, so the
  * method is re-asserted with `CURLOPT_CUSTOMREQUEST` afterwards.
+ *
+ * A **form-data file part** is read through `curl_mime_data_cb` from the file
+ * the plan opened (`FormField::approved`, #2416), at this transfer's own
+ * offset, with a seek callback for the same rewinds; its filename and
+ * Content-Type are set explicitly (`declared_file_name`,
+ * `file_part_content_type`), because libcurl derives neither for a callback
+ * part the way it did for a path.
  *
  * @param source Receives what the handle now points into (the multipart tree,
  *        the open file), which must outlive the transfer: a local for the

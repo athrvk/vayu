@@ -135,9 +135,26 @@ std::string untrusted_message (const FileRef& file, std::string_view label) {
     "pick it again in the request, or allow its folder in Settings > Files";
 }
 
-std::string unreadable_message (const FileRef& file, std::string_view label, int error) {
+std::string unreadable_message (const FileRef& file, std::string_view label, std::string_view reason) {
     return std::string (label) + ": cannot read file '" + file.src + "' (" +
-    vayu::utils::errno_message (error) + ")";
+    std::string (reason) + ")";
+}
+
+std::string unreadable_message (const FileRef& file, std::string_view label, int error) {
+    return unreadable_message (file, label, vayu::utils::errno_message (error));
+}
+
+/// A fill for a path the plan never checked: on the load path, one a
+/// per-iteration value produced, which no plan could see.
+std::string not_planned_message (const std::string& src, std::string_view label) {
+    return std::string (label) + " '" + src +
+    "' was not checked when the run started - a file path may take a data "
+    "column, but not a value that changes per iteration";
+}
+
+std::string unplanned_message (const std::string& src, std::string_view label) {
+    return std::string (label) + " '" + src +
+    "' was not checked before the send - this driver skipped the file rule";
 }
 
 /// The bytes of an inline-sized file, or its hash and size streamed, off one
@@ -229,6 +246,24 @@ bool is_prepared (const FileRef& file) {
     return file.inline_bytes != nullptr || !file.sha256.empty ();
 }
 
+std::optional<std::string> unplanned_file_ref (const Body& body) {
+    if (body.mode == BodyMode::Binary) {
+        if (is_prepared (body.file)) {
+            return std::nullopt;
+        }
+        return unplanned_message (body.file.src, "Body file");
+    }
+    if (!has_file_parts (body)) {
+        return std::nullopt;
+    }
+    for (const auto& field : body.fields) {
+        if (field.enabled && field.type == FormFieldType::File && !field.approved) {
+            return unplanned_message (field.src, form_part_label (field));
+        }
+    }
+    return std::nullopt;
+}
+
 std::string body_file_placeholder (const FileRef& file) {
     return "<file " + declared_file_name (file) + ", " + std::to_string (file.size) + " bytes>";
 }
@@ -261,6 +296,33 @@ std::uint64_t body_file_opens () {
     return open_counter ().load (std::memory_order_relaxed);
 }
 
+std::expected<std::shared_ptr<const ApprovedFile>, std::string>
+ApprovedFile::open (const fs::path& canonical) {
+    open_counter ().fetch_add (1, std::memory_order_relaxed);
+    auto opened = platform::open_regular_file (canonical);
+    if (!opened) {
+        return std::unexpected (opened.error ().message ());
+    }
+    return std::make_shared<const ApprovedFile> (*opened);
+}
+
+ApprovedFile::ApprovedFile (platform::OpenedFile opened)
+: file_ (opened.file), size_ (opened.size) {
+}
+
+ApprovedFile::~ApprovedFile () {
+    platform::close_file (file_);
+}
+
+std::optional<std::size_t>
+ApprovedFile::read_at (std::uint64_t offset, std::span<char> buffer) const {
+    const auto got = platform::read_file_at (file_, offset, buffer);
+    if (!got) {
+        return std::nullopt;
+    }
+    return *got;
+}
+
 FilePlan::FilePlan (FileAccessPolicy policy) : policy_ (std::move (policy)) {
 }
 
@@ -270,13 +332,20 @@ FilePlan::check (const FileRef& file, std::string_view label, bool needs_bytes) 
     return check_locked (file, label, needs_bytes);
 }
 
+const FilePlan::Checked* FilePlan::checked (const std::string& src, bool needs_bytes) const {
+    const auto found = by_src_.find (src);
+    if (found == by_src_.end () || !found->second.serves (needs_bytes)) {
+        return nullptr;
+    }
+    return &found->second;
+}
+
 std::optional<std::string>
 FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_bytes) {
     if (auto refusal = refuse_shape (file, label)) {
         return refusal;
     }
-    const auto found = by_src_.find (file.src);
-    if (found != by_src_.end () && (!needs_bytes || found->second.read)) {
+    if (checked (file.src, needs_bytes) != nullptr) {
         return std::nullopt;
     }
 
@@ -287,56 +356,73 @@ FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_
     }
     // Decided before the file is opened: a path the policy does not allow is
     // never read at all.
-    if (!policy_.allows (file.src)) {
+    const auto canonical = policy_.approved_path (file.src);
+    if (!canonical) {
         return untrusted_message (file, label);
     }
     if (!fs::is_regular_file (status)) {
         return std::string (label) + " '" + file.src +
         "' is not a regular file - a directory, device or pipe cannot be sent";
     }
+    return needs_bytes ? read_body_file (file, label) :
+                         open_part_file (file, label, *canonical);
+}
 
+std::optional<std::string>
+FilePlan::read_body_file (const FileRef& file, std::string_view label) {
     const FileHandle handle = open_counted (file.src);
     if (!handle) {
         return unreadable_message (file, label, errno);
     }
-    Checked checked;
-    if (needs_bytes) {
-        if (!read_contents (
-            handle.get (), checked.inline_bytes, checked.sha256, checked.size)) {
-            return unreadable_message (file, label, errno);
-        }
-        checked.read = true;
-    } else {
-        // A part's bytes are libcurl's to read during the transfer; this only
-        // proves the read can start. A directory that slipped past the type
-        // check (some platforms open one) fails here.
-        char probe           = 0;
-        const size_t read    = std::fread (&probe, 1, 1, handle.get ());
-        const int read_errno = errno;
-        if (read != 1 && std::feof (handle.get ()) == 0) {
-            return unreadable_message (file, label, read_errno);
-        }
+    std::shared_ptr<const std::string> bytes;
+    std::string sha256;
+    std::uint64_t size = 0;
+    if (!read_contents (handle.get (), bytes, sha256, size)) {
+        return unreadable_message (file, label, errno);
     }
-    by_src_.insert_or_assign (file.src, std::move (checked));
+    Checked& entry     = by_src_[file.src];
+    entry.inline_bytes = std::move (bytes);
+    entry.sha256       = std::move (sha256);
+    entry.size         = size;
+    entry.read         = true;
     return std::nullopt;
 }
 
-std::optional<std::string>
-FilePlan::fill_one (FileRef& file, std::string_view label, bool needs_bytes) const {
-    if (auto refusal = refuse_shape (file, label)) {
+std::optional<std::string> FilePlan::open_part_file (const FileRef& file,
+std::string_view label,
+const fs::path& canonical) {
+    auto approved = ApprovedFile::open (canonical);
+    if (!approved) {
+        return unreadable_message (file, label, approved.error ());
+    }
+    by_src_[file.src].approved = std::move (*approved);
+    return std::nullopt;
+}
+
+std::optional<std::string> FilePlan::fill_body_file (FileRef& file) const {
+    if (auto refusal = refuse_shape (file, "Body file")) {
         return refusal;
     }
-    const auto found = by_src_.find (file.src);
-    if (found == by_src_.end () || (needs_bytes && !found->second.read)) {
-        return std::string (label) + " '" + file.src +
-        "' was not checked when the run started - a file path may take a data "
-        "column, but not a value that changes per iteration";
+    const Checked* planned = checked (file.src, true);
+    if (planned == nullptr) {
+        return not_planned_message (file.src, "Body file");
     }
-    if (needs_bytes) {
-        file.inline_bytes = found->second.inline_bytes;
-        file.sha256       = found->second.sha256;
-        file.size         = found->second.size;
+    file.inline_bytes = planned->inline_bytes;
+    file.sha256       = planned->sha256;
+    file.size         = planned->size;
+    return std::nullopt;
+}
+
+std::optional<std::string> FilePlan::fill_part (FormField& field) const {
+    const std::string label = form_part_label (field);
+    if (auto refusal = refuse_shape (file_ref_of (field), label)) {
+        return refusal;
     }
+    const Checked* planned = checked (field.src, false);
+    if (planned == nullptr) {
+        return not_planned_message (field.src, label);
+    }
+    field.approved = planned->approved;
     return std::nullopt;
 }
 
@@ -347,17 +433,20 @@ std::optional<std::string> FilePlan::prepare (Request& request) {
         if (auto refusal = check_locked (body.file, "Body file", true)) {
             return refusal;
         }
-        return fill_one (body.file, "Body file", true);
+        return fill_body_file (body.file);
     }
     if (!has_file_parts (body)) {
         return std::nullopt;
     }
-    for (const auto& field : body.fields) {
+    for (auto& field : body.fields) {
         if (!field.enabled || field.type != FormFieldType::File) {
             continue;
         }
         if (auto refusal =
             check_locked (file_ref_of (field), form_part_label (field), false)) {
+            return refusal;
+        }
+        if (auto refusal = fill_part (field)) {
             return refusal;
         }
     }
@@ -368,17 +457,16 @@ std::optional<std::string> FilePlan::fill (Request& request) const {
     const std::shared_lock lock (mutex_);
     Body& body = request.body;
     if (body.mode == BodyMode::Binary) {
-        return fill_one (body.file, "Body file", true);
+        return fill_body_file (body.file);
     }
     if (!has_file_parts (body)) {
         return std::nullopt;
     }
-    for (const auto& field : body.fields) {
+    for (auto& field : body.fields) {
         if (!field.enabled || field.type != FormFieldType::File) {
             continue;
         }
-        FileRef ref = file_ref_of (field);
-        if (auto refusal = fill_one (ref, form_part_label (field), false)) {
+        if (auto refusal = fill_part (field)) {
             return refusal;
         }
     }

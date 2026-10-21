@@ -582,7 +582,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `type` | Form rows only: `"text"` (default) or `"file"`. Any other value is a `400`. |
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
-| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. A text part takes it too (see above). |
+| `contentType` | A binary body's Content-Type tier (above); a file part's own Content-Type, else derived from its name (see Sending, below). A text part takes it too (see above). |
 | `unresolved` | Read-only, derived by the engine on every read (below): `true` when `src` is a concrete path this machine would refuse. Accepted and ignored on input. |
 
 Shape refusals (`400`):
@@ -648,12 +648,19 @@ per iteration in a way no row explains (an identity or generator token) cannot
 be checked ahead and is refused per submission.
 
 **Sending.** The check runs **once per send** and **once per run**, never per
-transfer. A file of at most 4 MiB is read in that pass and its bytes are shared
-by every transfer of the run; a larger one is hashed in that pass and streamed
-from disk per transfer (`Content-Length` from the planned size; a redirect
-rewinds it). A file that vanishes mid-run fails that transfer with libcurl's own
-read error. A form part's bytes are always read by libcurl during the transfer.
-A **disabled** file part is neither checked nor sent.
+transfer. A binary body of at most 4 MiB is read in that pass and its bytes are
+shared by every transfer of the run; a larger one is hashed in that pass and
+streamed from disk per transfer (`Content-Length` from the planned size; a
+redirect rewinds it). A binary file that vanishes mid-run fails that transfer
+with libcurl's own read error. A **form part's** file is opened in that pass,
+on the path the check resolved and without following a final symlink, and every
+transfer of the send or run reads that open file: a link re-pointed or a file
+replaced at the path afterwards is not what is sent. Its length is the one the
+open saw; a file truncated below it under the open handle aborts the transfer.
+A part with no declared Content-Type is typed by its filename's extension, then
+its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`,
+`htm`, `html`, `pdf`, `xml`), else `application/octet-stream`. A **disabled**
+file part is neither checked nor sent.
 
 **What a record keeps.** A view of a request never carries a file's bytes: the
 raw-request view shows `<file avatar.png, 1234 bytes>` in their place. A binary

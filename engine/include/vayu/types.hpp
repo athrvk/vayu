@@ -36,6 +36,10 @@
 // on nothing but the standard library, so it cannot cycle back here either.
 #include "vayu/utils/ascii_case.hpp"
 
+namespace vayu::http {
+class ApprovedFile; // vayu/http/file_ref.hpp
+}
+
 namespace vayu {
 
 // ============================================================================
@@ -380,13 +384,13 @@ struct FileGrant {
  * round-tripped, and dropped only when the body is put on the wire.
  *
  * A **file part** (`type == FormFieldType::File`) names a path in `src` rather
- * than carrying bytes in `value`: libcurl reads the file at transfer time, so
- * nothing here holds the contents. `file_name` and `content_type` override what
- * the part declares about itself; empty means "let libcurl derive it" (the
- * basename, and `application/octet-stream`). A file part whose `src` is empty,
- * unreadable or untrusted is refused before the transfer starts - see
- * `vayu::http::unsendable_file_ref`. A text part may carry `content_type` too,
- * sent as that part's own Content-Type (#2539).
+ * than carrying bytes in `value`. The file rule opens it once, when it approves
+ * it, and every transfer reads that open file (`approved`), never `src` again.
+ * `file_name` and `content_type` override what the part declares about itself;
+ * empty means derived (the basename, and `vayu::http::file_part_content_type`).
+ * A file part whose `src` is empty, unreadable or untrusted is refused before
+ * the transfer starts - see `vayu::http::unsendable_file_ref`. A text part may
+ * carry `content_type` too, sent as that part's own Content-Type (#2539).
  */
 struct FormField {
     FormField () = default;
@@ -405,7 +409,11 @@ struct FormField {
     FormFieldType type = FormFieldType::Text;
     std::string src;          // file parts only - a path on this machine
     std::string file_name;    // declared filename; empty = basename of `src`
-    std::string content_type; // per-part Content-Type; empty = libcurl's guess
+    std::string content_type; // per-part Content-Type; empty = derived
+    // Plan-time, never serialised: the file `FilePlan` approved and opened
+    // (#2416). Null until it fills the part, and the send gate refuses an
+    // enabled file part without it.
+    std::shared_ptr<const vayu::http::ApprovedFile> approved;
 };
 
 /**

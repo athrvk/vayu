@@ -30,23 +30,28 @@
  * path, and says what to do.
  *
  * The check runs **once per send** on the design path and **once per run** on
- * the load and collection paths (`FilePlan`), never per transfer. A file at or
- * under `INLINE_FILE_LIMIT` is read in the same pass, and the bytes are shared
- * by every transfer of the run; a larger one is hashed in that pass and
- * streamed from disk per transfer.
+ * the load and collection paths (`FilePlan`), never per transfer. For a binary
+ * body, a file at or under `INLINE_FILE_LIMIT` is read in the same pass, and
+ * the bytes are shared by every transfer of the run; a larger one is hashed in
+ * that pass and streamed from disk per transfer. A form-data file part is
+ * opened in that pass (`ApprovedFile`) and every transfer reads that open file.
  */
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <expected>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -73,10 +78,18 @@ namespace vayu::http {
 /// binds, or one nothing will.
 [[nodiscard]] bool has_templated_file_path (const Body& body);
 
-/// True once `FilePlan` has filled the plan-time members of @p file. A binary
-/// body that reaches a transfer without them was never checked, and the send
-/// gate refuses it (`validate_transferable`).
+/// True once `FilePlan` has filled the plan-time members of @p file.
 [[nodiscard]] bool is_prepared (const FileRef& file);
+
+/**
+ * @brief Why @p body cannot reach a transfer because no plan checked a file it
+ * names, or nothing.
+ *
+ * A binary body without its plan-time members, or an enabled file part without
+ * `approved`, never went through the rule, so the send gate
+ * (`validate_transferable`) refuses it rather than read the path on its behalf.
+ */
+[[nodiscard]] std::optional<std::string> unplanned_file_ref (const Body& body);
 
 /**
  * @brief The raw-request and trace stand-in for a binary body's bytes:
@@ -103,19 +116,60 @@ const FileRef& file);
 
 /**
  * @brief How many times this process has opened a request-body file - for a
- * plan's check-and-read, or a streamed transfer. Monotonic; tests read the
- * difference across a send or a run.
+ * plan's check-and-read, a part's `ApprovedFile`, or a streamed transfer.
+ * Monotonic; tests read the difference across a send or a run.
  */
 [[nodiscard]] std::uint64_t body_file_opens ();
+
+/**
+ * @brief A form-data file part's file, opened when the rule approved it (#2416).
+ *
+ * Opened on the canonical path the policy approved
+ * (`FileAccessPolicy::approved_path`), never on `src` again, and without
+ * following a final symlink (`platform::open_regular_file`), so a link swapped
+ * in at the path after the check, or between a run's iterations, is not what a
+ * transfer reads. One per distinct path per plan, shared by every copy of the
+ * request; reads are positional, so concurrent transfers share no position.
+ * The size is the one the open saw, and a transfer sends exactly that many
+ * bytes.
+ */
+class ApprovedFile {
+    public:
+    /// @p canonical opened, or why it could not be.
+    [[nodiscard]] static std::expected<std::shared_ptr<const ApprovedFile>, std::string>
+    open (const std::filesystem::path& canonical);
+
+    /// Takes ownership of @p opened's file.
+    explicit ApprovedFile (platform::OpenedFile opened);
+    ~ApprovedFile ();
+    ApprovedFile (const ApprovedFile&)            = delete;
+    ApprovedFile& operator= (const ApprovedFile&) = delete;
+    ApprovedFile (ApprovedFile&&)                 = delete;
+    ApprovedFile& operator= (ApprovedFile&&)      = delete;
+
+    [[nodiscard]] std::uint64_t size () const {
+        return size_;
+    }
+
+    /// Up to @p buffer's size at @p offset: the count read, 0 at the end, or
+    /// nothing on a read error.
+    [[nodiscard]] std::optional<std::size_t>
+    read_at (std::uint64_t offset, std::span<char> buffer) const;
+
+    private:
+    platform::ReadOnlyFile file_;
+    std::uint64_t size_;
+};
 
 /**
  * @brief The file references of a send or a run, checked once.
  *
  * `prepare` applies the rule to every enabled reference of a request and fills
- * a binary body's plan-time members (`inline_bytes`, `sha256`, `size`), reading
- * each distinct path once for the life of the plan. `fill` is the hot-path half:
- * it answers only from paths `prepare` already checked, so a load run's
- * transfers never touch the filesystem for a small file and never re-check one.
+ * its plan-time members (a binary body's `inline_bytes`, `sha256`, `size`; a
+ * file part's `approved`), reading or opening each distinct path once for the
+ * life of the plan. `fill` is the hot-path half: it answers only from paths
+ * `prepare` already checked, so a load run's transfers never re-check a file
+ * and never open a small binary body or a file part.
  *
  * Thread-safe: a run prepares on one thread and fills from many.
  */
@@ -137,8 +191,9 @@ class FilePlan {
     [[nodiscard]] std::optional<std::string> fill (Request& request) const;
 
     /**
-     * Apply the rule to one reference; @p needs_bytes also reads (or hashes) it,
-     * which only a binary body needs. Cached by `src` like `prepare`.
+     * Apply the rule to one reference; @p needs_bytes reads (or hashes) it, as
+     * a binary body needs, and otherwise opens it, as a file part needs.
+     * Cached by `src` like `prepare`.
      */
     [[nodiscard]] std::optional<std::string>
     check (const FileRef& file, std::string_view label, bool needs_bytes);
@@ -149,18 +204,29 @@ class FilePlan {
 
     private:
     /// A path that passed the whole rule; one the policy refused is never
-    /// cached, so a hit needs no second trust check.
+    /// cached, so a hit needs no second trust check. One path can serve both
+    /// needs, a binary body in one step and a file part in another.
     struct Checked {
         bool read = false; // bytes or hash taken (a binary body's need)
         std::shared_ptr<const std::string> inline_bytes;
         std::string sha256;
         std::uint64_t size = 0;
+        std::shared_ptr<const ApprovedFile> approved; // a file part's need
+
+        [[nodiscard]] bool serves (bool needs_bytes) const {
+            return needs_bytes ? read : approved != nullptr;
+        }
     };
 
     std::optional<std::string>
     check_locked (const FileRef& file, std::string_view label, bool needs_bytes);
-    std::optional<std::string>
-    fill_one (FileRef& file, std::string_view label, bool needs_bytes) const;
+    [[nodiscard]] const Checked* checked (const std::string& src, bool needs_bytes) const;
+    std::optional<std::string> read_body_file (const FileRef& file, std::string_view label);
+    std::optional<std::string> open_part_file (const FileRef& file,
+    std::string_view label,
+    const std::filesystem::path& canonical);
+    std::optional<std::string> fill_body_file (FileRef& file) const;
+    std::optional<std::string> fill_part (FormField& field) const;
 
     FileAccessPolicy policy_;
     mutable std::shared_mutex mutex_;
