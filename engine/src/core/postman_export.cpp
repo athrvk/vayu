@@ -892,7 +892,7 @@ std::optional<json> postman_auth (const json& stored, AuthLevel level, Walk& wal
 
 /// `graphql`: Postman's variables are the text of its Variables pane.
 json graphql_body (const std::string& content) {
-    const auto envelope =
+    auto envelope =
     vayu::utils::parse_ordered_json (content, vayu::utils::ORDERED_JSON_UNBOUNDED);
     json graphql;
     if (!envelope || !envelope->is_object ()) {
@@ -917,11 +917,15 @@ json graphql_body (const std::string& content) {
     }
     // Anything else the envelope holds (`operationName`) rides along; the
     // importer keeps every key it does not rewrite.
-    for (auto member = parsed.begin (); member != parsed.end (); ++member) {
+    // Moved out of the envelope, which is this function's own parse and is
+    // read no further: a value here can be as wide as the stored body.
+    vayu::utils::reserve_members (graphql, envelope->size ());
+    for (auto member = envelope->begin (); member != envelope->end (); ++member) {
         if (member.key () != "query" && member.key () != "variables") {
             // The envelope's keys are distinct and neither is `query` or
             // `variables`, which are already in `graphql`.
-            vayu::utils::append_unique_member (graphql, member.key (), member.value ());
+            vayu::utils::append_unique_member (
+            graphql, member.key (), std::move (member.value ()));
         }
     }
     return json{ { "mode", "graphql" }, { "graphql", std::move (graphql) } };

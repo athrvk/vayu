@@ -154,7 +154,15 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   not (`ordered_map::operator[]` per member); the test measures the whole path.
   Copying members out of an object whose keys are already distinct goes through
   `vayu::utils::append_unique_member` (#2552), and a test reads its export back
-  with `parse_ordered_json`, never `ordered_json::parse`.
+  with `parse_ordered_json`, never `ordered_json::parse`. **Linear is not
+  enough on the Windows ASan leg**, where every allocation is expensive: an
+  `ordered_json` object keeps `std::pair<const std::string, ...>`, which is not
+  nothrow-movable, so growing one deep-copies every member it holds, and a
+  member added beside a wide one copies the wide one. Reserve first
+  (`vayu::utils::reserve_members`), move a value you own rather than copy it,
+  and build a many-times object member by member rather than from an
+  initializer list. The 100,000-key test of an entry point fails the sanitizer
+  legs' CTest timeout when this is ignored, though every copy is linear.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
   `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
   and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as
@@ -366,9 +374,12 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `src/platform/high_resolution_timer.cpp`, wrapped in `// clang-format off`
   because `timeapi.h` needs `windows.h`'s types and sorts first. A second such
   case is pinned at the site the same way, never by turning the sorter off.
-- **clang-tidy 19 or newer** (`.clang-tidy` in `engine/`, `engine/src/runtime/`,
-  `engine/tests/`; the root config uses `ExcludeHeaderFilterRegex`, which an
-  older binary rejects). The pre-push hook finds it as `clang-tidy-19` or
+- **clang-tidy 22, the LLVM project's build** (`.clang-tidy` in `engine/`,
+  `engine/src/runtime/`, `engine/tests/`). CI installs it on both legs with
+  `scripts/install-clang-tidy.sh` (apt.llvm.org on Linux, the attested LLVM
+  release installer on Windows), and the pre-push hook takes 22 as its floor;
+  before 19 the root config's `ExcludeHeaderFilterRegex` is rejected outright.
+  The pre-push hook finds it as `clang-tidy-22` or
   plain `clang-tidy` through the same `find_llvm_tool`
   (`scripts/lib/llvm-tools.sh`) the pre-commit formatter uses (`exact` there,
   `minimum` here), because apt splits the names and Homebrew does not (#918).
