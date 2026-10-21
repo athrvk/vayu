@@ -3510,9 +3510,10 @@ to, in the order the walk met them: every count an OpenAPI parse takes while on
 an operation, Postman's per-request counters, and Insomnia's file bodies and
 the resources it cannot import. A count that belongs to the document (a second
 server URL, a malformed section) has none. **`names`**, when present, names
-what the count dropped, never its value: today only `oauth2_unmapped_param`,
-whose `names` are the keys of the OAuth 2.0 request parameters a Postman parse
-did not carry.
+what the count dropped, never its value: `oauth2_unmapped_param`, whose
+`names` are the keys of the OAuth 2.0 request parameters a Postman parse did
+not carry, and `protocol_behavior_folder`, whose `names` are the folders or
+collection that declared a setting Vayu cannot apply.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a

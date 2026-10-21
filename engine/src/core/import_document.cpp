@@ -1541,7 +1541,8 @@ void set_event_elements (json& item, const std::vector<const json*>& events, Pos
  * apply (issue #1765): a key outside the set the engine honours, with a value
  * that is not Postman's default, or a `disabledSystemHeaders` entry for a
  * header whose removal would break HTTP/1.1 framing (`host`,
- * `content-length`). Counted once per request as `protocol_behavior`.
+ * `content-length`). Counted once per request as `protocol_behavior`, or once per declaring
+ * folder or collection as `protocol_behavior_folder`.
  */
 bool names_unapplied_protocol_behavior (const json& behavior) {
     for (auto member = behavior.begin (); member != behavior.end (); ++member) {

@@ -474,7 +474,9 @@ per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bod
 resources it cannot import), so the Preview can say which request to finish rather than only
 how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
 parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
-[postman.md](./postman.md#oauth-20-extra-request-parameters)). How the Preview words and ranks each kind - amber for what the user must finish, muted
+[postman.md](./postman.md#oauth-20-extra-request-parameters)), and the folders or collection
+that declared a Postman setting Vayu cannot apply (`protocol_behavior_folder`, see
+[postman.md](./postman.md#redirect-settings)). How the Preview words and ranks each kind - amber for what the user must finish, muted
 for what the import decided, not shown for what changes nothing sent - is
 `app/src/modules/collections/import-notices.ts`.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
