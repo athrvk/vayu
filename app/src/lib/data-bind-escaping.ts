@@ -96,7 +96,7 @@ type Placement =
  * Only what JSON forbids raw is rewritten, so non-ASCII and `/` pass as typed
  * and a control character is `\u00xx` in lowercase hex.
  */
-export function escapeJsonStringContent(text: string): string {
+function escapeJsonStringContent(text: string): string {
 	let out = "";
 	for (const char of text) {
 		out += JSON_ESCAPES[char] ?? escapeControl(char);
@@ -124,7 +124,7 @@ function escapeControl(char: string): string {
  * only the attribute delimiter in force (`null` in character data), so `it's`
  * stays readable inside a double-quoted attribute.
  */
-export function escapeXmlContent(text: string, attributeQuote: '"' | "'" | null): string {
+function escapeXmlContent(text: string, attributeQuote: '"' | "'" | null): string {
 	let out = "";
 	for (const char of text) {
 		if (char === "&") out += "&amp;";
@@ -142,7 +142,7 @@ export function escapeXmlContent(text: string, attributeQuote: '"' | "'" | null)
  * section after its `]]` and reopens one for the `>`, so a parser reads one
  * uninterrupted run of the cell's text.
  */
-export function escapeXmlCdata(text: string): string {
+function escapeXmlCdata(text: string): string {
 	return text.split("]]>").join("]]]]><![CDATA[>");
 }
 

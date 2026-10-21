@@ -167,7 +167,10 @@ const MAX_NESTED_RESOLUTIONS = 8;
  * name it answers `undefined` for keeping its braces.
  *
  * The engine's `substitute_tokens`, restated: the recursion and its bound live
- * here and the tier order lives in the lookup.
+ * here and the tier order lives in the lookup, which is what lets one core
+ * serve both a composition preview (`resolveTemplate`) and a preview that holds
+ * the row (`resolveTemplateWithRow`) without either restating the other's
+ * nesting rules.
  *
  * A replacement that carries tokens of its own is resolved through the same
  * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
