@@ -6308,6 +6308,11 @@ with specific codes:
 
 Execute a single HTTP request (Design Mode). Returns immediate response with test results.
 
+A body nested deeper than 128 levels in any field answers `400` `request body
+is nested deeper than 128 levels` (code `bad_request`) before anything is
+recorded or sent (issue #2417). The one exception is a `data` cell, held to its
+own bound of 100 below.
+
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
 the pre-request script runs, so `pm.request` reflects the real outgoing headers -
@@ -7290,6 +7295,11 @@ Start a load test run (Vayu Mode).
   "stream_metrics": true     // Optional - feed the event histogram behind the report's `stream` section
 }
 ```
+
+A body nested deeper than 128 levels in any field answers `400` `request body
+is nested deeper than 128 levels` (code `invalid_run_config`) before any run row
+exists (issue #2417). The exception is a `data` or `scenario.data` cell, held to
+its own bound of 100 and refused in its own words (see below).
 
 **`httpVersion` on `POST /runs`** is not a per-run override of a stored
 request - it is simply how this endpoint states which protocol the run uses at

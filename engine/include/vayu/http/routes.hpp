@@ -44,6 +44,7 @@
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -187,6 +188,43 @@ route_error (int status, const std::string& message, std::string_view code = {})
 [[nodiscard]] inline std::pair<int, nlohmann::json>
 error_response (int status, const std::string& message, std::string_view code = {}) {
     return { status, error_body (status, message, code) };
+}
+
+/**
+ * A request body as JSON, or the 400 to answer instead: text that does not
+ * parse (`Invalid JSON: ...`, the default code), or a value nested deeper than
+ * `constants::request_body::MAX_JSON_DEPTH` levels (@p depth_code, #2417).
+ *
+ * nlohmann parses iteratively but `dump ()` and the copy constructor recurse,
+ * so a tree this returns is one that both are safe on, and a refused one has
+ * been probed only by `vayu::json::exceeds_depth`.
+ *
+ * @p field_bounds runs between the parse and the body's bound, for a field
+ * whose own bound is tighter and named (a data cell, #2362), so that refusal
+ * keeps its words. It must probe only with `exceeds_depth`, and a field that
+ * passes it must fit under the body's bound (`MAX_JSON_DEPTH`'s assert).
+ */
+[[nodiscard]] inline std::expected<nlohmann::json, RouteError>
+parse_request_json (const std::string& body,
+std::string_view depth_code                                            = {},
+const std::function<RouteResult (const nlohmann::json&)>& field_bounds = {}) {
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse (body);
+    } catch (const nlohmann::json::exception& e) {
+        return route_error (400, "Invalid JSON: " + std::string (e.what ()));
+    }
+    if (field_bounds) {
+        if (auto refused = field_bounds (parsed); !refused) {
+            return std::unexpected (std::move (refused.error ()));
+        }
+    }
+    constexpr size_t max_depth = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+    if (vayu::json::exceeds_depth (parsed, max_depth)) {
+        return route_error (400,
+        std::format ("request body is nested deeper than {} levels", max_depth), depth_code);
+    }
+    return parsed;
 }
 
 /**

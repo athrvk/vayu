@@ -1395,3 +1395,156 @@ TEST_F (RunConfigValidationRouteTest, ADataCellAtTheDepthBoundStillStartsTheRun)
 
     EXPECT_EQ (status, 202) << body.dump ();
 }
+
+// --- A value nested far past the body's bound, in any other field (#2417) ----
+//
+// Both routes dump or copy the whole body (the stored snapshot, the elements
+// they compile), so a deep value anywhere took the engine down the way a deep
+// data cell did. Mutation check: drop the `exceeds_depth` check in
+// `parse_request_json` and the test binary crashes.
+
+namespace {
+
+constexpr std::size_t kBodyDepthBound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+
+const std::string& body_depth_message () {
+    static const std::string message = "request body is nested deeper than " +
+    std::to_string (kBodyDepthBound) + " levels";
+    return message;
+}
+
+/// A `POST /runs` (when @p run) or `POST /execute` body against @p url whose
+/// @p member is the JSON text @p value.
+std::string send_with_member (bool run,
+const std::string& url,
+const std::string& member,
+const std::string& value) {
+    std::string text = R"({"method":"GET","url":")" + url + "\",";
+    if (run) {
+        text += R"("mode":"iterations","iterations":1,"concurrency":1,)";
+    }
+    return text + "\"" + member + "\":" + value + "}";
+}
+
+} // namespace
+
+TEST (RequestBodyDepth, ABodyAtTheBoundParsesAndOnePastItIsRefused) {
+    const auto at_bound = vayu::http::routes::parse_request_json (
+    vayu::tests::nested_array_text (kBodyDepthBound), "some_code");
+    EXPECT_TRUE (at_bound.has_value ());
+
+    const auto past = vayu::http::routes::parse_request_json (
+    vayu::tests::nested_array_text (kBodyDepthBound + 1), "some_code");
+    ASSERT_FALSE (past.has_value ());
+    EXPECT_EQ (past.error ().status, 400);
+    EXPECT_EQ (error_code_of (past.error ().body), "some_code");
+    EXPECT_EQ (vayu::http::routes::error_message_of (past.error ().body),
+    body_depth_message ());
+}
+
+TEST (RequestBodyDepth, TextThatDoesNotParseKeepsItsMessageAndTheDefaultCode) {
+    const auto refused = vayu::http::routes::parse_request_json ("{\"a\":", "some_code");
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_EQ (refused.error ().status, 400);
+    EXPECT_EQ (error_code_of (refused.error ().body), "bad_request");
+    EXPECT_EQ (
+    vayu::http::routes::error_message_of (refused.error ().body).rfind ("Invalid JSON: ", 0), 0U)
+    << refused.error ().body.dump ();
+}
+
+// A field with a tighter bound of its own answers before the body's does, in
+// its own words, even when the body is past both.
+TEST (RequestBodyDepth, AFieldBoundAnswersBeforeTheBodyBound) {
+    bool consulted     = false;
+    const auto refused = vayu::http::routes::parse_request_json (
+    vayu::tests::nested_array_text (kCrashingDepth), {},
+    [&consulted] (const nlohmann::json&) -> vayu::http::routes::RouteResult {
+        consulted = true;
+        return vayu::http::routes::route_error (400, "the field's own words", "field_code");
+    });
+    EXPECT_TRUE (consulted);
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_EQ (error_code_of (refused.error ().body), "field_code");
+    EXPECT_EQ (vayu::http::routes::error_message_of (refused.error ().body),
+    "the field's own words");
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepValueInAnyOtherFieldIsRefusedOnBothRoutes) {
+    const vayu::tests::EchoServer echo;
+    const std::string deep = vayu::tests::nested_array_text (kCrashingDepth);
+    struct Case {
+        const char* path;
+        const char* member;
+        const char* code;
+    };
+    for (const auto& [path, member, code] : std::to_array<Case> ({
+         { "/runs", "headers", "invalid_run_config" },
+         { "/runs", "body", "invalid_run_config" },
+         { "/runs", "requestElements", "invalid_run_config" },
+         { "/runs", "variables", "invalid_run_config" },
+         { "/runs", "notAField", "invalid_run_config" },
+         { "/execute", "headers", "bad_request" },
+         { "/execute", "body", "bad_request" },
+         { "/execute", "elements", "bad_request" },
+         { "/execute", "variables", "bad_request" },
+         { "/execute", "notAField", "bad_request" },
+         })) {
+        const bool run = std::string_view (path) == "/runs";
+        const auto [status, body] =
+        post_text (path, send_with_member (run, echo.url (), member, deep));
+        EXPECT_EQ (status, 400) << path << " " << member << ": " << body.dump ();
+        EXPECT_EQ (error_code_of (body), code) << path << " " << member;
+        EXPECT_EQ (vayu::http::routes::error_message_of (body), body_depth_message ())
+        << path << " " << member;
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+
+    // A `scenario` member other than `data` has no bound of its own either.
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","notAField":)" + deep + "}}");
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), body_depth_message ());
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+
+    // And the engine is still answering.
+    const auto [after, after_body] =
+    post ("/execute", json{ { "method", "GET" }, { "url", echo.url () } });
+    EXPECT_EQ (after, 200) << after_body.dump ();
+}
+
+// A JSON request body nested to the bound is an ordinary payload on both routes,
+// and reaches the wire whole.
+TEST_F (RunConfigValidationRouteTest, ABodyAtTheDepthBoundStillRunsOnBothRoutes) {
+    const vayu::tests::EchoServer echo;
+    // `content` sits two levels below the payload (payload > `body` > content).
+    const std::string content = vayu::tests::nested_array_text (kBodyDepthBound - 2);
+    const std::string json_body = R"({"mode":"json","content":)" + content + "}";
+
+    const auto [run_status, run_body] =
+    post_text ("/runs", send_with_member (true, echo.url (), "body", json_body));
+    ASSERT_EQ (run_status, 202) << run_body.dump ();
+    EXPECT_EQ (settled_status (run_body.value ("runId", std::string ())),
+    vayu::RunStatus::Completed);
+
+    const auto [send_status, send_body] =
+    post_text ("/execute", send_with_member (false, echo.url (), "body", json_body));
+    EXPECT_EQ (send_status, 200) << send_body.dump ();
+    EXPECT_EQ (echo.body (), content);
+}
+
+// A parse error quotes the byte it stopped at, and a byte that is not UTF-8
+// would make a strict dump of the refusal throw, which the server answers as a
+// bodiless 500. Mutation check: dump `POST /runs`' refusal without `replace` and
+// its case answers 500.
+TEST_F (RunConfigValidationRouteTest, BodyTextThatIsNotJsonIsA400OnBothRoutesWhateverItsBytes) {
+    for (const char* path : { "/runs", "/execute" }) {
+        const auto [status, body] = post_text (path, "{\"a\":\xff}");
+        EXPECT_EQ (status, 400) << path;
+        EXPECT_EQ (error_code_of (body), "bad_request") << path << ": " << body.dump ();
+        EXPECT_EQ (
+        vayu::http::routes::error_message_of (body).rfind ("Invalid JSON: ", 0), 0U)
+        << path << ": " << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
