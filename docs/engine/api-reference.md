@@ -3896,7 +3896,11 @@ accepted a client-supplied `id` - which they no longer do (see
   file, a `(host, port)` pair another row already claims) is **skipped**
   rather than failing the call or naming an `item` error - the tree it does
   not reference has already committed by the time this section runs, and
-  nothing in the response says which candidates landed. Only a Postman
+  nothing in the response says which candidates landed. The engine registers
+  every candidate it is sent: the app sends only the ones the user ticked in
+  the preview, so an empty array registers nothing. Each registration is
+  logged at info (`http`: host, port and certificate path, never the
+  passphrase or the key), and a skipped candidate at warning. Only a Postman
   preview's own `clientCertificates` array (`POST /import/parse`) ever
   populates this; every other format sends `[]`.
 - Up to **10,000 items** per call (collections + requests + environments +

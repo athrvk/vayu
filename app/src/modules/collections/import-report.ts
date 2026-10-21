@@ -32,9 +32,18 @@ import {
 } from "@/stores";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { ImportResult } from "@/services/importers/types";
+import { unselectedCertificateCount } from "@/services/importers/client-certificate-selection";
 
-/** The report for one applied file; `rootIds` are the real ids the apply returned. */
-export function buildImportReport(result: ImportResult, rootIds: string[]): ImportReport {
+/**
+ * The report for one applied file; `rootIds` are the real ids the apply returned.
+ * `selectedCertificates` is the selection the apply sent, so the candidates it
+ * left out are in the kept notices too.
+ */
+export function buildImportReport(
+	result: ImportResult,
+	rootIds: string[],
+	selectedCertificates?: readonly number[]
+): ImportReport {
 	const { meta } = result;
 	return {
 		title:
@@ -42,7 +51,7 @@ export function buildImportReport(result: ImportResult, rootIds: string[]): Impo
 				? result.collections[0].name
 				: (meta.fileName ?? meta.format),
 		fileName: meta.fileName ?? null,
-		notices: importNotices(meta),
+		notices: importNotices(meta, unselectedCertificateCount(result, selectedCertificates)),
 		fileNeeds: fileReferenceNeeds([result]),
 		counts: {
 			requests: meta.requestCount,

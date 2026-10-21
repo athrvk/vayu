@@ -82,3 +82,40 @@ describe("the apply payload both sides build", () => {
 		}
 	);
 });
+
+/**
+ * The fixture pins `clientCertificates: []` for every case, because it records
+ * what an unselected apply sends (issue #2363). A preview that carries
+ * candidates must not change anything else in the payload.
+ */
+describe("the apply payload when the preview lists client certificates", () => {
+	const candidates = [
+		{ host: "a.example.com", certPath: "/c/a.pem" },
+		{ host: "b.example.com", port: 8443, certPath: "/c/b.p12", certFormat: "p12" as const },
+	];
+
+	async function payloadFor(selected?: number[]): Promise<ImportApplyRequest> {
+		const { api, sent } = recorder();
+		const result = assignTempIds({
+			...(JSON.parse(JSON.stringify(cases[0].expected)) as ImportResult),
+			clientCertificates: candidates,
+		});
+		await new ImportOrchestrator(api).run(result, {
+			importEnvironments: true,
+			importScripts: true,
+			...(selected ? { selectedClientCertificates: selected } : {}),
+		});
+		return sent[0];
+	}
+
+	it("sends none by default and leaves the rest of the payload as the engine builds it", async () => {
+		expect(await payloadFor()).toEqual(cases[0].payload);
+	});
+
+	it("sends only the ticked candidate", async () => {
+		expect(await payloadFor([1])).toEqual({
+			...cases[0].payload,
+			clientCertificates: [candidates[1]],
+		});
+	});
+});

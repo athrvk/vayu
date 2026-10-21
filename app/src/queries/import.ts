@@ -11,7 +11,7 @@ import { invalidateAllRequestLists } from "./collections";
 import { queryKeys } from "./keys";
 import { assignTempIds } from "@/services/importers/assign-ids";
 import { ImportOrchestrator, type ImportApi } from "@/services/importers/orchestrator";
-import type { ImportOptions, ImportResult } from "@/services/importers/types";
+import type { ImportApplyOptions, ImportResult } from "@/services/importers/types";
 import { useSpecFileStore, type SpecFileLocation } from "@/stores/spec-file-store";
 
 /** Build an ImportApi backed by the real apiService. */
@@ -89,7 +89,7 @@ export function useImportMutation() {
 			specFile,
 		}: {
 			result: ImportResult;
-			opts: ImportOptions;
+			opts: ImportApplyOptions;
 			/**
 			 * Where the imported document sits on this machine, when it was picked
 			 * as a file. Ignored unless the tree actually carries a spec - every

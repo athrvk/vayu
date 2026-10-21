@@ -476,13 +476,33 @@ export function describeCounts(meta: ImportMeta): string {
 }
 
 /**
+ * The engine's `certificate` tally plus the resolved candidates the user left
+ * unticked (#2363): both are certificates the import did not register, and the
+ * fix is the same - add it in Settings. The request names the engine attached
+ * are dropped once there are unticked ones, since they would name fewer
+ * requests than the line counts.
+ */
+function withUnticked(skipped: readonly SkippedItem[], unticked: number): readonly SkippedItem[] {
+	if (unticked === 0) return skipped;
+	if (!skipped.some((item) => item.kind === "certificate")) {
+		return [...skipped, { kind: "certificate", count: unticked }];
+	}
+	return skipped.map((item) =>
+		item.kind === "certificate" ? { kind: item.kind, count: item.count + unticked } : item
+	);
+}
+
+/**
  * The lines a preview shows for one parsed file, actions first. Shared by the
  * single-file preview and every batch ledger row, so one file is described in
  * the same words wherever it appears.
+ *
+ * @param unticked client-certificate candidates in this file the apply will not
+ * register (`unselectedCertificateCount`), tallied beside the engine's own.
  */
-export function importNotices(meta: ImportMeta): ImportNotice[] {
+export function importNotices(meta: ImportMeta, unticked = 0): ImportNotice[] {
 	const notices: ImportNotice[] = [];
-	for (const item of meta.skipped) {
+	for (const item of withUnticked(meta.skipped, unticked)) {
 		const notice = skippedNotice(item);
 		if (notice) notices.push(notice);
 	}

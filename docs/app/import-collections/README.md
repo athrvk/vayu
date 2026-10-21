@@ -292,8 +292,13 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
 - **`clientCertificates` is best-effort, inside the same call but outside the tree's own
   atomicity** (issue #1656). A Postman import resolves a request's own `certificate` into
   a `client_certificates` registry candidate at preview time (see
-  [postman.md](postman.md#request)) and the orchestrator sends it alongside the
-  tree, always `[]` included like `specs`. The engine applies each candidate through the
+  [postman.md](postman.md#request)) and the preview lists it. The orchestrator sends it
+  alongside the tree, `[]` included like `specs`, but only the candidates the user ticked
+  (`ImportApplyOptions.selectedClientCertificates`, indexes into
+  `ImportResult.clientCertificates`; issue #2363): a registry row is host-wide and outlives
+  the import, and the document chose its host and path. A caller that states no selection
+  sends none, and the candidates left unticked are tallied in the `certificate` notice. The
+  engine applies each candidate it is sent through the
   same check-and-write `POST /client-certificates` uses, but only *after* the tree's own
   transaction commits - reusing that write means reusing its own lock, and taking it from
   inside the tree's transaction would deadlock. A candidate that fails (a `(host, port)`

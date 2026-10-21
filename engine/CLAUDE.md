@@ -820,7 +820,7 @@ logged as a warning: it means a client skipped composition.
   `clientCertificates` array rides the same `import_apply_payload` pin (#1656,
   see the client-certificate bullet above) - the one section neither side's
   flattening invents a `tempId` for, since nothing else in the tree references
-  one. The renderer keeps
+  one; the app sends only the candidates the user ticked. The renderer keeps
   `ref-bundler.ts` alone, exempt with a reason: inlining referenced files is
   fetch-time assembly through `POST /import/document`, reaching the network and
   disk through channels an engine should not have.
@@ -986,7 +986,9 @@ logged as a warning: it means a client skipped composition.
   `import_apply_response`'s own would deadlock. A candidate that route would
   refuse (an unreadable file, a `(host, port)` collision) is silently skipped,
   not surfaced as a `400`; see `docs/engine/api-reference.md`'s
-  `POST /import/apply` section.
+  `POST /import/apply` section. The app sends only the candidates the user
+  ticked, and each registration is logged at info (`host`, `port`, `certPath`;
+  never the passphrase or the key).
 - **A file a request body names is sent under one trust rule**
   (`http/file_ref.hpp`, `http/file_access_policy.hpp`): a `binary` body's
   `file` and a `form-data` file part are sendable iff `FileAccessPolicy::allows

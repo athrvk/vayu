@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { importToastMessage } from "./import-report";
+import { buildImportReport, importToastMessage } from "./import-report";
+import { collection, result } from "./import-preview.testkit";
 import type { ImportReport } from "@/stores";
 
 function report(overrides: Partial<ImportReport> = {}): ImportReport {
@@ -71,5 +72,25 @@ describe("importToastMessage", () => {
 
 	it("is unchanged when the import touched no environment", () => {
 		expect(importToastMessage([report()], undefined)).toBe(importToastMessage([report()]));
+	});
+});
+
+describe("buildImportReport - client certificates left unticked (#2363)", () => {
+	const candidates = [
+		{ host: "a.example.com", certPath: "/c/a.pem" },
+		{ host: "b.example.com", certPath: "/c/b.pem" },
+	];
+	const withCandidates = () =>
+		result({ collections: [collection()], clientCertificates: candidates });
+
+	it("keeps the tally of the candidates the apply did not register", () => {
+		const kept = buildImportReport(withCandidates(), ["col_1"], [1]);
+		expect(kept.notices).toEqual([
+			{ tier: "action", text: "1 client certificate not imported - add it in Settings" },
+		]);
+	});
+
+	it("keeps no line when every candidate was ticked", () => {
+		expect(buildImportReport(withCandidates(), ["col_1"], [0, 1]).notices).toEqual([]);
 	});
 });

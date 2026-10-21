@@ -21,6 +21,12 @@
  *    ancestor walk cannot see them (nothing is stored yet), and a cycle is what
  *    made cascade delete loop forever under the global mutex (issue #79).
  *
+ *  - **Only the `clientCertificates` the payload carries are registered**
+ *    (#2363). The app sends the candidates the user ticked, so an empty array
+ *    registers nothing even for a document whose preview produced one, and a
+ *    carried candidate registers exactly one row and logs it without the
+ *    passphrase.
+ *
  *  - **Per-item POST still creates.** The bulk endpoint replaces the app's usage,
  *    not the public create API (that removal is #97), so a plain
  *    `create_collection_response` is exercised alongside.
@@ -32,15 +38,21 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/logger.hpp"
 
 using nlohmann::json;
 
@@ -534,6 +546,131 @@ TEST_F (ImportApplyRouteTest, PerItemCreateStillWorksForThirdPartyClients) {
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["id"].get<std::string> ().rfind ("col_", 0), 0u);
     EXPECT_TRUE (db_->get_collection (body["id"]).has_value ());
+}
+
+/// A file on disk for a client certificate candidate to name. The bytes are not
+/// a certificate: registration checks that the path is readable, and the TLS
+/// backend judges the certificate at handshake time.
+class ScratchFile {
+    public:
+    explicit ScratchFile (std::string name) : path_ (std::move (name)) {
+        std::ofstream out (path_, std::ios::binary | std::ios::trunc);
+        out << "not-a-real-certificate\n";
+    }
+    ~ScratchFile () {
+        std::error_code ignored;
+        std::filesystem::remove (path_, ignored);
+    }
+    ScratchFile (const ScratchFile&)            = delete;
+    ScratchFile& operator= (const ScratchFile&) = delete;
+    ScratchFile (ScratchFile&&)                 = delete;
+    ScratchFile& operator= (ScratchFile&&)      = delete;
+
+    const std::string& path () const {
+        return path_;
+    }
+
+    private:
+    std::string path_;
+};
+
+/// The one-file log directory the file sink writes into, removed on exit.
+class ScratchLogDir {
+    public:
+    ScratchLogDir ()
+    : path_ (std::filesystem::temp_directory_path () /
+      ("vayu-import-apply-log-" +
+      std::string (::testing::UnitTest::GetInstance ()->current_test_info ()->name ()))) {
+        std::filesystem::create_directories (path_);
+    }
+    ~ScratchLogDir () {
+        std::error_code ignored;
+        std::filesystem::remove_all (path_, ignored);
+    }
+    ScratchLogDir (const ScratchLogDir&)            = delete;
+    ScratchLogDir& operator= (const ScratchLogDir&) = delete;
+    ScratchLogDir (ScratchLogDir&&)                 = delete;
+    ScratchLogDir& operator= (ScratchLogDir&&)      = delete;
+
+    const std::filesystem::path& path () const {
+        return path_;
+    }
+
+    /// Everything the sink has written so far, across rotations.
+    std::string contents () const {
+        vayu::utils::Logger::instance ().flush ();
+        std::stringstream all;
+        for (const auto& entry : std::filesystem::directory_iterator (path_)) {
+            std::ifstream in (entry.path ());
+            all << in.rdbuf ();
+        }
+        return all.str ();
+    }
+
+    private:
+    std::filesystem::path path_;
+};
+
+constexpr const char* POSTMAN_SCHEMA =
+"https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
+constexpr const char* PASSPHRASE = "hunter2-passphrase";
+
+/// What `POST /import/parse` previews for a Postman request naming a PEM pair
+/// and a passphrase: one `clientCertificates` candidate, in the shape the app
+/// sends back to apply.
+json previewed_candidates (const ScratchFile& cert, const ScratchFile& key) {
+    const auto parsed = vayu::core::parse_import (
+    std::string (R"({"info":{"schema":")") + POSTMAN_SCHEMA + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://api.example.com:8443/pets",
+            "certificate":{"cert":{"src":")" +
+    cert.path () + R"("},"key":{"src":")" + key.path () +
+    R"("},"passphrase":")" + PASSPHRASE + R"("}}}]})",
+    {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return json::parse (parsed.result.at ("clientCertificates").dump ());
+}
+
+TEST_F (ImportApplyRouteTest,
+AnEmptyClientCertificatesSectionRegistersNothingEvenWhenThePreviewHadOne) {
+    const ScratchFile cert ("import_apply_cert_empty.pem");
+    const ScratchFile key ("import_apply_key_empty.pem");
+    ASSERT_EQ (previewed_candidates (cert, key).size (), 1u);
+
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+    { "clientCertificates", json::array () } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_TRUE (db_->get_client_certificates ().empty ());
+}
+
+TEST_F (ImportApplyRouteTest, ACarriedClientCertificateCandidateRegistersExactlyOneRow) {
+    const ScratchFile cert ("import_apply_cert_carried.pem");
+    const ScratchFile key ("import_apply_key_carried.pem");
+    const ScratchLogDir logs;
+    vayu::utils::Logger::instance ().init (logs.path ().string ());
+    vayu::utils::Logger::instance ().set_file_level (vayu::utils::Logger::Level::INFO);
+
+    auto [status, response] = import_apply_response (
+    *db_, json{ { "clientCertificates", previewed_candidates (cert, key) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const auto stored = db_->get_client_certificates ();
+    ASSERT_EQ (stored.size (), 1u);
+    EXPECT_EQ (stored[0].host, "api.example.com");
+    EXPECT_EQ (stored[0].port.value_or (-1), 8443);
+    EXPECT_EQ (stored[0].cert_path, cert.path ());
+    EXPECT_EQ (stored[0].passphrase, PASSPHRASE);
+
+    // The registration is on record, and the record never carries the secret
+    // or the key's location.
+    const std::string logged = logs.contents ();
+    EXPECT_NE (logged.find ("registered an imported client certificate"), std::string::npos)
+    << logged;
+    EXPECT_NE (logged.find ("api.example.com"), std::string::npos) << logged;
+    EXPECT_NE (logged.find (cert.path ()), std::string::npos) << logged;
+    EXPECT_EQ (logged.find (PASSPHRASE), std::string::npos) << logged;
+    EXPECT_EQ (logged.find (key.path ()), std::string::npos) << logged;
 }
 
 } // namespace

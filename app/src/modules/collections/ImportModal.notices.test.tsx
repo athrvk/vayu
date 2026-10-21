@@ -388,3 +388,40 @@ describe("the import preview's file folders", () => {
 		expect(screen.queryByRole("button", { name: /Allow folder/ })).toBeNull();
 	});
 });
+
+/**
+ * A Postman request's own certificate the engine resolved is offered, not
+ * registered (#2363). The ones the user leaves unticked are told in the same
+ * line the engine's unresolvable ones are, summed.
+ */
+describe("the import preview's unticked client certificates", () => {
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+		useImportModalStore.setState({ isOpen: true });
+	});
+
+	const offered = () =>
+		result({
+			collections: [collection({ name: "API", requests: [request({ name: "Get user" })] })],
+			clientCertificates: [
+				{ host: "a.example.com", certPath: "/c/a.pem" },
+				{ host: "b.example.com", certPath: "/c/b.pem" },
+			],
+			meta: { skipped: [{ kind: "certificate", count: 1 }] },
+		});
+
+	it("counts the unticked candidates with the engine's, and drops one as it is ticked", async () => {
+		stubParse(offered);
+		preview();
+
+		await screen.findByText("3 client certificates not imported - add them in Settings");
+		expect(severityOf(/3 client certificates not imported/)).toContain("text-warning-text");
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /a\.example\.com/ }));
+		await screen.findByText("2 client certificates not imported - add them in Settings");
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /b\.example\.com/ }));
+		await screen.findByText("1 client certificate not imported - add it in Settings");
+	});
+});

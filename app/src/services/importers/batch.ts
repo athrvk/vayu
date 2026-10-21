@@ -120,6 +120,13 @@ export interface BatchEntry {
 	bundledInto: string | null;
 	/** Included in the apply. Errors and bundled siblings start out excluded. */
 	included: boolean;
+	/**
+	 * Indexes into `result.clientCertificates` the user ticked (issue #2363);
+	 * absent means none. Per entry, because a batch applies one file at a time and
+	 * one file's ticks must never register another's certificates. Cleared when
+	 * the file is re-parsed: the candidates it indexes may no longer be the same.
+	 */
+	selectedCertificates?: number[];
 	/** What the apply did with it. Absent until Import has run. */
 	outcome?: { ok: boolean; message: string };
 }
@@ -467,8 +474,14 @@ export async function reparseBatch(
 			});
 			report("parsing", ++done, reparses);
 			// A file the user had unchecked stays unchecked; a toggle changes what is
-			// in each file, not which files the user asked for.
-			return { ...entry, ...parsed, included: parsed.result !== null && entry.included };
+			// in each file, not which files the user asked for. A ticked certificate
+			// is not carried over: it indexes the parse that was replaced.
+			return {
+				...entry,
+				...parsed,
+				included: parsed.result !== null && entry.included,
+				selectedCertificates: [],
+			};
 		})
 	);
 }
