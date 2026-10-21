@@ -28,7 +28,8 @@ cat <<NOTE
 
 Cloud session environment (from .claude/hooks/session-start.sh):
 - Already done by 'build.py --setup': system packages, vcpkg dependencies, app
-  node_modules, git pre-commit hook. Do not re-run --setup or reinstall them.
+  node_modules, the git pre-commit and pre-push hooks. Do not re-run --setup
+  or reinstall them. Pushing a C++ change runs clang-tidy on it (minutes).
 - The engine is ${engine_state}.
   When you need it: 'ninja -C engine/build vayu-engine' once configured, else
   'python build.py -e' (add -t for tests). Skip building for docs-only or

@@ -87,7 +87,7 @@ jobs:
     # Windows leg is why this workflow exists (#1023), but the coverage hole a
     # whole-tree scan fills is not Windows-specific: the gate lints translation
     # units, never a header (#940), so a **header-only pull request is linted
-    # by no CI job at all** - it relies on the contributor's pre-commit hook.
+    # by no CI job at all** - it relies on the contributor's pre-push hook.
     # A header that introduces findings across the sources including it can
     # therefore reach master unlinted on either platform, and only a whole-tree
     # run finds it afterwards. Linux drifts too, more slowly: it pins

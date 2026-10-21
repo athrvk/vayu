@@ -99,9 +99,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # macOS went with it - nothing here looks for a program any more, and the hook
 # does its own PATH prepend.
 #
-# The two layers that do bind are the `scripts/pre-commit` hook, which lints
-# staged files and refuses the commit on a finding, and the `Lint changed engine
-# sources` step in .github/workflows/pr-tests.yml, which lints the sources a pull
+# The two layers that do bind are the `scripts/pre-push` hook, which lints the
+# files a push changes and refuses the push on a finding, and the `Lint changed
+# engine sources` step in .github/workflows/pr-tests.yml, which lints the sources a pull
 # request changes before it can merge. `CMAKE_EXPORT_COMPILE_COMMANDS` above is
 # what both of them read the compile flags from. See docs/engine/building.md.
 

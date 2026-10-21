@@ -81,7 +81,7 @@ vayu/
 │   ├── src/         # Renderer (React)
 |   ├── installer/   # Installer files
 │   └── package.json # Dependencies
-├── scripts/         # pre-commit, floor checks, test fixtures, perf harness
+├── scripts/         # git hooks, floor checks, test fixtures, perf harness
 │   ├── test/        # Test scripts and fixtures
 │   └── perf/        # Weekly measurement harness
 └── docs/            # Documentation
@@ -124,7 +124,7 @@ vayu/
   `git blame` keeps attributing lines to whoever wrote them.
 - **Linting:** clang-tidy, **19 or newer**. `engine/.clang-tidy` uses
   `ExcludeHeaderFilterRegex`, which landed in LLVM 19; an older binary rejects
-  the config file outright and lints nothing. The `scripts/pre-commit` hook
+  the config file outright and lints nothing. The `scripts/pre-push` hook
   probes the version and says so rather than passing silently - if you see that
   warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default;
   `apt install clang-tidy-19` is what CI uses) or lean on CI, which lints the
@@ -136,7 +136,12 @@ vayu/
   installer use it (#918). Both tools share one lookup, so the two cannot drift
   apart again.
 
-  A finding fails in both places - the hook refuses the commit, CI fails the
+  The hook runs at `git push`, not at commit: whole-file clang-tidy costs
+  20-90s a file, so it lints once per push, over every C++ file (headers
+  included) in the commits no remote branch has yet. A C++ push takes minutes;
+  a commit takes under a second.
+
+  A finding fails in both places - the hook refuses the push, CI fails the
   engine job - and the hook and both of CI's linting legs gate the **whole of
   every file** you touch (#946 promoted Linux, #1023 Windows; the tree is
   measured clean on both toolchains, so every finding in a file you edit is
@@ -272,11 +277,11 @@ change here is derived from that same list by
 
 ### Shell and Python (tooling)
 
-The installer, the git hook, the test harnesses and `build.py` are the
+The installer, the git hooks, the test harnesses and `build.py` are the
 repository's third language pair, and CI lints both on its `Script lint` job:
 
 ```bash
-shellcheck $(git ls-files '*.sh' 'scripts/pre-commit' | grep -v '^engine/vendor/')
+shellcheck $(git ls-files '*.sh' 'scripts/pre-commit' 'scripts/pre-push' | grep -v '^engine/vendor/')
 ruff check $(git ls-files '*.py')
 ```
 
