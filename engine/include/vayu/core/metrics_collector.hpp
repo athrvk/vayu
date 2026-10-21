@@ -1085,7 +1085,8 @@ class MetricsCollector {
 
     /**
      * @brief Batch write all results to database
-     * Call after test completion. Uses a single transaction for efficiency.
+     * Call after test completion. Written in chunks, one transaction each
+     * (Database::add_results_batch), so a throw can follow a partial write.
      * @return Number of results written
      */
     size_t flush_to_database (db::Database& db);

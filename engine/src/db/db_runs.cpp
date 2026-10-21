@@ -20,9 +20,11 @@
 #include <chrono>
 #include <expected>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -556,62 +558,130 @@ void Database::add_result (const Result& result) {
     impl_->storage.insert (result);
 }
 
-// Batch insert with transaction for better performance
-// Includes retry logic to handle database lock contention
+namespace {
+
+using BlobIds = std::map<std::string, int>;
+
+/// How long add_results_batch stays off the DB mutex between chunks. The mutex
+/// is not fair: a writer that re-locks at once, or after `yield ()`, takes it
+/// back before the reader it woke is scheduled: with `yield ()` a reader
+/// waited out a whole 10,000-row flush (520 ms in a Debug build). Sleeping lets
+/// the woken reader in, and it then waited at most one chunk. 1 ms rather than
+/// less leaves room for a busy machine; it adds 4 ms per 1,000 rows to the
+/// ~27 ms writing them takes in a Release build.
+constexpr auto CHUNK_HANDOFF_PAUSE = std::chrono::milliseconds (1);
+
+/// `bodies` grouped by the chunk their result is written in. An index with no
+/// result is dropped: there is nothing to attach it to.
+std::vector<std::vector<const PendingResultBody*>> group_bodies_by_chunk (
+const std::vector<PendingResultBody>& bodies,
+size_t result_count,
+size_t chunk_rows) {
+    std::vector<std::vector<const PendingResultBody*>> groups (
+    (result_count + chunk_rows - 1) / chunk_rows);
+    for (const auto& pending : bodies) {
+        if (pending.result_index < result_count) {
+            groups.at (pending.result_index / chunk_rows).push_back (&pending);
+        }
+    }
+    return groups;
+}
+
+/// The blob row holding `pending`'s body: one an earlier chunk committed, one
+/// this attempt already wrote, or a new one recorded in `fresh`.
+int blob_id_for (Storage& storage,
+const PendingResultBody& pending,
+const std::string& run_id,
+const BlobIds& committed,
+BlobIds& fresh) {
+    if (const auto it = committed.find (pending.body_hash); it != committed.end ()) {
+        return it->second;
+    }
+    if (const auto it = fresh.find (pending.body_hash); it != fresh.end ()) {
+        return it->second;
+    }
+    BodyBlob blob;
+    blob.run_id  = run_id;
+    blob.hash    = pending.body_hash;
+    blob.content = pending.body;
+    const int id = storage.insert (blob);
+    fresh.emplace (pending.body_hash, id);
+    return id;
+}
+
+/// Inserts `results[begin, end)` and the bodies attached to them, inside the
+/// caller's transaction.
+void insert_results_chunk (Storage& storage,
+const std::vector<Result>& results,
+size_t begin,
+size_t end,
+const std::vector<const PendingResultBody*>& bodies,
+const BlobIds& committed_blob_ids,
+BlobIds& fresh_blob_ids) {
+    // Row ids only exist after the insert, so keep them alongside the batch
+    // positions the pending bodies refer to.
+    std::vector<int> result_ids;
+    result_ids.reserve (end - begin);
+    for (size_t i = begin; i < end; ++i) {
+        result_ids.push_back (storage.insert (results.at (i)));
+    }
+
+    for (const PendingResultBody* pending : bodies) {
+        const Result& result = results.at (pending->result_index);
+        ResultBody row;
+        row.result_id     = result_ids.at (pending->result_index - begin);
+        row.run_id        = result.run_id;
+        row.headers       = pending->headers;
+        row.blob_id       = pending->body_hash.empty () ?
+              0 :
+              blob_id_for (storage, *pending, result.run_id, committed_blob_ids, fresh_blob_ids);
+        row.body_bytes    = pending->body_bytes;
+        row.truncated     = pending->truncated;
+        row.is_binary     = pending->binary;
+        row.content_type  = pending->content_type;
+        row.stream_events = pending->stream_events;
+        storage.replace (row);
+    }
+}
+
+} // namespace
+
+// One transaction and one mutex acquisition per RESULTS_WRITE_CHUNK_ROWS rows
+// (#2548): a whole flush in one held the mutex for 240-400 ms, and every other
+// DB caller, the live report poll included, waited behind it.
 void Database::add_results_batch (const std::vector<Result>& results,
 const std::vector<PendingResultBody>& bodies) {
-    if (results.empty ())
+    if (results.empty ()) {
         return;
+    }
 
-    retry_on_busy ("flush results batch", 5, std::chrono::milliseconds (100), [&] {
-        impl_->storage.transaction ([&] {
-            // Row ids only exist after the insert, so keep them alongside the
-            // batch positions the pending bodies refer to.
-            std::vector<int> result_ids;
-            result_ids.reserve (results.size ());
-            for (const auto& result : results) {
-                result_ids.push_back (impl_->storage.insert (result));
-            }
+    constexpr size_t chunk_rows = vayu::core::constants::database::RESULTS_WRITE_CHUNK_ROWS;
+    const auto chunk_bodies = group_bodies_by_chunk (bodies, results.size (), chunk_rows);
 
-            // Dedup within the run: identical bodies (the norm for a load test)
-            // share one blob row. The map is rebuilt per attempt on purpose -
-            // a retried transaction re-inserts the blobs it rolled back.
-            std::map<std::string, int> blob_ids;
-            for (const auto& pending : bodies) {
-                if (pending.result_index >= result_ids.size ()) {
-                    continue; // Defensive: an index with no result cannot be attached.
-                }
+    // Dedup spans the whole call, so identical bodies (the norm for a load
+    // test) share one blob row across chunks. A chunk's new blobs join it only
+    // once that chunk commits.
+    BlobIds committed_blob_ids;
+    for (size_t chunk = 0; chunk < chunk_bodies.size (); ++chunk) {
+        if (chunk > 0) {
+            std::this_thread::sleep_for (CHUNK_HANDOFF_PAUSE);
+        }
+        const size_t begin = chunk * chunk_rows;
+        const size_t end   = std::min (begin + chunk_rows, results.size ());
 
-                int blob_id = 0;
-                if (!pending.body_hash.empty ()) {
-                    auto it = blob_ids.find (pending.body_hash);
-                    if (it != blob_ids.end ()) {
-                        blob_id = it->second;
-                    } else {
-                        BodyBlob blob;
-                        blob.run_id  = results[pending.result_index].run_id;
-                        blob.hash    = pending.body_hash;
-                        blob.content = pending.body;
-                        blob_id      = impl_->storage.insert (blob);
-                        blob_ids.emplace (pending.body_hash, blob_id);
-                    }
-                }
-
-                ResultBody row;
-                row.result_id     = result_ids[pending.result_index];
-                row.run_id        = results[pending.result_index].run_id;
-                row.headers       = pending.headers;
-                row.blob_id       = blob_id;
-                row.body_bytes    = pending.body_bytes;
-                row.truncated     = pending.truncated;
-                row.is_binary     = pending.binary;
-                row.content_type  = pending.content_type;
-                row.stream_events = pending.stream_events;
-                impl_->storage.replace (row);
-            }
-            return true; // Commit
+        BlobIds fresh_blob_ids;
+        retry_on_busy ("flush results batch", 5, std::chrono::milliseconds (100), [&] {
+            // Per attempt on purpose: a retried transaction re-inserts the
+            // blobs it rolled back.
+            fresh_blob_ids.clear ();
+            impl_->storage.transaction ([&] {
+                insert_results_chunk (impl_->storage, results, begin, end,
+                chunk_bodies[chunk], committed_blob_ids, fresh_blob_ids);
+                return true; // Commit
+            });
         });
-    });
+        committed_blob_ids.merge (fresh_blob_ids);
+    }
 }
 
 std::vector<Result> Database::get_results (const std::string& run_id) {

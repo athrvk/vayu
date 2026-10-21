@@ -9900,8 +9900,10 @@ flight, and `thresholdValidation` is absent even when the run declared budgets, 
 verdict is computed from the summary written at the end. Read `metadata.status` before treating a
 report as final.
 
-A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A
-partial report of a **load** run also never reads the rows' stored traces (issue #2548), because
+A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A load
+run writes them in chunks of 250, so a poll that lands during that write waits for one chunk
+rather than the whole flush and may count part of the rows (see [`results`](db-schema.md#results)).
+A partial report of a **load** run also never reads the rows' stored traces (issue #2548), because
 it is the one a client re-reads on a timer (a design or scenario run stores its rows just before
 the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
 traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and

@@ -429,12 +429,18 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   peak in-flight, and a full per-status-code distribution
 - **Batch DB writes**: Per-request results written after test completion; the metrics thread
   persists one wide `metric_ticks` row per second during the run (the complete tick object,
-  built once at write time), and the whole-run `runs.summary` is written once at completion
+  built once at write time), and the whole-run `runs.summary` is written once at completion.
+  The results go in chunks of `RESULTS_WRITE_CHUNK_ROWS` (250), one transaction and one DB mutex
+  acquisition each, with a 1 ms pause off the mutex between chunks (#2548): the run is still
+  `running` while it flushes, and a 10,000-row flush written whole held the mutex for 240-400 ms,
+  so a live report poll waited out all of it. A result and its captured body share a chunk; a
+  failure part-way keeps the chunks before it
+  ([`results`](db-schema.md#results))
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
   the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
   completion rate, each carrying a message and a trace blob, so an unlimited store grows for the
-  whole run and then flushes as one enormous transaction. Success results are sampled.
+  whole run and then flushes as an enormous write. Success results are sampled.
   Because the final report's per-type error breakdown is built by walking those stored
   records, a run with more errors than the cap gets a breakdown that does not sum to its
   (exact) total - raise `maxStoredErrors` to keep it complete, or set `0` for unlimited.

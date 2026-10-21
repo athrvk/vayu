@@ -834,17 +834,23 @@ class Database {
     // Results
     void add_result (const Result& result);
     /**
-     * @brief Transactional batch insert of a run's sampled results, optionally
-     *        with the response bodies captured alongside them.
+     * @brief Batch insert of a run's sampled results, optionally with the
+     *        response bodies captured alongside them.
      *
      * `bodies` refer to results by index (`PendingResultBody::result_index`),
-     * because the row ids only exist once the insert has run. Results, the
-     * deduplicated blobs and the per-result body rows all land in one
-     * transaction, so a crash mid-flush cannot leave a body row pointing at a
-     * result that was rolled back.
+     * because the row ids only exist once the insert has run.
      *
-     * Bodies are deduplicated by `body_hash` within this call: identical
-     * responses - the norm for a load test - share one `body_blobs` row.
+     * Written in chunks of `RESULTS_WRITE_CHUNK_ROWS` results, one transaction
+     * and one DB mutex acquisition each, with a pause off the mutex between
+     * them, so another caller waits on one chunk rather than the whole flush
+     * (#2548). A chunk's results, their body rows and the blobs they introduce
+     * commit together, so a crash cannot leave a body row pointing at a result
+     * that was rolled back. The call as a whole is not atomic: a failure
+     * part-way keeps the chunks already committed.
+     *
+     * Bodies are deduplicated by `body_hash` within this call, across chunks:
+     * identical responses - the norm for a load test - share one `body_blobs`
+     * row.
      */
     void add_results_batch (const std::vector<Result>& results,
     const std::vector<PendingResultBody>& bodies = {});

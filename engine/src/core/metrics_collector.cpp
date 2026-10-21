@@ -754,7 +754,7 @@ std::optional<AttemptDuration> attempt) {
     // is dropped but counted - total_errors_ and the status-code distribution
     // above stay exact, so only the per-error detail is lost. Without the cap a
     // fully-failing target grows this vector for the life of the run and then
-    // flushes it as one enormous transaction.
+    // flushes it as an enormous write.
     // Copy the exchange before taking the store's mutex, so a body-sized copy
     // never lengthens a critical section every failing completion queues on.
     // `error_index` is this call's position in the error sequence, and the
@@ -1204,10 +1204,16 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
         }
     }
 
-    // Batch insert with transaction (prevents WAL growth and OOM). Results and
-    // their captured bodies land together, so a failure leaves neither.
+    // Written in chunks, each result with its captured body in one
+    // transaction; a failure part-way keeps the chunks before it.
     if (!batch.empty ()) {
+        const auto write_started = std::chrono::steady_clock::now ();
         db.add_results_batch (batch, bodies);
+        vayu::utils::log_debug ("run", "Wrote results batch",
+        { { "rows", batch.size () },
+        { "ms",
+        std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now () - write_started)
+        .count () } });
     }
     response_bodies_captured_.store (bodies.size (), std::memory_order_relaxed);
 
