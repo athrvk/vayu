@@ -87,16 +87,20 @@ describe("createFileRoots", () => {
 		});
 		const listFileRoots = vi
 			.fn<() => Promise<EngineWrite<FileTrustRow[]>>>()
+			.mockResolvedValueOnce(done("/old"))
 			.mockReturnValueOnce(held)
 			.mockResolvedValue(done("/a", "/new"));
 		const roots = createFileRoots({ listFileRoots });
+		await expect(roots.list()).resolves.toEqual(["/old"]);
 
+		roots.invalidate();
 		const early = roots.list();
 		roots.invalidate();
 		release(done("/a"));
-		await early;
+		// Neither the half-read list nor the copy from before the change.
+		await expect(early).resolves.toEqual([]);
 
 		await expect(roots.list()).resolves.toEqual(["/a", "/new"]);
-		expect(listFileRoots).toHaveBeenCalledTimes(2);
+		expect(listFileRoots).toHaveBeenCalledTimes(3);
 	});
 });

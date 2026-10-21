@@ -61,7 +61,9 @@ export function createFileRoots(client: Pick<FileTrustClient, "listFileRoots">):
 	return {
 		async list() {
 			if (stale) await join();
-			return roots;
+			// Still stale: an invalidate() landed during the read, so what it
+			// listed is not trusted.
+			return stale ? [] : roots;
 		},
 
 		invalidate() {

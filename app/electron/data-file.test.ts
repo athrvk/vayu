@@ -50,8 +50,9 @@ const system = (overrides: Partial<DataFileSystem> = {}): DataFileSystem => ({
  * however well it passes the other gates.
  *
  * Mutation check: drop `assertGranted` from `statOpenableDataFile` (or make the
- * injected `isGranted` answer true) and every "never granted" case fails; run
- * the grant before the stat and the "moved" cases fail.
+ * injected `isGranted` answer true) and every "never granted" case fails; move
+ * the grant after the stat and the "same answer whether or not it exists" case
+ * fails.
  */
 describe("the grant on the path (#2357)", () => {
 	const ungranted = () => system({ isGranted: vi.fn(async () => false) });
@@ -100,7 +101,23 @@ describe("the grant on the path (#2357)", () => {
 		});
 	});
 
-	it("reports a granted file that has moved as moved, not as ungranted", async () => {
+	it("answers an ungranted path the same whether or not a file is there", async () => {
+		const missing = system({
+			isGranted: vi.fn(async () => false),
+			stat: vi.fn(async () => {
+				throw new Error("ENOENT");
+			}),
+		});
+		await expect(readDataFile("/home/u/rows.csv", missing)).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+		expect(missing.stat).not.toHaveBeenCalled();
+		await expect(readDataFile("/home/u/rows.csv", ungranted())).rejects.toBeInstanceOf(
+			FileNotGrantedError
+		);
+	});
+
+	it("reports a granted path with no file as moved", async () => {
 		const io = system({
 			stat: vi.fn(async () => {
 				throw new Error("ENOENT");
@@ -112,7 +129,6 @@ describe("the grant on the path (#2357)", () => {
 		await expect(hashDataFile("/home/u/rows.csv", io)).rejects.toBeInstanceOf(
 			DataFileMissingError
 		);
-		expect(io.isGranted).not.toHaveBeenCalled();
 	});
 
 	it("does not consult the registry for a refused extension or an empty path", async () => {

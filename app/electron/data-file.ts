@@ -26,8 +26,10 @@
  *     preload from a real `File` and never from a string the renderer
  *     supplies. The registry is persisted by the engine's `file_grants` table,
  *     so it survives a restart; a data file declared before grants existed
- *     must be picked once more. It is checked *after* the stat, so a granted
- *     file that has moved still says it has moved.
+ *     must be picked once more. It is checked *before* the stat, so a path
+ *     that holds no grant answers the same whether or not a file is there; the
+ *     registry cannot resolve a file that has moved, so that file also reads as
+ *     not picked, and the cure is the same.
  *  3. **The engine's `maxScenarioDataBytes`, fetched** - never a second copy of
  *     the rule. A user who raises the setting can pre-fill the bigger file the
  *     same session; a user who lowers it is refused here rather than at
@@ -240,8 +242,8 @@ export async function hashDataFileReply(
 
 /**
  * The gates both channels pass before a byte is touched; answers the file's
- * size. The grant comes last so a granted file that has moved is reported as
- * moved.
+ * size. The grant comes before the stat, so a path the user never picked
+ * answers the same whether or not a file is there.
  */
 async function statOpenableDataFile(filePath: string, system: DataFileSystem): Promise<number> {
 	if (typeof filePath !== "string" || filePath.trim() === "") {
@@ -255,15 +257,13 @@ async function statOpenableDataFile(filePath: string, system: DataFileSystem): P
 		);
 	}
 
-	let size: number;
+	await assertGranted(system.isGranted, filePath);
+
 	try {
 		const stats = await system.stat(filePath);
 		if (!stats.isFile()) throw new Error("not a file");
-		size = stats.size;
+		return stats.size;
 	} catch {
 		throw new DataFileMissingError(filePath);
 	}
-
-	await assertGranted(system.isGranted, filePath);
-	return size;
 }
