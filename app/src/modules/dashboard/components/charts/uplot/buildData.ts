@@ -14,7 +14,11 @@
 
 import type { LoadTestMetrics } from "@/types";
 import { DEFAULT_CHART_BUCKET_SECONDS } from "@/constants/client-settings";
-import { hasSecondPercentiles, secondPercentiles } from "../../../utils/tickPercentiles";
+import {
+	hasSecondPercentiles,
+	secondPercentiles,
+	worstReading,
+} from "../../../utils/tickPercentiles";
 
 /**
  * A column value: a number, or `null` for a tick that holds no reading (a gap,
@@ -47,13 +51,6 @@ export function bucketColumns<T extends Sample = number>(
 	return { times, cols };
 }
 
-/** The larger of two samples; a gap yields to a reading, since `Math.max (null, 5)` would count it as 0. */
-function largerSample(a: Sample, b: Sample): Sample {
-	if (a === null) return b;
-	if (b === null) return a;
-	return Math.max(a, b);
-}
-
 /** Which sample a bucket keeps when several ticks land in it. */
 export type BucketMerge = "last" | "max";
 
@@ -66,7 +63,9 @@ export type BucketMerge = "last" | "max";
  * {@link bucketColumns}, or the largest per column. A percentile series takes
  * `"max"`: a 5 s bucket holding five per-second p99s shows the worst second,
  * where "last" would hide a stall in the first four and an average of
- * percentiles is not a percentile of anything.
+ * percentiles is not a percentile of anything. A `null` is no reading
+ * ({@link worstReading}): it loses to any number and survives only a bucket
+ * that held nothing else, so an empty second stays a gap (issue #2386).
  */
 export function rebucket<T extends Sample = number>(
 	times: number[],
@@ -83,7 +82,7 @@ export function rebucket<T extends Sample = number>(
 		const prev = map.get(t);
 		map.set(
 			t,
-			merge === "max" && prev ? row.map((v, k) => largerSample(prev[k], v) as T) : row
+			merge === "max" && prev ? row.map((v, k) => worstReading(prev[k], v) as T) : row
 		);
 	}
 	const outTimes = Array.from(map.keys()).sort((a, b) => a - b);

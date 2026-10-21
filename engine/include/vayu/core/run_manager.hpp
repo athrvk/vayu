@@ -1100,10 +1100,12 @@ struct MetricTickSample {
     std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
     // The second since the previous row, every 100 ms window merged
     // (MetricsCollector::take_second_percentiles, #2385); neither the last
-    // window alone nor the run so far.
-    double latency_p50_ms = 0.0;
-    double latency_p95_ms = 0.0;
-    double latency_p99_ms = 0.0;
+    // window alone nor the run so far. Zero samples leaves the three keys out
+    // of the row (#2386): a second with no completion has no latency.
+    size_t latency_samples = 0;
+    double latency_p50_ms  = 0.0;
+    double latency_p95_ms  = 0.0;
+    double latency_p99_ms  = 0.0;
     // This run's `metric.record` / `pm.metrics` values so far (issue #1500),
     // snapshotted at the same 1 Hz gate as the rest of this tick. Absent
     // when the run has recorded none, which is what keeps the stored row's

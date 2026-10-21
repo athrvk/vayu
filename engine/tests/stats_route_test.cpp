@@ -105,6 +105,7 @@ class StatsRouteTest : public ::testing::Test {
         sample.bytes_sent               = 512;
         sample.bytes_received           = 4096;
         sample.status_codes             = { { 200, 10 } };
+        sample.latency_samples          = 10;
         sample.latency_p50_ms           = 5.0;
         sample.latency_p95_ms           = 8.0;
         sample.latency_p99_ms           = 12.0;
@@ -212,6 +213,29 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
     EXPECT_DOUBLE_EQ (entry["window_avg_queue_wait_ms"].get<double> (), 0.25);
     EXPECT_DOUBLE_EQ (entry["latency_p50_ms"].get<double> (), 5.0);
     EXPECT_EQ (entry["status_codes"]["200"].get<size_t> (), 10u);
+}
+
+// #2386: a second with no completion has no latency, so its row carries no
+// percentile key at all (the export schema types them as numbers, so not
+// null) and every other key as the pin above has it. Mutation check: write
+// the three keys unconditionally in build_metric_tick_payload and this fails.
+TEST_F (StatsRouteTest, StoredTickOfAnEmptySecondHasNoPercentileKeys) {
+    const std::string id   = seed_run ();
+    auto sample            = sample_at (1000, 0.0);
+    sample.latency_samples = 0;
+    add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    const auto& entry = body["data"][0];
+    for (const auto* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
+        EXPECT_FALSE (entry.contains (key)) << key << ": " << entry.dump ();
+    }
+    EXPECT_EQ (entry.size (), 20u)
+    << "only the three percentiles leave: " << entry.dump ();
+    EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
 }
 
 // #2393: a window that completed nothing has no mean. The keys stay, as null,
@@ -357,6 +381,7 @@ nlohmann::json cumulative_tick (int i) {
     sample.backpressure        = 2;
     sample.bytes_received      = completed * 100;
     sample.status_codes        = { { 200, completed } };
+    sample.latency_samples     = 10;
     sample.latency_p50_ms      = 5.0;
     sample.latency_p95_ms      = 8.0;
     sample.latency_p99_ms      = 12.0;

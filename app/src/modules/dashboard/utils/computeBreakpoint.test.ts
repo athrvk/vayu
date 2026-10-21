@@ -45,6 +45,23 @@ describe("computeBreakpoint", () => {
 		expect(bp.sloMs).toBe(200);
 	});
 
+	it("passes over a stored second with no completion (#2386)", () => {
+		// The engine writes no percentile keys for it: nothing to latch on.
+		const stall = tick({ elapsed_seconds: 2, current_concurrency: 20 });
+		delete stall.latency_p50_ms;
+		delete stall.latency_p95_ms;
+		delete stall.latency_p99_ms;
+		const bp = computeBreakpoint(
+			[
+				tick({ elapsed_seconds: 1, current_concurrency: 10, latency_p99_ms: 50 }),
+				stall,
+				tick({ elapsed_seconds: 3, current_concurrency: 30, latency_p99_ms: 260 }),
+			],
+			200
+		);
+		expect(bp).toMatchObject({ crossed: true, timeSeconds: 3, concurrency: 30, p99Ms: 260 });
+	});
+
 	it("reports not-crossed when p99 stays under threshold throughout", () => {
 		const bp = computeBreakpoint(
 			[

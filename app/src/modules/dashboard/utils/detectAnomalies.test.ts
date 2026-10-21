@@ -78,7 +78,7 @@ describe("detectAnomalies - a clean run", () => {
 		 * factor is loosened to 1. A flat series would pass either way and so
 		 * could not tell a working threshold from a broken one.
 		 */
-		const p99 = healthyRun(60).map((m) => m.latency_p99_ms);
+		const p99 = healthyRun(60).map((m) => m.latency_p99_ms ?? 0);
 		const trailingMedian = (i: number) =>
 			[...p99.slice(i - BASELINE_TICKS, i)].sort((a, b) => a - b)[BASELINE_TICKS >> 1];
 
@@ -144,6 +144,60 @@ describe("detectAnomalies - latency spikes", () => {
 		expect(found).toHaveLength(1);
 		expect(found[0].startSeconds).toBe(20);
 		expect(found[0].endSeconds).toBe(24);
+	});
+});
+
+/** A stored second in which nothing completed: the engine writes no percentile keys (#2386). */
+function emptySecond(m: LoadTestMetrics): LoadTestMetrics {
+	const out = { ...m, current_rps: 0 };
+	delete out.latency_p50_ms;
+	delete out.latency_p95_ms;
+	delete out.latency_p99_ms;
+	return out;
+}
+
+/** `run` with the seconds `from`..`to` (inclusive) emptied. */
+function stalled(run: LoadTestMetrics[], from: number, to: number): LoadTestMetrics[] {
+	return run.map((m, i) => (i >= from && i <= to ? emptySecond(m) : m));
+}
+
+describe("detectAnomalies - a second with no completion (#2386)", () => {
+	it("leaves the stall out of the baseline of the spike that follows it", () => {
+		// Ticks 10-17 stall, 25-26 run at 4x. The baseline at 25 is the median of
+		// the readings among ticks 10-24 (118…124 → 121). Read as 0 ms, the eight
+		// stalled seconds would be the median, and a 0 baseline judges nothing.
+		const run = stalled(
+			healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 480 } : {})),
+			10,
+			17
+		);
+		expect(run.filter((m) => m.latency_p99_ms === undefined)).toHaveLength(8);
+
+		const found = detectAnomalies(run).filter((a) => a.kind === "latency_spike");
+		expect(found).toHaveLength(1);
+		expect(found[0].startSeconds).toBe(25);
+		expect(found[0].magnitude).toBeCloseTo(480 / 121, 3);
+	});
+
+	it("does not read a stall inside a spike as its recovery", () => {
+		// Ticks 20-21 open the spike, 22-24 complete nothing, 25 is back to normal.
+		const run = stalled(
+			healthyRun(40, (i) => (i === 20 || i === 21 ? { latency_p99_ms: 480 } : {})),
+			22,
+			24
+		);
+
+		const found = detectAnomalies(run).filter((a) => a.kind === "latency_spike");
+		expect(found).toHaveLength(1);
+		expect(found[0].startSeconds).toBe(20);
+		expect(found[0].endSeconds).toBe(24);
+		expect(found[0].magnitude).toBeCloseTo(480 / 112, 3);
+	});
+
+	it("reports a stall as a throughput drop, never as a latency spike", () => {
+		const found = detectAnomalies(stalled(healthyRun(40), 20, 22));
+		expect(found.map((a) => a.kind)).toEqual(["throughput_drop"]);
+		expect(found[0]).toMatchObject({ startSeconds: 20, endSeconds: 22 });
 	});
 });
 
@@ -439,6 +493,23 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 			"latency_spike",
 			"throughput_drop",
 		]);
+	});
+
+	it("agrees over a randomized sequence whose run stalls now and then (#2386)", () => {
+		const rand = mulberry32(2386);
+		const run = noisyRun(900, rand);
+		// Stalls of one to four seconds, so a baseline, a hot run and a recovery
+		// tail each meet a second with no reading.
+		for (let i = BASELINE_TICKS; i < run.length; i++) {
+			if (rand() >= 0.03) continue;
+			const length = 1 + Math.floor(rand() * 4);
+			for (let k = i; k < Math.min(run.length, i + length); k++) run[k] = emptySecond(run[k]);
+		}
+		expect(run.filter((m) => m.latency_p99_ms === undefined).length).toBeGreaterThan(30);
+
+		const { commits, kinds } = replay(run, rand, { windowSeconds: 60, cap: 5000 });
+		expect(commits).toBeGreaterThan(100);
+		expect(kinds.has("latency_spike")).toBe(true);
 	});
 
 	it("falls silent for a window whose lead-in has rolled out, exactly as a rescan does", () => {
@@ -787,9 +858,24 @@ function windowFrame(previous: LoadTestMetrics, next: LoadTestMetrics, k: number
 /**
  * The gate frame for a stored tick: the tick's second in `second_*` and its own
  * `latency_p99_ms` a 30 ms window. Its `current_rps` is the stored tick's, as
- * the engine reads both off one trailing window (#2393).
+ * the engine reads both off one trailing window (#2393). A stored second with
+ * no completion is a gate with `second_samples` 0 and null percentiles, and a
+ * null window (#2386).
  */
 function gateFrame(m: LoadTestMetrics): LoadTestMetrics {
+	if (m.latency_p99_ms === undefined) {
+		return {
+			...m,
+			live: true,
+			latency_p50_ms: null,
+			latency_p95_ms: null,
+			latency_p99_ms: null,
+			second_samples: 0,
+			second_p50_ms: null,
+			second_p95_ms: null,
+			second_p99_ms: null,
+		};
+	}
 	return {
 		...m,
 		live: true,
@@ -874,6 +960,24 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 		const found = detectAnomalies(wholeSecondTicks(liveStream(settled)));
 		expect(found).toHaveLength(1);
 		expect(found[0]).toMatchObject({ kind: "latency_spike", startSeconds: BASELINE_TICKS });
+	});
+
+	it("reads an empty gate as its stored empty second, never as 0 ms (#2386)", () => {
+		// The stall at 10-17 would be a 0 ms baseline under the spike at 25-26 if
+		// either view read an empty second as a reading.
+		const stored = recorded(
+			stalled(
+				healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 480 } : {})),
+				10,
+				17
+			)
+		);
+		const expected = detectAnomalies(stored);
+		expect(expected.filter((a) => a.kind === "latency_spike")).toHaveLength(1);
+
+		const series = wholeSecondTicks(liveStream(stored));
+		expect(series.filter((m) => m.second_samples === 0)).toHaveLength(8);
+		expect(detectAnomalies(series)).toEqual(expected);
 	});
 
 	it("reads a gate's own current_rps, the figure its stored row holds (#2393)", () => {

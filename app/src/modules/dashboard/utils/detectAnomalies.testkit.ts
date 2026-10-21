@@ -15,7 +15,8 @@
  * detector answered before the rewrite, which is what #1151's second acceptance
  * criterion actually asks. Only an independent implementation can say that, and
  * this is that implementation, taken verbatim from `db346d3`, with its p99
- * reader moved to whole-second figures in step with the detector (#2589).
+ * reader moved to whole-second figures in step with the detector (#2589), and
+ * a second with no p99 left out of a baseline and a recovery (#2386).
  *
  * It is a deliberate copy and it is meant to stay one. A rule change has to be
  * made here as well, on purpose, with the equivalence tests failing in between -
@@ -36,19 +37,21 @@ import {
 } from "./detectAnomalies";
 import { secondPercentiles } from "./tickPercentiles";
 
-function median(values: number[]): number {
-	if (values.length === 0) return 0;
-	const sorted = [...values].sort((a, b) => a - b);
+function median(values: Array<number | null>): number | null {
+	const present = values.filter((v): v is number => v != null);
+	if (present.length === 0) return null;
+	const sorted = present.sort((a, b) => a - b);
 	const mid = sorted.length >> 1;
 	return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
 /**
- * Median of the {@link BASELINE_TICKS} ticks *before* each index - `null` until
- * that much history exists, which is what makes the opening seconds of a run
- * (where every value is its own outlier) produce nothing.
+ * Median of the readings among the {@link BASELINE_TICKS} ticks *before* each
+ * index - `null` until that much history exists, which is what makes the
+ * opening seconds of a run (where every value is its own outlier) produce
+ * nothing.
  */
-function trailingMedians(values: number[]): Array<number | null> {
+function trailingMedians(values: Array<number | null>): Array<number | null> {
 	return values.map((_, i) =>
 		i < BASELINE_TICKS ? null : median(values.slice(i - BASELINE_TICKS, i))
 	);
@@ -80,11 +83,16 @@ function span(history: LoadTestMetrics[], start: number, end: number): string {
 }
 
 function detectLatencySpikes(history: LoadTestMetrics[]): Anomaly[] {
-	const p99 = history.map((m) => secondPercentiles(m)?.p99 ?? 0);
+	const p99 = history.map((m) => secondPercentiles(m)?.p99 ?? null);
 	const baselines = trailingMedians(p99);
 	const isHot = (i: number) => {
 		const base = baselines[i];
-		return base != null && base > 0 && p99[i] > base * LATENCY_SPIKE_FACTOR;
+		const value = p99[i];
+		return base != null && base > 0 && value != null && value > base * LATENCY_SPIKE_FACTOR;
+	};
+	const recovered = (i: number, base: number) => {
+		const value = p99[i];
+		return value != null && value <= base * LATENCY_RECOVERY_FACTOR;
 	};
 
 	const out: Anomaly[] = [];
@@ -101,11 +109,11 @@ function detectLatencySpikes(history: LoadTestMetrics[]): Anomaly[] {
 		 */
 		const base = baselines[start] as number;
 		let end = hotEnd;
-		while (end + 1 < history.length && p99[end + 1] > base * LATENCY_RECOVERY_FACTOR) end++;
+		while (end + 1 < history.length && !recovered(end + 1, base)) end++;
 		consumedThrough = end;
 
 		let peak = 0;
-		for (let i = start; i <= end; i++) peak = Math.max(peak, p99[i]);
+		for (let i = start; i <= end; i++) peak = Math.max(peak, p99[i] ?? 0);
 		const magnitude = peak / base;
 		out.push({
 			kind: "latency_spike",

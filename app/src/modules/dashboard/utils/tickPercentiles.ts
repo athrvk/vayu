@@ -28,30 +28,55 @@ export interface PercentileTriple {
 }
 
 /**
+ * True when the tick stands for a whole second: a gate frame (`second_samples`
+ * present) or a stored tick. Any other live frame is a ~100 ms window.
+ */
+export const coversSecond = (m: LoadTestMetrics): boolean =>
+	m.second_samples !== undefined || !m.live;
+
+/**
  * The tick's whole-second percentiles, or `null` when the tick holds none.
  *
- * - A gate frame (`second_samples` present) holds its second's figures, or
- *   none when nothing completed in it: an idle second is a gap, not a 0 ms.
+ * - A gate frame holds its second's figures, or none when nothing completed.
  * - Any other live frame holds only a window, which is no second's figure.
- * - A stored tick's own `latency_p*_ms` are its second's already.
+ * - A stored tick's own `latency_p*_ms` are its second's already, and are
+ *   absent for a second with no completion (issue #2386). A row an older
+ *   engine wrote holds `0` there, which reads as the number it is.
+ *
+ * {@link coversSecond} without percentiles is an empty second: a gap in a
+ * chart, never a 0 ms reading.
  */
 export function secondPercentiles(m: LoadTestMetrics): PercentileTriple | null {
 	if (m.second_samples !== undefined) {
 		if (m.second_samples <= 0) return null;
-		const { second_p50_ms: p50, second_p95_ms: p95, second_p99_ms: p99 } = m;
-		if (p50 == null || p95 == null || p99 == null) return null;
-		return { p50, p95, p99 };
+		return triple(m.second_p50_ms, m.second_p95_ms, m.second_p99_ms);
 	}
 	if (m.live) return null;
-	return {
-		p50: m.latency_p50_ms ?? 0,
-		p95: m.latency_p95_ms ?? 0,
-		p99: m.latency_p99_ms ?? 0,
-	};
+	return triple(m.latency_p50_ms, m.latency_p95_ms, m.latency_p99_ms);
+}
+
+function triple(
+	p50: number | null | undefined,
+	p95: number | null | undefined,
+	p99: number | null | undefined
+): PercentileTriple | null {
+	if (p50 == null || p95 == null || p99 == null) return null;
+	return { p50, p95, p99 };
 }
 
 /** True when the tick holds a whole-second figure to plot or judge. */
 export const hasSecondPercentiles = (m: LoadTestMetrics): boolean => secondPercentiles(m) !== null;
+
+/**
+ * The worse of two percentile readings, where `null` is no reading: a bucket
+ * merging an empty second with a measured one keeps the measurement, and a
+ * bucket of empty seconds stays empty rather than becoming 0 ms.
+ */
+export function worstReading(a: number | null, b: number | null): number | null {
+	if (a == null) return b;
+	if (b == null) return a;
+	return Math.max(a, b);
+}
 
 /**
  * The percentiles over the run so far, the span `avg_latency_ms` covers.
@@ -59,7 +84,7 @@ export const hasSecondPercentiles = (m: LoadTestMetrics): boolean => secondPerce
  * A live frame carries them on every frame, `null` until something has
  * completed, which reads as 0 here because the card prints 0 as "awaiting
  * samples". A tick without the keys (a stored one) falls back to its own
- * `latency_p*_ms`.
+ * `latency_p*_ms`, and an empty second's absent ones read as 0 the same way.
  */
 export function cumulativePercentiles(
 	m: Pick<

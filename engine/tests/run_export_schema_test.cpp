@@ -26,6 +26,7 @@
 
 #include "run_export_schema_support.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/types.hpp"
@@ -262,6 +263,29 @@ TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {
     EXPECT_FALSE (comparison["differences"].empty ());
     EXPECT_FALSE (comparison["deltas"].empty ());
     EXPECT_FALSE (comparison["statusCodes"].empty ());
+}
+
+// #2386: a second with no completion is stored without percentile keys, and
+// the export carries the tick without them rather than refusing the document.
+// Mutation check: put the three keys back in the schema's `required` and this
+// fails.
+TEST_F (RunExportSchemaTest, ATickOfAnEmptySecondValidates) {
+    seed ("run_stalled", vayu::RunStatus::Completed, healthy_summary ());
+    vayu::core::MetricTickSample empty_second;
+    empty_second.timestamp          = START_MS + 2000;
+    empty_second.elapsed_seconds    = 2.0;
+    empty_second.requests_completed = 10;
+    empty_second.status_codes       = { { 200, 10 } };
+    db_->add_metric_tick ({ 0, "run_stalled", empty_second.timestamp,
+    vayu::core::build_metric_tick_payload (empty_second).dump () });
+
+    json document      = expect_valid (json{ { "runId", "run_stalled" } });
+    const json& series = document["timeSeries"];
+    ASSERT_EQ (series.size (), 2u) << document.dump (2);
+    EXPECT_TRUE (series[0].contains ("latency_p99_ms")) << series[0].dump ();
+    for (const char* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
+        EXPECT_FALSE (series[1].contains (key)) << key << ": " << series[1].dump ();
+    }
 }
 
 TEST_F (RunExportSchemaTest, TheSchemaRefusesAMemberItDoesNotName) {

@@ -1693,9 +1693,12 @@ run was registered, so a run with a slow setup understated both in its early row
 Latency percentiles in a tick (`latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`) cover the
 **row's second**: every 100 ms window the `hdr_interval_recorder` handed back since the previous
 row, merged as histograms before the percentile is read (issue #2385). The row stores no sample
-count; a second with no completion stores `0`. The whole-run cumulative percentiles live in
+count; a second with no completion stores **none of the three keys** (issue #2386), absent rather
+than `null` because the run export types them as numbers. Rows an engine older than issue #2386
+stored keep `0` for such a second: nothing rewrites them, so a reader of an older run still meets
+a `0` that means "no completion", not "answered in 0 ms". The whole-run cumulative percentiles live in
 [`runs.summary`](#runs), never here. The partial second between the last row and the end of the
-run is stored nowhere: it reaches only the final live frame. Rows an engine older than that issue
+run is stored nowhere: it reaches only the final live frame. Rows an engine older than issue #2385
 stored hold the **last 100 ms window** of their second instead, about a tenth of its completions.
 
 ---

@@ -515,8 +515,7 @@
         "additionalProperties": false,
         "required": [
           "elapsed_seconds", "requests_completed", "requests_failed", "current_rps",
-          "current_concurrency", "throughput", "error_rate", "status_codes", "latency_p50_ms",
-          "latency_p95_ms", "latency_p99_ms"
+          "current_concurrency", "throughput", "error_rate", "status_codes"
         ],
         "properties": {
           "elapsed_seconds": {"type": "number"},
@@ -527,7 +526,7 @@
           "throughput": {"type": "number"},
           "error_rate": {"type": "number"},
           "status_codes": {"$ref": "#/definitions/codeCounts"},
-          "latency_p50_ms": {"type": "number"},
+          "latency_p50_ms": {"description": "Absent, like p95 and p99, for a second in which nothing completed (issue #2386); a tick stored before that issue has 0 there instead.", "type": "number"},
           "latency_p95_ms": {"type": "number"},
           "latency_p99_ms": {"type": "number"}
         }
