@@ -2089,11 +2089,16 @@ nlohmann::json get_script_completions () {
     "the module is itself callable, so uuid() is a v4. lodash is npm's lodash "
     "4.17.21 and answers the same object as the _ global. moment is npm's "
     "moment 2.31.0, English only, with no moment-timezone, and has no global. "
-    "Any other name throws \"Cannot find module\" and lists the shelf: nothing "
-    "is read from disk or fetched.\n\nExample:\n"
+    "csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version "
+    "Postman bundles: the module is parse(input, options), input a string, "
+    "and it has no global; bare csv-parse and its other paths are not on the "
+    "shelf. Any other name throws \"Cannot find module\" and lists the shelf: "
+    "nothing is read from disk or fetched.\n\nExample:\n"
     "const CryptoJS = require('crypto-js');\n"
     "const uuid = require('uuid');\nconst id = uuid();\n"
-    "const _ = require('lodash');\nconst moment = require('moment');" },
+    "const _ = require('lodash');\nconst moment = require('moment');\n"
+    "const parse = require('csv-parse/lib/sync');\n"
+    "const rows = parse(pm.response.text(), { columns: true });" },
     { "sortText", "2_require" } });
 
     // `any`: lodash's few hundred members are not restated here, and a partial

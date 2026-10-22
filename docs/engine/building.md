@@ -476,17 +476,21 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 The libraries the script sandbox's `require()` hands out are the real npm
 builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
 beside its licence and a `README.md` naming the package, the exact version,
-the tarball URL and its registry integrity. They are compiled into `vayu_core`
-as data and evaluated on a script's first `require` of them, never when a
-context is built ([#2650](https://github.com/athrvk/vayu/issues/2650),
+the tarball URL and its registry integrity. csv-parse ships no single-file
+build, so its file is an esbuild bundle of the package's own sources, and its
+`README.md` also carries the command that reproduces it byte for byte. They are
+compiled into `vayu_core` as data and evaluated on a script's first `require`
+of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/issues/2650),
 [#2651](https://github.com/athrvk/vayu/issues/2651),
-[#2652](https://github.com/athrvk/vayu/issues/2652)).
+[#2652](https://github.com/athrvk/vayu/issues/2652),
+[#2653](https://github.com/athrvk/vayu/issues/2653)).
 
 | Library | Version | Licence | Vendored file |
 |---------|---------|---------|---------------|
 | uuid | 8.3.2 | MIT | `engine/vendor/uuid/uuid.min.js` (`dist/umd/uuid.min.js`, 8,160 bytes) |
 | lodash | 4.17.21 | MIT | `engine/vendor/lodash/lodash.min.js` (the package's `lodash.min.js`, 73,015 bytes) |
 | moment | 2.31.0 | MIT | `engine/vendor/moment/moment.min.js` (the package's `min/moment.min.js`, 60,887 bytes; English only, no locale files) |
+| csv-parse | 1.2.4 | BSD-3-Clause | `engine/vendor/csv-parse/csv-parse-sync.min.js` (the package's `lib/sync.js` and the `lib/index.js` it requires, bundled and minified by esbuild, 11,679 bytes; string input only), loaded as `require('csv-parse/lib/sync')` |
 
 `vayu_embed_js(<target> <symbol> <file>)` (`engine/cmake/embed_js.cmake`) is
 the embed step, one call per library inside the QuickJS block of
@@ -500,13 +504,15 @@ dependency, so editing it re-runs CMake, and the header is rewritten only when
 its content changes. The header asserts that it holds as many bytes as the file
 has, so an embed that came out short is a compile error. The cost is linear:
 about 10 ms of configure for uuid's 8 KB and 90 ms per 70 KB; lodash's 73 KB
-measured 40 ms of the two regex passes on the cloud dev box, and moment's 61 KB
-60 ms on a box where lodash read 80 ms.
+measured 40 ms of the two regex passes on the cloud dev box, moment's 61 KB
+60 ms on a box where lodash read 80 ms, and csv-parse's 12 KB 18 ms on one
+where moment read 58 to 80 ms.
 
 The vendored files are excluded from every formatter and linter
 (`engine/vendor/.clang-format`, the repo-JS ESLint config's ignores) and must
-stay byte-identical to the package; `.gitattributes`' `eol=lf` is a no-op on
-them because they hold no CR.
+stay byte-identical to the package (csv-parse's to the build its README
+names; `node-shims.mjs` beside it is build input and is not embedded);
+`.gitattributes`' `eol=lf` is a no-op on them because they hold no CR.
 
 #### First-load cost
 
@@ -524,6 +530,7 @@ Medians of 101 runs after three warm-ups, pinned to one core, gcc 13:
 | generated 70 KB one-line, minified-style stand-in | 5.3 ms | 16 ms |
 | lodash 4.18.1 minified, 73 KB joined onto one line (not vendored) | 10 ms | 26 ms |
 | moment 2.31.0 as vendored, 61 KB in 8 lines (#2652) | 7.6 ms | 17 ms |
+| csv-parse 1.2.4 sync as vendored, 12 KB in 7 lines (#2653) | 1.3 ms | 2.6 ms |
 
 The stand-in is a UMD-wrapped file of functions, objects and arrow functions
 with short identifiers, lighter per byte than a real library; lodash is the

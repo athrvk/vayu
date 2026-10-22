@@ -2842,7 +2842,7 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')` and `require('moment')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')` and `require('csv-parse/lib/sync')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `_` | The same `lodash` module as a global, loaded on first read |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
@@ -2866,9 +2866,9 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid` and `moment`
-run (`uuid` and `moment` have no global, they are `require` only, as in
-Postman). The others (`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
+Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid`, `moment`
+and `csv-parse/lib/sync` run (`uuid`, `moment` and `csv-parse/lib/sync` have
+no global, they are `require` only, as in Postman). The others (`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2879,8 +2879,10 @@ lists them.
 `Cannot find module '<name>'` for any other name, listing what is on the shelf.
 There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
-The argument must be a string (anything else is a `TypeError`). Today the shelf
-holds four libraries, `crypto-js`, `uuid`, `lodash` and `moment`. `CryptoJS` is the
+The argument must be a string (anything else is a `TypeError`), and it is
+matched whole: `csv-parse/lib/sync` is on the shelf and `csv-parse` is not.
+Today the shelf holds five libraries, `crypto-js`, `uuid`, `lodash`, `moment`
+and `csv-parse/lib/sync`. `CryptoJS` is the
 `crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
 a Postman script work:
 
@@ -3044,8 +3046,62 @@ requires it pays again.
 
 The Postman import's script scan does not name `require('moment')`.
 
+#### `csv-parse`
+
+`require('csv-parse/lib/sync')` is **the npm `csv-parse` package, version
+1.2.4**: its `lib/sync.js` and the `lib/index.js` it requires, bundled by
+esbuild into one 11,679-byte file (`engine/vendor/csv-parse/`, BSD-3-Clause;
+see [Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+It is the version and the path Postman's sandbox gives (sandbox 6.8.0 pins
+1.2.4 and exposes only `csv-parse/lib/sync`), so the options and the error
+messages are the ones a Postman script was written against. The module **is
+the parse function**, `parse(input, options?)`, and answers the records; there
+is no global.
+
+```javascript
+const parse = require('csv-parse/lib/sync');
+const rows = parse(pm.response.text(), { columns: true, skip_empty_lines: true });
+pm.test('every row has an id', () => rows.forEach((row) => pm.expect(row.id).to.not.be.empty));
+```
+
+The options are 1.2.4's: `delimiter`, `rowDelimiter`, `quote`, `escape`,
+`columns`, `comment`, `objname`, `relax`, `relax_column_count`,
+`skip_empty_lines`, `skip_lines_with_empty_values`, `trim`, `ltrim`, `rtrim`,
+`auto_parse`, `auto_parse_date`, `from` and `to`. Later majors renamed some
+(`auto_parse` is `cast` and `rowDelimiter` is `record_delimiter` by 4.x), so a
+script written for a newer csv-parse needs these names here as it does in
+Postman.
+
+- The input is a string. A `Buffer` is not supported; the sandbox has none.
+- A malformed record throws csv-parse's own `Error`, which a script can catch:
+  `Quoted field not terminated at line 3`,
+  `Number of columns is inconsistent on line 2`,
+  `Invalid closing quote at line 3; found "y" instead of delimiter ","`. As in
+  1.2.4 itself, and so in Postman, a last record with the wrong number of
+  fields and no line ending after it is dropped rather than refused.
+- Only the whole name loads it. `require('csv-parse')`, csv-parse 5's
+  `csv-parse/sync` and every other path under the package are refused like any
+  name off the shelf.
+- The bundle carries the few Node pieces the sync path reaches (a `Transform`,
+  `util.inherits`, a `StringDecoder`) inside itself, so loading it adds no
+  global: there is still no `Buffer`, `process` or `module` in the sandbox.
+
+**Cost.** Evaluated on the first `require('csv-parse/lib/sync')` in an
+execution, never when a context is built, so a script that does not require it
+pays nothing. First use costs about 1.3 ms in a `-O2` build and 2.6 ms in a
+Debug build (QuickJS parsing and running the 12 KB library, measured in a fresh
+context, median of 101; [First-load cost](building.md#first-load-cost) has the
+method); the evaluated module then holds about 90 KB of the script's 64 MB
+limit until the execution ends. Nothing is shared between executions, so the
+next script that requires it pays again.
+
+The Postman import's script scan does not name
+`require('csv-parse/lib/sync')`; it still names `require('csv-parse')` and every
+other path under the package.
+
 The libraries Postman also lets a script `require` - `ajv`,
-`tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins - are
+`tv4`, `xml2js`, `cheerio`, `chai` and Node's built-ins, and `csv-parse` at
+any path but `csv-parse/lib/sync` - are
 **not** on the shelf: `require` of one throws, and a Postman import names the
 script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
 has the same list from the Postman side.

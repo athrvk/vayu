@@ -3667,7 +3667,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
 Postman script API Vayu does not run, and which ones - `require()` of a module
-off the `crypto-js` / `uuid` / `lodash` / `moment` shelf, `script.packages`, a bundled library such as
+off the `crypto-js` / `uuid` / `lodash` / `moment` / `csv-parse/lib/sync` shelf, `script.packages`, a bundled library such as
 `tv4`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
@@ -10993,7 +10993,7 @@ the `require()` shelf does not carry (`tv4`, `cheerio`, ...), whose hover names
 the replacement Postman itself gives (`tv4` is `require('ajv')`). `require`,
 `CryptoJS` and `_` are declared as what they are, with a `declare module` for
 each name on the `require()` shelf (`crypto-js` #2578, `uuid` #2650, `lodash`
-#2651, `moment` #2652) and one `require`
+#2651, `moment` #2652, `csv-parse/lib/sync` #2653) and one `require`
 signature keyed on those names, so a name off the shelf is a type error. Postman's `postman` object and its pre-`pm.*`
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
