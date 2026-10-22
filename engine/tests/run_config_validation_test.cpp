@@ -1452,6 +1452,20 @@ TEST (RequestBodyDepth, TextThatDoesNotParseKeepsItsMessageAndTheDefaultCode) {
     << refused.error ().body.dump ();
 }
 
+// A route whose documented error code covers its whole body names the parse
+// failure's code apart from the depth refusal's.
+TEST (RequestBodyDepth, ParseCodeTagsATextFailureAndNotADepthRefusal) {
+    const auto unparsed =
+    vayu::http::routes::parse_request_json ("{\"a\":", "depth_code", {}, "parse_code");
+    ASSERT_FALSE (unparsed.has_value ());
+    EXPECT_EQ (error_code_of (unparsed.error ().body), "parse_code");
+
+    const auto too_deep = vayu::http::routes::parse_request_json (
+    vayu::tests::nested_array_text (kBodyDepthBound + 1), "depth_code", {}, "parse_code");
+    ASSERT_FALSE (too_deep.has_value ());
+    EXPECT_EQ (error_code_of (too_deep.error ().body), "depth_code");
+}
+
 // A field with a tighter bound of its own answers before the body's does, in
 // its own words, even when the body is past both.
 TEST (RequestBodyDepth, AFieldBoundAnswersBeforeTheBodyBound) {
