@@ -48,6 +48,7 @@ add_executable(vayu_tests
     bounds_primitives_test.cpp
     db_concurrency_test.cpp
     db_recovery_test.cpp
+    storage_error_test.cpp
     health_route_test.cpp
     rate_limit_test.cpp
     metrics_helper_test.cpp

@@ -505,7 +505,7 @@ void register_spec_routes (RouteContext& ctx) {
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "http", "POST /specs - Error: " + std::string (e.what ()));
-            send_error (res, 400, e.what ());
+            send_exception (res, e);
         }
     });
 

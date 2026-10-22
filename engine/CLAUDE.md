@@ -494,6 +494,21 @@ logged as a warning: it means a client skipped composition.
   per-resource appliers (`apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
   field added there reaches bulk import too.
+- **A route's `catch (const std::exception&)` answers through `send_exception`,
+  never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
+  failure is not the request's fault: `vayu::db::classify_storage_error`
+  (`db/database.hpp`, beside `classify_probe_failure`) reads sqlite_orm's
+  `std::system_error` - the category check is required, because an errno shares
+  its numbers - and `send_exception` answers `SQLITE_FULL` with `507
+  insufficient_storage`, `SQLITE_BUSY` / `SQLITE_LOCKED` with `503 unavailable`
+  plus `Retry-After: 1`, any other SQLite code with `500`, and everything else
+  (a JSON parse error, a validation throw) with the `400` it always had. The
+  body never quotes SQLite. Only a read-only or compute route (`spec_match`,
+  `spec_export`, `spec_diff`, `spec_describe`, `postman_export`) may keep the
+  bare `400`; `SendExceptionGuard` in `tests/storage_error_test.cpp` scans
+  `src/http/routes` for the rest. No test drives a real `SQLITE_FULL` through a
+  handler - `Database` has no pragma seam to fill a scratch database - so the
+  handlers are held by that scan plus the unit tests of the two functions.
 - **A core that reads, decides and writes holds one lock** (#386, #1440,
   #1453, #1454, #1455, #1878, #1906). `Database::with_lock` scopes the mutex around
   the whole composite; a merge-patch is `update_<resource>_locked` called inside
