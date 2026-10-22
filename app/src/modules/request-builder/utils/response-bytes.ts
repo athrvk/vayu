@@ -162,7 +162,7 @@ function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
 	try {
 		binary = atob(base64);
 	} catch (cause) {
-		throw new Error("The engine marked this response body base64, and it does not decode.", {
+		throw new Error("Vayu's engine marked this response body base64, and it does not decode.", {
 			cause,
 		});
 	}
@@ -190,7 +190,9 @@ export function decodeResponseBody({
 }): DecodedBody {
 	if (bodyEncoding === undefined || bodyEncoding === "utf8") return { text: bodyRaw };
 	if (bodyEncoding !== "base64") {
-		throw new Error(`The engine sent a response body in an unknown encoding: ${bodyEncoding}.`);
+		throw new Error(
+			`Vayu's engine sent a response body in an unknown encoding: ${bodyEncoding}.`
+		);
 	}
 
 	const data = bytesFromBase64(bodyRaw);

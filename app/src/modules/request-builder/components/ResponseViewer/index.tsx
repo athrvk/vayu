@@ -714,8 +714,8 @@ export default function ResponseViewer() {
 									<Callout severity="warning" title="Body capped while reading">
 										Only the first{" "}
 										{formatSize(shown.size || heldBodySize(shown))} of this
-										response was read - the engine stops a design-mode send
-										there, so re-sending reads the same amount. Raise Max Design
+										response was read - Vayu&apos;s engine stops a Send there,
+										so re-sending reads the same amount. Raise Max Design
 										Response Body in Settings to read more.
 									</Callout>
 								</div>

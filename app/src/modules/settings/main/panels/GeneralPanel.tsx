@@ -251,7 +251,7 @@ export default function GeneralPanel() {
 						<CardTitle>{DATA_MANAGEMENT.label}</CardTitle>
 					</div>
 					<CardDescription>
-						Stored load-test runs and their metrics live in the engine database.
+						Stored load-test runs and their metrics live in Vayu's engine database.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

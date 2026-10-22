@@ -318,8 +318,8 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 	it("blames the engine for a failed save and for an unanswered ceiling", () => {
 		for (const result of [{ saved: 0, failed: 1, pending: 0 }, null]) {
 			const prompt = buildFlushFailurePrompt("quit", result);
-			expect(prompt.message).toContain("the engine isn't responding");
-			expect(prompt.detail).toContain("once the engine answers");
+			expect(prompt.message).toContain("Vayu's engine isn't responding");
+			expect(prompt.detail).toContain("once Vayu's engine answers");
 		}
 	});
 
@@ -362,7 +362,7 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 
 	it("keeps the engine wording for a failure with no reason", () => {
 		const prompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 1, pending: 0 });
-		expect(prompt.message).toBe("Couldn't save one edit - the engine isn't responding.");
+		expect(prompt.message).toBe("Couldn't save one edit - Vayu's engine isn't responding.");
 		expect(prompt.message).not.toContain("disk");
 	});
 
@@ -380,7 +380,7 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 	it("blames the engine when a failure sits beside a blocked edit", () => {
 		const prompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 1, pending: 1 });
 		expect(prompt.message).toContain("2 edits");
-		expect(prompt.message).toContain("the engine isn't responding");
+		expect(prompt.message).toContain("Vayu's engine isn't responding");
 	});
 
 	it("does not ask, and proceeds, when the flush landed clean", async () => {

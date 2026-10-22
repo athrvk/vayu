@@ -560,7 +560,7 @@ function ExplorerRow({
 		node.description,
 		deprecated ? `Deprecated: ${node.deprecationReason}` : null,
 		node.branch === "subscription" && node.kind === "field"
-			? "Subscriptions can't be run here - the engine sends one HTTP request and reads one response."
+			? "Subscriptions can't be run here - Vayu sends one HTTP request and reads one response."
 			: null,
 	]
 		.filter(Boolean)

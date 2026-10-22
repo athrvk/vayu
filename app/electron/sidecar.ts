@@ -412,7 +412,7 @@ interface PortChoice {
 /** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
 function describeSpawnFailure(failure: SpawnFailure): string {
 	if (failure.kind === "error") {
-		return `Couldn't start the engine process: ${failure.message}`;
+		return `Couldn't start Vayu's engine: ${failure.message}`;
 	}
 
 	// A signal means something killed it; a code means it decided to leave. Only
@@ -425,7 +425,7 @@ function describeSpawnFailure(failure: SpawnFailure): string {
 	const tail =
 		failure.stderr.length > 0 ? `\n\nLast engine output:\n${failure.stderr.join("\n")}` : "";
 
-	return `The engine exited before it was ready (${cause}).${tail}`;
+	return `Vayu's engine exited before it was ready (${cause}).${tail}`;
 }
 
 export class EngineSidecar {

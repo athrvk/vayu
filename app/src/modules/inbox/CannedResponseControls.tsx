@@ -306,7 +306,7 @@ export function CannedResponseControls({
 				<p className="text-xs text-muted-foreground mt-1.5">
 					{stopped
 						? "This inbox is stopped, so nothing is being served. Start a new one to change what callers receive."
-						: "Every caller to this inbox gets this reply. Apply sends the changes to the engine; the status bar shows when it's saved."}
+						: "Every caller to this inbox gets this reply. Apply sends the changes to Vayu's engine; the status bar shows when it's saved."}
 				</p>
 			</div>
 

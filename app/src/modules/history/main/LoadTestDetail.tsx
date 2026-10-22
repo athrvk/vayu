@@ -116,7 +116,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const seriesFailure = useMemo<SeriesFailure | undefined>(() => {
 		if (!isSeriesError) return undefined;
 		return {
-			message: seriesError?.message ?? "The engine returned no time-series data.",
+			message: seriesError?.message ?? "Vayu's engine returned no time-series data.",
 			retry: () => void refetchSeries(),
 		};
 	}, [isSeriesError, seriesError, refetchSeries]);
@@ -141,7 +141,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const monitorFailure = useMemo<SeriesFailure | undefined>(() => {
 		if (!isMonitorError) return undefined;
 		return {
-			message: monitorError?.message ?? "The engine returned no server-vitals data.",
+			message: monitorError?.message ?? "Vayu's engine returned no server-vitals data.",
 			retry: () => void refetchMonitor(),
 		};
 	}, [isMonitorError, monitorError, refetchMonitor]);

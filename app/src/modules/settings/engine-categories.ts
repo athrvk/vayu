@@ -71,7 +71,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		// "General" in the same sidebar as the app panel of that name.
 		label: "Core",
 		description:
-			"The engine's base capacity, threading model and storage internals - the settings a run is built on",
+			"Base capacity, threading model and storage internals of Vayu's engine - the settings a run is built on",
 		icon: Server,
 		motion: ICON_MOTION.press,
 	},

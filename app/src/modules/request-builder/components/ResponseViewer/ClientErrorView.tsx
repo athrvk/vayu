@@ -46,7 +46,7 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
  */
 const ENGINE_ANSWERED_ERROR = "Vayu's engine answered with an error";
 const ENGINE_ANSWERED_HINT =
-	"This is Vayu's failure, not the server's. Send again; if it repeats, the engine log in Settings › General › Logs has the reason.";
+	"This is Vayu's failure, not the server's. Send again; if it repeats, Vayu's engine log in Settings › General › Logs has the reason.";
 
 /**
  * Error hints for common error codes

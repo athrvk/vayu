@@ -157,7 +157,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						</p>
 						<p className="text-xs text-warning-text/80 mt-0.5">
 							Changes to <span className="font-medium">{labels.join(", ")}</span> will
-							take effect after restarting the engine
+							take effect after restarting Vayu&apos;s engine
 						</p>
 					</div>
 				</div>
