@@ -140,7 +140,7 @@ TEST_F (ConfigSeedTest, AReseedOverAnUnchangedCatalogueWritesNothing) {
 // (docs/ux-writing.md, "Case"). The Settings page renders `label` verbatim, so
 // this is the engine's half of the app's sentence-case scan (#2293). A later
 // word may start with a capital only when it is all capitals (DNS, CA, URL,
-// ID) or a name written that way: OAuth, OpenAPI, and the glossary's Send.
+// ID) or a name written that way: OAuth, OpenAPI, the header name Expect, and the glossary's Send.
 std::string first_non_sentence_case_word (const std::string& label) {
     static const std::unordered_set<std::string> capitalised_names = { "OAuth",
         "OpenAPI", "Send", "Sends", "Expect" };

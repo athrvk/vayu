@@ -961,8 +961,8 @@ The app renders it as the suffix inside the input, which is where a unit is
 stated **once** - so a seeded description never spells the same unit out as an
 "in milliseconds" clause, and a label never carries a `(ms)` suffix; a test
 over the catalogue enforces both. Labels are sentence case ("Default request
-timeout", "Correlation ID"), enforced by another. `bytes` additionally selects human-readable
-formatting for the value, the range hint and the default line (`104857600`
+timeout", "Correlation ID"), enforced by a second catalogue test. `bytes`
+additionally selects human-readable formatting for the value, the range hint and the default line (`104857600`
 reads as `100.0 MB`), which the app used to select from a hardcoded list of
 three keys - so a byte-valued entry added engine-side was formatted as a raw
 number until someone edited a TypeScript array. A client that meets a unit it

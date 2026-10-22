@@ -249,7 +249,8 @@ from creeping back in afterward. These hold it:
 - **The engine's half** is two tests. `config_seed_test.cpp`
   `EveryEngineSettingLabelIsSentenceCase` reads the setting labels the Settings
   page renders verbatim (#2293); a later word may start with a capital only when
-  it is all capitals or one of OAuth, OpenAPI, Send, Sends. The other, a scan of
+  it is all capitals or one of OAuth, OpenAPI, Send, Sends,
+  Expect. The other, a scan of
   `engine/src/http/routes/*.cpp` for response bodies opening "Could not" or
   "Failed to", does not exist yet and is owned by #2295.
 - **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
