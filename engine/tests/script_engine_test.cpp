@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "echo_server.hpp"
+#include "library_call_config.hpp"
 #include "step_elements_test_helper.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -8348,19 +8349,7 @@ std::string shelf_answer (ScriptEngine& engine, Request& request, const std::str
     return result.success ? env["out"].value : "threw: " + result.error_message;
 }
 
-/// Stack budget for a test that calls into a bundled library and asserts what
-/// it answers. MSVC at /Od under ASan overflowed the default 256 KB inside
-/// lodash and moment calls (`_.isEqual`, `.format`), so those answers would
-/// depend on a frame size, not on the library. The stack-budget behaviour
-/// itself is pinned by RequireShelfLibrariesLoadUnderAShallowInterpreterStack
-/// and the restore test after it. Half of the 1 MB stack a Windows thread has.
-constexpr std::size_t LIBRARY_CALL_STACK_BYTES = std::size_t{ 512 } * 1024;
-
-ScriptConfig library_call_config () {
-    ScriptConfig config;
-    config.stack_size = LIBRARY_CALL_STACK_BYTES;
-    return config;
-}
+using vayu::tests::library_call_config;
 
 } // namespace
 
@@ -8658,12 +8647,13 @@ TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
 
 // One module for the global and the require, whichever the script reaches first.
 TEST_F (ScriptEngineTest, RequireShelfLodashIsOneModuleForRequireAndTheGlobal) {
-    EXPECT_EQ (shelf_answer (engine, request,
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (shelf_answer (roomy, request,
                "typeof _ + ' ' + (require('lodash') === _) + ' ' + "
                "(require('lodash') === require('lodash'))"),
     "function true true");
     EXPECT_EQ (
-    shelf_answer (engine, request,
+    shelf_answer (roomy, request,
     "(function () { var l = require('lodash'); return (l === _) + ' ' + "
     "typeof l.get; })()"),
     "true function");

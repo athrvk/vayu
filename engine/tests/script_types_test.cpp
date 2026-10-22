@@ -34,6 +34,7 @@
 #include <string>
 #include <string_view>
 
+#include "library_call_config.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
@@ -480,7 +481,7 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 #ifdef VAYU_HAS_QUICKJS
     const std::string dts = generate_script_typedefs ();
 
-    vayu::runtime::ScriptEngine engine;
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
     vayu::Environment env;
     vayu::runtime::ScriptContext ctx;
     ctx.environment = &env;
