@@ -218,7 +218,7 @@ cookie_for_url (const std::string& url, JarCookie cookie);
  * both for a URL that matched nothing and for one it could not parse. A
  * *destructive* call needs the two kept apart: `pm.cookies.jar().clear(url)`
  * on an unparseable URL would otherwise report success for a wipe that never
- * happened, which is the same false success `jar_writes` refuses a jarless
+ * happened, which is the same false success `jar_write_context` refuses a jarless
  * execution over (issue #997).
  */
 [[nodiscard]] bool url_can_scope_cookies (const std::string& url);

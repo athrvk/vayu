@@ -1060,8 +1060,8 @@ TEST (CookieJarWrite, AWrittenCookieIsMatchedByTheSameRulesAReceivedOneIs) {
     CookieServer server;
     vayu::Environment env;
 
-    // Also refused by the write scope now (#2631); what is asserted is that
-    // nothing for example.com reaches the 127.0.0.1 transfer either way.
+    // The write scope (#2631) refuses this one before matching ever runs; what
+    // is asserted is only that nothing for example.com reaches the transfer.
     CookieJar other_host;
     const auto wrong_host = send_after_script (other_host,
     "env_a", "pm.cookies.jar().set('https://example.com/', { name: 'session', value: 'x' });",
