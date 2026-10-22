@@ -45,8 +45,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   malformed body passes it as both `depth_code` and `parse_code`. An empty body
   that means `{}` or `null` is the route's own `if (req.body.empty ())` before
   the call. Parse before the handler's `try`, so its `catch` keeps meaning "the
-  core threw". Test: `tests/request_body_depth_test.cpp` drives a 100,000-level
-  body through every adopted route.
+  core threw". Tests: `tests/request_body_depth_test.cpp` drives a 100,000-level
+  body through every adopted route; `tests/request_body_parse_scan_test.cpp`
+  fails on a `json::parse (req.body)` (or `request_body`, `body`) anywhere
+  under `src/http/routes`, so a new handler cannot skip the helper. It has no
+  exemption list because no route needs one; `routes.hpp` holds the one parse.
 - **An optional a guard has already proved is read through one binding**, not
   re-derived: `const auto& shape = shapes[i]; if (!shape) { continue; }
   use (*shape);`. `shapes[i]` written twice is two expressions, so
