@@ -411,6 +411,7 @@ ElementKind make_extract_json_kind () {
         { "required", nlohmann::json::array ({ "path", "variable" }) },
         { "additionalProperties", false },
     };
+    kind.writes_variables = true;
     return kind;
 }
 
@@ -464,6 +465,7 @@ ElementKind make_extract_regex_kind () {
         { "required", nlohmann::json::array ({ "pattern", "variable" }) },
         { "additionalProperties", false },
     };
+    kind.writes_variables = true;
     return kind;
 }
 
@@ -498,6 +500,7 @@ ElementKind make_extract_header_kind () {
         { "required", nlohmann::json::array ({ "header", "variable" }) },
         { "additionalProperties", false },
     };
+    kind.writes_variables = true;
     return kind;
 }
 
@@ -542,6 +545,7 @@ ElementKind make_extract_boundary_kind () {
         { "required", nlohmann::json::array ({ "variable" }) },
         { "additionalProperties", false },
     };
+    kind.writes_variables = true;
     return kind;
 }
 

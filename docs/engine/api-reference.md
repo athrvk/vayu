@@ -5661,7 +5661,8 @@ runs - so the script's `pm.request` holds the header - unless a credential
 still holds a `{{name}}` that is not a data column or the iteration identity.
 Such a name is one composition found no variable for, or any name a scope
 answers in a request a pre-request script runs before (it is listed in
-[`deferredVariables`](#deferredvariables)), and that auth is applied
+[`deferredVariables`](#deferredvariables)) or in a step of a collection run
+whose plan writes a variable ([Scenario runs](#scenario-runs)), and that auth is applied
 **after** the pre-request script and the residual-token pass instead, each
 credential resolved against the scopes as the script left them (#2473, #2521),
 so `pm.environment.set("password", …)` reaches a basic pair before it is
@@ -5671,7 +5672,8 @@ A data column or the identity in the same credential is bound first. A name
 nothing answers is encoded as written.
 
 **`oauth2` follows the same order on a single send and a collection run's step
-(#2521).** A config in a request that a pre-request script runs before, or holding a
+(#2521).** A config in a request that a pre-request script runs before (on a
+sequential run, in any step of a plan that writes a variable), or holding a
 `{{name}}` that nothing defines, is left as written by
 [`POST /compose`](#post-compose), resolved in every string after the
 pre-request script, and only then is its token acquired; the [token cache](#oauth-20-token-cache) key is computed from
@@ -5967,7 +5969,8 @@ script just wrote. Since issue #2521 the same is true of every name a variable
 scope *does* answer, in a request that a pre-request script (its own, a
 folder's or the collection's) runs before: composition leaves it written and
 lists it in [`deferredVariables`](#deferredvariables), because the script may
-change the value. A value composition did substitute is finished text and is
+change the value; a collection run's plan does the same in every step when any
+element in it writes a variable. A value composition did substitute is finished text and is
 never re-resolved - see [POST /execute](#post-execute) and
 [Scenario runs](#scenario-runs) for what that changes.
 
@@ -6078,7 +6081,10 @@ script, against the variable scopes as the script left them, and ignore the
 member itself - it describes this answer, not the request, so a client that
 posts the composed payload onward may leave it or drop it (the app and the MCP
 server drop it). A request no pre-request script runs before is composed
-exactly as it was before issue #2521: no `deferredVariables`.
+exactly as it was before issue #2521: no `deferredVariables`. A collection
+run's plan, which composes each step engine-side and returns nothing, defers
+the same names in every step of a plan in which any element writes a variable
+before some send, scripted or not ([Scenario runs](#scenario-runs)).
 
 Four kinds of name resolve at composition whatever a script does, each exactly
 once:
@@ -8309,24 +8315,28 @@ the same request does, and the two cannot drift apart.
 - **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
   a session the next step sends.
 
-> **`{{variables}}` composition could answer are resolved once, before the
-> first send, for a step no pre-request script runs before.** The plan is
-> composed once, so a name that already had a value when the run started is
-> fixed for the whole run in such a step: a value a script sets mid-run does
-> **not** change what a *composed* `{{name}}` becomes in a later step's URL,
-> headers or body. This is the price of resolving once, and resolving once is
-> what keeps a collection edited mid-run from changing the sequence underneath
-> it.
+> **A plan in which anything can write a variable resolves its `{{names}}` at
+> each send** (issue #2521). The plan is composed once, at run start, and its
+> sequence stays fixed for the run. When any step of it carries an enabled,
+> non-blank element that writes a variable scope before some send - a
+> `script.pre`, a `script.post` (a test script), a `script.setup`, or any
+> `extract.*` kind, on the request, a folder above it or the collection; a
+> `script.teardown` alone does not count, because it runs after the last send
+> - **every** step keeps each name a scope answers written, scripted or not,
+> and each iteration resolves them immediately before that step's send,
+> against the scopes as every script and extractor up to and including the
+> step's own pre-request script left them. That is Postman's order: a login
+> whose test script or extractor stores a new token is followed by a step whose
+> `Bearer {{token}}` carries that token, on every run and every iteration, and
+> not the one the environment held when the run started. The same four kinds of
+> name as in [`deferredVariables`](#deferredvariables) still resolve at
+> composition, and an OAuth 2.0 config defers only on a sequential run (a load
+> run acquires its token at plan time).
 >
-> **A step with a pre-request script above or on it is different** (issue
-> #2521). Its own `script.pre`, a folder's or the collection's is composed into
-> the step, so the plan keeps every name a scope answers written in that step,
-> and each iteration resolves them immediately before the step's send, against
-> the scopes as every script up to and including the step's own pre-request
-> script left them. That is Postman's order: a script that replaces a stored
-> token is sent, on every iteration, and not only on the second. Only the
-> *names* are re-read per iteration; the sequence itself is still the plan
-> composed at run start.
+> **A plan with no such element is resolved once, before the first send**,
+> exactly as before: a name that already had a value when the run started is
+> fixed for the whole run, which is what keeps a collection edited mid-run from
+> changing the sequence underneath it.
 >
 > **A name composition could not answer** (issue #1008) is resolved the same
 > way. Since #1009 that name keeps its braces instead of resolving to `""`, so
@@ -8337,7 +8347,7 @@ the same request does, and the two cannot drift apart.
 > what lets a step early in the plan fetch a token and a later step's `Bearer
 > {{token}}` carry it with no script of its own. A step's own request holds one
 > search per field, and a plan where every name was already defined at run start
-> and no step is scripted pays that and nothing else.
+> and nothing writes a variable pays that and nothing else.
 >
 > The exceptions are the two reserved namespaces below, which neither pass
 > touches: `{{data.*}}` and the `{{$vu}}` / `{{$iteration}}` identity (issue

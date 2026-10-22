@@ -333,6 +333,22 @@ enum class OAuth2Resolution : std::uint8_t {
 };
 
 /**
+ * Whether composition leaves a `{{name}}` a scope answers for the send to
+ * resolve after the scripts (#2521). What is never deferred is the same either
+ * way: `$` names, the `data` namespace and bound columns, a name whose value
+ * reaches one of those, and a file path.
+ */
+enum class VariableDeferral : std::uint8_t {
+    /// Deferred when the payload's own `elements` run a `script.pre` before
+    /// the send: a Send, a preview, a single-request run.
+    WhenScripted,
+    /// Deferred whatever the payload's own elements hold: a collection-run
+    /// step whose plan holds an element that writes a variable before some
+    /// send, so an earlier step may change the value this one reads.
+    Always,
+};
+
+/**
  * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
  * (kept verbatim) and @p bound_columns beside it (kept verbatim too, issue
  * #1007), then scopes, then the dynamic-variable table; a name nothing answers
@@ -552,6 +568,8 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
  * **`deferredVariables`**: the sorted names left written because a scope
  * answers them and the script may change that answer. Absent when none was.
  * It describes this answer only; `POST /execute` and `POST /runs` ignore it.
+ * @p deferral `Always` defers them with no script in the payload, which is
+ * what a collection-run plan asks for; it is never read from the body.
  *
  * An OAuth 2.0 config's names are deferred with the rest when @p oauth2 is
  * `AfterTheScript`; see @ref OAuth2Resolution. Absent, the body decides: a
@@ -564,6 +582,16 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
  */
 std::pair<int, nlohmann::json> compose_request_core (vayu::db::Database& db,
 const nlohmann::json& body,
-std::optional<OAuth2Resolution> oauth2 = std::nullopt);
+std::optional<OAuth2Resolution> oauth2 = std::nullopt,
+VariableDeferral deferral              = VariableDeferral::WhenScripted);
+
+/**
+ * The resolved `elements` a by-id composition of @p request carries: its
+ * collection chain's root to leaf, then its own, without a disabled, blank or
+ * `inherit.disable`d entry (`compose_elements`). What a collection-run plan
+ * reads, before it composes any step, to decide its @ref VariableDeferral.
+ */
+[[nodiscard]] nlohmann::json stored_request_elements (vayu::db::Database& db,
+const vayu::db::Request& request);
 
 } // namespace vayu::http

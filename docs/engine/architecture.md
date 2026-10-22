@@ -666,7 +666,9 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   (an enabled, non-blank `script.pre` on the request, a folder or the
   collection), composition leaves every name a scope answers written and lists
   the names in the response's `deferredVariables` (issue #2521), for the send
-  to resolve after that script;
+  to resolve after that script. A collection run's plan asks the same of every
+  step when any element in it writes a variable before some send
+  (`VariableDeferral::Always`, below);
 - resolves `inherit` auth by walking the collection ancestor chain leaf→root
   (an explicit `noauth` terminates the walk, `none` is stepped over), and
   resolves variables inside the winning block **before** any OAuth 2.0 cache
@@ -888,14 +890,21 @@ same request cannot drift apart.
   would need precedence rules, a persistence story and a UI, to hold what the
   environment scope already holds for the run's lifetime.
 
-Because the plan is composed once, a `{{variable}}` a script sets mid-run does
-**not** appear in a later step's URL when that step has no pre-request script
-above or on it - it reaches such a step through `pm.environment.get` in a
-script. A step that does run a pre-request script is different (issue #2521):
-its names stay written in the plan and are resolved after its own script, so a
-value an earlier step set reaches it. Fixing the structure once is what keeps a
-collection edited mid-run from changing the sequence underneath itself, and it
-is what will make the load-mode executor (a per-VU state machine) possible
+The plan is composed once, but its values are not always fixed then (issue
+#2521). `resolve_scenario` reads every step's composed `elements` before it
+composes any step (`plan_variable_deferral`), and when one holds a kind the
+registry marks `writes_variables` at a phase before some send - `script.pre`,
+`script.post`, `script.setup` or any `extract.*`; not `script.teardown`, which
+runs after the last send - every step is composed with
+`VariableDeferral::Always`: each name a scope answers stays written in the plan,
+scripted step or not, and is resolved immediately before that step's send
+against the scopes as the earlier steps' scripts and extractors left them (the
+sequential runner's `execute_exchange`, the load executor's per-VU residual
+pass). So a login whose test script or extractor stores a token is followed by
+a step whose `Bearer {{token}}` sends it. A plan with no such element resolves
+its values at composition, as it always did. Fixing the structure once is what
+keeps a collection edited mid-run from changing the sequence underneath itself,
+and it is what makes the load-mode executor (a per-VU state machine) possible
 without SQLite on its hot path.
 
 **Data rows bind per iteration.** A `scenario.data` array - rows the app parsed

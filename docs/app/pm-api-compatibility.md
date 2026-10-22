@@ -1724,8 +1724,11 @@ pm.request.body = JSON.stringify({ n: 2 });
   one. In the script, `pm.request.url` and `pm.request.headers` hold the
   `{{host}}` as written. A request no pre-request script runs before keeps the
   old rule: a value composition substituted is finished text, not re-resolved,
-  and `pm.request.url` is how a script changes it. `{{data.*}}`, `$` names and a
-  file path are never deferred.
+  and `pm.request.url` is how a script changes it. In a collection run, every
+  step defers when any step's script or extractor writes a variable before a
+  send (`script.teardown` aside), so a token a login's test script stores
+  reaches a later step's `Bearer {{token}}` on every run. `{{data.*}}`, `$`
+  names and a file path are never deferred.
 - **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
   capability.
 

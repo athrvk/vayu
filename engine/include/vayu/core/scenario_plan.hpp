@@ -32,9 +32,14 @@
  *
  * Composition goes through `compose_request_core` / `build_request` and each
  * step's elements are `compose_elements`' resolved list, compiled once
- * (issue #1514) - which is what keeps a step byte-identical to what a Send of
- * the same request would run. There is deliberately no second copy of
- * resolution here.
+ * (issue #1514) - which is what keeps a step what a Send of the same request
+ * would run. There is deliberately no second copy of resolution here.
+ *
+ * The structure is fixed here; a value may not be (#2521). A plan in which
+ * any step carries an element that writes a variable before some send
+ * (`ElementKind::writes_variables`: a script, an extractor) composes every
+ * step with its scope names left written, for the send to resolve against
+ * what the earlier steps set. A plan with none resolves them here.
  */
 
 #include <cstddef>

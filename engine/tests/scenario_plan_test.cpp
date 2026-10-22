@@ -150,6 +150,22 @@ class ScenarioPlanTest : public ::testing::Test {
         db_->save_request (r);
     }
 
+    /// Replace the stored `elements` of request @p id.
+    void set_request_elements (const std::string& id, const json& elements) {
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->elements = elements.dump ();
+        db_->save_request (*row);
+    }
+
+    /// Replace the stored `elements` of collection @p id.
+    void set_collection_elements (const std::string& id, const json& elements) {
+        auto row = db_->get_collection (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->elements = elements.dump ();
+        db_->create_collection (*row); // a replace, keyed on the id
+    }
+
     void seed_environment (const std::string& id, const std::string& variables) {
         vayu::db::Environment env;
         env.id         = id;
@@ -435,6 +451,65 @@ TEST_F (ScenarioPlanTest, AnUnscriptedStepResolvesItsNamesAndAuthIntoThePlan) {
     ASSERT_EQ (step.request.headers.count ("Authorization"), 1u);
     EXPECT_EQ (step.request.headers.at ("Authorization"), "Bearer s3cret");
     EXPECT_FALSE (step.auth_after_scripts);
+}
+
+// --- A plan with a step that writes a variable (#2521) ------------------------
+//
+// One answer for the whole plan: an earlier step's extractor or test script can
+// set the value a later, element-free step reads, so every step leaves its
+// scope names for the send. Mutation check for the block: make
+// `plan_variable_deferral` (scenario_plan.cpp) answer `WhenScripted` and the
+// first case's later step is resolved into the plan; drop its `run.end`
+// exclusion and the second case's teardown defers every step.
+
+TEST_F (ScenarioPlanTest, AnExtractorOnOneStepLeavesEveryStepsNamesForTheSend) {
+    seed_collection ("col", "");
+    seed_request ("login", "col", 0, "https://api.example.test/login");
+    set_request_elements ("login",
+    json::array ({ { { "id", "el_token" }, { "kind", "extract.json" }, { "enabled", true },
+    { "config", { { "path", "$.token" }, { "variable", "token" }, { "scope", "env" } } } } }));
+    seed_request ("use", "col", 1, "https://{{host}}/me",
+    /*auth=*/R"({"mode":"bearer","token":"{{token}}"})");
+    seed_environment ("env",
+    R"({"host":{"value":"api.example.test","enabled":true},
+        "token":{"value":"old","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& use = resolved.plan.steps.at (1);
+    EXPECT_EQ (use.request.url, "https://{{host}}/me");
+    EXPECT_EQ (use.request.headers.count ("Authorization"), 0u);
+    EXPECT_TRUE (use.auth_after_scripts);
+}
+
+// Elements that write nothing, and a teardown that writes only after the last
+// send, leave the plan resolved at composition exactly as before.
+TEST_F (ScenarioPlanTest, APlanWhoseElementsWriteNoVariableBeforeASendResolvesAtComposition) {
+    seed_collection ("col", "");
+    set_collection_elements ("col",
+    json::array ({ { { "id", "el_down" }, { "kind", "script.teardown" }, { "enabled", true },
+    { "config", { { "script", "pm.environment.set('token', 'after');" } } } } }));
+    seed_request ("check", "col", 0, "https://api.example.test/health");
+    set_request_elements ("check",
+    json::array ({ { { "id", "el_ok" }, { "kind", "assert.status" },
+    { "enabled", true }, { "config", { { "in", json::array ({ 200 }) } } } } }));
+    seed_request ("use", "col", 1, "https://{{host}}/me",
+    /*auth=*/R"({"mode":"bearer","token":"{{token}}"})");
+    seed_environment ("env",
+    R"({"host":{"value":"api.example.test","enabled":true},
+        "token":{"value":"s3cret","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& use = resolved.plan.steps.at (1);
+    EXPECT_EQ (use.request.url, "https://api.example.test/me");
+    ASSERT_EQ (use.request.headers.count ("Authorization"), 1u);
+    EXPECT_EQ (use.request.headers.at ("Authorization"), "Bearer s3cret");
+    EXPECT_FALSE (use.auth_after_scripts);
 }
 
 // A scripted step under the run's deferred generators (#995, #2521): the

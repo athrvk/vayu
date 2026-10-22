@@ -348,6 +348,56 @@ class ScenarioLoadTest : public ::testing::Test {
         return execution;
     }
 
+    /// `plan_login_then_bearer`, stored and planned by `resolve_scenario` as a
+    /// load run plans it (#2521): `col_test` holds `token=old`, step 0 GETs
+    /// `/login` carrying @p login_elements, and step 1 GETs `/echo` sending
+    /// `Bearer {{token}}` with no element of its own.
+    vayu::core::ScenarioExecution
+    resolve_login_then_bearer (const ScenarioMockServer& server, const json& login_elements) {
+        vayu::db::Collection collection;
+        collection.id         = "col_test";
+        collection.name       = "Collection";
+        collection.variables  = R"({"token":{"value":"old","enabled":true}})";
+        collection.created_at = 1;
+        collection.updated_at = 1;
+        db_->create_collection (collection);
+
+        const auto save = [&] (const std::string& id, int order, const std::string& path,
+                          const json& headers, const json& elements) {
+            vayu::db::Request request;
+            request.id            = id;
+            request.collection_id = collection.id;
+            request.name          = id;
+            request.method        = vayu::HttpMethod::GET;
+            request.url           = server.url (path);
+            request.headers       = headers.dump ();
+            request.elements      = elements.dump ();
+            request.order         = order;
+            request.created_at    = 1;
+            request.updated_at    = 1;
+            db_->save_request (request);
+        };
+        save ("login", 0, "/login", json::array (), login_elements);
+        save ("use", 1, "/echo",
+        json::array ({ { { "key", "Authorization" },
+        { "value", "Bearer {{token}}" }, { "enabled", true } } }),
+        json::array ());
+
+        vayu::core::ScenarioResolveOptions options;
+        options.timeout_ms           = 5000;
+        options.limits.max_steps     = 10;
+        options.limits.max_data_rows = 100;
+        options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        auto resolved = vayu::core::resolve_scenario (*db_,
+        json{ { "source", "collection" }, { "collectionId", collection.id } }, options);
+        EXPECT_TRUE (resolved.ok) << resolved.error;
+
+        vayu::core::ScenarioExecution execution;
+        execution.request = std::move (resolved.request);
+        execution.plan    = std::move (resolved.plan);
+        return execution;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     std::shared_ptr<vayu::core::RunContext> context_;
 };
@@ -1592,6 +1642,48 @@ TEST_F (ScenarioLoadTest, AScriptPostMarkedInlineCorrelatesPerVirtualUserTheSame
     for (const auto& echo : echoes) {
         ASSERT_TRUE (echo.cookie.rfind ("sid=", 0) == 0);
         EXPECT_EQ (echo.authorization, "Bearer tok-" + echo.cookie.substr (4));
+    }
+}
+
+// #2521: the same correlation through a plan `resolve_scenario` composed from
+// stored requests, whose collection already holds a `token`. The bearer step
+// carries no element, so only the plan-wide rule leaves its `{{token}}` for the
+// per-VU pass. Mutation check: make `plan_variable_deferral` (scenario_plan.cpp)
+// answer `WhenScripted`, and every VU sends `Bearer old`.
+TEST_F (ScenarioLoadTest, APlannedStepSendsTheTokenAnEarlierStepExtractedNotTheStoredOne) {
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    const auto execution = resolve_login_then_bearer (server,
+    json::array ({ vayu::tests::extract_json_element_json ("el_token", "$.token", "token") }));
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    for (const auto& echo : echoes) {
+        ASSERT_TRUE (echo.cookie.rfind ("sid=", 0) == 0)
+        << "no session reached step 1";
+        EXPECT_EQ (echo.authorization, "Bearer tok-" + echo.cookie.substr (4));
+    }
+}
+
+// The same through an inline `script.post`, the test-script login.
+TEST_F (ScenarioLoadTest, APlannedStepSendsTheTokenAnEarlierInlineTestScriptSet) {
+    ScenarioMockServer server;
+    const auto execution = resolve_login_then_bearer (server,
+    json::array ({ vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.collectionVariables.set('token', pm.response.json().token);",
+    /*inline_script=*/true) }));
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 3u);
+    for (size_t i = 0; i < echoes.size (); ++i) {
+        EXPECT_EQ (echoes[i].authorization, "Bearer tok-" + std::to_string (i + 1));
     }
 }
 

@@ -1147,7 +1147,11 @@ Rules worth knowing before you rely on them:
   `pm.request.url` holds the `{{host}}` as written, in the script. A request no
   pre-request script runs before is composed once, as it always was, and a
   `{{host}}` composition substituted is finished text - assign
-  `pm.request.url` directly to change that.
+  `pm.request.url` directly to change that. A collection run widens this to
+  the whole plan: when any step's script or extractor writes a variable before
+  a send (`script.teardown` aside), every step defers, so a token one step's
+  test script stores reaches a later step's `Bearer {{token}}` on every run
+  ([Scenario runs](api-reference.md#scenario-runs)).
 - **A single-request load test still does not run pre-request scripts** -
   only the `tests` (post-request) script runs there. A **scenario** load
   run's `script.pre` element does now, but only when marked `inline` or

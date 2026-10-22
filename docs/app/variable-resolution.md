@@ -32,7 +32,14 @@ written as `{{name}}` and lists the names in the response field
 `deferredVariables` (sorted, omitted when empty); the send resolves them in
 `resolve_residual_tokens`, one pass, the same resolver. A request no
 pre-request script runs before is composed exactly as it always was: resolved
-once, at compose, and the value is finished text. Whatever a script does, these
+once, at compose, and the value is finished text. **A collection run widens the
+rule to the whole plan**: when any step carries an enabled, non-blank element
+that writes a variable before some send (`script.pre`, `script.post`,
+`script.setup` or any `extract.*`, on the request, a folder or the collection;
+not `script.teardown`, which runs after the last send), every step defers its
+scope names the same way, scripted or not, so a later step's `Bearer {{token}}`
+sends the token an earlier step's test script or extractor stored in this run.
+A plan with no such element resolves at compose. Whatever a script does, these
 resolve at compose exactly once: `{{data.*}}` and a bound row's bare column
 names (the bind owns them), `$` names (a generator is generated once, the
 iteration identity is bound), a name whose value reaches one of those, and a
@@ -1026,7 +1033,8 @@ the new one. In the script, `pm.request.url`, `pm.request.headers` and the body
 hold the `{{token}}` as written; it resolves when the script ends, and the test
 script reads the request as sent. In a request **without** one, composition
 resolves the name once, as it always did, and a value composition substituted
-is finished text.
+is finished text - except in a collection run whose plan holds an element that
+writes a variable, where every step defers (D1 above).
 
 A name nothing answers at compose keeps its braces in either case (#1009) and is
 resolved after the script as well (#1008), so a token only a script can answer

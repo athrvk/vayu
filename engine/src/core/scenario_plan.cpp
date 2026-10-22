@@ -325,6 +325,35 @@ ScenarioResolution& resolution) {
 }
 
 /**
+ * How every step of the plan over @p rows composes its scope names (#2521).
+ *
+ * `Always` when one step's composed `elements` hold a kind the registry marks
+ * `writes_variables` (`script.pre`, `script.post`, `script.setup`, every
+ * `extract.*`) at a phase before some send: an earlier step's test script or
+ * extractor can then set the token a later step reads, after the plan was
+ * composed and before that step is sent. `script.teardown` alone does not
+ * count, because it runs after the last send. The lists are composition's
+ * own, so a disabled, blank or `inherit.disable`d element is already gone.
+ */
+vayu::http::VariableDeferral plan_variable_deferral (vayu::db::Database& db,
+const std::vector<vayu::db::Request>& rows) {
+    const auto& registry = Registry::instance ();
+    const auto writes_before_a_send = [&registry] (const nlohmann::json& element) {
+        const auto* kind = registry.find (element.value ("kind", std::string{}));
+        return kind != nullptr && kind->writes_variables &&
+        std::any_of (kind->phases.begin (), kind->phases.end (),
+        [] (Phase phase) { return phase != Phase::RunEnd; });
+    };
+    for (const auto& row : rows) {
+        const auto elements = vayu::http::stored_request_elements (db, row);
+        if (std::any_of (elements.begin (), elements.end (), writes_before_a_send)) {
+            return vayu::http::VariableDeferral::Always;
+        }
+    }
+    return vayu::http::VariableDeferral::WhenScripted;
+}
+
+/**
  * One step of the plan: composed, built, and refused if it carries a token
  * nothing in this run could bind.
  *
@@ -342,6 +371,7 @@ ScenarioResolution& resolution) {
  */
 std::optional<StepRefusal> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
+vayu::http::VariableDeferral deferral,
 const vayu::db::Collection& collection,
 bool has_data,
 const vayu::http::BoundColumnNames& bound_columns,
@@ -374,7 +404,8 @@ nlohmann::json& raw_elements_out) {
     compose_body["deferDynamicVariables"] = true;
     auto [status, payload] = vayu::http::compose_request_core (db, compose_body,
     options.oauth2_after_scripts ? vayu::http::OAuth2Resolution::AfterTheScript :
-                                   vayu::http::OAuth2Resolution::AtComposition);
+                                   vayu::http::OAuth2Resolution::AtComposition,
+    deferral);
     if (status != 200) {
         return ("Cannot compose " + describe_step (index, row) + ": " +
         compose_error_message (payload));
@@ -424,8 +455,8 @@ nlohmann::json& raw_elements_out) {
     // A name composition found no scope for is one a pre-request script, an
     // inline element or a setup script may define before the send, and none
     // of them can reach it once `apply_auth` has encoded it (issue #2473). So
-    // is any name of a scripted step on a sequential plan, OAuth 2.0 config
-    // included (#2521).
+    // is any name composition deferred (#2521), OAuth 2.0 config included on
+    // a sequential plan.
     const bool auth_after_scripts =
     vayu::core::credentials_await_scripts (parsed_auth, bound_columns);
 
@@ -884,10 +915,13 @@ const ScenarioResolveOptions& options) {
     const vayu::http::BoundColumnNames bound_columns =
     bound_columns_of (resolution.data_rows);
 
+    // One answer for the whole plan, decided before any step composes: the
+    // plan's structure is fixed here, and only values wait for the send.
+    const auto deferral = plan_variable_deferral (db, rows);
     resolution.plan.steps.reserve (rows.size ());
     std::vector<nlohmann::json> raw_elements (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
-        if (auto refusal = resolve_step (db, options, *collection, has_data,
+        if (auto refusal = resolve_step (db, options, deferral, *collection, has_data,
             bound_columns, index, rows[index], resolution.plan, raw_elements[index])) {
             return invalid (std::move (refusal->reason), std::move (refusal->code));
         }

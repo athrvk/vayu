@@ -1055,7 +1055,9 @@ const vayu::db::Request& request) {
  *
  * `script.pre` alone, because it is the one kind that runs between composition
  * and the send of the request it belongs to. `script.setup` runs once before a
- * collection run's first step, which is composed earlier still, at plan time.
+ * collection run's first step, which is composed earlier still, at plan time;
+ * a plan defers for it, and for every other kind that writes a variable, on
+ * its own (`VariableDeferral::Always`).
  */
 bool runs_a_pre_request_script (const nlohmann::json& payload) {
     const auto elements = payload.find ("elements");
@@ -1068,6 +1070,12 @@ bool runs_a_pre_request_script (const nlohmann::json& payload) {
         return is_composed_element (element, disabled) &&
         element.value ("kind", "") == "script.pre";
     });
+}
+
+/// Whether this composition leaves the names a scope answers for the send:
+/// always for a plan that asks it to, else when @p payload is scripted.
+bool defers_scope_names (VariableDeferral deferral, const nlohmann::json& payload) {
+    return deferral == VariableDeferral::Always || runs_a_pre_request_script (payload);
 }
 
 /// A stored headers blob as /execute takes it, plus the names whose last row
@@ -1749,9 +1757,15 @@ read_dynamic_resolution (const nlohmann::json& body, DynamicResolution& out) {
 
 } // namespace
 
+nlohmann::json stored_request_elements (vayu::db::Database& db,
+const vayu::db::Request& request) {
+    return compose_elements (collection_chain (db, request.collection_id), request);
+}
+
 std::pair<int, nlohmann::json> compose_request_core (vayu::db::Database& db,
 const nlohmann::json& body,
-std::optional<OAuth2Resolution> oauth2) {
+std::optional<OAuth2Resolution> oauth2,
+VariableDeferral deferral) {
     if (!body.is_object ()) {
         return compose_error (
         400, "invalid_compose_request", "Request body must be a JSON object");
@@ -1819,7 +1833,7 @@ std::optional<OAuth2Resolution> oauth2) {
     // every field reads one answer (#2521).
     std::set<std::string> deferred;
     std::set<std::string>* const defer_into =
-    runs_a_pre_request_script (payload) ? &deferred : nullptr;
+    defers_scope_names (deferral, payload) ? &deferred : nullptr;
     const ComposeLookup lookup{ vars, bound_columns, dynamic, defer_into };
 
     substitute_compose_path_variables (lookup, stored, payload);

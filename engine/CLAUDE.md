@@ -1157,7 +1157,15 @@ composed `elements` (`runs_a_pre_request_script`): an enabled, non-blank
 the URL, path rows, headers, body and non-OAuth credentials, and the 200 body
 lists them in `deferredVariables` (sorted, omitted when empty, never an input,
 ignored by `POST /execute` and `POST /runs`). A request no pre-request script
-runs before composes exactly as before: resolved once, at compose. Four things
+runs before composes exactly as before: resolved once, at compose. **A
+collection run decides for the whole plan**: `plan_variable_deferral`
+(`scenario_plan.cpp`) reads every step's composed `elements` before composing
+any, and when one holds a kind the registry marks `writes_variables` (every
+`script.*` and `extract.*` kind) at a phase other than `run.end`, every step
+composes with `VariableDeferral::Always`, an internal `compose_request_core`
+parameter, never a body field. So an unscripted step sends the token an earlier
+step's test script or extractor stored; a plan with no such element resolves at
+compose. A new kind that writes a variable sets the flag. Four things
 resolve at compose whatever a script does: `$` names (generators once, the
 iteration identity), the `data` namespace and bound columns, a name whose value
 reaches one of those, and a file path (`src`: the residual pass never resolves
@@ -1229,7 +1237,8 @@ dynamic-variable name set (`$guid`, `$timestamp`, …) is part of that contract 
 renderer table in `lib/dynamic-variables.ts`), as are the D17 malformed-data
 rules (absent or non-boolean `enabled` = enabled; non-string `value` = "") in
 `parse_variables` and `variable-resolution.ts`. D1 is now: a `{{name}}` is
-resolved at compose, except where a pre-request script can change the value,
+resolved at compose, except where a pre-request script can change the value
+(or, in a collection run, any element of the plan that writes a variable),
 when it is resolved after that script (#2521, Postman's order; the first
 paragraph above), and script text is never interpolated (D16). The renderer's
 Code section names the deferred tokens in its Resolved mode. MCP has no
