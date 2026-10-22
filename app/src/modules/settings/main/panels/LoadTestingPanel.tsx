@@ -62,7 +62,7 @@ const FIELDS: readonly CeilingField[] = [
 		key: "concurrency",
 		setting: appSetting("load-max-connections"),
 		description:
-			"Upper bound on the Virtual users field, and on where a ramp may start or finish. The engine pre-allocates connections per worker before any traffic flows, so this is the setting that costs memory up front.",
+			"Upper bound on the Virtual users field, and on where a ramp may start or finish. Vayu's engine pre-allocates connections per worker before any traffic flows, so this is the setting that costs memory up front.",
 	},
 	{
 		key: "rps",
@@ -76,7 +76,7 @@ const FIELDS: readonly CeilingField[] = [
 		setting: appSetting("load-max-duration"),
 		unit: "s",
 		description:
-			"Upper bound on both Duration and Ramp duration. The default of one hour is a session; the ceiling of one day is the engine's own per-transfer limit.",
+			"Upper bound on both Duration and Ramp duration. The default of one hour is a session; the ceiling of one day is the per-transfer limit of Vayu's engine.",
 	},
 	{
 		key: "iterations",
@@ -106,7 +106,7 @@ export default function LoadTestingPanel() {
 							<CardDescription className="mt-1">
 								The largest value each field in the Run a load test dialog will
 								offer. Raising one does not change any run you have already
-								configured - it only widens what you can ask for. The engine
+								configured - it only widens what you can ask for. Vayu&apos;s engine
 								enforces its own limits regardless, and no value here can exceed
 								them.
 							</CardDescription>

@@ -135,7 +135,7 @@ describe("a run whose server-vitals fetch failed", () => {
 
 		openPerformanceTab(MONITORED_REPORT);
 
-		expect(screen.getByText(/The engine returned no server-vitals data\./)).toBeTruthy();
+		expect(screen.getByText(/Vayu's engine returned no server-vitals data\./)).toBeTruthy();
 	});
 
 	it("shows beside a time series too short to chart, and beside a failed one", () => {

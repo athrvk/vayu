@@ -262,8 +262,10 @@ from creeping back in afterward. These hold it:
   "(s)" (`plural-rule.test.ts`, #2307), which reads "(s)" in the same strings
   and refuses a `=== 1` / `!== 1` ternary whose branches differ only by the
   plural suffix or are an agreement pair ("is"/"are", "it"/"them"); the fix is
-  `pluralize` or `pickByCount` from `modules/dashboard/utils/format.ts`. Not yet
-  written: bare "the engine" (`voice-bare-engine.test.ts`, #2298).
+  `pluralize` or `pickByCount` from `modules/dashboard/utils/format.ts`; and
+  bare "the engine" and "design-mode" (`voice-bare-engine.test.ts`, #2298),
+  which refuses either in a rendered string: write "Vayu's engine", and "Send"
+  for a design-mode send.
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
 `file :: literal`, each entry naming the open issue that retires it. The commit

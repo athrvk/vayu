@@ -89,7 +89,7 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 				<Callout severity="blocking" title="Every scrape failed">
 					{formatNumber(monitor.failures)} of {formatNumber(attempts)}. Nothing was
 					recorded, so there is no chart above - check that the monitor URL was reachable
-					from the engine for the life of the run.
+					from Vayu&apos;s engine for the life of the run.
 				</Callout>
 			)}
 

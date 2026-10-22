@@ -206,8 +206,8 @@ export function buildFlushFailurePrompt(
 		};
 	}
 	return {
-		message: `Couldn't save ${subject} - the engine isn't responding.`,
-		detail: `${discards} Keep working to try again once the engine answers.`,
+		message: `Couldn't save ${subject} - Vayu's engine isn't responding.`,
+		detail: `${discards} Keep working to try again once Vayu's engine answers.`,
 		buttons,
 	};
 }

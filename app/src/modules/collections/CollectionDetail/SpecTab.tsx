@@ -711,7 +711,7 @@ function BoundSpec({
 				{failed && (
 					<FieldError>
 						Couldn&apos;t read the stored document - its source and fetch time are
-						unknown until the engine answers.
+						unknown until Vayu&apos;s engine answers.
 					</FieldError>
 				)}
 			</Card>

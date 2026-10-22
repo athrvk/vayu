@@ -128,7 +128,7 @@ describe("the restart-required banner", () => {
 		expect(mutateAsync).toHaveBeenCalledWith({ entries: { worker_threads: "8" } });
 		// Read out of the banner's own line, not the page: the field's label
 		// carries the same words and would match anywhere.
-		const detail = screen.getByText(/will take effect after restarting the engine/);
+		const detail = screen.getByText(/will take effect after restarting Vayu's engine/);
 		expect(detail.textContent).toContain("Changes to Worker threads");
 		// The store is what holds it, and the component reads it from there.
 		expect(useEngineStore.getState().pendingRestart).toBe(true);

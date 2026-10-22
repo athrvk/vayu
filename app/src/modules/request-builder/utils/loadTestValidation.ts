@@ -54,7 +54,7 @@ export function validateStartConcurrencyFloor(
 		return "Start must be a number of virtual users, and at least 1.";
 	}
 	if (startConcurrency < 1) {
-		return `Start (${startConcurrency}) must be at least 1, since the run climbs from it and can't climb from nothing. The engine rejects a lower start rather than raising it for you.`;
+		return `Start (${startConcurrency}) must be at least 1, since the run climbs from it and can't climb from nothing. Vayu's engine rejects a lower start rather than raising it for you.`;
 	}
 	return null;
 }

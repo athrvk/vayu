@@ -111,8 +111,7 @@ export const APP_SETTINGS = [
 		anchor: "cookies",
 		panel: "general",
 		label: "Cookies",
-		searchText:
-			"What the engine's cookie jar holds per environment, and the button that empties it.",
+		searchText: "What the cookie jar holds per environment, and the button that empties it.",
 		keywords: ["jar", "clear cookies"],
 	},
 	{
@@ -311,7 +310,7 @@ export const APP_SETTINGS = [
 		panel: "notifications",
 		label: "Notify through the system when Vayu is in the background",
 		searchText:
-			"Post an operating-system notification when a run finishes, the engine stops responding, an update is ready or a sign-in completes while Vayu is not the window in front.",
+			"Post an operating-system notification when a run finishes, Vayu's engine stops responding, an update is ready or a sign-in completes while Vayu is not the window in front.",
 		keywords: ["os", "desktop", "system", "background", "banner", "alert"],
 	},
 	{

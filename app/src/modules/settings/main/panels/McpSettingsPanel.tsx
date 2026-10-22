@@ -990,7 +990,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{NETWORK.label}</CardTitle>
 					</div>
 					<CardDescription>
-						<CollapsibleText text="When off (default), an agent with write access still can't change the proxy settings or the certificate authorities Vayu trusts - the engine config entries that decide where every request goes and whom it trusts. The allowlist checks the host a request names, not the proxy it passes through, and a trusted authority is what lets that proxy read encrypted traffic. Needs Write access on as well; on its own it grants nothing." />
+						<CollapsibleText text="When off (default), an agent with write access still can't change the proxy settings or the certificate authorities Vayu trusts - Vayu's engine settings that decide where every request goes and whom it trusts. The allowlist checks the host a request names, not the proxy it passes through, and a trusted authority is what lets that proxy read encrypted traffic. Needs Write access on as well; on its own it grants nothing." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

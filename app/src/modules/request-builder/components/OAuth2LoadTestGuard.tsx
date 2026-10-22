@@ -118,7 +118,7 @@ export default function OAuth2LoadTestGuard({
 				{state.nonExpiring
 					? "Access token doesn't expire - it covers the whole run."
 					: state.viaRefresh
-						? "Access token expires during the run - the engine refreshes it mid-run."
+						? "Access token expires during the run - Vayu's engine refreshes it mid-run."
 						: "Access token covers the whole run."}
 			</Callout>
 		);
