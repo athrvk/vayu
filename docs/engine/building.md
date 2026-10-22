@@ -621,10 +621,12 @@ the runner image's tools, so the leg installs `git` and `zstd` before checkout
 (`actions/cache` versions an entry by its compression, so a gzip-only job
 misses what a zstd job saved), the toolchain action installs the rest, and
 CMake and Ninja are the copies vcpkg pins at `VCPKG_COMMIT` (`vcpkg fetch`).
-Inside a container job `github.workspace` is the host's path, which the
-container does not see (actions/runner#2058), so the `run-cmake` steps take a
-workspace-relative `CMakeLists.txt`; the vcpkg and cache paths built from it
-resolve to the same container-local directory in every job that reads them.
+Inside a container job the runner rewrites a value that starts with the host
+workspace path to the mounted one (`/__w`), in `with:` inputs and env values
+alike. A value that only contains the path is left alone, so
+`VCPKG_BINARY_SOURCES` (`clear;files,<path>,readwrite`) kept the host path and
+vcpkg wrote its archives where the cache step never looked. Each container leg
+re-sets it from `$GITHUB_WORKSPACE` through `GITHUB_ENV` before vcpkg runs.
 `cache-warm.yml` warms the pnpm store in the container as well as on
 `ubuntu-24.04`: setup-node's key is the same in both, but the store's path is
 not, and `actions/cache` versions an entry by its path.

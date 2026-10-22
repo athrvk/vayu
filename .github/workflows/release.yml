@@ -70,10 +70,10 @@ jobs:
         # runner, because the ubuntu-22.04 runner image is removed on
         # 2027-04-17 (#2634). `os` is the leg's label and the vcpkg cache key's
         # image component, so it names the container rather than the runner.
-        # Inside the container `github.workspace` is the host's path, not the
-        # mounted workspace (actions/runner#2058): the paths built from it
-        # below resolve to a container-local directory, consistently for every
-        # step that reads them, and the run-cmake steps take a relative path.
+        # In the container the runner rewrites a value that starts with the
+        # host workspace path to the mounted one, in `with:` inputs and env
+        # values alike; a value that only contains it (VCPKG_BINARY_SOURCES)
+        # keeps the host path. See "Point vcpkg's binary cache" below.
         os: [container-ubuntu-22.04, windows-latest, macos-latest]
         include:
           - os: container-ubuntu-22.04
@@ -166,6 +166,17 @@ jobs:
             "$exe" --version | head -1
             dirname "$exe" >> "$GITHUB_PATH"
           done
+
+      # On this leg the runner rewrites the host workspace path to the
+      # container's (/__w) wherever a value starts with it: `with:` inputs,
+      # and env values. VCPKG_BINARY_SOURCES starts with `clear;`, so it kept
+      # the host path, and vcpkg wrote its archives to a container-local
+      # directory while the cache step saved the empty /__w one. This
+      # replaces it, for every later step, with the container's own path.
+      - name: Point vcpkg's binary cache at the container workspace (container)
+        if: matrix.container
+        shell: bash
+        run: echo "VCPKG_BINARY_SOURCES=clear;files,$GITHUB_WORKSPACE/.vcpkg-archives,readwrite" >> "$GITHUB_ENV"
 
       # Windows used to skip both of these: sccache-action@v0.0.10 could not
       # install on the Windows Server 2025 + Visual Studio 2026 image GitHub
