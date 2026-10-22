@@ -116,9 +116,9 @@ export default function FilesPanel() {
 						disabled={isPending}
 					>
 						{isPending ? (
-							<Loader2 className="size-icon mr-1.5 animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
-							<FolderOpen className="size-icon mr-1.5" />
+							<FolderOpen className="size-icon" />
 						)}
 						Choose folder...
 					</Button>

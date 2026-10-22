@@ -167,7 +167,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						onClick={onDismiss}
 						className="border-warning/40 hover:bg-warning/15"
 					>
-						<X className="size-icon mr-1.5" />
+						<X className="size-icon" />
 						Dismiss
 					</Button>
 					<Button
@@ -177,9 +177,9 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						onClick={() => void restart()}
 					>
 						{isRestarting ? (
-							<Loader2 className="size-icon mr-1.5 animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
-							<RefreshCw className="size-icon mr-1.5" />
+							<RefreshCw className="size-icon" />
 						)}
 						<LabelSwap
 							label={isRestarting ? "Restarting…" : "Restart engine"}
@@ -907,7 +907,7 @@ export default function SettingsMain() {
 							disabled={updateConfigMutation.isPending}
 						>
 							<RotateCcw
-								className="size-icon mr-1.5"
+								className="size-icon"
 								data-icon-motion={ICON_MOTION.spinBack}
 							/>
 							Reset to defaults
@@ -920,12 +920,9 @@ export default function SettingsMain() {
 							}
 						>
 							{updateConfigMutation.isPending ? (
-								<Loader2 className="size-icon mr-1.5 animate-spin" />
+								<Loader2 className="size-icon animate-spin" />
 							) : (
-								<Save
-									className="size-icon mr-1.5"
-									data-icon-motion={ICON_MOTION.press}
-								/>
+								<Save className="size-icon" data-icon-motion={ICON_MOTION.press} />
 							)}
 							Save changes
 						</Button>

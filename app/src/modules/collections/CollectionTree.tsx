@@ -375,7 +375,7 @@ export default function CollectionTree() {
 							disabled={panel.isCreatingCollection}
 						>
 							{panel.isCreatingCollection && (
-								<Loader2 className="size-icon-sm animate-spin mr-1" />
+								<Loader2 className="size-icon-sm animate-spin" />
 							)}
 							Add
 						</Button>

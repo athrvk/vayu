@@ -202,11 +202,11 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 						disabled={!result || reassembling}
 						onClick={() => void copy(result?.text ?? "", "The document")}
 					>
-						<Copy className="mr-2 size-icon" />
+						<Copy className="size-icon" />
 						Copy
 					</Button>
 					<Button disabled={!result || reassembling} onClick={handleDownload}>
-						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
+						<Download className="size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>
 				</DialogFooter>

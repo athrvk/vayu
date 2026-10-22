@@ -242,7 +242,6 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							}}
 						/>
 						<LabelSwap
-							className="ml-1.5"
 							label={token ? (expired ? "Refresh" : "Renew") : "Get token"}
 							states={TOKEN_ACTION_LABELS}
 						/>

@@ -310,7 +310,7 @@ export default function DataFilePicker({
 						disabled={disabled}
 						className="shrink-0"
 					>
-						<X className="mr-1.5 size-icon-sm" />
+						<X className="size-icon-sm" />
 						Remove
 					</Button>
 				) : (
@@ -322,10 +322,7 @@ export default function DataFilePicker({
 						disabled={disabled}
 						className="shrink-0"
 					>
-						<Upload
-							className="mr-1.5 size-icon-sm"
-							data-icon-motion={ICON_MOTION.lift}
-						/>
+						<Upload className="size-icon-sm" data-icon-motion={ICON_MOTION.lift} />
 						Choose file
 					</Button>
 				)}

@@ -270,9 +270,9 @@ export default function GeneralPanel() {
 								className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 							>
 								{clearing ? (
-									<Loader2 className="size-icon mr-1.5 animate-spin" />
+									<Loader2 className="size-icon animate-spin" />
 								) : (
-									<Database className="size-icon mr-1.5" />
+									<Database className="size-icon" />
 								)}
 								Clear run history
 							</Button>
@@ -349,7 +349,7 @@ export default function GeneralPanel() {
 											className="shrink-0"
 											onClick={() => void openLogsFolder()}
 										>
-											<FolderOpen className="size-icon mr-1.5" />
+											<FolderOpen className="size-icon" />
 											Open
 										</Button>
 									)}
@@ -384,10 +384,7 @@ export default function GeneralPanel() {
 						onClick={() => setConfirmReset(true)}
 						className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 					>
-						<RotateCcw
-							className="size-icon mr-1.5"
-							data-icon-motion={ICON_MOTION.spinBack}
-						/>
+						<RotateCcw className="size-icon" data-icon-motion={ICON_MOTION.spinBack} />
 						Reset to defaults
 					</Button>
 				</CardContent>

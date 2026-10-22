@@ -141,7 +141,7 @@ export default function OAuth2LoadTestGuard({
 						) : (
 							<RefreshCw className="size-icon-sm" />
 						)}
-						<span className="ml-1.5">Fetch &amp; check</span>
+						Fetch &amp; check
 					</Button>
 				}
 			>
@@ -188,7 +188,7 @@ export default function OAuth2LoadTestGuard({
 						) : (
 							<RefreshCw className="size-icon-sm" />
 						)}
-						<span className="ml-1.5">Refresh token</span>
+						Refresh token
 					</Button>
 				</>
 			) : (

@@ -232,9 +232,9 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 						disabled={state.phase === "checking" || syncSpec.isPending}
 					>
 						{state.phase === "checking" ? (
-							<Loader2 className="mr-2 size-icon animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
-							<RefreshCw className="mr-2 size-icon" />
+							<RefreshCw className="size-icon" />
 						)}
 						Check for changes
 					</Button>
@@ -294,10 +294,10 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 								disabled={syncSpec.isPending}
 							>
 								{syncSpec.isPending ? (
-									<Loader2 className="mr-2 size-icon animate-spin" />
+									<Loader2 className="size-icon animate-spin" />
 								) : (
 									<Upload
-										className="mr-2 size-icon"
+										className="size-icon"
 										data-icon-motion={ICON_MOTION.lift}
 									/>
 								)}

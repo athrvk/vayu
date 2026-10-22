@@ -120,9 +120,9 @@ export function WorkspaceBackupCard() {
 						onClick={() => void backUp()}
 					>
 						{running ? (
-							<Loader2 className="size-icon mr-1.5 animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
-							<HardDriveDownload className="size-icon mr-1.5" />
+							<HardDriveDownload className="size-icon" />
 						)}
 						Back up now
 					</Button>
