@@ -352,8 +352,8 @@ struct FileRef {
     std::shared_ptr<const vayu::http::ApprovedFile> approved;
 };
 
-/// The largest file a run reads once and shares across its transfers; larger
-/// files stream from disk per transfer.
+/// The largest file a run reads once and shares across its transfers; a larger
+/// one is streamed from the open file the plan approved.
 inline constexpr std::size_t INLINE_FILE_LIMIT = std::size_t{ 4 } * 1024 * 1024;
 
 /**

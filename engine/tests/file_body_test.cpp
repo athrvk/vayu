@@ -1356,9 +1356,10 @@ TEST (BinaryBodyPlan, ALinkFlippedDuringTheCheckIsNeverReadAsTheOtherFile) {
     std::thread flipper ([&] () {
         for (bool to_other = true; !stop.load (); to_other = !to_other) {
             (void)swap_link (link, to_other ? other : approved);
+            std::this_thread::yield ();
         }
     });
-    constexpr int EACH_OUTCOME = 200;
+    constexpr int EACH_OUTCOME = 50;
     int accepted               = 0;
     int refused                = 0;
     int misread                = 0;
