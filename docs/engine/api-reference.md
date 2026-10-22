@@ -4492,8 +4492,13 @@ The sections, in order:
    derived from the counts.
 5. `## Latency`: min, p50, p90, p95, p99, p999 and max, with the budget that
    judged each (`<= 30 ms - missed`).
-6. `## Errors`, only when there were any: by status code, then by transport
-   error type.
+6. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
+   transport error type. A request that got no response is listed once, under
+   its error type: status code 0 counts the same requests, so it has no row of
+   its own and no row reads `HTTP 0` (issue #2400). When the report lists no
+   error type for them (a run stored before the per-type counts past the
+   error store's cap), code 0 is one `No response` row, the app's words, so
+   the count is not lost. The HTML report reads the same table.
 7. `## Compared with <base reference>`, only when the document has a
    `comparison`: each metric's base, this run, change and a word from the
    delta's own `direction` (`improved`, `regressed`, `unchanged`, or `not

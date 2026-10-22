@@ -240,6 +240,58 @@ TEST (RunExportMarkdownTest, ErrorRateIsTheReportsWithItsTwoKindsOfFailure) {
     std::string::npos);
 }
 
+/// The first cell of each body row of the Errors table, trimmed.
+std::vector<std::string> error_row_labels (const std::string& text) {
+    std::vector<std::string> labels;
+    bool in_errors = false;
+    for (const std::string& line : lines_of (text)) {
+        if (line.starts_with ("## ")) {
+            in_errors = line == "## Errors";
+            continue;
+        }
+        if (!in_errors || !line.starts_with ("| ") ||
+        line.starts_with ("| Error ") || line.starts_with ("| -")) {
+            continue;
+        }
+        const auto end    = line.find (" |", 2);
+        std::string label = line.substr (2, end - 2);
+        label.erase (label.find_last_not_of (' ') + 1);
+        labels.push_back (label);
+    }
+    return labels;
+}
+
+// #2400: code 0 counts the requests the type rows already list, so they are
+// listed once, under their types, and no row says "HTTP 0". Mutation check:
+// restore the `"HTTP " + user (code)` label and the erase of code 0 and the
+// golden and this red on an `HTTP 0` row.
+TEST (RunExportMarkdownTest, NoResponseRequestsAreListedOnceUnderTheirTypes) {
+    const ordered_json document = read_document ("errors-and-budget-failed");
+    ASSERT_EQ (document["report"]["errors"]["byStatusCode"]["0"], 300)
+    << "the fixture has to carry the no-response count for this to test "
+       "anything";
+    const std::string text = render_run_export_markdown (document);
+
+    const std::vector<std::string> expected{ "HTTP 500", "HTTP 503", "timeout",
+        "connection_reset" };
+    EXPECT_EQ (error_row_labels (text), expected) << text;
+    EXPECT_EQ (text.find ("HTTP 0"), std::string::npos) << text;
+}
+
+// A run whose types were never counted (stored before #2400 past the cap) keeps
+// its no-response total as one row, worded as the app words it.
+TEST (RunExportMarkdownTest, NoResponseIsOneRowWhenNoTypeListsThem) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["errors"]["types"] = ordered_json::object ();
+    const std::string text = render_run_export_markdown (document);
+
+    // Most frequent first; the tie at 300 is broken by the code, 0 before 503.
+    const std::vector<std::string> expected{ "HTTP 500", "No response", "HTTP 503" };
+    EXPECT_EQ (error_row_labels (text), expected) << text;
+    EXPECT_NE (text.find ("| No response | 300      |"), std::string::npos) << text;
+    EXPECT_EQ (text.find ("HTTP 0"), std::string::npos) << text;
+}
+
 TEST (RunExportMarkdownTest, AStoppedRunSaysHowFarItGot) {
     const std::string text =
     render_run_export_markdown (read_document ("stopped-early"));
