@@ -82,6 +82,9 @@ on:
       - 'engine/vcpkg.json'
       - 'app/pnpm-lock.yaml'
       - 'VERSION'
+      # Holds the clang-tidy version and installer hash the Windows lint
+      # cache is keyed on, so a bump re-warms it before the next PR asks.
+      - 'scripts/install-clang-tidy.sh'
       - '.github/workflows/cache-warm.yml'
   # The guard below is cheap and catches the regressions that would quietly
   # switch this workflow off, so it runs before they can merge.
@@ -242,6 +245,42 @@ jobs:
           for i in "${!files[@]}"; do
             if [ "${deps[$i]}" != "${deps[0]}" ]; then
               echo "::error::${files[$i]} hashes a different lockfile than ${files[0]} for its pnpm cache, so the warmed store is unreachable from the build that needs it." >&2
+              exit 1
+            fi
+          done
+          echo "All ${#files[@]} workflows agree."
+
+      - name: Assert every workflow shares one Windows clang-tidy cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The warm-clang-tidy job below saves the tree that
+          # scripts/install-clang-tidy.sh extracts on Windows, and the lint
+          # gate and the whole-tree scan restore it. actions/cache matches on
+          # the key and versions an entry by its path, so both have to be
+          # identical in all three files, or the warmed entry is one nothing
+          # reads. Each file's `path:` line sits directly above its `key:`.
+          files=(pr-tests.yml engine-tidy-scan.yml cache-warm.yml)
+          entries=()
+          for f in "${files[@]}"; do
+            p=".github/workflows/$f"
+            entry=$(awk '/^[[:space:]]*key: clang-tidy-windows-/ { sub(/^[[:space:]]+/, "", prev); sub(/^[[:space:]]+/, "", $0); print prev " | " $0 } { prev = $0 }' "$p" | sort -u)
+            # A guard that matched nothing would pass forever. Fail instead.
+            if [ -z "$entry" ]; then
+              echo "::error::$p has no Windows clang-tidy cache key line - this guard just stopped guarding it." >&2
+              exit 1
+            fi
+            if [ "$(printf '%s\n' "$entry" | wc -l)" -ne 1 ]; then
+              echo "::error::$p disagrees with itself on the Windows clang-tidy cache path or key." >&2
+              printf '%s\n' "$entry" >&2
+              exit 1
+            fi
+            entries+=("$entry")
+            echo "  $f  $entry"
+          done
+          for i in "${!files[@]}"; do
+            if [ "${entries[$i]}" != "${entries[0]}" ]; then
+              echo "::error::${files[$i]} caches clang-tidy under a different path or key than ${files[0]}, so the warmed tree is unreachable from the lint that needs it." >&2
               exit 1
             fi
           done
@@ -612,3 +651,43 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Store path: \`$store\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Store size: \`${size:-unknown}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # The Windows clang-tidy the lint gate and the whole-tree scan use comes from
+  # a 435 MB LLVM installer (scripts/install-clang-tidy.sh), and the 73 MB it
+  # keeps is cached. Pull requests cannot read each other's caches, and a push
+  # to master runs no lint step, so until this job existed nothing saved the
+  # tree where every pull request could read it: each one's first push
+  # downloaded the installer again, about 25 s of its Windows lint.
+  warm-clang-tidy:
+    name: Warm clang-tidy on windows-latest
+    needs: guard
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Path and key byte-identical to pr-tests.yml and engine-tidy-scan.yml;
+      # the guard job asserts it. The post step saves on a miss.
+      - name: Restore clang-tidy (Windows)
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/clang-tidy
+          key: clang-tidy-windows-${{ hashFiles('scripts/install-clang-tidy.sh') }}
+
+      # A no-op on a hit beyond checking the version; on a miss it downloads,
+      # verifies the pinned hash and extracts. Either way the script asserts
+      # the binary it leaves answers to the pinned version.
+      - name: Install clang-tidy into the cached tree
+        shell: bash
+        run: |
+          tidy="$(bash scripts/install-clang-tidy.sh)"
+          "$tidy" --version
+          {
+            echo "### Windows clang-tidy"
+            echo ""
+            echo "- Cache hit: \`${{ steps.cache.outputs.cache-hit || 'false' }}\`"
+            echo "- Binary: \`$tidy\`"
+          } >> "$GITHUB_STEP_SUMMARY"

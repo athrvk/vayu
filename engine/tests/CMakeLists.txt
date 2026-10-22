@@ -48,6 +48,7 @@ add_executable(vayu_tests
     bounds_primitives_test.cpp
     db_concurrency_test.cpp
     db_recovery_test.cpp
+    storage_error_test.cpp
     health_route_test.cpp
     rate_limit_test.cpp
     metrics_helper_test.cpp
@@ -66,14 +67,17 @@ add_executable(vayu_tests
     sse_stream_test.cpp
     server_bind_test.cpp
     server_gate_test.cpp
+    httplib_resolver_test.cpp
     request_log_test.cpp
     log_category_scan_test.cpp
     log_record_schema_test.cpp
+    script_error_log_test.cpp
     numeric_flag_test.cpp
     high_resolution_timer_test.cpp
     platform_test.cpp
     file_lock_test.cpp
     worker_count_test.cpp
+    script_config_test.cpp
     argument_rules_test.cpp
     transport_policy_test.cpp
     loopback_guard_test.cpp
@@ -375,6 +379,8 @@ set(vayu_scratch_database_suites
     CollectionsRouteTest
     ConfigRouteTest
     ConfigSeedTest
+    ScriptConfigDbTest
+    ScriptConfigExecuteTest
     ConfigSnapshotExecuteTest
     ExecuteAuthProvenanceTest
     ExecuteBinaryBodyTest

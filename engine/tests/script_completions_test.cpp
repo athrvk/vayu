@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "chai_conformance_table.hpp"
+#include "library_call_config.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/types.hpp"
@@ -726,7 +727,7 @@ TEST (ScriptCompletions, TheLodashGlobalIsOfferedAndBound) {
     EXPECT_NE (item->value ("documentation", std::string{}).find ("require('lodash')"),
     std::string::npos);
 
-    vayu::runtime::ScriptEngine engine;
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
     vayu::Request request;
     vayu::Response response;
     vayu::Environment env;

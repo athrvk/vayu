@@ -51,6 +51,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -60,6 +61,7 @@
 #include <nlohmann/json.hpp>
 
 #include "competing_writer.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -1697,6 +1699,37 @@ APostmanProtocolBehaviorStringOfAHundredThousandMembersIsParsedInLinearTime) {
     ASSERT_EQ (status, 200) << created.dump ().substr (0, 200);
     EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
     EXPECT_EQ (created["postmanProtocolBehavior"], vayu::tests::wide_object_json ());
+}
+
+// The string spelling is a client's text that the request body's depth bound
+// (#2417) never looks inside, and the applier re-serializes it with a `dump ()`
+// that recurses, so one nested past the bound is refused before that runs
+// (#2672). Mutation check: drop the `json_within_depth` check in
+// `apply_postman_protocol_behavior_field` and the first case crashes the test
+// binary.
+TEST_F (ResourceWriteRouteTest, APostmanProtocolBehaviorStringNestedPastTheBoundIsA400) {
+    constexpr std::size_t bound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+    const std::string message =
+    "Invalid 'postmanProtocolBehavior': nested deeper than " +
+    std::to_string (bound) + " levels";
+    for (const std::size_t levels : { std::size_t{ 100'000 }, bound + 1 }) {
+        json body = protocol_request (make_collection ());
+        body["postmanProtocolBehavior"] = vayu::tests::nested_object_text (levels, "1");
+        auto [status, answer] = create_request_response (*db_, body);
+        EXPECT_EQ (status, 400) << levels;
+        EXPECT_EQ (answer["error"]["message"], message) << levels;
+    }
+}
+
+// The other side of the bound: a string that fits is stored as written.
+TEST_F (ResourceWriteRouteTest, APostmanProtocolBehaviorStringNestedToTheBoundIsStored) {
+    constexpr std::size_t bound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+    const std::string at_bound = vayu::tests::nested_object_text (bound, "1");
+    json body                  = protocol_request (make_collection ());
+    body["postmanProtocolBehavior"] = at_bound;
+    auto [status, created]          = create_request_response (*db_, body);
+    ASSERT_EQ (status, 200) << created.dump ().substr (0, 200);
+    EXPECT_EQ (created["postmanProtocolBehavior"], at_bound);
 }
 
 TEST_F (ResourceWriteRouteTest, AMalformedProtocolSettingIsA400NamingIt) {

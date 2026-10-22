@@ -1327,14 +1327,19 @@ row exists - and the executor is the only thing that differs.
 
 Shutdown unwinds that in a fixed order, because every one of these threads
 holds references to state `main` owns: HTTP server stopped **and its stream
-consumers drained** (`Server::stop()` calls `SseStreamManager::shutdown()`,
+consumers drained** (`Server::stop()` closes the listener, joins its accept
+loop's thread once the requests in flight have been answered - also when the
+loop had already ended on its own, which is what the daemon's wait reads as a
+reason to shut down (#2667) - then calls `SseStreamManager::shutdown()`,
 which signals every stream and joins its worker) → run workers signalled and
 joined (each joins its own metrics and monitor threads and stops its event loop
 first) → the start-of-session recovery backup refresh interrupted and joined →
 the recovery backup refreshed once more, bounded by a deadline
 (`Database::refresh_recovery_backup_on_shutdown`, #2421) → `curl_global_cleanup`
 → `Database` / `RunManager` destroyed at scope exit → the instance lock
-released. Nothing is detached.
+released. One thread can be detached: a request handler still running three
+seconds into `Server::stop()` leaves the accept loop's thread unjoined, and
+the teardown above then runs underneath it.
 
 The stream drain belongs to `stop()` rather than to `~Server` because
 `curl_global_cleanup` runs *between* the two: a consumer joined only by the
@@ -1374,7 +1379,8 @@ Default configuration values (from `constants.hpp`):
 | DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
 | Max Response Body | 32MB | Per load-test transfer; larger fails the request |
 | Script Memory | 64MB | QuickJS memory limit |
-| Script Timeout | 5s | Script execution timeout |
+| Script Timeout | 5s | Script execution timeout (1ms to 60s; there is no "no limit") |
+| Script Stack | 256KB | QuickJS stack size (64KB to 256KB, lowered only) |
 | Stats Interval | 100ms | Metrics collection interval |
 
 ## Data Directory Structure

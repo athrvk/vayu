@@ -24,9 +24,11 @@ void seed_scripting (ConfigSeeder& seed, int64_t now) {
     "How long a pre- or post-request script may run. A script "
     "that exceeds this is aborted and reported as an error, so an infinite "
     "loop "
-    "cannot hang the engine. 0 disables the limit, which is not recommended.",
+    "cannot hang the engine. There is no way to turn the limit off.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS),
-    "0", "60000", std::nullopt, now })));
+    std::to_string (vayu::core::constants::script_engine::SCRIPT_TIMEOUT_MIN_MS),
+    std::to_string (vayu::core::constants::script_engine::SCRIPT_TIMEOUT_MAX_MS),
+    std::nullopt, now })));
 
     seed (keywords ({ "debug", "print" }) (ConfigEntry{ "scriptEnableConsole",
     vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false", "boolean", "Enable Script Console",
@@ -51,11 +53,12 @@ void seed_scripting (ConfigSeeder& seed, int64_t now) {
     seed (advanced (
     unit ("bytes") (keywords ({ "recursion" }) (ConfigEntry{ "scriptStackSize",
     std::to_string (vayu::core::constants::script_engine::STACK_SIZE), "integer", "Script Stack Size",
-    "Depth of the call stack one script execution may use. Raise it only for a "
-    "script that recurses deeply enough to overflow.",
+    "Size of the call stack one script execution may use. It can only be "
+    "lowered from the default: a larger stack would overflow the native "
+    "thread the script runs on.",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::STACK_SIZE),
-    "65536",   // 64KB
-    "1048576", // 1MB
+    std::to_string (vayu::core::constants::script_engine::STACK_SIZE_MIN),
+    std::to_string (vayu::core::constants::script_engine::STACK_SIZE_MAX),
     std::nullopt, now }))));
 }
 

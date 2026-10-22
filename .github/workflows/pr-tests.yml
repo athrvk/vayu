@@ -906,10 +906,11 @@ jobs:
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
 
       # The Windows leg's clang-tidy is extracted from a 455 MB LLVM installer
-      # (`scripts/install-clang-tidy.sh`); the 73 MB it keeps is cached, so
-      # only the first run after the pin moves downloads it. The key is the
-      # script, which holds the version and the hash. Linux installs from apt
-      # and caches nothing.
+      # (`scripts/install-clang-tidy.sh`); the 73 MB it keeps is cached, and
+      # `cache-warm.yml` saves it in master's scope, which every pull request
+      # reads, so only a pull request that moves the pin downloads it. The key
+      # is the script, which holds the version and the hash. Linux installs
+      # from apt and caches nothing.
       - name: Restore clang-tidy (Windows)
         if: >-
           github.event_name == 'pull_request'

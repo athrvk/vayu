@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -90,6 +91,35 @@ inline const char* column_text (sqlite3_stmt* stmt, int column_index) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     return reinterpret_cast<const char*> (sqlite3_column_text (stmt, column_index));
 }
+
+/**
+ * @brief How a storage write failed, as far as a caller can act on it.
+ *
+ * `Full` is `SQLITE_FULL`: the disk holding the database has no room, and
+ * freeing space is the cure. `Busy` is `SQLITE_BUSY` or `SQLITE_LOCKED` after
+ * the busy timeout: another connection held the file, and the same call is
+ * worth repeating. `Other` is every remaining SQLite failure (an I/O error, a
+ * read-only file, a file that cannot be opened, corruption): nothing the
+ * caller sent was wrong and nothing it can do will help.
+ */
+enum class StorageFailure : std::uint8_t { Full, Busy, Other };
+
+struct StorageError {
+    StorageFailure kind = StorageFailure::Other;
+    /// SQLite's own words, de-duplicated; for the log, never for the user.
+    std::string message;
+};
+
+/**
+ * @brief Sort an exception a write caught into a storage failure, or nothing.
+ *
+ * A `std::system_error` in sqlite_orm's SQLite category is a storage failure
+ * and any other exception (a `nlohmann::json` parse error, a validation
+ * `std::runtime_error`, a `std::filesystem_error` whose errno 13 is not
+ * `SQLITE_FULL`) answers `std::nullopt`: the request itself was at fault.
+ * Same category guard as `classify_probe_failure`.
+ */
+std::optional<StorageError> classify_storage_error (const std::exception& error);
 
 /**
  * Optional filters for the paginated GET /runs list. An unset field is a

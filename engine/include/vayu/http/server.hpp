@@ -114,13 +114,15 @@ class Server {
     /// managers that own listeners or transfers. It holds derived data and can
     /// be dropped at any point without losing anything (see #1150).
     RunSummaryCache run_summary_cache_;
+    /// Every registered handler captures a reference to this, so it is
+    /// declared before server_ for the same reason as the members above.
+    std::unique_ptr<routes::RouteContext> route_ctx_;
     httplib::Server server_;
     std::thread server_thread_;
     /// Ready once `server_thread_`'s accept loop has returned, so `stop()` can
     /// join the moment it does instead of re-checking on a fixed quantum.
     std::future<void> server_thread_exited_;
     std::atomic<bool> is_running_{ false };
-    std::unique_ptr<routes::RouteContext> route_ctx_;
     routes::ShutdownCallback shutdown_callback_;
 };
 

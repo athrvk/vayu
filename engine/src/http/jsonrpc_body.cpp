@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/utils/ordered_json.hpp"
 
 namespace vayu::http {
@@ -46,7 +47,13 @@ std::string jsonrpc_wire_body (const std::string& content) {
     // arrives from a user, being unreadable is an expected answer here, and the
     // members they wrote must come back out in the order they wrote them. A body
     // with a hundred thousand members is still one call to complete.
-    auto parsed = utils::parse_ordered_json (content, utils::ORDERED_JSON_UNBOUNDED);
+    //
+    // Bounded, because the body is a string field the request-body depth bound
+    // (#2417) never looks inside, and completing the call copies and dumps the
+    // tree, both recursive (#2672). A call nested past the bound parses to
+    // nothing, which is the unparseable answer below.
+    auto parsed = utils::parse_ordered_json (
+    content, vayu::core::constants::request_body::MAX_JSON_DEPTH);
 
     // Three of the four inputs leave by this door, and one test covers all
     // three because they are one question - is there a single call object here

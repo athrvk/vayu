@@ -60,7 +60,10 @@ namespace vayu::http {
  *   (interpolation is mode-agnostic - see `request_composer.cpp`), and the
  *   envelope check runs at wire time on the resolved text. A token that never
  *   resolved reaches the wire as typed rather than being wrapped into a
- *   well-formed request carrying nonsense.
+ *   well-formed request carrying nonsense. Text nested deeper than
+ *   `constants::request_body::MAX_JSON_DEPTH` levels takes the same door
+ *   (#2672): the field is a string, so the request-body bound never looked
+ *   inside it, and completing the call would re-serialize it recursively.
  *
  * Members are added to the object the caller wrote rather than to a fresh one,
  * so their key order survives; JSON object members are unordered, so the

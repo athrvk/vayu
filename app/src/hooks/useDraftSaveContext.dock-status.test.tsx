@@ -23,6 +23,7 @@ import { SaveBlockedError } from "@/lib/elements";
 import { useToastStore } from "@/stores/toast-store";
 import { act, renderHook } from "@testing-library/react";
 import { useSaveStore } from "@/stores/save-store";
+import { ApiError } from "@/services/http-client";
 import { useDraftSaveContext } from "./useDraftSaveContext";
 import { useEntityDraft } from "./useEntityDraft";
 
@@ -277,5 +278,29 @@ describe("useDraftSaveContext's save verdict", () => {
 		mount({ id: "a", isDirty: true });
 
 		await expect(registeredSave("a")()).resolves.toBe("saved");
+	});
+});
+
+describe("how a draft save's rejection is reported (#2423)", () => {
+	async function flushRejecting(error: Error) {
+		mount({ id: "a", isDirty: true }, () => Promise.reject(error));
+		return act(() => useSaveStore.getState().flushAll());
+	}
+
+	it("is a disk-full failure when the engine answered 507", async () => {
+		const result = await flushRejecting(
+			new ApiError(507, "insufficient_storage", "The disk holding Vayu's data is full")
+		);
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0, reason: "disk-full" });
+		expect(useSaveStore.getState().lastErrorMessage).toBe(
+			"Couldn't save Test editor - The disk holding Vayu's data is full"
+		);
+	});
+
+	it("is a plain failure for any other rejection", async () => {
+		const result = await flushRejecting(new ApiError(500, "internal_error", "boom"));
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
 	});
 });

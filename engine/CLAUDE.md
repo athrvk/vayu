@@ -158,7 +158,14 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   the members before it, so one object of 100,000 keys is minutes of one core
   in a Debug build. Pass `ORDERED_JSON_UNBOUNDED` where the caller bounds depth
   itself (`read_document` does, on the finished tree) and a depth where it
-  does not. Only text the engine wrote itself, at a size no client chose, may
+  does not. JSON carried inside a *string* field is outside the request-body
+  depth bound (`parse_request_json`, #2417), so whoever parses it bounds it at
+  `constants::request_body::MAX_JSON_DEPTH` before anything copies or `dump`s
+  it (#2672): `jsonrpc_wire_body` parses with that depth,
+  `graphql_get_parameters` and the `pm` GraphQL view probe `exceeds_depth`, and
+  `postmanProtocolBehavior` measures with `json_within_depth`. Each has a
+  crash-depth test and an at-bound test in its suite. Only text the engine wrote
+  itself, at a size no client chose, may
   keep `ordered_json::parse`; a stored row is not that (its members are a
   client's), so `engine/src` has no such site today. A file that aliases the
   type (`using json = nlohmann::ordered_json`) makes `json::parse` the same
@@ -318,6 +325,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `<redacted>` and a field whose name ends `url`/`Url` is stripped to
   scheme/host/path, both in `Logger::write` before either sink sees the
   record (`utils/log_redact.hpp`) - a caller never redacts its own fields.
+  `msg` is never redacted, so text a user's script authored (a thrown message)
+  is a field, bounded through `vayu::utils::bounded_log_text`
+  (`utils/log_text.hpp`, 512 bytes, #2359), and never part of `msg`.
   The file sink writes one JSON line per record (validated in tests against
   `docs/engine/log-record.schema.json`); the console renders the same record
   as text. `vayu::utils::Logger` keeps its console verbosity (`-v 0|1|2`:
@@ -510,6 +520,21 @@ logged as a warning: it means a client skipped composition.
   per-resource appliers (`apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
   field added there reaches bulk import too.
+- **A route's `catch (const std::exception&)` answers through `send_exception`,
+  never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
+  failure is not the request's fault: `vayu::db::classify_storage_error`
+  (`db/database.hpp`, beside `classify_probe_failure`) reads sqlite_orm's
+  `std::system_error` - the category check is required, because an errno shares
+  its numbers - and `send_exception` answers `SQLITE_FULL` with `507
+  insufficient_storage`, `SQLITE_BUSY` / `SQLITE_LOCKED` with `503 unavailable`
+  plus `Retry-After: 1`, any other SQLite code with `500`, and everything else
+  (a JSON parse error, a validation throw) with the `400` it always had. The
+  body never quotes SQLite. Only a read-only or compute route (`spec_match`,
+  `spec_export`, `spec_diff`, `spec_describe`, `postman_export`) may keep the
+  bare `400`; `SendExceptionGuard` in `tests/storage_error_test.cpp` scans
+  `src/http/routes` for the rest. No test drives a real `SQLITE_FULL` through a
+  handler - `Database` has no pragma seam to fill a scratch database - so the
+  handlers are held by that scan plus the unit tests of the two functions.
 - **A core that reads, decides and writes holds one lock** (#386, #1440,
   #1453, #1454, #1455, #1878, #1906). `Database::with_lock` scopes the mutex around
   the whole composite; a merge-patch is `update_<resource>_locked` called inside

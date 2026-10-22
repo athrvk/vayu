@@ -31,11 +31,14 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 
 #include <nlohmann/json.hpp>
 
+#include "nested_json.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/types.hpp"
 
@@ -111,6 +114,16 @@ Body graphql_body (std::string_view content) {
 std::string wire_query (std::string_view content) {
     const std::string wire = vayu::http::graphql_wire_body (std::string{ content });
     return nlohmann::json::parse (wire).at ("query").get<std::string> ();
+}
+
+/// The bound a request body's JSON may nest to (#2417), which the graphql
+/// envelope held in a string field answers to as well (#2672).
+constexpr std::size_t kBodyDepthBound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+
+/// `{"query":"{ a }","variables":{"a":{...1}}}` with `variables` @p levels deep.
+std::string envelope_with_variables (std::size_t levels) {
+    return R"({"query":"{ a }","variables":)" +
+    vayu::tests::nested_object_text (levels, "1") + "}";
 }
 
 /// A C++ string as a JavaScript string literal, for a script built around one.
@@ -272,6 +285,34 @@ TEST_F (ScriptRequestBodyTest, AnUnreadableEnvelopeIsNotGuessedAt) {
         pm.expect(pm.request.body.graphql).to.equal(undefined);
         pm.expect(pm.request.body.raw).to.include('{{savedQuery}}');
     )JS");
+}
+
+/**
+ * The envelope is read with a `dump ()` that recurses, and the body is a string
+ * field the request-body depth bound (#2417) never looks inside, so one nested
+ * past that bound is answered as unreadable - the same answer, and the same
+ * bound, as the GET transport gives it - rather than overflowing the stack
+ * (#2672). The envelope's own root is the first level. Mutation check: drop the
+ * `exceeds_depth` probe in `body_graphql_view` and the first body crashes the
+ * test binary.
+ */
+TEST_F (ScriptRequestBodyTest, AnEnvelopeNestedPastTheBoundIsNotRead) {
+    for (const std::size_t levels : { std::size_t{ 50'000 }, kBodyDepthBound }) {
+        request.body = graphql_body (envelope_with_variables (levels));
+        expect_script_passes (R"JS(
+            pm.expect(pm.request.body.mode).to.equal('graphql');
+            pm.expect(pm.request.body.graphql).to.equal(undefined);
+        )JS");
+    }
+}
+
+/// The other side of the bound: an envelope that fits is still read.
+TEST_F (ScriptRequestBodyTest, AnEnvelopeNestedExactlyToTheBoundIsStillRead) {
+    request.body = graphql_body (envelope_with_variables (kBodyDepthBound - 1));
+    expect_script_passes (
+    "pm.expect(pm.request.body.graphql.query).to.equal('{ a }');"
+    "pm.expect(JSON.stringify(pm.request.body.graphql.variables)).to.equal(" +
+    js_literal (vayu::tests::nested_object_text (kBodyDepthBound - 1, "1")) + ");");
 }
 
 /// An empty body has no query, and inventing one would give a bodiless request

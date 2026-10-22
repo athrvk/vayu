@@ -16,11 +16,18 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <memory>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
+
+#if defined(__linux__)
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -28,8 +35,10 @@
 #include "vayu/http/server.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include "mock_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -165,7 +174,7 @@ TEST_F (ServerBindTest, AFreePortStartsAndServesWithNoRecordedError) {
 
     httplib::Client client ("127.0.0.1", port);
     auto response = client.Get ("/health");
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 200);
 
     server.stop ();
@@ -257,7 +266,7 @@ TEST_F (ServerBindTest, AnImportBodyOverTheLimitNeverReachesTheRouteOverASocket)
         httplib::Client fresh ("127.0.0.1", port);
         within_limit = fresh.Post ("/import/parse", "[]", "application/json");
     }
-    ASSERT_TRUE (within_limit);
+    ASSERT_TRUE (within_limit) << httplib::to_string (within_limit.error ());
     EXPECT_EQ (within_limit->status, 400);
 
     server.stop ();
@@ -276,14 +285,15 @@ TEST_F (ServerBindTest, EveryResponseCarriesNoStoreCacheControl) {
 
     httplib::Client client ("127.0.0.1", port);
     auto health_response = client.Get ("/health");
-    ASSERT_TRUE (health_response);
+    ASSERT_TRUE (health_response) << httplib::to_string (health_response.error ());
     EXPECT_EQ (health_response->get_header_value ("Cache-Control"), "no-store");
 
     // The header comes from one call site (set_default_headers), but a second,
     // unrelated JSON route pins that it is truly a server-wide default rather
     // than something that happened to land on /health alone.
     auto collections_response = client.Get ("/collections");
-    ASSERT_TRUE (collections_response);
+    ASSERT_TRUE (collections_response)
+    << httplib::to_string (collections_response.error ());
     EXPECT_EQ (collections_response->get_header_value ("Cache-Control"), "no-store");
 
     server.stop ();
@@ -315,7 +325,7 @@ TEST_F (ServerBindTest, AResponseIsNeverCompressedForALoopbackClient) {
     // The config catalogue: JSON, and large enough that a compressing server
     // would compress it.
     auto response = client.Get ("/config", browser);
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 200);
     ASSERT_GT (response->body.size (), 4096u)
     << "the body is too within_limit to prove anything";
@@ -350,7 +360,7 @@ TEST_F (ServerBindTest, EachCallProducesOneCentralRequestLogLine) {
     httplib::Headers headers{ { "Authorization", "Bearer secret-token-should-not-be-logged" } };
     auto response =
     client.Get ("/health?token=secret-query-should-not-be-logged", headers);
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 200);
 
     server.stop ();
@@ -389,7 +399,7 @@ TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
     httplib::Client client ("127.0.0.1", port);
     auto response =
     client.Get ("/health", httplib::Headers{ { "Origin", "https://evil.example" } });
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 403);
 
     server.stop ();
@@ -399,6 +409,111 @@ TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
     EXPECT_TRUE (std::regex_search (written,
     std::regex (R"("level":"info".*GET /health 403 \d+(\.\d+)?ms \d+B)")))
     << written;
+}
+
+// `stop()` returns only once the request it found in flight has been answered,
+// because the daemon tears down the run manager, curl's global state and the
+// database right after it (#2667). The upstream holds the engine's `/execute`
+// handler inside its transfer until it is released from another thread, which
+// races `stop()` the way a real shutdown races a finishing request: the
+// handler is always in flight when `stop()` is called, and usually still
+// running when the listener closes. Under ASan a handler that outlived `stop()` is also reported writing
+// through the destroyed Server. Mutation check: make `stop()` detach the
+// listener thread instead of waiting for it, and the result row is missing when
+// it returns.
+TEST_F (ServerBindTest, StopAnswersTheRequestInFlightBeforeReturning) {
+    vayu::tests::SlowMockServer upstream;
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    // `std::async` futures wait for their task on destruction, so no assertion
+    // below can leave a thread running past the objects it uses.
+    auto call = std::async (std::launch::async, [port, url = upstream.hang_url ()] () {
+        httplib::Client client ("127.0.0.1", port);
+        client.set_read_timeout (20, 0);
+        const nlohmann::json payload{ { "method", "GET" }, { "url", url } };
+        const auto response = client.Post ("/execute", payload.dump (), "application/json");
+        return response ? response->status : -1;
+    });
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&upstream] () { return upstream.live_connection_count () > 0; }))
+    << "the /execute handler never reached the upstream";
+
+    auto release = std::async (
+    std::launch::async, [&upstream] () { upstream.released.store (true); });
+    server.stop ();
+    release.get ();
+
+    // The buffered `/execute` stores its result row before it answers.
+    const auto runs = db_->get_runs_paginated (vayu::db::RunFilter{}, 1, 0);
+    EXPECT_FALSE (runs.empty () || db_->get_results (runs.front ().id).empty ())
+    << "stop() returned with the /execute handler still running";
+    EXPECT_EQ (call.get (), 200);
+}
+
+#if defined(__linux__)
+/// The listening socket this process holds on @p port, or -1.
+int listening_socket_on (int port) {
+    constexpr int SCANNED_DESCRIPTORS = 1024;
+    for (int fd = 0; fd < SCANNED_DESCRIPTORS; ++fd) {
+        sockaddr_in address{};
+        socklen_t length = sizeof (address);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (::getsockname (fd, reinterpret_cast<sockaddr*> (&address), &length) != 0 ||
+        address.sin_family != AF_INET ||
+        std::cmp_not_equal (ntohs (address.sin_port), port)) {
+            continue;
+        }
+        int listening      = 0;
+        socklen_t its_size = sizeof (listening);
+        if (::getsockopt (fd, SOL_SOCKET, SO_ACCEPTCONN, &listening, &its_size) == 0 &&
+        listening != 0) {
+            return fd;
+        }
+    }
+    return -1;
+}
+#endif
+
+// An accept loop that ended on its own - an accept error cpp-httplib does not
+// retry - leaves `is_running()` false, which the daemon's wait reads as a
+// reason to shut down. `stop()` must still join the listener thread: destroying
+// a joinable one terminates the process (#2667). Shutting the listening socket
+// down from outside is that error on Linux, where accept then answers EINVAL;
+// other platforms do not promise to wake accept for it, so there is nothing to
+// provoke the path with there. Mutation check: guard `stop()` with
+// `is_running_` again, and this test's process aborts.
+TEST_F (ServerBindTest, AListenerThatEndedOnItsOwnIsStillJoined) {
+#if !defined(__linux__)
+    GTEST_SKIP ()
+    << "needs a way to end the accept loop from outside the server";
+#else
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const int listener = listening_socket_on (port);
+    ASSERT_GE (listener, 0);
+
+    ASSERT_EQ (::shutdown (listener, SHUT_RDWR), 0);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&server] () { return !server.is_running (); }));
+
+    server.stop ();
+    EXPECT_FALSE (server.is_running ());
+#endif
 }
 
 } // namespace

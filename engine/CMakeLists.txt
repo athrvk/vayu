@@ -265,33 +265,6 @@ if(VAYU_USE_TSAN)
     message(STATUS "ThreadSanitizer enabled")
     target_compile_options(vayu_sanitizers INTERFACE -fsanitize=thread -fno-omit-frame-pointer)
     target_link_options(vayu_sanitizers INTERFACE -fsanitize=thread)
-
-    # Turn cpp-httplib's non-blocking resolver off for this build only (#957).
-    #
-    # vcpkg's port sets CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO as an INTERFACE
-    # definition on httplib::httplib. On glibc that selects a `getaddrinfo_a`
-    # implementation, and glibc services that call on a worker thread it creates
-    # *internally* - one that never passes ThreadSanitizer's `pthread_create`
-    # interceptor. The thread therefore has no TSan ThreadState, and the first
-    # malloc on it dereferences a null per-thread cache: `this=0x8` inside
-    # SizeClassAllocator64LocalCache::Allocate. That is a crash in the sanitizer
-    # runtime rather than a report, so no suppression can reach it, and it took
-    # out all 58 socket-opening tests on `linux-tsan` deterministically.
-    #
-    # Undefined rather than removed from the interface, because CMake emits
-    # <DEFINES> before <FLAGS> on the compile line, so a `-U` here reliably wins
-    # over the `-D` the imported target contributes. httplib then compiles its
-    # `#else` branch, a plain synchronous getaddrinfo.
-    #
-    # What this costs is one behaviour the TSan leg no longer exercises: the
-    # per-resolve timeout, which that branch does not implement (`timeout_sec`
-    # is explicitly ignored there). No test asserts on it - the suite resolves
-    # localhost - and the shipping build is untouched, so ASan on all three
-    # platforms and the ordinary builds keep the non-blocking resolver. Scoping
-    # it to VAYU_USE_TSAN is the whole point: the async path stays covered
-    # everywhere it can be.
-    target_compile_options(vayu_sanitizers INTERFACE
-        -UCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO)
 endif()
 
 # ============================================================================
@@ -324,6 +297,27 @@ find_package(CURL REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(httplib CONFIG REQUIRED)
+# cpp-httplib resolves names on its plain synchronous `getaddrinfo` branch in
+# every build (#2667). vcpkg's port puts CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO
+# on this interface, which on glibc selects `getaddrinfo_a()` with the request
+# (`struct gaicb`) on the caller's stack. glibc finds a request by that
+# address, so a client's next resolve from the same frame can be woken by the
+# previous request's completion; httplib then reports the still-running one
+# as a failure and returns, and glibc's resolver thread goes on to read and
+# write the dead frame. The symptom is a request that fails without reaching
+# the server and then a SIGSEGV no sanitizer can see, since glibc is not
+# instrumented. That thread is also created where ThreadSanitizer's
+# `pthread_create` interceptor never sees it, which crashed every
+# socket-opening test on linux-tsan (#957). All the branch buys is a timeout
+# on resolving for an httplib *client*, and the engine's one such client is
+# vayu-cli dialling its daemon URL, a loopback literal unless told otherwise.
+# `httplib_resolver_test.cpp` fails if the definition comes back.
+get_target_property(_httplib_definitions httplib::httplib INTERFACE_COMPILE_DEFINITIONS)
+if(_httplib_definitions)
+    list(FILTER _httplib_definitions EXCLUDE REGEX "CPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO")
+    set_target_properties(httplib::httplib PROPERTIES
+        INTERFACE_COMPILE_DEFINITIONS "${_httplib_definitions}")
+endif()
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SqliteOrm CONFIG REQUIRED)
 find_package(valijson CONFIG REQUIRED)
@@ -580,6 +574,7 @@ add_library(vayu_core STATIC
     src/core/import_document.cpp
     src/core/jmeter_import.cpp
     src/core/script_api_scan.cpp
+    src/core/script_config.cpp
     src/core/openapi_document.cpp
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp

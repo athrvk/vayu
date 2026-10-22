@@ -20,6 +20,7 @@
 import { create } from "zustand";
 
 import { TIMING } from "@/config/timing";
+import { isDiskFullError } from "@/lib/disk-full";
 import { useToastStore } from "./toast-store";
 
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
@@ -35,8 +36,24 @@ export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
  * `final` is a failure the engine will repeat for this payload (a 4xx, #1889):
  * the same as `failed` to every reader of the count, and the one a caller that
  * retries must not retry.
+ *
+ * `disk-full` is a `failed` that knows its cause (the engine's 507, #2423): it
+ * counts as failed and is retried like one, and `flushAll` carries the cause to
+ * the quit prompt so that does not blame the engine for a full disk.
  */
-export type SaveOutcome = "saved" | "failed" | "final" | "pending";
+export type SaveOutcome = "saved" | "failed" | "final" | "disk-full" | "pending";
+
+/**
+ * What `flushAll` reports. `FlushResult` in `electron/save-flush.ts` is the same
+ * shape on the other side of the IPC hop. `reason` is present only when it
+ * explains every failure.
+ */
+export interface FlushTally {
+	saved: number;
+	failed: number;
+	pending: number;
+	reason?: "disk-full";
+}
 
 type FillIn = (context: SaveContext) => void;
 
@@ -149,7 +166,7 @@ interface SaveState {
 	 * decides whether a failure or a still-pending edit is worth asking about
 	 * before the window goes away, so this counts rather than swallows them.
 	 */
-	flushAll: () => Promise<{ saved: number; failed: number; pending: number }>;
+	flushAll: () => Promise<FlushTally>;
 }
 
 export const useSaveStore = create<SaveState>((set, get) => {
@@ -180,6 +197,9 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// publish `pending` (`completeSaveThenIdle` holds another dirty context
 	// against a success), and the next context to resolve would read that as its
 	// own verdict. The batch fills in once, after every verdict is in.
+	//
+	// Silence cannot name a cause: `failSave` receives text, not the error, so
+	// such a context reads `failed` even when its write met a 507.
 	const outcomeFromPublishedStatus = (context: SaveContext, fillIn: FillIn): SaveOutcome => {
 		const published = get().status;
 		if (published === "error") return "failed";
@@ -221,7 +241,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			get().failSave(
 				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
 			);
-			return "failed";
+			return isDiskFullError(error) ? "disk-full" : "failed";
 		}
 	};
 
@@ -361,16 +381,25 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			if (last && !["error", "pending"].includes(get().status)) {
 				get().completeSaveThenIdle(last.id);
 			}
-			const count = (wanted: SaveOutcome) =>
-				outcomes.filter((outcome) => outcome === wanted).length;
+			const count = (...wanted: SaveOutcome[]) =>
+				outcomes.filter((outcome) => wanted.includes(outcome)).length;
+			const failed = count("failed", "final", "disk-full");
+			// The cause is named only when it explains every failure: one context
+			// that failed for another reason (a dead engine) makes the prompt's
+			// generic wording the honest one, and "the disk is full" would send the
+			// user to free space that is not the problem. The key is absent rather
+			// than `undefined` when there is no cause, so the result keeps the
+			// three-count shape its consumers compare against.
+			const diskFullOnly = failed > 0 && count("disk-full") === failed;
 			// `pending` is a context that settled without persisting its edit (a
 			// blocked save, an edit that landed mid-flight). The caller (`main.ts`,
 			// #1489) also sees the case no completed flush can represent - the 2s
-			// ceiling firing before the renderer answers - as a `null` result.
+			// ceiling firing before the renderer answered - as a `null` result.
 			return {
 				saved: count("saved"),
-				failed: count("failed") + count("final"),
+				failed,
 				pending: count("pending"),
+				...(diskFullOnly && { reason: "disk-full" as const }),
 			};
 		},
 	};

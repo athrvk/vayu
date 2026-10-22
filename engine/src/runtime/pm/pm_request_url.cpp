@@ -20,11 +20,13 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/query_encoding.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/json.hpp"
 
 namespace vayu::runtime::pm_detail {
 
@@ -1533,10 +1535,12 @@ JSValue body_field_list (JSContext* ctx, const std::vector<FormField>& fields, b
  * - A readable envelope: its own `query`, and `variables` when it carries them.
  * - A bare document: `{query: <the document>}` - what wrapping it would send.
  * - Object-shaped text that does not parse (an envelope whose `{{token}}` went
- *   unresolved, or a mistyped one): **undefined**. `graphql_wire_body` passes
- *   that through untouched rather than guessing at it, and any pair invented
- *   here would be the guess it refuses. `.raw` still carries the string, so the
- *   body is described as unreadable rather than hidden.
+ *   unresolved, or a mistyped one), or that nests deeper than
+ *   `constants::request_body::MAX_JSON_DEPTH` levels: **undefined**.
+ *   `graphql_wire_body` passes that through untouched rather than guessing at
+ *   it, and any pair invented here would be the guess it refuses. `.raw` still
+ *   carries the string, so the body is described as unreadable rather than
+ *   hidden.
  *
  * An empty body answers `undefined` for the reason the header gives: empty in,
  * empty out, and `{query: ""}` would give a bodiless request a query.
@@ -1568,6 +1572,13 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
     if (document.is_discarded ()) {
         // The classifier's object-shaped-but-unreadable case: it said envelope
         // on the shape alone, and there is nothing under the shape to read.
+        return JS_UNDEFINED;
+    }
+    // The body is a string field the request-body depth bound (#2417) never
+    // looks inside, and the `dump` below recurses (#2672). An envelope nested
+    // past the bound is unreadable, the answer `graphql_get_parameters` gives
+    // it too, so the two readers of one body still agree.
+    if (vayu::json::exceeds_depth (document, vayu::core::constants::request_body::MAX_JSON_DEPTH)) {
         return JS_UNDEFINED;
     }
     // QuickJS is handed what nlohmann *read*, never the bytes it read them from.

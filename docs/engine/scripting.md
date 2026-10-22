@@ -926,7 +926,7 @@ pm.request.body.mode         // 'urlencoded' | 'formdata' | 'graphql' | 'file' |
 pm.request.body.raw          // the body as a string, for every mode
 pm.request.body.urlencoded   // [{key, value, disabled}, ...] or undefined
 pm.request.body.formdata     // [{key, value?, type, fileName?, disabled}, ...] or undefined
-pm.request.body.graphql      // {query, variables?} or undefined
+pm.request.body.graphql      // {query, variables?} or undefined (unreadable, or nested past 128 levels)
 pm.request.body.file         // {name, size?} or undefined
 pm.request.body.length       // the body string's own length
 ```
@@ -972,6 +972,9 @@ Three things worth knowing before scripting against it:
   unresolved `{{token}}`, or a mistyped envelope. The send passes such a body
   through untouched rather than wrapping something it could not read, and a pair
   invented here would be the guess it refuses. `.raw` still carries the string.
+  So does an envelope **nested deeper than 128 levels**, its own root counted
+  (issue #2672): the body is one string, the request-body depth bound never
+  looks inside it, and the GET transport refuses it by the same bound.
 - **`.raw` stays the whole string in this mode too**, where Postman leaves it
   undefined - the same divergence `.raw` already carries for the two form modes,
   and for the same reason. Assigning `.raw` moves the pair with it.
@@ -1914,8 +1917,7 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
   a blocking C function never yields to it. So the request's timeout is clamped
   to whatever is left of the script's budget; without that, a 5s script calling
   `pm.sendRequest` at the default 30s request timeout would hold its thread for
-  30s with no error and no way to interrupt it. When `scriptTimeout` is `0`
-  there is no budget and nothing to clamp to. A call made with the budget
+  30s with no error and no way to interrupt it. A call made with the budget
   already spent is refused by name - `pm.sendRequest was called with none of
   the script's time budget left` - and that sentence is what the script's error
   reports, since the handler never ran and so never stopped anything.
@@ -3099,8 +3101,9 @@ script's memory limit, so this is what bounds it.
 
 **An interval nothing clears ends the script with an error.** Clear it from its
 own callback when it is done. Otherwise it runs until the deadline stops it,
-`Script execution timed out after <n>ms`, or, with `scriptTimeout` at `0`, until
-the cap on asynchronous work in [Limitations](#limitations) does.
+`Script execution timed out after <n>ms`. (Only an engine run with no deadline
+at all, which no setting produces, falls to the cap on asynchronous work in
+[Limitations](#limitations).)
 
 ### Top-level `await`
 
@@ -3294,10 +3297,19 @@ The **language** is current; what is missing is the **host environment**:
   response byte bound its path reads, and refused outright for agent-started
   runs.
 - **Memory limit**: 64MB per script execution
+- **Stack size**: 256KB per script execution (default), configurable through
+  `scriptStackSize` from 64KB to 256KB, so it can only be lowered. QuickJS
+  measures its ceiling from where the runtime is created, already some frames
+  into the worker thread, and a secondary thread has 512KB on macOS (Windows
+  gives 1MB) - no engine thread sets its own stack size - so a 512KB ceiling
+  would overflow the native thread before QuickJS could refuse the recursion;
+  256KB is the size proven on it. A value an older engine stored above it is
+  read as 256KB.
 - **Timeout**: 5 seconds per script (default), enforced by a wall-clock deadline - an
   infinite-loop script is aborted and reported as an error rather than hanging the
-  engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
-  the limit. The deadline is checked *between bytecode operations*, so it cannot
+  engine. Configurable via the `scriptTimeout` setting (milliseconds, 1 to 60000);
+  there is no way to turn the limit off, and a `0` stored by an older engine
+  (it meant "no limit") is read as the 5s default. The deadline is checked *between bytecode operations*, so it cannot
   interrupt a blocking call - which is why `pm.sendRequest` clamps its own
   timeout to the budget that is left rather than relying on it. **A script is
   reported as timed out when the deadline actually stopped it**, not whenever
@@ -3316,11 +3328,12 @@ The **language** is current; what is missing is the **host environment**:
   #2577): the queues a script leaves are drained inside the same budget,
   checked between jobs and timer callbacks as well as inside one, so a runaway
   `while (true) await null;` or an uncleared `setInterval` stops with the same
-  `Script execution timed out after <n>ms`. With `scriptTimeout` at `0` there
-  is no deadline to bound the drain, so it stops after 100,000 jobs and timer
-  callbacks together (`MAX_ASYNC_JOBS_WITHOUT_TIMEOUT`) with its own message,
-  `Script stopped after running 100000 promise jobs and timer callbacks: ...`.
-  That cap is provisional until #2359 settles what `0` means. A job or timer
+  `Script execution timed out after <n>ms`. The setting always yields a
+  deadline (#2359), so the drain is bounded by it; only an engine started with
+  no deadline at all (an embedder or a test) has none, and there the drain stops
+  after 100,000 jobs and timer callbacks together
+  (`MAX_ASYNC_JOBS_WITHOUT_TIMEOUT`) with its own message, `Script stopped
+  after running 100000 promise jobs and timer callbacks: ...`. A job or timer
   left queued by either stop is never run.
 
 ## Script Execution Context
