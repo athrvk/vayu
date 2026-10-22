@@ -142,7 +142,14 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   the members before it, so one object of 100,000 keys is minutes of one core
   in a Debug build. Pass `ORDERED_JSON_UNBOUNDED` where the caller bounds depth
   itself (`read_document` does, on the finished tree) and a depth where it
-  does not. Only text the engine wrote itself, at a size no client chose, may
+  does not. JSON carried inside a *string* field is outside the request-body
+  depth bound (`parse_request_json`, #2417), so whoever parses it bounds it at
+  `constants::request_body::MAX_JSON_DEPTH` before anything copies or `dump`s
+  it (#2672): `jsonrpc_wire_body` parses with that depth,
+  `graphql_get_parameters` and the `pm` GraphQL view probe `exceeds_depth`, and
+  `postmanProtocolBehavior` measures with `json_within_depth`. Each has a
+  crash-depth test and an at-bound test in its suite. Only text the engine wrote
+  itself, at a size no client chose, may
   keep `ordered_json::parse`; a stored row is not that (its members are a
   client's), so `engine/src` has no such site today. A file that aliases the
   type (`using json = nlohmann::ordered_json`) makes `json::parse` the same

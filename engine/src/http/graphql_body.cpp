@@ -13,7 +13,9 @@
 
 #include "vayu/http/graphql_body.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/url_parts.hpp"
+#include "vayu/utils/json.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -87,6 +89,12 @@ std::optional<std::string> graphql_get_parameters (const std::string& content) {
     const auto envelope = nlohmann::json::parse (content, nullptr, false);
     if (envelope.is_discarded () || !envelope.is_object ()) {
         // Envelope-shaped and unreadable - see the header.
+        return std::nullopt;
+    }
+    // The body is a string field the request-body depth bound (#2417) never
+    // looks inside, and the `dump ()` below recurses (#2672). An envelope
+    // nested past the bound is unreadable by the same rule as the one above.
+    if (vayu::json::exceeds_depth (envelope, vayu::core::constants::request_body::MAX_JSON_DEPTH)) {
         return std::nullopt;
     }
 

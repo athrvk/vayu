@@ -10,7 +10,9 @@
  * @brief Request management routes
  */
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/core/json_depth.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
@@ -451,6 +453,16 @@ bool is_create) {
             return route_error (400,
             "Invalid 'postmanProtocolBehavior': must be an object, a string "
             "holding a JSON object, or null");
+        }
+        // The request body's depth bound (#2417) never looks inside a string,
+        // and `dump ()` recurses (#2672). `json_within_depth` rather than
+        // `exceeds_depth`: this tree is an `ordered_json`, and it is the
+        // measure `parse_ordered_json`'s own bound uses.
+        constexpr size_t max_depth = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+        if (!vayu::core::json_within_depth (*parsed, max_depth)) {
+            return route_error (400,
+            std::format (
+            "Invalid 'postmanProtocolBehavior': nested deeper than {} levels", max_depth));
         }
         dumped = parsed->dump ();
     } else {

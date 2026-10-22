@@ -926,7 +926,7 @@ pm.request.body.mode         // 'urlencoded' | 'formdata' | 'graphql' | 'file' |
 pm.request.body.raw          // the body as a string, for every mode
 pm.request.body.urlencoded   // [{key, value, disabled}, ...] or undefined
 pm.request.body.formdata     // [{key, value?, type, fileName?, disabled}, ...] or undefined
-pm.request.body.graphql      // {query, variables?} or undefined
+pm.request.body.graphql      // {query, variables?} or undefined (unreadable, or nested past 128 levels)
 pm.request.body.file         // {name, size?} or undefined
 pm.request.body.length       // the body string's own length
 ```
@@ -972,6 +972,9 @@ Three things worth knowing before scripting against it:
   unresolved `{{token}}`, or a mistyped envelope. The send passes such a body
   through untouched rather than wrapping something it could not read, and a pair
   invented here would be the guess it refuses. `.raw` still carries the string.
+  So does an envelope **nested deeper than 128 levels**, its own root counted
+  (issue #2672): the body is one string, the request-body depth bound never
+  looks inside it, and the GET transport refuses it by the same bound.
 - **`.raw` stays the whole string in this mode too**, where Postman leaves it
   undefined - the same divergence `.raw` already carries for the two form modes,
   and for the same reason. Assigning `.raw` moves the pair with it.
