@@ -235,10 +235,13 @@ bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view
 
 bool is_refused_reference_url (const std::string& url, const LocalPeerRule& rule) {
     const detail::UrlAuthority authority = detail::parse_authority (url);
-    // Every address spelling this exists for is one the host parser reads; a
-    // host it cannot (a zone id) is left to the connected-peer check.
-    const auto host = canonical_host (authority.host);
-    if (!host || (!is_loopback_source (*host) && !is_link_local_host (*host))) {
+    const auto host                      = canonical_host (authority.host);
+    // An IPv6 literal the host parser cannot read (a zone id) is refused: behind
+    // a proxy no connected peer is left to judge it.
+    if (!host) {
+        return authority.host.find (':') != std::string::npos;
+    }
+    if (!is_loopback_source (*host) && !is_link_local_host (*host)) {
         return false;
     }
     return !is_source_host (*host, authority.port, rule);

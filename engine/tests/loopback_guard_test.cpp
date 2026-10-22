@@ -200,11 +200,11 @@ TEST (LocalPeerRulePredicate, ASourceUrlNamingNoHostHasNoRule) {
 using vayu::http::is_refused_reference_url;
 
 constexpr auto LOCAL_REFERENCE_URLS = std::to_array<const char*> (
-{ "http://127.0.0.1:3000/a", "http://127.1/a", "http://0x7f.0.0.1/a",
-"http://2130706433/a", "http://localhost/a", "http://LOCALHOST.:3000/a",
-"http://dev.localhost/a", "http://[::1]/a", "http://[::ffff:127.0.0.1]/a",
-"http://0.0.0.0/a", "http://[::]/a", "http://169.254.169.254/latest",
-"http://[fe80::1]:8080/a", "https://user:pw@localhost/a" });
+{ "http://127.0.0.1:3000/a", "http://127.1/a", "http://0x7f.0.0.1/a", "http://2130706433/a",
+"http://localhost/a", "http://LOCALHOST.:3000/a", "http://dev.localhost/a",
+"http://[::1]/a", "http://[::ffff:127.0.0.1]/a", "http://0.0.0.0/a", "http://[::]/a",
+"http://169.254.169.254/latest", "http://[fe80::1]:8080/a", "https://user:pw@localhost/a",
+"http://[::1%25lo]:5000/a", "http://[fe80::1%25eth0]/a" });
 
 constexpr auto ELSEWHERE_REFERENCE_URLS = std::to_array<const char*> (
 { "http://example.com/a", "http://10.0.0.1/a", "http://localhost.example.com/a",

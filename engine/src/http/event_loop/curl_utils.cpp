@@ -1344,7 +1344,7 @@ ConnectedPeerCheck* peer_check) {
     // registry is process-wide); a reference fetch's rule rides it (#2364).
     set_opt<CURLOPT_PREREQFUNCTION> (curl, refuse_forbidden_peer);
     set_opt<CURLOPT_PREREQDATA> (curl, peer_check);
-    if (peer_check != nullptr) {
+    if (peer_check != nullptr && peer_check->local_peers != nullptr) {
         peer_check->proxy = configured_proxy (policy);
     }
 
