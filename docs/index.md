@@ -78,6 +78,13 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
     uninstall by re-running it with `-- --uninstall`, which also removes the Start
     at login entry if you turned it on.
 
+    **Do not pin a version older than 0.27.0 over existing data.** Those
+    releases have no check on the database version, so opening a workspace that
+    0.27.0 or later has used empties its requests and collections and overwrites
+    the automatic `.bak` copy, with no error. The installer refuses while a
+    workspace exists, before it downloads anything, and `-- --allow-data-loss`
+    overrides that. Take a **Workspace backup** in Settings first.
+
 === "Windows"
 
     ```powershell
@@ -92,6 +99,13 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
     1. Download [**Vayu-x64.exe**](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe).
     2. Run the installer and follow the wizard. When it finishes, it offers to
        launch Vayu.
+
+    **Pinning an older version.** `winget install athrvk.Vayu --version <x.y.z>`
+    runs the installer of that release, and neither it nor the installer you
+    download can check your data first. Do not install a version older than
+    0.27.0 over a workspace that 0.27.0 or later has opened: it empties your
+    requests and collections without an error. Take a **Workspace backup** in
+    Settings first and restore it if you go back.
 
     **If Windows shows "Windows protected your PC"**, that is SmartScreen
     stopping a file it does not recognise. Vayu is not code-signed, and a
