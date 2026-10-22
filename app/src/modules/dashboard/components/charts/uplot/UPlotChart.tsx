@@ -29,8 +29,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { readUplotTheme, currentThemeKey, type ColorRole } from "./uplotTheme";
 import {
-	markersPlugin,
-	annotationsPlugin,
+	overlaysPlugin,
 	tooltipPlugin,
 	type Marker,
 	type Annotation,
@@ -350,10 +349,11 @@ export function UPlotChart({
 					],
 				},
 				plugins: [
-					// Bands first: they are a background wash, and the markers' dashed
-					// rules must stay legible over them.
-					annotationsPlugin(() => annotationsRef.current, theme),
-					markersPlugin(() => markersRef.current, theme),
+					overlaysPlugin(
+						() => markersRef.current,
+						() => annotationsRef.current,
+						theme
+					),
 					tooltipPlugin({
 						theme,
 						format: perSeriesFormat,

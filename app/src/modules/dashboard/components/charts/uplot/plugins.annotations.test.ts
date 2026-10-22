@@ -6,7 +6,7 @@
  */
 
 /**
- * What the annotations plugin actually puts on the canvas.
+ * What the overlays plugin puts on the canvas for annotations.
  *
  * jsdom has no layout and a stubbed 2D context, so a rendered chart can only be
  * asserted to have mounted - which would pass just as happily with a plugin that
@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from "vitest";
 import type uPlot from "uplot";
-import { annotationsPlugin, type Annotation } from "./plugins";
+import { overlaysPlugin, type Annotation } from "./plugins";
 import type { UplotTheme, ColorRole } from "./uplotTheme";
 
 interface DrawCall {
@@ -48,6 +48,8 @@ function fakePlot() {
 		fillText: (_text: string, x: number, y: number) =>
 			calls.push({ op: "fillText", args: [x, y] }),
 		setLineDash: (d: number[]) => dashes.push(d),
+		measureText: (text: string) => ({ width: text.length * 6 }),
+		canvas: { width: 600 },
 		font: "",
 		textAlign: "left",
 		fillStyle: "",
@@ -75,7 +77,11 @@ function fakePlot() {
 
 function draw(annotations: Annotation[]) {
 	const { u, theme, calls, dashes } = fakePlot();
-	const plugin = annotationsPlugin(() => annotations, theme);
+	const plugin = overlaysPlugin(
+		() => [],
+		() => annotations,
+		theme
+	);
 	const hook = plugin.hooks.draw as (u: uPlot) => void;
 	hook(u);
 	return { calls, dashes };
@@ -95,7 +101,7 @@ const INSTANT: Annotation = {
 	role: "destructive",
 };
 
-describe("annotationsPlugin", () => {
+describe("overlaysPlugin annotations", () => {
 	it("fills a band spanning the window and labels it", () => {
 		// The fixture is non-empty on purpose: a guard that reads an empty list
 		// draws nothing and passes for the wrong reason.
