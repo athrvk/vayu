@@ -1817,8 +1817,9 @@ chunks already committed. Blob dedup spans the whole flush, not one chunk.
 
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
-latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time
-spent queued inside the generator. A buffered design send adds a ninth, **`engineMs`** (#2132):
+latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME` less its wait for a connection slot (#2394);
+`queueWaitMs = totalMs − wireMs` is time spent queued before the wire, inside the generator or in
+libcurl (see [the split](api-reference.md#post-execute)). A buffered design send adds a ninth, **`engineMs`** (#2132):
 Vayu's own cost for that exchange, the handler's elapsed time less `wireMs`, script time and an OAuth 2.0 token fetch, taken
 before the write (see [One timing
 convention](api-reference.md#post-execute)). No other writer stores it.

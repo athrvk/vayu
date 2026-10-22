@@ -659,8 +659,8 @@ struct Request {
  */
 struct Timing {
     double total_ms = 0.0; // perceived latency: submit → completion (after Plan 1)
-    double wire_ms = 0.0; // pure CURLINFO_TOTAL_TIME (DNS + TCP + TLS + send + recv)
-    double queue_wait_ms = 0.0; // total_ms − wire_ms (generator-side overhead, clamped >= 0)
+    double wire_ms = 0.0; // CURLINFO_TOTAL_TIME less libcurl's connection-slot queue (detail::wire_seconds)
+    double queue_wait_ms = 0.0; // total_ms − wire_ms: generator-side wait, libcurl's queue included (clamped >= 0)
     double dns_ms        = 0.0;
     double connect_ms    = 0.0;
     double tls_ms        = 0.0;

@@ -12,6 +12,7 @@
 #include <httplib.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "optional_assert.hpp"
+#include "task_queue.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -572,6 +574,112 @@ TEST_F (CurlTransferTest, FailedTransferKeepsTheTimingAndBytesCurlMeasured) {
     << "curl measured the time spent before the timeout";
     EXPECT_GT (response.timing.bytes_up, 0u)
     << "the request headers went out and must be counted";
+}
+
+// ============================================================================
+// libcurl's connection-slot queue (#2394)
+// ============================================================================
+
+namespace {
+
+/// Holds the first `held` requests it receives for `hold`, then answers every
+/// later one at once, saying which kind each was. With the client's per-host
+/// limit at `held`, the later ones can only have waited in libcurl's queue.
+class HeldFirstBatchServer {
+    public:
+    HeldFirstBatchServer (int held, std::chrono::milliseconds hold) {
+        // Wider than any batch the test sends, so the server never queues.
+        svr.new_task_queue = vayu::tests::pooled_task_queue (8);
+        svr.Get ("/held",
+        [this, held, hold] (const httplib::Request&, httplib::Response& res) {
+            if (arrivals.fetch_add (1) < held) {
+                std::this_thread::sleep_for (hold);
+                res.set_content ("held", "text/plain");
+                return;
+            }
+            res.set_content ("queued", "text/plain");
+        });
+        port   = svr.bind_to_any_port ("127.0.0.1");
+        thread = std::thread ([this] () { svr.listen_after_bind (); });
+        svr.wait_until_ready ();
+    }
+
+    ~HeldFirstBatchServer () {
+        svr.stop ();
+        if (thread.joinable ())
+            thread.join ();
+    }
+    HeldFirstBatchServer (const HeldFirstBatchServer&)            = delete;
+    HeldFirstBatchServer& operator= (const HeldFirstBatchServer&) = delete;
+    HeldFirstBatchServer (HeldFirstBatchServer&&)                 = delete;
+    HeldFirstBatchServer& operator= (HeldFirstBatchServer&&)      = delete;
+
+    std::string url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/held";
+    }
+
+    private:
+    httplib::Server svr;
+    std::thread thread;
+    std::atomic<int> arrivals{ 0 };
+    int port = 0;
+};
+
+} // namespace
+
+// Six transfers on two connection slots: two reach the target and are held,
+// four wait in libcurl until a slot frees. TOTAL_TIME includes that wait
+// (curl 8.23, measured), so before #2394 it was reported as wire time - the
+// target's latency - and queue wait stayed near 0.
+//
+// The bound is half the hold. A queued transfer waits at least the hold less
+// the time the submit loop took (microseconds), so its queue wait reads about
+// 1000ms healthy and about 0ms broken; its wire time reads a few ms healthy (an
+// immediate answer on a reused connection) and at least the hold broken.
+// Mutation-check: make wire_seconds return `times.total` and every queued
+// transfer fails both assertions.
+TEST_F (CurlTransferTest, AWaitForAConnectionSlotIsQueueWaitNotWireTime) {
+    constexpr int kSlots = 2;
+    constexpr auto kHold = std::chrono::milliseconds (1000);
+    constexpr double kBoundMs =
+    std::chrono::duration<double, std::milli> (kHold).count () / 2.0;
+
+    HeldFirstBatchServer server (kSlots, kHold);
+    vayu::http::EventLoopConfig config;
+    config.num_workers  = 1; // one multi handle, so one per-host limit
+    config.max_per_host = kSlots;
+    vayu::http::EventLoop loop (config);
+    loop.start ();
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server.url ();
+    std::vector<vayu::http::RequestHandle> handles;
+    for (int i = 0; i < 6; ++i) {
+        handles.push_back (loop.submit_async (request));
+    }
+
+    int held = 0;
+    for (auto& handle : handles) {
+        auto result = handle.future.get ();
+        ASSERT_TRUE (result.is_ok ());
+        const auto& response = result.value ();
+        ASSERT_EQ (response.status_code, 200);
+        const auto& t = response.timing;
+        if (response.body == "held") {
+            ++held;
+            EXPECT_GT (t.wire_ms, kBoundMs)
+            << "time the target held it is wire time";
+            continue;
+        }
+        EXPECT_GT (t.queue_wait_ms, kBoundMs)
+        << "a wait for a connection slot is queue wait (wire " << t.wire_ms << "ms)";
+        EXPECT_LT (t.wire_ms, kBoundMs)
+        << "a wait for a connection slot is not wire time (queue "
+        << t.queue_wait_ms << "ms)";
+    }
+    EXPECT_EQ (held, kSlots) << "the per-host limit admits exactly two at once";
+    loop.stop ();
 }
 
 // ============================================================================
