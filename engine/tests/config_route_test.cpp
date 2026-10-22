@@ -144,10 +144,12 @@ TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
 TEST_F (ConfigRouteTest, ABodyNestedPastTheBoundIs400AndWritesNothing) {
     const auto before = db_->get_config_entry ("workers");
     ASSERT_HAS_VALUE (before);
-    ASSERT_NE (before->value, "3");
+    // `workers` defaults to the core count, so the value to try is whichever
+    // of two differs from it: a fixed one is the default on a 3-vCPU runner.
+    const std::string attempted = before->value == "3" ? "4" : "3";
 
-    const std::string body = R"({"entries":{"workers":"3"},"extra":)" +
-    vayu::tests::nested_array_text (100000) + "}";
+    const std::string body = R"({"entries":{"workers":")" + attempted +
+    R"("},"extra":)" + vayu::tests::nested_array_text (100000) + "}";
     const auto [status, answer] = vayu::http::routes::apply_config_update (*db_, body);
 
     EXPECT_EQ (status, 400);
@@ -159,8 +161,8 @@ TEST_F (ConfigRouteTest, ABodyNestedPastTheBoundIs400AndWritesNothing) {
     ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->value, before->value);
 
-    const auto [ok_status, ok_body] =
-    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"3"}})");
+    const auto [ok_status, ok_body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"workers":")" + attempted + R"("}})");
     EXPECT_EQ (ok_status, 200) << ok_body.dump ();
 }
 

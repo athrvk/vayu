@@ -180,7 +180,7 @@ void register_file_root_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            send_error (res, 400, e.what ());
+            send_exception (res, e);
         }
     });
 
