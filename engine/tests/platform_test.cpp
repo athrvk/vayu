@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -29,6 +30,7 @@
 
 #include <gtest/gtest.h>
 
+#include "optional_assert.hpp"
 #include "source_scan.hpp"
 #include "vayu/core/worker_count.hpp"
 #include "vayu/db/database.hpp"
@@ -138,6 +140,85 @@ TEST (ThreadScheduling, SleepUntilPreciseReturnsImmediatelyForAPastDeadline) {
     sleep_until_precise (deadline);
     const auto elapsed = std::chrono::steady_clock::now () - start;
     EXPECT_LT (elapsed, std::chrono::milliseconds (200));
+}
+
+// ============================================================================
+// A regular file read by offset (#2416)
+// ============================================================================
+
+/// A directory of its own under the working directory, which `main` has
+/// already made private to this process.
+class RegularFileTest : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        root_ = std::filesystem::current_path () /
+        ("vayu-regular-file-" +
+        std::string (::testing::UnitTest::GetInstance ()->current_test_info ()->name ()));
+        std::filesystem::remove_all (root_);
+        std::filesystem::create_directories (root_);
+    }
+    void TearDown () override {
+        std::error_code ignored;
+        std::filesystem::remove_all (root_, ignored);
+    }
+    [[nodiscard]] std::filesystem::path
+    write (const std::string& name, const std::string& contents) const {
+        const auto path = root_ / name;
+        std::ofstream (path, std::ios::binary) << contents;
+        return path;
+    }
+    std::filesystem::path root_;
+};
+
+// Mutation check: drop `O_NOFOLLOW` from `open_regular_file` and the link
+// opens as its target.
+TEST_F (RegularFileTest, AFinalSymlinkIsRefusedNotFollowed) {
+#if VAYU_PLATFORM_WINDOWS
+    GTEST_SKIP ()
+    << "Windows follows a final reparse point by design (platform.hpp)";
+#else
+    const auto target = write ("target.bin", "target");
+    const auto link   = root_ / "link.bin";
+    std::error_code ec;
+    std::filesystem::create_symlink (target, link, ec);
+    if (ec) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink: " << ec.message ();
+    }
+    auto opened = open_regular_file (link);
+    if (opened) {
+        close_file (opened->file);
+        FAIL () << "the link was followed";
+    }
+    auto direct = open_regular_file (target);
+    ASSERT_HAS_VALUE (direct) << direct.error ().message ();
+    close_file (direct->file);
+#endif
+}
+
+TEST_F (RegularFileTest, ADirectoryIsRefused) {
+    auto opened = open_regular_file (root_);
+    if (opened) {
+        close_file (opened->file);
+        FAIL () << "a directory opened as a regular file";
+    }
+}
+
+// Mutation check: read from the descriptor's position (`read`, ignoring the
+// offset) in `read_file_at` and the second read starts where the first ended.
+TEST_F (RegularFileTest, ReadsAtTheOffsetAskedWhateverWasReadBefore) {
+    auto opened = open_regular_file (write ("digits.bin", "0123456789"));
+    ASSERT_HAS_VALUE (opened) << opened.error ().message ();
+    EXPECT_EQ (opened->size, 10u);
+    std::string buffer (4, '\0');
+    const auto at = [&] (std::uint64_t offset) {
+        const auto got = read_file_at (opened->file, offset, std::span<char> (buffer));
+        return got ? buffer.substr (0, *got) : std::string ("<error>");
+    };
+    EXPECT_EQ (at (3), "3456");
+    EXPECT_EQ (at (0), "0123");
+    EXPECT_EQ (at (8), "89");
+    EXPECT_EQ (at (10), "") << "the end of the file reads nothing";
+    close_file (opened->file);
 }
 
 // ============================================================================
