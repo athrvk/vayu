@@ -121,6 +121,17 @@ consumes it.
   `buildPercentileChartData` and `rebucket(..., "max")` use, keeps a bucket
   null only when every second in it was empty. A row an older engine stored
   holds `0` for such a second and still reads as `0`: nothing rewrites it.
+- **The dashed vertical line marks where p99 first crossed the SLO, and the
+  horizontal one is the SLO itself** (#2698). The vertical line is labelled
+  `p99 > SLO <threshold>`, never the observed p99, which is in its hover with the
+  load at the crossing. It is drawn on every time chart for a `ramp_up` run, on
+  the percentile chart alone for any other mode, and on none when
+  `Breakpoint.atRunStart` is set: the first whole-second reading (a window
+  between gates and an empty second are not readings) was already over the SLO,
+  so there was no crossing, and the percentile chart's horizontal SLO line,
+  drawn whether or not p99 reached it, carries the message. The store latches
+  the flag with the breakpoint; History's `computeBreakpoint` sets it over its
+  own series, where on a bucketed run it means the first bucket.
 - **A tick's rates and means cover its trailing second, and the run-cumulative
   ones stay on the hero cards** (#2393). The engine reads one trailing window
   (at least a second) per tick, and a live frame and a stored row carry the

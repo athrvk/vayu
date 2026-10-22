@@ -44,13 +44,18 @@ export const LATENCY_LEGEND = {
 	queueWait: { label: "queue wait", role: "warning", shape: "band" },
 } as const satisfies Record<string, LegendEntry>;
 
+/** The horizontal SLO threshold line, drawn the same on the scatter and the percentile chart. */
+const SLO_LINE = { label: "SLO", role: "subtle", shape: "line" } as const satisfies LegendEntry;
+
 // Which percentile a line is carries no verdict, so none of these takes a
 // status role: a healthy 3 ms p99 drawn red reads as failing (#2245).
-// p99 keeps the violet it has on the scatter.
+// p99 keeps the violet it has on the scatter. `slo` is the threshold marker,
+// not a data series: the chart builds its series from p50, p95 and p99 only.
 export const PERCENTILE_LEGEND = {
 	p50: { label: "p50", role: "muted", shape: "line" },
 	p95: { label: "p95", role: "categorical-2", shape: "line" },
 	p99: { label: "p99", role: "categorical", shape: "line" },
+	slo: SLO_LINE,
 } as const satisfies Record<string, LegendEntry>;
 
 /**
@@ -63,7 +68,7 @@ export const SCATTER_LEGEND = {
 	// so this series changed hue per scheme and could land on a neighbouring
 	// semantic one. On `forest` the accent is 3% lightness from `--success`.
 	p99: { label: "p99", role: "categorical", shape: "dot" },
-	slo: { label: "SLO", role: "subtle", shape: "line" },
+	slo: SLO_LINE,
 } as const satisfies Record<string, LegendEntry>;
 
 // The key each card renders. Live (`MetricsView`) and History read these same

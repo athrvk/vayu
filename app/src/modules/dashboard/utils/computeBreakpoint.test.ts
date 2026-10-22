@@ -135,3 +135,56 @@ describe("computeBreakpoint on a live series (issue #2385)", () => {
 		expect(computeBreakpoint(windows, 200).crossed).toBe(false);
 	});
 });
+
+describe("computeBreakpoint atRunStart", () => {
+	it("is set when the first tick is already over the SLO", () => {
+		const bp = computeBreakpoint(
+			[tick({ elapsed_seconds: 1, latency_p99_ms: 400 }), tick({ latency_p99_ms: 500 })],
+			200
+		);
+		expect(bp).toMatchObject({ crossed: true, timeSeconds: 1, atRunStart: true });
+	});
+
+	it("is clear when an earlier tick read under the SLO", () => {
+		const bp = computeBreakpoint(
+			[
+				tick({ elapsed_seconds: 1, latency_p99_ms: 50 }),
+				tick({ elapsed_seconds: 2, latency_p99_ms: 400 }),
+			],
+			200
+		);
+		expect(bp).toMatchObject({ crossed: true, timeSeconds: 2, atRunStart: false });
+	});
+
+	it("counts the first tick that held a reading, not the first tick", () => {
+		// A stored second with no completion has no p99: it is no reading under
+		// the SLO, so a crossing right after it is still the run's first.
+		const stall = tick({ elapsed_seconds: 1 });
+		delete stall.latency_p99_ms;
+		const bp = computeBreakpoint(
+			[stall, tick({ elapsed_seconds: 2, latency_p99_ms: 400 })],
+			200
+		);
+		expect(bp).toMatchObject({ crossed: true, timeSeconds: 2, atRunStart: true });
+	});
+
+	it("does not count a live window between gates as a reading", () => {
+		const gate = (s: number, p99: number) =>
+			tick({
+				live: true,
+				elapsed_seconds: s,
+				second_samples: 50,
+				second_p50_ms: 10,
+				second_p95_ms: 20,
+				second_p99_ms: p99,
+			});
+		const window = tick({ live: true, elapsed_seconds: 0.5, latency_p99_ms: 20 });
+		expect(computeBreakpoint([window, gate(1, 300)], 200).atRunStart).toBe(true);
+		expect(computeBreakpoint([window, gate(1, 100), gate(2, 300)], 200).atRunStart).toBe(false);
+	});
+
+	it("is clear on a series that never crossed", () => {
+		expect(computeBreakpoint([tick({ latency_p99_ms: 50 })], 200).atRunStart).toBe(false);
+		expect(computeBreakpoint([], 200).atRunStart).toBe(false);
+	});
+});

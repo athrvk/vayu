@@ -42,6 +42,7 @@ describe("BreakpointStat", () => {
 			timeSeconds: 6,
 			p99Ms: 227,
 			sloMs: 200,
+			atRunStart: false,
 		}).textContent;
 		expect(text).toContain("1,450");
 		expect(text).not.toContain("not crossed");

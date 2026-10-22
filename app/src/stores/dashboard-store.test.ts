@@ -134,6 +134,38 @@ describe("dashboard-store breakpoint on live frames (issue #2385)", () => {
 	});
 });
 
+describe("dashboard-store breakpoint atRunStart", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
+		useDashboardStore.getState().startRun("r");
+	});
+
+	it("is set when the first reading the run holds is already over the SLO", () => {
+		const s = useDashboardStore.getState();
+		// A window between gates holds no reading, so it does not count as one.
+		s.addMetricsBatch([{ ...tick(0.5, 900), live: true }, tick(1, 250)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			atRunStart: true,
+		});
+	});
+
+	it("is clear when an earlier tick in the same batch read under the SLO", () => {
+		useDashboardStore.getState().addMetricsBatch([tick(1, 50), tick(2, 250)]);
+		expect(useDashboardStore.getState().breakpoint.atRunStart).toBe(false);
+	});
+
+	it("is clear when an earlier batch read under the SLO", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([tick(1, 50)]);
+		s.addMetricsBatch([tick(2, 250)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			atRunStart: false,
+		});
+	});
+});
+
 describe("dashboard-store breakpoint SLO", () => {
 	beforeEach(() => {
 		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });

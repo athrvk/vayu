@@ -36,6 +36,12 @@ export interface Marker {
 	role: ColorRole;
 	/** Horizontal label side (default "right"); a vertical label sits right of its line, left when that would leave the canvas. */
 	align?: "left" | "right";
+	/**
+	 * Tooltip text for a vertical marker, shown while the cursor is within
+	 * {@link ANNOTATION_HOVER_PX} of its line. For what the label has no room
+	 * for; a marker without one is not hoverable.
+	 */
+	hover?: string;
 }
 
 const dpr = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
@@ -178,7 +184,7 @@ export interface Annotation {
 	role: ColorRole;
 }
 
-/** How far, in CSS pixels, the cursor may be from an annotation and still be hovering it - what makes an instant (zero width) reachable. */
+/** How far, in CSS pixels, the cursor may be from an annotation or a marker's line and still be hovering it - what makes an instant (zero width) reachable. */
 const ANNOTATION_HOVER_PX = 5;
 
 /** Below this width a band would read as a smudge, so it is drawn as a line. */
@@ -301,9 +307,25 @@ export function annotationsUnderCursor(
 	});
 }
 
+type HoverableMarker = Marker & { hover: string };
+
+/** The vertical markers with hover text that sit within reach of the cursor at `left` (CSS px). */
+export function markersUnderCursor(
+	u: uPlot,
+	markers: readonly Marker[],
+	left: number
+): HoverableMarker[] {
+	return markers.filter(
+		(m): m is HoverableMarker =>
+			m.orient === "vertical" &&
+			!!m.hover &&
+			Math.abs(left - u.valToPos(m.value, "x", false)) <= ANNOTATION_HOVER_PX
+	);
+}
+
 export type ValueFormatter = (v: number | null | undefined) => string;
 
-/** A tooltip line naming an annotation under the cursor: a swatch in its colour, then its label. */
+/** A tooltip line naming an annotation or marker under the cursor: a swatch in its colour, then its text. */
 function annotationRow(label: string, stroke: string): HTMLElement {
 	const row = document.createElement("div");
 	row.style.cssText = "display:flex;gap:5px;align-items:center";
@@ -359,6 +381,8 @@ export function tooltipPlugin(opts: {
 	 * same reason as `tipValues`: annotations stream in without a rebuild.
 	 */
 	annotations?: () => Annotation[];
+	/** The markers whose `hover` text to show when the cursor is on their line; a getter for the same reason. */
+	markers?: () => Marker[];
 }): uPlot.Plugin {
 	let tip: HTMLDivElement | null = null;
 	const fmt = opts.format ?? {};
@@ -430,6 +454,9 @@ export function tooltipPlugin(opts: {
 				if (rows.length === headRows && firstZeroRow) rows.push(firstZeroRow);
 				for (const a of annotationsUnderCursor(u, opts.annotations?.() ?? [], left)) {
 					rows.push(annotationRow(a.label, opts.theme.color(a.role)));
+				}
+				for (const m of markersUnderCursor(u, opts.markers?.() ?? [], left)) {
+					rows.push(annotationRow(m.hover, opts.theme.color(m.role)));
 				}
 				// Built from text, never markup: series labels include script-defined
 				// custom-metric names, which an imported collection can fill with HTML.

@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import type uPlot from "uplot";
-import { tooltipPlugin, type Annotation } from "./plugins";
+import { tooltipPlugin, type Annotation, type Marker } from "./plugins";
 import type { UplotTheme } from "./uplotTheme";
 
 const THEME = { font: "12px sans-serif" } as unknown as UplotTheme;
@@ -224,6 +224,65 @@ describe("tooltipPlugin annotation hover", () => {
 
 	it("colours the swatch by the annotation's role", () => {
 		const tip = hoverAt(px(8), [WINDOW]);
+		const swatch = tip.lastElementChild?.firstElementChild as HTMLElement;
+		expect(swatch.style.background).toBe("rgb(255, 0, 0)");
+	});
+});
+
+describe("tooltipPlugin marker hover", () => {
+	const COLOURED = {
+		font: "12px sans-serif",
+		color: (role: string) => (role === "warning" ? "rgb(255, 0, 0)" : "rgb(0, 0, 255)"),
+	} as unknown as UplotTheme;
+	/** One second per 10px. */
+	const px = (seconds: number) => seconds * 10;
+
+	const BREAKPOINT: Marker = {
+		orient: "vertical",
+		value: 12,
+		role: "warning",
+		label: "p99 > SLO 200ms",
+		hover: "p99 303ms at 12 virtual users",
+	};
+
+	/** Hover CSS-pixel `left` and return the tooltip's rows as text. */
+	function hoverAt(left: number, markers: Marker[]): HTMLElement {
+		const over = document.createElement("div");
+		const u = {
+			over,
+			cursor: { idx: 0, left, top: 10 },
+			data: [[1], [5]],
+			series: [{}, { label: "rps", stroke: "red" }],
+			valToPos: (v: number) => px(v),
+		} as unknown as uPlot;
+		const plugin = tooltipPlugin({ theme: COLOURED, markers: () => markers });
+		(plugin.hooks.init as (u: uPlot) => void)(u);
+		(plugin.hooks.setCursor as (u: uPlot) => void)(u);
+		return over.querySelector(".vayu-chart-tooltip") as HTMLElement;
+	}
+	const texts = (tip: HTMLElement) => Array.from(tip.children, (r) => r.textContent);
+
+	it("shows the marker's hover text from a few pixels either side of its line, not from far away", () => {
+		expect(texts(hoverAt(px(12) + 3, [BREAKPOINT]))).toContain(BREAKPOINT.hover);
+		expect(texts(hoverAt(px(12) - 3, [BREAKPOINT]))).toContain(BREAKPOINT.hover);
+		expect(texts(hoverAt(px(12) + 20, [BREAKPOINT]))).not.toContain(BREAKPOINT.hover);
+	});
+
+	it("says nothing for a marker without hover text", () => {
+		const { hover: _unused, ...plain } = BREAKPOINT;
+		expect(texts(hoverAt(px(12), [plain]))).toEqual(["1.0s", "rps5"]);
+	});
+
+	it("never offers a horizontal marker, which has no x to be near", () => {
+		const horizontal: Marker = { ...BREAKPOINT, orient: "horizontal", value: 12 };
+		expect(texts(hoverAt(px(12), [horizontal]))).toEqual(["1.0s", "rps5"]);
+	});
+
+	it("colours the swatch by the marker's role and shows the text as text, never markup", () => {
+		const hostile: Marker = { ...BREAKPOINT, hover: "<img src=x onerror=alert(1)>" };
+		const tip = hoverAt(px(12), [hostile]);
+		expect(tip.querySelector("img")).toBeNull();
+		expect(tip.textContent).toContain(hostile.hover);
 		const swatch = tip.lastElementChild?.firstElementChild as HTMLElement;
 		expect(swatch.style.background).toBe("rgb(255, 0, 0)");
 	});

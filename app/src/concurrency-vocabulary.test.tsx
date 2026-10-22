@@ -392,6 +392,7 @@ function derivedIn(mode: LoadMode): DashboardDerived {
 			timeSeconds: 5,
 			p99Ms: 227,
 			sloMs: 200,
+			atRunStart: false,
 		},
 	};
 }
@@ -431,6 +432,7 @@ describe("the dashboard's cards name the count in virtual users (#2128)", () => 
 					timeSeconds: 5,
 					p99Ms: 227,
 					sloMs: 200,
+					atRunStart: false,
 				}}
 				failedRequests={0}
 			/>,

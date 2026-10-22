@@ -360,6 +360,7 @@ function MetricsView({
 							<LatencyPercentilesChart
 								history={chartWindow}
 								syncKey={CHART_SYNC.live}
+								mode={loadMode}
 								breakpoint={breakpoint}
 								anomalies={anomalies}
 								sleeps={hostSleeps}

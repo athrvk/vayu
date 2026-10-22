@@ -14,7 +14,7 @@
  * cursor; pass `breakpoint` to mark the W1 capacity elbow.
  */
 
-import { formatLatency } from "@/lib/format-number";
+import { formatLatency, formatNumber } from "@/lib/format-number";
 import { useMemo } from "react";
 import type uPlot from "uplot";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
@@ -51,7 +51,12 @@ import {
 	fmtPct,
 	fmtVitals,
 } from "./formatters";
-import { concurrencyMeasureLabel } from "@/constants/load-test-modes";
+import {
+	concurrencyMeasureLabel,
+	formatConcurrency,
+	isClosedLoopMode,
+} from "@/constants/load-test-modes";
+import { pluralize } from "../../../utils/format";
 import { useClientSettingsStore } from "@/stores";
 
 interface BaseProps {
@@ -75,15 +80,44 @@ interface BaseProps {
 	sleeps?: readonly HostSleep[] | null;
 }
 
-/** Vertical breakpoint marker (p99 crossed SLO), shared by the time-series charts. */
-function breakpointMarker(breakpoint?: Breakpoint | null): Marker[] {
-	if (!breakpoint?.crossed || breakpoint.timeSeconds == null) return [];
+/** The run's concurrency in the words its mode measures it in. */
+function concurrencyPhrase(concurrency: number, mode?: string): string {
+	if (isClosedLoopMode(mode)) return formatConcurrency(concurrency);
+	return `${formatNumber(concurrency)} ${pluralize(concurrency, "request")} in flight`;
+}
+
+/** What the cursor learns on the breakpoint line: the p99 and the load at the crossing. */
+function breakpointHover(breakpoint: Breakpoint, mode?: string): string | undefined {
+	if (breakpoint.p99Ms == null) return undefined;
+	const p99 = `p99 ${formatLatency(breakpoint.p99Ms)}`;
+	if (breakpoint.concurrency == null) return p99;
+	return `${p99} at ${concurrencyPhrase(breakpoint.concurrency, mode)}`;
+}
+
+/**
+ * The vertical line where p99 first crossed the SLO, shared by the time-series
+ * charts. A capacity elbow only means something on a ramp_up run, where load
+ * rises under the line, so the other modes draw it on the percentile chart
+ * alone; and a run whose first reading was already over the SLO never crossed
+ * anything, which the horizontal SLO line on that chart says better.
+ */
+function breakpointMarker(
+	breakpoint: Breakpoint | null | undefined,
+	mode: string | undefined,
+	onPercentileChart = false
+): Marker[] {
+	if (!breakpoint?.crossed || breakpoint.timeSeconds == null || breakpoint.atRunStart) return [];
+	if (mode !== "ramp_up" && !onPercentileChart) return [];
 	return [
 		{
 			orient: "vertical",
 			value: breakpoint.timeSeconds,
 			role: "warning",
-			label: breakpoint.p99Ms != null ? `SLO · ${formatLatency(breakpoint.p99Ms)}` : "SLO",
+			label:
+				breakpoint.sloMs != null
+					? `p99 > SLO ${formatLatency(breakpoint.sloMs)}`
+					: "p99 > SLO",
+			hover: breakpointHover(breakpoint, mode),
 		},
 	];
 }
@@ -94,11 +128,28 @@ export function LatencyPercentilesChart({
 	isCompleted,
 	syncKey,
 	height,
+	mode,
 	breakpoint,
 	anomalies,
 	sleeps,
-}: BaseProps) {
+}: BaseProps & { mode?: string }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
+	const settingSloMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	// The SLO the breakpoint was judged against, so the line and the marker
+	// agree even after the setting has changed; the setting where none was.
+	const sloMs = breakpoint?.sloMs ?? settingSloMs;
+	const markers = useMemo<Marker[]>(
+		() => [
+			{
+				orient: "horizontal",
+				value: sloMs,
+				role: PERCENTILE_LEGEND.slo.role,
+				label: `${PERCENTILE_LEGEND.slo.label} ${formatLatency(sloMs)}`,
+			},
+			...breakpointMarker(breakpoint, mode, true),
+		],
+		[sloMs, breakpoint, mode]
+	);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series } = useMemo(() => {
 		const d = buildPercentileChartData(history);
@@ -128,7 +179,7 @@ export function LatencyPercentilesChart({
 			yFormat={axisMs}
 			isLive={!isCompleted}
 			syncKey={syncKey}
-			markers={breakpointMarker(breakpoint)}
+			markers={markers}
 			annotations={annotations}
 		/>
 	);
@@ -279,9 +330,9 @@ export function RequestRateChart({
 				role: THROUGHPUT_LEGEND.target.role,
 				label: `target ${targetRps} req/s`,
 			});
-		m.push(...breakpointMarker(breakpoint));
+		m.push(...breakpointMarker(breakpoint, mode));
 		return m;
-	}, [targetRps, breakpoint]);
+	}, [targetRps, breakpoint, mode]);
 
 	if (data[0].length < 2) return null;
 	return (
@@ -336,7 +387,7 @@ export function ConnectionsChart({
 			yFormat={(v) => `${Math.round(v)}`}
 			isLive={!isCompleted}
 			syncKey={syncKey}
-			markers={breakpointMarker(breakpoint)}
+			markers={breakpointMarker(breakpoint, mode)}
 			annotations={annotations}
 		/>
 	);
@@ -348,10 +399,11 @@ export function ErrorRateChart({
 	isCompleted,
 	syncKey,
 	height,
+	mode,
 	breakpoint,
 	anomalies,
 	sleeps,
-}: BaseProps) {
+}: BaseProps & { mode?: string }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const data = useMemo<uPlot.AlignedData>(() => {
@@ -371,7 +423,7 @@ export function ErrorRateChart({
 			yFormat={axisPct}
 			isLive={!isCompleted}
 			syncKey={syncKey}
-			markers={breakpointMarker(breakpoint)}
+			markers={breakpointMarker(breakpoint, mode)}
 			annotations={annotations}
 		/>
 	);
