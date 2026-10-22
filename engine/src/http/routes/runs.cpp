@@ -1141,12 +1141,11 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
 std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
 const std::string& run_id,
 const std::string& body) {
-    nlohmann::json parsed;
-    try {
-        parsed = nlohmann::json::parse (body);
-    } catch (const std::exception&) {
-        return { 400, error_body (400, "Invalid JSON body") };
+    const auto parsed_body = parse_request_json (body);
+    if (!parsed_body) {
+        return as_response (parsed_body.error ());
     }
+    const nlohmann::json& parsed = *parsed_body;
     if (!parsed.is_object () || !parsed.contains ("baseline")) {
         return { 400, error_body (400, "Missing 'baseline': expected {\"baseline\": true|false}") };
     }

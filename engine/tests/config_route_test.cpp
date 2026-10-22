@@ -23,8 +23,10 @@
 #include <nlohmann/json.hpp>
 
 #include "competing_writer.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/types.hpp"
@@ -133,6 +135,33 @@ TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
     EXPECT_EQ (body["error"]["code"], "invalid_config");
     EXPECT_NE (
     body["error"]["message"].get<std::string> ().find ("Invalid JSON"), std::string::npos);
+}
+
+// A body nested past what `dump ()` survives is refused under the route's own
+// code before any entry is read (#2671). Mutation check: put a raw
+// `nlohmann::json::parse` back in `apply_config_update` and the entry is
+// written, or the binary crashes on the first copy.
+TEST_F (ConfigRouteTest, ABodyNestedPastTheBoundIs400AndWritesNothing) {
+    const auto before = db_->get_config_entry ("workers");
+    ASSERT_HAS_VALUE (before);
+    ASSERT_NE (before->value, "3");
+
+    const std::string body = R"({"entries":{"workers":"3"},"extra":)" +
+    vayu::tests::nested_array_text (100000) + "}";
+    const auto [status, answer] = vayu::http::routes::apply_config_update (*db_, body);
+
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (answer["error"]["code"], "invalid_config");
+    EXPECT_EQ (answer["error"]["message"].get<std::string> (),
+    "request body is nested deeper than " +
+    std::to_string (vayu::core::constants::request_body::MAX_JSON_DEPTH) + " levels");
+    const auto after = db_->get_config_entry ("workers");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->value, before->value);
+
+    const auto [ok_status, ok_body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"3"}})");
+    EXPECT_EQ (ok_status, 200) << ok_body.dump ();
 }
 
 TEST_F (ConfigRouteTest, InvalidRequestFormatIs400) {

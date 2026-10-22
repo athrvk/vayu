@@ -406,9 +406,13 @@ void register_client_certificate_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/client-certificates",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /client-certificates", json.error ());
+            return;
+        }
         try {
-            auto json = nlohmann::json::parse (req.body);
-            auto [status, body] = create_client_certificate_response (ctx.db, json);
+            auto [status, body] = create_client_certificate_response (ctx.db, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /client-certificates - " + std::to_string (status) +
@@ -436,9 +440,13 @@ void register_client_certificate_routes (RouteContext& ctx) {
     ctx.server.Put (R"(/client-certificates/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
+        const auto json      = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "PUT /client-certificates/:id", json.error ());
+            return;
+        }
         try {
-            auto json = nlohmann::json::parse (req.body);
-            auto [status, body] = update_client_certificate_response (ctx.db, id, json);
+            auto [status, body] = update_client_certificate_response (ctx.db, id, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /client-certificates/:id failed",
                 { { "status", status }, { "id", id }, { "error", error_message_of (body) } });

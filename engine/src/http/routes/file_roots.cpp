@@ -165,10 +165,14 @@ void register_file_root_routes (RouteContext& ctx) {
         if (!admit_file_trust_write (ctx.grant_secret, req, res)) {
             return;
         }
+        const auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /file-roots", json.error ());
+            return;
+        }
         try {
-            auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = create_file_root_response (
-            ctx.db, json, vayu::platform::home_directory ());
+            ctx.db, *json, vayu::platform::home_directory ());
             if (status == 201) {
                 vayu::utils::log_info ("http", "Allowed a folder for request-body files",
                 { { "id", body["id"].get<std::string> () } });

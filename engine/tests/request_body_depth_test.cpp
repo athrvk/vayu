@@ -11,11 +11,15 @@
  *        body through `parse_request_json`: the resource routes
  *        (`/collections`, `/requests`, `/specs`, `/specs/diff`), then
  *        `/compose`, `/reorder`, `/specs/bind`, `/specs/sync`, `/import*`,
- *        the `/oauth2` family, `/mock/start`, `/mock-issuer` and `/inbox`.
+ *        the `/oauth2` family, `/mock/start`, `/mock-issuer` and `/inbox`,
+ *        then `/globals`, `/environments`, the example, client-certificate,
+ *        file-root and file-grant writes, `/specs/{match,describe,export}` and
+ *        the Postman exports.
  *
  * `POST /runs` and `POST /execute` are held in run_config_validation_test.cpp;
  * the cores that take the body as a string (`connection_test`,
- * `oauth2_token_post`, `import_fetch`) in their own route tests.
+ * `oauth2_token_post`, `import_fetch`, `apply_config_update`,
+ * `set_run_baseline_response`) in their own route tests.
  * Driven through the registered handlers, because the parse lives in the
  * handler and not in the testable core it hands the tree to.
  */
@@ -46,6 +50,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/grant_secret.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
@@ -54,6 +59,10 @@
 namespace {
 
 using nlohmann::json;
+
+/// 64 characters, the shape the app sends: 32 random bytes as hex.
+constexpr const char* GRANT_SECRET =
+"9f2c4e6a8b0d1f3e5c7a9b1d3f5e7c9a0b2d4f6e8a1c3e5b7d9f0a2c4e6b8d0f";
 
 constexpr std::size_t kBodyDepthBound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
 
@@ -86,7 +95,7 @@ class RequestBodyDepthRouteTest : public ::testing::Test {
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
         vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
         authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
-        mock_server_manager_, *manager_, run_summary_cache_ });
+        mock_server_manager_, *manager_, run_summary_cache_, grant_secret_ });
         vayu::http::routes::register_collection_routes (*ctx_);
         vayu::http::routes::register_request_routes (*ctx_);
         vayu::http::routes::register_spec_routes (*ctx_);
@@ -100,6 +109,16 @@ class RequestBodyDepthRouteTest : public ::testing::Test {
         vayu::http::routes::register_mock_server_routes (*ctx_);
         vayu::http::routes::register_mock_issuer_routes (*ctx_);
         vayu::http::routes::register_inbox_routes (*ctx_);
+        vayu::http::routes::register_globals_routes (*ctx_);
+        vayu::http::routes::register_environment_routes (*ctx_);
+        vayu::http::routes::register_request_example_routes (*ctx_);
+        vayu::http::routes::register_client_certificate_routes (*ctx_);
+        vayu::http::routes::register_file_root_routes (*ctx_);
+        vayu::http::routes::register_file_grant_routes (*ctx_);
+        vayu::http::routes::register_spec_match_routes (*ctx_);
+        vayu::http::routes::register_spec_describe_routes (*ctx_);
+        vayu::http::routes::register_spec_export_routes (*ctx_);
+        vayu::http::routes::register_postman_export_routes (*ctx_);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -119,15 +138,19 @@ class RequestBodyDepthRouteTest : public ::testing::Test {
 
     /// The status and body @p method on @p path answered @p body with. The
     /// body is JSON text already: a value nested past what `dump ()`
-    /// survives cannot be built as a `json` and sent.
+    /// survives cannot be built as a `json` and sent. Every request carries
+    /// the grant secret, which the file-trust writes check before they parse.
     std::pair<int, json> send_text (const std::string& method,
     const std::string& path,
     const std::string& body) const {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
+        const httplib::Headers headers{
+            { std::string (vayu::http::GRANT_SECRET_HEADER), GRANT_SECRET }
+        };
         auto response = method == "PUT" ?
-        client.Put (path, body, "application/json") :
-        client.Post (path, body, "application/json");
+        client.Put (path, headers, body, "application/json") :
+        client.Post (path, headers, body, "application/json");
         if (!response) {
             ADD_FAILURE () << "no response from " << method << " " << path;
             return { 0, json::object () };
@@ -153,6 +176,7 @@ class RequestBodyDepthRouteTest : public ::testing::Test {
     vayu::http::InboxManager inbox_manager_;
     vayu::http::MockServerManager mock_server_manager_;
     vayu::http::RunSummaryCache run_summary_cache_;
+    vayu::http::GrantSecret grant_secret_{ GRANT_SECRET };
     std::unique_ptr<vayu::http::SseStreamManager> manager_;
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
 };
@@ -207,6 +231,21 @@ const std::vector<CodedRoute>& other_routes () {
         { "PUT", "/mock-issuer/missing", "mock_issuer_invalid_config", R"({"extra":)", "}" },
         { "POST", "/inbox/start", GENERIC_CODE, R"({"extra":)", "}" },
         { "PUT", "/inbox/missing", GENERIC_CODE, R"({"extra":)", "}" },
+        { "POST", "/globals", GENERIC_CODE, R"({"variables":{},"extra":)", "}" },
+        { "POST", "/environments", GENERIC_CODE, R"({"name":"e","extra":)", "}" },
+        { "PUT", "/environments/missing", GENERIC_CODE, R"({"extra":)", "}" },
+        { "POST", "/requests/missing/examples", GENERIC_CODE, R"({"extra":)", "}" },
+        { "PUT", "/requests/missing/examples/missing", GENERIC_CODE, R"({"extra":)", "}" },
+        { "POST", "/client-certificates", GENERIC_CODE, R"({"host":"h","extra":)", "}" },
+        { "PUT", "/client-certificates/missing", GENERIC_CODE, R"({"extra":)", "}" },
+        { "POST", "/file-roots", GENERIC_CODE, R"({"path":"/","extra":)", "}" },
+        { "POST", "/file-grants", GENERIC_CODE, R"({"path":"/","extra":)", "}" },
+        { "POST", "/specs/match", GENERIC_CODE, R"({"collectionId":"c","extra":)", "}" },
+        { "POST", "/specs/describe", GENERIC_CODE, R"({"content":"x","extra":)", "}" },
+        { "POST", "/specs/export", GENERIC_CODE, R"({"collectionId":"c","extra":)", "}" },
+        { "POST", "/export/postman", GENERIC_CODE, R"({"collectionId":"c","extra":)", "}" },
+        { "POST", "/export/postman-environment", GENERIC_CODE,
+        R"({"environmentId":"e","extra":)", "}" },
     };
     return routes;
 }
@@ -313,6 +352,10 @@ TEST_F (RequestBodyDepthRouteTest, ADeepValueIsRefusedOnEveryOtherRouteWithItsOw
     EXPECT_TRUE (mock_server_manager_.list ().empty ());
     EXPECT_TRUE (inbox_manager_.list ().empty ());
     EXPECT_TRUE (mock_issuer_manager_.list ()["issuers"].empty ());
+    EXPECT_TRUE (db_->get_client_certificates ().empty ());
+    EXPECT_TRUE (db_->get_file_roots ().empty ());
+    EXPECT_TRUE (db_->get_file_grants ().empty ());
+    EXPECT_FALSE (db_->get_globals ().has_value ());
 
     // And the engine is still answering.
     EXPECT_FALSE (create ("/collections", { { "name", "after" } }).empty ());

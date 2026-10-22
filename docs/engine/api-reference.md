@@ -144,10 +144,10 @@ answers `400` `Invalid JSON: <parser message>` (issues
 `bad_request` unless the route has one of its own for a malformed body, which
 the depth refusal then shares: `invalid_compose_request` on `POST /compose`,
 `oauth2_invalid_config` on the `/oauth2/*` routes, `mock_issuer_invalid_config`
-on `/mock-issuer`. `POST /execute` and `POST /runs` hold the same bound; see
-their sections. A route that accepts an empty body (`POST /mock/start`,
-`POST /mock-issuer/start`, the `/inbox` writes) reads it as no body at all
-rather than as a parse failure. The import routes are held to the same 128
+on `/mock-issuer`, `invalid_config` on `POST /config`. `POST /execute` and
+`POST /runs` hold the same bound; see their sections. A route that accepts an
+empty body (`POST /mock/start`, `POST /mock-issuer/start`, the `/inbox` writes)
+reads it as no body at all rather than as a parse failure. The import routes are held to the same 128
 levels: their documents travel as a string (`content`) or as flat lists linked
 by temp ids, so a legitimate body is far shallower. A document's own nesting is
 bounded separately, where the engine reads it.
@@ -1279,6 +1279,9 @@ with the specific reason(s):
 ```json
 { "error": { "code": "invalid_config", "message": "'workers' must be at most 128 (got 9999)" } }
 ```
+
+A body that does not parse, or nests deeper than 128 levels (see
+[Request bodies](#request-bodies)), is a `400` with the same code.
 
 **Success response:** `200` - the full updated entries array (same shape as
 `GET /config`) plus `"success": true`.

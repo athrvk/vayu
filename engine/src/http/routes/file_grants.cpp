@@ -154,9 +154,13 @@ void register_file_grant_routes (RouteContext& ctx) {
         if (!admit_file_trust_write (ctx.grant_secret, req, res)) {
             return;
         }
+        const auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /file-grants", json.error ());
+            return;
+        }
         try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = create_file_grant_response (ctx.db, json);
+            auto [status, body] = create_file_grant_response (ctx.db, *json);
             if (status == 201) {
                 vayu::utils::log_info ("http", "Granted a picked file for request bodies",
                 { { "id", body["id"].get<std::string> () } });
