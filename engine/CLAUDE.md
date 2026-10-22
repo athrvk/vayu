@@ -703,6 +703,13 @@ logged as a warning: it means a client skipped composition.
   same order (keep the manager in a `unique_ptr` reset first). Waiting on
   `context->closed()` is not draining: it flips before the completion callback
   writes the run row.
+- **A transfer a management-API handler makes carries
+  `RouteContext::server_stopping`** (#2683) as `ClientConfig::cancel`, through
+  `ExchangeInputs::cancel`, `acquire_token`'s `cancel` or the route core's own
+  parameter, and an SSE relay loop ends on it. `Server::stop()` sets it, then
+  joins every handler and never detaches one, because the daemon destroys
+  curl's global state and the database right after; a send that does not carry
+  it holds shutdown open for its whole timeout.
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
   engine-computed `hash`; `collections.openapi` (`{specId, specHash, syncedAt}`,
