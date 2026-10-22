@@ -534,6 +534,30 @@ if (verify_attestation "$payload" "$FIRST_ATTESTED_VERSION") >/dev/null 2>&1; th
 fi
 (verify_attestation "$payload" "0.39.0") >/dev/null 2>&1 \
 	|| fail "a release before the first attested one is not checked"
+
+# The tag is pinned too: a genuine older attested installer re-uploaded under a
+# newer release carries a valid statement for the older tag, so repo and signer
+# alone would accept it. The stub models gh by rejecting any attestation whose
+# ref is not GH_ATTESTED_REF.
+GH_VERIFY_RC=0
+(verify_attestation "$payload" "0.44.0") >/dev/null 2>&1 \
+	|| fail "a passing attestation should verify for 0.44.0"
+grep -q -- "--source-ref refs/tags/v0.44.0" "$TMPROOT/gh-args" \
+	|| fail "attestation must be pinned to the tag being installed"
+grep -q -- "--signer-workflow athrvk/vayu/.github/workflows/release.yml" "$TMPROOT/gh-args" \
+	|| fail "the tag pin must not replace the signer pin"
+gh() {
+	[ "$1" = auth ] && return 0
+	case "$*" in *"--source-ref $GH_ATTESTED_REF"*) return 0 ;; esac
+	return 1
+}
+GH_ATTESTED_REF="refs/tags/v0.44.0"
+(verify_attestation "$payload" "0.44.0") >/dev/null 2>&1 \
+	|| fail "an asset attested for its own tag should verify"
+GH_ATTESTED_REF="refs/tags/v0.43.0"
+out="$( (verify_attestation "$payload" "0.44.0") 2>&1 || true)"
+grep -q 'Build provenance verification failed' <<<"$out" \
+	|| fail "an asset attested for another tag must abort with the provenance error, got: $out"
 unset -f gh
 
 printf 'PASS: download integrity\n'

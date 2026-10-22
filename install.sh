@@ -808,9 +808,9 @@ refuse_ungated_over_workspace() {
 }
 
 # Verify the build-provenance attestation when `gh` can. It proves the asset
-# was built by this repository's release workflow for a tag, which the
-# checksum beside it (served from the same release) cannot. Without a usable
-# `gh` the checksum alone stands, and the script says so.
+# was built by this repository's release workflow for the tag being installed,
+# which the checksum beside it (served from the same release) cannot. Without a
+# usable `gh` the checksum alone stands, and the script says so.
 verify_attestation() {
 	local file="$1" version="$2"
 	version_at_least "$version" "$FIRST_ATTESTED_VERSION" || return 0
@@ -821,8 +821,13 @@ verify_attestation() {
 	# --signer-workflow, not just --repo: any other workflow in the repository
 	# granted `attestations: write` could otherwise mint a statement this
 	# accepts. Only release.yml's publish job is trusted.
+	# --source-ref pins the tag: release.yml publishes only from a tag push, so
+	# the attested ref is the release tag, and without the pin a genuine older
+	# attested installer re-uploaded under a newer release would still verify.
+	# A gh too old to know the flag fails here, closed, rather than skipping it.
 	if ! gh attestation verify "$file" --repo "$REPO" \
-		--signer-workflow "$REPO/.github/workflows/release.yml" >/dev/null 2>&1; then
+		--signer-workflow "$REPO/.github/workflows/release.yml" \
+		--source-ref "refs/tags/v$version" >/dev/null 2>&1; then
 		die 'Build provenance verification failed - aborting.'
 	fi
 	log 'Build provenance verified.'
