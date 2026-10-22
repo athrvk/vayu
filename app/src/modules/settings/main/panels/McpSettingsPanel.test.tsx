@@ -194,6 +194,131 @@ describe("McpSettingsPanel endpoint", () => {
 	});
 });
 
+/**
+ * An enabled server that never bound used to look fine here: the callout said
+ * the port "may be" in use while the endpoint row and every snippet kept
+ * offering a URL that another program might be answering (#2368).
+ */
+describe("McpSettingsPanel when the server is not listening", () => {
+	const IN_USE: McpStatus = {
+		running: false,
+		url: "http://127.0.0.1:9877/mcp",
+		enabled: true,
+		error: { code: "EADDRINUSE", message: "Another program holds 127.0.0.1:9877." },
+	};
+
+	/** The Connection card, where a URL is offered as fact. */
+	const connectionCard = () =>
+		screen.getByText("Connection").closest("[data-slot=card]") as HTMLElement;
+
+	function expectNoUsableEndpoint() {
+		const card = within(connectionCard());
+		expect(card.queryByText(/^https?:\/\//)).toBeNull();
+		expect(card.queryByText(/127\.0\.0\.1:9877\/mcp/)).toBeNull();
+		expect(
+			card.getAllByText(/unavailable - the mcp server is not running/i).length
+		).toBeGreaterThan(0);
+		const copyButtons = card.getAllByRole("button", { name: /^copy$/i });
+		expect(copyButtons.length).toBeGreaterThan(0);
+		for (const button of copyButtons) expect(button).toBeDisabled();
+		const connectButtons = card.getAllByRole("button", { name: /^connect$/i });
+		expect(connectButtons.length).toBeGreaterThan(0);
+		for (const button of connectButtons) {
+			expect(button).toBeDisabled();
+			expect(button).toHaveAttribute("title", "The MCP server isn't running");
+		}
+	}
+
+	it("says another program holds the port and offers no endpoint", async () => {
+		getMcpStatus.mockResolvedValue(IN_USE);
+
+		await renderPanel();
+
+		expect(screen.getByText(/another program holds 127\.0\.0\.1:9877/i)).toBeInTheDocument();
+		expect(screen.getByText(/do not connect an agent until it is free/i)).toBeInTheDocument();
+		expect(screen.queryByText(/the port may be in use/i)).not.toBeInTheDocument();
+		expectNoUsableEndpoint();
+	});
+
+	it("names the host and port the status reports, not a fixed one", async () => {
+		getMcpStatus.mockResolvedValue({ ...IN_USE, url: "http://127.0.0.1:9999/mcp" });
+
+		await renderPanel();
+
+		expect(screen.getByText(/another program holds 127\.0\.0\.1:9999/i)).toBeInTheDocument();
+	});
+
+	it("Retry asks main to start again and clears the notice when it binds", async () => {
+		getMcpStatus.mockResolvedValue(IN_USE);
+		setMcpEnabled.mockResolvedValue(STATUS);
+
+		await renderPanel();
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+		});
+
+		expect(setMcpEnabled).toHaveBeenCalledWith(true);
+		await waitFor(() =>
+			expect(screen.queryByText(/another program holds/i)).not.toBeInTheDocument()
+		);
+		const card = within(connectionCard());
+		expect(card.getAllByText("http://127.0.0.1:9877/mcp").length).toBeGreaterThan(0);
+		for (const button of card.getAllByRole("button", { name: /^copy$/i })) {
+			expect(button).toBeEnabled();
+		}
+	});
+
+	it("keeps the generic notice, and still withholds the endpoint, for any other failure", async () => {
+		getMcpStatus.mockResolvedValue({
+			...IN_USE,
+			error: { code: "other", message: "The MCP server couldn't start: config unreadable" },
+		});
+
+		await renderPanel();
+
+		expect(screen.getByText(/enabled but not listening/i)).toBeInTheDocument();
+		expect(screen.getByText(/config unreadable/i)).toBeInTheDocument();
+		expect(screen.queryByText(/another program holds/i)).not.toBeInTheDocument();
+		expectNoUsableEndpoint();
+	});
+
+	it("falls back to the generic notice when main reported no reason", async () => {
+		getMcpStatus.mockResolvedValue({ ...IN_USE, error: undefined });
+
+		await renderPanel();
+
+		expect(screen.getByText(/the port may be in use/i)).toBeInTheDocument();
+		expectNoUsableEndpoint();
+	});
+
+	it("leaves a healthy server's endpoint, Copy and Connect usable", async () => {
+		await renderPanel();
+
+		const card = within(connectionCard());
+		expect(card.queryByText(/enabled but not listening/i)).not.toBeInTheDocument();
+		expect(card.getAllByText("http://127.0.0.1:9877/mcp").length).toBeGreaterThan(0);
+		for (const button of card.getAllByRole("button", { name: /^copy$/i })) {
+			expect(button).toBeEnabled();
+		}
+		const connectButtons = card.getAllByRole("button", { name: /^connect$/i });
+		expect(connectButtons.length).toBeGreaterThan(0);
+		for (const button of connectButtons) expect(button).toBeEnabled();
+	});
+
+	it("keeps Connect disabled with its own reason while the server is switched off", async () => {
+		getMcpStatus.mockResolvedValue({ ...STATUS, running: false, enabled: false });
+
+		await renderPanel();
+
+		for (const button of within(connectionCard()).getAllByRole("button", {
+			name: /^connect$/i,
+		})) {
+			expect(button).toBeDisabled();
+			expect(button).toHaveAttribute("title", "Enable the MCP server first");
+		}
+	});
+});
+
 describe("McpSettingsPanel write failures", () => {
 	it("reports a failed save and re-reads what the main process actually holds", async () => {
 		await renderPanel();

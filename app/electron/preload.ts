@@ -81,8 +81,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	getEngineStartFailure: (): Promise<string | null> => ipcRenderer.invoke("engine:startFailure"),
 
 	// MCP server (exposes Vayu to agents like Claude Code). See electron/mcp/.
-	getMcpStatus: (): Promise<{ running: boolean; url: string; enabled: boolean }> =>
-		ipcRenderer.invoke("mcp:status"),
+	getMcpStatus: (): Promise<{
+		running: boolean;
+		url: string;
+		enabled: boolean;
+		error?: { code: "EADDRINUSE" | "EACCES" | "other"; message: string };
+	}> => ipcRenderer.invoke("mcp:status"),
 	getMcpSafety: () => ipcRenderer.invoke("mcp:getSafety"),
 	getMcpTools: () => ipcRenderer.invoke("mcp:getTools"),
 	updateMcpSafety: (partial: unknown) => ipcRenderer.invoke("mcp:updateSafety", partial),

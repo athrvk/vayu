@@ -63,6 +63,7 @@ import {
 import type {
 	McpConnectClient,
 	McpSafetyConfig,
+	McpStartError,
 	McpStatus,
 	McpToolCategory,
 	McpToolInfo,
@@ -97,6 +98,36 @@ const REVEAL = appSetting("mcp-reveal-secrets");
  * into an agent's config and silently fail to connect.
  */
 const ENDPOINT_UNKNOWN = "(unavailable - MCP status not loaded)";
+
+/**
+ * Shown in place of the URL while the server is enabled but not listening. The
+ * configured URL is still what an agent would be pointed at, and whatever holds
+ * the port would answer to it, so it is withheld rather than greyed out.
+ */
+const ENDPOINT_NOT_RUNNING = "(unavailable - the MCP server is not running)";
+
+/** `host:port` of the endpoint, for naming what is affected. Falls back to the raw text. */
+function endpointHostPort(url: string): string {
+	try {
+		return new URL(url).host;
+	} catch {
+		return url;
+	}
+}
+
+/** What follows the callout's title; the port conflict has its own title and wording. */
+function notListeningDetail(error: McpStartError | undefined): string {
+	if (!error) return "the port may be in use.";
+	if (error.code === "EADDRINUSE") return "Do not connect an agent until it is free, then retry.";
+	return error.message;
+}
+
+/** The tooltip on a disabled Connect button; undefined while it is usable. */
+function connectDisabledReason(enabled: boolean, notListening: boolean): string | undefined {
+	if (!enabled) return "Enable the MCP server first";
+	if (notListening) return "The MCP server isn't running";
+	return undefined;
+}
 
 interface ConnectSnippet {
 	label: string;
@@ -387,12 +418,18 @@ export default function McpSettingsPanel() {
 		return () => window.removeEventListener("focus", onFocus);
 	}, []);
 
-	// Until the status arrives there is no endpoint to copy - the placeholder is
-	// displayed, and every Copy is disabled so it cannot be pasted anywhere.
-	const endpoint = status?.url ?? ENDPOINT_UNKNOWN;
-	const hasEndpoint = status?.url !== undefined;
+	// Until the status arrives, or while an enabled server is not listening, there
+	// is no endpoint to copy - a placeholder is displayed and every Copy and
+	// Connect is disabled so the URL cannot be pasted or registered anywhere.
 	const running = status?.running ?? false;
 	const enabled = status?.enabled ?? false;
+	const notListening = enabled && !running;
+	const hasEndpoint = status?.url !== undefined && !notListening;
+	const endpoint = hasEndpoint
+		? status.url
+		: notListening
+			? ENDPOINT_NOT_RUNNING
+			: ENDPOINT_UNKNOWN;
 
 	// Apply a change: main sanitizes + persists and returns the resolved config,
 	// which we adopt as the new source of truth.
@@ -623,12 +660,16 @@ export default function McpSettingsPanel() {
 						disabled={isLoading || !hasElectron || !status}
 					/>
 
-					{/* Enabled but not listening - usually a port conflict. Offer a retry. */}
-					{!isLoading && enabled && !running && (
+					{/* Enabled but not listening - say why when main knows, and offer a retry. */}
+					{!isLoading && notListening && (
 						<Callout
 							className="enter-fade"
 							severity="warning"
-							title="Enabled but not listening"
+							title={
+								status?.error?.code === "EADDRINUSE"
+									? `Another program holds ${endpointHostPort(status.url)}`
+									: "Enabled but not listening"
+							}
 							action={
 								<Button
 									variant="outline"
@@ -640,7 +681,7 @@ export default function McpSettingsPanel() {
 								</Button>
 							}
 						>
-							the port may be in use.
+							{notListeningDetail(status?.error)}
 						</Callout>
 					)}
 
@@ -667,12 +708,13 @@ export default function McpSettingsPanel() {
 											size="sm"
 											onClick={() => void handleConnect(snippet.client!)}
 											disabled={
-												!hasElectron || !enabled || connecting !== null
+												!hasElectron ||
+												!enabled ||
+												notListening ||
+												connecting !== null
 											}
 											className="h-control-sm px-2 text-xs shrink-0"
-											title={
-												enabled ? undefined : "Enable the MCP server first"
-											}
+											title={connectDisabledReason(enabled, notListening)}
 										>
 											{connecting === snippet.client ? (
 												<Loader2 className="size-icon-sm mr-1 animate-spin" />

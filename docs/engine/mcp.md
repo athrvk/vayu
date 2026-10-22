@@ -22,8 +22,10 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
 
 - **Hosted in the app.** MCP is a capability the running app exposes, not a
   separate process to manage. It is started and stopped alongside the engine
-  sidecar by `app/electron/main.ts`, best-effort (a bind failure logs and the app
-  continues without it). Only the port is bound at launch (`listener.ts`, which
+  sidecar by `app/electron/main.ts`, best-effort (a bind failure logs, the app
+  continues without it, and `mcp:status` reports why so Settings can show it:
+  another program holding the port is named, and no endpoint is offered while
+  nothing is listening). Only the port is bound at launch (`listener.ts`, which
   imports no SDK); the SDK, the tool registry and the service are loaded by the
   first `POST /mcp` that arrives, so a launch no agent connects to never
   evaluates them - 5-7 MB of the main process at idle, measured on the packaged
@@ -2483,12 +2485,12 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled }`.                                |
+| `mcp:status`        | `{ running, url, enabled, error? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`). |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
-| `mcp:setEnabled`    | Start/stop the server, persist the preference.              |
+| `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
-| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`).                 |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); refuses with `reason: "not-running"` while no listener is up. |
 
 One channel runs the other way, main → renderer:
 
