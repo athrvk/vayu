@@ -8799,42 +8799,78 @@ TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
 
 // A library's parse depth is Vayu's own, not the script's to budget (#2652):
 // MSVC at /Od under ASan has frames large enough that lodash and moment
-// overflowed the default 256 KB budget inside QuickJS's parser, while the same
-// source loads on GCC at -O0 from 46 KB (lodash) and 30 KB (moment). 24 KB is
-// under both, so these fail the way Windows did on any toolchain: the
-// RangeError "Maximum call stack size exceeded" without the raise, a loaded
-// library with it. The raise must also end with the library: recursion
-// afterwards reaches the depth it reached before the require, not the 32 times
-// deeper one the library's budget allows.
+// overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
+// budget cannot stand in for that, because the toolchain decides what a frame
+// costs: 24 KB runs a trivial script on GCC at -O0 and cannot on macOS under
+// ASan. So the budget is found at run time, the smallest one at which the
+// recursion probe below runs at all here. A library needs several times more
+// than that on every toolchain (GCC at -O0: probe 6 KB, lodash from 46 KB,
+// moment from 30 KB), so without the raise the load fails with the RangeError
+// "Maximum call stack size exceeded" and with it the library loads. The raise
+// must also end with the library: recursion afterwards reaches the depth it
+// reached before the require (healthy: equal within noise), not the depth the
+// 768 KB library budget allows (broken: 30 times deeper or more).
 namespace {
 
-constexpr std::size_t SHALLOW_STACK_BYTES = std::size_t{ 24 } * 1024;
+/// Script text that defines `depth ()`, the number of calls a runaway
+/// recursion makes before the interpreter's RangeError.
+constexpr const char* DEPTH_PROBE = R"(
+    function depth() {
+        var reached = 0;
+        function descend() { reached++; descend(); }
+        try { descend(); } catch (e) { if (!(e instanceof RangeError)) { throw e; } }
+        return reached;
+    }
+)";
 
-ScriptConfig shallow_stack_config () {
+/// The smallest stack budget, climbing 8 KB in 2 KB steps to 256 KB, at which
+/// a script that only measures its own recursion depth runs on this build; 0
+/// when none does.
+std::size_t shallowest_working_stack (Request& request) {
+    constexpr std::size_t KIB = 1024;
+    for (std::size_t budget = 8 * KIB; budget <= 256 * KIB; budget += 2 * KIB) {
+        ScriptConfig config;
+        config.stack_size = budget;
+        ScriptEngine candidate{ config };
+        Environment probe_env;
+        const auto result = candidate.execute_prerequest (
+        std::string (DEPTH_PROBE) + "pm.environment.set('d', String(depth()));",
+        request, probe_env);
+        if (result.success) {
+            return budget;
+        }
+    }
+    return 0;
+}
+
+ScriptConfig shallow_stack_config (std::size_t budget) {
     ScriptConfig config;
-    config.stack_size = SHALLOW_STACK_BYTES;
+    config.stack_size = budget;
     return config;
 }
 
 } // namespace
 
+// Only the load is asserted: calling into lodash is the script's own stack and
+// needs more than the probe's budget.
 TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack) {
-    ScriptEngine shallow{ shallow_stack_config () };
-    EXPECT_EQ (shelf_answer (shallow, request, "require('lodash').get({ a: 1 }, 'a')"), "1");
-    EXPECT_EQ (shelf_answer (shallow, request, "require('moment').utc(0).year()"), "1970");
-    EXPECT_EQ (shelf_answer (shallow, request, "_.get({ a: 2 }, 'a')"), "2");
+    const std::size_t budget = shallowest_working_stack (request);
+    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the probe script";
+    ScriptEngine shallow{ shallow_stack_config (budget) };
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('lodash').get"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('moment').utc"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof _.get"), "function")
+    << "at " << budget << " bytes";
 }
 
 TEST_F (ScriptEngineTest, RequireShelfRestoresTheScriptsStackBudgetAfterALibraryLoads) {
-    ScriptEngine shallow{ shallow_stack_config () };
+    const std::size_t budget = shallowest_working_stack (request);
+    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the probe script";
+    ScriptEngine shallow{ shallow_stack_config (budget) };
     Environment shallow_env;
-    const auto result = shallow.execute_prerequest (R"(
-        function depth() {
-            var reached = 0;
-            function descend() { reached++; descend(); }
-            try { descend(); } catch (e) { if (!(e instanceof RangeError)) { throw e; } }
-            return reached;
-        }
+    const auto result = shallow.execute_prerequest (std::string (DEPTH_PROBE) + R"(
         var before = depth();
         require('lodash');
         require('moment');
@@ -8844,14 +8880,14 @@ TEST_F (ScriptEngineTest, RequireShelfRestoresTheScriptsStackBudgetAfterALibrary
     )",
     request, shallow_env);
 
-    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_TRUE (result.success) << result.error_message << " at " << budget << " bytes";
     const auto before = std::stoul (shallow_env["before"].value);
     const auto after  = std::stoul (shallow_env["after"].value);
     ASSERT_GT (before, 0u);
-    // Raised and never restored, the budget is 768 KB / 24 KB = 32 times deeper.
     EXPECT_LE (after, before + (before / 2))
     << "recursion after require() ran under the library's budget, not the "
-       "script's";
+       "script's (budget "
+    << budget << " bytes)";
 }
 
 // The defect #2578 measured: a crypto-js signing script failed and the request
