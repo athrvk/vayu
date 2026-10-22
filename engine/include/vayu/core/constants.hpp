@@ -1160,6 +1160,17 @@ constexpr size_t MAX_BYTES = import_limit (spec_document::MAX_CONFIGURABLE_BYTES
 static_assert (MAX_BYTES > scenario::MAX_CONFIGURABLE_DATA_BYTES + IMPORT_HEADROOM_BYTES,
 "a collection run carrying the largest data set maxScenarioDataBytes allows "
 "must still fit under the body ceiling");
+
+/// Deepest a JSON request body may nest where `parse_request_json` reads it
+/// (#2417). A stack bound, not a policy: nlohmann parses iteratively but
+/// `dump ()` and the copy constructor recurse, and the routes do each to the
+/// whole body or to a field of it. A data cell
+/// (`spec_document::MAX_READ_DEPTH`, #2362) sits up to four levels below the
+/// body (`scenario` > `data` > row > cell), so a cell at its own bound must
+/// still fit under this one.
+constexpr size_t MAX_JSON_DEPTH = 128;
+static_assert (MAX_JSON_DEPTH >= spec_document::MAX_READ_DEPTH + 4,
+"a data cell nested to its own bound must not trip the body's");
 } // namespace request_body
 
 /**
