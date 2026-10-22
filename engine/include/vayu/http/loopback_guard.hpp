@@ -30,7 +30,9 @@
  *
  * A fetch made on a document's behalf (a `$ref`, #2364) runs a wider rule on
  * the same callback: `LocalPeerRule` refuses every loopback and link-local
- * peer that is not the source document's own host and port.
+ * peer that is not the source document's own host and port. The proxy the
+ * transfer names is not refused (#2605); its URL is judged instead, before
+ * anything is dialled (`is_refused_reference_url`).
  */
 
 #include <optional>
@@ -117,6 +119,25 @@ std::optional<LocalPeerRule> local_peer_rule_for_source (const std::string& sour
 /// Whether @p rule refuses a connection to @p peer_ip on @p peer_port. An
 /// address that cannot be read as one is refused: the rule fails closed.
 bool is_refused_local_peer (std::string_view peer_ip, int peer_port, const LocalPeerRule& rule);
+
+/// Whether a connection to @p peer_ip on @p peer_port reached what a URL
+/// naming @p host on @p port names, by the rule `LocalPeerRule` matches its
+/// source with: the same address, or loopback for a loopback name or address.
+/// How the reference rule recognises the proxy a transfer was configured with
+/// (#2605), which it does not refuse.
+bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view host, int port);
+
+/**
+ * @brief Whether @p rule refuses @p url by its text alone (#2605): its host
+ *        names a loopback or link-local address, `localhost` or a
+ *        `*.localhost` name, and is not the source's host and port.
+ *
+ * The pre-connect half of the rule, for a fetch sent through a proxy: the
+ * connected peer is then the proxy, so only the URL says where the fetch goes.
+ * A host name that only resolves to such an address is not seen here; behind
+ * a proxy, that is the proxy's to resolve.
+ */
+bool is_refused_reference_url (const std::string& url, const LocalPeerRule& rule);
 
 /// The sentence a peer `LocalPeerRule` refused reports, for every driver.
 std::string local_peer_refusal ();

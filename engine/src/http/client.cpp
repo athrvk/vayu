@@ -544,6 +544,20 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     return raw_req.str ();
 }
 
+/// The URL half of a reference fetch's rule (#2605), before anything is
+/// dialled. Behind a proxy it is the only half that sees the target; sent
+/// directly, the connected address it names is refused on the same terms.
+std::optional<Error>
+refused_reference_url (const ClientConfig& config, const Request& request) {
+    const auto& rule = config.local_peer_rule;
+    if (!rule ||
+    !vayu::http::is_refused_reference_url (vayu::http::wire_url (request), *rule)) {
+        return std::nullopt;
+    }
+    return Error{ ErrorCode::InvalidUrl,
+        "Cannot send this request: " + vayu::http::local_peer_refusal () };
+}
+
 } // namespace
 
 // ============================================================================
@@ -593,7 +607,11 @@ Result<Response> Client::send (const Request& request) {
     // status-0 response, not an Error, because send() never returns an Error -
     // every caller (including /execute, which calls .value() unguarded) reads
     // the failure off the response.
-    if (auto invalid = detail::validate_transferable (request)) {
+    auto invalid = detail::validate_transferable (request);
+    if (!invalid) {
+        invalid = refused_reference_url (impl_->config, request);
+    }
+    if (invalid) {
         Response refused        = detail::error_response (*invalid);
         refused.request_headers = request.headers;
         return refused;

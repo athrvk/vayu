@@ -124,6 +124,35 @@ UrlAuthority parse_authority (const std::string& url) {
     return authority;
 }
 
+namespace {
+
+/// libcurl's `CURL_DEFAULT_PROXY_PORT` (lib/urldata.h, not a public header):
+/// the port of a proxy URL that names none, except an `https` one.
+constexpr int LIBCURL_DEFAULT_PROXY_PORT = 1080;
+
+/// Whether @p url writes a port after its host, rather than leaving the
+/// scheme to imply one.
+bool names_port (const std::string& url) {
+    const auto span = vayu::http::url_host_span (url);
+    return span && span->authority_end > span->begin + span->size + 1;
+}
+
+} // namespace
+
+std::optional<UrlAuthority> configured_proxy (const TransportPolicy& policy) {
+    const bool named = policy.proxy_mode == ProxyMode::Manual ||
+    policy.proxy_mode == ProxyMode::System;
+    if (!named || policy.proxy_url.empty ()) {
+        return std::nullopt;
+    }
+    UrlAuthority proxy = parse_authority (policy.proxy_url);
+    if (!names_port (policy.proxy_url) &&
+    !vayu::utils::ascii_lower_equal (vayu::http::url_scheme (policy.proxy_url), "https")) {
+        proxy.port = LIBCURL_DEFAULT_PROXY_PORT;
+    }
+    return proxy;
+}
+
 std::string extract_hostname (const std::string& url) {
     return parse_authority (url).host;
 }
@@ -923,10 +952,20 @@ const std::string& url) {
     return matched;
 }
 
+/// Whether @p peer_ip on @p peer_port is the proxy @p check's transfer names.
+bool is_configured_proxy (const ConnectedPeerCheck& check, const char* peer_ip, int peer_port) {
+    return check.proxy && peer_ip != nullptr &&
+    vayu::http::is_peer_named_by (
+    peer_ip, peer_port, check.proxy->host, check.proxy->port);
+}
+
 /// Whether @p check's `LocalPeerRule` refuses this peer, recording it when it
-/// does. A missing address is refused: the rule fails closed.
+/// does. A missing address is refused: the rule fails closed. The configured
+/// proxy is not (#2605): the user named it, and where it forwards is judged on
+/// the URL before the transfer (`is_refused_reference_url`).
 bool refuses_local_peer (ConnectedPeerCheck* check, const char* peer_ip, int peer_port) {
-    if (check == nullptr || check->local_peers == nullptr) {
+    if (check == nullptr || check->local_peers == nullptr ||
+    is_configured_proxy (*check, peer_ip, peer_port)) {
         return false;
     }
     check->refused_local_peer = peer_ip == nullptr ||
@@ -942,8 +981,9 @@ bool refuses_local_peer (ConnectedPeerCheck* check, const char* peer_ip, int pee
  * It runs for every connection a transfer uses, reused ones included, after
  * the connect and before a byte of the request is written - so a redirect hop
  * and a name that resolves to loopback are judged by the address libcurl
- * actually reached. With a proxy in force that address is the proxy's. The
- * abort surfaces as `CURLE_ABORTED_BY_CALLBACK`, which `curl_to_error`
+ * actually reached. With a proxy in force that address is the proxy's: the
+ * reserved ports still refuse it, the reference rule passes it. The abort
+ * surfaces as `CURLE_ABORTED_BY_CALLBACK`, which `curl_to_error`
  * recognises by asking the reserved-port predicate the same question, or by
  * the refusal the check recorded.
  *
@@ -1304,6 +1344,9 @@ ConnectedPeerCheck* peer_check) {
     // registry is process-wide); a reference fetch's rule rides it (#2364).
     set_opt<CURLOPT_PREREQFUNCTION> (curl, refuse_forbidden_peer);
     set_opt<CURLOPT_PREREQDATA> (curl, peer_check);
+    if (peer_check != nullptr) {
+        peer_check->proxy = configured_proxy (policy);
+    }
 
     apply_ca_options (curl, policy);
     apply_proxy_options (curl, policy);
