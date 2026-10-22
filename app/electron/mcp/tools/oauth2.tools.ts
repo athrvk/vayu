@@ -13,7 +13,16 @@
 import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
 import type { McpTool } from "./contract.js";
-import { callEngine, errorResult, isRecord, requireStr, str, writesDisabled } from "./kit.js";
+import {
+	callEngine,
+	callEngineStructured,
+	errorResult,
+	isRecord,
+	requireStr,
+	str,
+	writesDisabled,
+} from "./kit.js";
+import { oauthStatusSchema } from "./output-schemas.js";
 import {
 	OAUTH2_INTERACTIVE_REFUSAL,
 	oauth2CacheKeyInput,
@@ -86,8 +95,9 @@ export const OAUTH2_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { cacheKey: oauth2CacheKeyInput },
+		outputSchema: oauthStatusSchema,
 		handler: (args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getOAuth2TokenStatus(requireStr(args, "cacheKey"), signal),
 				(answer) => projectOAuth2Status(answer)

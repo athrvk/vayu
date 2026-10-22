@@ -12,7 +12,8 @@
 
 import { z } from "zod";
 import type { McpTool } from "./contract.js";
-import { callEngine, requireStr, ToolArgError } from "./kit.js";
+import { callEngine, callEngineStructured, requireStr, ToolArgError } from "./kit.js";
+import { mockIssuerListSchema } from "./output-schemas.js";
 import {
 	MOCK_ISSUER_FAILURE_MODES,
 	mockIssuerPatchPayload,
@@ -109,7 +110,9 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listMockIssuers(signal)),
+		outputSchema: mockIssuerListSchema,
+		handler: (_args, ctx, signal) =>
+			callEngineStructured(ctx, () => ctx.client.listMockIssuers(signal)),
 	},
 	{
 		name: "stop_mock_issuer",

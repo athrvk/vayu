@@ -15,7 +15,14 @@ import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
 import { secretsShape, withheldPointer, withholdRequestUrl } from "../withhold.js";
 import type { McpTool } from "./contract.js";
-import { engineErrorResult, errorResult, jsonResult, stringArray, ToolArgError } from "./kit.js";
+import {
+	engineErrorResult,
+	errorResult,
+	stringArray,
+	structuredResult,
+	ToolArgError,
+} from "./kit.js";
+import { graphqlSdlSchema } from "./output-schemas.js";
 import { boundText } from "./inline-body-bounds.js";
 import { composeViaEngine, readAuthArg, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
 import {
@@ -75,6 +82,7 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 					'Print only these named types (e.g. ["Query", "Order"]), in this order. Omit for the whole schema.'
 				),
 		},
+		outputSchema: graphqlSdlSchema,
 		handler: async (args, ctx, signal) => {
 			const only = stringArray(args, "types");
 			const composeBody = schemaComposeBody(args, readAuthArg(args));
@@ -119,7 +127,7 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				);
 			}
 			const sdl = boundText(printed.sdl, MAX_SCHEMA_SDL_BYTES);
-			return jsonResult({
+			return structuredResult({
 				endpoint: secretsShape(ctx, (value) => withholdRequestUrl(value, composed.auth))(
 					composed.url
 				),

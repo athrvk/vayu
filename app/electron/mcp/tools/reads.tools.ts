@@ -39,6 +39,7 @@ import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngine,
 	callEngineForRunOutput,
+	callEngineStructured,
 	engineErrorResult,
 	errorResult,
 	optionalOffset,
@@ -55,13 +56,25 @@ import {
 	DEFAULT_RUN_SAMPLE_LIMIT,
 	DEFAULT_RUN_SERIES_LIMIT,
 	MAX_RUN_SERIES_LIMIT,
+	PAGE_CURSOR_SENTENCE,
 	pagedRead,
 	RUN_STATUSES,
 	RUN_TYPES,
 	runListQuery,
 } from "./run-housekeeping.js";
 import { markPartialReport, projectRunStatus } from "./run-status.js";
-import { engineHealthSchema, isEngineHealthShape } from "./output-schemas.js";
+import {
+	appFocusSchema,
+	engineConfigSchema,
+	engineHealthSchema,
+	isEngineHealthShape,
+	requestRowSchema,
+	runPageSchema,
+	runReportSchema,
+	runSamplePageSchema,
+	runSeriesPageSchema,
+	runStatusSchema,
+} from "./output-schemas.js";
 
 /**
  * One run's row, with the engine's bare "Run not found" 404 made to name the id
@@ -128,6 +141,7 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
+		outputSchema: appFocusSchema,
 		handler: async (_args, ctx) => {
 			const focus = ctx.appFocus?.();
 			if (!focus) {
@@ -214,8 +228,9 @@ export const READ_TOOLS: McpTool[] = [
 				.string()
 				.describe("Saved request ID, the (req_...) of a Vayu reference line."),
 		},
+		outputSchema: requestRowSchema,
 		handler: (args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getRequest(requireStr(args, "requestId"), signal),
 				secretsShape(ctx, withholdRowSecrets)
@@ -253,7 +268,8 @@ export const READ_TOOLS: McpTool[] = [
 			"List past runs (single Design-mode requests, collection runs and load tests), " +
 			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. A finished load test's row also carries \`resultSummary\` {rps, p95Ms, errorRate, verdict}: errorRate is a percentage 0-100, verdict is "passed" or "failed" and absent when the run declared no budgets, and any key the run did not record is absent; a design run's row carries {statusCode, latencyMs} there instead. verdict is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and errorRate is computed over the status-code distribution so it can differ slightly from the report's summary.errorRate. A data-driven run's summary names the file its rows came from, never its path: \`dataFileName\`, \`dataFileHash\` (SHA-256 of its bytes) and \`dataFileCastNumbers\` (true only when the file was read with 'Read numbers as numbers') on a single-request run, \`summary.scenario.dataFileName\` / \`dataFileHash\` / \`dataFileCastNumbers\` on a collection run - compare the hash with list_collections' \`dataFile.hash\` before re-running with the same file. ` +
 			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
-			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is." +
+			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is. " +
+			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "List runs",
@@ -309,6 +325,7 @@ export const READ_TOOLS: McpTool[] = [
 					"true lists only runs pinned as a baseline, false only unpinned ones. Omit for both."
 				),
 		},
+		outputSchema: runPageSchema,
 		handler: async (args, ctx, signal) => {
 			// Built before the call, not inside it: an argument the caller got
 			// wrong must reach dispatch as a ToolArgError - inside `pagedRead`'s
@@ -343,10 +360,12 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to fetch.") },
+		outputSchema: runReportSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			return callEngineForRunOutput(ctx, () => ctx.client.getRunReport(runId, signal), {
 				bound: (report) => markPartialReport(boundRunReport(report)),
+				structured: true,
 				signal,
 			});
 		},
@@ -365,10 +384,12 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to read, as a start tool returned it.") },
+		outputSchema: runStatusSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			return callEngineForRunOutput(ctx, () => readRunRow(ctx, runId, signal), {
 				bound: (row) => projectRunStatus(row),
+				structured: true,
 				signal,
 			});
 		},
@@ -379,7 +400,8 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description: (config) =>
 			"Get the response samples a load run captured - the actual headers and bodies of individual exchanges, which the report's aggregates do not carry. A load run keeps 1 in 100 responses, up to 1000 per run, unless `start_load_run` set `responseSamplePeriod` (1 keeps every response) or `maxResponseSamples` (0 keeps none); a run that captured nothing returns an empty page, not an error. " +
-			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. \`pagination\` says how many exist; read the rest with \`offset\`.` +
+			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. ` +
+			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get run samples",
@@ -405,6 +427,7 @@ export const READ_TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many samples to skip, for paging (default 0)."),
 		},
+		outputSchema: runSamplePageSchema,
 		handler: async (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			const limit = optionalPageLimit(
@@ -429,7 +452,8 @@ export const READ_TOOLS: McpTool[] = [
 		description:
 			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. A tick's latency_p50_ms / latency_p95_ms / latency_p99_ms cover its second, and are absent from a second in which nothing completed: a stall, not a 0 ms answer. A run stored by an older engine has 0 there instead. " +
 			`${RUN_ERROR_DEFINITION_POINTER} ` +
-			`BOUNDED: ${DEFAULT_RUN_SERIES_LIMIT} ticks per call by default, ${MAX_RUN_SERIES_LIMIT} at most - a larger \`limit\` is refused, not clamped, and the engine's own 5000-row default is far past what a tool result can carry. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+			`BOUNDED: ${DEFAULT_RUN_SERIES_LIMIT} ticks per call by default, ${MAX_RUN_SERIES_LIMIT} at most - a larger \`limit\` is refused, not clamped, and the engine's own 5000-row default is far past what a tool result can carry. ` +
+			PAGE_CURSOR_SENTENCE,
 		annotations: {
 			title: "Get run time series",
 			readOnlyHint: true,
@@ -454,6 +478,7 @@ export const READ_TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many ticks to skip, for paging (default 0)."),
 		},
+		outputSchema: runSeriesPageSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			const limit = optionalPageLimit(
@@ -476,7 +501,8 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get the server vitals scraped during a run - the target's own CPU, memory and load, sampled on the monitor's cadence rather than the tick cadence, so these rows do not line up with get_run_timeseries row for row. Answers 'was the target saturated?' beside the client-side latency the report shows. Only a run started with a `monitor` block has any; any other run returns an empty page, not an error. " +
-			`BOUNDED the same way as get_run_timeseries: ${DEFAULT_RUN_SERIES_LIMIT} samples by default, ${MAX_RUN_SERIES_LIMIT} at most, refused above that. \`pagination\` says how many exist; read the rest with \`offset\`.`,
+			`BOUNDED the same way as get_run_timeseries: ${DEFAULT_RUN_SERIES_LIMIT} samples by default, ${MAX_RUN_SERIES_LIMIT} at most, refused above that. ` +
+			PAGE_CURSOR_SENTENCE,
 		annotations: {
 			title: "Get run monitor series",
 			readOnlyHint: true,
@@ -501,6 +527,7 @@ export const READ_TOOLS: McpTool[] = [
 				.optional()
 				.describe("How many samples to skip, for paging (default 0)."),
 		},
+		outputSchema: runSeriesPageSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			const limit = optionalPageLimit(
@@ -531,8 +558,9 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
+		outputSchema: engineConfigSchema,
 		handler: (_args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getConfig(signal),
 				secretsShape(ctx, withholdConfigCredentials)
