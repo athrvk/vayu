@@ -326,6 +326,11 @@ ApprovedFile::read_at (std::uint64_t offset, std::span<char> buffer) const {
 FilePlan::FilePlan (FileAccessPolicy policy) : policy_ (std::move (policy)) {
 }
 
+std::size_t FilePlan::kept_files () const {
+    const std::shared_lock lock (mutex_);
+    return kept_.size ();
+}
+
 std::optional<std::string>
 FilePlan::check (const FileRef& file, std::string_view label, bool needs_bytes) {
     const std::unique_lock lock (mutex_);
@@ -340,6 +345,26 @@ const FilePlan::Checked* FilePlan::checked (const std::string& src, bool needs_b
     return &found->second;
 }
 
+std::expected<fs::path, std::string>
+FilePlan::approve (const FileRef& file, std::string_view label) const {
+    std::error_code ec;
+    const fs::file_status status = fs::status (fs::path (file.src), ec);
+    if (ec || !fs::exists (status)) {
+        return std::unexpected (unreadable_message (file, label, ec ? ec.value () : ENOENT));
+    }
+    // Decided before the file is opened: a path the policy does not allow is
+    // never read at all.
+    auto canonical = policy_.approved_path (file.src);
+    if (!canonical) {
+        return std::unexpected (untrusted_message (file, label));
+    }
+    if (!fs::is_regular_file (status)) {
+        return std::unexpected (std::string (label) + " '" + file.src +
+        "' is not a regular file - a directory, device or pipe cannot be sent");
+    }
+    return std::move (*canonical);
+}
+
 std::optional<std::string>
 FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_bytes) {
     if (auto refusal = refuse_shape (file, label)) {
@@ -348,28 +373,21 @@ FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_
     if (checked (file.src, needs_bytes) != nullptr) {
         return std::nullopt;
     }
-
-    std::error_code ec;
-    const fs::file_status status = fs::status (fs::path (file.src), ec);
-    if (ec || !fs::exists (status)) {
-        return unreadable_message (file, label, ec ? ec.value () : ENOENT);
+    if (needs_bytes) {
+        return read_body_file (file, label);
     }
-    // Decided before the file is opened: a path the policy does not allow is
-    // never read at all.
-    const auto canonical = policy_.approved_path (file.src);
-    if (!canonical) {
-        return untrusted_message (file, label);
+    auto opened = open_part_file (file, label, PartFiles::PerRequest);
+    if (!opened) {
+        return std::move (opened.error ());
     }
-    if (!fs::is_regular_file (status)) {
-        return std::string (label) + " '" + file.src +
-        "' is not a regular file - a directory, device or pipe cannot be sent";
-    }
-    return needs_bytes ? read_body_file (file, label) :
-                         open_part_file (file, label, *canonical);
+    return std::nullopt;
 }
 
 std::optional<std::string>
 FilePlan::read_body_file (const FileRef& file, std::string_view label) {
+    if (auto approved = approve (file, label); !approved) {
+        return std::move (approved.error ());
+    }
     const FileHandle handle = open_counted (file.src);
     if (!handle) {
         return unreadable_message (file, label, errno);
@@ -388,14 +406,46 @@ FilePlan::read_body_file (const FileRef& file, std::string_view label) {
     return std::nullopt;
 }
 
-std::optional<std::string> FilePlan::open_part_file (const FileRef& file,
-std::string_view label,
-const fs::path& canonical) {
-    auto approved = ApprovedFile::open (canonical);
-    if (!approved) {
-        return unreadable_message (file, label, approved.error ());
+std::expected<std::shared_ptr<const ApprovedFile>, std::string>
+FilePlan::open_part_file (const FileRef& file, std::string_view label, PartFiles part_files) {
+    auto canonical = approve (file, label);
+    if (!canonical) {
+        return std::unexpected (std::move (canonical.error ()));
     }
-    by_src_[file.src].approved = std::move (*approved);
+    const std::string key = canonical->string ();
+    std::shared_ptr<const ApprovedFile> opened;
+    if (const auto kept = kept_.find (key); kept != kept_.end ()) {
+        opened = kept->second;
+    } else {
+        auto fresh = ApprovedFile::open (*canonical);
+        if (!fresh) {
+            return std::unexpected (unreadable_message (file, label, fresh.error ()));
+        }
+        opened = std::move (*fresh);
+    }
+    if (part_files == PartFiles::KeptByPlan) {
+        kept_.emplace (key, opened);
+    }
+    by_src_[file.src].canonical = key;
+    return opened;
+}
+
+std::optional<std::string> FilePlan::prepare_part (FormField& field, PartFiles part_files) {
+    const FileRef ref       = file_ref_of (field);
+    const std::string label = form_part_label (field);
+    if (auto refusal = refuse_shape (ref, label)) {
+        return refusal;
+    }
+    const Checked* planned = checked (field.src, false);
+    if (planned != nullptr &&
+    (part_files == PartFiles::PerRequest || kept_.contains (planned->canonical))) {
+        return fill_part (field);
+    }
+    auto opened = open_part_file (ref, label, part_files);
+    if (!opened) {
+        return std::move (opened.error ());
+    }
+    field.approved = std::move (*opened);
     return std::nullopt;
 }
 
@@ -414,19 +464,34 @@ std::optional<std::string> FilePlan::fill_body_file (FileRef& file) const {
 }
 
 std::optional<std::string> FilePlan::fill_part (FormField& field) const {
+    const FileRef ref       = file_ref_of (field);
     const std::string label = form_part_label (field);
-    if (auto refusal = refuse_shape (file_ref_of (field), label)) {
+    if (auto refusal = refuse_shape (ref, label)) {
         return refusal;
     }
     const Checked* planned = checked (field.src, false);
     if (planned == nullptr) {
         return not_planned_message (field.src, label);
     }
-    field.approved = planned->approved;
+    if (const auto kept = kept_.find (planned->canonical); kept != kept_.end ()) {
+        field.approved = kept->second;
+        return std::nullopt;
+    }
+    // Approved, not kept: a path a data row bound. Opened for this request
+    // alone, through the rule again, so the run holds nothing per row.
+    auto canonical = approve (ref, label);
+    if (!canonical) {
+        return std::move (canonical.error ());
+    }
+    auto opened = ApprovedFile::open (*canonical);
+    if (!opened) {
+        return unreadable_message (ref, label, opened.error ());
+    }
+    field.approved = std::move (*opened);
     return std::nullopt;
 }
 
-std::optional<std::string> FilePlan::prepare (Request& request) {
+std::optional<std::string> FilePlan::prepare (Request& request, PartFiles part_files) {
     const std::unique_lock lock (mutex_);
     Body& body = request.body;
     if (body.mode == BodyMode::Binary) {
@@ -442,11 +507,7 @@ std::optional<std::string> FilePlan::prepare (Request& request) {
         if (!field.enabled || field.type != FormFieldType::File) {
             continue;
         }
-        if (auto refusal =
-            check_locked (file_ref_of (field), form_part_label (field), false)) {
-            return refusal;
-        }
-        if (auto refusal = fill_part (field)) {
+        if (auto refusal = prepare_part (field, part_files)) {
             return refusal;
         }
     }

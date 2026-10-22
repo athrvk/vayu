@@ -1516,7 +1516,8 @@ record shape, the category list, the redaction rule and the file layout
   checked. A form-data file part is opened by that check, on the canonical
   path the policy approved and without following a final symlink, and every
   transfer reads that open file rather than the path (#2416), so a link
-  re-pointed after the check, or between a run's iterations, is not followed;
+  re-pointed after the check, or between a run's iterations, is not followed
+  (a path a data row binds is opened per submission, through the check again);
   `engine/CLAUDE.md` states what remains. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
   path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).

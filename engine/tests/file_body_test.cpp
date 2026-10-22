@@ -335,7 +335,7 @@ TEST (FileRule, AMissingFileIsRefusedNamingThePath) {
     EXPECT_NE (refusal->find ("cannot read file"), std::string::npos) << *refusal;
 }
 
-// Mutation check: drop the `is_regular_file` test from `FilePlan::check_locked`
+// Mutation check: drop the `is_regular_file` test from `FilePlan::approve`
 // and the directory opens (on Linux) and `/dev/zero` is read until the inline
 // limit and sent as a body.
 TEST (FileRule, ADirectoryOrADeviceIsNotAFile) {
@@ -357,8 +357,8 @@ TEST (FileRule, ADirectoryOrADeviceIsNotAFile) {
     EXPECT_NE (device->find ("not a regular file"), std::string::npos) << *device;
 }
 
-// The trust half. Mutation check: make `check_locked` skip the
-// `policy_.allows` refusal and the outside path is sent.
+// The trust half. Mutation check: make `FilePlan::approve` skip the
+// `policy_.approved_path` refusal and the outside path is sent.
 TEST (FileRule, APathIsSentFromUnderAnAllowedFolderOrAsAPickedFile) {
     ScratchDir scratch;
     const std::string inside  = scratch.write ("allowed/a.bin", "a");
@@ -995,6 +995,53 @@ TEST_F (FormPartWireTest, AFileReplacedAfterTheCheckSendsTheApprovedOne) {
     EXPECT_EQ (part_f (*server_), "approved bytes");
 }
 
+// A data file of many rows names many files. Each is approved at plan time
+// and none is kept open by the plan, so a run cannot run out of descriptors;
+// `fill` opens a row's file for that request alone, and every request sends
+// its own row's bytes. A path the run's own request names is kept, once per
+// file however it is spelled. Mutation check: keep every part's open file in
+// `FilePlan::open_part_file` whatever `PartFiles` says and the plan holds one
+// per row.
+TEST_F (FormPartWireTest, ADataBoundPathIsApprovedButNotKeptOpenByThePlan) {
+    constexpr std::size_t ROWS = 60;
+    vayu::core::LoadDataSet data;
+    for (std::size_t row = 0; row < ROWS; ++row) {
+        const std::string name = "rows/" + std::to_string (row) + ".bin";
+        data.rows.push_back (
+        json{ { "f", scratch_.write (name, "row " + std::to_string (row)) } });
+    }
+    data.bound_columns = vayu::core::bound_columns_of (data.rows);
+
+    const Request templated = form_part_request (server_->url (), "{{data.f}}");
+    FilePlan files (allowing (scratch_));
+    Request planned = templated;
+    ASSERT_FALSE (vayu::core::plan_load_files (files, planned, &data));
+    EXPECT_EQ (files.kept_files (), 0u);
+
+    Client client;
+    const auto fields = vayu::core::tokenize_bindable_fields (templated, data.bound_columns);
+    for (std::size_t row = 0; row < ROWS; ++row) {
+        Request bound = templated;
+        const vayu::core::IterationBinding binding{ &data.rows.at (row), row,
+            vayu::core::IterationIdentity{ 1, 0 } };
+        ASSERT_TRUE (
+        vayu::core::apply_iteration_template (bound, fields, binding).ok);
+        const auto filled = vayu::core::fill_bound_files (&files, templated, bound);
+        ASSERT_TRUE (filled.ok) << filled.error;
+        EXPECT_EQ (client.send (bound).value ().status_code, 200);
+        EXPECT_EQ (part_f (*server_), "row " + std::to_string (row));
+    }
+    EXPECT_EQ (files.kept_files (), 0u);
+
+    const std::string fixed = scratch_.write ("fixed.bin", "fixed");
+    for (const std::string& spelling : { fixed, scratch_.dir ("rows") + "/../fixed.bin" }) {
+        Request request = form_part_request (server_->url (), spelling);
+        ASSERT_FALSE (files.prepare (request, PartFiles::KeptByPlan));
+    }
+    EXPECT_EQ (files.kept_files (), 1u)
+    << "two spellings of one file, one open file";
+}
+
 // A part no plan filled never went through the rule, so the gate refuses it
 // rather than read its path. Mutation check: drop the file-part arm from
 // `unplanned_file_ref` and the transfer reaches a part with no open file.
@@ -1300,8 +1347,9 @@ class StoredTrustTest : public BinaryBodyExchangeTest {
 // The finding #2356 names: a body saying `unresolved: false` used to skip the
 // folder rule. Outside every root and every grant it is refused on all three
 // send paths, for a binary body and a form-data part. Mutation check: restore
-// the body-read trust (parse the key and let `false` skip `policy_.allows` in
-// `check_locked`) and every refusal here turns into a send.
+// the body-read trust (parse the key and let `false` skip
+// `policy_.approved_path` in `FilePlan::approve`) and every refusal here
+// turns into a send.
 TEST_F (StoredTrustTest, AFalseBodyOutsideEveryRootAndGrantIsRefusedOnEverySendPath) {
     const std::string outside = scratch_.write ("elsewhere/a.bin", "secret");
     for (const json& body : bodies_claiming_trust (outside)) {

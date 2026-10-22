@@ -655,7 +655,10 @@ redirect rewinds it). A binary file that vanishes mid-run fails that transfer
 with libcurl's own read error. A **form part's** file is opened in that pass,
 on the path the check resolved and without following a final symlink, and every
 transfer of the send or run reads that open file: a link re-pointed or a file
-replaced at the path afterwards is not what is sent. Its length is the one the
+replaced at the path afterwards is not what is sent. A path a data row binds is
+the exception: it is checked when the run starts but opened per submission,
+through the same check again, so a large data file holds no file open per row.
+Its length is the one the
 open saw; a file truncated below it under the open handle aborts the transfer.
 A part with no declared Content-Type is typed by its filename's extension, then
 its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`,
