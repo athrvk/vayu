@@ -2286,11 +2286,20 @@ plant a cookie for another site, nor delete that site's session.
 - **For `set`, the cookie's `domain` must be in scope too.** Without the check a
   cookie `{ domain: 'victim.example', path: '/' }` set through a URL of
   `a.example` would be stored for `victim.example` and sent on the next transfer
-  to it (cookie fixation); RFC 6265 section 5.3 has a user agent ignore a
-  `Domain` the request host does not domain-match. A leading dot is ignored for
-  the comparison and the domain is compared as punycode, as the jar keys on it.
+  to it (cookie fixation). RFC 6265 section 5.3 has a user agent ignore a
+  `Domain` that does not domain-match the request host; the jar does not apply
+  that rule itself, so the engine checks it here, and it reads the match in both
+  directions like the rest of the scope. A leading dot is ignored for the
+  comparison and the domain is compared as punycode, as the jar keys on it.
   `Domain=example.com` set from a request to `www.example.com` is in scope and
   still stores.
+- **A single-label domain is refused** (`.com`, `test`) unless it is exactly the
+  request's host or one the script called (a request to `localhost` may write
+  `domain: 'localhost'`). A top-level domain is a parent of every host under it,
+  so the site rule alone would admit it, and the cookie would then be sent to
+  every site there. **No public-suffix list is applied** (#2731): `co.uk` or
+  `github.io` still passes as a domain, because telling it from `example.co.uk`
+  needs the list.
 - `clear()` with no URL empties this environment's jar and is not subject to the
   site limit (see above).
 

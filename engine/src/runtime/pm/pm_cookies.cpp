@@ -840,18 +840,50 @@ bool jar_write_in_scope (ContextData& data, const char* member, const std::strin
     return false;
 }
 
+// Whether @p host is, spelled exactly, the request's host or one this script
+// has addressed: the one case a single-label domain may be written for.
+bool jar_host_is_scope_host (const ContextData& data, const std::string& host) {
+    const auto request_host = jar_request_host (data);
+    const auto same         = [&host] (const std::string& allowed) {
+        return vayu::utils::ascii_lower_equal (host, allowed);
+    };
+    return (request_host && same (*request_host)) ||
+    std::ranges::any_of (data.addressed_hosts, same);
+}
+
+// A domain with no interior dot (`com`, `test`) is a top-level domain, and a
+// cookie for one is carried to every site under it. There is no public-suffix
+// list to tell `co.uk` from `example.co.uk`, so this is the cheap half of the
+// rule; an IPv6 literal is exact by nature and exempt.
+bool is_single_label_domain (const std::string& host) {
+    return !host.starts_with ("[") && host.find ('.') == std::string::npos;
+}
+
 // Whether a cookie about to be stored for @p domain (as `cookie_for_url`
 // settled it: punycode, a leading dot for "subdomains too") stays inside the
 // scope. This is the half `jar_write_in_scope` cannot see: a cookie whose
 // Domain differs from the URL's host is sent to that domain's hosts, so the
-// URL being in scope proves nothing about where the cookie goes.
+// URL being in scope proves nothing about where the cookie goes. The scope
+// relates a host to its parents, so a single-label domain is held to the exact
+// host (`localhost` writing `localhost`) rather than to the parent test.
 bool jar_cookie_domain_in_scope (ContextData& data, const char* member, const std::string& domain) {
     const std::string host = domain.starts_with (".") ? domain.substr (1) : domain;
-    if (jar_host_in_scope (data, host)) {
+    const bool suffix_like =
+    is_single_label_domain (host) && !jar_host_is_scope_host (data, host);
+    if (!suffix_like && jar_host_in_scope (data, host)) {
         return true;
     }
-    warn_out_of_jar_scope (data, "write",
-    std::string ("pm.cookies.") + member + " wrote nothing for the domain " + host);
+    const std::string outcome =
+    std::string ("pm.cookies.") + member + " wrote nothing for the domain " + host;
+    if (suffix_like) {
+        data.console_output.push_back ({ ConsoleLevel::Warn,
+        outcome +
+        ": a single-label domain is refused unless it is the request's "
+        "own host, as it would reach every site under it. See "
+        "docs/engine/scripting.md." });
+    } else {
+        warn_out_of_jar_scope (data, "write", outcome);
+    }
     return false;
 }
 

@@ -1288,12 +1288,16 @@ Divergences from Postman:
 - **`jar.set`, `jar.unset` and `jar.clear(url)` are limited to the same site**
   (#2631). A write whose URL is outside it is refused with a console warning and
   stores or removes nothing, and so is a `set` whose cookie `domain` is outside
-  it (RFC 6265 section 5.3 has a user agent ignore a `Domain` the request host
-  does not domain-match; Postman's own jar permits it). The call still returns
-  and calls its callback as a stored write would. **A script that logs in across
-  hosts by `set`ting a cookie with a foreign `domain` stops working**: call the
-  other host through `pm.sendRequest` first and it is in scope. Details in
-  [scripting.md](../engine/scripting.md#writes-are-limited-the-same-way).
+  it. RFC 6265 section 5.3 has a user agent ignore a `Domain` that does not
+  domain-match the request host; Postman's own jar does not apply that rule to
+  a script's write, and here it is checked in both directions like the read
+  scope. A single-label domain (`.com`, `test`) is also refused unless it is the
+  request's own host, because it would reach every site under it; no
+  public-suffix list is applied (#2731), so `co.uk` still passes. The call still
+  returns and calls its callback as a stored write would. **A script that logs in
+  across hosts by `set`ting a cookie with a foreign `domain` stops working**:
+  call the other host through `pm.sendRequest` first and it is in scope. Details
+  in [scripting.md](../engine/scripting.md#writes-are-limited-the-same-way).
 - **A write is applied after the transfer it was made before**, not the moment
   it is called - so it rides that request and cannot be lost when the response's
   cookies are captured. Details in

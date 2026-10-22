@@ -1971,6 +1971,63 @@ TEST (CookieJarWriteScope, ADomainOfTheRequestsOwnSiteStillStores) {
     EXPECT_EQ (jar.matching ("env_a", "http://www.a.test/").size (), 1u);
 }
 
+TEST (CookieJarWriteScope, ASingleLabelDomainIsRefusedBecauseItReachesEverySiteUnderIt) {
+    // `.test` is a parent of the request host, so the site rule alone admits
+    // it - and the cookie would then ride every transfer to victim.test.
+    // There is no public-suffix list (#2731); the cheap guard is the label count.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "for (const domain of ['.test', 'test', 'TEST']) {"
+    "  jar.set('http://a.test/', { name: 'sid', value: 'x', domain, path: '/' "
+    "});"
+    "  jar.set('http://a.test/', { name: 'sid2', value: 'x', domain });"
+    "}",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (jar.snapshot ().empty ())
+    << "a cookie for a top-level domain was stored";
+    EXPECT_FALSE (jar_holds_for (jar, "victim.test"));
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 6u);
+    for (const auto& message : warned) {
+        EXPECT_NE (message.find ("single-label"), std::string::npos) << message;
+    }
+}
+
+TEST (CookieJarWriteScope, ASingleLabelDomainIsAllowedForTheExactHostAndASubdomainStays) {
+    {
+        // A host with no dot in it (`localhost`) is the only thing its own
+        // cookie domain can be.
+        CookieJar jar;
+        vayu::Environment env;
+        const auto result = run_jar_write (jar, "http://localhost/users",
+        "const jar = pm.cookies.jar();"
+        "jar.set('http://localhost/', { name: 'a', value: 'v', domain: "
+        "'localhost', path: '/' });"
+        "jar.set('http://localhost/', { name: 'b', value: 'v', domain: "
+        "'localhost' });",
+        env);
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_TRUE (warnings_of (result).empty ());
+        EXPECT_EQ (jar.matching ("env_a", "http://localhost/").size (), 2u);
+    }
+    {
+        CookieJar jar;
+        vayu::Environment env;
+        const auto result = run_jar_write (jar, "http://a.test/users",
+        "pm.cookies.jar().set('http://a.test/', { name: 'sub', value: 'v', "
+        "domain: 'evil.a.test', path: '/' });",
+        env);
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_TRUE (warnings_of (result).empty ());
+        EXPECT_EQ (jar.matching ("env_a", "http://evil.a.test/").size (), 1u);
+    }
+}
+
 TEST (CookieJarWriteScope, AHostTheScriptCalledThroughSendRequestBecomesWritable) {
     // The server is on 127.0.0.1, a host the request (to a.test) is not for.
     CookieServer server;
