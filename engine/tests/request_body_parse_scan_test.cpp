@@ -19,6 +19,7 @@
  * `summary_json`, `snapshot`) is the engine's own text and is not matched.
  */
 
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -34,7 +35,8 @@ namespace {
 
 /// The expressions that name the request text a handler was given: the
 /// `httplib::Request` member, and the parameter the testable cores take it as.
-constexpr std::string_view kRequestTextNames[] = { "req.body", "request_body", "body" };
+constexpr auto kRequestTextNames =
+std::to_array<std::string_view> ({ "req.body", "request_body", "body" });
 
 bool is_identifier_char (char c) {
     return (std::isalnum (static_cast<unsigned char> (c)) != 0) || c == '_';
