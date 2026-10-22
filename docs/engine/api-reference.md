@@ -144,6 +144,12 @@ JSON: <parser message>` (code `bad_request`) (issue
 [#2417](https://github.com/athrvk/vayu/issues/2417)). `POST /execute` and
 `POST /runs` hold the same bound; see their sections.
 
+The bound reads the body's own tree, so JSON carried inside a string field is
+not covered by it. The engine parses a few such fields again and holds each to
+the same 128 levels itself (issue
+[#2672](https://github.com/athrvk/vayu/issues/2672)): a `jsonrpc` body's
+`content` ([the `jsonrpc` envelope](#the-jsonrpc-envelope)).
+
 ## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,
@@ -524,7 +530,7 @@ same rule, as the `graphql` one. `content` may be either shape:
 | a JSON object with a **string** `jsonrpc` member | itself, **byte for byte** |
 | a JSON object without one | itself plus `"jsonrpc":"2.0"`, and `"id":1` if it declares no `id` |
 | a JSON array (a batch call) | itself, verbatim |
-| anything else (a non-object, or text that does not parse) | itself, verbatim |
+| anything else (a non-object, text that does not parse, or a call nested deeper than 128 levels) | itself, verbatim |
 
 The added `id` is the constant `1`, never a random or time-derived value: a
 load run sends the same call thousands of times and a replay has to send the
