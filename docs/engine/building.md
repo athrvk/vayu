@@ -478,17 +478,21 @@ builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
 beside its licence and a `README.md` naming the package, the exact version,
 the tarball URL and its registry integrity. csv-parse and xml2js ship no
 single-file build, and chai's browser build (`chai.js`) carries a dependency set Postman
-does not ship, so each of the three files is an esbuild bundle of the package's own
+does not ship, so each of those three files is an esbuild bundle of the package's own
 sources (xml2js's with the `sax` and `xmlbuilder` it depends on, chai's with
 its seven dependencies, their licences beside it), and its `README.md` also
-carries the command that reproduces it byte for byte. They are
+carries the command that reproduces it byte for byte. ajv's file is the
+package's own `dist/ajv.min.js` (its browser bundle, which carries four
+dependencies, each licence beside it); tv4 ships no minified build, so its
+file is `tv4.js` minified by esbuild and its `README.md` carries the command. They are
 compiled into `vayu_core` as data and evaluated on a script's first `require`
 of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/issues/2650),
 [#2651](https://github.com/athrvk/vayu/issues/2651),
 [#2652](https://github.com/athrvk/vayu/issues/2652),
 [#2653](https://github.com/athrvk/vayu/issues/2653),
 [#2654](https://github.com/athrvk/vayu/issues/2654),
-[#2655](https://github.com/athrvk/vayu/issues/2655)).
+[#2655](https://github.com/athrvk/vayu/issues/2655),
+[#2656](https://github.com/athrvk/vayu/issues/2656)).
 
 | Library | Version | Licence | Vendored file |
 |---------|---------|---------|---------------|
@@ -498,6 +502,14 @@ of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/i
 | csv-parse | 1.2.4 | BSD-3-Clause | `engine/vendor/csv-parse/csv-parse-sync.min.js` (the package's `lib/sync.js` and the `lib/index.js` it requires, bundled and minified by esbuild, 11,679 bytes; string input only), loaded as `require('csv-parse/lib/sync')` |
 | xml2js | 0.6.2, with sax 1.2.4 and xmlbuilder 11.0.1 | MIT (sax ISC) | `engine/vendor/xml2js/xml2js.min.js` (xml2js's `lib/`, sax's `lib/sax.js` and xmlbuilder's `lib/`, bundled and minified by esbuild, 98,939 bytes; string input only), loaded as `require('xml2js')` or the `xml2Json` global |
 | chai | 4.4.1, with assertion-error 1.1.0, check-error 1.0.3, deep-eql 4.1.3, get-func-name 2.0.2, loupe 2.3.7, pathval 1.1.1 and type-detect 4.0.8 | MIT | `engine/vendor/chai/chai.min.js` (chai's `lib/` and its dependencies' entry files, bundled and minified by esbuild, 68,034 bytes), loaded as `require('chai')` |
+| ajv | 6.12.5, with fast-deep-equal 3.1.x, fast-json-stable-stringify 2.x, json-schema-traverse 0.4.1 and uri-js 4.4.0 | MIT (uri-js BSD-2-Clause) | `engine/vendor/ajv/ajv.min.js` (the package's `dist/ajv.min.js` byte for byte, 122,009 bytes; draft-07), loaded as `require('ajv')` |
+| tv4 | 1.3.0 | public domain (MIT as the alternative) | `engine/vendor/tv4/tv4.min.js` (the package's `tv4.js`, 56,187 bytes, minified by esbuild to 28,767 bytes; draft-04), loaded as `require('tv4')` or the `tv4` global |
+
+ajv is 6.12.5, not 6.6.2: Postman's sandbox 6.8.0 pins 6.12.5, and the
+fingerprint of its published bundle agrees, since it carries the
+`strictNumbers` option that ajv added in 6.12.3 and 6.6.2 lacks.
+ajv 7 and later ship no `dist/ajv.min.js` and report `instancePath` where 6
+reports `dataPath`, so a move to one changes what scripts see.
 
 `vayu_embed_js(<target> <symbol> <file>)` (`engine/cmake/embed_js.cmake`) is
 the embed step, one call per library inside the QuickJS block of
@@ -517,7 +529,7 @@ where moment read 58 to 80 ms.
 
 The vendored files are excluded from every formatter and linter
 (`engine/vendor/.clang-format`, the repo-JS ESLint config's ignores) and must
-stay byte-identical to the package (csv-parse's, xml2js's and chai's to the
+stay byte-identical to the package (csv-parse's, xml2js's, chai's and tv4's to the
 build each README names; csv-parse's `node-shims.mjs` and xml2js's `shims/` are build
 input and are not embedded);
 `.gitattributes`' `eol=lf` is a no-op on them because they hold no CR.
@@ -541,6 +553,8 @@ Medians of 101 runs after three warm-ups, pinned to one core, gcc 13:
 | csv-parse 1.2.4 sync as vendored, 12 KB in 7 lines (#2653) | 1.3 ms | 2.6 ms |
 | xml2js 0.6.2 with sax and xmlbuilder as vendored, 99 KB in 13 lines (#2654)\* | 16 ms | 42 ms |
 | chai 4.4.1 with its seven dependencies as vendored, 68 KB in 5 lines (#2655)\*\* | 5.5 ms | 15 ms |
+| ajv 6.12.5 as vendored, 122 KB in 2 lines (#2656)\*\*\* | 21 ms | 55 ms |
+| tv4 1.3.0 minified as vendored, 29 KB on one line (#2656)\*\*\* | 2.7 ms | 6.5 ms |
 
 \* Measured on a box where csv-parse read 1.5 ms and 3.8 ms, so somewhat
 slower than the rows above. The bundle's 99 KB put it past lodash; its first
@@ -552,6 +566,14 @@ first use costs about what moment's does. The harness also reads the memory
 the evaluated module holds (the runtime's `malloc_size` after a garbage
 collection, the module still referenced): about 470 KB for chai, 400 KB for
 moment and 620 KB for xml2js.
+
+\*\*\* Measured on a box where csv-parse read 1.3 ms and 3.5 ms, chai 8.0 ms
+and 22 ms and xml2js 13 ms and 33 ms. ajv's first load is the shelf's dearest,
+past xml2js, and holds about 1,000 KB until the execution ends; tv4 holds about
+190 KB. ajv's first `new Ajv().compile(schema)` and a call then cost 10 ms at
+`-O2` and 35 ms in a Debug build, most of it compiling the draft-07 meta-schema
+the schema is checked against; tv4's first `validate` of a four-level schema
+costs 0.12 ms and 0.37 ms more.
 
 The stand-in is a UMD-wrapped file of functions, objects and arrow functions
 with short identifiers, lighter per byte than a real library; lodash is the

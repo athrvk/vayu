@@ -708,6 +708,8 @@ if(QUICKJS_FOUND)
     vayu_embed_js(vayu_core CSV_PARSE_SYNC_JS vendor/csv-parse/csv-parse-sync.min.js)
     vayu_embed_js(vayu_core XML2JS_JS vendor/xml2js/xml2js.min.js)
     vayu_embed_js(vayu_core CHAI_JS vendor/chai/chai.min.js)
+    vayu_embed_js(vayu_core AJV_JS vendor/ajv/ajv.min.js)
+    vayu_embed_js(vayu_core TV4_JS vendor/tv4/tv4.min.js)
 
     # Disable C99 extension warnings for the QuickJS glue (QuickJS macros use
     # compound literals). One list for both, so a file added to the glue cannot

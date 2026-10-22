@@ -2097,7 +2097,11 @@ nlohmann::json get_script_completions () {
     "input; its global, xml2Json, is a synchronous parse over it rather than "
     "the module. chai is npm's chai 4.4.1, the version Postman bundles: "
     "expect, assert, should and use, the library itself and a separate object "
-    "from pm.expect, which loading it leaves unchanged; it has no global. Any "
+    "from pm.expect, which loading it leaves unchanged; it has no global. ajv "
+    "is npm's ajv 6.12.5, the version Postman bundles: the Ajv constructor, "
+    "draft-07, whose compile(schema) answers a validator that records its "
+    "errors; it has no global. tv4 is npm's tv4 1.3.0, the draft-04 validator "
+    "Postman bundles, and answers the same object as the tv4 global. Any "
     "other name throws \"Cannot find module\" and lists the shelf: nothing is "
     "read from disk or fetched.\n\nExample:\n"
     "const CryptoJS = require('crypto-js');\n"
@@ -2108,7 +2112,11 @@ nlohmann::json get_script_completions () {
     "const xml2js = require('xml2js');\n"
     "xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));\n"
     "const { expect } = require('chai');\n"
-    "expect(pm.response.json().id).to.equal(7);" },
+    "expect(pm.response.json().id).to.equal(7);\n"
+    "const Ajv = require('ajv');\n"
+    "const validate = new Ajv().compile({ type: 'object', required: ['id'] "
+    "});\n"
+    "if (!validate(pm.response.json())) console.log(validate.errors);" },
     { "sortText", "2_require" } });
 
     completions.push_back ({ { "label", "xml2Json" }, { "kind", KIND_FUNCTION },
@@ -2135,6 +2143,103 @@ nlohmann::json get_script_completions () {
     "reads it.\n\nExample:\nconst id = _.get(pm.response.json(), "
     "'data.items[0].id');" },
     { "sortText", "2__" } });
+
+    // tv4 1.3.0's whole public surface, so a call that runs is never an editor
+    // error. `error`, `missing` and `valid` describe the last validate() on the
+    // object, which the global and require('tv4') share.
+    completions.push_back ({ { "label", "tv4" }, { "kind", KIND_VARIABLE },
+    { "insertText", "tv4" }, { "detail", "tv4 1.3.0" },
+    { "documentation",
+    "Postman's bundled tv4: npm's tv4 1.3.0, a draft-04 JSON Schema "
+    "validator, and the same object as require('tv4'). Postman deprecates it "
+    "for require('ajv'), which validates draft-07.\n\nLoaded the first time "
+    "a script reads it.\n\nExample:\nif (!tv4.validate(pm.response.json(), "
+    "schema)) console.log(tv4.error.message);" },
+    { "sortText", "2_tv4" } });
+
+    struct Tv4Member {
+        const char* name;
+        int kind;
+        /// The signature after the member's name, or a field's type.
+        const char* signature;
+        const char* documentation;
+    };
+    constexpr std::string_view TV4_VALIDATE_PARAMS =
+    "(data: unknown, schema: object | boolean | string, checkRecursive?: "
+    "boolean, banUnknownProperties?: boolean)";
+    const std::string tv4_result = std::string (TV4_VALIDATE_PARAMS) +
+    ": { valid: boolean, error: any, missing: string[] }";
+    const std::string tv4_multiple = std::string (TV4_VALIDATE_PARAMS) +
+    ": { valid: boolean, errors: any[], missing: string[] }";
+    const std::string tv4_validate = std::string (TV4_VALIDATE_PARAMS) + ": boolean";
+    const auto tv4_members = std::to_array<Tv4Member> ({
+    { "validate", KIND_FUNCTION, tv4_validate.c_str (),
+    "Validate data against a schema (a $ref string names an added one). "
+    "Answers whether it holds and leaves tv4.error (the first failure, with "
+    "message, code, dataPath and schemaPath, or null), tv4.missing and "
+    "tv4.valid describing it." },
+    { "validateResult", KIND_FUNCTION, tv4_result.c_str (),
+    "validate(), answered as its own { valid, error, missing } rather than "
+    "on tv4." },
+    { "validateMultiple", KIND_FUNCTION, tv4_multiple.c_str (),
+    "Every failure rather than the first: { valid, errors, missing }." },
+    { "addSchema", KIND_FUNCTION, "(uri: string | object, schema?: object): void",
+    "Add a schema a $ref can name, by URI or by its own id." },
+    { "getSchema", KIND_FUNCTION, "(uri: string): any", "An added schema, by URI." },
+    { "getSchemaMap", KIND_FUNCTION, "(): { [uri: string]: any }", "Every added schema, by URI." },
+    { "getSchemaUris", KIND_FUNCTION, "(filter?: RegExp): string[]", "The URIs of the added schemas." },
+    { "getMissingUris", KIND_FUNCTION, "(filter?: RegExp): string[]",
+    "The URIs a $ref named that no added schema answered." },
+    { "dropSchemas", KIND_FUNCTION, "(): void", "Forget every added schema." },
+    { "addFormat", KIND_FUNCTION,
+    "(format: string | object, validator?: (data: unknown, schema: object) => "
+    "string | boolean | null): void",
+    "Define a format: the validator answers null or true for a match and an "
+    "error message otherwise. tv4 checks no format of its own." },
+    { "defineKeyword", KIND_FUNCTION,
+    "(keyword: string, validator: (data: unknown, value: unknown, schema: "
+    "object) => any): void",
+    "Define a keyword of your own." },
+    { "defineError", KIND_FUNCTION, "(codeName: string, codeNumber: number, defaultMessage: string): void",
+    "Register an error code for a defineKeyword validator to answer." },
+    { "setErrorReporter", KIND_FUNCTION,
+    "(reporter: string | ((error: object, data: unknown, schema: object) => "
+    "string | undefined)): boolean | string",
+    "Word the failures yourself, or pick a language by its code." },
+    { "language", KIND_FUNCTION, "(code?: string): string | boolean",
+    "Pick the error messages' language by code, or read it with no code. "
+    "Only en is built in; addLanguage adds another." },
+    { "addLanguage", KIND_FUNCTION, "(code: string, messages: object): any",
+    "Add the messages for a language code." },
+    { "freshApi", KIND_FUNCTION, "(language?: string): any",
+    "A separate tv4 with its own schemas, formats and last result." },
+    { "reset", KIND_FUNCTION, "(): void", "Clear the last result: error null, missing empty, valid true." },
+    { "normSchema", KIND_FUNCTION, "(schema: object, baseUri?: string): any",
+    "Resolve a schema's ids and $refs against a base URI." },
+    { "resolveUrl", KIND_FUNCTION, "(base: string, href: string): string",
+    "Resolve a reference against a base URI." },
+    { "getDocumentUri", KIND_FUNCTION, "(uri: string): string", "A URI without its fragment." },
+    { "error", KIND_FIELD, "any (the last validate's first failure, or null)",
+    "The last validate()'s first failure, an Error with message, code, "
+    "params, dataPath, schemaPath and subErrors, or null when it held." },
+    { "missing", KIND_FIELD, "string[]", "The URIs the last validate() could not resolve." },
+    { "valid", KIND_FIELD, "boolean", "Whether the last validate() held." },
+    { "errorCodes", KIND_FIELD, "object", "Every error code by name, as tv4.error.code reports it." },
+    { "tv4", KIND_FIELD, "any (tv4 itself)", "tv4 itself, tv4's legacy alias." },
+    });
+    for (const auto& member : tv4_members) {
+        const std::string label = std::string ("tv4.") + member.name;
+        const bool is_function  = member.kind == KIND_FUNCTION;
+        nlohmann::json entry    = { { "label", label }, { "kind", member.kind },
+               { "insertText", is_function ? label + "($0)" : label },
+               { "detail", is_function ? label + member.signature : member.signature },
+               { "documentation", member.documentation },
+               { "sortText", "2_tv4_" + std::string (member.name) } };
+        if (is_function) {
+            entry["insertTextRules"] = INSERT_AS_SNIPPET;
+        }
+        completions.push_back (std::move (entry));
+    }
 
     completions.push_back ({ { "label", "CryptoJS" }, { "kind", KIND_VARIABLE },
     { "insertText", "CryptoJS" }, { "detail", "crypto-js, as Vayu provides it" },
