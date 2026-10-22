@@ -172,7 +172,7 @@ interface UpdateDownloadProgress {
 }
 
 /** Mirrors `UpdateVerificationFailure` in `electron/updater.ts`. */
-interface UpdateVerificationFailure {
+export interface UpdateVerificationFailure {
 	version: string;
 	/** Why the attestation was refused, as `update-attestation.ts` words it. */
 	reason: string;

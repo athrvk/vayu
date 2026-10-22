@@ -48,4 +48,5 @@ export { useAppearanceStore } from "./appearance-store";
 export { useThemeStore, effectiveColorScheme } from "./theme-store";
 export { useToastStore, type Toast, type ToastVariant } from "./toast-store";
 export { useRecoveryNoticeStore } from "./recovery-notice-store";
+export { useUpdateVerificationStore } from "./update-verification-store";
 export { useInboxNotifyStore, inboxNotifiesOnCapture } from "./inbox-notify-store";

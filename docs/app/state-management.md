@@ -1260,6 +1260,26 @@ the dashboard then shows no active test while one streams.
 
 **Non-persisted** (fresh per session).
 
+#### `update-verification-store.ts` - An Installer That Would Not Verify
+
+The downloaded update whose build-provenance attestation did not verify (issue
+#2372), or `null`.
+
+**State:**
+```typescript
+{
+  failure: { version: string; reason: string } | null
+  setFailure: (failure) => void
+  clear: () => void
+}
+```
+
+**Non-persisted.** `useAppUpdate` writes it from `onUpdateVerificationFailed` and
+clears it on the next `update:available` or `update:downloaded`. It is a store
+rather than hook state because the banner receives the event for the whole
+session while `UpdatesCard` mounts only when Settings opens, and a per-instance
+hook would show it nothing. Both read it with a selector.
+
 #### `host-sleep-store.ts` - When The Machine Slept Under A Run
 
 The intervals the host spent asleep while a run was streaming (issue #1357),
