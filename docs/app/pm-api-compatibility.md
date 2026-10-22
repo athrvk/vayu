@@ -1051,8 +1051,8 @@ the transfer failed, two fields naming why:
 | Property | What it is |
 |---|---|
 | `responseTime` | What the caller waited - submission to completion, queue wait included. The one a ported Postman script reads, since it is the one carrying Postman's name |
-| `responseTimeWire` | `CURLINFO_TOTAL_TIME`: DNS, connect, TLS, send and receive. What the server and the network cost, with none of Vayu's own queue in it |
-| `responseTimeQueueWait` | `responseTime` minus `responseTimeWire`, clamped at zero - the generator-side overhead. Near zero on a single send, which has no generator queue to wait in |
+| `responseTimeWire` | `CURLINFO_TOTAL_TIME` less any wait for a connection slot: DNS, connect, TLS, send and receive. What the server and the network cost, with none of Vayu's own queue in it |
+| `responseTimeQueueWait` | `responseTime` minus `responseTimeWire`, clamped at zero - the generator's queue plus libcurl's wait for a connection slot. Near zero on a single send, which has nothing to wait for |
 | `errorCode` | The transport failure's code (`TIMEOUT`, `CONNECTION_FAILED`, `TOO_MANY_REDIRECTS`, …), as `pm.sendRequest`'s `err.code` spells it |
 | `errorMessage` | That failure's message |
 

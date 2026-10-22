@@ -322,7 +322,13 @@ system resolver. Three rules make that safe:
 
 **Configuration:**
 - Max concurrent requests per worker: 1000 (configurable)
-- Max connections per host: 100
+- Max connections per host: 200 per worker (`eventLoopMaxPerHost`), raised
+  by a load run to each worker's share of its virtual users,
+  `ceil(concurrency / workers)` (`effective_max_per_host`, #2394), and reported
+  as a `per_host_limit_raised` run warning when it was. Below that share libcurl
+  queues the rest of a worker's transfers while the run counts them in flight;
+  that wait is libcurl's `CURLINFO_QUEUE_TIME_T`, taken off the wire time and
+  counted as queue wait (`detail::curl_queue_seconds`)
 - Poll timeout: 1ms (kept short because a submission interrupts the poll via
   `curl_multi_wakeup`; on Windows see **Timer resolution** below for what makes
   a 1ms wait 1ms)
@@ -1402,7 +1408,7 @@ Default configuration values (from `constants.hpp`):
 |---------|---------|-------------|
 | Port | 9876 | HTTP server port |
 | Max Concurrent | 1000 | Per worker event loop |
-| Max Per Host | 100 | Connections per hostname |
+| Max Per Host | 200 | Connections per hostname, per worker; a load run raises it to cover its virtual users |
 | Poll Timeout | 10ms | Event loop poll interval |
 | DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
 | Max Response Body | 32MB | Per load-test transfer; larger fails the request |

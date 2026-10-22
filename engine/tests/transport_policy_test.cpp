@@ -67,22 +67,6 @@ std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
 const vayu::http::TransportPolicy& transport);
 } // namespace vayu::http::routes
 
-namespace vayu::core {
-// Defined in run_manager.cpp, not declared in its header: the one place a load
-// run resolves a transport policy, and where it keeps the snapshot the deferred
-// script pass reads back (issue #1256). Borrowed here rather than exported,
-// because what the load-path traversal case below has to drive is the run's own
-// resolution - a policy the test hands over itself would assert nothing about
-// where the run got one.
-void configure_event_loop (vayu::db::Database& db,
-const nlohmann::json& config,
-const std::shared_ptr<RunContext>& context,
-size_t concurrency,
-int timeout_ms,
-int configured_workers,
-int default_max_per_host);
-} // namespace vayu::core
-
 namespace vayu::http {
 namespace {
 

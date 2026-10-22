@@ -7324,6 +7324,16 @@ rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
 without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
 
+**`wireMs` and `queueWaitMs` split `totalMs` at the wire** ([#2394](https://github.com/athrvk/vayu/issues/2394)).
+`totalMs` is perceived: submission to completion. `wireMs` is libcurl's
+`CURLINFO_TOTAL_TIME` less the time libcurl held the transfer waiting for a
+connection slot (`CURLINFO_QUEUE_TIME_T`, bounded by `PRETRANSFER_TIME`
+because curl 8.23 counts a wait again each time the transfer is passed over),
+and `queueWaitMs = totalMs - wireMs` is everything before the wire: the
+generator's own queue and that slot wait. The phases are measured after the
+slot wait too, so `firstByteMs` is the target's own. A design send has no
+slot to wait for, so its `queueWaitMs` stays a sliver.
+
 **`timing.engineMs` is Vayu's own cost for the exchange** ([#2132](https://github.com/athrvk/vayu/issues/2132)),
 the ninth key and the only one a buffered `/execute` alone carries. It is the
 time from the handler receiving the request to the answer being assembled,
@@ -9570,7 +9580,7 @@ no frame.
 | `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
-| `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
+| `avgQueueWaitMs` | Mean time queued before the wire, inside the generator or in libcurl waiting for a connection slot (#2394), over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
 | `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
@@ -10516,7 +10526,13 @@ warning). Neither refuses the run - a literal `{{` can be deliberate in a body -
 they are counted, not fixed. Each entry carries `code` and a human-readable
 `message`; `unresolved_tokens` also carries `count` (requests affected) and
 `names` (a few of the unresolved names, capped); `pre_request_script_skipped`
-carries `steps` (how many carried a `script.pre` that did not run inline). Absent, not an empty array, for a run
+carries `steps` (how many carried a `script.pre` that did not run inline).
+`per_host_limit_raised` ([#2394](https://github.com/athrvk/vayu/issues/2394))
+is of another kind: the run did everything, but opened more connections per
+host than `eventLoopMaxPerHost` says, because each worker's share of the
+virtual users (`ceil(concurrency / workers)`) was larger; it carries
+`configured` (the setting) and `effective` (the per-host limit each worker ran
+with). Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
 load shape alike (issue #1540): a single-request run with no data set and a
