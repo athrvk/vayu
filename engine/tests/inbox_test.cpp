@@ -899,6 +899,9 @@ TEST_F (InboxListenerTest, ASecondInboxCannotShareARunningInboxsPort) {
     EXPECT_FALSE (refused.ok);
     EXPECT_EQ (refused.http_status, 409);
     EXPECT_EQ (refused.error_code, "inbox_bind_failed");
+    EXPECT_EQ (refused.error_message.rfind ("Couldn't bind ", 0), 0u)
+    << "the app shows this beneath its own \"Couldn't ...\" heading: "
+    << refused.error_message;
     EXPECT_NE (refused.error_message.find (first.info.inbox_id), std::string::npos)
     << "the refusal must name the holder: " << refused.error_message;
     EXPECT_EQ (manager_->list ().size (), 1u)

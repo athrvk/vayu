@@ -237,7 +237,8 @@ std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& re
 std::pair<int, nlohmann::json> fetch_outcome (const vayu::http::Client& client,
 const Result<Response>& result) {
     if (!result.is_ok ()) {
-        return { 502, error_body (502, "Failed to fetch: " + client.last_error ()) };
+        return { 502,
+            error_body (502, "Couldn't fetch the document: " + client.last_error ()) };
     }
 
     const auto& resp = result.value ();
@@ -251,7 +252,7 @@ const Result<Response>& result) {
     if (resp.has_error ()) {
         const std::string detail =
         resp.error_message.empty () ? "connection error" : resp.error_message;
-        return { 502, error_body (502, "Failed to fetch: " + detail) };
+        return { 502, error_body (502, "Couldn't fetch the document: " + detail) };
     }
     // The upstream answered, but not with the document: a 404 or 500 page
     // handed on as `content` reaches a JSON/YAML reader and is reported as an

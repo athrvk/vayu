@@ -122,7 +122,7 @@ TEST (ManagedListener, ThePortGuardSpansListenerFamilies) {
 
 TEST (ManagedListener, AnUnlabelledHolderIsStillNamedSomething) {
     // Nothing in the engine starts a listener without a label, but a caller
-    // that forgets one must not produce "Could not bind ... -  is already
+    // that forgets one must not produce "Couldn't bind ... -  is already
     // listening there".
     ManagedListener holder;
     const int port = holder.start ("127.0.0.1").port;
