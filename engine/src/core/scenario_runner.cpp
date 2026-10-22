@@ -675,11 +675,14 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.controller_state = &ctx.controller_state;
     // One user walking the sequence, which is what a collection run in design
     // mode is - the same number `{{$vu}}` binds into its requests (issue #994).
-    inputs.vu                     = SOLE_VIRTUAL_USER;
-    inputs.iteration_count        = ctx.iteration_count;
-    inputs.transport              = ctx.transport;
-    inputs.default_headers        = ctx.default_headers;
-    inputs.token_cache            = ctx.token_cache;
+    inputs.vu              = SOLE_VIRTUAL_USER;
+    inputs.iteration_count = ctx.iteration_count;
+    inputs.transport       = ctx.transport;
+    inputs.default_headers = ctx.default_headers;
+    inputs.token_cache     = ctx.token_cache;
+    // The run's caller's host rule (#2521), judged on each step's final URL.
+    const auto& target_policy     = ctx.context->target_policy;
+    inputs.target_policy          = target_policy ? &*target_policy : nullptr;
     inputs.max_response_bytes     = ctx.max_response_bytes;
     inputs.max_element_body_bytes = ctx.max_element_body_bytes;
     // The files the plan already checked (`ScenarioExecution::files`); a step

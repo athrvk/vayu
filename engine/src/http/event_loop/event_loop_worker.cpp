@@ -27,6 +27,7 @@
 #include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -382,6 +383,13 @@ EventLoopWorker::SubmitPass EventLoopWorker::submit_pending_transfers (size_t& l
             // never reached the wire already has everywhere else.
             complete_transfer (*data, error_response (*invalid));
             continue;
+        }
+        if (config.target_policy) {
+            if (auto refused = refuse_target (*config.target_policy, data->request)) {
+                complete_transfer (*data,
+                error_response (Error{ ErrorCode::InvalidUrl, std::move (refused->message) }));
+                continue;
+            }
         }
 
         // Acquire handle from pool (lock-free or specialized pool)

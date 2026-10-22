@@ -44,6 +44,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -549,6 +550,12 @@ struct ExchangeInputs {
     /// null refuses such a config (`oauth2_no_database`) rather than sending
     /// the request without its token.
     vayu::db::Database* token_cache = nullptr;
+
+    /// The hosts the caller allows this exchange to reach (`target_policy.hpp`),
+    /// judged after the pre-request script and the residual pass and before
+    /// the late auth, so a refused target fetches no token either. Null for a
+    /// caller that states none, which sends wherever the request names.
+    const vayu::http::TargetPolicy* target_policy = nullptr;
 };
 
 /** What one exchange produced. */
@@ -709,6 +716,16 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
 vayu::http::Auth auth,
 const vayu::http::VariableValues& vars,
 LateTokenAcquisition* acquisition = nullptr);
+
+/**
+ * @p policy's verdict on @p request (`refuse_target`) in the residual pass's
+ * shape: an `InvalidUrl` error, the code `target_not_allowed` or
+ * `target_host_unknown`. Nothing when @p policy is null or admits the host.
+ * Both design sends call it at the same point, after the residual pass and
+ * before the late auth.
+ */
+[[nodiscard]] std::optional<ResidualRefusal>
+refuse_disallowed_target (const vayu::http::TargetPolicy* policy, const vayu::Request& request);
 
 /** @ref apply_late_auth over the scopes, flattened as the residual pass reads them. */
 [[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,

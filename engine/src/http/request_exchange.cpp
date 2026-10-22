@@ -802,6 +802,20 @@ LateTokenAcquisition* acquisition) {
     return apply_late_auth (request, std::move (auth), values_from_scopes (scopes), acquisition);
 }
 
+std::optional<ResidualRefusal> refuse_disallowed_target (const vayu::http::TargetPolicy* policy,
+const vayu::Request& request) {
+    if (policy == nullptr) {
+        return std::nullopt;
+    }
+    auto refusal = vayu::http::refuse_target (*policy, request);
+    if (!refusal) {
+        return std::nullopt;
+    }
+    return ResidualRefusal{ vayu::Error{ vayu::ErrorCode::InvalidUrl,
+                            std::move (refusal->message) },
+        std::string (refusal->code) };
+}
+
 std::vector<std::string> resolve_load_residuals (vayu::Request& request,
 const vayu::http::VariableValues& vars,
 std::optional<vayu::http::Auth> late_auth) {
@@ -1059,8 +1073,13 @@ ExchangeInputs inputs) {
     // this with the *previous* steps'
     // writes in `scopes` too, which is the same rule one step further on.
     // Deferred auth (issue #2473) goes on once the pass has answered, so no
-    // credential it writes is resolved a second time.
+    // credential it writes is resolved a second time. The caller's host rule
+    // (#2521) reads the URL between the two: final once the pass has run, and
+    // judged before a late OAuth 2.0 token is fetched for a send it refuses.
     auto refusal = resolve_residual_tokens (outcome.request, scopes);
+    if (!refusal) {
+        refusal = refuse_disallowed_target (inputs.target_policy, outcome.request);
+    }
     if (!refusal && inputs.late_auth) {
         LateTokenAcquisition acquisition{ inputs.token_cache };
         refusal = apply_late_auth (

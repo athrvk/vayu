@@ -45,6 +45,7 @@
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -1554,6 +1555,9 @@ struct ExecutePayload {
     bool include_parsed_body = true;
     StreamFlag stream;
     RunOrigin origin;
+    /// The hosts the caller allows this send to reach (#2521); none stated
+    /// when absent.
+    std::optional<vayu::http::TargetPolicy> target_policy;
     /// The row this send binds, if the caller named one (issue #601).
     std::optional<nlohmann::json> data_row;
     /// Auth the exchange applies after the pre-request script (issue #2473).
@@ -1591,6 +1595,12 @@ struct DesignSend {
     /// Auth neither the build nor the bind applied, for after the pre-request
     /// script (`apply_late_auth`, issue #2473).
     std::optional<vayu::http::Auth> late_auth;
+    /// Copied from the payload; both paths judge the final URL by it.
+    std::optional<vayu::http::TargetPolicy> target_policy;
+
+    [[nodiscard]] const vayu::http::TargetPolicy* target_policy_or_null () const {
+        return target_policy ? &*target_policy : nullptr;
+    }
 };
 
 
@@ -1676,6 +1686,14 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     if (!origin) {
         vayu::utils::log_warning ("http", "POST /execute - " + origin.error ());
         return origin.error ();
+    }
+
+    // A malformed policy is a 400 rather than a send nothing holds to it.
+    auto target_policy = vayu::http::read_target_policy (json);
+    if (!target_policy) {
+        vayu::utils::log_warning ("http", "POST /execute - " + target_policy.error ());
+        return ExecuteRefusal{ target_policy.error (),
+            std::string (vayu::http::INVALID_TARGET_POLICY_CODE) };
     }
 
     // Scripts are elements now (issue #1514's clean cut, no transitional
@@ -1791,6 +1809,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     out.include_parsed_body = include_parsed_body.value;
     out.stream              = std::move (stream);
     out.origin              = std::move (*origin);
+    out.target_policy       = std::move (*target_policy);
     out.data_row            = std::move (data_row.value);
     out.built               = std::move (built);
     return std::nullopt;
@@ -1885,6 +1904,7 @@ DesignSend& send) {
     send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
 
     send.data_row            = payload.data_row;
+    send.target_policy       = payload.target_policy;
     send.stream              = payload.stream;
     send.persist_variables   = payload.persist_variables;
     send.include_parsed_body = payload.include_parsed_body;
@@ -1957,16 +1977,20 @@ bool jar_off) {
 
 /**
  * What refuses a streaming send before its stream opens, in the order the
- * buffered send meets them: the residual pass (issue #1008), the auth that
- * waited on the pre-request script (issue #2473), then the file rule
- * (`file_ref.hpp`) over the allowed folders as they stand, code
- * `unsendable_file`.
+ * buffered send meets them: the residual pass (issue #1008), the caller's
+ * target policy (#2521), the auth that waited on the pre-request script
+ * (issue #2473), then the file rule (`file_ref.hpp`) over the allowed folders
+ * as they stand, code `unsendable_file`.
  */
 std::optional<ResidualRefusal> refuse_before_stream (vayu::db::Database& db,
 vayu::Request& request,
 std::optional<vayu::http::Auth> late_auth,
-const ScriptVariableScopes& scopes) {
+const ScriptVariableScopes& scopes,
+const vayu::http::TargetPolicy* target_policy) {
     if (auto refusal = resolve_residual_tokens (request, scopes)) {
+        return refusal;
+    }
+    if (auto refusal = refuse_disallowed_target (target_policy, request)) {
         return refusal;
     }
     if (late_auth) {
@@ -2113,8 +2137,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // (issue #1008), here because this path runs the pre-request script itself
     // rather than through `execute_exchange`: a `{{token}}` the script has just
     // defined resolves before the stream opens.
-    if (auto refusal = refuse_before_stream (
-        ctx.db, send.request, std::move (send.late_auth), scopes)) {
+    if (auto refusal = refuse_before_stream (ctx.db, send.request,
+        std::move (send.late_auth), scopes, send.target_policy_or_null ())) {
         // What that pass can refuse (issues #1051 and #1084), in the same words
         // the buffered send refuses it with and under the code composition
         // refuses it under; what differs is where the caller reads it, this
@@ -2318,12 +2342,13 @@ std::chrono::steady_clock::time_point handler_start) {
     // no row: it has no iteration index, and a binding that cannot fail is
     // worse than a missing one (issue #300).
     ExchangeInputs inputs;
-    inputs.request      = std::move (send.request);
-    inputs.late_auth    = std::move (send.late_auth);
-    inputs.token_cache  = &ctx.db;
-    inputs.elements     = send.elements;
-    inputs.request_id   = send.run.request_id;
-    inputs.request_name = send.script_request_name;
+    inputs.request       = std::move (send.request);
+    inputs.late_auth     = std::move (send.late_auth);
+    inputs.token_cache   = &ctx.db;
+    inputs.target_policy = send.target_policy_or_null ();
+    inputs.elements      = send.elements;
+    inputs.request_id    = send.run.request_id;
+    inputs.request_name  = send.script_request_name;
     // Read at the point of use, so a settings change applies to the next
     // send without a restart (issue #705). The body bound is read the same way
     // and for the same reason (issue #1157).
@@ -2680,6 +2705,14 @@ RunOrigin& origin) {
         return RouteError{ 400, error_body (400, read_origin.error ()) };
     }
     origin = std::move (*read_origin);
+
+    // Read again by the run itself (`RunContext::target_policy`); refused here
+    // so a malformed one leaves no run behind.
+    if (auto policy = vayu::http::read_target_policy (json); !policy) {
+        vayu::utils::log_warning ("http", "POST /runs - " + policy.error ());
+        return RouteError{ 400,
+            error_body (400, policy.error (), vayu::http::INVALID_TARGET_POLICY_CODE) };
+    }
 
     // Validate required fields
     if (!is_scenario) {

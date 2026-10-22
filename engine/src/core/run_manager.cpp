@@ -866,6 +866,15 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     // inline-or-deferred fate can depend on it.
     compile_step_elements (config);
 
+    // The route refused a malformed policy before this run existed, so a
+    // reading that fails here means a caller skipped that check: no host is
+    // allowed rather than every one.
+    if (auto policy = vayu::http::read_target_policy (config)) {
+        target_policy = std::move (*policy);
+    } else {
+        target_policy = vayu::http::TargetPolicy{};
+    }
+
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
 }
 
@@ -1376,6 +1385,9 @@ int default_max_per_host) {
     // leave the way the transfers it is asserting on left, and this is the one
     // place a load run resolves that. See `RunContext::transport`.
     context->transport = loop_config.transport;
+    // Every submission of either load shape is judged here, at the one place
+    // all of them pass before the wire (#2521).
+    loop_config.target_policy = context->target_policy;
     loop_config.max_response_body_bytes =
     vayu::http::routes::load_response_body_bound (db);
     // Only enable curl verbose if explicitly requested in config,

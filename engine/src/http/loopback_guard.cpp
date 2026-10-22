@@ -13,8 +13,6 @@
 
 #include "vayu/http/loopback_guard.hpp"
 
-#include <ada.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -23,6 +21,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/url_parts.hpp"
 
 namespace vayu::http {
 
@@ -35,28 +34,6 @@ constexpr int MAX_PORT = 65535;
 std::atomic<int>& engine_port_slot () noexcept {
     static std::atomic<int> slot{ 0 };
     return slot;
-}
-
-/**
- * @p host as a URL parser serialises it, or nullopt when it is not a host.
- *
- * WHATWG's host parser (ada, already the engine's IDNA reader) rather than a
- * private one, because the spellings that matter here are the lenient ones:
- * `127.1`, `0x7f.0.0.1` and `2130706433` are all `127.0.0.1` to libcurl, and
- * an IPv6 literal has as many spellings as it has zero runs. The parser
- * folds each to one form: a dotted quad, a lower-cased name, or a bracketed,
- * compressed IPv6 address (`[::1]`, `[::ffff:7f00:1]`).
- */
-std::optional<std::string> canonical_host (std::string_view host) {
-    std::string text (host);
-    if (text.find (':') != std::string::npos && !text.starts_with ('[')) {
-        text = "[" + text + "]"; // the bracketless form `parse_authority` and libcurl report
-    }
-    auto url = ada::parse<ada::url> ("http://x");
-    if (!url || !url->set_hostname (text)) {
-        return std::nullopt;
-    }
-    return url->get_hostname ();
 }
 
 /// A canonical dotted quad: four runs of digits. A domain such as

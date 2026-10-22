@@ -27,6 +27,7 @@
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
 #include "vayu/utils/text_escape.hpp"
@@ -1928,6 +1929,9 @@ const std::vector<std::string>& secret_values) {
 
     // Stored in its own columns (#1817); a second copy here could only disagree.
     parsed.erase ("origin");
+    // The caller's per-send host rule (#2521), which governed the send and
+    // says nothing about what was sent: never stored.
+    parsed.erase (vayu::http::TARGET_POLICY_FIELD);
     if (const auto body_it = parsed.find ("body"); body_it != parsed.end ()) {
         erase_file_trust (*body_it);
     }
