@@ -486,7 +486,7 @@
     {"keyword": "discriminator", "schema": {"type": "object", "discriminator": {"propertyName": "kind"}}, "value": {}}
   ],
   "divergences": [
-    {"name": "propertyNames", "schema": {"propertyNames": {"pattern": "^[a-z]+$"}}, "value": {"aB": 1}, "ajv": false, "native": true, "why": "The native verdict is wrong: valijson's propertyNames check returns false without recording an error, and run_validator reads validity from the recorded errors alone (`failures_total == 0`), so the failure is lost and jsonSchema passes."},
+    {"name": "propertyNames", "schema": {"propertyNames": {"pattern": "^[a-z]+$"}}, "value": {"aB": 1}, "ajv": false, "native": true, "why": "The native verdict is wrong (#2719): valijson's propertyNames check returns false without recording an error, and run_validator reads validity from the recorded errors alone (`failures_total == 0`), so the failure is lost and jsonSchema passes."},
     {"name": "format date", "schema": {"format": "date"}, "value": "2024-13-01", "ajv": true, "native": false, "why": "ajv 6 checks formats in its default `fast` mode, a shape match that takes any two digits for a month and a day; jsonSchema checks the calendar, as ajv's `format: 'full'` does."},
     {"name": "format date", "schema": {"format": "date"}, "value": "2024-02-30", "ajv": true, "native": false, "why": "ajv 6 checks formats in its default `fast` mode, a shape match that takes any two digits for a month and a day; jsonSchema checks the calendar, as ajv's `format: 'full'` does."},
     {"name": "format time", "schema": {"format": "time"}, "value": "25:00:00Z", "ajv": true, "native": false, "why": "ajv 6's `fast` time takes any two digits for an hour; jsonSchema checks the range, as ajv's `format: 'full'` does."},
