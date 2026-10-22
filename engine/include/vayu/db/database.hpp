@@ -888,10 +888,9 @@ class Database {
     /**
      * @brief A run's results with every column but `trace_data`, in id order.
      *
-     * What GET /runs/:id/report reads for a load run that is not terminal
-     * yet (#2548): its aggregate needs the status, latency and error of each row,
-     * and the poll that repeats it every few seconds should not copy and parse
-     * every stored trace to get them. Each row's `trace_data` comes back empty,
+     * For a reader that needs each row's status, latency and error and not
+     * the stored trace (#2548); the report of a load run that is not terminal
+     * reads no row at all since #2659. Each row's `trace_data` comes back empty,
      * which every reader of a `Result` already takes to mean "no trace".
      */
     std::vector<Result> get_results_without_traces (const std::string& run_id);

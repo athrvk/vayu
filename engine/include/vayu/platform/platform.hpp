@@ -21,7 +21,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <filesystem>
 #include <functional>
+#include <span>
 #include <string>
 #include <system_error>
 
@@ -267,6 +270,50 @@ struct FileReplacement {
  */
 [[nodiscard]] FileReplacement
 replace_file_durably (const std::string& from, const std::string& to);
+
+/// A file opened for positional reads: a descriptor on POSIX, a `HANDLE` on
+/// Windows.
+#if VAYU_PLATFORM_WINDOWS
+using ReadOnlyFile                            = void*;
+constexpr ReadOnlyFile INVALID_READ_ONLY_FILE = nullptr;
+#else
+using ReadOnlyFile                            = int;
+constexpr ReadOnlyFile INVALID_READ_ONLY_FILE = -1;
+#endif
+
+/// What `open_regular_file` opened; the caller closes it with `close_file`.
+struct OpenedFile {
+    ReadOnlyFile file  = INVALID_READ_ONLY_FILE;
+    std::uint64_t size = 0;
+};
+
+/**
+ * @brief Open @p path read-only, refusing anything but a regular file
+ * @return The open file and its size, or why nothing was opened:
+ *         the OS's error, or `std::errc::invalid_argument` when @p path names
+ *         something other than a regular file. Never throws.
+ *
+ * POSIX: `open` with `O_NOFOLLOW`, so a final component that is a symlink is
+ * refused (`ELOOP`) rather than followed, and `O_NONBLOCK`, so a FIFO cannot
+ * block the open before `fstat` refuses it. Windows: `CreateFileW` sharing
+ * read, write and delete, which follows a final reparse point: a cloud
+ * placeholder is one, so refusing them would refuse ordinary files.
+ */
+[[nodiscard]] std::expected<OpenedFile, std::error_code> open_regular_file (
+const std::filesystem::path& path);
+
+/**
+ * @brief Read up to @p buffer's size from @p file at @p offset
+ * @return The bytes read, 0 at the end of the file, or the OS's error.
+ *
+ * Positional (`pread`, `ReadFile` with an offset): no file position is read or
+ * relied on, so any number of threads may read one file at once.
+ */
+[[nodiscard]] std::expected<std::size_t, std::error_code>
+read_file_at (ReadOnlyFile file, std::uint64_t offset, std::span<char> buffer);
+
+/// Close a file `open_regular_file` opened; an invalid one is left alone.
+void close_file (ReadOnlyFile file);
 
 // ============================================================================
 // Signal Handling

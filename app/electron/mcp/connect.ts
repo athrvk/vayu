@@ -42,8 +42,11 @@ export type McpConnectClient = "claude" | "vscode";
 
 export interface McpConnectResult {
 	ok: boolean;
-	/** Why it failed - distinguishes "install the CLI" from a real error. */
-	reason?: "cli-not-found" | "error" | "unsupported";
+	/**
+	 * Why it failed - distinguishes "install the CLI" from a real error.
+	 * `"not-running"` is answered by `status.ts` before any CLI is tried.
+	 */
+	reason?: "cli-not-found" | "error" | "unsupported" | "not-running";
 	/** Human-readable detail (command output on success, error text on failure). */
 	message?: string;
 }

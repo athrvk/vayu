@@ -2825,8 +2825,8 @@ carry from one script to the next belongs in a variable scope
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
 four timer functions, Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...) and three bundled libraries, `crypto-js`, `uuid` and
-`lodash` ([below](#the-require-shelf)).
+`responseBody`, ...) and four bundled libraries, `crypto-js`, `uuid`, `lodash`
+and `moment` ([below](#the-require-shelf)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2840,7 +2840,7 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')` and `require('lodash')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')` and `require('moment')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `_` | The same `lodash` module as a global, loaded on first read |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
@@ -2864,9 +2864,9 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Of the libraries Postman bundles, `CryptoJS`, `_` (lodash) and `uuid` run
-(`uuid` has no global, it is `require('uuid')` only). The others (`moment`,
-`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
+Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid` and `moment`
+run (`uuid` and `moment` have no global, they are `require` only, as in
+Postman). The others (`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2878,7 +2878,7 @@ lists them.
 There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`). Today the shelf
-holds three libraries, `crypto-js`, `uuid` and `lodash`. `CryptoJS` is the
+holds four libraries, `crypto-js`, `uuid`, `lodash` and `moment`. `CryptoJS` is the
 `crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
 a Postman script work:
 
@@ -2887,6 +2887,15 @@ const CryptoJS = require('crypto-js');
 const signature = CryptoJS.HmacSHA256(payload, secret).toString(CryptoJS.enc.Hex);
 pm.request.headers.upsert({ key: 'X-Signature', value: signature });
 ```
+
+A library is evaluated under its own stack budget, not the script's
+(`constants::script_engine::SHELF_LIBRARY_STACK_SIZE`, 768 KB; a script whose
+`scriptStackSize` is larger keeps it). The library is Vayu's own vendored
+source, and how much native stack QuickJS's parser needs for it depends on the
+toolchain: MSVC at `/Od` under AddressSanitizer overflowed the default 256 KB
+`scriptStackSize` evaluating lodash and moment (#2652), while GCC at `-O0` loads
+them from 46 KB and 30 KB. The script's budget is put back as soon as the
+library has loaded, so the script's own recursion is limited exactly as before.
 
 #### `crypto-js`
 
@@ -2996,7 +3005,44 @@ executions, so the next script that uses it pays again.
 
 The Postman import's script scan does not name `_` or `require('lodash')`.
 
-The libraries Postman also lets a script `require` - `moment`, `ajv`,
+#### `moment`
+
+`require('moment')` is **the npm `moment` package itself**, version 2.31.0, its
+`min/moment.min.js` (60,887 bytes) vendored unmodified (`engine/vendor/moment/`,
+MIT; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+It is the build Postman's sandbox gives `require('moment')`: plain moment,
+English only, no `moment-timezone` (Postman 6.8.0 ships 2.30.1). It is reached
+only through `require`, as in Postman: **there is no `moment` global**, and a
+bare `moment` in a script is a `ReferenceError` unless the script declares it.
+
+```javascript
+const moment = require('moment');
+pm.environment.set('expires', moment.utc().add(1, 'hour').toISOString());
+pm.environment.set('stamp', moment('2026-10-21').add(1, 'day').format('YYYY-MM-DD'));
+const age = moment.utc(pm.response.json().createdAt).diff(moment.utc('2026-01-01'), 'days');
+```
+
+Parsing and formatting without `utc` use the engine host's time zone, as moment
+does in Node, so a script that must give the same answer everywhere uses
+`moment.utc`. The build carries no locale files: `moment.locale('fr')` asks the
+shelf's `require` for `./locale/fr`, is refused, and moment keeps English, so
+the call returns `'en'` and throws nothing. `moment.tz` does not exist.
+moment takes its CommonJS branch inside the shelf's glue, so loading it adds no
+global.
+
+**Cost.** Evaluated on the first `require('moment')` in an execution, never
+when a context is built, so a script that does not require it pays nothing.
+First use costs about 8 ms in a `-O2` build and 17 ms in a Debug build (QuickJS
+parsing and running the 61 KB library, measured in a fresh context, median of
+101; [First-load cost](building.md#first-load-cost) has the method); the
+evaluated module then holds about 550 KB of the script's 64 MB limit until the
+execution ends. Nothing is shared between executions, so the next script that
+requires it pays again.
+
+The Postman import's script scan does not name `require('moment')`.
+
+The libraries Postman also lets a script `require` - `ajv`,
 `tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins - are
 **not** on the shelf: `require` of one throws, and a Postman import names the
 script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
@@ -3240,7 +3286,7 @@ The **language** is current; what is missing is the **host environment**:
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: `require()` answers only the
-  [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`); `fs`, `http`, `crypto`
+  [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`, `moment`); `fs`, `http`, `crypto`
   and every other module throw `Cannot find module`.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at

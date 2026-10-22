@@ -2383,16 +2383,18 @@ interface VayuShelfModules {
 	'crypto-js': typeof import('crypto-js');
 	'uuid': typeof import('uuid');
 	'lodash': typeof import('lodash');
+	'moment': typeof import('moment');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
  * const uuid = require('uuid');
  * const id = uuid();
  * const _ = require('lodash');
+ * const moment = require('moment');
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2594,13 +2596,6 @@ declare const cheerio: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled moment. Its replacement is require('moment'), which Vayu's require() does not load either. The Date built-in is what a script has.
- */
-declare const moment: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
  * Postman's bundled Backbone, which it names no replacement for. Vayu has no Backbone.
  */
 declare const Backbone: never;
@@ -2648,4 +2643,9 @@ declare module 'uuid' {
 
 declare module 'lodash' {
 	export = _;
+}
+
+declare module 'moment' {
+	const moment: any;
+	export = moment;
 }

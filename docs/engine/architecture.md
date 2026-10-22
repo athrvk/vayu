@@ -423,7 +423,8 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   gave up. A request a Stop cancelled or one refused before the wire (the `maxInFlight` cap,
   an invalid URL, a refused header, a data-binding failure) has no duration and is not a
   sample. The percentiles, the max and the mean share this one population (the mean divides
-  by the sample count, not by successes); see
+  by the sample count, not by successes). A stored error row (`results.latency_ms`) carries
+  the same duration, and `0` where there is none; see
   [Latency population](api-reference.md#latency-population).
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
@@ -1512,7 +1513,13 @@ record shape, the category list, the redaction rule and the file layout
   `http/file_access_policy.hpp`, runs once per design send after the residual
   pass and once per run at plan time (every distinct data-bound path
   included), and refuses before any transfer; the send gate
-  (`validate_transferable`) refuses a binary body no plan checked. A record
+  (`validate_transferable`) refuses a binary body or file part no plan
+  checked. A form-data file part is opened by that check, on the canonical
+  path the policy approved and without following a final symlink, and every
+  transfer reads that open file rather than the path (#2416), so a link
+  re-pointed after the check, or between a run's iterations, is not followed
+  (a path a data row binds is opened per submission, through the check again);
+  `engine/CLAUDE.md` states what remains. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
   path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
 - **Single instance**: one engine per data directory, held from before the

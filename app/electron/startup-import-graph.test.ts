@@ -117,6 +117,7 @@ describe("main process startup import graph", () => {
 				path.join("mcp", "connect.ts"),
 				path.join("mcp", "gates.ts"),
 				path.join("mcp", "listener.ts"),
+				path.join("mcp", "status.ts"),
 				path.join("mcp", "store.ts"),
 			].sort()
 		);

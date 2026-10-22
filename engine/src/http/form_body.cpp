@@ -10,6 +10,7 @@
 #include <curl/curl.h>
 
 #include <algorithm>
+#include <array>
 #include <string_view>
 
 #include "vayu/core/postman_encode_sets.hpp"
@@ -18,6 +19,7 @@
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/url_parts.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::http {
 
@@ -48,6 +50,37 @@ std::string percent_decode (std::string value) {
     return out;
 }
 
+struct CurlFileType {
+    std::string_view suffix;
+    std::string_view type;
+};
+
+// libcurl's `Curl_mime_contenttype` table (lib/mime.c), in its order, matched
+// as it matches: a case-insensitive suffix of the whole name.
+constexpr auto CURL_FILE_TYPES = std::to_array<CurlFileType> ({
+{ ".gif", "image/gif" },
+{ ".jpg", "image/jpeg" },
+{ ".jpeg", "image/jpeg" },
+{ ".png", "image/png" },
+{ ".svg", "image/svg+xml" },
+{ ".txt", "text/plain" },
+{ ".htm", "text/html" },
+{ ".html", "text/html" },
+{ ".pdf", "application/pdf" },
+{ ".xml", "application/xml" },
+});
+
+std::string_view curl_file_type (std::string_view name) {
+    for (const auto& entry : CURL_FILE_TYPES) {
+        if (name.size () >= entry.suffix.size () &&
+        vayu::utils::ascii_lower_equal (
+        name.substr (name.size () - entry.suffix.size ()), entry.suffix)) {
+            return entry.type;
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 // Declared in the header since issue #1003: `pm.request.body.formdata` names a
@@ -59,6 +92,18 @@ std::string declared_file_name (const FormField& field) {
     }
     const auto slash = field.src.find_last_of ("/\\");
     return slash == std::string::npos ? field.src : field.src.substr (slash + 1);
+}
+
+std::string file_part_content_type (const FormField& field) {
+    if (!field.content_type.empty ()) {
+        return field.content_type;
+    }
+    for (const std::string& name : { declared_file_name (field), field.src }) {
+        if (const auto type = curl_file_type (name); !type.empty ()) {
+            return std::string (type);
+        }
+    }
+    return "application/octet-stream";
 }
 
 bool is_form_mode (BodyMode mode) {

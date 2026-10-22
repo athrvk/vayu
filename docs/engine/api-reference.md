@@ -136,6 +136,15 @@ is not read, the engine answers and closes the connection: a client that is
 still writing a large body may see the connection reset rather than the
 response.
 
+Once read, a JSON body is held to a depth bound on `POST /collections`,
+`PUT /collections/:id`, `POST /requests`, `PUT /requests/:id`, `POST /specs`
+and `POST /specs/diff`: one nested deeper than 128 levels answers `400`
+`request body is nested deeper than 128 levels` (code `bad_request`) before
+the route reads a field, and text that does not parse answers `400` `Invalid
+JSON: <parser message>` (code `bad_request`) (issue
+[#2417](https://github.com/athrvk/vayu/issues/2417)). `POST /execute` and
+`POST /runs` hold the same bound; see their sections.
+
 ## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,
@@ -601,7 +610,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `type` | Form rows only: `"text"` (default) or `"file"`. Any other value is a `400`. |
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
-| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. A text part takes it too (see above). |
+| `contentType` | A binary body's Content-Type tier (above); a file part's own Content-Type, else derived from its name (see Sending, below). A text part takes it too (see above). |
 | `unresolved` | Read-only, derived by the engine on every read (below): `true` when `src` is a concrete path this machine would refuse. Accepted and ignored on input. |
 
 Shape refusals (`400`):
@@ -667,12 +676,22 @@ per iteration in a way no row explains (an identity or generator token) cannot
 be checked ahead and is refused per submission.
 
 **Sending.** The check runs **once per send** and **once per run**, never per
-transfer. A file of at most 4 MiB is read in that pass and its bytes are shared
-by every transfer of the run; a larger one is hashed in that pass and streamed
-from disk per transfer (`Content-Length` from the planned size; a redirect
-rewinds it). A file that vanishes mid-run fails that transfer with libcurl's own
-read error. A form part's bytes are always read by libcurl during the transfer.
-A **disabled** file part is neither checked nor sent.
+transfer. A binary body of at most 4 MiB is read in that pass and its bytes are
+shared by every transfer of the run; a larger one is hashed in that pass and
+streamed from disk per transfer (`Content-Length` from the planned size; a
+redirect rewinds it). A binary file that vanishes mid-run fails that transfer
+with libcurl's own read error. A **form part's** file is opened in that pass,
+on the path the check resolved and without following a final symlink, and every
+transfer of the send or run reads that open file: a link re-pointed or a file
+replaced at the path afterwards is not what is sent. A path a data row binds is
+the exception: it is checked when the run starts but opened per submission,
+through the same check again, so a large data file holds no file open per row.
+Its length is the one the
+open saw; a file truncated below it under the open handle fails the transfer.
+A part with no declared Content-Type is typed by its filename's extension, then
+its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`,
+`htm`, `html`, `pdf`, `xml`), else `application/octet-stream`. A **disabled**
+file part is neither checked nor sent.
 
 **What a record keeps.** A view of a request never carries a file's bytes: the
 raw-request view shows `<file avatar.png, 1234 bytes>` in their place. A binary
@@ -3607,7 +3626,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
     "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
     "nonExecutableAuth": 0, "unattachedFileParts": 0,
-    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "moment"] } ]
+    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "tv4"] } ]
   }
 }
 ```
@@ -3616,8 +3635,8 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
 Postman script API Vayu does not run, and which ones - `require()` of a module
-off the `crypto-js` / `uuid` / `lodash` shelf, `script.packages`, a bundled library such as
-`moment`, and the other rows of the table in
+off the `crypto-js` / `uuid` / `lodash` / `moment` shelf, `script.packages`, a bundled library such as
+`tv4`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
 `docs/app/import-collections/postman.md#scripts` has the rules.
@@ -5739,6 +5758,8 @@ a `{{data.*}}` token in one is refused like one anywhere else in the config.
 `expiresAt` is `null` for a non-expiring token; `scope` is omitted when empty.
 Errors carry an `oauth2_*` code: `400` invalid config, `401` provider rejected
 the request, `409` interactive authorization required, `502` network error.
+A token response nested past 100 levels is treated as unparseable (`401`
+`oauth2_provider_error`, "unparseable response"), never cached (issue #2413).
 
 #### GET /oauth2/token?key=&lt;cacheKey&gt;
 
@@ -6364,6 +6385,11 @@ with specific codes:
 
 Execute a single HTTP request (Design Mode). Returns immediate response with test results.
 
+A body nested deeper than 128 levels in any field answers `400` `request body
+is nested deeper than 128 levels` (code `bad_request`) before anything is
+recorded or sent (issue #2417). The one exception is a `data` cell, held to its
+own bound of 100 below.
+
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
 the pre-request script runs, so `pm.request` reflects the real outgoing headers -
@@ -6928,6 +6954,8 @@ setting to read more. Two consequences worth stating, since both follow from
 reading less: a cut JSON body no longer parses, so `body` is `null` and a test
 script's `pm.response.json()` throws, and `validation` below reports
 `checked: false` with `body_not_json` rather than inventing a schema failure.
+A body nested past 100 levels counts as not JSON for the same check, so a deep
+body is never walked by the schema validator (issue #2413).
 
 The cap falls on a byte count, so it can land inside a UTF-8 character. For a
 capped body only, `bodyEncoding` is decided with that incomplete last character
@@ -7012,7 +7040,7 @@ narrower than it looks rather than wrong.
 | `no_schema_for_status` | Nothing the operation declares covers this status |
 | `no_schema_for_content_type` | The status matched; none of its media types did |
 | `no_response` | A transport error - there was no response to check |
-| `body_not_json` | The body is not JSON, and a JSON Schema cannot describe it |
+| `body_not_json` | The body is not JSON (or nests past 100 levels, which counts as not JSON), and a JSON Schema cannot describe it |
 
 **`headers` is keyed by the lower-cased header name, and a name the response
 sent more than once holds every value folded with `", "`** - the RFC 7230 §3.2.2
@@ -7346,6 +7374,11 @@ Start a load test run (Vayu Mode).
   "stream_metrics": true     // Optional - feed the event histogram behind the report's `stream` section
 }
 ```
+
+A body nested deeper than 128 levels in any field answers `400` `request body
+is nested deeper than 128 levels` (code `invalid_run_config`) before any run row
+exists (issue #2417). The exception is a `data` or `scenario.data` cell, held to
+its own bound of 100 and refused in its own words (see below).
 
 **`httpVersion` on `POST /runs`** is not a per-run override of a stored
 request - it is simply how this endpoint states which protocol the run uses at
@@ -8976,7 +9009,10 @@ Left out, because they have no duration to report:
   duration;
 - a request refused before the wire: one dropped at the `maxInFlight` cap
   (`droppedRequests`), an invalid URL or an unsendable header, a residual
-  `{{token}}` or file-rule refusal, a data-binding failure.
+  `{{token}}` or file-rule refusal, a data-binding failure. An invalid URL
+  includes one libcurl itself refuses before it resolves or connects (a URL
+  it cannot parse, such as a space sent as typed with Send URL without
+  encoding on, or a scheme it guessed for a URL naming none) (#2412).
 
 So a run where 5% of requests hit a 2000 ms timeout reports a p99 and `max`
 near 2000 ms, and a `latencyP99Ms` budget below that fails it. `totalRequests`,
@@ -8985,6 +9021,31 @@ set. The per-phase histograms of the [timing breakdown](#get-runsrunidreport)
 stay answered-only: a request that failed has no connect, TLS or first-byte
 split to report. A scenario step's histogram follows the same rule as the
 run's.
+
+Where libcurl reports the failure, the test is whether the transfer reached
+the network, not which error it ended with. A redirect to a scheme the engine
+does not send, an unparsable redirect `Location`, and a reply libcurl cannot
+read come back with the same codes as a refused URL, but after real hops, so
+they are timed. So are a DNS failure, a refused connection, and a client
+certificate or CA file libcurl cannot read: libcurl reads those files during
+the TLS handshake, after the TCP connect, so that failure has a duration. (A
+client certificate whose file is already unreadable when the run resolves its
+transport is dropped there, with a logged error, and the request goes out
+without it.)
+
+A stored error row carries the same duration (#2412): its `latencyMs` in
+`results[]`, the Samples tab, and the `results.latency_ms` column hold the
+time until the transfer gave up, so a request that timed out at 2000 ms is
+stored at about 2000 ms. A request with no duration (refused before the wire,
+or cancelled at a run's natural end) is stored at `0`. The row has no other
+way to say "no duration", and `0` can also be a real reading under a coarse
+clock, so the two cannot be told apart from a stored row; a load run stored by
+an engine before #2412 holds `0` for every error. That bounds one report: a
+run with **no summary** (still running, or the engine died before writing one)
+is reported from its stored rows alone, and there every stored row, a `0`
+included, is in the percentiles and the mean, which divides by the rows stored
+rather than by this population. A run that reached a terminal status reports
+from its summary, which this does not affect.
 
 The sequential collection runner follows the same population, with two differences:
 its `latency` block is computed **exact nearest-rank** over every sent step's duration
@@ -9947,27 +10008,32 @@ a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sa
 rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
 first - see "`results[]` is not a uniform sample" below). A run with no summary has either not
 reached a terminal status yet (`metadata.status` is `pending` or `running`) or never will because
-the engine died mid-run; its report is built from those sampled `results` alone rather than
-erroring. **The response shape is the same either way.**
+the engine died mid-run; its report is built without it rather than erroring. **The response
+shape is the same either way.**
 
-A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
-come from whatever results have been stored so far, `metadata.status` says the run is still in
-flight, and `thresholdValidation` is absent even when the run declared budgets, because the
-verdict is computed from the summary written at the end. Read `metadata.status` before treating a
-report as final.
+A report read while the run is `pending` or `running` is therefore **partial**: `metadata.status`
+says the run is still in flight, and `thresholdValidation` is absent even when the run declared
+budgets, because the verdict is computed from the summary written at the end. Read
+`metadata.status` before treating a report as final.
 
-A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A load
-run writes them in chunks of 250, so a poll that lands during that write waits for one chunk
-rather than the whole flush and may count part of the rows (see [`results`](db-schema.md#results)).
-A partial report of a **load** run also never reads the rows' stored traces (issue #2548), because
-it is the one a client re-reads on a timer (a design or scenario run stores its rows just before
-the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
-traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
-`errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
-unless the run recorded `phases`) and `slowRequests` is absent: with no trace read there is no
-threshold to report, and the exact count arrives with the summary. The status distribution, latency
-percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
-a finished run.
+A design or scenario run stores its `results` rows just before its status flips, and a client
+fetching once in that gap needs them with their traces, so its partial report is built from the
+rows stored so far. A partial report of a **load** run reads no `results` row at all (issue
+#2659): it is the one a client re-reads on a timer, and a load run writes its rows only as it
+finishes, in chunks (see [`results`](db-schema.md#results)), so a report built from them is all
+zeros while the run sends and a growing prefix of the flush after. Its figures come from the
+run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive) reads:
+`summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
+`noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
+`errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
+`bytesReceived`, `httpVersionDowngraded`, and `avgRps`, `throughput` and `sendRate` over the time
+since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
+still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
+(`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
+`timingBreakdown` and `slowRequests` are absent. In the moment between the summary write and the
+status flip the aggregates are the summary's, as for a finished run, still with no row read. A
+run whose row says `running` but which the engine no longer holds answers the same shape with
+every count at zero.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is
@@ -10891,11 +10957,11 @@ so a client may cache on `version`.
 The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
 Node (`fetch`, `URL`, `Buffer`, ...), and the libraries Postman bundles that
-the `require()` shelf does not carry (`moment`, `tv4`, ...), whose hover names
+the `require()` shelf does not carry (`tv4`, `cheerio`, ...), whose hover names
 the replacement Postman itself gives (`tv4` is `require('ajv')`). `require`,
 `CryptoJS` and `_` are declared as what they are, with a `declare module` for
 each name on the `require()` shelf (`crypto-js` #2578, `uuid` #2650, `lodash`
-#2651) and one `require`
+#2651, `moment` #2652) and one `require`
 signature keyed on those names, so a name off the shelf is a type error. Postman's `postman` object and its pre-`pm.*`
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
@@ -10905,7 +10971,7 @@ That is not padding: the app suppresses "Cannot find name" (2304), so a name tha
 is merely undeclared draws nothing. A name typed `never` makes the call, member
 access or assignment that follows an error ("not callable", "property does not
 exist"). `never` is assignable to everything, so a bare read passes
-(`console.log(moment)`).
+(`console.log(tv4)`).
 
 Declaring a name does not reserve it: the app compiles each script as a module
 (`moduleDetection`), so a script's own `const data = ...` shadows the declared

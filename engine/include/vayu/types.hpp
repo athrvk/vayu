@@ -36,6 +36,10 @@
 // on nothing but the standard library, so it cannot cycle back here either.
 #include "vayu/utils/ascii_case.hpp"
 
+namespace vayu::http {
+class ApprovedFile; // vayu/http/file_ref.hpp
+}
+
 namespace vayu {
 
 // ============================================================================
@@ -380,13 +384,13 @@ struct FileGrant {
  * round-tripped, and dropped only when the body is put on the wire.
  *
  * A **file part** (`type == FormFieldType::File`) names a path in `src` rather
- * than carrying bytes in `value`: libcurl reads the file at transfer time, so
- * nothing here holds the contents. `file_name` and `content_type` override what
- * the part declares about itself; empty means "let libcurl derive it" (the
- * basename, and `application/octet-stream`). A file part whose `src` is empty,
- * unreadable or untrusted is refused before the transfer starts - see
- * `vayu::http::unsendable_file_ref`. A text part may carry `content_type` too,
- * sent as that part's own Content-Type (#2539).
+ * than carrying bytes in `value`. The file rule opens it once, when it approves
+ * it, and every transfer reads that open file (`approved`), never `src` again.
+ * `file_name` and `content_type` override what the part declares about itself;
+ * empty means derived (the basename, and `vayu::http::file_part_content_type`).
+ * A file part whose `src` is empty, unreadable or untrusted is refused before
+ * the transfer starts - see `vayu::http::unsendable_file_ref`. A text part may
+ * carry `content_type` too, sent as that part's own Content-Type (#2539).
  */
 struct FormField {
     FormField () = default;
@@ -405,7 +409,11 @@ struct FormField {
     FormFieldType type = FormFieldType::Text;
     std::string src;          // file parts only - a path on this machine
     std::string file_name;    // declared filename; empty = basename of `src`
-    std::string content_type; // per-part Content-Type; empty = libcurl's guess
+    std::string content_type; // per-part Content-Type; empty = derived
+    // Plan-time, never serialised: the file `FilePlan` approved and opened
+    // (#2416). Null until it fills the part, and the send gate refuses an
+    // enabled file part without it.
+    std::shared_ptr<const vayu::http::ApprovedFile> approved;
 };
 
 /**
@@ -896,16 +904,21 @@ struct Response {
     Timing timing;
 
     /**
-     * @brief True when libcurl ran a transfer for this response, so `timing`
-     *        is a measurement - answered or not (#2384).
+     * @brief True when libcurl ran a transfer for this response that reached
+     *        the network, so `timing` is a measurement - answered or not
+     *        (#2384).
      *
      * Set by each driver where it stamps `timing` after a transfer
-     * (`extract_response`, `Client::send`, `consume_sse_stream`), and false on
-     * a response built for a request that never left: `error_response`, a
-     * residual or file-rule refusal, a default `Response`. It decides which
-     * failures join a run's latency population. `timing.total_ms > 0` cannot
-     * say it: a refusal reads 0 and so could a real transfer under a coarse
-     * clock.
+     * (`extract_response`, `Client::send`, `consume_sse_stream`) from
+     * `detail::curl_transfer_attempted`, and false on a response built for a
+     * request that never left: `error_response`, a residual or file-rule
+     * refusal, a default `Response`. A transfer libcurl refused before it
+     * resolved or connected (a URL it cannot parse, a scheme the handle does
+     * not allow) is false too (#2412); a resolve failure, a refused connection
+     * and a TLS file libcurl could not read are attempts, because each is
+     * raised by work on the network. It decides which failures join a run's
+     * latency population. `timing.total_ms > 0` cannot say it: a refusal reads
+     * 0 and so could a real transfer under a coarse clock.
      */
     bool transfer_attempted = false;
 
@@ -1973,8 +1986,8 @@ struct Result {
     // JSON. Design mode stores the whole exchange here (request + response,
     // nested). A load run stores only the timing breakdown - never a body -
     // because `calculate_detailed_report` parses every row of this column on
-    // every report fetch of a finished run (a live run's report skips the
-    // column, #2548). Load-run bodies live in `result_bodies`/`body_blobs`
+    // every report fetch of a finished run (a live load run's report reads no
+    // row, #2659). Load-run bodies live in `result_bodies`/`body_blobs`
     // instead, read only by GET /runs/:id/samples.
     std::string trace_data;
 };

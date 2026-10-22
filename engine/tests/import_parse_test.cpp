@@ -2486,7 +2486,7 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Legacy tests",
     R"j(["tests[\"ok\"] = responseCode.code === 200;","pm.visualizer.set('<p></p>', {});"])j") +
     "," + request_with_script ("Library", R"j(["const h = tv4.validate('x');"])j") +
-    "," + request_with_script ("Module", R"j(["const c = require('moment');"])j") + "," +
+    "," + request_with_script ("Module", R"j(["const c = require('ajv');"])j") + "," +
     request_with_script (
     "Host", R"j(["setTimeout(next, 10);","await next;","Buffer.from('x');"])j") +
     "," + request_with_script ("Chai", R"j(["pm.expect(pm.response).to.be.postmanResponse;"])j") +
@@ -2503,6 +2503,9 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Lodash",
     R"j(["const id = _.get(pm.response.json(), 'items[0].id');","const l = require('lodash');","l.chunk([1, 2], 1);"])j") +
     "," +
+    request_with_script ("Moment",
+    R"j(["const moment = require('moment');","const d = moment.utc(0).format();"])j") +
+    "," +
     request_with_script ("Cipher",
     R"j(["const c = require('crypto-js');","const e = CryptoJS.AES.encrypt('x', 'k');"])j") +
     "," +
@@ -2515,7 +2518,8 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     // the crypto-js members the shim defines (#2578), as the global and as
     // `require('crypto-js')`, so "Legacy tests" and "Shelf" are not named, and
     // `require('uuid')` runs (#2650), so "Uuid" is not either, nor is "Lodash"
-    // (`_` and `require('lodash')`, #2651); "Cipher" reaches past the shim and
+    // (`_` and `require('lodash')`, #2651) or "Moment" (`require('moment')`,
+    // #2652); "Cipher" reaches past the shim and
     // is. "Module" requires a name off the shelf and is.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
@@ -2579,7 +2583,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     R"j({"info":{"name":"Signed API","schema":")j" + std::string (POSTMAN_SCHEMA) + R"j("},
         "event":[{"listen":"prerequest","script":{"exec":["Buffer.from(f);"]}}],
         "item":[
-        {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = moment().format();"]}}],
+        {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = cheerio.load(h);"]}}],
          "item":[{"name":"R","event":[
              {"listen":"prerequest","script":{"exec":["var t = tv4.validate(x);"]}},
              {"listen":"test","script":{"exec":["const c = require('x');"]}}],
@@ -2591,7 +2595,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
         {"request":"R","names":["require()","tv4"]},
-        {"request":"Reports","names":["moment"]},
+        {"request":"Reports","names":["cheerio"]},
         {"request":"Signed API","names":["Buffer"]}
     ])j"));
 }

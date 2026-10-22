@@ -260,9 +260,9 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	 * access that follows is the error.
 	 */
 	it.each([
-		["require('moment');", 2345],
+		["require('ajv');", 2345],
 		["xml2Json(pm.response.text());", 2349],
-		["moment().format();", 2349],
+		["tv4.validate(pm.response.json(), {});", 2339],
 		["fetch('https://example.com');", 2349],
 	])("%s is an error (TS%i)", (source, code) => {
 		expect(errorsOf(source)).toContain(`TS${code}`);
@@ -343,6 +343,23 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 					"const pages = _.chunk([1, 2, 3], 2);",
 					"const total = _([1, 2]).sum();",
 					"pm.environment.set('id', id + pages.length + total + _.VERSION);",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	/*
+	 * moment runs (#2652) as require('moment') only: Postman binds no global of
+	 * that name, so the module is declared and nothing else is.
+	 */
+	it("declares require('moment') as the module a Postman script reads", () => {
+		expect(
+			errorsOf(
+				[
+					"const moment = require('moment');",
+					"const day = moment('2026-10-21').add(1, 'day').format('YYYY-MM-DD');",
+					"const utc = moment.utc(0).toISOString();",
+					"pm.environment.set('day', day + utc);",
 				].join("\n")
 			)
 		).toBe("");

@@ -490,8 +490,12 @@ void register_spec_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/specs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = create_spec_document_response (ctx.db, json);
+            auto json = parse_request_json (req.body);
+            if (!json) {
+                refuse_request_body (res, "POST /specs", json.error ());
+                return;
+            }
+            auto [status, body] = create_spec_document_response (ctx.db, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /specs - " + std::to_string (status) + ": " + error_message_of (body));

@@ -554,6 +554,39 @@ TEST_P (MutualTlsTest, AnEncryptedKeyOpensWithItsPassphraseAndNotWithout) {
        "settings is wrong";
 }
 
+TEST_P (MutualTlsTest, ACertificateFileGoneAtSendTimeIsATimedTlsFailure) {
+    // libcurl reads the client certificate while it sets up the handshake,
+    // after the TCP connect, so a file gone since the run resolved its policy
+    // fails a transfer that reached the listener: it is timed like any TLS
+    // failure, never left out as a request that did not leave (#2412). The
+    // file goes after `policy ()`, which drops an entry whose file is already
+    // gone. The message naming the path is what says libcurl tried to read it.
+    // Mutation-check: make `curl_transfer_attempted` answer false and the
+    // attempt reads false. Adding `CURLE_SSL_CERTPROBLEM` to
+    // `refused_before_connecting` does not: the peer half still sees the TCP
+    // connect.
+    TlsServer server (ca_, ca_);
+    const ClientIdentity client = identity ("gone", ca_);
+    register_entry (client);
+
+    EventLoopConfig config;
+    config.transport = policy ();
+    std::filesystem::remove (client.certificate.path ());
+    EventLoop loop (config);
+    loop.start ();
+    const auto result =
+    loop.submit_async (get_request (server.url ("/hello"))).future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const Response& response = result.value ();
+    EXPECT_EQ (response.error_code, ErrorCode::SslError)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_NE (response.error_message.find (client.certificate.path ()), std::string::npos)
+    << response.error_message;
+    EXPECT_TRUE (response.transfer_attempted);
+}
+
 TEST_P (MutualTlsTest, AnEntryThatNamesNoFormatIsReadOffTheFileAndStillConnects) {
     // The write-time default (#833), against real material rather than the
     // byte-shaped fixtures in `client_certificates_test.cpp`: a user who never

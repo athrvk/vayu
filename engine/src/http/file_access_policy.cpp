@@ -153,22 +153,28 @@ refused_root_reason (std::string_view canonical, std::string_view home) {
 }
 
 bool FileAccessPolicy::allows (const std::string& path) const {
+    return approved_path (path).has_value ();
+}
+
+std::optional<fs::path> FileAccessPolicy::approved_path (const std::string& path) const {
     if (path.empty () || (roots_.empty () && grants_.empty ())) {
-        return false;
+        return std::nullopt;
     }
     // `canonical`, not `weakly_canonical`: every component must exist so every
     // symlink on the way is followed, which is what refuses a link inside a
     // root that points outside it.
     std::error_code ec;
-    const fs::path resolved = fs::canonical (fs::path (path), ec);
+    fs::path resolved = fs::canonical (fs::path (path), ec);
     if (ec) {
-        return false;
+        return std::nullopt;
     }
-    if (grants_.contains (resolved.string ())) {
-        return true;
-    }
-    return std::any_of (roots_.begin (), roots_.end (),
+    const bool allowed = grants_.contains (resolved.string ()) ||
+    std::any_of (roots_.begin (), roots_.end (),
     [&resolved] (const fs::path& root) { return contains (root, resolved); });
+    if (!allowed) {
+        return std::nullopt;
+    }
+    return resolved;
 }
 
 } // namespace vayu::http

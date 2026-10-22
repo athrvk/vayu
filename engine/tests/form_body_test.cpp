@@ -92,6 +92,22 @@ class TempFile {
     std::filesystem::path path_;
 };
 
+/// @p request after the file rule, as every send path applies it before a
+/// transfer: each enabled file part picked, then checked and filled by one plan
+/// (`file_ref.hpp`). The parts keep the plan's open files once it is gone.
+Request planned (Request request) {
+    std::vector<std::string> picked;
+    for (const auto& field : request.body.fields) {
+        if (field.enabled && field.type == FormFieldType::File) {
+            picked.push_back (std::filesystem::canonical (field.src).string ());
+        }
+    }
+    FilePlan plan (FileAccessPolicy ({}, picked));
+    const auto refusal = plan.prepare (request);
+    EXPECT_FALSE (refusal) << refusal.value_or ("");
+    return request;
+}
+
 class FormBodyWireTest : public ::testing::Test {
     protected:
     void SetUp () override {
@@ -246,8 +262,8 @@ TEST_F (FormBodyWireTest, FormBodyKeepsANonPostMethod) {
 TEST_F (FormBodyWireTest, FilePartUploadsTheFileBesideTextParts) {
     TempFile file ("avatar.png", "\x89PNG\r\n binary-ish bytes");
 
-    auto request = form_request (server_->url (), BodyMode::FormData,
-    { { "caption", "my avatar", true }, file_field ("avatar", file.path ()) });
+    auto request = planned (form_request (server_->url (), BodyMode::FormData,
+    { { "caption", "my avatar", true }, file_field ("avatar", file.path ()) }));
 
     auto result = client_->send (request);
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
@@ -267,8 +283,8 @@ TEST_F (FormBodyWireTest, FilePartUploadsTheFileBesideTextParts) {
 TEST_F (FormBodyWireTest, FilePartHonoursAnExplicitNameAndContentType) {
     TempFile file ("upload.bin", "id,name\n1,ada\n");
 
-    auto request = form_request (server_->url (), BodyMode::FormData,
-    { file_field ("dataset", file.path (), "people.csv", "text/csv") });
+    auto request = planned (form_request (server_->url (), BodyMode::FormData,
+    { file_field ("dataset", file.path (), "people.csv", "text/csv") }));
 
     ASSERT_TRUE (client_->send (request).is_ok ());
     const auto parts = server_->parts ();
@@ -279,6 +295,37 @@ TEST_F (FormBodyWireTest, FilePartHonoursAnExplicitNameAndContentType) {
     EXPECT_EQ (parts.at ("dataset").filename, "people.csv");
     EXPECT_EQ (parts.at ("dataset").content_type, "text/csv");
     EXPECT_EQ (parts.at ("dataset").content, "id,name\n1,ada\n");
+}
+
+// A part that declares no type is typed by its name, then by its path, then as
+// `application/octet-stream`: what `curl_mime_filedata` sent before #2416
+// moved file parts onto the plan's handle, so the cut-over changed no wire.
+// Mutation check: drop the type from `attach_multipart` and the `.json` and
+// extensionless parts arrive with none.
+TEST_F (FormBodyWireTest, AFilePartWithNoDeclaredTypeIsTypedByItsNameThenItsPath) {
+    struct Case {
+        std::string disk_name;
+        std::string file_name;
+        std::string content_type;
+    };
+    for (const Case& c : std::vector<Case>{ { "avatar.png", "", "image/png" },
+         { "notes.TXT", "", "text/plain" }, { "data.json", "", "application/octet-stream" },
+         { "blob", "", "application/octet-stream" }, { "photo.png", "upload", "image/png" },
+         { "photo.png", "report.pdf", "application/pdf" } }) {
+        TempFile file (c.disk_name, "bytes of " + c.disk_name);
+        const Request request = planned (form_request (server_->url (),
+        BodyMode::FormData, { file_field ("f", file.path (), c.file_name) }));
+
+        ASSERT_TRUE (client_->send (request).is_ok ()) << c.disk_name;
+        const auto parts = server_->parts ();
+        ASSERT_EQ (parts.count ("f"), 1u) << c.disk_name;
+        EXPECT_EQ (parts.at ("f").filename,
+        c.file_name.empty () ? std::filesystem::path (file.path ()).filename ().string () :
+                               c.file_name);
+        EXPECT_EQ (parts.at ("f").content_type, c.content_type)
+        << c.disk_name << " as " << c.file_name;
+        EXPECT_EQ (parts.at ("f").content, "bytes of " + c.disk_name);
+    }
 }
 
 TEST_F (FormBodyWireTest, ADisabledFilePartIsNeitherSentNorRead) {
@@ -371,9 +418,9 @@ TEST_F (FormBodyWireTest, LoadDriverUploadsAFilePartOnEveryIteration) {
     loop.start ();
 
     for (int i = 0; i < 2; ++i) {
-        auto request = form_request (server_->url (), BodyMode::FormData,
-        { file_field ("blob", file.path (), "payload.txt", "text/plain") });
-        auto result  = loop.submit_async (request).future.get ();
+        auto request = planned (form_request (server_->url (), BodyMode::FormData,
+        { file_field ("blob", file.path (), "payload.txt", "text/plain") }));
+        auto result = loop.submit_async (request).future.get ();
         ASSERT_TRUE (result.is_ok ()) << result.error ().message;
         EXPECT_EQ (server_->parts ().at ("blob").content, "iteration payload");
         EXPECT_EQ (server_->parts ().at ("blob").filename, "payload.txt");

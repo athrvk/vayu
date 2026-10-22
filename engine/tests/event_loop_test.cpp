@@ -256,6 +256,39 @@ TEST_F (EventLoopTest, HandleInvalidUrl) {
     EXPECT_TRUE (result.value ().transfer_attempted);
 }
 
+// A URL libcurl refuses to parse never reaches a peer, so it is not timed
+// (#2412). Sent second on one worker, so it runs on the pooled handle the
+// answered request used: the peer address that request left behind must not
+// read as this one's. Mutation-check: set `transfer_attempted` true
+// unconditionally in `extract_response` and the second half fails.
+TEST_F (EventLoopTest, AUrlLibcurlCannotParseIsNotATransferAttempt) {
+    vayu::http::EventLoopConfig config;
+    config.num_workers = 1;
+    vayu::http::EventLoop loop (config);
+    loop.start ();
+
+    vayu::Request answered;
+    answered.method  = vayu::HttpMethod::GET;
+    answered.url     = test_url;
+    const auto first = loop.submit_async (answered).future.get ();
+
+    // Sent as typed, a raw space is a URL libcurl refuses before it resolves.
+    vayu::Request refused        = answered;
+    refused.url                  = mock_server->base_url () + "/a b";
+    refused.disable_url_encoding = true;
+    const auto second            = loop.submit_async (refused).future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (first.is_ok ());
+    EXPECT_EQ (first.value ().status_code, 200);
+    EXPECT_TRUE (first.value ().transfer_attempted);
+
+    ASSERT_TRUE (second.is_ok ());
+    EXPECT_EQ (second.value ().error_code, vayu::ErrorCode::InvalidUrl)
+    << second.value ().error_message;
+    EXPECT_FALSE (second.value ().transfer_attempted);
+}
+
 TEST_F (EventLoopTest, CounterStats) {
     vayu::http::EventLoop loop;
     loop.start ();

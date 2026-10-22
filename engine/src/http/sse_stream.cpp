@@ -512,7 +512,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     response.timing.queue_wait_ms =
     std::max (0.0, perceived_ms - response.timing.wire_ms);
     detail::apply_phase_timings (response.timing, phase_times);
-    response.transfer_attempted = true;
+    response.transfer_attempted = detail::curl_transfer_attempted (curl, result);
 
     long negotiated_version = 0;
     get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
