@@ -216,6 +216,31 @@ const std::vector<ElementOutcome>& run_end) {
     return node;
 }
 
+namespace {
+
+/// `CompiledElement::scope`. `origin.kind` stays the two-valued
+/// collection/request answer its readers expect, so the folder distinction
+/// rides beside it as `origin.scope` (`emit_level`, `request_composer.cpp`).
+/// An origin a client stamped without `scope` falls back to `kind`.
+std::string scope_of_origin (const nlohmann::json& origin) {
+    if (!origin.is_object ()) {
+        return {};
+    }
+    for (const char* member : { "scope", "kind" }) {
+        const auto found = origin.find (member);
+        if (found == origin.end () || !found->is_string ()) {
+            continue;
+        }
+        const auto& value = found->get_ref<const std::string&> ();
+        if (value == "collection" || value == "folder" || value == "request") {
+            return value;
+        }
+    }
+    return {};
+}
+
+} // namespace
+
 std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
     std::vector<CompiledElement> compiled;
     if (!elements.is_array ()) {
@@ -229,6 +254,7 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
         out.id      = entry.value ("id", "");
         out.kind    = entry.value ("kind", "");
         out.origin  = entry.value ("origin", nlohmann::json::object ());
+        out.scope   = scope_of_origin (out.origin);
         out.config  = entry.value ("config", nlohmann::json::object ());
         out.enabled = !entry.contains ("enabled") ||
         entry["enabled"].is_null () || entry.value ("enabled", true);
@@ -352,7 +378,8 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         ctx.outcome_message.reset ();
         ctx.outcome_waited_ms.reset ();
         ctx.outcome_duration_us.reset ();
-        ctx.element_id = compiled.id;
+        ctx.element_id    = compiled.id;
+        ctx.element_scope = compiled.scope;
 
         std::optional<std::string> skipped;
         bool deferred = false;

@@ -212,6 +212,24 @@ class ScenarioRunnerTest : public ::testing::Test {
         db_->create_collection (col);
     }
 
+    /// A collection carrying its own @p elements, under @p parent_id when one
+    /// is given - a folder, whose elements every request under it inherits
+    /// after its parent's (#2522).
+    void seed_collection_with_elements (const std::string& id,
+    const std::string& parent_id,
+    const json& elements) {
+        vayu::db::Collection col;
+        col.id   = id;
+        col.name = "Collection " + id;
+        if (!parent_id.empty ()) {
+            col.parent_id = parent_id;
+        }
+        col.elements   = elements.dump ();
+        col.created_at = 1;
+        col.updated_at = 1;
+        db_->create_collection (col);
+    }
+
     /// Override a seeded config value, keeping the rest of its row intact.
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
@@ -877,6 +895,93 @@ TEST_F (ScenarioRunnerTest, ATestScriptErrorDoesNotEndTheIteration) {
     << rows[1].error;
     EXPECT_EQ (json::parse (rows[2].trace_data)["outcome"].get<std::string> (), "passed");
     EXPECT_EQ (summary_of (run_id)["scenario"]["steps_not_run"].get<size_t> (), 0u);
+}
+
+// ============================================================================
+// Issue #2522: every level's scripts run and every level is reported.
+// ============================================================================
+
+json script_element (const std::string& kind, const std::string& id, const std::string& text) {
+    return { { "id", id }, { "kind", kind }, { "enabled", true },
+        { "config", { { "script", text } } } };
+}
+
+// Probe XA: the collection's failing test used to be overwritten by the
+// request's passing one, and the step passed. Mutation check: assign instead
+// of folding in `script_kinds.cpp`'s `run_step_script` and the step passes.
+TEST_F (ScenarioRunnerTest, ACollectionLevelFailingTestFailsTheStep) {
+    seed_collection_with_elements ("col_1", "",
+    json::array ({ script_element ("script.post", "el_col",
+    "pm.test('collection must fail', () => pm.expect(1).to.eql(2));") }));
+    seed_request ("req_a", 0, "/ok", "",
+    "pm.test('request passes', () => pm.expect(1).to.eql(1));");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace = json::parse (rows[0].trace_data);
+    EXPECT_EQ (trace["outcome"].get<std::string> (), "failed");
+    EXPECT_NE (rows[0].error.find ("collection must fail"), std::string::npos)
+    << rows[0].error;
+
+    const auto& tests = trace["scripts"]["testResults"];
+    ASSERT_EQ (tests.size (), 2u) << trace["scripts"].dump ();
+    EXPECT_EQ (tests[0]["name"], "collection must fail");
+    EXPECT_EQ (tests[0]["scope"], "collection");
+    EXPECT_EQ (tests[1]["name"], "request passes");
+    EXPECT_EQ (tests[1]["scope"], "request");
+}
+
+// Probe XB: a throwing collection pre-request left the step passed once the
+// request's own pre-request succeeded.
+TEST_F (ScenarioRunnerTest, ACollectionLevelThrowErrorsTheStepNamingTheLevel) {
+    seed_collection_with_elements ("col_1", "",
+    json::array ({ script_element (
+    "script.pre", "el_col", "throw new Error('XB COLLECTION PRE THROWS');") }));
+    seed_request ("req_a", 0, "/ok", "console.log('request pre ran');");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace = json::parse (rows[0].trace_data);
+    EXPECT_EQ (trace["outcome"].get<std::string> (), "errored");
+    EXPECT_EQ (rows[0].error.rfind ("Collection pre-request script failed - ", 0), 0u)
+    << rows[0].error;
+    EXPECT_NE (rows[0].error.find ("XB COLLECTION PRE THROWS"), std::string::npos);
+    EXPECT_EQ (trace["scripts"].value ("preScriptError", ""), rows[0].error);
+}
+
+// A folder sits between the collection and the request: its results carry
+// `folder`, and a throw there is named as the folder's.
+TEST_F (ScenarioRunnerTest, AFolderLevelScriptIsReportedAsTheFolders) {
+    seed_collection_with_elements ("root_1", "",
+    json::array ({ script_element ("script.post", "el_root",
+    "pm.test('collection passes', () => pm.expect(1).to.eql(1));") }));
+    seed_collection_with_elements ("col_1", "root_1",
+    json::array ({ script_element ("script.post", "el_folder",
+    "pm.test('folder passes', () => pm.expect(1).to.eql(1)); throw new "
+    "Error('folder threw');") }));
+    seed_request ("req_a", 0, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace = json::parse (rows[0].trace_data);
+    EXPECT_EQ (trace["outcome"].get<std::string> (), "errored");
+    EXPECT_EQ (rows[0].error.rfind ("Folder test script failed - ", 0), 0u)
+    << rows[0].error;
+
+    const auto& tests = trace["scripts"]["testResults"];
+    ASSERT_EQ (tests.size (), 2u) << trace["scripts"].dump ();
+    EXPECT_EQ (tests[0]["scope"], "collection");
+    EXPECT_EQ (tests[1]["name"], "folder passes");
+    EXPECT_EQ (tests[1]["scope"], "folder");
 }
 
 // The commonest Postman shape that throws: an assertion written at the top

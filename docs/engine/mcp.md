@@ -243,8 +243,18 @@ How the name reaches the tool differs by era and transport:
 Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
 **annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint` + a display title), and a **Zod** input schema (arguments are
-validated by the SDK). A few declare an `outputSchema` and return validated
-`structuredContent` alongside the text rendering.
+validated by the SDK). Every **read** tool declares an `outputSchema` and
+returns validated `structuredContent` alongside the text rendering, except the
+six whose answer is not an object: `list_collections`, `list_environments`,
+`list_requests`, `list_client_certificates` and `get_live_metrics` answer a bare
+JSON array, and `export_run_report` answers the document's own text. An
+`outputSchema` is object-rooted, and reshaping those answers would break every
+agent that reads them. The read schemas are loose and name only the stable
+keys, so a field the engine adds still arrives; a non-object engine answer is
+wrapped as `{ "raw": ... }` rather than refused, because the SDK reports a
+rejected result as a broken tool and hides the body.
+`output-schema.conformance.test.ts` fails a read tool that is on neither side
+of that line, and an exception that stops being true.
 
 The four categories partition tools by what they can do - and thus which gate
 applies: **read** (inspection; returns workspace data, with secrets withheld unless the
@@ -265,12 +275,12 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
 | `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
-| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
+| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
-| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
-| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
-| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
+| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max, with `pagination.nextOffset` / `note` as `list_runs`; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
+| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000; `pagination.nextOffset` / `note` as `list_runs` |
+| `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
@@ -334,7 +344,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
 | `stop_webhook_inbox`   | execute  | `POST /inbox/:id/stop`                       | - (frees the port, keeps the record and its captures) |
 | `delete_webhook_inbox` | write    | `GET /inbox` + `DELETE /inbox/:id`           | write toggle + confirm (the prompt names the capture count) |
-| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max; each body capped at 32 KB; secret values and credential header values read `<redacted>` unless revealed |
+| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max, with `pagination.nextOffset` / `note` as `list_runs`; each body capped at 32 KB; secret values and credential header values read `<redacted>` unless revealed |
 | `clear_inbox_captures` | write    | `DELETE /inbox/:id/requests`                 | write toggle               |
 | `update_inbox_response`| execute  | `PUT /inbox/:id` (merge-patch)               | - (live edit of the canned reply) |
 
@@ -429,8 +439,8 @@ Notes:
   an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. A Postman script that
   calls an API Vayu does not run (`require()` of anything but `crypto-js`,
-  `uuid`, `lodash`, `moment`, `csv-parse/lib/sync`, `xml2js` and `chai`, a bundled
-  library such as `tv4`) imports
+  `uuid`, `lodash`, `moment`, `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and
+  `tv4`, a bundled library such as `cheerio`) imports
   and throws at first run, so `meta.unsupportedScriptApis` (issue
   [#2576](https://github.com/athrvk/vayu/issues/2576); `[{request, names}]`, absent
   when empty) names those requests in both tools' result, `meta` riding whole.
@@ -660,7 +670,12 @@ Notes:
   series, well under the engine's 50000. A `limit` past a ceiling is **refused,
   not clamped** - the #319 precedent - because a short page silently substituted
   for the one asked for reads as the whole answer. A page with more behind it
-  says so in words beside the JSON, with the `offset` to read next.
+  says so inside the JSON document, never in a second text block that would
+  stop the answer parsing (#2445): `pagination.nextOffset` is the `offset` to
+  read next (null on the last page) and `pagination.note` says the same in
+  words, present only while `hasMore` is true. The same holds for `list_runs`
+  and `get_inbox_captures`, and all five declare the envelope as their
+  `outputSchema`.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
   `restartRequired` in its structured result (read from each entry's typed
@@ -881,8 +896,13 @@ Notes:
   fails on its tests says which, rather than leaving an agent with `ok: false`
   beside a `200`. Both scripts count, and a pre-request assertion's line is
   prefixed `[pre-request]` (issue #810): it failed before the request went out,
-  which is a different thing to go and look at. The list is cut at ten, the number the engine caps a schema
-  verdict's failures at, while `failed` stays the true count. A response that
+  which is a different thing to go and look at. An assertion from a script the
+  request inherits is prefixed with its level first - `[collection]` or
+  `[folder]`, so `[folder] [pre-request] name: message` (issue #2522) - because
+  the request's own scripts are the wrong place to go looking for it; the
+  request's own assertion carries none. The list is cut at ten, the number the
+  engine caps a schema verdict's failures at, while `failed` stays the true
+  count. A response that
   ran no assertions carries no `tests` node: none ran is not all passed.
   For a collection **bound to an OpenAPI document** each row also carries a
   `schema` verdict (issue #681) and folds it into `ok` the way `testResults`
@@ -2736,13 +2756,19 @@ reveal-off/on pair. Measured at #2441 (reveal off): 115,370 bytes with writes
 off, 181,447 with writes on, down from 136,705 and 211,549; the caps sit about
 5% above the measured sizes. #2562's OAuth parameter lists grew the writes-off
 list to 121,210 (reveal off) and 118,484 (reveal on), and those two caps were
-re-set to that plus 5%. The same file fails on a sentence of 150 or more
+re-set to that plus 5%. The envelope schema on the five paged reads (#2445)
+added about 2.9 KB to each pair: 127,059 / 124,333 bytes with writes off and
+194,425 / 190,028 with writes on (reveal off / on). The loose schemas on the 23
+other object-rooted reads added 7,866 bytes more to every row, about 340 bytes
+a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
+under caps of 136,300 / 133,600 and 204,400 / 199,900.
+The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the
 withholding rules and the error definition moved that way, and
 `VARIABLE_PRECEDENCE_SENTENCE` stays under 150 so its deliberate repetition
 passes), and on any `Withheld` or `<redacted>` in a description of a session
-with reveal on. A tool that adds output schemas (#2445) or a long description
+with reveal on. A tool that adds an output schema or a long description
 lands under the caps or raises them in its own diff.
 
 ## Deferred

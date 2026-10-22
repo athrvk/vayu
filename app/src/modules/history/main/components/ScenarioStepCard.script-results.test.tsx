@@ -23,7 +23,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import ScenarioStepCard from "./ScenarioStepCard";
 import TestResults from "@/modules/request-builder/components/ResponseViewer/TestResults";
-import type { TestResult } from "@/types";
+import type { ElementOutcome, TestResult } from "@/types";
 import type { ScenarioStepRow } from "../scenario-steps";
 
 afterEach(cleanup);
@@ -179,5 +179,37 @@ describe("ScenarioStepCard script results", () => {
 		// A scriptless step is not a step whose assertions all held.
 		expect(screen.queryByText(/tests? passed/)).toBeNull();
 		expect(screen.queryByText(/passed,/)).toBeNull();
+	});
+
+	it("shows an errored inherited element's message in the expansion, not an empty chip", () => {
+		// Issue #2522: a collection's script that threw errored its own element,
+		// and the row used to say only "script.pre error" with the reason in a
+		// tooltip. A history step is where nobody has the request open to look.
+		const element: ElementOutcome = {
+			id: "root-pre",
+			kind: "script.pre",
+			origin: { kind: "collection", id: "c1", name: "Root" },
+			outcome: "error",
+			message: "Collection pre-request script failed - token is not defined",
+		};
+		renderCard(
+			step({
+				outcome: "errored",
+				result: {
+					timestamp: 1_700_000_000_000,
+					statusCode: 200,
+					latencyMs: 12,
+					trace: {
+						iteration: 0,
+						stepIndex: 0,
+						response: { headers: {}, body: "{}" },
+						elements: [element],
+					},
+				},
+			}),
+			true
+		);
+
+		expect(screen.getByText(element.message as string)).toBeTruthy();
 	});
 });

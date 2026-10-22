@@ -1,0 +1,497 @@
+{
+  "$comment": [
+    "The draft-07 verdicts pm.response.to.have.jsonSchema (the engine's native validator, core/schema_validation.hpp) and the shelf's ajv 6.12.5 and tv4 1.3.0 must agree on (#2656); script_json_schema_conformance_test.cpp runs every datum through all of them.",
+    "`valid` is the verdict each validator gives. `tv4: false` marks a case outside tv4's draft-04 reach (a draft-06/07 keyword, which tv4 ignores, or a format, which tv4 checks only when one is added) or one tv4 answers against the specification (a length in UTF-16 code units rather than characters); the other validators still run it.",
+    "`ignoredByAjv` lists the keywords the native validator does not evaluate and so refuses to pass on (collect_unevaluated_keywords): ajv 6 ignores each of them by default, so its verdict leaves the keyword out and it answers valid for each row's datum. None is a keyword ajv evaluates.",
+    "`divergences` are the data the validators answer differently, each with both verdicts and why. They are kept out of `cases` and asserted as they stand, so a change on either side fails until its row moves into `cases`.",
+    "Every verdict was checked against the unbundled ajv 6.12.5 and tv4 1.3.0 on Node."
+  ],
+  "cases": [
+    {
+      "name": "type string",
+      "schema": {"type": "string"},
+      "tv4": true,
+      "data": [
+        {"value": "a", "valid": true},
+        {"value": 1, "valid": false},
+        {"value": null, "valid": false}
+      ]
+    },
+    {
+      "name": "type integer",
+      "schema": {"type": "integer"},
+      "tv4": true,
+      "data": [
+        {"value": 3, "valid": true},
+        {"value": 3.5, "valid": false},
+        {"value": "3", "valid": false}
+      ]
+    },
+    {
+      "name": "type number",
+      "schema": {"type": "number"},
+      "tv4": true,
+      "data": [
+        {"value": 3.5, "valid": true},
+        {"value": 3, "valid": true},
+        {"value": true, "valid": false}
+      ]
+    },
+    {
+      "name": "type boolean and null",
+      "schema": {"type": ["boolean", "null"]},
+      "tv4": true,
+      "data": [
+        {"value": false, "valid": true},
+        {"value": null, "valid": true},
+        {"value": 0, "valid": false}
+      ]
+    },
+    {
+      "name": "type array and object",
+      "schema": {"type": ["array", "object"]},
+      "tv4": true,
+      "data": [
+        {"value": [], "valid": true},
+        {"value": {}, "valid": true},
+        {"value": "[]", "valid": false}
+      ]
+    },
+    {
+      "name": "enum",
+      "schema": {"enum": ["a", 1, null, {"k": [1]}]},
+      "tv4": true,
+      "data": [
+        {"value": "a", "valid": true},
+        {"value": null, "valid": true},
+        {"value": {"k": [1]}, "valid": true},
+        {"value": {"k": [2]}, "valid": false},
+        {"value": "b", "valid": false}
+      ]
+    },
+    {
+      "name": "properties and required",
+      "schema": {"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}, "required": ["id"]},
+      "tv4": true,
+      "data": [
+        {"value": {"id": 1}, "valid": true},
+        {"value": {"id": 1, "name": "a", "extra": true}, "valid": true},
+        {"value": {"name": "a"}, "valid": false},
+        {"value": {"id": "1"}, "valid": false}
+      ]
+    },
+    {
+      "name": "additionalProperties false",
+      "schema": {"properties": {"a": {}}, "additionalProperties": false},
+      "tv4": true,
+      "data": [
+        {"value": {"a": 1}, "valid": true},
+        {"value": {"a": 1, "b": 2}, "valid": false}
+      ]
+    },
+    {
+      "name": "additionalProperties schema",
+      "schema": {"properties": {"a": {}}, "additionalProperties": {"type": "number"}},
+      "tv4": true,
+      "data": [
+        {"value": {"a": "x", "b": 2}, "valid": true},
+        {"value": {"b": "x"}, "valid": false}
+      ]
+    },
+    {
+      "name": "patternProperties",
+      "schema": {"patternProperties": {"^x-": {"type": "string"}}, "additionalProperties": false},
+      "tv4": true,
+      "data": [
+        {"value": {"x-a": "1"}, "valid": true},
+        {"value": {"x-a": 1}, "valid": false},
+        {"value": {"y": "1"}, "valid": false}
+      ]
+    },
+    {
+      "name": "min and max properties",
+      "schema": {"minProperties": 1, "maxProperties": 2},
+      "tv4": true,
+      "data": [
+        {"value": {"a": 1}, "valid": true},
+        {"value": {}, "valid": false},
+        {"value": {"a": 1, "b": 2, "c": 3}, "valid": false}
+      ]
+    },
+    {
+      "name": "items schema",
+      "schema": {"items": {"type": "integer"}},
+      "tv4": true,
+      "data": [
+        {"value": [1, 2], "valid": true},
+        {"value": [], "valid": true},
+        {"value": [1, "2"], "valid": false}
+      ]
+    },
+    {
+      "name": "items tuple and additionalItems",
+      "schema": {"items": [{"type": "string"}, {"type": "number"}], "additionalItems": false},
+      "tv4": true,
+      "data": [
+        {"value": ["a", 1], "valid": true},
+        {"value": ["a"], "valid": true},
+        {"value": [1, "a"], "valid": false},
+        {"value": ["a", 1, 2], "valid": false}
+      ]
+    },
+    {
+      "name": "min and max items",
+      "schema": {"minItems": 1, "maxItems": 2},
+      "tv4": true,
+      "data": [
+        {"value": [1], "valid": true},
+        {"value": [], "valid": false},
+        {"value": [1, 2, 3], "valid": false}
+      ]
+    },
+    {
+      "name": "uniqueItems",
+      "schema": {"uniqueItems": true},
+      "tv4": true,
+      "data": [
+        {"value": [1, "1", {"a": 1}, {"a": 2}], "valid": true},
+        {"value": [{"a": [1]}, {"a": [1]}], "valid": false},
+        {"value": [1, 1], "valid": false}
+      ]
+    },
+    {
+      "name": "min and max length",
+      "schema": {"minLength": 2, "maxLength": 3},
+      "tv4": true,
+      "data": [
+        {"value": "ab", "valid": true},
+        {"value": "a", "valid": false},
+        {"value": "abcd", "valid": false},
+        {"value": 5, "valid": true}
+      ]
+    },
+    {
+      "name": "pattern",
+      "schema": {"pattern": "^[a-z]+-\\d+$"},
+      "tv4": true,
+      "data": [
+        {"value": "abc-12", "valid": true},
+        {"value": "ABC-12", "valid": false},
+        {"value": "xabc-12x", "valid": false}
+      ]
+    },
+    {
+      "name": "pattern unanchored",
+      "schema": {"pattern": "b"},
+      "tv4": true,
+      "data": [
+        {"value": "abc", "valid": true},
+        {"value": "xyz", "valid": false}
+      ]
+    },
+    {
+      "name": "minimum and maximum",
+      "schema": {"minimum": 1, "maximum": 10},
+      "tv4": true,
+      "data": [
+        {"value": 1, "valid": true},
+        {"value": 10, "valid": true},
+        {"value": 0, "valid": false},
+        {"value": 10.5, "valid": false},
+        {"value": "0", "valid": true}
+      ]
+    },
+    {
+      "name": "multipleOf integer",
+      "schema": {"multipleOf": 3},
+      "tv4": true,
+      "data": [
+        {"value": 9, "valid": true},
+        {"value": 10, "valid": false}
+      ]
+    },
+    {
+      "name": "multipleOf fraction",
+      "schema": {"multipleOf": 0.5},
+      "tv4": true,
+      "data": [
+        {"value": 2.5, "valid": true},
+        {"value": 2.25, "valid": false}
+      ]
+    },
+    {
+      "name": "allOf",
+      "schema": {"allOf": [{"type": "string"}, {"minLength": 2}]},
+      "tv4": true,
+      "data": [
+        {"value": "ab", "valid": true},
+        {"value": "a", "valid": false}
+      ]
+    },
+    {
+      "name": "anyOf",
+      "schema": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+      "tv4": true,
+      "data": [
+        {"value": "a", "valid": true},
+        {"value": 1, "valid": true},
+        {"value": 1.5, "valid": false}
+      ]
+    },
+    {
+      "name": "oneOf",
+      "schema": {"oneOf": [{"type": "integer"}, {"minimum": 2}]},
+      "tv4": true,
+      "data": [
+        {"value": 1, "valid": true},
+        {"value": 2.5, "valid": true},
+        {"value": 3, "valid": false},
+        {"value": 1.5, "valid": false}
+      ]
+    },
+    {
+      "name": "not",
+      "schema": {"not": {"type": "string"}},
+      "tv4": true,
+      "data": [
+        {"value": 1, "valid": true},
+        {"value": "a", "valid": false}
+      ]
+    },
+    {
+      "name": "ref to definitions",
+      "schema": {"definitions": {"pos": {"type": "integer", "minimum": 1}}, "type": "object", "properties": {"id": {"$ref": "#/definitions/pos"}, "ids": {"type": "array", "items": {"$ref": "#/definitions/pos"}}}},
+      "tv4": true,
+      "data": [
+        {"value": {"id": 1, "ids": [2, 3]}, "valid": true},
+        {"value": {"id": 0}, "valid": false},
+        {"value": {"ids": [1, -1]}, "valid": false}
+      ]
+    },
+    {
+      "name": "recursive ref",
+      "schema": {"definitions": {"node": {"type": "object", "properties": {"next": {"$ref": "#/definitions/node"}, "v": {"type": "integer"}}}}, "$ref": "#/definitions/node"},
+      "tv4": true,
+      "data": [
+        {"value": {"v": 1, "next": {"v": 2, "next": {}}}, "valid": true},
+        {"value": {"v": 1, "next": {"v": "2"}}, "valid": false}
+      ]
+    },
+    {
+      "name": "dependencies array",
+      "schema": {"dependencies": {"card": ["billing"]}},
+      "tv4": true,
+      "data": [
+        {"value": {"card": 1, "billing": 2}, "valid": true},
+        {"value": {"billing": 2}, "valid": true},
+        {"value": {"card": 1}, "valid": false}
+      ]
+    },
+    {
+      "name": "dependencies schema",
+      "schema": {"dependencies": {"card": {"required": ["billing"]}}},
+      "tv4": true,
+      "data": [
+        {"value": {"card": 1, "billing": 2}, "valid": true},
+        {"value": {"card": 1}, "valid": false}
+      ]
+    },
+    {
+      "name": "nested response shape",
+      "schema": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["id", "tags"], "properties": {"id": {"type": "integer"}, "tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}}}}}},
+      "tv4": true,
+      "data": [
+        {"value": {"data": [{"id": 1, "tags": ["a", "b"]}]}, "valid": true},
+        {"value": {"data": []}, "valid": false},
+        {"value": {"data": [{"id": 1, "tags": ["a", "a"]}]}, "valid": false},
+        {"value": {"data": [{"id": 1}]}, "valid": false}
+      ]
+    },
+    {
+      "name": "const",
+      "schema": {"const": {"a": [1, 2]}},
+      "tv4": false,
+      "data": [
+        {"value": {"a": [1, 2]}, "valid": true},
+        {"value": {"a": [2, 1]}, "valid": false}
+      ]
+    },
+    {
+      "name": "contains",
+      "schema": {"contains": {"type": "integer", "minimum": 5}},
+      "tv4": false,
+      "data": [
+        {"value": [1, 6], "valid": true},
+        {"value": [1, 2], "valid": false},
+        {"value": [], "valid": false}
+      ]
+    },
+    {
+      "name": "propertyNames",
+      "schema": {"propertyNames": {"pattern": "^[a-z]+$"}},
+      "tv4": false,
+      "data": [
+        {"value": {"ab": 1}, "valid": true}
+      ]
+    },
+    {
+      "name": "if then else",
+      "schema": {"if": {"properties": {"kind": {"const": "a"}}}, "then": {"required": ["a"]}, "else": {"required": ["b"]}},
+      "tv4": false,
+      "data": [
+        {"value": {"kind": "a", "a": 1}, "valid": true},
+        {"value": {"kind": "a", "b": 1}, "valid": false},
+        {"value": {"kind": "z", "b": 1}, "valid": true},
+        {"value": {"kind": "z"}, "valid": false}
+      ]
+    },
+    {
+      "name": "exclusive bounds as numbers",
+      "schema": {"exclusiveMinimum": 0, "exclusiveMaximum": 10},
+      "tv4": false,
+      "data": [
+        {"value": 5, "valid": true},
+        {"value": 0, "valid": false},
+        {"value": 10, "valid": false}
+      ]
+    },
+    {
+      "name": "boolean subschemas",
+      "schema": {"properties": {"yes": true, "no": false}},
+      "tv4": false,
+      "data": [
+        {"value": {"yes": 1}, "valid": true},
+        {"value": {"no": 1}, "valid": false}
+      ]
+    },
+    {
+      "name": "length counts code points",
+      "schema": {"maxLength": 1},
+      "tv4": false,
+      "data": [
+        {"value": "😀", "valid": true},
+        {"value": "ab", "valid": false}
+      ]
+    },
+    {
+      "name": "format date-time",
+      "schema": {"format": "date-time"},
+      "tv4": false,
+      "data": [
+        {"value": "2024-01-02T03:04:05Z", "valid": true},
+        {"value": "2024-01-02T03:04:05.123+05:30", "valid": true},
+        {"value": "2024-01-02 03:04", "valid": false},
+        {"value": "yesterday", "valid": false}
+      ]
+    },
+    {
+      "name": "format date",
+      "schema": {"format": "date"},
+      "tv4": false,
+      "data": [
+        {"value": "2024-02-29", "valid": true}
+      ]
+    },
+    {
+      "name": "format time",
+      "schema": {"format": "time"},
+      "tv4": false,
+      "data": [
+        {"value": "03:04:05Z", "valid": true},
+        {"value": "03:04:05+01:00", "valid": true}
+      ]
+    },
+    {
+      "name": "format email",
+      "schema": {"format": "email"},
+      "tv4": false,
+      "data": [
+        {"value": "ada@example.com", "valid": true},
+        {"value": "ada", "valid": false},
+        {"value": "ada@", "valid": false}
+      ]
+    },
+    {
+      "name": "format ipv4",
+      "schema": {"format": "ipv4"},
+      "tv4": false,
+      "data": [
+        {"value": "192.168.0.1", "valid": true},
+        {"value": "256.0.0.1", "valid": false},
+        {"value": "1.2.3", "valid": false}
+      ]
+    },
+    {
+      "name": "format ipv6",
+      "schema": {"format": "ipv6"},
+      "tv4": false,
+      "data": [
+        {"value": "::1", "valid": true},
+        {"value": "2001:db8::8a2e:370:7334", "valid": true},
+        {"value": "2001:db8::g", "valid": false}
+      ]
+    },
+    {
+      "name": "format uri",
+      "schema": {"format": "uri"},
+      "tv4": false,
+      "data": [
+        {"value": "https://example.com/a?b=c", "valid": true},
+        {"value": "urn:isbn:0451450523", "valid": true},
+        {"value": "/relative/path", "valid": false},
+        {"value": "not a uri", "valid": false}
+      ]
+    },
+    {
+      "name": "format uuid",
+      "schema": {"format": "uuid"},
+      "tv4": false,
+      "data": [
+        {"value": "123e4567-e89b-12d3-a456-426614174000", "valid": true},
+        {"value": "123e4567-e89b-12d3-a456", "valid": false}
+      ]
+    },
+    {
+      "name": "format hostname",
+      "schema": {"format": "hostname"},
+      "tv4": false,
+      "data": [
+        {"value": "api.example.com", "valid": true},
+        {"value": "-bad.example.com", "valid": false},
+        {"value": "a_b.example.com", "valid": false}
+      ]
+    },
+    {
+      "name": "multipleOf decimal",
+      "schema": {"multipleOf": 0.01},
+      "tv4": false,
+      "data": [
+        {"value": 0.075, "valid": false}
+      ]
+    }
+  ],
+  "ignoredByAjv": [
+    {"keyword": "unevaluatedProperties", "schema": {"properties": {"a": {}}, "unevaluatedProperties": false}, "value": {"a": 1, "b": 2}},
+    {"keyword": "unevaluatedItems", "schema": {"items": [{}], "unevaluatedItems": false}, "value": [1, 2]},
+    {"keyword": "prefixItems", "schema": {"prefixItems": [{"type": "string"}]}, "value": [1]},
+    {"keyword": "dependentSchemas", "schema": {"dependentSchemas": {"a": {"required": ["b"]}}}, "value": {"a": 1}},
+    {"keyword": "dependentRequired", "schema": {"dependentRequired": {"a": ["b"]}}, "value": {"a": 1}},
+    {"keyword": "minContains", "schema": {"contains": {"type": "integer"}, "minContains": 2}, "value": [1, "x"]},
+    {"keyword": "maxContains", "schema": {"contains": {"type": "integer"}, "maxContains": 1}, "value": [1, 2]},
+    {"keyword": "$dynamicRef", "schema": {"$dynamicRef": "#node"}, "value": 1},
+    {"keyword": "$dynamicAnchor", "schema": {"$dynamicAnchor": "node"}, "value": 1},
+    {"keyword": "$recursiveRef", "schema": {"$recursiveRef": "#"}, "value": 1},
+    {"keyword": "$recursiveAnchor", "schema": {"$recursiveAnchor": true}, "value": 1},
+    {"keyword": "nullable", "schema": {"type": ["string", "null"], "nullable": true}, "value": null},
+    {"keyword": "discriminator", "schema": {"type": "object", "discriminator": {"propertyName": "kind"}}, "value": {}}
+  ],
+  "divergences": [
+    {"name": "propertyNames", "schema": {"propertyNames": {"pattern": "^[a-z]+$"}}, "value": {"aB": 1}, "ajv": false, "native": true, "why": "The native verdict is wrong (#2719): valijson's propertyNames check returns false without recording an error, and run_validator reads validity from the recorded errors alone (`failures_total == 0`), so the failure is lost and jsonSchema passes."},
+    {"name": "format date", "schema": {"format": "date"}, "value": "2024-13-01", "ajv": true, "native": false, "why": "ajv 6 checks formats in its default `fast` mode, a shape match that takes any two digits for a month and a day; jsonSchema checks the calendar, as ajv's `format: 'full'` does."},
+    {"name": "format date", "schema": {"format": "date"}, "value": "2024-02-30", "ajv": true, "native": false, "why": "ajv 6 checks formats in its default `fast` mode, a shape match that takes any two digits for a month and a day; jsonSchema checks the calendar, as ajv's `format: 'full'` does."},
+    {"name": "format time", "schema": {"format": "time"}, "value": "25:00:00Z", "ajv": true, "native": false, "why": "ajv 6's `fast` time takes any two digits for an hour; jsonSchema checks the range, as ajv's `format: 'full'` does."},
+    {"name": "format time", "schema": {"format": "time"}, "value": "03:04:05", "ajv": true, "native": false, "why": "ajv 6 leaves a time's offset optional in both its format modes; jsonSchema follows RFC 3339's full-time, which requires one."},
+    {"name": "multipleOf decimal", "schema": {"multipleOf": 0.01}, "value": 0.07, "ajv": false, "native": true, "why": "ajv 6 divides in binary floating point (0.07 / 0.01 is 7.000000000000001, not an integer) unless `multipleOfPrecision` is set; jsonSchema answers the decimal question."},
+    {"name": "multipleOf decimal", "schema": {"multipleOf": 0.01}, "value": 19.99, "ajv": false, "native": true, "why": "ajv 6 divides in binary floating point (0.07 / 0.01 is 7.000000000000001, not an integer) unless `multipleOfPrecision` is set; jsonSchema answers the decimal question."}
+  ]
+}

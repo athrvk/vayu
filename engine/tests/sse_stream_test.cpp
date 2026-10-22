@@ -1194,6 +1194,37 @@ TEST_F (StreamExecuteTest, TruncationIsVisibleToTheScriptAndMatchesTheTrace) {
     EXPECT_EQ (trace["events"]["items"].size (), 2u);
 }
 
+// #2522 on the streaming transport: the elements a composed send carries are
+// stamped with their level, and the stored trace (the route already answered
+// 202, so it is the only place the results land) keeps each level's test under
+// its own scope instead of the request's passing one replacing the collection's
+// failing one.
+TEST_F (StreamExecuteTest, AStreamsTraceKeepsTheCollectionsFailingTestUnderItsScope) {
+    serve (1);
+    const auto post_at = [] (const std::string& scope, const std::string& id,
+                         const std::string& body) {
+        return json{ { "id", id }, { "kind", "script.post" },
+            { "config", { { "script", body } } },
+            { "origin",
+            { { "kind", scope == "request" ? "request" : "collection" },
+            { "scope", scope }, { "id", "owner_" + scope } } } };
+    };
+    const auto run_id = start (json{ { "elements",
+    json::array ({ post_at ("collection", "el_col", "pm.test('collection must fail', () => pm.expect(1).to.eql(2));"),
+    post_at ("request", "el_req", "pm.test('request passes', () => pm.expect(1).to.eql(1));") }) } });
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    const auto& tests = trace["scripts"]["testResults"];
+    ASSERT_EQ (tests.size (), 2u) << trace["scripts"].dump (2);
+    EXPECT_EQ (tests[0]["name"], "collection must fail");
+    EXPECT_FALSE (tests[0]["passed"].get<bool> ());
+    EXPECT_EQ (tests[0]["scope"], "collection");
+    EXPECT_EQ (tests[1]["name"], "request passes");
+    EXPECT_EQ (tests[1]["scope"], "request");
+}
+
 // A pre-request script on a stream is not a special case - it edits the request
 // that goes on the wire, exactly as it does on a buffered send. Proven off the
 // origin's own record of what arrived, not off the plan.

@@ -18,7 +18,7 @@
  * table-driven list of names, found by reading the script as tokens rather than
  * as text.
  *
- * It is a notice, so it errs toward naming too much: a `tv4` the script
+ * It is a notice, so it errs toward naming too much: a `cheerio` the script
  * reads from somewhere unusual may be named. What it must not do is miss one of
  * the listed names, and the two
  * places a plain text search would miss or invent one - a name that only

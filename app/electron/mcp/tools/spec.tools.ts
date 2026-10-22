@@ -23,10 +23,18 @@ import {
 	jsonResult,
 	requireStr,
 	str,
+	structuredResult,
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
+import {
+	bindPreviewSchema,
+	exportDocumentSchema,
+	importPreviewSchema,
+	specDiffSchema,
+	specReadSchema,
+} from "./output-schemas.js";
 import {
 	asRecord,
 	boundedBucket,
@@ -80,6 +88,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					"Include the document text (capped at 32 KB). Off by default - the metadata is what describes a binding, and the text can be megabytes."
 				),
 		},
+		outputSchema: specReadSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = str(args, "collectionId");
 			const specIdArg = str(args, "specId");
@@ -115,7 +124,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// here would read as an engine or id problem.
 				if (!binding) {
 					return withCaveat(
-						jsonResult({ collectionId, bound: false }),
+						structuredResult({ collectionId, bound: false }),
 						"\n\nThis collection is not bound to an OpenAPI document. Bind one with `bind_spec` (call `preview_spec_bind` first to see what it would change)."
 					);
 				}
@@ -152,7 +161,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					...(binding ? { collectionId, bound: true, binding } : {}),
 					...(includeContent ? boundSpecContent(meta) : {}),
 				};
-				return jsonResult(value);
+				return structuredResult(value);
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}
@@ -183,6 +192,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					"The re-fetched OpenAPI document text, JSON or YAML. Not stored - this is the candidate, compared against the bytes the collection is bound to. Capped by the maxSpecDocumentBytes setting, the same cap a bind applies."
 				),
 		},
+		outputSchema: specDiffSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			const content = requireStr(args, "content");
@@ -218,7 +228,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				(bucket) => bucket.entries.length < bucket.total
 			);
 			return withCaveat(
-				jsonResult({
+				structuredResult({
 					collectionId,
 					identical: diff.identical === true,
 					// The engine's totals, not these lists' lengths - see
@@ -330,7 +340,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Read a collection, environment or API spec document the way import_document would, and store nothing: the collections it would create (names, folder and request counts), the environments, the number of globals, and `meta` - the format, the counts, and `meta.skipped`, what the document declares that Vayu cannot carry, each with the requests it applies to. For a Postman collection, `meta.unsupportedScriptApis` (present only when non-empty) names each request, folder or collection whose scripts use a Postman API Vayu does not run (`require()` of anything but crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js and chai, a bundled library such as tv4, ...); those scripts import either way and throw when they run. Takes exactly import_document's arguments, so preview first, show the user what would be left out, then import. Available with writes off.",
+			"Read a collection, environment or API spec document the way import_document would, and store nothing: the collections it would create (names, folder and request counts), the environments, the number of globals, and `meta` - the format, the counts, and `meta.skipped`, what the document declares that Vayu cannot carry, each with the requests it applies to. For a Postman collection, `meta.unsupportedScriptApis` (present only when non-empty) names each request, folder or collection whose scripts use a Postman API Vayu does not run (`require()` of anything but crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js, chai, ajv and tv4, cheerio, ...); those scripts import either way and throw when they run. Takes exactly import_document's arguments, so preview first, show the user what would be left out, then import. Available with writes off.",
 		annotations: {
 			title: "Preview an import",
 			readOnlyHint: true,
@@ -338,6 +348,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: importDocumentInput,
+		outputSchema: importPreviewSchema,
 		handler: async (args, ctx, signal) => {
 			const payload = importPayload(args);
 			let summary: Record<string, unknown>;
@@ -346,7 +357,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}
-			return withCaveat(jsonResult(summary), `\n\n${describeImportPreview(summary)}`);
+			return withCaveat(structuredResult(summary), `\n\n${describeImportPreview(summary)}`);
 		},
 	},
 	{
@@ -416,6 +427,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					"The OpenAPI document text, JSON or YAML. Capped by the maxSpecDocumentBytes setting, as bind_spec is."
 				),
 		},
+		outputSchema: bindPreviewSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			const content = requireStr(args, "content");
@@ -425,7 +437,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}
-			return withCaveat(jsonResult(preview), `\n\n${describeBindPreview(preview)}`);
+			return withCaveat(structuredResult(preview), `\n\n${describeBindPreview(preview)}`);
 		},
 	},
 	{
@@ -526,6 +538,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					'What a bound export may write. "contract" (default) keeps the stored document as the contract and writes only examples and parameter values; "full" writes every edit the collection holds. Ignored for a collection bound to no document.'
 				),
 		},
+		outputSchema: exportDocumentSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			const format = str(args, "format") || "json";
@@ -542,7 +555,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			const answer = isRecord(exported) ? exported : {};
 			const text = typeof answer.text === "string" ? answer.text : "";
 			const { text: bounded, truncated } = boundText(text);
-			return jsonResult({
+			return structuredResult({
 				collectionId,
 				format,
 				mode,
@@ -571,6 +584,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				.string()
 				.describe("Collection to export. Its whole subtree is read, folders included."),
 		},
+		outputSchema: exportDocumentSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			let exported: unknown;
@@ -586,7 +600,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			const answer = isRecord(exported) ? exported : {};
 			const text = typeof answer.text === "string" ? answer.text : "";
 			const { text: bounded, truncated } = boundText(text);
-			return jsonResult({
+			return structuredResult({
 				collectionId,
 				fileName: answer.fileName ?? null,
 				notes: answer.notes ?? null,

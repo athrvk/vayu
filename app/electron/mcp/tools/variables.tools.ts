@@ -22,6 +22,7 @@ import { secretsShape, withheldPointer, withholdRowSecrets } from "../withhold.j
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
+	callEngineStructured,
 	echoShape,
 	engineErrorResult,
 	errorResult,
@@ -42,6 +43,7 @@ import {
 	removeVariablesInput,
 	variablesInput,
 } from "./variable-blobs.js";
+import { globalsSchema, resolveVariablesSchema } from "./output-schemas.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const VARIABLE_TOOLS: McpTool[] = [
@@ -62,8 +64,9 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
+		outputSchema: globalsSchema,
 		handler: (_args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getGlobals(signal),
 				secretsShape(ctx, withholdRowSecrets)
@@ -106,6 +109,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 					"Optional variable names to report. Omit for every name defined anywhere in the context. A name nothing defines is reported as unresolved rather than omitted."
 				),
 		},
+		outputSchema: resolveVariablesSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = str(args, "collectionId");
 			const environmentId = str(args, "environmentId");

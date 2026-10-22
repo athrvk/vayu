@@ -15,14 +15,14 @@
  * library is Vayu's own source (the crypto-js shim) or a vendored npm build
  * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
  * around it (`uuid`, #2650; `lodash`, #2651; `moment`, #2652;
- * `csv-parse/lib/sync`, #2653; `xml2js`, #2654; `chai`, #2655). A name is
- * matched whole, so a sub-path is on the shelf only as itself. A library
- * global (`CryptoJS`, `_`, `xml2Json`) is an accessor that loads its library on
- * first read and then replaces itself with the value, as `responseCookies`
- * does; the value is the module, or what the row's adapter builds from it
- * (`xml2Json` is a function over xml2js, not xml2js). A library with no global
- * (`uuid`, `moment`, `csv-parse/lib/sync`, `chai`) is reached only through
- * `require`, as in Postman.
+ * `csv-parse/lib/sync`, #2653; `xml2js`, #2654; `chai`, #2655; `ajv` and
+ * `tv4`, #2656). A name is matched whole, so a sub-path is on the shelf only
+ * as itself. A library global (`CryptoJS`, `_`, `xml2Json`, `tv4`) is an
+ * accessor that loads its library on first read and then replaces itself with
+ * the value, as `responseCookies` does; the value is the module, or what the
+ * row's adapter builds from it (`xml2Json` is a function over xml2js, not
+ * xml2js). A library with no global (`uuid`, `moment`, `csv-parse/lib/sync`,
+ * `chai`, `ajv`) is reached only through `require`, as in Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
  * context is built: every script gets a freshly built context
@@ -48,17 +48,21 @@
 
 #include <sodium.h>
 
+#include "ajv_glue.hpp"
 #include "chai_glue.hpp"
 #include "crypto_js_shim.hpp"
 #include "csv_parse_glue.hpp"
 #include "lodash_glue.hpp"
 #include "moment_glue.hpp"
+#include "tv4_glue.hpp"
 #include "uuid_glue.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/embedded/ajv_js.hpp"
 #include "vayu/embedded/chai_js.hpp"
 #include "vayu/embedded/csv_parse_sync_js.hpp"
 #include "vayu/embedded/lodash_js.hpp"
 #include "vayu/embedded/moment_js.hpp"
+#include "vayu/embedded/tv4_js.hpp"
 #include "vayu/embedded/uuid_js.hpp"
 #include "vayu/embedded/xml2js_js.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
@@ -190,6 +194,8 @@ constexpr auto SHELF = std::to_array<ShelfLibrary> ({
 vayu::runtime::embedded::CSV_PARSE_SYNC_JS, CSV_PARSE_GLUE_CLOSE, nullptr },
 { XML2JS_MODULE, XML2JS_GLUE_OPEN, vayu::runtime::embedded::XML2JS_JS, XML2JS_GLUE_CLOSE, nullptr },
 { CHAI_MODULE, CHAI_GLUE_OPEN, vayu::runtime::embedded::CHAI_JS, CHAI_GLUE_CLOSE, nullptr },
+{ AJV_MODULE, AJV_GLUE_OPEN, vayu::runtime::embedded::AJV_JS, AJV_GLUE_CLOSE, nullptr },
+{ TV4_MODULE, TV4_GLUE_OPEN, vayu::runtime::embedded::TV4_JS, TV4_GLUE_CLOSE, nullptr },
 });
 
 // The import scan reads SHELF_MODULE_NAMES; a library here that is not there
@@ -229,6 +235,7 @@ constexpr auto SHELF_GLOBALS = std::to_array<ShelfGlobal> ({
 { "CryptoJS", shelf_index (CRYPTO_JS_MODULE), {} },
 { "_", shelf_index (LODASH_MODULE), {} },
 { "xml2Json", shelf_index (XML2JS_MODULE), XML2JSON_FROM_XML2JS },
+{ "tv4", shelf_index (TV4_MODULE), {} },
 });
 
 static_assert (

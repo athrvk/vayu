@@ -13,7 +13,8 @@
 import { z } from "zod";
 import { secretsShape, withheldPointer, withholdCookieValues } from "../withhold.js";
 import type { McpTool } from "./contract.js";
-import { callEngine, errorResult, str, writesDisabled } from "./kit.js";
+import { callEngine, callEngineStructured, errorResult, str, writesDisabled } from "./kit.js";
+import { cookiesSchema } from "./output-schemas.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const COOKIE_TOOLS: McpTool[] = [
@@ -31,8 +32,9 @@ export const COOKIE_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
+		outputSchema: cookiesSchema,
 		handler: (_args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getCookies(signal),
 				secretsShape(ctx, withholdCookieValues)

@@ -45,6 +45,16 @@ export function structuredResult(value: Record<string, unknown>): ToolResult {
 	};
 }
 
+/**
+ * @p answer as the object a `structuredContent` must be. A non-object answer is
+ * wrapped as `{ raw }` rather than returned bare: a declared `outputSchema` is
+ * object-rooted, and the SDK reports a result it rejects as a broken tool while
+ * hiding the body the engine actually sent (the case `get_engine_health` pins).
+ */
+export function structuredRoot(answer: unknown): Record<string, unknown> {
+	return isRecord(answer) ? answer : { raw: answer ?? null };
+}
+
 export function textResult(text: string): ToolResult {
 	return { content: [{ type: "text", text }] };
 }
@@ -123,14 +133,35 @@ export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
  * `shape` runs on the engine's answer before it becomes a result - the one seam
  * where a passthrough tool can bound what it hands an agent (issue #767).
  */
-export async function callEngine(
+export function callEngine(
 	ctx: ToolContext,
 	fn: () => Promise<unknown>,
 	shape?: (value: unknown) => unknown
 ): Promise<ToolResult> {
+	return callEngineAs(ctx, fn, shape, jsonResult);
+}
+
+/**
+ * {@link callEngine} for a tool that declares an `outputSchema`: the answer
+ * also rides as `structuredContent`, through {@link structuredRoot}.
+ */
+export function callEngineStructured(
+	ctx: ToolContext,
+	fn: () => Promise<unknown>,
+	shape?: (value: unknown) => unknown
+): Promise<ToolResult> {
+	return callEngineAs(ctx, fn, shape, (value) => structuredResult(structuredRoot(value)));
+}
+
+async function callEngineAs(
+	ctx: ToolContext,
+	fn: () => Promise<unknown>,
+	shape: ((value: unknown) => unknown) | undefined,
+	render: (value: unknown) => ToolResult
+): Promise<ToolResult> {
 	try {
 		const answer = await fn();
-		return jsonResult(shape ? shape(answer) : answer);
+		return render(shape ? shape(answer) : answer);
 	} catch (err) {
 		return engineErrorResult(err, ctx);
 	}
@@ -162,9 +193,10 @@ export async function callEngineForRunOutput(
 	fn: () => Promise<unknown>,
 	options: RunOutputOptions = {}
 ): Promise<ToolResult> {
-	return withheldRunAnswer(ctx, fn, options, (withheld) =>
-		jsonResult(options.bound ? options.bound(withheld) : withheld)
-	);
+	return withheldRunAnswer(ctx, fn, options, (withheld) => {
+		const bounded = options.bound ? options.bound(withheld) : withheld;
+		return options.structured ? structuredResult(structuredRoot(bounded)) : jsonResult(bounded);
+	});
 }
 
 /**
@@ -183,6 +215,8 @@ export async function callEngineForRunText(
 
 interface RunOutputOptions {
 	bound?: (value: unknown) => unknown;
+	/** The tool declares an `outputSchema`: answer as {@link callEngineStructured} does. */
+	structured?: boolean;
 	signal?: AbortSignal;
 	/** An auth block sent inline, whose API-key header no stored row names. */
 	auth?: unknown;

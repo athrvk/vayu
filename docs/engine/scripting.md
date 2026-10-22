@@ -43,7 +43,11 @@ assertion is reported with the script that made it: each entry in the response
 body's and the stored trace's `testResults` carries a `source` of `"pre"` or
 `"test"`, the same two spellings `consoleLogs` uses, and the app's Tests pane
 groups the list under the script's name (issue #810). A failing assertion fails
-its collection-run step from either script.
+its collection-run step from either script. **Every level asserts too**: the
+collection's and each folder's scripts run before the request's own, and every
+level's assertions are listed, each naming its level in `scope`
+(`"collection"`, `"folder"` or `"request"`, #2522), so a collection-level
+`pm.test` that fails fails the step even when the request's own tests pass.
 
 **`pm.test` returns `pm`, so calls chain** - Postman's contract, and what an
 imported script written as one `pm.test(...).test(...)` expression relies on:
@@ -362,7 +366,9 @@ Notes on the edges:
   `options` is ajv's and is accepted and not read. `format` is checked for
   `date`, `time`, `date-time`, `ipv4`, `email`, `uri`, `uuid`, `hostname` and
   `ipv6`; any other name (`uri-reference`, `int64`, ...) is an annotation and
-  passes any string, where ajv would reject some of them.
+  passes any string, where ajv would reject some of them. `require('ajv')` is
+  on [the shelf](#ajv) and is the real library; `jsonSchema` stays on the
+  engine's validator, and [where the two answer differently](#ajv) is pinned.
 - **Every public member of chai 4.4.1's `expect` API has a row** in
   `engine/tests/fixtures/chai-conformance.json`, with a snippet that passes and
   one that fails, each checked against the real package. The suite holds the
@@ -817,7 +823,7 @@ naming it, in both polarities. `options` is ajv's and is not read, and `format`
 is checked for `date`, `time`, `date-time`, `ipv4`, `email`, `uri`, `uuid`,
 `hostname` and `ipv6` (see
 [pm-api-compatibility.md](../app/pm-api-compatibility.md#assertion-chains-pmexpect)
-for where the engine's checks differ from ajv's).
+and [`ajv`](#ajv) for where the engine's checks differ from ajv's).
 
 `have.responseTime` and `have.responseSize` are a call and a chain, as in
 chai-postman: `responseTime(120)` asserts the time equals 120, and
@@ -2534,14 +2540,16 @@ rather than `[object Object]`; a value that cannot be serialized (a circular
 reference, say) becomes `[Object: unserializable]`.
 
 **The level travels with the line.** Each entry on the wire is
-`{ "source": "pre" | "test", "level": "log" | "info" | "warn" | "error",
-"message": "..." }` - see
+`{ "source": "pre" | "test", "scope"?: "collection" | "folder" | "request",
+"level": "log" | "info" | "warn" | "error", "message": "..." }` - see
 [`consoleLogs` in the API reference](api-reference.md#post-execute). The four
 methods are bound to one C function distinguished by QuickJS's `magic`
 argument (`setup_console`), so the level is captured at the call; it cannot be
 recovered from the text afterwards, which is why it used to be lost. The app's
 Console tab draws `warn` and `error` in their status tokens and labels every
-non-`log` line in a gutter.
+non-`log` line in a gutter. `level` is the console method; which collection,
+folder or request script wrote the line is `scope` (#2522), absent on a line
+stored before the field.
 
 ## Examples
 
@@ -2829,8 +2837,8 @@ carry from one script to the next belongs in a variable scope
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
 four timer functions, Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...) and seven bundled libraries, `crypto-js`, `uuid`,
-`lodash`, `moment`, `csv-parse/lib/sync`, `xml2js` and `chai`
+`responseBody`, ...) and nine bundled libraries, `crypto-js`, `uuid`,
+`lodash`, `moment`, `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`
 ([below](#the-require-shelf)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
@@ -2871,9 +2879,10 @@ synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
 Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid`, `moment`,
-`csv-parse/lib/sync`, `xml2js` with its `xml2Json` global, and `chai` run
-(`uuid`, `moment`, `csv-parse/lib/sync` and `chai` have no global, they are
-`require` only, as in Postman). The others (`tv4`, `cheerio`, `Backbone`) are absent. The editor
+`csv-parse/lib/sync`, `xml2js` with its `xml2Json` global, `chai`, `ajv` and
+`tv4` run (`uuid`, `moment`, `csv-parse/lib/sync`, `chai` and `ajv` have no
+global, they are `require` only, as in Postman; `tv4` is a global and a module,
+one object). The others (`cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2886,11 +2895,11 @@ There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`), and it is
 matched whole: `csv-parse/lib/sync` is on the shelf and `csv-parse` is not.
-Today the shelf holds seven libraries, `crypto-js`, `uuid`, `lodash`, `moment`,
-`csv-parse/lib/sync`, `xml2js` and `chai`. `CryptoJS` is the
-`crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
-a Postman script work; `xml2Json` is not a module but Postman's parse function
-over `xml2js`, bound the same lazy way:
+Today the shelf holds nine libraries, `crypto-js`, `uuid`, `lodash`, `moment`,
+`csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`. `CryptoJS` is the
+`crypto-js` module bound as a global, `_` is `lodash` and `tv4` is the `tv4`
+module, so both spellings of a Postman script work; `xml2Json` is not a module
+but Postman's parse function over `xml2js`, bound the same lazy way:
 
 ```javascript
 const CryptoJS = require('crypto-js');
@@ -3232,12 +3241,126 @@ execution ends. Nothing is shared between executions.
 
 The Postman import's script scan does not name `require('chai')`.
 
-The libraries Postman also lets a script `require` - `ajv`,
-`tv4`, `cheerio` and Node's built-ins, and `csv-parse` at
-any path but `csv-parse/lib/sync` - are
-**not** on the shelf: `require` of one throws, and a Postman import names the
-script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
-has the same list from the Postman side.
+#### `ajv`
+
+`require('ajv')` is **the npm `ajv` package, version 6.12.5**, the version
+Postman's sandbox pins (not 6.6.2: its bundle carries `strictNumbers`, which
+ajv added in 6.12.3), as its own `dist/ajv.min.js` browser bundle, 122,009
+bytes, vendored unmodified with the four packages it carries (`engine/vendor/ajv/`;
+MIT, and `uri-js` BSD-2-Clause, each licence beside it; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+The module is the `Ajv` constructor, callable with or without `new`, with
+`ValidationError` and `MissingRefError` on it, and it has no global:
+
+```javascript
+const Ajv = require('ajv');
+const validate = new Ajv({ allErrors: true }).compile({
+    type: 'object',
+    required: ['id'],
+    properties: { id: { type: 'integer' } },
+});
+pm.test('the body matches the schema', () => {
+    pm.expect(validate(pm.response.json()), JSON.stringify(validate.errors)).to.be.true;
+});
+```
+
+It validates draft-07 and adds no other meta-schema, so a `$schema` naming
+draft-04 or draft-06 is refused until a script calls `addMetaSchema`, as in
+Postman. `validate.errors` is ajv 6's array (`dataPath`, `schemaPath`,
+`message`), `null` after a pass. ajv compiles each schema into a function with
+`new Function`, which the sandbox allows. `require('ajv/lib/ajv')`, `ajv-formats`
+and every other path throw like any name off the shelf.
+
+**It is not what `jsonSchema` runs.** `pm.expect(x).to.have.jsonSchema` and
+`pm.response.to.have.jsonSchema` stay on the engine's native validator, which
+loads no library and compiles no schema. The two must give a script the
+same verdict on the draft-07 vocabulary both cover, so a script ported from
+Postman does not pass on one and fail on the other.
+`engine/tests/script_json_schema_conformance_test.cpp` pins that: it runs
+every datum of `engine/tests/fixtures/json-schema-conformance.json` through
+ajv, tv4 (where the schema is in its draft-04 reach) and `jsonSchema`, and
+fails on any disagreement. The fixture also records the data they answer
+differently, and the test fails when a recorded answer changes, until the row
+moves into the agreed cases:
+
+- `format: 'date'` and `'time'`: ajv's default `fast` mode accepts
+  `2024-13-01`, `2024-02-30` and `25:00:00Z`, and accepts a time with no offset
+  (`03:04:05`) in both of its modes. `jsonSchema` checks the calendar and the
+  range and requires the offset, as RFC 3339 does.
+- `multipleOf` with a decimal: ajv divides in binary floating point, so
+  `{"multipleOf": 0.01}` rejects `0.07` and `19.99` unless `multipleOfPrecision`
+  is set. `jsonSchema` answers the decimal question and passes both.
+- `propertyNames`: `jsonSchema` passes `{"aB": 1}` against
+  `{"propertyNames": {"pattern": "^[a-z]+$"}}` and ajv rejects it. The native
+  verdict is the wrong one (a bug, [#2719](https://github.com/athrvk/vayu/issues/2719)).
+
+The keywords `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
+`nullable` and `discriminator`) are the ones ajv 6 ignores, so a schema that
+uses one passes `ajv` with the keyword left out and fails `jsonSchema` naming
+it.
+
+**Cost.** Evaluated on an execution's first `require('ajv')`, never when a
+context is built, so a script that does not require it pays nothing. The first
+load costs about 21 ms in a `-O2` build and 55 ms in a Debug build, the
+shelf's dearest ([First-load cost](building.md#first-load-cost) has the
+method), and the first `compile` and a call 10 ms and 35 ms more, most of it
+compiling the draft-07 meta-schema the schema is checked against. The evaluated
+module holds about 1,000 KB of the script's 64 MB limit until the execution
+ends. A compile runs on the script's own stack: the measured schema (four
+levels of nesting, `allErrors` on) needed between 48 and 64 KB in a `-O0`
+build, inside the 256 KB default. Nothing is shared between executions.
+
+The Postman import's script scan does not name `require('ajv')`.
+
+#### `tv4`
+
+`require('tv4')` and the bare `tv4` global are **the npm `tv4` package, version
+1.3.0**, the version Postman's sandbox pins, and one object, as in Postman.
+Postman deprecates the global in favour of `require('ajv')`; it still runs
+there, so it runs here. tv4 is released into the public domain (MIT as the
+alternative). The package ships no minified build, so
+`engine/vendor/tv4/tv4.min.js` is its `tv4.js` minified by esbuild, 28,767
+bytes, and `engine/vendor/tv4/README.md` has the command that reproduces it byte
+for byte.
+
+```javascript
+const body = pm.response.json();
+pm.test('the body matches the schema', () => {
+    pm.expect(tv4.validate(body, { type: 'object', required: ['id'] }), tv4.error && tv4.error.message).to.be.true;
+});
+```
+
+tv4 is a draft-04 validator. A draft-06 or draft-07 keyword (`const`,
+`contains`, `propertyNames`, `if`/`then`/`else`, a numeric `exclusiveMinimum`)
+is ignored, and `format` is checked only for a name a script registers with
+`addFormat`; use `require('ajv')` for those. tv4 keeps the last verdict on the
+object (`tv4.error`, `tv4.missing`, `tv4.valid`), so the global and the module
+share it, whichever is read first. The messages are English, as in Postman.
+
+**One difference from Postman.** The shelf evaluates every library in strict
+mode, and Postman's bundle runs sloppy. A method called detached from the
+object (`const v = tv4.validate; v(data, schema)`) throws a `TypeError` here,
+where Postman writes `error`, `missing` and `valid` onto the global object.
+Called as `tv4.validate(...)` it behaves the same. Minification renames tv4's
+internal constructors, so an error's stack names a minified function, as it
+does in Postman's own bundle.
+
+**Cost.** Evaluated on the first `require('tv4')` or read of `tv4` in an
+execution, never when a context is built. The first load costs about 2.7 ms in
+a `-O2` build and 6.5 ms in a Debug build, and a first `tv4.validate` of a
+four-level schema 0.12 ms and 0.37 ms more; the evaluated module holds about
+190 KB of the script's memory. `require('tv4/tv4.js')` and every other path
+throw like any name off the shelf. The Postman import's script scan does not
+name `require('tv4')` or `tv4`.
+
+The libraries Postman also lets a script `require` or reach as a global -
+`cheerio`, `Backbone`, Node's built-ins (`crypto`, `fs`, `buffer`, ...) and
+`csv-parse` at any path but `csv-parse/lib/sync` - are **not** on the shelf, and
+stay unshipped on purpose: `require` of one throws, the editor declares
+`cheerio` and `Backbone` as unusable, and a Postman import names the script
+that uses one. [The compatibility
+page](../app/pm-api-compatibility.md#the-require-shelf) has the same list from
+the Postman side.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
 is Promise-based and covers algorithms this sandbox does not implement, so a
@@ -3672,6 +3795,21 @@ visible to a later `script.pre` element (and to the send itself) because
 every element at a step shares the one `Request` object being sent - only the
 JavaScript variable scope is per-element. The same holds for `script.post`
 elements and `pm.response`.
+
+**Every level is run and every level is reported (#2522).** The elements run
+collection first, then each folder from the outermost in, then the request,
+and each script's result is added to the step's rather than replacing the
+level before it. Every `testResults` and `consoleLogs` entry carries `scope`
+(`"collection"`, `"folder"` or `"request"`); a failing `pm.test` at any level
+fails the step; an `assert.*` element's result survives a later level's script;
+and a script that asked for no flow control does not cancel a skip or jump an
+earlier level set (a later instruction does replace it). **A throw names its
+level**: when the collection's or a folder's script throws, the collection-run
+step error and the send's `preScriptError` / `postScriptError` read
+"Collection pre-request script failed - <message>" or "Folder test script
+failed - <message>"; the request's own throw reads as it always did. When
+several levels throw, the first one is the step's error, and every level's own
+message stays on its element's `elements[]` outcome.
 
 **A single-request `POST /runs` runs the element pipeline too now (issue
 #1594), and no longer joins.** It calls `refuse_legacy_script_fields` the

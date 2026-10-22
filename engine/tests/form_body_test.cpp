@@ -67,9 +67,14 @@ std::string content_type = {}) {
 /// bytes.
 class TempFile {
     public:
+    // Under the working directory, which `main` has already made private to
+    // this process (`enter_process_scratch_dir`): ctest runs each test in its
+    // own process at once, the counter below restarts at 0 in each, and a name
+    // under the shared temp directory let two tests that both write
+    // "avatar.png" delete each other's file mid-send.
     explicit TempFile (const std::string& name, const std::string& contents) {
         static std::atomic<int> counter{ 0 };
-        path_ = std::filesystem::temp_directory_path () /
+        path_ = std::filesystem::current_path () /
         ("vayu-form-body-" + std::to_string (counter.fetch_add (1)) + "-" + name);
         std::ofstream out (path_, std::ios::binary);
         out << contents;

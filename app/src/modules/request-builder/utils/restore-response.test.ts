@@ -617,6 +617,39 @@ describe("scriptsFromTrace", () => {
 		expect(restored?.testResults).toHaveLength(1);
 	});
 
+	it("restores a trace stored before the scope field, and one that carries it, as written", () => {
+		// An entry without `scope` is the request's own (issue #2522): the funnel
+		// must neither invent one for it nor drop one that is there.
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					...sample().trace,
+					scripts: {
+						testResults: [
+							{ name: "stored before", passed: true },
+							{ name: "from the folder", passed: false, scope: "folder" },
+						],
+						consoleLogs: [
+							{ source: "pre", level: "log", message: "stored before" },
+							{
+								source: "pre",
+								scope: "collection",
+								level: "log",
+								message: "inherited",
+							},
+						],
+					},
+				},
+			})
+		);
+		expect(restored?.testResults?.[0]).not.toHaveProperty("scope");
+		expect(restored?.testResults?.[1]?.scope).toBe("folder");
+		expect(restored?.consoleLogs).toEqual([
+			{ source: "pre", level: "log", message: "stored before" },
+			{ source: "pre", scope: "collection", level: "log", message: "inherited" },
+		]);
+	});
+
 	it("keeps the engine's own key names rather than renaming on the way through", () => {
 		// A rename here would be the one place the live pane and the restored
 		// pane could drift, since both read `ResponseState` under these names.

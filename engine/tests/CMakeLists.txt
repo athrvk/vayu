@@ -36,6 +36,7 @@ add_executable(vayu_tests
     script_expect_message_test.cpp
     script_response_assertions_test.cpp
     script_chai_conformance_test.cpp
+    script_json_schema_conformance_test.cpp
     script_assertion_error_test.cpp
     script_parse_position_test.cpp
     script_completions_test.cpp
@@ -170,6 +171,7 @@ add_executable(vayu_tests
     scenario_load_test.cpp
     scenario_plan_test.cpp
     scenario_runner_test.cpp
+    script_levels_test.cpp
     tree_order_test.cpp
     reorder_route_test.cpp
     spec_sync_route_test.cpp
@@ -447,6 +449,7 @@ set(vayu_scratch_database_suites
     ScenarioPlanTest
     ScenarioRunnerTest
     ScratchDatabaseCleanup
+    ScriptLevelSend
     ScriptLifecycleTest
     ScriptRequestNameTest
     ScriptSendRequestCapLoadTest

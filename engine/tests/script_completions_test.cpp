@@ -855,6 +855,53 @@ TEST (ScriptCompletions, ChaiIsOfferedThroughRequireAndHasNoGlobal) {
     EXPECT_TRUE (result.success) << result.error_message;
 }
 
+// ajv and tv4 (#2656) are offered through require, and tv4 also as the global
+// Postman binds; ajv has none. Every offered tv4 member is one the runtime
+// defines, as the kind its entry says, so a suggestion never throws.
+TEST (ScriptCompletions, AjvAndTv4AreOfferedThroughRequireAndTv4AsAGlobal) {
+    const auto completions = get_script_completions ();
+    const auto* require    = find_by_label (completions, "require");
+    ASSERT_NE (require, nullptr);
+    const std::string documentation = require->value ("documentation", std::string{});
+    EXPECT_NE (documentation.find ("ajv is npm's ajv 6.12.5"), std::string::npos)
+    << documentation;
+    EXPECT_NE (documentation.find ("tv4 is npm's tv4 1.3.0"), std::string::npos)
+    << documentation;
+    EXPECT_NE (documentation.find ("require('ajv')"), std::string::npos) << documentation;
+    const std::string insert = require->value ("insertText", std::string{});
+    EXPECT_NE (insert.find (",ajv,tv4|"), std::string::npos) << insert;
+    EXPECT_EQ (find_by_label (completions, "ajv"), nullptr)
+    << "ajv is not a global in Postman";
+    EXPECT_EQ (find_by_label (completions, "Ajv"), nullptr)
+    << "ajv is not a global in Postman";
+
+    const auto* tv4 = find_by_label (completions, "tv4");
+    ASSERT_NE (tv4, nullptr) << "the tv4 global is not offered";
+    EXPECT_NE (tv4->value ("documentation", std::string{}).find ("require('tv4')"),
+    std::string::npos);
+
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    int offered          = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("tv4.", 0) != 0) {
+            continue;
+        }
+        ++offered;
+        const bool is_function = item.value ("kind", 0) == KIND_FUNCTION;
+        const std::string script = "if (!('" + label.substr (4) + "' in tv4) || (typeof " +
+        label + " === 'function') !== " + (is_function ? "true" : "false") +
+        ") throw new Error('not as offered');";
+        const auto result = engine.execute_test (script, request, response, env);
+        EXPECT_TRUE (result.success) << label << ": " << result.error_message;
+    }
+    EXPECT_EQ (offered, 25) << "tv4 1.3.0 defines 25 members";
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no
