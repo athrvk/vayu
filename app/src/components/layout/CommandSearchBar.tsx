@@ -36,8 +36,8 @@ import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores";
 import { PALETTE_CHORD } from "@/constants/shortcuts";
-import { formatChord } from "@/lib/platform";
-import { ICON_MOTION } from "@/components/ui";
+import { chordKeys } from "@/lib/platform";
+import { ICON_MOTION, Kbd } from "@/components/ui";
 
 export function CommandSearchBar({ className }: { className?: string }) {
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
@@ -80,9 +80,13 @@ export function CommandSearchBar({ className }: { className?: string }) {
 			<span className="flex-1 truncate text-left">Search</span>
 			{/* The hint is the reason the bar earns its width: a user who learns the
 			    chord here never needs the bar again. */}
-			<kbd className="shrink-0 font-mono text-micro tracking-tight opacity-70">
-				{formatChord(PALETTE_CHORD)}
-			</kbd>
+			<span className="flex shrink-0 items-center gap-1">
+				{chordKeys(PALETTE_CHORD).map((cap) => (
+					<Kbd key={cap} size="sm">
+						{cap}
+					</Kbd>
+				))}
+			</span>
 		</button>
 	);
 }

@@ -104,7 +104,7 @@ The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/i
 
 ### `CommandSearchBar` (`components/layout/CommandSearchBar.tsx`)
 
-The palette's visible entry point, in the title row. A `<button>` styled as an input: it looks like a field because that is what makes ⌘K discoverable, but typing happens in the palette's own input - a real field here would be a second query state and a second ranked list to keep in step. Clicking sets `paletteOpen`; the hint it prints comes from `PALETTE_CHORD` (`constants/shortcuts.ts`), the same constant `CommandPalette`'s listener matches, so the bar cannot advertise a chord nothing handles.
+The palette's visible entry point, in the title row. A `<button>` styled as an input: it looks like a field because that is what makes ⌘K discoverable, but typing happens in the palette's own input - a real field here would be a second query state and a second ranked list to keep in step. Clicking sets `paletteOpen`; the hint it prints is one `Kbd` cap per key from `chordKeys(PALETTE_CHORD)` (`constants/shortcuts.ts`), the same constant `CommandPalette`'s listener matches, so the bar cannot advertise a chord nothing handles.
 
 ### `TabStrip` (`components/layout/TabStrip.tsx`)
 

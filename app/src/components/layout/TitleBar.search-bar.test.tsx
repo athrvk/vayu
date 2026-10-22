@@ -34,7 +34,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PALETTE_CHORD } from "@/constants/shortcuts";
-import { formatChord } from "@/lib/platform";
+import { chordKeys } from "@/lib/platform";
 
 const env = vi.hoisted(() => ({ list: [] as { id: string; name: string }[] }));
 
@@ -128,9 +128,12 @@ describe("title-row search bar", () => {
 	it("shows a search bar carrying the palette's own chord", async () => {
 		await renderFor("linux");
 		expect(searchBar()).toHaveTextContent("Search");
-		// The rendered hint, not the constant: a bar showing "⌘P" while the
+		// The rendered caps, not the constant: a bar showing "⌘P" while the
 		// handler matches ⌘K is precisely what shortcuts.ts was written to stop.
-		expect(searchBar()).toHaveTextContent(formatChord(PALETTE_CHORD));
+		const caps = Array.from(searchBar().querySelectorAll('[data-slot="kbd"]')).map(
+			(cap) => cap.textContent
+		);
+		expect(caps).toEqual(chordKeys(PALETTE_CHORD));
 	});
 
 	it("opens the palette when clicked, and does not search on its own", async () => {

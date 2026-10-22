@@ -967,6 +967,15 @@ hand-written `text-primary-foreground/N` inside a `TooltipContent`: white at
 `opacity-70` on the fill is 2.50:1 on `sunset`, under the bar, and a second
 alpha is a second unmeasured tint.
 
+**A shortcut tooltip is `TooltipShortcutLabel`.** The label, then the chord in a
+`TooltipHint`, in one `flex items-center gap-1.5` row - no parentheses, no
+mono face, no `${label} ${shortcut}` template (which would leave the chord
+outside the tinted primitive). `RailButton`, `TooltipIconButton` and the URL
+bar's `Hint` all render it; a second line such as the rail's gloss stacks
+beneath as its own `TooltipHint`. A chord that is *not* in a tooltip (the
+title-row search bar, the palette's rows) is `Kbd` caps from `chordKeys`.
+→ `tooltip-shortcut-format.test.tsx`
+
 **A value and the hint that sources it stack; they never share a flex row.**
 `TooltipContent` is capped at `max-w-xs`, a value that wraps on `break-all` has
 a min-content width of about one character, and a hint has to keep its

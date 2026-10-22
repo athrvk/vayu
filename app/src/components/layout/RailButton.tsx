@@ -6,7 +6,13 @@
  */
 
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from "@/components/ui";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipHint,
+	TooltipShortcutLabel,
+	TooltipTrigger,
+} from "@/components/ui";
 
 export interface RailButtonProps {
 	active: boolean;
@@ -109,7 +115,11 @@ export function RailButton({
 			</TooltipTrigger>
 			{/* Away from the window edge this button's rail sits on - see the `side` doc above. */}
 			<TooltipContent side={side === "left" ? "right" : "left"}>
-				<p>{shortcut ? `${label} ${shortcut}` : label}</p>
+				{shortcut ? (
+					<TooltipShortcutLabel label={label} shortcut={shortcut} />
+				) : (
+					<p>{label}</p>
+				)}
 				{hint && <TooltipHint className="block">{hint}</TooltipHint>}
 			</TooltipContent>
 		</Tooltip>

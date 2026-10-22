@@ -108,6 +108,7 @@ export {
 	TooltipTrigger,
 	TooltipContent,
 	TooltipHint,
+	TooltipShortcutLabel,
 	TooltipValue,
 	TooltipProvider,
 } from "./tooltip";

@@ -165,8 +165,12 @@ scattered strings land the same way.
   Recoverable actions (anything that lands in Trash) skip the confirm dialog
   entirely and use an undo toast instead - a dialog for a reversible action
   is friction with no purpose.
-- **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format:
-  `Send request (⌘↵)`.
+- **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format: the
+  label, then the chord in a `TooltipHint` beside it, no parentheses
+  (`Send request`  `⌘↵`). `TooltipShortcutLabel` renders it for the rail, the
+  icon buttons and the URL bar alike. A parenthetical was rejected: the chord
+  has to sit in the tinted primitive to read on the tooltip's accent fill, and
+  "(⌘↵)" written into the label string would be plain foreground text.
 - **A bare noun on the rail gets a gloss.** An icon-only rail button's tooltip
   is the only place its name is explained, so a name that is a category rather
   than a thing ("Services") carries a one-line fragment beneath the label that
