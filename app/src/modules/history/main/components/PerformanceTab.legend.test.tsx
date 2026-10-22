@@ -117,12 +117,13 @@ function renderTab(mode: string, withSendRate = true) {
 }
 
 describe("PerformanceTab chart legends (#2697)", () => {
-	it("keys the percentile card p50, p95, p99 in the roles its lines are drawn with", () => {
+	it("keys the percentile card p50, p95, p99 in the roles its lines are drawn with, then the SLO marker (#2698)", () => {
 		const { labels, roles, chart } = legendOf(renderTab("constant_rps"), PERCENTILES_TITLE);
 
-		expect(labels).toEqual(["p50", "p95", "p99"]);
+		// The SLO line is a marker, not a series, so the series stay the three percentiles.
+		expect(labels).toEqual(["p50", "p95", "p99", "SLO"]);
 		expect(chart?.series.map((s) => [s.label, s.role])).toEqual(
-			labels.map((label, i) => [label, roles[i]])
+			labels.slice(0, 3).map((label, i) => [label, roles[i]])
 		);
 	});
 
