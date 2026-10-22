@@ -489,6 +489,15 @@ export const ROOT_READING_GUARDS = {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",
 		paths: ["README.md"],
 	},
+	/*
+	 * The updater refuses an installer that has no attestation (#2372), and
+	 * the workflow decides which release assets get one. Nothing in `app/`
+	 * otherwise reads it.
+	 */
+	releaseAttestationScope: {
+		reader: "app/electron/release-attestation-scope.test.ts",
+		paths: [".github/workflows/release.yml"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 function union(guards: Record<string, ReadingGuard>): readonly string[] {

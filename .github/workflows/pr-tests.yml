@@ -360,6 +360,7 @@ jobs:
               - 'README.md'
               - 'install.sh'
               - 'scripts/perf/measure-app.mjs'
+              - '.github/workflows/release.yml'
             engine:
               - 'engine/**'
               - 'VERSION'
