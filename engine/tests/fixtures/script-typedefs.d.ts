@@ -2387,10 +2387,12 @@ interface VayuShelfModules {
 	'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');
 	'xml2js': typeof import('xml2js');
 	'chai': typeof import('chai');
+	'ajv': typeof import('ajv');
+	'tv4': typeof import('tv4');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js, chai. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman bundles: parseString, parseStringPromise, Parser and Builder, a string input; its global, xml2Json, is a synchronous parse over it rather than the module. chai is npm's chai 4.4.1, the version Postman bundles: expect, assert, should and use, the library itself and a separate object from pm.expect, which loading it leaves unchanged; it has no global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js, chai, ajv, tv4. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman bundles: parseString, parseStringPromise, Parser and Builder, a string input; its global, xml2Json, is a synchronous parse over it rather than the module. chai is npm's chai 4.4.1, the version Postman bundles: expect, assert, should and use, the library itself and a separate object from pm.expect, which loading it leaves unchanged; it has no global. ajv is npm's ajv 6.12.5, the version Postman bundles: the Ajv constructor, draft-07, whose compile(schema) answers a validator that records its errors; it has no global. tv4 is npm's tv4 1.3.0, the draft-04 validator Postman bundles, and answers the same object as the tv4 global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
@@ -2404,6 +2406,9 @@ interface VayuShelfModules {
  * xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));
  * const { expect } = require('chai');
  * expect(pm.response.json().id).to.equal(7);
+ * const Ajv = require('ajv');
+ * const validate = new Ajv().compile({ type: 'object', required: ['id'] });
+ * if (!validate(pm.response.json())) console.log(validate.errors);
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2482,6 +2487,117 @@ declare function setTimeout(callback: (...args: any[]) => void, delay?: number, 
  * The object is read once the script has finished, in key order, after the pm.test results: a key assigned twice is one result, with the last value. pm.test(name, fn) is what to write in a new script.
  */
 declare const tests: { [key: string]: any };
+
+/**
+ * Postman's bundled tv4: npm's tv4 1.3.0, a draft-04 JSON Schema validator, and the same object as require('tv4'). Postman deprecates it for require('ajv'), which validates draft-07.
+ * 
+ * Loaded the first time a script reads it.
+ * 
+ * Example:
+ * if (!tv4.validate(pm.response.json(), schema)) console.log(tv4.error.message);
+ */
+declare const tv4: {
+	/**
+	 * Define a format: the validator answers null or true for a match and an error message otherwise. tv4 checks no format of its own.
+	 */
+	addFormat(format: string | object, validator?: (data: unknown, schema: object) => string | boolean | null): void;
+	/**
+	 * Add the messages for a language code.
+	 */
+	addLanguage(code: string, messages: object): any;
+	/**
+	 * Add a schema a $ref can name, by URI or by its own id.
+	 */
+	addSchema(uri: string | object, schema?: object): void;
+	/**
+	 * Register an error code for a defineKeyword validator to answer.
+	 */
+	defineError(codeName: string, codeNumber: number, defaultMessage: string): void;
+	/**
+	 * Define a keyword of your own.
+	 */
+	defineKeyword(keyword: string, validator: (data: unknown, value: unknown, schema: object) => any): void;
+	/**
+	 * Forget every added schema.
+	 */
+	dropSchemas(): void;
+	/**
+	 * The last validate()'s first failure, an Error with message, code, params, dataPath, schemaPath and subErrors, or null when it held.
+	 */
+	error: any;
+	/**
+	 * Every error code by name, as tv4.error.code reports it.
+	 */
+	errorCodes: { [key: string]: any };
+	/**
+	 * A separate tv4 with its own schemas, formats and last result.
+	 */
+	freshApi(language?: string): any;
+	/**
+	 * A URI without its fragment.
+	 */
+	getDocumentUri(uri: string): string;
+	/**
+	 * The URIs a $ref named that no added schema answered.
+	 */
+	getMissingUris(filter?: RegExp): string[];
+	/**
+	 * An added schema, by URI.
+	 */
+	getSchema(uri: string): any;
+	/**
+	 * Every added schema, by URI.
+	 */
+	getSchemaMap(): { [uri: string]: any };
+	/**
+	 * The URIs of the added schemas.
+	 */
+	getSchemaUris(filter?: RegExp): string[];
+	/**
+	 * Pick the error messages' language by code, or read it with no code. Only en is built in; addLanguage adds another.
+	 */
+	language(code?: string): string | boolean;
+	/**
+	 * The URIs the last validate() could not resolve.
+	 */
+	missing: string[];
+	/**
+	 * Resolve a schema's ids and $refs against a base URI.
+	 */
+	normSchema(schema: object, baseUri?: string): any;
+	/**
+	 * Clear the last result: error null, missing empty, valid true.
+	 */
+	reset(): void;
+	/**
+	 * Resolve a reference against a base URI.
+	 */
+	resolveUrl(base: string, href: string): string;
+	/**
+	 * Word the failures yourself, or pick a language by its code.
+	 */
+	setErrorReporter(reporter: string | ((error: object, data: unknown, schema: object) => string | undefined)): boolean | string;
+	/**
+	 * tv4 itself, tv4's legacy alias.
+	 */
+	tv4: any;
+	/**
+	 * Whether the last validate() held.
+	 */
+	valid: boolean;
+	/**
+	 * Validate data against a schema (a $ref string names an added one). Answers whether it holds and leaves tv4.error (the first failure, with message, code, dataPath and schemaPath, or null), tv4.missing and tv4.valid describing it.
+	 */
+	validate(data: unknown, schema: object | boolean | string, checkRecursive?: boolean, banUnknownProperties?: boolean): boolean;
+	/**
+	 * Every failure rather than the first: { valid, errors, missing }.
+	 */
+	validateMultiple(data: unknown, schema: object | boolean | string, checkRecursive?: boolean, banUnknownProperties?: boolean): { valid: boolean, errors: any[], missing: string[] };
+	/**
+	 * validate(), answered as its own { valid, error, missing } rather than on tv4.
+	 */
+	validateResult(data: unknown, schema: object | boolean | string, checkRecursive?: boolean, banUnknownProperties?: boolean): { valid: boolean, error: any, missing: string[] };
+};
 
 /**
  * Postman's bundled XML parser: xml2js 0.6.2's parseString with Postman's options (explicitArray: false, trim: true, mergeAttrs: false), answered synchronously. A child element read once is its value and one repeated is an array; attributes sit under $ and an element's text beside them under _. A document the parser refuses answers undefined and empty input null; require('xml2js') has the error and the other options.
@@ -2590,13 +2706,6 @@ declare const document: never;
  * Not a browser. Use console.log, shown in the response pane's Console tab.
  */
 declare const alert: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's bundled JSON Schema validator. Its replacement is require('ajv'), which Vayu's require() does not load either.
- */
-declare const tv4: never;
 
 /**
  * Not available in the Vayu script sandbox.
@@ -2728,4 +2837,54 @@ declare module 'chai' {
 	}
 	const chai: Chai;
 	export = chai;
+}
+
+declare module 'ajv' {
+	interface ErrorObject {
+		keyword: string;
+		dataPath: string;
+		schemaPath: string;
+		params: { [key: string]: any };
+		message?: string;
+		schema?: unknown;
+		parentSchema?: object;
+		data?: unknown;
+	}
+	interface ValidateFunction {
+		(data: unknown, dataPath?: string, parentData?: object, parentDataProperty?: string | number, rootData?: object): boolean | PromiseLike<any>;
+		schema?: object | boolean;
+		errors?: ErrorObject[] | null;
+	}
+	interface Options {
+		[option: string]: any;
+	}
+	interface Ajv {
+		validate(schemaKeyRef: object | string | boolean, data: unknown): boolean | PromiseLike<any>;
+		compile(schema: object | boolean): ValidateFunction;
+		compileAsync(schema: object | boolean, meta?: boolean, callback?: (error: Error, validate: ValidateFunction) => any): PromiseLike<ValidateFunction>;
+		addSchema(schema: object | object[], key?: string): Ajv;
+		addMetaSchema(schema: object, key?: string): Ajv;
+		validateSchema(schema: object | boolean): boolean;
+		getSchema(keyRef: string): ValidateFunction | undefined;
+		removeSchema(schemaKeyRef?: object | string | RegExp | boolean): Ajv;
+		addFormat(name: string, format: string | RegExp | ((data: string) => boolean) | object): Ajv;
+		addKeyword(keyword: string, definition: object): Ajv;
+		getKeyword(keyword: string): object | boolean;
+		removeKeyword(keyword: string): Ajv;
+		validateKeyword(definition: object, throwError: boolean): boolean;
+		errorsText(errors?: ErrorObject[] | null, options?: { separator?: string; dataVar?: string }): string;
+		errors?: ErrorObject[] | null;
+	}
+	interface AjvStatic {
+		new (options?: Options): Ajv;
+		(options?: Options): Ajv;
+		ValidationError: new (errors: ErrorObject[]) => Error & { errors: ErrorObject[]; ajv: true; validation: true };
+		MissingRefError: new (baseId: string, ref: string, message?: string) => Error & { missingRef: string; missingSchema: string };
+	}
+	const Ajv: AjvStatic;
+	export = Ajv;
+}
+
+declare module 'tv4' {
+	export = tv4;
 }

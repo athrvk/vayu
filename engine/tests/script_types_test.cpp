@@ -465,7 +465,7 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
 }
 
 // The declarations name the globals the sandbox lacks (`fetch`, `process`,
-// Postman's bundled `tv4`, ...) so that using one is an error the editor can
+// Postman's bundled `cheerio`, ...) so that using one is an error the editor can
 // explain, rather than the silence the app's suppression of "Cannot find name"
 // would otherwise leave.
 //
@@ -586,8 +586,8 @@ std::string documentation_above (const std::string& dts, const std::string& decl
 // to write instead on hover. Postman's pre-`pm.*` globals left this list when
 // they started running (#2577), `CryptoJS` when the require() shelf did
 // (#2578), `_` when lodash joined it (#2651), `moment` when it did (#2652;
-// Postman binds no global of that name, only require('moment')) and
-// `xml2Json` when xml2js did (#2654).
+// Postman binds no global of that name, only require('moment')),
+// `xml2Json` when xml2js did (#2654) and `tv4` when it and ajv did (#2656).
 //
 // The pairs are pinned here rather than read from the table, so a name dropped
 // from it, or reworded until it no longer names the replacement, fails. A name
@@ -600,7 +600,6 @@ TEST (ScriptTypesTest, EveryPostmanBundledLibraryIsAbsentAndNamesItsReplacement)
         const char* replacement;
     };
     constexpr auto globals = std::to_array<Legacy> ({
-    { "tv4", "require('ajv')" },
     { "cheerio", "require('cheerio')" },
     { "Backbone", "Backbone" },
     });
@@ -682,7 +681,7 @@ TEST (ScriptTypesTest, ThePostmanLegacyGlobalsAreDeclaredAsTheValuesTheyAre) {
     EXPECT_TRUE (contains (dts, "\turl: string;\n"));
     // What stays absent stays `never`.
     EXPECT_TRUE (contains (dts, "declare const fetch: never;\n"));
-    EXPECT_TRUE (contains (dts, "declare const tv4: never;\n"));
+    EXPECT_TRUE (contains (dts, "declare const cheerio: never;\n"));
 }
 
 // `require` and crypto-js run (#2578), so they are declared as what they are:
@@ -707,7 +706,9 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     "\t'moment': typeof import('moment');\n"
     "\t'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');\n"
     "\t'xml2js': typeof import('xml2js');\n"
-    "\t'chai': typeof import('chai');\n}\n"));
+    "\t'chai': typeof import('chai');\n"
+    "\t'ajv': typeof import('ajv');\n"
+    "\t'tv4': typeof import('tv4');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -897,6 +898,132 @@ TEST (ScriptTypesTest, ChaiIsDeclaredAsTheLibrarysTopLevelMembers) {
     }
 }
 
+// ajv runs (#2656) as require('ajv') only, with no global, so the module
+// carries its own declaration: the Ajv constructor and an instance's methods.
+// Each declared member is pinned to the kind the runtime gives it, so a member
+// the module lacks fails here rather than in a script.
+TEST (ScriptTypesTest, AjvIsDeclaredAsTheConstructorAndItsInstance) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_FALSE (contains (dts, "declare const Ajv"));
+
+    const size_t open = dts.find ("declare module 'ajv' {\n");
+    ASSERT_NE (open, std::string::npos);
+    const std::string body = dts.substr (open, dts.find ("\n}\n", open) - open);
+    EXPECT_TRUE (contains (body, "\texport = Ajv;"));
+    EXPECT_TRUE (contains (body, "\t\tnew (options?: Options): Ajv;\n"));
+    EXPECT_TRUE (contains (body, "\t\t(options?: Options): Ajv;\n"));
+    EXPECT_TRUE (contains (body, "\t\terrors?: ErrorObject[] | null;\n"));
+
+    struct Member {
+        const char* declaration;
+        const char* path;
+        const char* runtime_type;
+    };
+    constexpr auto members = std::to_array<Member> ({
+    { "\t\tvalidate(schemaKeyRef: ", "validate", "function" },
+    { "\t\tcompile(schema: object | boolean): ValidateFunction;", "compile", "function" },
+    { "\t\tcompileAsync(schema: ", "compileAsync", "function" },
+    { "\t\taddSchema(schema: ", "addSchema", "function" },
+    { "\t\taddMetaSchema(schema: ", "addMetaSchema", "function" },
+    { "\t\tvalidateSchema(schema: ", "validateSchema", "function" },
+    { "\t\tgetSchema(keyRef: ", "getSchema", "function" },
+    { "\t\tremoveSchema(schemaKeyRef?: ", "removeSchema", "function" },
+    { "\t\taddFormat(name: ", "addFormat", "function" },
+    { "\t\taddKeyword(keyword: ", "addKeyword", "function" },
+    { "\t\tgetKeyword(keyword: ", "getKeyword", "function" },
+    { "\t\tremoveKeyword(keyword: ", "removeKeyword", "function" },
+    { "\t\tvalidateKeyword(definition: ", "validateKeyword", "function" },
+    { "\t\terrorsText(errors?: ", "errorsText", "function" },
+    });
+#ifdef VAYU_HAS_QUICKJS
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+    // The validator, the statics and both error classes are what they are
+    // declared as.
+    const auto statics = engine.execute (
+    "var Ajv = require('ajv'); var v = new Ajv().compile({ type: 'string' }); "
+    "if (v(1) !== false || !Array.isArray(v.errors) || typeof "
+    "v.errors[0].keyword !== 'string' || typeof v.errors[0].dataPath !== "
+    "'string' || typeof v.errors[0].schemaPath !== 'string' || typeof "
+    "v.errors[0].params !== 'object' || typeof v.errors[0].message !== "
+    "'string' || typeof Ajv().compile !== 'function' || !(new "
+    "Ajv.ValidationError([]) instanceof Error) || !(new "
+    "Ajv.MissingRefError('a', 'b') instanceof Error)) throw new "
+    "Error('wrong kind');",
+    ctx);
+    EXPECT_TRUE (statics.success) << statics.error_message;
+#endif
+    for (const auto& member : members) {
+        EXPECT_TRUE (contains (body, member.declaration))
+        << member.declaration << " is not declared";
+#ifdef VAYU_HAS_QUICKJS
+        const auto result = engine.execute (
+        std::string ("if (typeof new (require('ajv'))().") + member.path +
+        " !== '" + member.runtime_type + "') throw new Error('wrong kind');",
+        ctx);
+        EXPECT_TRUE (result.success)
+        << "an Ajv's " << member.path << " is not a " << member.runtime_type
+        << " at run time (" << result.error_message << ")";
+#endif
+    }
+}
+
+// tv4 runs (#2656) as the tv4 global and require('tv4'), one object, so the
+// global is declared from its completions and the module points at it, as
+// lodash's does. Every member tv4 1.3.0 defines is declared, as the kind the
+// runtime gives it, so a call that runs is never an editor error.
+TEST (ScriptTypesTest, Tv4IsDeclaredAsTheGlobalTheModuleAnswers) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "declare module 'tv4' {\n\texport = tv4;\n}"));
+
+    const std::string root = "declare const tv4: {\n";
+    const size_t open      = dts.find (root);
+    ASSERT_NE (open, std::string::npos);
+    EXPECT_FALSE (contains (documentation_above (dts, root),
+    "Not available in the Vayu script sandbox."));
+    const std::string body = dts.substr (open, dts.find ("\n};\n", open) - open);
+    EXPECT_TRUE (contains (body,
+    "\tvalidate(data: unknown, schema: object | boolean | string, "
+    "checkRecursive?: boolean, banUnknownProperties?: boolean): boolean;\n"));
+    EXPECT_TRUE (contains (body, "\terror: any;\n"));
+    EXPECT_TRUE (contains (body, "\tmissing: string[];\n"));
+    EXPECT_TRUE (contains (body, "\tvalid: boolean;\n"));
+
+    constexpr auto members =
+    std::to_array<std::string_view> ({ "setErrorReporter", "addFormat", "language",
+    "addLanguage", "freshApi", "validate", "validateResult", "validateMultiple",
+    "addSchema", "getSchema", "getSchemaMap", "getSchemaUris", "getMissingUris",
+    "dropSchemas", "defineKeyword", "defineError", "reset", "missing", "error",
+    "valid", "normSchema", "resolveUrl", "getDocumentUri", "errorCodes", "tv4" });
+    for (const std::string_view member : members) {
+        EXPECT_TRUE (contains (body, "\t" + std::string (member) + "(") ||
+        contains (body, "\t" + std::string (member) + ": "))
+        << "tv4." << member << " is not declared";
+    }
+#ifdef VAYU_HAS_QUICKJS
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+    // The members are tv4's own keys, no more and no fewer; the fields hold
+    // what they are declared as once a validate has run.
+    std::string keys;
+    for (const std::string_view member : members) {
+        keys += (keys.empty () ? "" : ",") + std::string (member);
+    }
+    const auto result = engine.execute ("tv4.validate(1, { type: 'string' }); "
+                                        "if (Object.keys(tv4).join() !== '" +
+    keys +
+    "' || !Array.isArray(tv4.missing) || typeof tv4.valid !== 'boolean' || "
+    "typeof tv4.error.message !== 'string' || typeof tv4.errorCodes !== "
+    "'object') throw new Error('wrong kind');",
+    ctx);
+    EXPECT_TRUE (result.success) << result.error_message;
+#endif
+}
+
 // uuid has no global to point at (#2650), so its module carries the whole
 // declaration: callable, with npm's members on it. Each member is pinned to
 // the kind the runtime gives it, so a declared member the module lacks (or a
@@ -998,9 +1125,11 @@ TEST (ScriptTypesTest, ACallInsideALabelDoesNotEmptyTheSignature) {
     EXPECT_TRUE (contains (dts,
     "set(url: string, cookie: object | string, "
     "value?: string | Function, callback?: Function): object;"));
-    EXPECT_FALSE (contains (dts, "get(): void;"));
-    EXPECT_FALSE (contains (dts, "set(): void;"));
-    EXPECT_FALSE (contains (dts, "getAll(): void;"));
+    // The tab is the start of the member name: tv4's `reset(): void` is not
+    // an emptied `set`.
+    EXPECT_FALSE (contains (dts, "\tget(): void;"));
+    EXPECT_FALSE (contains (dts, "\tset(): void;"));
+    EXPECT_FALSE (contains (dts, "\tgetAll(): void;"));
 }
 
 // A closed set of strings is a type, and `field_type` called it prose. So
