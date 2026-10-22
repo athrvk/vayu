@@ -822,6 +822,12 @@ jobs:
             dirname "$exe" >> "$GITHUB_PATH"
           done
 
+      # release.yml's step, for its reasons.
+      - name: Point vcpkg's binary cache at the container workspace (container)
+        if: matrix.container
+        shell: bash
+        run: echo "VCPKG_BINARY_SOURCES=clear;files,$GITHUB_WORKSPACE/.vcpkg-archives,readwrite" >> "$GITHUB_ENV"
+
       # sccache used to be skipped on Windows. sccache-action@v0.0.10 failed its
       # install step on the Windows Server 2025 + Visual Studio 2026 image
       # GitHub rolled across windows-latest in June 2026: "Unable to locate
@@ -848,8 +854,6 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
           echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
 
-      # Relative: in the container `github.workspace` is the host's path,
-      # which the container does not see (actions/runner#2058).
       - name: Build engine
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
