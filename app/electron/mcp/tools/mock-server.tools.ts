@@ -13,7 +13,15 @@
 import { z } from "zod";
 import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
-import { callEngine, engineErrorResult, jsonResult, requireStr, withCaveat } from "./kit.js";
+import {
+	callEngine,
+	callEngineStructured,
+	engineErrorResult,
+	jsonResult,
+	requireStr,
+	withCaveat,
+} from "./kit.js";
+import { mockActivitySchema, mockRoutesSchema, mockServerListSchema } from "./output-schemas.js";
 import { mockServerCaveat, mockServerStartPayload } from "./mock-server.js";
 
 export const MOCK_SERVER_TOOLS: McpTool[] = [
@@ -98,7 +106,9 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listMockServers(signal)),
+		outputSchema: mockServerListSchema,
+		handler: (_args, ctx, signal) =>
+			callEngineStructured(ctx, () => ctx.client.listMockServers(signal)),
 	},
 	{
 		name: "get_mock_routes",
@@ -115,8 +125,9 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		inputSchema: {
 			mockId: z.string().describe("Mock server ID (from start_mock_server)."),
 		},
+		outputSchema: mockRoutesSchema,
 		handler: (args, ctx, signal) =>
-			callEngine(ctx, () =>
+			callEngineStructured(ctx, () =>
 				ctx.client.getMockServerRoutes(requireStr(args, "mockId"), signal)
 			),
 	},
@@ -143,10 +154,11 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 				.optional()
 				.describe("At most this many entries (default 50, max 200)."),
 		},
+		outputSchema: mockActivitySchema,
 		handler: async (args, ctx, signal) => {
 			const limit = args.limit as number | undefined;
 			const mockId = requireStr(args, "mockId");
-			return callEngine(
+			return callEngineStructured(
 				ctx,
 				() => ctx.client.getMockServerActivity(mockId, limit ?? 50, signal),
 				await runOutputShape(ctx, signal)

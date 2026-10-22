@@ -15,6 +15,7 @@ import { EngineRequestError } from "../engine-client.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
+	callEngineStructured,
 	confirmDestructive,
 	confirmedInput,
 	echoShape,
@@ -27,6 +28,7 @@ import {
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
+import { trashListSchema } from "./output-schemas.js";
 import { describeTrashEntry, readTrashEntry, trashRefusalMessage, type TrashRow } from "./trash.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
@@ -44,7 +46,9 @@ export const TRASH_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listTrash(signal)),
+		outputSchema: trashListSchema,
+		handler: (_args, ctx, signal) =>
+			callEngineStructured(ctx, () => ctx.client.listTrash(signal)),
 	},
 	{
 		name: "restore_trash_entry",

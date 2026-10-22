@@ -110,6 +110,21 @@ function page(data: unknown[], total = data.length, offset = 0) {
 
 const emptyPage = () => page([]);
 
+/** @p envelope as a paged read answers its last page: `nextOffset` null, no `note`. */
+function lastPageAnswer(envelope: ReturnType<typeof page>) {
+	return { ...envelope, pagination: { ...envelope.pagination, nextOffset: null } };
+}
+
+/**
+ * A paged read's `pagination`, read from its one text block parsed as JSON,
+ * after checking that parse agrees with `structuredContent`.
+ */
+function pageOf(res: { content: Array<{ text: string }>; structuredContent?: unknown }) {
+	const parsed = JSON.parse(res.content[0].text) as { pagination: Record<string, unknown> };
+	expect(res.structuredContent).toEqual(parsed);
+	return parsed.pagination;
+}
+
 /**
  * `serialize_token`'s shape (`engine/src/http/oauth_client.cpp`), bearer bytes
  * included - the fakes serve what the engine serves, so the tools' redaction
@@ -9333,23 +9348,30 @@ describe("run housekeeping tools", () => {
 			expect(client.listRuns).not.toHaveBeenCalled();
 		});
 
-		test("a page with more behind it says so, with the next offset", async () => {
+		// #2445: the bound used to ride as a second text block, so page one of
+		// 17 runs stopped parsing as JSON exactly when there was a page two.
+		test("a page with more behind it is one JSON document carrying the next offset", async () => {
 			const client = fakeClient({
-				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }, { id: "run_2" }], 57)),
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }], 17)),
 			});
-			const res = await dispatchTool("list_runs", { limit: 2 }, ctxWith(client));
-			const text = res.content.map((c) => c.text).join("\n");
-			expect(text).toMatch(/2 of 57 runs/);
-			expect(text).toMatch(/offset: 2/);
+			const res = await dispatchTool("list_runs", { limit: 1 }, ctxWith(client));
+			expect(res.content).toHaveLength(1);
+			const pagination = pageOf(res);
+			expect(pagination.hasMore).toBe(true);
+			expect(pagination.nextOffset).toBe(1);
+			expect(pagination.note).toMatch(/1 of 17 runs, starting at offset 0/);
 		});
 
-		test("a complete page carries no caveat", async () => {
+		test("the last page has a null next offset and no note", async () => {
 			const client = fakeClient({
-				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }])),
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_17" }], 17, 16)),
 			});
-			const res = await dispatchTool("list_runs", {}, ctxWith(client));
+			const res = await dispatchTool("list_runs", { limit: 1, offset: 16 }, ctxWith(client));
 			expect(res.content).toHaveLength(1);
-			expect(firstText(res)).not.toMatch(/Bounded read/);
+			const pagination = pageOf(res);
+			expect(pagination.hasMore).toBe(false);
+			expect(pagination.nextOffset).toBeNull();
+			expect(pagination).not.toHaveProperty("note");
 		});
 	});
 
@@ -9460,6 +9482,80 @@ describe("run housekeeping tools", () => {
 			expect(res.isError).toBe(true);
 			expect(firstText(res)).toMatch(/404/);
 		});
+	});
+
+	describe("every paged read answers one JSON document its outputSchema accepts", () => {
+		const PAGED_READS = [
+			{ tool: "list_runs", args: {}, method: "listRuns", row: { id: "run_1" } },
+			{
+				tool: "get_run_samples",
+				args: { runId: "run_1" },
+				method: "getRunSamples",
+				row: { resultId: 1 },
+			},
+			{
+				tool: "get_run_timeseries",
+				args: { runId: "run_1" },
+				method: "getRunTimeSeries",
+				row: { rps: 10 },
+			},
+			{
+				tool: "get_run_monitor",
+				args: { runId: "run_1" },
+				method: "getRunMonitorSeries",
+				row: { cpu: 0.5 },
+			},
+			{
+				tool: "get_inbox_captures",
+				args: { inboxId: "inbox_1" },
+				method: "getInboxCaptures",
+				row: { id: 9 },
+			},
+		] as const;
+
+		/** @p tool's declared outputSchema; its absence fails the case rather than skipping it. */
+		function outputSchemaOf(tool: string) {
+			const schema = TOOLS.find((t) => t.name === tool)?.outputSchema;
+			expect(schema, tool).toBeDefined();
+			return schema!;
+		}
+
+		test.each(PAGED_READS)(
+			"$tool: a page with more behind it",
+			async ({ tool, args, method, row }) => {
+				const client = fakeClient({ [method]: vi.fn().mockResolvedValue(page([row], 17)) });
+				const res = await dispatchTool(tool, { ...args, limit: 1 }, ctxWith(client));
+				expect(res.content).toHaveLength(1);
+				const pagination = pageOf(res);
+				expect(pagination.hasMore).toBe(true);
+				expect(pagination.nextOffset).toBe(1);
+				expect(pagination.note).toEqual(expect.any(String));
+				expect(() => outputSchemaOf(tool).parse(res.structuredContent)).not.toThrow();
+			}
+		);
+
+		test.each(PAGED_READS)("$tool: the last page", async ({ tool, args, method, row }) => {
+			const client = fakeClient({ [method]: vi.fn().mockResolvedValue(page([row], 17, 16)) });
+			const res = await dispatchTool(tool, { ...args, offset: 16 }, ctxWith(client));
+			expect(res.content).toHaveLength(1);
+			const pagination = pageOf(res);
+			expect(pagination.nextOffset).toBeNull();
+			expect(pagination).not.toHaveProperty("note");
+			expect(() => outputSchemaOf(tool).parse(res.structuredContent)).not.toThrow();
+		});
+
+		// The schema would reject a bare non-object, and the SDK reports that as
+		// a broken tool while hiding the engine's body.
+		test.each(PAGED_READS)(
+			"$tool: a non-object answer is wrapped, not refused",
+			async ({ tool, args, method }) => {
+				const client = fakeClient({ [method]: vi.fn().mockResolvedValue(null) });
+				const res = await dispatchTool(tool, args, ctxWith(client));
+				expect(res.isError).toBeFalsy();
+				expect(res.structuredContent).toEqual({ raw: null });
+				expect(() => outputSchemaOf(tool).parse(res.structuredContent)).not.toThrow();
+			}
+		);
 	});
 
 	describe("set_run_baseline", () => {
@@ -14010,9 +14106,9 @@ describe("secret withholding", () => {
 			body: "token=<redacted>&p=<redacted>",
 			bodyBytes: 40,
 		});
-		expect(withheld.body.pagination).toEqual(samples.pagination);
+		expect(withheld.body.pagination).toEqual(lastPageAnswer(samples).pagination);
 		const revealed = await read("get_run_samples", client, REVEAL, { runId: "run_1" });
-		expect(revealed.body).toEqual(samples);
+		expect(revealed.body).toEqual(lastPageAnswer(samples));
 	});
 
 	const RUN_ROW = {
@@ -14042,7 +14138,7 @@ describe("secret withholding", () => {
 			dataFileHash: "c".repeat(64),
 			dataFileCastNumbers: true,
 		});
-		expect((await read("list_runs", client, REVEAL)).body).toEqual(runs);
+		expect((await read("list_runs", client, REVEAL)).body).toEqual(lastPageAnswer(runs));
 	});
 
 	test("set_run_baseline masks the run row it echoes unless revealed", async () => {
@@ -14085,7 +14181,7 @@ describe("secret withholding", () => {
 			bodyBytes: 30,
 		});
 		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
-		expect(revealed.body).toEqual(captures);
+		expect(revealed.body).toEqual(lastPageAnswer(captures));
 	});
 
 	test("get_mock_activity masks a secret in a logged path unless revealed", async () => {
@@ -15293,5 +15389,243 @@ describe("get_graphql_schema", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(message);
 		expect(client.composeRequest).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * #2445: a read that declares an `outputSchema` answers `structuredContent`
+ * the schema accepts, mirroring its text block. The SDK turns a result its
+ * schema rejects into a protocol error that hides the whole answer, so each
+ * row is dispatched with a realistic answer and parsed through the tool's own
+ * schema; the paged reads, `compare_runs` and `get_engine_health` are held by
+ * their own cases above.
+ */
+describe("every structured read answers structuredContent its outputSchema accepts", () => {
+	const ENDPOINT = "https://api.example.com/graphql";
+
+	interface StructuredRead {
+		tool: string;
+		args: Record<string, unknown>;
+		client?: Partial<Record<keyof EngineClient, unknown>>;
+		safety?: Partial<McpSafetyConfig>;
+		/** The window's report, for the one tool that reads it rather than the engine. */
+		appFocus?: ToolContext["appFocus"];
+		/** Top-level keys the answer carries, so the schema's names are not vacuous. */
+		has: string[];
+		/** The engine method whose non-object answer the handler wraps as `{ raw }`. */
+		wraps?: keyof EngineClient;
+	}
+
+	const SDL_ANSWER = {
+		status: 200,
+		bodyRaw: JSON.stringify({
+			data: introspectionFromSchema(buildSchema("type Query { id: ID }")),
+		}),
+	};
+	const OPERATION = { method: "GET", path: "/pets" };
+
+	const READS: StructuredRead[] = [
+		{
+			tool: "get_app_focus",
+			has: ["activeTab", "run", "activeEnvironment"],
+			args: {},
+			appFocus: () => ({
+				activeTab: { type: "run", entityId: "run_9", label: "Design run" },
+				activeEnvironment: { id: "env_1", name: "Staging" },
+			}),
+		},
+		{ tool: "resolve_variables", args: {}, has: ["context", "variables", "summary"] },
+		{
+			tool: "get_request",
+			args: { requestId: "req_1" },
+			has: ["id", "name", "method", "url"],
+			wraps: "getRequest",
+		},
+		{
+			tool: "get_run_report",
+			has: ["metadata", "summary", "results", "partial", "note"],
+			args: { runId: "run_1" },
+			client: {
+				getRunReport: vi.fn().mockResolvedValue({
+					metadata: { runId: "run_1", runType: "load", status: "running", endTime: 0 },
+					summary: { totalRequests: 3 },
+					results: [],
+				}),
+			},
+			wraps: "getRunReport",
+		},
+		{
+			tool: "get_run",
+			args: { runId: "run_b" },
+			has: ["id", "status", "terminal", "progress", "nextStep"],
+			wraps: "getRun",
+		},
+		{ tool: "get_engine_config", args: {}, has: ["entries"], wraps: "getConfig" },
+		{
+			tool: "get_graphql_schema",
+			has: ["endpoint", "sdl", "sdlTruncated", "sdlBytes", "types"],
+			args: { url: ENDPOINT },
+			client: {
+				listEnvironments: listingEnv1(),
+				composeRequest: vi.fn().mockResolvedValue({ method: "POST", url: ENDPOINT }),
+				executeRequest: vi.fn().mockResolvedValue(SDL_ANSWER),
+			},
+			safety: { allowlist: ["api.example.com"] },
+		},
+		{ tool: "get_spec", args: { collectionId: "col_1" }, has: ["collectionId", "bound"] },
+		{
+			tool: "get_spec",
+			args: { specId: "spec_1", includeContent: true },
+			has: ["specId", "hash", "contentBytes"],
+		},
+		{
+			tool: "diff_spec",
+			args: { collectionId: "col_1", content: "{}" },
+			has: ["identical", "summary", "added", "removed", "changed", "entriesTruncated"],
+		},
+		{
+			tool: "preview_import",
+			has: ["collections", "environments", "globals", "clientCertificates", "meta"],
+			args: { content: "{}" },
+			client: {
+				parseImport: vi.fn().mockResolvedValue({
+					collections: [{ name: "Pets", requests: [{ name: "List" }], children: [] }],
+					environments: [{ name: "Staging" }],
+					meta: { format: "OpenAPI 3.0", skipped: [] },
+				}),
+			},
+		},
+		{
+			tool: "preview_spec_bind",
+			has: [
+				"title",
+				"operations",
+				"matched",
+				"wouldClear",
+				"unmatchedRequests",
+				"unmatchedOperations",
+			],
+			args: { collectionId: "col_1", content: "openapi: 3.0.0" },
+			client: {
+				describeSpec: vi.fn().mockResolvedValue({ title: "Pets", operations: [OPERATION] }),
+				matchSpec: vi.fn().mockResolvedValue({
+					matched: [],
+					unmatchedRequests: [],
+					unmatchedOperations: [OPERATION],
+				}),
+				listCollections: vi.fn().mockResolvedValue([{ id: "col_1", parentId: null }]),
+			},
+		},
+		{
+			tool: "export_spec",
+			args: { collectionId: "col_1" },
+			has: ["format", "mode", "document", "documentTruncated", "contentBytes"],
+		},
+		{
+			tool: "export_postman",
+			args: { collectionId: "col_1" },
+			has: ["fileName", "document", "documentTruncated", "contentBytes"],
+		},
+		{ tool: "list_trash", args: {}, has: ["items", "total"], wraps: "listTrash" },
+		{
+			tool: "list_request_examples",
+			has: ["examples", "bodiesOmitted", "bodyBudgetBytes"],
+			args: { requestId: "req_1" },
+			client: {
+				listRequestExamples: vi.fn().mockResolvedValue([{ id: "ex_1", body: "{}" }]),
+			},
+		},
+		{
+			tool: "get_globals",
+			args: {},
+			has: ["id", "variables", "updatedAt"],
+			wraps: "getGlobals",
+		},
+		{ tool: "get_cookies", args: {}, has: ["scopes"], wraps: "getCookies" },
+		{
+			tool: "get_oauth2_token_status",
+			has: ["found"],
+			args: { cacheKey: "k" },
+			wraps: "getOAuth2TokenStatus",
+		},
+		{ tool: "list_mock_issuers", args: {}, has: ["issuers"], wraps: "listMockIssuers" },
+		{ tool: "list_mock_servers", args: {}, has: ["data"], wraps: "listMockServers" },
+		{
+			tool: "get_mock_routes",
+			has: ["data"],
+			args: { mockId: "mock_1" },
+			wraps: "getMockServerRoutes",
+		},
+		{
+			tool: "get_mock_activity",
+			has: ["data"],
+			args: { mockId: "mock_1" },
+			wraps: "getMockServerActivity",
+		},
+		{ tool: "list_webhook_inboxes", args: {}, has: ["data"], wraps: "listInboxes" },
+	];
+
+	/** Held by the paged-read and comparison cases above, not by a row here. */
+	const COVERED_ELSEWHERE = [
+		"get_engine_health",
+		"compare_runs",
+		"list_runs",
+		"get_run_samples",
+		"get_run_timeseries",
+		"get_run_monitor",
+		"get_inbox_captures",
+	];
+
+	/** @p tool's declared outputSchema; its absence fails the case rather than skipping it. */
+	function outputSchemaOf(tool: string) {
+		const schema = TOOLS.find((t) => t.name === tool)?.outputSchema;
+		expect(schema, tool).toBeDefined();
+		return schema!;
+	}
+
+	function dispatchRead(read: StructuredRead, overrides: Partial<StructuredRead["client"]> = {}) {
+		const client = fakeClient({ ...read.client, ...overrides });
+		const ctx = { ...ctxWith(client, read.safety), appFocus: read.appFocus };
+		return dispatchTool(read.tool, read.args, ctx);
+	}
+
+	test("every read tool with a schema is held here or by a case above", () => {
+		const held = new Set([...READS.map((read) => read.tool), ...COVERED_ELSEWHERE]);
+		const unheld = TOOLS.filter(
+			(tool) => tool.category === "read" && tool.outputSchema && !held.has(tool.name)
+		).map((tool) => tool.name);
+		expect(unheld).toEqual([]);
+	});
+
+	// A prose caveat may follow the first block (`withCaveat`); that block is the document.
+	test.each(READS)("$tool $args: the first block is the structured document", async (read) => {
+		const res = await dispatchRead(read);
+		expect(res.isError).toBeFalsy();
+		expect(res.structuredContent).toEqual(JSON.parse(firstText(res)));
+		expect(Object.keys(res.structuredContent!)).toEqual(expect.arrayContaining(read.has));
+		expect(() => outputSchemaOf(read.tool).parse(res.structuredContent)).not.toThrow();
+	});
+
+	const WRAPPING = READS.filter((read) => read.wraps);
+
+	test.each(WRAPPING)("$tool: a non-object answer is wrapped, not refused", async (read) => {
+		for (const answer of [null, ["bare"]]) {
+			const res = await dispatchRead(read, {
+				[read.wraps!]: vi.fn().mockResolvedValue(answer),
+			});
+			expect(res.isError).toBeFalsy();
+			expect(res.structuredContent).toEqual({ raw: answer });
+			expect(() => outputSchemaOf(read.tool).parse(res.structuredContent)).not.toThrow();
+		}
+	});
+
+	test("a key the schema does not name still arrives", async () => {
+		const res = await dispatchRead(
+			READS.find((read) => read.tool === "get_run")!,
+			{ getRun: vi.fn().mockResolvedValue({ id: "run_1", status: "completed", novel: 1 }) }
+		);
+		expect(res.structuredContent).toMatchObject({ id: "run_1", terminal: true });
+		const parsed = outputSchemaOf("get_run").parse({ id: "run_1", novel: 1 });
+		expect(parsed).toMatchObject({ novel: 1 });
 	});
 });

@@ -8458,7 +8458,7 @@ TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
     EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash, moment, "
-                             "csv-parse/lib/sync, xml2js, chai)"),
+                             "csv-parse/lib/sync, xml2js, chai, ajv, tv4)"),
     std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
@@ -9403,6 +9403,236 @@ TEST_F (ScriptEngineTest, RequireShelfChaiEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
 }
 
+// require('ajv') is npm's ajv 6.12.5, the version Postman's sandbox bundles
+// (#2656): the Ajv constructor, draft-07. Every answer was checked against the
+// unbundled package on Node.
+TEST_F (ScriptEngineTest, RequireShelfAjvCompilesAndValidates) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    // ajv compiles each schema into a function with `new Function`; the
+    // sandbox allows it.
+    { "new Function('a', 'b', 'return a + b')(2, 3)", "5" },
+    { "typeof require('ajv')", "function" },
+    { "(function () { var Ajv = require('ajv'); var v = new Ajv().compile({ "
+      "type: 'object', properties: { id: { type: 'integer' } }, required: "
+      "['id'] }); return [v({ id: 7 }), v.errors, v({ id: '7' }), "
+      "JSON.stringify(v.errors)].join('|'); })()",
+    "true||false|[{\"keyword\":\"type\",\"dataPath\":\".id\",\"schemaPath\":"
+    "\"#/properties/id/type\",\"params\":{\"type\":\"integer\"},\"message\":"
+    "\"should be integer\"}]" },
+    { "(function () { var ajv = new (require('ajv'))({ allErrors: true }); "
+      "var ok = ajv.validate({ properties: { a: { type: 'string' }, b: { "
+      "minimum: 3 } } }, { a: 1, b: 2 }); return ok + ' ' + "
+      "ajv.errors.length + ' ' + ajv.errorsText(); })()",
+    "false 2 data.a should be string, data.b should be >= 3" },
+    // Callable without `new`, as ajv 6 is.
+    { "(function () { var v = require('ajv')().compile({ const: 'x' }); "
+      "return v('x') + ' ' + v('y'); })()",
+    "true false" },
+    { "(function () { var v = new (require('ajv'))().compile({ if: { "
+      "properties: { kind: { const: 'a' } } }, then: { required: ['a'] }, "
+      "else: { required: ['b'] } }); return [v({ kind: 'a', a: 1 }), v({ "
+      "kind: 'a', b: 1 }), v({ kind: 'z', b: 1 })].join(); })()",
+    "true,false,true" },
+    { "(function () { var v = new (require('ajv'))().compile({ type: "
+      "'string', format: 'email' }); return v('a@example.com') + ' ' + "
+      "v('nope'); })()",
+    "true false" },
+    { "(function () { var v = new (require('ajv'))().compile({ definitions: "
+      "{ id: { type: 'integer', minimum: 1 } }, properties: { id: { $ref: "
+      "'#/definitions/id' } } }); return v({ id: 1 }) + ' ' + v({ id: 0 }) + "
+      "' ' + v.errors[0].message; })()",
+    "true false should be >= 1" },
+    { "(function () { var ajv = new (require('ajv'))(); ajv.addSchema({ $id: "
+      "'user', type: 'object', required: ['name'] }); return "
+      "ajv.validate('user', { name: 'a' }) + ' ' + ajv.validate('user', {}); "
+      "})()",
+    "true false" },
+    { "(function () { try { new (require('ajv'))().compile({ type: 'nope' }); "
+      "} catch (e) { return e.message; } })()",
+    "schema is invalid: data.type should be equal to one of the allowed "
+    "values, data.type should be array, data.type should match some schema "
+    "in anyOf" },
+    { "(function () { var Ajv = require('ajv'); try { new Ajv().compile({ "
+      "$ref: 'missing.json' }); } catch (e) { return (e instanceof "
+      "Ajv.MissingRefError) + ' ' + e.missingRef; } })()",
+    "true missing.json" },
+    { "Object.keys(require('ajv')).join()", "ValidationError,MissingRefError,$dataMetaSchema" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// A validator compiled once runs inside a pm.test like any other code, and a
+// failed check is an ordinary failed test.
+TEST_F (ScriptEngineTest, RequireShelfAjvInsidePmTest) {
+    ScriptEngine roomy{ library_call_config () };
+    response.status_code = 200;
+    response.body        = R"({"id":7,"name":"ada"})";
+    const auto result    = roomy.execute_test (R"JS(
+        const Ajv = require('ajv');
+        const validate = new Ajv().compile({
+            type: 'object',
+            properties: { id: { type: 'integer' }, name: { type: 'string', minLength: 4 } },
+            required: ['id', 'name'],
+        });
+        pm.test('holds', function () {
+            pm.expect(validate({ id: 1, name: 'grace' })).to.be.true;
+        });
+        pm.test('fails', function () {
+            pm.expect(validate(pm.response.json()), JSON.stringify(validate.errors)).to.be.true;
+        });
+    )JS",
+       request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "");
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_NE (result.tests[1].error_message.find (
+               "should NOT be shorter than 4 characters"),
+    std::string::npos)
+    << result.tests[1].error_message;
+}
+
+// require('tv4') is npm's tv4 1.3.0, Postman's bundled draft-04 validator
+// (#2656); it keeps the last verdict on itself. Checked against the
+// unbundled package on Node.
+TEST_F (ScriptEngineTest, RequireShelfTv4ValidatesAndReportsTheError) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "[tv4.validate({ id: 7 }, { type: 'object', properties: { id: { type: "
+      "'integer' } } }), tv4.error, tv4.valid].join('|')",
+    "true||true" },
+    { "(function () { var ok = require('tv4').validate({ id: '7' }, { type: "
+      "'object', properties: { id: { type: 'integer' } } }); var e = "
+      "tv4.error; return [ok, e.message, e.code, e.dataPath, e.schemaPath, "
+      "e.name, e instanceof Error, tv4.valid].join('|'); })()",
+    "false|Invalid type: string (expected integer)|0|/id|/properties/id/"
+    "type|ValidationError|true|false" },
+    { "(function () { var r = tv4.validateMultiple({ a: 1, b: 2 }, { "
+      "properties: { a: { type: 'string' }, b: { minimum: 3 } } }); return "
+      "r.valid + ' ' + r.errors.map(function (e) { return e.message; "
+      "}).join('; '); })()",
+    "false Invalid type: number (expected string); Value 2 is less than "
+    "minimum 3" },
+    { "(function () { var r = tv4.validateResult({}, { required: ['id'] }); "
+      "return [r.valid, r.error.message, r.error.code, tv4.error].join('|'); "
+      "})()",
+    "false|Missing required property: id|302|" },
+    // The shelf evaluates tv4 in strict mode, so a detached call has no
+    // object to record its verdict on.
+    { "(function () { try { var v = tv4.validate; v(1, { type: 'string' }); "
+      "return 'ran'; } catch (e) { return e.name; } })()",
+    "TypeError" },
+    { "(function () { var ok = tv4.validate({ a: 1 }, { properties: { a: { "
+      "$ref: 'http://example.com/a.json' } } }); return ok + ' ' + "
+      "tv4.missing.join(); })()",
+    "true http://example.com/a.json" },
+    { "Object.keys(tv4).join()",
+    "setErrorReporter,addFormat,language,addLanguage,freshApi,validate,"
+    "validateResult,validateMultiple,addSchema,getSchema,getSchemaMap,"
+    "getSchemaUris,getMissingUris,dropSchemas,defineKeyword,defineError,reset,"
+    "missing,error,valid,normSchema,resolveUrl,getDocumentUri,errorCodes,tv4" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// The tv4 global is require('tv4'), whichever is read first, so a verdict
+// one records the other reads, as in Postman.
+TEST_F (ScriptEngineTest, RequireShelfTv4GlobalIsTheModule) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "typeof tv4 + ' ' + (tv4 === require('tv4')) + ' ' + (tv4.tv4 "
+               "=== tv4)"),
+    "object true true");
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(require('tv4') === tv4) + ' ' + (require('tv4').validate(1, "
+               "{ type: 'string' }), tv4.error.message)"),
+    "true Invalid type: number (expected string)");
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(tv4.validate(1, { type: 'string' }), "
+               "require('tv4').error.message)"),
+    "Invalid type: number (expected string)");
+}
+
+// The glues' `module` and `exports` are the factories', and neither library
+// defines anything outside itself: the global object gains nothing beyond
+// the tv4 accessor's own value, and there is no Ajv global.
+TEST_F (ScriptEngineTest, RequireShelfAjvAndTv4LeaveNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(function () { var before = "
+               "Object.getOwnPropertyNames(globalThis).sort().join(); "
+               "require('ajv')().compile({ type: 'string' })('x'); "
+               "require('tv4').validate(1, { type: 'string' }); return "
+               "Object.getOwnPropertyNames(globalThis).sort().join() === "
+               "before; })()"),
+    "true");
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(require('ajv'), require('tv4'), [typeof Ajv, typeof module, "
+               "typeof exports, typeof define].join(' '))"),
+    "undefined undefined undefined undefined");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfAjvAndTv4RefuseEveryOtherPath) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    for (const char* name : { "ajv/lib/ajv", "ajv/dist/ajv.min.js", "Ajv",
+         "ajv-formats", "uri-js", "tv4/tv4", "TV4", "tv4.js" }) {
+        const std::string refusal =
+        shelf_answer (engine, request, "require('" + std::string (name) + "')");
+        EXPECT_NE (refusal.find ("Cannot find module '" + std::string (name) + "'"),
+        std::string::npos)
+        << refusal;
+    }
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a refused name evaluated a library";
+}
+
+// ajv is evaluated on an execution's first require('ajv'), once however often
+// it is required, and never by a script that does not ask for it. Mutation:
+// evaluate the shelf in `setup_require_shelf` and the first count fails.
+TEST_F (ScriptEngineTest, RequireShelfAjvEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "require('ajv') === require('ajv') && typeof "
+               "require('ajv')().compile"),
+    "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require('ajv')"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
+// tv4 likewise, through the global or require, and the global's accessor and
+// require share the one evaluation. Mutation: evaluate the shelf in
+// `setup_require_shelf` and the first count fails.
+TEST_F (ScriptEngineTest, RequireShelfTv4EvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof tv4.validate + ' ' + (require('tv4') === tv4)"),
+    "function true");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require('tv4').validate"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
 // A library's parse depth is Vayu's own, not the script's to budget (#2652):
 // MSVC at /Od under ASan has frames large enough that lodash and moment
 // overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
@@ -9483,6 +9713,10 @@ TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack
     EXPECT_EQ (shelf_answer (shallow, request, "typeof xml2Json"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('chai').expect"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('ajv')"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof tv4.validate"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof _.get"), "function")
     << "at " << budget << " bytes";

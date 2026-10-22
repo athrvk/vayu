@@ -33,11 +33,13 @@ inline constexpr std::string_view MOMENT_MODULE    = "moment";
 inline constexpr std::string_view CSV_PARSE_SYNC_MODULE = "csv-parse/lib/sync";
 inline constexpr std::string_view XML2JS_MODULE         = "xml2js";
 inline constexpr std::string_view CHAI_MODULE           = "chai";
+inline constexpr std::string_view AJV_MODULE            = "ajv";
+inline constexpr std::string_view TV4_MODULE            = "tv4";
 
 /// Every name `require` accepts.
-inline constexpr auto SHELF_MODULE_NAMES =
-std::to_array<std::string_view> ({ CRYPTO_JS_MODULE, UUID_MODULE, LODASH_MODULE,
-MOMENT_MODULE, CSV_PARSE_SYNC_MODULE, XML2JS_MODULE, CHAI_MODULE });
+inline constexpr auto SHELF_MODULE_NAMES = std::to_array<std::string_view> (
+{ CRYPTO_JS_MODULE, UUID_MODULE, LODASH_MODULE, MOMENT_MODULE,
+CSV_PARSE_SYNC_MODULE, XML2JS_MODULE, CHAI_MODULE, AJV_MODULE, TV4_MODULE });
 
 [[nodiscard]] constexpr bool is_shelf_module (std::string_view name) {
     for (const std::string_view shelf_name : SHELF_MODULE_NAMES) {

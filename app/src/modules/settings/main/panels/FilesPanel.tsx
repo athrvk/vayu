@@ -57,6 +57,26 @@ export default function FilesPanel() {
 		}
 	};
 
+	// One picker button, drawn in the empty state when the list is empty and
+	// below the list otherwise, so the panel never shows two. Outside Electron
+	// there is no picker and no button.
+	const folderButton = (label: string) =>
+		chooseAndAllow && (
+			<Button
+				variant="outline"
+				size="sm"
+				onClick={() => void chooseAndAllow()}
+				disabled={isPending}
+			>
+				{isPending ? (
+					<Loader2 className="size-icon animate-spin" />
+				) : (
+					<FolderOpen className="size-icon" />
+				)}
+				{label}
+			</Button>
+		);
+
 	return (
 		<Card data-setting-anchor={ALLOWED_FOLDERS.anchor}>
 			<CardHeader className="pb-3">
@@ -80,6 +100,7 @@ export default function FilesPanel() {
 					<EmptyState
 						variant="inline"
 						title="Files from an import, an agent or a data file are sent only from a folder you allow."
+						action={folderButton("Allow folder…")}
 					/>
 				) : (
 					<ul aria-label="Allowed folders">
@@ -108,21 +129,7 @@ export default function FilesPanel() {
 					</ul>
 				)}
 
-				{chooseAndAllow && (
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => void chooseAndAllow()}
-						disabled={isPending}
-					>
-						{isPending ? (
-							<Loader2 className="size-icon animate-spin" />
-						) : (
-							<FolderOpen className="size-icon" />
-						)}
-						Choose folder…
-					</Button>
-				)}
+				{roots.length > 0 && folderButton("Choose folder…")}
 			</CardContent>
 		</Card>
 	);

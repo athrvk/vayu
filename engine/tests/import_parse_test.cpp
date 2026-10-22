@@ -2485,8 +2485,8 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     const std::string items =
     request_with_script ("Legacy tests",
     R"j(["tests[\"ok\"] = responseCode.code === 200;","pm.visualizer.set('<p></p>', {});"])j") +
-    "," + request_with_script ("Library", R"j(["const h = tv4.validate('x');"])j") +
-    "," + request_with_script ("Module", R"j(["const c = require('ajv');"])j") + "," +
+    "," + request_with_script ("Library", R"j(["const $ = cheerio.load('x');"])j") + "," +
+    request_with_script ("Module", R"j(["const c = require('cheerio');"])j") + "," +
     request_with_script (
     "Host", R"j(["setTimeout(next, 10);","await next;","Buffer.from('x');"])j") +
     "," + request_with_script ("Chai", R"j(["pm.expect(pm.response).to.be.postmanResponse;"])j") +
@@ -2515,6 +2515,9 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Chai module",
     R"j(["const { expect } = require('chai');","expect(pm.response.json().id).to.equal(7);"])j") +
     "," +
+    request_with_script ("Validators",
+    R"j(["const v = new (require('ajv'))().compile({ type: 'object' });","v(pm.response.json());","tv4.validate(pm.response.json(), {});","require('tv4').error;"])j") +
+    "," +
     request_with_script ("Cipher",
     R"j(["const c = require('crypto-js');","const e = CryptoJS.AES.encrypt('x', 'k');"])j") +
     "," +
@@ -2529,12 +2532,13 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     // `require('uuid')` runs (#2650), so "Uuid" is not either, nor is "Lodash"
     // (`_` and `require('lodash')`, #2651), "Moment" (`require('moment')`,
     // #2652), "Csv" (`require('csv-parse/lib/sync')`, #2653), "Xml"
-    // (`xml2Json` and `require('xml2js')`, #2654) or "Chai module"
-    // (`require('chai')`, #2655); "Cipher" reaches past the shim and is.
+    // (`xml2Json` and `require('xml2js')`, #2654), "Chai module"
+    // (`require('chai')`, #2655) or "Validators" (`require('ajv')`, `tv4` and
+    // `require('tv4')`, #2656); "Cipher" reaches past the shim and is.
     // "Module" requires a name off the shelf and is.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
-        {"request":"Library","names":["tv4"]},
+        {"request":"Library","names":["cheerio"]},
         {"request":"Module","names":["require()"]},
         {"request":"Host","names":["Buffer"]},
         {"request":"Chai","names":[".postmanRequest / .postmanResponse / .postmanRequestOrResponse"]},
@@ -2546,7 +2550,7 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
                .at ("elements")[0]
                .at ("config")
                .at ("script"),
-    "const h = tv4.validate('x');");
+    "const $ = cheerio.load('x');");
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_script_api"));
 }
@@ -2557,15 +2561,15 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
 /// as before leaves no element and no name.
 TEST (PostmanImport, ReadsAStringValuedEventScriptAsItsText) {
     const ImportParse parsed = parse_postman_items (
-    R"j({"name":"Old","event":[{"listen":"prerequest","script":"var h = tv4.validate(responseBody);"}],
+    R"j({"name":"Old","event":[{"listen":"prerequest","script":"var h = cheerio.load(responseBody);"}],
          "request":{"method":"GET","url":"https://x.com"}})j");
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& element =
     parsed.result.at ("collections")[0].at ("requests")[0].at ("elements")[0];
     EXPECT_EQ (element.at ("kind"), "script.pre");
-    EXPECT_EQ (element.at ("config").at ("script"), "var h = tv4.validate(responseBody);");
+    EXPECT_EQ (element.at ("config").at ("script"), "var h = cheerio.load(responseBody);");
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
-    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["tv4"]}])j"));
+    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["cheerio"]}])j"));
 }
 
 /// A non-empty `script.packages` is a use of Postman's package library, which
@@ -2596,7 +2600,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
         "item":[
         {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = cheerio.load(h);"]}}],
          "item":[{"name":"R","event":[
-             {"listen":"prerequest","script":{"exec":["var t = tv4.validate(x);"]}},
+             {"listen":"prerequest","script":{"exec":["var t = new Backbone.Model(x);"]}},
              {"listen":"test","script":{"exec":["const c = require('x');"]}}],
              "request":{"method":"GET","url":"https://x.com/r"}}]},
         {"name":"A","request":{"method":"GET","url":"https://x.com/a"}}
@@ -2605,7 +2609,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
-        {"request":"R","names":["require()","tv4"]},
+        {"request":"R","names":["require()","Backbone"]},
         {"request":"Reports","names":["cheerio"]},
         {"request":"Signed API","names":["Buffer"]}
     ])j"));
@@ -2616,7 +2620,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
 /// script qualifies. Mutation check: scanning before the option gate, or
 /// emitting an empty list, reds one of these.
 TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
-    const std::string legacy = request_with_script ("Legacy", R"j(["tv4.validate('a');"])j");
+    const std::string legacy = request_with_script ("Legacy", R"j(["cheerio.load('a');"])j");
     ImportOptions off;
     off.import_scripts      = false;
     const ImportParse gated = parse_postman_items (legacy, off);
@@ -2626,7 +2630,7 @@ TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
 
     const ImportParse disabled = parse_postman_items (
     R"j({"name":"Off","event":[{"listen":"test","disabled":true,
-            "script":{"exec":["tv4.validate('a');"]}}],
+            "script":{"exec":["cheerio.load('a');"]}}],
          "request":{"method":"GET","url":"https://x.com"}})j");
     ASSERT_TRUE (disabled.ok ()) << disabled.error;
     EXPECT_FALSE (

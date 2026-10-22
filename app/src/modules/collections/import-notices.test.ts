@@ -316,7 +316,7 @@ describe("importNotices", () => {
 			const [notice] = scriptApis([
 				{
 					request: "A",
-					names: ["require()", "CryptoJS", "_", "Buffer", "tv4"],
+					names: ["require()", "CryptoJS", "_", "Buffer", "cheerio"],
 				},
 				{ request: "B", names: ["moment"] },
 				{ request: "C", names: [] },

@@ -28,12 +28,22 @@ function row(over: Partial<ElementOutcome>): ElementOutcome {
 describe("ElementOutcomes", () => {
 	it("prints a timer's wait", () => {
 		render(<ElementOutcomes outcomes={[row({ waitedMs: 250 })]} />);
-		expect(screen.getByText(/250 ms/)).toBeTruthy();
+		expect(screen.getByText("· 250ms")).toBeTruthy();
 	});
 
 	it("prints a zero wait, the silenced timer", () => {
 		render(<ElementOutcomes outcomes={[row({ waitedMs: 0 })]} />);
-		expect(screen.getByText(/0 ms/)).toBeTruthy();
+		expect(screen.getByText("· 0ms")).toBeTruthy();
+	});
+
+	// The shared latency rule: sub-millisecond keeps its decimals and a wait of
+	// a second or more reads in seconds, so no surface prints "1500 ms".
+	it.each([
+		[0.4, "· 0.4ms"],
+		[1500, "· 1.50s"],
+	])("formats a %s ms wait through formatLatency", (waitedMs, text) => {
+		render(<ElementOutcomes outcomes={[row({ waitedMs })]} />);
+		expect(screen.getByText(text)).toBeTruthy();
 	});
 
 	it("prints a passing transaction's name inline", () => {
@@ -43,7 +53,7 @@ describe("ElementOutcomes", () => {
 			/>
 		);
 		expect(screen.getByText("checkout")).toBeTruthy();
-		expect(screen.getByText(/80 ms/)).toBeTruthy();
+		expect(screen.getByText("· 80ms")).toBeTruthy();
 	});
 
 	it("prints neither for a row that carries neither", () => {

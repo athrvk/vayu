@@ -154,6 +154,81 @@ describe("ErrorSummary", () => {
 		expect(container.textContent).toBe("");
 	});
 
+	// #2400: a run stored before the engine kept exact per-type counts builds By
+	// error type from the records its store kept, so past the cap the rows add up
+	// to less than the no-response total. 10 stored, 40 dropped, 50 in all.
+	describe("the note under By error type", () => {
+		const capped = (over: Partial<ErrorSummaryProps> = {}) =>
+			props({
+				errors: { total: 50, withDetails: 10, types: { timeout: 6, dns_failed: 4 } },
+				errorRate: 50,
+				noResponse: 50,
+				sampling: {
+					errorsDropped: 40,
+					successTracesDropped: 0,
+					slowTracesDropped: 0,
+					responseSamplesDropped: 0,
+				},
+				...over,
+			});
+
+		it("says how many errors the rows do not cover, and that the totals do", () => {
+			render(<ErrorSummary {...capped()} />);
+
+			const note = screen.getByText(
+				/40 errors beyond the first 10 are not broken down by type/
+			);
+			expect(note).toHaveTextContent("cover only the stored errors");
+			expect(note).toHaveTextContent("the totals above are exact");
+			// It sits with the rows it qualifies, not under the totals.
+			const group = screen.getByText("By error type").parentElement!;
+			expect(group).toContainElement(note);
+		});
+
+		it("agrees its verb with a single dropped error", () => {
+			const base = capped();
+			render(
+				<ErrorSummary
+					{...base}
+					errors={{ total: 11, withDetails: 10, types: { timeout: 10 } }}
+					noResponse={11}
+					sampling={{ ...base.sampling!, errorsDropped: 1 }}
+				/>
+			);
+			expect(screen.getByText(/1 error beyond the first 10 is not broken down/)).toBeTruthy();
+		});
+
+		it("is silent when nothing was dropped", () => {
+			const base = capped();
+			render(<ErrorSummary {...base} sampling={{ ...base.sampling!, errorsDropped: 0 }} />);
+			expect(screen.queryByText(/not broken down by type/)).toBeNull();
+		});
+
+		// An older summary has no section; absent is "cannot tell", not "nothing dropped".
+		it("is silent when the run reported no retention counts", () => {
+			render(<ErrorSummary {...capped({ sampling: undefined })} />);
+			expect(screen.queryByText(/not broken down by type/)).toBeNull();
+		});
+
+		// A run that counted every error by type: the rows add up to the no-response
+		// total, so errors with no stored record cost the breakdown nothing.
+		it("is silent when the types account for every no-response request", () => {
+			render(
+				<ErrorSummary
+					{...capped({
+						errors: {
+							total: 50,
+							withDetails: 10,
+							types: { timeout: 30, dns_failed: 20 },
+						},
+					})}
+				/>
+			);
+			expect(screen.getByText("Timeout")).toBeTruthy();
+			expect(screen.queryByText(/not broken down by type/)).toBeNull();
+		});
+	});
+
 	describe("onSelectStatus", () => {
 		const withStatuses = props({
 			errors: {

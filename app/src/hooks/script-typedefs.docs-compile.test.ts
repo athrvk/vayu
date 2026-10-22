@@ -256,12 +256,14 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 
 	/*
 	 * Each line is what a script imported from Postman reaches for and the
-	 * sandbox does not have. The declaration is `never`, so the call or member
-	 * access that follows is the error.
+	 * sandbox does not have. A global is declared `never`, so the call or member
+	 * access that follows is the error; a `require` name is off the shelf, so
+	 * the argument is.
 	 */
 	it.each([
-		["require('ajv');", 2345],
-		["tv4.validate(pm.response.json(), {});", 2339],
+		["require('cheerio');", 2345],
+		["cheerio.load(pm.response.text());", 2339],
+		["Backbone.Model.extend({});", 2339],
 		["fetch('https://example.com');", 2349],
 	])("%s is an error (TS%i)", (source, code) => {
 		expect(errorsOf(source)).toContain(`TS${code}`);
@@ -441,6 +443,33 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 		expect(errorsOf("require('chai/lib/chai');")).toContain("TS2345");
 		expect(errorsOf("require('chai').nope;")).toContain("TS2339");
 		expect(errorsOf("require('chai').config.truncateThreshold = 'x';")).toContain("TS2322");
+	});
+
+	/*
+	 * ajv and tv4 run (#2656): require('ajv') is the Ajv constructor, whose
+	 * compile answers a validator that records `errors`; require('tv4') and the
+	 * bare `tv4` global are one object. The lines a Postman schema test writes
+	 * read clean, and a call the library does not take is still an error.
+	 */
+	it("declares require('ajv'), require('tv4') and the tv4 global as what they load", () => {
+		expect(
+			errorsOf(
+				[
+					"const Ajv = require('ajv');",
+					"const validate = new Ajv({ allErrors: true }).compile({ type: 'object', required: ['id'] });",
+					"pm.test('ajv', () => {",
+					"	pm.expect(validate(pm.response.json())).to.be.true;",
+					"	console.log(validate.errors && validate.errors[0].dataPath);",
+					"});",
+					"const tv = require('tv4');",
+					"if (!tv.validate(pm.response.json(), { required: ['id'] })) console.log(tv.error.message);",
+					"if (!tv4.validate(pm.response.json(), {})) console.log(tv4.error.dataPath);",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("require('ajv/lib/ajv');")).toContain("TS2345");
+		expect(errorsOf("require('tv4/tv4.js');")).toContain("TS2345");
+		expect(errorsOf("new (require('ajv'))().compile(42);")).toContain("TS2345");
 	});
 
 	/*

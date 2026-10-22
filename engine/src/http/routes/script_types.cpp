@@ -152,9 +152,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 
 // The libraries Postman bundles that Vayu's require() shelf does not carry,
 // each saying what Vayu has instead. One that ships leaves this list (#2578).
-{ "tv4",
-"Postman's bundled JSON Schema validator. Its replacement is "
-"require('ajv'), which Vayu's require() does not load either." },
 { "cheerio",
 "Postman's bundled HTML parser. Its replacement is require('cheerio'), "
 "which Vayu's require() does not load either." },
@@ -175,8 +172,9 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
  *
  * `body` is what sits inside `declare module '<name>' { ... }`, tab-indented
  * and ending in the `export =` that names the module's value: a module with a
- * global to point at is one line (crypto-js, lodash), and one with none (uuid,
- * moment, csv-parse/lib/sync, xml2js, chai) carries its own declaration.
+ * global to point at is one line (crypto-js, lodash, tv4), and one with none
+ * (uuid, moment, csv-parse/lib/sync, xml2js, chai, ajv) carries its own
+ * declaration.
  *
  * `script_types_test.cpp` runs `require(name)` in the real script engine for
  * every module declared here, and checks that every name `require` accepts
@@ -312,6 +310,65 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 "\t}\n"
 "\tconst chai: Chai;\n"
 "\texport = chai;\n" },
+// ajv 6.12.5's export, the Ajv constructor, callable with or without `new`.
+// The signatures are ajv's own `lib/ajv.d.ts`, trimmed to what a script
+// writes: options and keyword definitions are open objects rather than
+// restated, and a validator answers a promise only for an `$async` schema.
+{ "ajv",
+"\tinterface ErrorObject {\n"
+"\t\tkeyword: string;\n"
+"\t\tdataPath: string;\n"
+"\t\tschemaPath: string;\n"
+"\t\tparams: { [key: string]: any };\n"
+"\t\tmessage?: string;\n"
+"\t\tschema?: unknown;\n"
+"\t\tparentSchema?: object;\n"
+"\t\tdata?: unknown;\n"
+"\t}\n"
+"\tinterface ValidateFunction {\n"
+"\t\t(data: unknown, dataPath?: string, parentData?: object, "
+"parentDataProperty?: string | number, rootData?: object): boolean | "
+"PromiseLike<any>;\n"
+"\t\tschema?: object | boolean;\n"
+"\t\terrors?: ErrorObject[] | null;\n"
+"\t}\n"
+"\tinterface Options {\n"
+"\t\t[option: string]: any;\n"
+"\t}\n"
+"\tinterface Ajv {\n"
+"\t\tvalidate(schemaKeyRef: object | string | boolean, data: unknown): "
+"boolean | PromiseLike<any>;\n"
+"\t\tcompile(schema: object | boolean): ValidateFunction;\n"
+"\t\tcompileAsync(schema: object | boolean, meta?: boolean, callback?: "
+"(error: Error, validate: ValidateFunction) => any): "
+"PromiseLike<ValidateFunction>;\n"
+"\t\taddSchema(schema: object | object[], key?: string): Ajv;\n"
+"\t\taddMetaSchema(schema: object, key?: string): Ajv;\n"
+"\t\tvalidateSchema(schema: object | boolean): boolean;\n"
+"\t\tgetSchema(keyRef: string): ValidateFunction | undefined;\n"
+"\t\tremoveSchema(schemaKeyRef?: object | string | RegExp | boolean): "
+"Ajv;\n"
+"\t\taddFormat(name: string, format: string | RegExp | ((data: string) => "
+"boolean) | object): Ajv;\n"
+"\t\taddKeyword(keyword: string, definition: object): Ajv;\n"
+"\t\tgetKeyword(keyword: string): object | boolean;\n"
+"\t\tremoveKeyword(keyword: string): Ajv;\n"
+"\t\tvalidateKeyword(definition: object, throwError: boolean): boolean;\n"
+"\t\terrorsText(errors?: ErrorObject[] | null, options?: { separator?: "
+"string; dataVar?: string }): string;\n"
+"\t\terrors?: ErrorObject[] | null;\n"
+"\t}\n"
+"\tinterface AjvStatic {\n"
+"\t\tnew (options?: Options): Ajv;\n"
+"\t\t(options?: Options): Ajv;\n"
+"\t\tValidationError: new (errors: ErrorObject[]) => Error & { errors: "
+"ErrorObject[]; ajv: true; validation: true };\n"
+"\t\tMissingRefError: new (baseId: string, ref: string, message?: string) "
+"=> Error & { missingRef: string; missingSchema: string };\n"
+"\t}\n"
+"\tconst Ajv: AjvStatic;\n"
+"\texport = Ajv;\n" },
+{ "tv4", "\texport = tv4;\n" },
 });
 
 /**
@@ -938,10 +995,9 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
  * The entry's `detail` cannot give each module its own return type, and a pair
  * of overloads would turn a name off the shelf from TS2345 into TS2769 "No
  * overload matches" - the less direct message. One generic signature keyed on
- * the names keeps the parameter a literal union (`require('ajv')` is "not
- * assignable to 'crypto-js' | 'uuid' | 'lodash' | 'moment' |
- * 'csv-parse/lib/sync' | 'xml2js' | 'chai'"). Only the entry's documentation is
- * read.
+ * the names keeps the parameter a literal union (`require('cheerio')` is "not
+ * assignable to 'crypto-js' | 'uuid' | ... | 'tv4'"). Only the entry's
+ * documentation is read.
  */
 void render_require (std::string& out, const TypeNode& require) {
     out += "interface VayuShelfModules {\n";

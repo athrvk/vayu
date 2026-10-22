@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input), `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) and `require('chai')` (npm's `chai` 4.4.1, bundled; a separate object from `pm.expect`) - any other module throws; see [The `require` shelf](#the-require-shelf) |
+| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input), `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) `require('chai')` (npm's `chai` 4.4.1, bundled; a separate object from `pm.expect`), `require('ajv')` (npm's `ajv` 6.12.5, vendored; draft-07) and `require('tv4')` (npm's `tv4` 1.3.0, minified; draft-04; also the `tv4` global) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -413,11 +413,11 @@ and the other SHA-2 hashers are the `crypto-js` shelf's, see
 
 `require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
 `Cannot find module '<name>'` for any other name; it reads no file and fetches
-nothing. The shelf holds seven libraries, `crypto-js`, `uuid`, `lodash`,
-`moment`, `csv-parse/lib/sync`, `xml2js` and `chai`, each matched as the whole
-name.
-`crypto-js` is also bound as the global `CryptoJS` and `lodash` as `_`,
-so both spellings of a Postman script run (`xml2Json` is a global too, but a
+nothing. The shelf holds nine libraries, `crypto-js`, `uuid`, `lodash`,
+`moment`, `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`, each matched
+as the whole name.
+`crypto-js` is also bound as the global `CryptoJS`, `lodash` as `_` and `tv4` as
+`tv4`, so both spellings of a Postman script run (`xml2Json` is a global too, but a
 parse function over `xml2js` rather than the module, as in Postman):
 
 ```javascript
@@ -583,12 +583,75 @@ use costs about 5.5 ms (`-O2`) to 15 ms (Debug build) and about 470 KB of the
 script's memory, per execution; a script that does not require it pays nothing.
 The import's notice does not name it.
 
-**Not on the shelf:** `ajv` and `tv4`,
-`cheerio`, `csv-parse` at any path but `csv-parse/lib/sync`,
-`moment-timezone` and Node's built-ins (`crypto`, `fs`, `buffer`, ...).
-`require` of one throws, the editor underlines `tv4`, `cheerio` and
-`Backbone` as unusable, and a Postman import names the request in
-`meta.unsupportedScriptApis`.
+**`ajv`** is npm's `ajv` package, version 6.12.5, the version Postman's sandbox
+pins, as the package's own browser bundle, and is reached as `require('ajv')`.
+The module is the `Ajv` constructor, callable with or without `new`:
+
+```javascript
+const Ajv = require('ajv');
+const validate = new Ajv({ allErrors: true }).compile({ type: 'object', required: ['id'] });
+pm.test('the body matches the schema', () => {
+    pm.expect(validate(pm.response.json()), JSON.stringify(validate.errors)).to.be.true;
+});
+```
+
+It validates draft-07; a `$schema` naming draft-04 or draft-06 is refused until
+the script adds that meta-schema with `addMetaSchema`, as in Postman. Vayu has
+no `Ajv` global, and `ajv-formats` and every path under the package throw like
+any name off the shelf. First use costs about 21 ms (`-O2`) to 55 ms (Debug
+build) and the first `compile` 10 ms to 35 ms more, with about 1,000 KB of the
+script's memory held, per execution; a script that does not require it pays
+nothing. The import's notice does not name it.
+
+**`ajv` and `jsonSchema` are two validators that agree on the draft-07 they
+share.** `pm.expect(x).to.have.jsonSchema` stays on the engine's own validator
+(see [Assertion chains](#assertion-chains-pmexpect)), and a conformance suite
+(`engine/tests/script_json_schema_conformance_test.cpp` over
+`engine/tests/fixtures/json-schema-conformance.json`) runs the same schemas and
+data through ajv, `tv4` and `jsonSchema` and fails on any disagreement. These
+are the answers recorded as different, and the reason for each:
+
+| Schema and value | `ajv` | `jsonSchema` | Why |
+|------------------|-------|--------------|-----|
+| `{"format": "date"}`, `"2024-13-01"` or `"2024-02-30"` | passes | fails | ajv's default `fast` formats match a shape; `jsonSchema` checks the calendar |
+| `{"format": "time"}`, `"25:00:00Z"` | passes | fails | `fast` takes any two digits for an hour |
+| `{"format": "time"}`, `"03:04:05"` | passes | fails | ajv leaves the offset optional; `jsonSchema` follows RFC 3339, which requires it |
+| `{"multipleOf": 0.01}`, `0.07` or `19.99` | fails | passes | ajv divides in binary floating point unless `multipleOfPrecision` is set |
+| `{"propertyNames": {"pattern": "^[a-z]+$"}}`, `{"aB": 1}` | fails | passes | a bug in `jsonSchema`, tracked as [#2719](https://github.com/athrvk/vayu/issues/2719) |
+
+A keyword `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
+`nullable` and `discriminator`) is one ajv 6 ignores, so the same schema passes
+`ajv` with the keyword left out.
+
+**`tv4`** is npm's `tv4` package, version 1.3.0, the version Postman's sandbox
+pins, minified (the package ships no minified build). `require('tv4')` and the
+`tv4` global are one object, as in Postman, which deprecates the global in
+favour of `require('ajv')` but still runs it:
+
+```javascript
+if (!tv4.validate(pm.response.json(), { type: 'object', required: ['id'] })) {
+    console.log(tv4.error.message, tv4.error.dataPath);
+}
+```
+
+tv4 is a draft-04 validator, so a draft-06 or draft-07 keyword (`const`,
+`contains`, `propertyNames`, `if`/`then`/`else`, a numeric `exclusiveMinimum`)
+is ignored and `format` is checked only for a name added with `addFormat`. It
+keeps the last verdict on itself (`tv4.error`, `tv4.missing`, `tv4.valid`).
+**One difference from Postman:** the shelf evaluates every library in strict
+mode, so a method called detached (`const v = tv4.validate; v(data, schema)`)
+throws a `TypeError`, where Postman's sloppy-mode bundle writes `error`,
+`missing` and `valid` onto the global object. `tv4.validate(...)` behaves the
+same. First use costs about 2.7 ms (`-O2`) to 6.5 ms (Debug build) and about
+190 KB of the script's memory, per execution; a script that touches neither
+name pays nothing. The import's notice names neither `require('tv4')` nor
+`tv4`.
+
+**Not on the shelf, and unshipped on purpose:** `cheerio`, `Backbone`,
+`csv-parse` at any path but `csv-parse/lib/sync`, `moment-timezone` and Node's
+built-ins (`crypto`, `fs`, `buffer`, ...). `require` of one throws, the editor
+underlines `cheerio` and `Backbone` as unusable, and a Postman import names the
+request in `meta.unsupportedScriptApis`.
 
 ### Timers run before the script ends, and do not wait
 
@@ -864,7 +927,9 @@ the corners: `email` is a dot-atom `local@hostname` (no quoted local part, no
 bracketed address literal), `uri` is an absolute RFC 3986 URI checked for a
 scheme and its character set rather than the grammar of the authority, and
 `uuid` is the hyphenated form without a `urn:uuid:` prefix. The body of `pm.response.to.have.jsonSchema` is read as
-`JSON.parse` reads it, so `1.0` is the integer `1`.
+`JSON.parse` reads it, so `1.0` is the integer `1`. `require('ajv')` is on the
+shelf and is the real library; [the data it and `jsonSchema` answer
+differently](#the-require-shelf) are pinned by a conformance suite.
 
 **Where the vocabulary stops matching chai.** Each of these is a difference in
 what is accepted or how it is reported, never a quiet pass:
@@ -1515,9 +1580,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   show the template in
 - `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
 - **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment`,
-  `csv-parse/lib/sync`, `xml2js` and `chai`, `script.packages` and the libraries
-  Postman bundles beyond `CryptoJS`, `_` and `xml2Json`** - `tv4`, `cheerio`
-  and `Backbone`. The sandbox has no module
+  `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`, `script.packages` and
+  the libraries Postman bundles beyond `CryptoJS`, `_`, `xml2Json` and `tv4`** -
+  `cheerio` and `Backbone`. The sandbox has no module
   system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
   covers the hashers and their HMACs and nothing else of `CryptoJS`, so a
   `CryptoJS` member outside that list is named by the import notice, also when
@@ -1530,7 +1595,7 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   [above](#timers-run-before-the-script-ends-and-do-not-wait))
 - Chai and chai-postman members outside the list in
   [Assertion chains](#assertion-chains-pmexpect), the `require()`-able libraries
-  off the shelf (`ajv`, …) and chai-postman's own `postmanRequest`,
+  off the shelf (`cheerio`, …) and chai-postman's own `postmanRequest`,
   `postmanResponse` and `postmanRequestOrResponse`. Each throws a `TypeError`
   rather than reporting a pass. A flag that changes what the matcher after it
   asserts (`any`, `own`, `ordered`, `itself`) is never accepted as a no-op for
@@ -1812,12 +1877,12 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 
 - the host globals of a browser or Node: `fetch`, `URL`, `Buffer`, ...
 - the libraries Postman bundles that the [`require` shelf](#the-require-shelf)
-  does not carry: `tv4`, `cheerio` and `Backbone`
-  (`CryptoJS`, `_`, `xml2Json` and `require` are declared as the real thing,
+  does not carry: `cheerio` and `Backbone`
+  (`CryptoJS`, `_`, `tv4`, `xml2Json` and `require` are declared as the real thing,
   with `declare module 'crypto-js'`, `declare module 'uuid'`,
   `declare module 'lodash'`, `declare module 'moment'`,
-  `declare module 'csv-parse/lib/sync'`, `declare module 'xml2js'` and
-  `declare module 'chai'` so each
+  `declare module 'csv-parse/lib/sync'`, `declare module 'xml2js'`,
+  `declare module 'chai'`, `declare module 'ajv'` and `declare module 'tv4'` so each
   `require(...)` of them types; all come from the one `SHELF_MODULES` table in
   `script_types.cpp`, and `require` takes only the names on it. `_` and the
   `moment` module are declared `any`: their members are not restated, and a
@@ -1830,18 +1895,22 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
   top-level members (`expect`, `assert`, `should`, `use`, `config`,
   `AssertionError`, ...) and answers `any` for an assertion chain, whose
   members are not restated; it has no global, as in Postman. `should` on a
-  value is not declared, because it exists only after `chai.should()` runs)
+  value is not declared, because it exists only after `chai.should()` runs. The
+  `ajv` module declares the `Ajv` constructor, an instance's methods, the
+  validator and its `errors`; `tv4` is declared as the object with its members,
+  and `declare module 'tv4'` is that same object, as at run time)
 
-Hover names the replacement Postman itself gives: `tv4` is `require('ajv')`, and
-says what Vayu has instead. The `postman` object is
+Hover names the replacement Postman itself gives (`cheerio`'s is
+`require('cheerio')`, which Vayu's `require` does not load either) and says what
+Vayu has instead. The `postman` object is
 declared as the methods it has, each hover naming the `pm.*` method it aliases, and
 Postman's pre-`pm.*` globals (`tests`, `responseBody`, ...) as the values they are
 (`string`, `number`, an object), so `JSON.parse(responseBody)` and `responseTime < 200`
 are correct code to the editor as they are to the engine.
 
 A name is declared `never`, so a call, a member access or an assignment is an error
-(`tv4.validate(...)`, `cheerio.load(...)`). `never` is assignable to everything, so a bare read
-into something that takes anything (`console.log(tv4)`) is left unflagged: hover
+(`cheerio.load(...)`). `never` is assignable to everything, so a bare read
+into something that takes anything (`console.log(cheerio)`) is left unflagged: hover
 still names the replacement there.
 
 **A script that declares one of these names itself is not flagged.** `const data =

@@ -72,7 +72,10 @@ void add_trace_metrics (const std::string& trace_data, DetailedReport& report, T
     try {
         auto trace = nlohmann::json::parse (trace_data);
 
-        // Error details (supports both snake_case and camelCase)
+        // Error details (supports both snake_case and camelCase). The type
+        // counts here cover only the stored records; a summary's exact
+        // `error_types` replaces them, so they stand only for a run stored
+        // before #2400 or one whose summary has none.
         if (trace.contains ("error_type") || trace.contains ("errorType")) {
             report.errors_with_details++;
             std::string error_type = trace.contains ("error_type") ?

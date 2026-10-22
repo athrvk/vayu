@@ -738,6 +738,10 @@ std::optional<AttemptDuration> attempt) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     const size_t error_index = total_errors_.fetch_add (1, std::memory_order_relaxed);
+    // A code outside the enum cannot name a type; slot 0 (None) reads "unknown".
+    const auto type_slot = static_cast<size_t> (code);
+    const size_t slot    = type_slot < ERROR_CODE_COUNT ? type_slot : 0;
+    error_type_counts_.at (slot).fetch_add (1, std::memory_order_relaxed);
 
     // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
     // bucket them under code 0. This keeps the status-code distribution summing
@@ -789,6 +793,17 @@ std::optional<AttemptDuration> attempt) {
         "Run " + run_id_ + ": error store full at " + std::to_string (config_.max_errors) +
         " records; further errors are counted but not stored");
     }
+}
+
+std::map<std::string, size_t> MetricsCollector::error_type_counts () const {
+    std::map<std::string, size_t> counts;
+    for (size_t slot = 0; slot < ERROR_CODE_COUNT; ++slot) {
+        const size_t count = error_type_counts_.at (slot).load (std::memory_order_relaxed);
+        if (count > 0) {
+            counts[error_type_name (static_cast<ErrorCode> (slot))] += count;
+        }
+    }
+    return counts;
 }
 
 void MetricsCollector::record_drop_batch (size_t count) {

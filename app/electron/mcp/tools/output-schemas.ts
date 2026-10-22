@@ -8,7 +8,8 @@
 /**
  * @file output-schemas.ts
  * @brief The structured output schemas, and the readers that fill them: run
- *        comparison, engine health, the smoke matrix and the config update.
+ *        comparison, engine health, the smoke matrix and the config update,
+ *        plus the loose schemas of the other object-rooted reads.
  */
 
 import { z } from "zod";
@@ -50,6 +51,208 @@ export const runComparisonSchema = z.object({
 		z.object({ code: z.string(), message: z.string(), base: z.string(), target: z.string() })
 	),
 });
+
+/** The engine's `pagination` block, plus the cursor `pagedRead` writes into it. */
+const paginationSchema = z.looseObject({
+	total: z.number().optional(),
+	limit: z.number().optional(),
+	offset: z.number().optional(),
+	returned: z.number().optional(),
+	hasMore: z.boolean().optional(),
+	/** The `offset` to read next; null when this page is the last. */
+	nextOffset: z.number().nullable().optional(),
+	/** The bound in words, present only while `hasMore` is true. */
+	note: z.string().optional(),
+});
+
+/**
+ * The `{data, pagination}` envelope a paged read answers (`pagedRead`), with
+ * @p rowSchema for each row.
+ *
+ * Loose throughout, every field optional: the SDK turns a result its declared
+ * schema rejects into a protocol error that hides the whole answer, so this
+ * names what an agent can rely on without refusing a field the engine adds. A
+ * non-object answer arrives wrapped as `{ raw }`.
+ */
+export function pagedEnvelopeSchema(rowSchema: z.ZodType = z.record(z.string(), z.unknown())) {
+	return z.looseObject({
+		data: z.array(rowSchema).optional(),
+		pagination: paginationSchema.optional(),
+	});
+}
+
+/** `list_runs`: a run row's id, the handle every other run tool takes. */
+export const runPageSchema = pagedEnvelopeSchema(z.looseObject({ id: z.string().optional() }));
+
+/** `get_run_samples`: `resultId` joins a sample to the report's `results[].id`. */
+export const runSamplePageSchema = pagedEnvelopeSchema(
+	z.looseObject({ resultId: z.number().optional() })
+);
+
+/** `get_run_timeseries` / `get_run_monitor`: stored payloads, with no key every row is held to. */
+export const runSeriesPageSchema = pagedEnvelopeSchema();
+
+/** `get_inbox_captures`: the capture's numeric id. */
+export const inboxCapturePageSchema = pagedEnvelopeSchema(
+	z.looseObject({ id: z.number().optional() })
+);
+
+// --- The other reads that answer a JSON object (#2445) -----------------------
+//
+// Loose and all-optional for the reason `pagedEnvelopeSchema` gives: a field
+// named here is one an agent can rely on, a field not named still arrives, and
+// nothing the engine sends can turn into a protocol error. `nullish` where the
+// answer states "none" as null.
+
+const optStr = z.string().optional();
+const optNum = z.number().optional();
+const optBool = z.boolean().optional();
+const nullStr = z.string().nullish();
+const nullNum = z.number().nullish();
+const anyRecord = z.record(z.string(), z.unknown());
+const anyList = z.array(z.unknown()).optional();
+const rowsOf = (row: z.ZodType = anyRecord) => z.array(row).optional();
+const countOf = z.looseObject({ count: optNum });
+
+/** The `{data}` list the mock-server and inbox reads answer, with no `pagination`. */
+const dataListSchema = (row?: z.ZodType) => z.looseObject({ data: rowsOf(row) });
+
+export const appFocusSchema = z.looseObject({
+	activeTab: z.looseObject({ type: optStr, entityId: nullStr, label: optStr }).nullish(),
+	run: z.looseObject({ runId: optStr }).nullish(),
+	activeEnvironment: z.looseObject({ id: optStr, name: optStr }).nullish(),
+});
+
+export const resolveVariablesSchema = z.looseObject({
+	context: anyRecord.optional(),
+	variables: rowsOf(z.looseObject({ name: optStr, resolved: optBool })),
+	summary: anyRecord.optional(),
+});
+
+/** `get_request`: the stored row's identity. */
+export const requestRowSchema = z.looseObject({
+	id: optStr,
+	name: optStr,
+	method: optStr,
+	url: optStr,
+});
+
+/** `get_run_report`: `partial` and `note` appear only while the run is unfinished. */
+export const runReportSchema = z.looseObject({
+	metadata: z.looseObject({ runId: optStr, runType: optStr, status: optStr }).optional(),
+	summary: anyRecord.optional(),
+	results: anyList,
+	partial: optBool,
+	note: optStr,
+});
+
+export const runStatusSchema = z.looseObject({
+	id: nullStr,
+	status: nullStr,
+	terminal: optBool,
+	progress: nullNum,
+	nextStep: optStr,
+});
+
+export const engineConfigSchema = z.looseObject({
+	entries: rowsOf(z.looseObject({ key: optStr })),
+});
+
+export const graphqlSdlSchema = z.looseObject({
+	endpoint: nullStr,
+	fetchedAt: optNum,
+	sdl: optStr,
+	sdlTruncated: optBool,
+	sdlBytes: optNum,
+	types: z.array(z.string()).optional(),
+	unknownTypes: z.array(z.string()).optional(),
+});
+
+/** `get_spec`: `bound` and `collectionId` appear when the read resolved a binding or found none. */
+export const specReadSchema = z.looseObject({
+	specId: optStr,
+	collectionId: optStr,
+	bound: optBool,
+	sourceUrl: nullStr,
+	hash: nullStr,
+	contentBytes: nullNum,
+});
+
+export const specDiffSchema = z.looseObject({
+	collectionId: optStr,
+	identical: optBool,
+	summary: anyRecord.optional(),
+	added: anyList,
+	removed: anyList,
+	changed: anyList,
+	entriesTruncated: optBool,
+});
+
+export const importPreviewSchema = z.looseObject({
+	collections: rowsOf(),
+	environments: z.array(z.string()).optional(),
+	globals: optNum,
+	clientCertificates: optNum,
+	meta: anyRecord.optional(),
+});
+
+export const bindPreviewSchema = z.looseObject({
+	title: optStr,
+	operations: optNum,
+	matched: optNum,
+	wouldClear: countOf.optional(),
+	unmatchedRequests: countOf.optional(),
+	unmatchedOperations: countOf.optional(),
+});
+
+/** `export_spec` and `export_postman`; `format` and `mode` are the former's alone. */
+export const exportDocumentSchema = z.looseObject({
+	collectionId: optStr,
+	format: optStr,
+	mode: optStr,
+	fileName: nullStr,
+	document: optStr,
+	documentTruncated: optBool,
+	contentBytes: optNum,
+});
+
+export const trashListSchema = z.looseObject({
+	items: rowsOf(z.looseObject({ id: optStr, kind: optStr })),
+	total: optNum,
+});
+
+export const requestExamplesSchema = z.looseObject({
+	examples: rowsOf(z.looseObject({ id: optStr })),
+	bodiesOmitted: optNum,
+	bodyBudgetBytes: optNum,
+});
+
+export const globalsSchema = z.looseObject({
+	id: optStr,
+	variables: z.unknown().optional(),
+	updatedAt: optNum,
+});
+
+export const cookiesSchema = z.looseObject({
+	scopes: rowsOf(z.looseObject({ environmentId: nullStr, cookies: anyList })),
+});
+
+export const oauthStatusSchema = z.looseObject({
+	found: optBool,
+	expired: optBool,
+	token: anyRecord.optional(),
+});
+
+export const mockIssuerListSchema = z.looseObject({
+	issuers: rowsOf(z.looseObject({ issuerId: optStr })),
+});
+
+export const mockServerListSchema = dataListSchema(z.looseObject({ mockId: optStr }));
+export const mockRoutesSchema = dataListSchema(
+	z.looseObject({ requestId: optStr, method: optStr, path: optStr, hasExample: optBool })
+);
+export const mockActivitySchema = dataListSchema();
+export const inboxListSchema = dataListSchema(z.looseObject({ inboxId: optStr }));
 
 export const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })

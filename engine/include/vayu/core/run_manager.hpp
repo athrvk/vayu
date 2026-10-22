@@ -1285,6 +1285,9 @@ struct RunSummaryInputs {
     size_t requests_expected  = 0;
     double sending_duration_s = 0.0;
     std::map<int, size_t> status_codes;
+    // Every error by type, under the summary's `error_types` key (#2400):
+    // exact, where counting the stored error records stops at max_errors.
+    std::map<std::string, size_t> error_types;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
     // Whole-run percentiles for each of the five network phases, indexed by

@@ -3659,7 +3659,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
     "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
     "nonExecutableAuth": 0, "unattachedFileParts": 0,
-    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "tv4"] } ]
+    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "cheerio"] } ]
   }
 }
 ```
@@ -3668,8 +3668,8 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
 Postman script API Vayu does not run, and which ones - `require()` of a module
-off the `crypto-js` / `uuid` / `lodash` / `moment` / `csv-parse/lib/sync` / `xml2js` / `chai` shelf, `script.packages`, a bundled library such as
-`tv4`, and the other rows of the table in
+off the `crypto-js` / `uuid` / `lodash` / `moment` / `csv-parse/lib/sync` / `xml2js` / `chai` / `ajv` / `tv4` shelf, `script.packages`, a bundled library such as
+`cheerio`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
 `docs/app/import-collections/postman.md#scripts` has the rules.
@@ -4492,8 +4492,15 @@ The sections, in order:
    derived from the counts.
 5. `## Latency`: min, p50, p90, p95, p99, p999 and max, with the budget that
    judged each (`<= 30 ms - missed`).
-6. `## Errors`, only when there were any: by status code, then by transport
-   error type.
+6. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
+   transport error type. A request that got no response is listed once, under
+   its error type: status code 0 counts the same requests, so no row reads
+   `HTTP 0` (issue #2400). A `No response` row (the app's words) appears only
+   when the error types sum to less than code 0, which is a run stored before
+   the per-type counts, whose types stop at the error store's cap; its count is
+   the remainder (code 0 minus the types' sum), so the requests no type names
+   are not lost and none is listed twice. With no error types at all it holds
+   the whole of code 0. The HTML report reads the same table.
 7. `## Compared with <base reference>`, only when the document has a
    `comparison`: each metric's base, this run, change and a word from the
    delta's own `direction` (`improved`, `regressed`, `unchanged`, or `not
@@ -10276,8 +10283,8 @@ named it.
     "totalRequests": 6000,
     "successfulRequests": 5970,
     "failedRequests": 30,
-    "httpErrorRequests": 30,
-    "noResponseRequests": 0,
+    "httpErrorRequests": 20,
+    "noResponseRequests": 10,
     "cancelledRequests": 0,
     "errorRate": 0.5,
     "totalDurationSeconds": 60.4,
@@ -10299,14 +10306,14 @@ named it.
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
     "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
   },
-  "statusCodes": [[200, 5970], [500, 30]],
+  "statusCodes": [[0, 10], [200, 5970], [500, 20]],
   "rateControl": { "targetRps": 100, "actualRps": 100.0, "achievement": 100.0,
                    "requestsSent": 6000, "requestsExpected": 6000 },
   "errors": {
     "total": 30,
-    "withDetails": 30,
-    "types": { "timeout": 20, "connection_failed": 10 },
-    "byStatusCode": [[500, 30]]
+    "withDetails": 10,
+    "types": { "timeout": 6, "connection_failed": 4 },
+    "byStatusCode": [[0, 10], [500, 20]]
   },
   "timingBreakdown": {
     "avgDnsMs": 5.2, "avgConnectMs": 12.3, "avgTlsMs": 45.1,
@@ -10423,6 +10430,19 @@ size_t>`, which nlohmann serialises that way. The app folds the pairs
 (`statusCodeEntries`). The stored summary, a live `metrics` frame and the
 document [`POST /export/run-report`](#post-exportrun-report) writes all spell
 the distribution as an object.
+
+**`errors`** is the run's failures three ways. `total` is the
+[one error definition](#what-counts-as-an-error) and `byStatusCode` its
+distribution, code `0` being the requests that got no response. `types` counts
+those no-response requests by what went wrong (`timeout`, `connection_failed`,
+`dns_failed`, ...), so its counts sum to `byStatusCode`'s code `0`. For a load
+run, a collection load run included, they are counted as the run happened and
+stored in its summary (issue #2400), exact past the error store's cap.
+`withDetails` is how many error records the run kept, at most
+`maxStoredErrors`, so past the cap it is smaller than `types` adds up to.
+Load runs stored before issue #2400, and design-mode collection runs, have no
+stored per-type counts: their `types` counts the kept records, and past the cap
+covers only the first `maxStoredErrors` errors.
 
 **`slowRequests`** is present when the run set a `slow_threshold_ms` above `0`.
 `count` is every successful completion at or past `thresholdMs`, counted as it
@@ -11042,11 +11062,11 @@ so a client may cache on `version`.
 The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
 Node (`fetch`, `URL`, `Buffer`, ...), and the libraries Postman bundles that
-the `require()` shelf does not carry (`tv4`, `cheerio`, ...), whose hover names
-the replacement Postman itself gives (`tv4` is `require('ajv')`). `require`,
-`CryptoJS`, `_` and `xml2Json` are declared as what they are, with a `declare module` for
+the `require()` shelf does not carry (`cheerio`, `Backbone`), whose hover names
+the replacement Postman itself gives. `require`,
+`CryptoJS`, `_`, `tv4` and `xml2Json` are declared as what they are, with a `declare module` for
 each name on the `require()` shelf (`crypto-js` #2578, `uuid` #2650, `lodash`
-#2651, `moment` #2652, `csv-parse/lib/sync` #2653, `xml2js` #2654, `chai` #2655) and one `require`
+#2651, `moment` #2652, `csv-parse/lib/sync` #2653, `xml2js` #2654, `chai` #2655, `ajv` and `tv4` #2656) and one `require`
 signature keyed on those names, so a name off the shelf is a type error. Postman's `postman` object and its pre-`pm.*`
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
@@ -11056,7 +11076,7 @@ That is not padding: the app suppresses "Cannot find name" (2304), so a name tha
 is merely undeclared draws nothing. A name typed `never` makes the call, member
 access or assignment that follows an error ("not callable", "property does not
 exist"). `never` is assignable to everything, so a bare read passes
-(`console.log(tv4)`).
+(`console.log(cheerio)`).
 
 Declaring a name does not reserve it: the app compiles each script as a module
 (`moduleDetection`), so a script's own `const data = ...` shadows the declared
