@@ -49,6 +49,7 @@ import {
 	AlertTriangle,
 	GitCompareArrows,
 } from "lucide-react";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 // What a pinned load run's chip says: the pin is its request's comparison
 // baseline and also keeps it past retention (#2163).
@@ -506,8 +507,8 @@ export default function RunItem({
 						{scenario?.stepCount != null && (
 							<span className="flex shrink-0 items-center gap-1">
 								<ListOrdered className="size-icon-sm" />
-								{formatNumber(scenario.stepCount)} step
-								{scenario.stepCount === 1 ? "" : "s"}
+								{formatNumber(scenario.stepCount)}{" "}
+								{pluralize(scenario.stepCount, "step")}
 							</span>
 						)}
 						{/* One pass is the default and saying so on every row is noise;

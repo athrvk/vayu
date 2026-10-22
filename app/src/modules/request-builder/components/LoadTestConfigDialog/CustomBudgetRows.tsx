@@ -161,7 +161,7 @@ export function CustomBudgetRows({
 				onClick={() => onChange([...rows, emptyCustomBudgetRow()])}
 				disabled={disabled}
 			>
-				<Plus className="mr-1.5 size-icon-sm" />
+				<Plus className="size-icon-sm" />
 				Add custom metric budget
 			</Button>
 		</div>

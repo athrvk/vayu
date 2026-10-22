@@ -262,7 +262,6 @@ function CopyButton({
 			className={cn("h-control-sm px-2 text-xs shrink-0", className)}
 		>
 			<IconSwap
-				className="mr-1"
 				state={copied ? "copied" : "copy"}
 				icons={{
 					copy: <Copy className="size-icon-sm" />,
@@ -717,10 +716,10 @@ export default function McpSettingsPanel() {
 											title={connectDisabledReason(enabled, notListening)}
 										>
 											{connecting === snippet.client ? (
-												<Loader2 className="size-icon-sm mr-1 animate-spin" />
+												<Loader2 className="size-icon-sm animate-spin" />
 											) : (
 												<Zap
-													className="size-icon-sm mr-1"
+													className="size-icon-sm"
 													data-icon-motion={ICON_MOTION.flash}
 												/>
 											)}
@@ -882,7 +881,7 @@ export default function McpSettingsPanel() {
 								onClick={addHost}
 								disabled={!config || config.allowAll || newHost.trim() === ""}
 							>
-								<Plus className="size-icon mr-1" />
+								<Plus className="size-icon" />
 								Add
 							</Button>
 						</div>

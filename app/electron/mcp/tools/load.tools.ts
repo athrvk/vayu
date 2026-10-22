@@ -148,7 +148,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.enum(LOAD_MODES)
 				.optional()
 				.describe(
-					`${LOAD_MODES.join(" | ")} (default ${DEFAULT_LOAD_MODE}). A shape field left out is sent as the engine's default for the mode (each field names its own), and the confirmation preview and the started result's \`shape\` state the run that will start.`
+					`${LOAD_MODES.join(" | ")} (default ${DEFAULT_LOAD_MODE}, or constant_rps given \`targetRps\`). A shape field left out is sent as the engine's default for the mode (each field names its own), and the confirmation preview and the started result's \`shape\` state the run that will start.`
 				),
 			// Positive, because an agent's natural guess for "unlimited" is -1 or
 			// 0, and the engine reads concurrency as an eager per-worker
@@ -212,7 +212,14 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					`Iteration count (iterations mode). Default ${statedDefaults("iterations")}.`
 				),
-			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
+			// Not narrowed to the mode here: the engine refuses a rate on any mode
+			// but constant_rps by name (#2396), and one rule lives in one place.
+			targetRps: z
+				.number()
+				.optional()
+				.describe(
+					"Target requests per second (open loop): constant_rps only; the engine refuses it on other modes. With no `mode`, it selects constant_rps."
+				),
 			// Streaming under load (issue #576). Forwarded verbatim and bounded
 			// only by the engine's own `constants::sse` ranges, on the
 			// thresholds precedent: the engine validates before the run row

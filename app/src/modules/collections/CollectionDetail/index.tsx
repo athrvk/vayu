@@ -27,6 +27,7 @@ import InfoTab from "./InfoTab";
 import MockServerControl from "./MockServerControl";
 import SpecTab from "./SpecTab";
 import VariablesTab from "./VariablesTab";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export type CollectionTab = "info" | "auth" | "elements" | "variables" | "data" | "spec";
 
@@ -273,7 +274,7 @@ export default function CollectionDetail() {
 				<Folder className="size-icon text-primary shrink-0" />
 				<span className="text-sm font-semibold text-foreground">{collection.name}</span>
 				<span className="text-xs text-muted-foreground">
-					- {requestCount} request{requestCount !== 1 ? "s" : ""}
+					- {requestCount} {pluralize(requestCount, "request")}
 				</span>
 				{/* Right-aligned, because it is an action on the collection rather
 				    than part of its identity. It knows nothing about the tabs

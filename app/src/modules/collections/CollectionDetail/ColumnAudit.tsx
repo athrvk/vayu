@@ -52,6 +52,7 @@ import { useColumnAudit } from "@/hooks/useColumnAudit";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import type { Collection } from "@/types";
 import { SectionLabel } from "./shared";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 interface ColumnAuditProps {
 	/** The collection whose contract is audited. Rendered only when it has one. */
@@ -141,10 +142,10 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 						)}
 						{collidingColumns.length > 0 && (
 							<Callout severity="info" title="Also a variable name">
-								{collidingColumns.join(", ")} also name
-								{collidingColumns.length === 1 ? "s" : ""} a global, collection or
-								environment variable. While a row is bound, the column wins; with no
-								row bound, the variable answers as it always did.
+								{collidingColumns.join(", ")} also{" "}
+								{pluralize(collidingColumns.length, "names", "name")} a global,
+								collection or environment variable. While a row is bound, the column
+								wins; with no row bound, the variable answers as it always did.
 							</Callout>
 						)}
 						<p className="text-label text-muted-foreground">

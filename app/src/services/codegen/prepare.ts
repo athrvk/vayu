@@ -36,6 +36,7 @@ import {
 import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -71,7 +72,7 @@ export function untypedTextPartNote(
 	if (body?.kind !== "form-data") return undefined;
 	const keys = body.fields.flatMap(([key, , contentType]) => (contentType ? [key] : []));
 	if (keys.length === 0) return undefined;
-	return `${client} cannot set a text part's Content-Type: ${keys.join(", ")} ${keys.length > 1 ? "are" : "is"} sent without the type the request declares.`;
+	return `${client} cannot set a text part's Content-Type: ${keys.join(", ")} ${pluralize(keys.length, "is", "are")} sent without the type the request declares.`;
 }
 
 export interface PreparedRequest {

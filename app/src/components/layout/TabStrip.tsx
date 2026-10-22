@@ -67,6 +67,7 @@ import { fitTabs, makeTextMeasurer, naturalTabWidth } from "./tab-fit";
 // the same tabs and must name them identically. See tab-descriptors.ts.
 import { useTabDescriptors } from "./tab-descriptors";
 import { getMethodColor } from "@/lib/method-display";
+import { pluralize } from "@/modules/dashboard/utils/format";
 // One tab, in its own module so a test can `vi.mock` it (#1714).
 import TabItem from "./TabItem";
 import { useRovingStop } from "./useRovingStop";
@@ -282,7 +283,7 @@ export function TabStrip() {
 					<DropdownMenuTrigger asChild>
 						<button
 							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
-							aria-label={`${overflowed.length} more tabs`}
+							aria-label={`${overflowed.length} more ${pluralize(overflowed.length, "tab")}`}
 						>
 							+{overflowed.length}
 							<ChevronDown className="size-icon-sm" />

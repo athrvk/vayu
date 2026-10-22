@@ -17,6 +17,8 @@
  * authority: nothing here is needed for correctness, only for the wording.
  */
 
+import { pluralize } from "@/modules/dashboard/utils/format";
+
 /** `constants::mock_server::MAX_ALLOWED_ORIGINS` and the inbox's twin. */
 export const MAX_ALLOWED_ORIGINS = 32;
 /** `constants::mock_server::MAX_ALLOWED_ORIGIN_LENGTH`, in bytes, and the inbox's twin. */
@@ -118,5 +120,5 @@ export function describeOriginPolicy(allowedOrigins: readonly string[]): string 
 /** The same policy as a count, for a row with no room for the list. */
 export function summarizeOriginPolicy(allowedOrigins: readonly string[]): string {
 	if (allowedOrigins.length === 0) return "Any origin";
-	return `${allowedOrigins.length} ${allowedOrigins.length === 1 ? "origin" : "origins"}`;
+	return `${allowedOrigins.length} ${pluralize(allowedOrigins.length, "origin")}`;
 }

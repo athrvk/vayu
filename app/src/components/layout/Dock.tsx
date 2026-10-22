@@ -30,6 +30,7 @@ import { ENGINE_BASE_URL } from "@/config/network";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 import { ResponsePositionButton } from "./ResponsePositionButton";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
  * What each engine state is called in the strip.
@@ -242,7 +243,7 @@ function EngineVersion() {
 				</span>
 			</TooltipTrigger>
 			<TooltipContent side="top">
-				<p>{workers === 1 ? "1 worker thread" : `${workers} worker threads`}</p>
+				<p>{`${workers} ${pluralize(workers, "worker thread")}`}</p>
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -314,7 +315,7 @@ function RunningServices() {
 					className="enter-fade flex items-center gap-1 text-xs text-status-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<span className="w-1.5 h-1.5 rounded-full bg-current" />
-					{count === 1 ? "1 service" : `${count} services`}
+					{`${count} ${pluralize(count, "service")}`}
 				</button>
 			</TooltipTrigger>
 			<TooltipContent side="top">

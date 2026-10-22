@@ -69,6 +69,7 @@ import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { downloadTextFile } from "@/lib/download-text-file";
 import { useSpecExportQuery } from "@/queries/specs";
 import type { Collection, ExportFormat, ExportMode, ExportNotes } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface ExportSpecDialogProps {
 	/**
@@ -202,11 +203,11 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 						disabled={!result || reassembling}
 						onClick={() => void copy(result?.text ?? "", "The document")}
 					>
-						<Copy className="mr-2 size-icon" />
+						<Copy className="size-icon" />
 						Copy
 					</Button>
 					<Button disabled={!result || reassembling} onClick={handleDownload}>
-						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
+						<Download className="size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>
 				</DialogFooter>
@@ -399,7 +400,8 @@ function Line({
 	if (count === 0 && !always) return null;
 	return (
 		<li>
-			<span className="text-foreground">{count}</span> {count === 1 ? label : plural} {suffix}
+			<span className="text-foreground">{count}</span> {pluralize(count, label, plural)}{" "}
+			{suffix}
 		</li>
 	);
 }

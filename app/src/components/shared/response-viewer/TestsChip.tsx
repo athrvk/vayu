@@ -23,6 +23,7 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StepTestTally } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface TestsChipProps {
 	tests: StepTestTally;
@@ -56,7 +57,7 @@ export function TestsChip({ tests, className }: TestsChipProps) {
 		>
 			<CheckCircle2 aria-hidden="true" className="size-icon-sm" />
 			<span className="tabular-nums">
-				{tests.passed.toLocaleString()} {total === 1 ? "test" : "tests"} passed
+				{tests.passed.toLocaleString()} {pluralize(total, "test")} passed
 			</span>
 		</div>
 	);

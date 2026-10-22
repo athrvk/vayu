@@ -687,8 +687,9 @@ export interface StartLoadTestRequest {
 	// Load test strategy
 	mode: LoadTestMode;
 
-	// For constant_rps / constant_concurrency modes
+	// Duration-bounded modes: constant_rps, constant_concurrency, ramp_up, capacity
 	duration?: string; // e.g., "10s", "2m"
+	// constant_rps only: the engine refuses a positive rate on any other mode (#2396)
 	targetRps?: number;
 
 	// For "iterations" mode
@@ -862,8 +863,8 @@ export interface StartScenarioRunRequest {
 	 *
 	 * `constant_rps` is a `400` here, not a silent downgrade: an open-loop
 	 * arrival rate over a multi-step sequence is an arrival-rate executor,
-	 * which Vayu does not implement. So is any non-zero `rps`/`targetRps`,
-	 * which is what would select that path regardless of the declared mode.
+	 * which Vayu does not implement. So is any non-zero `rps`/`targetRps`: a
+	 * scenario run is closed-loop by design, whatever the declared mode.
 	 */
 	mode?: "constant_concurrency" | "ramp_up" | "iterations";
 	/** Wall-clock length, e.g. `"60s"`. Read by the two duration-bounded modes. */

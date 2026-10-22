@@ -57,6 +57,7 @@ import {
 import type { SchemaEntry } from "@/lib/graphql/schema-cache";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /** How many rows to render before the window grows. */
 const ROW_WINDOW = 200;
@@ -691,7 +692,7 @@ function ExplorerRow({
 					</span>
 					{node.args.length > 0 && (
 						<span data-tree-args className="shrink-0 text-muted-foreground">
-							({node.args.length} {node.args.length === 1 ? "arg" : "args"})
+							({node.args.length} {pluralize(node.args.length, "arg")})
 						</span>
 					)}
 					{secondary && (

@@ -343,7 +343,7 @@ export interface EngineLoadDefaults {
 	durationSeconds?: number;
 	rampUpDurationSeconds?: number;
 	iterations?: number;
-	/** `ConstantLoadStrategy`: a positive `targetRps` runs it open-loop. */
+	/** A positive `targetRps` runs this mode open-loop: `constant_rps` alone (#2396). */
 	ratePaced?: boolean;
 }
 
@@ -360,7 +360,7 @@ export interface EngineLoadDefaults {
  * Its other knobs (`sloMs`, `stepDuration`) stay the engine's. `iterations` has no duration: the mode never reads one.
  */
 export const ENGINE_LOAD_DEFAULTS = {
-	constant_concurrency: { concurrency: 100, durationSeconds: 60, ratePaced: true },
+	constant_concurrency: { concurrency: 100, durationSeconds: 60 },
 	constant_rps: { concurrency: 100, durationSeconds: 60, ratePaced: true },
 	ramp_up: {
 		concurrency: 100,
@@ -381,7 +381,8 @@ export type LoadDefaultsTable = Readonly<Partial<Record<LoadMode, EngineLoadDefa
 /**
  * The mode whose strategy the engine runs for these params, mirroring
  * `LoadStrategy::create` (`load_strategy.cpp`): an absent `mode` is the
- * engine's own `constant_rps` (`start_load_run` always sends one, so only a
+ * engine's own `constant_rps` (`start_load_run` always sends one, resolving a
+ * mode-less run with a rate to `constant_rps` as the engine would, so only a
  * direct caller of these guards meets that case), and an unrecognised mode is a
  * constant run, or an iterations run when it carries `iterations`. Keying on
  * the mode string alone would leave that last case a way past the cap.

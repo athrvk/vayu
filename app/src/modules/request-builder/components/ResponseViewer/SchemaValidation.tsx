@@ -22,6 +22,7 @@
 import { AlertTriangle, CheckCircle2, HelpCircle, XCircle } from "lucide-react";
 import { uncheckedReasonText } from "@/components/shared/response-viewer/validation-reasons";
 import type { ResponseValidation } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface SchemaValidationProps {
 	validation: ResponseValidation;
@@ -67,7 +68,7 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 						/>
 						<span className="text-foreground tabular-nums">
 							<span className="text-status-error-text font-medium">{total}</span>{" "}
-							{total === 1 ? "problem" : "problems"} against the schema
+							{pluralize(total, "problem")} against the schema
 							{validation.matchedStatus ? ` for ${validation.matchedStatus}` : ""}
 						</span>
 					</>

@@ -925,7 +925,7 @@ export function ImportModal() {
 								disabled={isBusy}
 								onClick={() => folderInputRef.current?.click()}
 							>
-								<FolderOpen className="mr-1.5 size-icon-sm" />
+								<FolderOpen className="size-icon-sm" />
 								Import folder
 							</Button>
 						</div>

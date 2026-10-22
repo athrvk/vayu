@@ -10,6 +10,7 @@
  * @brief Run management and reporting routes
  */
 
+#include "vayu/core/load_strategy.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -1293,15 +1294,12 @@ vayu::DetailedReport& report) {
     static_cast<double> (report.total_requests) :
     0.0;
 
-    // Extract target RPS from config
+    // The rate the run asked for, read as `add_target_rps` records it. Not
+    // `open_loop_rate`: a stored closed-loop config with a rate predates #2396,
+    // and that run was paced or throttled by it.
     double target_rps = 0.0;
     try {
-        auto config = nlohmann::json::parse (config_snapshot);
-        if (config.contains ("rps")) {
-            target_rps = config["rps"].get<double> ();
-        } else if (config.contains ("targetRps")) {
-            target_rps = config["targetRps"].get<double> ();
-        }
+        target_rps = vayu::core::requested_rps (nlohmann::json::parse (config_snapshot));
     } catch (...) {
         // @deliberate: a snapshot that will not read leaves the target at 0,
         // which `rps_achievement` below already spells as "no target was

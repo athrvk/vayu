@@ -109,7 +109,7 @@ function StartInboxDialog({
 					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					<Button onClick={start} disabled={!canStart}>
 						{startInbox.isPending && (
-							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
+							<Loader2 className="size-icon animate-spin" aria-hidden="true" />
 						)}
 						Start inbox
 					</Button>

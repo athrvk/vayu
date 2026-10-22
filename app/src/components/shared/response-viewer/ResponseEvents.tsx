@@ -49,6 +49,7 @@ import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { formatJson } from "@/lib/json-format";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface ResponseEventsProps {
 	/** The events to render, oldest first. */
@@ -274,7 +275,7 @@ export default function ResponseEvents({
 					{isStreaming ? "Streaming" : "Stream ended"}
 				</span>
 				<span className="text-xs text-muted-foreground">
-					{received.toLocaleString()} {received === 1 ? "event" : "events"}
+					{received.toLocaleString()} {pluralize(received, "event")}
 					{eventsTruncated && ` - showing ${events.length.toLocaleString()}`}
 				</span>
 			</div>

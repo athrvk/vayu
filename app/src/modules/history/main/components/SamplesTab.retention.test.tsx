@@ -91,7 +91,7 @@ describe("SamplesTab retention", () => {
 
 	it("counts what it shows rather than claiming a capture total", () => {
 		renderTab();
-		expect(screen.getByText("1 samples shown")).toBeInTheDocument();
+		expect(screen.getByText("1 sample shown")).toBeInTheDocument();
 	});
 
 	// Issue #174: capture stores responses verbatim, so the tab that displays

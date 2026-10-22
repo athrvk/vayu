@@ -97,6 +97,7 @@ import { hasSpecBinding, type Collection } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
 import { InfoBanner, RelativeTime, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 interface SpecTabProps {
 	collection: Collection;
@@ -364,10 +365,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							onClick={() => fileInputRef.current?.click()}
 							disabled={bindSpec.isPending}
 						>
-							<Upload
-								className="mr-2 size-icon"
-								data-icon-motion={ICON_MOTION.lift}
-							/>
+							<Upload className="size-icon" data-icon-motion={ICON_MOTION.lift} />
 							Choose file
 						</Button>
 						<input
@@ -404,9 +402,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							disabled={!url || fetching || bindSpec.isPending}
 						>
 							{fetching ? (
-								<Loader2 className="mr-2 size-icon animate-spin" />
+								<Loader2 className="size-icon animate-spin" />
 							) : (
-								<Link2 className="mr-2 size-icon" />
+								<Link2 className="size-icon" />
 							)}
 							Fetch
 						</Button>
@@ -463,9 +461,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					{picked && match && (
 						<Button onClick={handleBind} disabled={bindSpec.isPending}>
 							{bindSpec.isPending ? (
-								<Loader2 className="mr-2 size-icon animate-spin" />
+								<Loader2 className="size-icon animate-spin" />
 							) : (
-								<FileJson className="mr-2 size-icon" />
+								<FileJson className="size-icon" />
 							)}
 							Bind this spec
 						</Button>
@@ -501,12 +499,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						<DropdownMenuTrigger asChild>
 							<Button variant="outline">
 								<Download
-									className="mr-2 size-icon"
+									className="size-icon"
 									data-icon-motion={ICON_MOTION.drop}
 								/>
 								Export
 								<ChevronDown
-									className="ml-1 size-icon-sm"
+									className="size-icon-sm"
 									data-icon-motion={ICON_MOTION.nudgeY}
 								/>
 							</Button>
@@ -547,7 +545,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						onClick={handleUnbind}
 						disabled={updateCollection.isPending}
 					>
-						<Trash2 className="mr-2 size-icon" />
+						<Trash2 className="size-icon" />
 						Unbind
 					</Button>
 					<p className="mt-1 text-label text-muted-foreground">
@@ -667,8 +665,8 @@ function BoundSpec({
 								/>
 							) : (
 								<>
-									{mappedCount} of {requestCount} request
-									{requestCount === 1 ? "" : "s"}
+									{mappedCount} of {requestCount}{" "}
+									{pluralize(requestCount, "request")}
 								</>
 							)}
 						</dd>
@@ -752,10 +750,9 @@ function MatchSummary({
 			 * and the two leftovers are what sync (#627) will later offer to act on.
 			 */}
 			<p className="text-label text-muted-foreground">
-				Matched {matched} request{matched === 1 ? "" : "s"} · {unmatchedRequests} request
-				{unmatchedRequests === 1 ? "" : "s"} with no operation · {unmatchedOperations}{" "}
-				operation
-				{unmatchedOperations === 1 ? "" : "s"} with no request
+				Matched {matched} {pluralize(matched, "request")} · {unmatchedRequests}{" "}
+				{pluralize(unmatchedRequests, "request")} with no operation · {unmatchedOperations}{" "}
+				{pluralize(unmatchedOperations, "operation")} with no request
 			</p>
 			{/*
 			 * The one line here that describes a *write* to something that already
@@ -765,9 +762,9 @@ function MatchSummary({
 			 */}
 			{staleStamps > 0 && (
 				<p className="text-label text-muted-foreground">
-					{staleStamps} request{staleStamps === 1 ? "" : "s"} record
-					{staleStamps === 1 ? "s" : ""} an operation this document does not have - that
-					identity is cleared, because it names another document.
+					{staleStamps} {pluralize(staleStamps, "request")}{" "}
+					{pluralize(staleStamps, "records", "record")} an operation this document does
+					not have - that identity is cleared, because it names another document.
 				</p>
 			)}
 		</div>

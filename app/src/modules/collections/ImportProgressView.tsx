@@ -8,6 +8,7 @@
 import { Progress } from "@/components/ui";
 import { formatBytes } from "@/modules/settings/utils/format-size";
 import { IMPORT_STAGE_LABELS } from "@/constants/import";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
  * What the import dialog is doing, and how far through it is (issue #882).
@@ -42,7 +43,7 @@ function detailOf(progress: ImportProgress): string {
 			? `${formatBytes(progress.received)} received`
 			: `${formatBytes(progress.received)} of ${formatBytes(progress.total)}`;
 	}
-	const unit = progress.total === 1 ? "file" : "files";
+	const unit = pluralize(progress.total, "file");
 	return `${progress.done} of ${progress.total} ${unit}`;
 }
 

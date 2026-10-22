@@ -33,7 +33,7 @@
  */
 
 import type { Run, RunReport } from "@/types";
-import { formatErrorPercent, pluralize } from "@/modules/dashboard/utils/format";
+import { formatErrorPercent, pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import { budgetName } from "./threshold-metrics";
 
 export type RunOutcome = "passed" | "failed" | "not-judged";
@@ -101,7 +101,10 @@ function failedReason(budgets: Budgets): string {
 
 function metReason(budgets: Extract<Budgets, { state: "met" }>): string {
 	if (budgets.total === undefined) return "All budgets met";
-	return budgets.total === 1 ? "The budget was met" : `All ${budgets.total} budgets met`;
+	return pickByCount(budgets.total, {
+		one: "The budget was met",
+		other: `All ${budgets.total} budgets met`,
+	});
 }
 
 /** The verdict for a run, or `null` when it is not (yet) a run that can be judged. */

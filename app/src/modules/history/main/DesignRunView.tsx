@@ -401,9 +401,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						title={pinTooltip}
 					>
 						{setBaselineMutation.isPending ? (
-							<Loader2 className="size-icon-sm mr-1.5 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 						) : (
-							<PinIcon className="size-icon-sm mr-1.5" />
+							<PinIcon className="size-icon-sm" />
 						)}
 						<LabelSwap label={pinLabel} states={["Pin", "Unpin"]} />
 					</Button>
@@ -415,10 +415,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					 */}
 					{liveRequest && (
 						<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
-							<Save
-								className="size-icon-sm mr-1.5"
-								data-icon-motion={ICON_MOTION.press}
-							/>
+							<Save className="size-icon-sm" data-icon-motion={ICON_MOTION.press} />
 							Save to request
 						</Button>
 					)}

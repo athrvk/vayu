@@ -56,6 +56,7 @@ import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { downloadTextFile } from "@/lib/download-text-file";
 import { usePostmanExportQuery } from "@/queries/exports";
 import type { Collection, PostmanExportNotes } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface ExportPostmanDialogProps {
 	/**
@@ -157,11 +158,11 @@ export default function ExportPostmanDialog({
 						disabled={!result || reassembling}
 						onClick={() => void copy(result?.text ?? "", "The collection")}
 					>
-						<Copy className="mr-2 size-icon" />
+						<Copy className="size-icon" />
 						Copy
 					</Button>
 					<Button disabled={!result || reassembling} onClick={handleDownload}>
-						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
+						<Download className="size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>
 				</DialogFooter>
@@ -285,8 +286,7 @@ function Line({
 	if (count === 0 && !always) return null;
 	return (
 		<li>
-			<span className="text-foreground">{count}</span> {count === 1 ? label : `${label}s`}{" "}
-			{suffix}
+			<span className="text-foreground">{count}</span> {pluralize(count, label)} {suffix}
 		</li>
 	);
 }

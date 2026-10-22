@@ -632,15 +632,29 @@ export async function composeLoadRunRequest(
 }
 
 /**
- * Mode `start_load_run` sends when the agent names none. Closed-loop and
- * duration-bounded, so an unspecified run is one the duration cap can hold.
+ * Mode `start_load_run` sends when the agent names none and no rate: closed-loop
+ * and duration-bounded, so an unspecified run is one the duration cap can hold.
+ * The engine's mode-less strategy is the same constant strategy, which is closed
+ * loop without a rate, so the two agree here. See {@link defaultModeFor} for the
+ * rate case.
  */
 export const DEFAULT_LOAD_MODE: LoadMode = "constant_concurrency";
 
 /**
+ * The mode of a run whose agent named none: `constant_rps` when it gave a
+ * positive `targetRps`, since only that mode paces at a rate and the engine
+ * refuses the rate on any other (#2396); {@link DEFAULT_LOAD_MODE} otherwise.
+ * A mode the agent did name is never replaced - a rate beside a non-constant_rps
+ * one is forwarded for the engine to refuse, so that rule lives in one place.
+ */
+function defaultModeFor(params: LoadRunParams): LoadMode {
+	return (params.targetRps ?? 0) > 0 ? "constant_rps" : DEFAULT_LOAD_MODE;
+}
+
+/**
  * The run `start_load_run` will start: the stated load fields, plus every one
  * the engine would otherwise default for this mode, written out (#2437).
- * `closedLoop` is false only when a `targetRps` paces a constant run.
+ * `closedLoop` is false only when a `targetRps` paces a `constant_rps` run.
  */
 export interface LoadShape extends LoadRunParams {
 	mode: string;
@@ -683,7 +697,7 @@ export function resolveLoadShape(
 	config: McpSafetyConfig,
 	defaults: LoadDefaultsTable = ENGINE_LOAD_DEFAULTS
 ): LoadShape {
-	const mode = params.mode ?? DEFAULT_LOAD_MODE;
+	const mode = params.mode ?? defaultModeFor(params);
 	const stated = { ...params, mode };
 	const row = defaults[engineLoadMode(stated)] ?? {};
 	const paced = row.ratePaced === true && (params.targetRps ?? 0) > 0;

@@ -111,7 +111,7 @@ export default function SpecReimportDialog({
 									variant="outline"
 									onClick={() => onSync(match.collectionId)}
 								>
-									<RefreshCw className="mr-2 size-icon" />
+									<RefreshCw className="size-icon" />
 									Sync instead
 								</Button>
 							</li>

@@ -519,7 +519,7 @@ describe("the load default tables mirror the engine", () => {
 		expect(capacityCeiling).toBeGreaterThan(0);
 		const durationSeconds = constant("DEFAULT_DURATION_MS") / 1000;
 		const expected: Record<LoadMode, EngineLoadDefaults> = {
-			constant_concurrency: { concurrency, durationSeconds, ratePaced: true },
+			constant_concurrency: { concurrency, durationSeconds },
 			constant_rps: { concurrency, durationSeconds, ratePaced: true },
 			ramp_up: {
 				concurrency,

@@ -220,12 +220,12 @@ export class ErrorBoundary extends Component<Props, State> {
 								>
 									{copied ? (
 										<>
-											<Check className="size-icon mr-2 text-status-success-text" />
+											<Check className="size-icon text-status-success-text" />
 											Copied
 										</>
 									) : (
 										<>
-											<Copy className="size-icon mr-2" />
+											<Copy className="size-icon" />
 											Copy error info
 										</>
 									)}
@@ -238,7 +238,7 @@ export class ErrorBoundary extends Component<Props, State> {
 									onClick={this.handleReset}
 									className="flex-1"
 								>
-									<RefreshCw className="size-icon mr-2" />
+									<RefreshCw className="size-icon" />
 									Try again
 								</Button>
 								<Button
@@ -246,7 +246,7 @@ export class ErrorBoundary extends Component<Props, State> {
 									onClick={this.handleReload}
 									className="flex-1"
 								>
-									<Home className="size-icon mr-2" />
+									<Home className="size-icon" />
 									Reload app
 								</Button>
 							</div>

@@ -1756,6 +1756,22 @@ TEST_F (RunsRouteTest, ReportRateControlDividesByTheSendingWindow) {
     EXPECT_DOUBLE_EQ (body["summary"]["testDuration"].get<double> (), 2.5);
 }
 
+// `rps: 0` falls through to `targetRps`, as the run paced and as the list row
+// records it (#2396). Mutation check: read `rps` whenever it is present in
+// `reconcile_report_rates` and the report loses its `rateControl`.
+TEST_F (RunsRouteTest, ReportReadsTheRateThroughAZeroRps) {
+    seed ({ .id = "run_zero_rps",
+    .start_time = 1000,
+    .config_snapshot = R"({"url":"https://x.test/","method":"GET","mode":"constant_rps","duration":"2s","rps":0,"targetRps":50})" });
+    db_->update_run_summary ("run_zero_rps",
+    vayu::core::build_run_summary_payload (drained_run_inputs ()).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_zero_rps");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("rateControl")) << body.dump ();
+    EXPECT_DOUBLE_EQ (body["rateControl"]["targetRps"].get<double> (), 50.0);
+}
+
 // A Stop 1.2 s in sent at the target rate but only 60 of the 100 planned: the
 // achievement is the share of the plan, not the rate. Mutation check: compute
 // it from `actual_rps / target_rps` in `apply_sending_window_rates` and it
