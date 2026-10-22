@@ -3284,9 +3284,6 @@ moves into the agreed cases:
 - `multipleOf` with a decimal: ajv divides in binary floating point, so
   `{"multipleOf": 0.01}` rejects `0.07` and `19.99` unless `multipleOfPrecision`
   is set. `jsonSchema` answers the decimal question and passes both.
-- `propertyNames`: `jsonSchema` passes `{"aB": 1}` against
-  `{"propertyNames": {"pattern": "^[a-z]+$"}}` and ajv rejects it. The native
-  verdict is the wrong one (a bug, [#2719](https://github.com/athrvk/vayu/issues/2719)).
 
 The keywords `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) are the ones ajv 6 ignores, so a schema that

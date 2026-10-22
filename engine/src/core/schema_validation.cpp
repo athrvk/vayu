@@ -484,6 +484,19 @@ void assert_extra_formats (valijson::SchemaParser& parser) {
 }
 
 /**
+ * The failure for a body the validator refused without recording why.
+ *
+ * Its path is the body itself: a constraint that records nothing also leaves no
+ * context to point at, so naming a deeper node would be a guess.
+ */
+SchemaFailure unrecorded_failure () {
+    SchemaFailure failure;
+    failure.message = "Failed to validate against a constraint that reports no "
+                      "detail, such as 'propertyNames'.";
+    return failure;
+}
+
+/**
  * One validator run, shared by both public entry points: the verdict, or the
  * validator's own reason when it refused the schema (at parse time, or at
  * validation time for a constraint it only reads then, such as a `pattern`).
@@ -498,6 +511,7 @@ const nlohmann::json& body) {
     const nlohmann::json root = validation_root (schema, ref_roots);
     valijson::Schema parsed;
     valijson::ValidationResults results;
+    bool accepted = false;
     try {
         valijson::SchemaParser parser;
         assert_extra_formats (parser);
@@ -505,7 +519,7 @@ const nlohmann::json& body) {
         parser.populateSchema (adapter, parsed);
         valijson::Validator validator;
         const valijson::adapters::NlohmannJsonAdapter target (body);
-        validator.validate (parsed, target, &results);
+        accepted = validator.validate (parsed, target, &results);
     } catch (const std::exception& e) {
         return std::unexpected (std::string (e.what ()));
     }
@@ -540,8 +554,16 @@ const nlohmann::json& body) {
         verdict.failures = std::move (structural);
     }
 
+    // The validator's own answer outranks the errors it recorded: a constraint
+    // can refuse the body and record nothing (#2719, valijson's `propertyNames`),
+    // and a verdict read from the errors alone would pass it.
+    if (!accepted && verdict.failures_total == 0) {
+        verdict.failures_total = 1;
+        verdict.failures.push_back (unrecorded_failure ());
+    }
+
     verdict.checked = true;
-    verdict.valid   = verdict.failures_total == 0;
+    verdict.valid   = accepted && verdict.failures_total == 0;
     return verdict;
 }
 
