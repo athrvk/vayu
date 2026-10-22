@@ -275,6 +275,45 @@ FileReplacement replace_file_durably (const std::string& from, const std::string
     return replacement;
 }
 
+std::expected<OpenedFile, std::error_code> open_regular_file (
+const std::filesystem::path& path) {
+    constexpr int OPEN_FLAGS = O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
+    // POSIX declares `open` variadic; the mode is only read with `O_CREAT`,
+    // which is never passed here.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    const int descriptor = open (path.c_str (), OPEN_FLAGS);
+    if (descriptor < 0) {
+        return std::unexpected (std::error_code (errno, std::generic_category ()));
+    }
+    struct stat info{};
+    if (fstat (descriptor, &info) != 0 || !S_ISREG (info.st_mode)) {
+        close (descriptor);
+        return std::unexpected (std::make_error_code (std::errc::invalid_argument));
+    }
+    return OpenedFile{ descriptor, static_cast<std::uint64_t> (info.st_size) };
+}
+
+std::expected<std::size_t, std::error_code>
+read_file_at (ReadOnlyFile file, std::uint64_t offset, std::span<char> buffer) {
+    if (offset > static_cast<std::uint64_t> (std::numeric_limits<off_t>::max ())) {
+        return std::unexpected (std::make_error_code (std::errc::invalid_argument));
+    }
+    ssize_t got = -1;
+    do {
+        got = pread (file, buffer.data (), buffer.size (), static_cast<off_t> (offset));
+    } while (got < 0 && errno == EINTR);
+    if (got < 0) {
+        return std::unexpected (std::error_code (errno, std::generic_category ()));
+    }
+    return static_cast<std::size_t> (got);
+}
+
+void close_file (ReadOnlyFile file) {
+    if (file != INVALID_READ_ONLY_FILE) {
+        close (file);
+    }
+}
+
 void restrict_new_files_to_owner () {
     umask (S_IRWXG | S_IRWXO);
 }

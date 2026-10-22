@@ -1494,7 +1494,8 @@ class RunManager {
     // RunContext::release_execution_resources(), so the event loop, the bound
     // rows and the plan are freed here rather than at the sweep (issue #1154).
     void retain_run (const std::string& run_id);
-    // Active OR retained-within-window. Used only by /runs/:id/live.
+    // Active OR retained-within-window. Used by /runs/:id/live and by the
+    // report of a load run that is not terminal yet.
     std::shared_ptr<RunContext> get_run_or_retained (const std::string& run_id);
     // Evict retained runs whose completed_at_ms is older than ttl_ms.
     void sweep_retained (int64_t ttl_ms);

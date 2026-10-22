@@ -138,7 +138,8 @@ enum class UncheckedReason : std::uint8_t {
     NoSchemaForContentType,
     /// There was no response to check - a transport error.
     NoResponse,
-    /// The body is not JSON, so no JSON Schema can speak about it.
+    /// The body is not JSON, or nests past `constants::elements::MAX_BODY_DEPTH`
+    /// (the validator recurses), so no JSON Schema can speak about it.
     BodyNotJson,
 };
 

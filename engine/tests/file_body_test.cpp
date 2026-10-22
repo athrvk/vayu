@@ -32,6 +32,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -334,7 +335,7 @@ TEST (FileRule, AMissingFileIsRefusedNamingThePath) {
     EXPECT_NE (refusal->find ("cannot read file"), std::string::npos) << *refusal;
 }
 
-// Mutation check: drop the `is_regular_file` test from `FilePlan::check_locked`
+// Mutation check: drop the `is_regular_file` test from `FilePlan::approve`
 // and the directory opens (on Linux) and `/dev/zero` is read until the inline
 // limit and sent as a body.
 TEST (FileRule, ADirectoryOrADeviceIsNotAFile) {
@@ -356,8 +357,8 @@ TEST (FileRule, ADirectoryOrADeviceIsNotAFile) {
     EXPECT_NE (device->find ("not a regular file"), std::string::npos) << *device;
 }
 
-// The trust half. Mutation check: make `check_locked` skip the
-// `policy_.allows` refusal and the outside path is sent.
+// The trust half. Mutation check: make `FilePlan::approve` skip the
+// `policy_.approved_path` refusal and the outside path is sent.
 TEST (FileRule, APathIsSentFromUnderAnAllowedFolderOrAsAPickedFile) {
     ScratchDir scratch;
     const std::string inside  = scratch.write ("allowed/a.bin", "a");
@@ -653,9 +654,11 @@ class RedirectingServer {
             res.status = 307;
             res.set_header ("Location", "/landed");
         });
+        // What landed: the body, or a multipart body's file part `f`.
         svr_.Post ("/landed", [this] (const httplib::Request& req, httplib::Response& res) {
             const std::lock_guard<std::mutex> lock (mutex_);
-            landed_ = req.body;
+            landed_ =
+            req.form.has_file ("f") ? req.form.get_file ("f").content : req.body;
             res.set_content ("{}", "application/json");
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -905,6 +908,357 @@ TEST (BinaryBodyPlan, EachPathADataRowBindsIsCheckedNamingTheRow) {
 }
 
 // ===========================================================================
+// A form-data file part reads the file the check approved (#2416)
+// ===========================================================================
+
+/// A form-data request uploading @p src as the part `f`.
+Request form_part_request (const std::string& url, const std::string& src) {
+    Request request;
+    request.method    = HttpMethod::POST;
+    request.url       = url;
+    request.body.mode = BodyMode::FormData;
+    FormField part;
+    part.key  = "f";
+    part.type = FormFieldType::File;
+    part.src  = src;
+    request.body.fields.push_back (std::move (part));
+    return request;
+}
+
+/// @p link re-pointed at @p target; false when this filesystem cannot make a
+/// symlink.
+bool point_link (const fs::path& link, const std::string& target) {
+    std::error_code ec;
+    fs::remove (link, ec);
+    fs::create_symlink (target, link, ec);
+    return !ec;
+}
+
+/// The content of the part `f` the echo server last received, or empty.
+std::string part_f (const EchoServer& server) {
+    const auto parts = server.parts ();
+    const auto part  = parts.find ("f");
+    return part == parts.end () ? std::string{} : part->second.content;
+}
+
+using FormPartWireTest = BinaryBodyWireTest;
+
+// The rule approves a file, then the link at its path is re-pointed before
+// the transfer. Both drivers send the approved file, under
+// the name the request gave it. Mutation check: read the part from
+// `field.src` again in `attach_multipart` (`curl_mime_filedata`) and the other
+// file's bytes arrive.
+TEST_F (FormPartWireTest, ALinkRepointedAfterTheCheckSendsTheApprovedFile) {
+    const std::string approved = scratch_.write ("approved.bin", "approved bytes");
+    const std::string other = scratch_.write ("other/key.pem", "other bytes");
+    const fs::path link     = scratch_.path () / "upload.bin";
+    if (!point_link (link, approved)) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink";
+    }
+    Request request = form_part_request (server_->url (), link.string ());
+    FilePlan plan (FileAccessPolicy ({}, { fs::canonical (approved).string () }));
+    ASSERT_FALSE (plan.prepare (request));
+    ASSERT_TRUE (point_link (link, other));
+
+    Client client;
+    const auto sent = client.send (request).value ();
+    EXPECT_EQ (sent.status_code, 200) << sent.error_message;
+    EXPECT_EQ (part_f (*server_), "approved bytes");
+    EXPECT_EQ (server_->parts ()["f"].filename, "upload.bin");
+
+    EventLoop loop;
+    loop.start ();
+    const auto result = loop.submit_async (request).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (part_f (*server_), "approved bytes");
+}
+
+// The same without a link, so it runs where none can be made: the checked
+// path replaced by another file. Mutation check: as above.
+TEST_F (FormPartWireTest, AFileReplacedAfterTheCheckSendsTheApprovedOne) {
+    const std::string src = scratch_.write ("data.bin", "approved bytes");
+    Request request       = form_part_request (server_->url (), src);
+    FilePlan plan (allowing (scratch_));
+    ASSERT_FALSE (plan.prepare (request));
+    // Renamed over the held file rather than removed and rewritten, so a
+    // platform that refuses either refuses the one step and skips.
+    const std::string replacement = scratch_.write ("data.new", "replacement");
+    std::error_code ec;
+    fs::rename (replacement, src, ec);
+    if (ec) {
+        GTEST_SKIP ()
+        << "this platform cannot replace a file held open: " << ec.message ();
+    }
+
+    Client client;
+    const auto sent = client.send (request).value ();
+    EXPECT_EQ (sent.status_code, 200) << sent.error_message;
+    EXPECT_EQ (part_f (*server_), "approved bytes");
+}
+
+// The part's length is the one the open saw; a file truncated below it under
+// the handle cannot keep that promise, and the transfer fails rather than send
+// a short or padded part. Mutation check: pad the short read with zeros in
+// `read_part` and the transfer succeeds with bytes the file never held.
+TEST_F (FormPartWireTest, AFileTruncatedUnderTheHandleFailsTheTransfer) {
+    const std::string src = scratch_.write ("data.bin", binary_payload (100000));
+    Request request    = form_part_request (server_->url (), src);
+    request.timeout_ms = 10000;
+    FilePlan plan (allowing (scratch_));
+    ASSERT_FALSE (plan.prepare (request));
+    std::error_code ec;
+    fs::resize_file (src, 10, ec);
+    if (ec) {
+        GTEST_SKIP ()
+        << "this platform cannot truncate a file held open: " << ec.message ();
+    }
+
+    Client client;
+    const auto sent = client.send (request).value ();
+    EXPECT_EQ (sent.status_code, 0);
+    EXPECT_FALSE (sent.error_message.empty ());
+    EXPECT_TRUE (server_->parts ().empty ());
+}
+
+// A data file of many rows names many files. Each is approved at plan time
+// and none is kept open by the plan, so a run cannot run out of descriptors;
+// `fill` opens a row's file for that request alone, and every request sends
+// its own row's bytes. A path the run's own request names is kept, once per
+// file however it is spelled. Mutation check: keep every part's open file in
+// `FilePlan::open_part_file` whatever `PartFiles` says and the plan holds one
+// per row.
+TEST_F (FormPartWireTest, ADataBoundPathIsApprovedButNotKeptOpenByThePlan) {
+    constexpr std::size_t ROWS = 60;
+    vayu::core::LoadDataSet data;
+    for (std::size_t row = 0; row < ROWS; ++row) {
+        const std::string name = "rows/" + std::to_string (row) + ".bin";
+        data.rows.push_back (
+        json{ { "f", scratch_.write (name, "row " + std::to_string (row)) } });
+    }
+    data.bound_columns = vayu::core::bound_columns_of (data.rows);
+
+    const Request templated = form_part_request (server_->url (), "{{data.f}}");
+    FilePlan files (allowing (scratch_));
+    Request planned = templated;
+    ASSERT_FALSE (vayu::core::plan_load_files (files, planned, &data));
+    EXPECT_EQ (files.kept_files (), 0u);
+
+    Client client;
+    const auto fields = vayu::core::tokenize_bindable_fields (templated, data.bound_columns);
+    for (std::size_t row = 0; row < ROWS; ++row) {
+        Request bound = templated;
+        const vayu::core::IterationBinding binding{ &data.rows.at (row), row,
+            vayu::core::IterationIdentity{ 1, 0 } };
+        ASSERT_TRUE (
+        vayu::core::apply_iteration_template (bound, fields, binding).ok);
+        const auto filled = vayu::core::fill_bound_files (&files, templated, bound);
+        ASSERT_TRUE (filled.ok) << filled.error;
+        EXPECT_EQ (client.send (bound).value ().status_code, 200);
+        EXPECT_EQ (part_f (*server_), "row " + std::to_string (row));
+    }
+    EXPECT_EQ (files.kept_files (), 0u);
+
+    const std::string fixed = scratch_.write ("fixed.bin", "fixed");
+    for (const std::string& spelling : { fixed, scratch_.dir ("rows") + "/../fixed.bin" }) {
+        Request request = form_part_request (server_->url (), spelling);
+        ASSERT_FALSE (files.prepare (request, PartFiles::KeptByPlan));
+    }
+    EXPECT_EQ (files.kept_files (), 1u)
+    << "two spellings of one file, one open file";
+}
+
+// A part no plan filled never went through the rule, so the gate refuses it
+// rather than read its path. Mutation check: drop the file-part arm from
+// `unplanned_file_ref` and the transfer reaches a part with no open file.
+TEST_F (FormPartWireTest, AnUncheckedFilePartIsRefusedAtTheGate) {
+    const Request request =
+    form_part_request (server_->url (), scratch_.write ("a.bin", "abc"));
+    const auto refused = detail::validate_transferable (request);
+    ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->message.rfind ("Form field 'f' '", 0), 0u) << refused->message;
+    EXPECT_NE (refused->message.find ("was not checked before the send"), std::string::npos)
+    << refused->message;
+
+    Client client;
+    const auto response = client.send (request).value ();
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_TRUE (server_->parts ().empty ());
+}
+
+// A 307 resends the body, which a part read from an open file can only do by
+// seeking back to its start. Mutation check: pass no seek callback in
+// `attach_multipart` and the follow fails with libcurl's rewind error.
+TEST_F (FormPartWireTest, AFilePartIsRewoundForARedirect) {
+    RedirectingServer redirecting;
+    const std::string payload = binary_payload (100000);
+    Request request =
+    form_part_request (redirecting.url (), scratch_.write ("big.bin", payload));
+    request.follow_redirects = true;
+
+    const auto response = send (request);
+    EXPECT_EQ (response.status_code, 200) << response.error_message;
+    EXPECT_TRUE (redirecting.landed () == payload);
+}
+
+// The plan's open file is the run's, and nothing a part carries reaches a
+// stored request: serialising a filled part writes what an unfilled one does.
+// Mutation check: write `approved` into the part's JSON in `serialize` and the
+// two differ.
+TEST (FormPartPlan, TheApprovedFileIsNeverSerialised) {
+    ScratchDir scratch;
+    const Request unfilled =
+    form_part_request ("http://127.0.0.1:1/", scratch.write ("a.png", "a"));
+    Request filled = unfilled;
+    FilePlan plan (allowing (scratch));
+    ASSERT_FALSE (plan.prepare (filled));
+    ASSERT_NE (filled.body.fields.at (0).approved, nullptr);
+    EXPECT_EQ (vayu::json::serialize (filled), vayu::json::serialize (unfilled));
+}
+
+/// Counts the uploads whose part `f` arrived as @p expected; calls
+/// @p on_first_hit before answering the first.
+class FormPartServer {
+    public:
+    FormPartServer (std::string expected, std::function<void ()> on_first_hit = {})
+    : expected_ (std::move (expected)), on_first_hit_ (std::move (on_first_hit)) {
+        svr_.new_task_queue = vayu::tests::pooled_task_queue (16);
+        svr_.Post ("/up", [this] (const httplib::Request& req, httplib::Response& res) {
+            if (hits_.fetch_add (1) == 0 && on_first_hit_) {
+                on_first_hit_ ();
+            }
+            if (req.form.has_file ("f") && req.form.get_file ("f").content == expected_) {
+                intact_.fetch_add (1);
+            }
+            res.set_content ("{}", "application/json");
+        });
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+    ~FormPartServer () {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+    }
+    FormPartServer (const FormPartServer&)            = delete;
+    FormPartServer& operator= (const FormPartServer&) = delete;
+    FormPartServer (FormPartServer&&)                 = delete;
+    FormPartServer& operator= (FormPartServer&&)      = delete;
+
+    [[nodiscard]] std::string url () const {
+        return "http://127.0.0.1:" + std::to_string (port_) + "/up";
+    }
+    [[nodiscard]] int hits () const {
+        return hits_.load ();
+    }
+    [[nodiscard]] int intact () const {
+        return intact_.load ();
+    }
+
+    private:
+    std::string expected_;
+    std::function<void ()> on_first_hit_;
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    std::atomic<int> hits_{ 0 };
+    std::atomic<int> intact_{ 0 };
+};
+
+constexpr const char* FORM_LOAD_DB_PATH = "test_file_body_form_load.db";
+
+/// A single-request load run of @p iterations uploading @p src as the part
+/// `f` to @p url, @p concurrency at a time, planned over @p policy as
+/// `POST /runs` plans it. Answers how many times a body file was opened.
+std::uint64_t run_form_part_load (const std::string& url,
+const std::string& src,
+FileAccessPolicy policy,
+int iterations,
+int concurrency) {
+    global_init ();
+    vayu::tests::remove_database_files (FORM_LOAD_DB_PATH);
+    std::uint64_t opens = 0;
+    {
+        vayu::db::Database db (FORM_LOAD_DB_PATH);
+        db.init ();
+        const json config{ { "method", "POST" }, { "url", url }, { "mode", "iterations" },
+            { "iterations", iterations }, { "concurrency", concurrency },
+            { "body",
+            { { "mode", "form-data" },
+            { "fields",
+            json::array ({ { { "key", "f" }, { "type", "file" }, { "src", src } } }) } } } };
+        auto built = build_request (config, &db, 5000, AuthResolution::Apply);
+        EXPECT_TRUE (built.ok) << built.error_message;
+
+        const auto before = body_file_opens ();
+        auto files        = std::make_shared<FilePlan> (std::move (policy));
+        const auto refusal = vayu::core::plan_load_files (*files, built.request, nullptr);
+        EXPECT_FALSE (refusal) << refusal.value_or ("");
+
+        auto context =
+        std::make_shared<vayu::core::RunContext> ("test-form-part-load", config);
+        context->file_plan = files;
+        context->load_template = vayu::core::tokenize_bindable_fields (built.request);
+        EventLoopConfig loop_config;
+        loop_config.max_concurrent = 10;
+        loop_config.max_per_host   = 10;
+        context->event_loop        = std::make_unique<EventLoop> (loop_config);
+        context->event_loop->start ();
+        auto strategy = vayu::core::LoadStrategy::create (config);
+        strategy->execute (context, db, built.request);
+        context->event_loop->stop (true, std::chrono::milliseconds (10000));
+        opens = body_file_opens () - before;
+    }
+    vayu::tests::remove_database_files (FORM_LOAD_DB_PATH);
+    global_cleanup ();
+    return opens;
+}
+
+// The swap between iterations: the server re-points the link while answering
+// the first upload, so every later iteration is submitted after it. Each one
+// still sends the approved file, and the run opens it once. Mutation check:
+// read the part from `field.src` in `attach_multipart` and every iteration
+// after the first sends the other file.
+TEST (FormPartLoadRun, ALinkRepointedMidRunSendsTheApprovedFileEveryIteration) {
+    ScratchDir scratch;
+    const std::string approved = scratch.write ("approved.bin", "approved bytes");
+    const std::string other = scratch.write ("other/key.pem", "other bytes");
+    const fs::path link     = scratch.path () / "upload.bin";
+    if (!point_link (link, approved)) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink";
+    }
+    std::atomic<bool> swapped{ false };
+    FormPartServer server (
+    "approved bytes", [&] () { swapped.store (point_link (link, other)); });
+
+    constexpr int ITERATIONS = 8;
+    const auto opens = run_form_part_load (server.url (), link.string (),
+    FileAccessPolicy ({}, { fs::canonical (approved).string () }), ITERATIONS, 2);
+    ASSERT_TRUE (swapped.load ()) << "the link was not re-pointed mid-run";
+    EXPECT_EQ (server.hits (), ITERATIONS);
+    EXPECT_EQ (server.intact (), ITERATIONS);
+    EXPECT_EQ (opens, 1u) << "one open for the whole run, none per transfer";
+}
+
+// Concurrent transfers read one open file at their own offsets: a part large
+// enough to take many reads, many at once, arrives whole every time. Mutation
+// check: make `platform::read_file_at` read from the descriptor's shared
+// position (`read`, ignoring the offset) and the uploads interleave.
+TEST (FormPartLoadRun, ConcurrentIterationsEachReadTheWholeFile) {
+    ScratchDir scratch;
+    const std::string payload = binary_payload (300000);
+    const std::string src     = scratch.write ("big.bin", payload);
+    FormPartServer server (payload);
+
+    constexpr int ITERATIONS = 24;
+    (void)run_form_part_load (server.url (), src, allowing (scratch), ITERATIONS, 8);
+    EXPECT_EQ (server.hits (), ITERATIONS);
+    EXPECT_EQ (server.intact (), ITERATIONS);
+}
+
+// ===========================================================================
 // The stored roots and grants, on every send path
 // ===========================================================================
 
@@ -1019,8 +1373,9 @@ class StoredTrustTest : public BinaryBodyExchangeTest {
 // The finding #2356 names: a body saying `unresolved: false` used to skip the
 // folder rule. Outside every root and every grant it is refused on all three
 // send paths, for a binary body and a form-data part. Mutation check: restore
-// the body-read trust (parse the key and let `false` skip `policy_.allows` in
-// `check_locked`) and every refusal here turns into a send.
+// the body-read trust (parse the key and let `false` skip
+// `policy_.approved_path` in `FilePlan::approve`) and every refusal here
+// turns into a send.
 TEST_F (StoredTrustTest, AFalseBodyOutsideEveryRootAndGrantIsRefusedOnEverySendPath) {
     const std::string outside = scratch_.write ("elsewhere/a.bin", "secret");
     for (const json& body : bodies_claiming_trust (outside)) {

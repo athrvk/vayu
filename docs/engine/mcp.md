@@ -22,8 +22,10 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
 
 - **Hosted in the app.** MCP is a capability the running app exposes, not a
   separate process to manage. It is started and stopped alongside the engine
-  sidecar by `app/electron/main.ts`, best-effort (a bind failure logs and the app
-  continues without it). Only the port is bound at launch (`listener.ts`, which
+  sidecar by `app/electron/main.ts`, best-effort (a bind failure logs, the app
+  continues without it, and `mcp:status` reports why so Settings can show it:
+  another program holding the port is named, and no endpoint is offered while
+  nothing is listening). Only the port is bound at launch (`listener.ts`, which
   imports no SDK); the SDK, the tool registry and the service are loaded by the
   first `POST /mcp` that arrives, so a launch no agent connects to never
   evaluates them - 5-7 MB of the main process at idle, measured on the packaged
@@ -426,8 +428,8 @@ Notes:
   sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
   an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. A Postman script that
-  calls an API Vayu does not run (`require()` of anything but `crypto-js` and
-  `uuid`, a bundled library such as `moment`) imports
+  calls an API Vayu does not run (`require()` of anything but `crypto-js`,
+  `uuid`, `lodash` and `moment`, a bundled library such as `tv4`) imports
   and throws at first run, so `meta.unsupportedScriptApis` (issue
   [#2576](https://github.com/athrvk/vayu/issues/2576); `[{request, names}]`, absent
   when empty) names those requests in both tools' result, `meta` riding whole.
@@ -473,8 +475,10 @@ Notes:
   alone reads as "applied the drift".
 - **A report read mid-run says so, and `get_run` is the status read** (#2436).
   The engine answers `GET /runs/:id/report` for a run that has not finished with
-  the numbers accumulated so far: zeros, no budget verdict, nothing that tells
-  that apart from a run that measured zero. `get_run_report` therefore adds
+  the numbers accumulated so far: a load run's live counts (no `latency` block
+  and no `results[]` rows until it ends, #2659), zeros elsewhere, no budget
+  verdict, nothing in the report itself that tells it apart from a finished
+  run that measured the same. `get_run_report` therefore adds
   top-level `partial: true` and a `note` when `metadata.status` is `pending` or
   `running` (after the withhold and the trace bounds, so a report that took the
   bounds' early return is marked too) and leaves both keys out for a terminal
@@ -2483,12 +2487,12 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled }`.                                |
+| `mcp:status`        | `{ running, url, enabled, error? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`). |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
-| `mcp:setEnabled`    | Start/stop the server, persist the preference.              |
+| `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
 | `mcp:getTools`      | IPC-safe tool catalog (name/description/category).           |
-| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`).                 |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`); refuses with `reason: "not-running"` while no listener is up. |
 
 One channel runs the other way, main → renderer:
 

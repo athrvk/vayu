@@ -752,6 +752,16 @@ declare const CryptoJS: {
 };
 
 /**
+ * Postman's bundled lodash: npm's lodash 4.17.21, the whole library, and the same object as require('lodash').
+ * 
+ * Loaded the first time a script reads it.
+ * 
+ * Example:
+ * const id = _.get(pm.response.json(), 'data.items[0].id');
+ */
+declare const _: any;
+
+/**
  * Decode base64 to a binary string - one character per byte. Throws on input that is not valid base64.
  */
 declare function atob(encoded: string): string;
@@ -842,10 +852,12 @@ declare const pm: {
 		/**
 		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
+		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
+		 * 
 		 * Example:
-		 * pm.collectionVariables.set('base_url', 'https://api.example.com');
+		 * pm.collectionVariables.set('token', t, { secret: true });
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * A plain object of every enabled collection variable, each value read as pm.collectionVariables.get() would answer it.
 		 * 
@@ -985,10 +997,12 @@ declare const pm: {
 		/**
 		 * Set an environment variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
+		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
+		 * 
 		 * Example:
-		 * pm.environment.set('auth_token', response.token);
+		 * pm.environment.set('auth_token', response.token, { secret: true });
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * A plain object of every enabled environment variable, each value read as pm.environment.get() would answer it.
 		 * 
@@ -1081,10 +1095,12 @@ declare const pm: {
 		/**
 		 * Set a global variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
+		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
+		 * 
 		 * Example:
-		 * pm.globals.set('api_key', 'new_key');
+		 * pm.globals.set('api_key', 'new_key', { secret: true });
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * A plain object of every enabled global variable, each value read as pm.globals.get() would answer it.
 		 * 
@@ -1363,11 +1379,15 @@ declare const pm: {
 		 */
 		method: string;
 		/**
-		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString() and toString(). {{variables}} are already resolved here.
+		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). {{variables}} are already resolved here.
 		 * 
 		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the full URL - so `===` and `typeof` are the two things that changed. Assign a string to retarget the request before it is sent, or call url.update(...); either way it must be non-empty.
 		 */
 		get url(): string & {
+			/**
+			 * Append several parameters at once, duplicates kept. Takes a query string ("a=1&b=2"; a leading ? is dropped), an array of "a=1" strings and { key, value } objects, or one { key, value } object. Each is encoded the way query.add encodes it. Every item is checked before any is added, so a bad one leaves the URL as it was.
+			 */
+			addQueryParams(params: string | { key: string, value?: string | number | boolean | null } | ReadonlyArray<string | { key: string, value?: string | number | boolean | null }>): void;
 			/**
 			 * The host as one string - the segments of host joined by dots.
 			 */
@@ -1449,6 +1469,10 @@ declare const pm: {
 				 */
 				upsert(param: { key: string, value?: string | number | boolean | null }): void;
 			};
+			/**
+			 * Remove every parameter of each name given: a name, or an array of names and { key } objects. A name that is not there is a no-op. Unlike Postman, a single { key } object outside an array is an error rather than a silent no-op - wrap it in an array.
+			 */
+			removeQueryParams(params: string | ReadonlyArray<string | { key: string }>): void;
 			/**
 			 * The whole URL as a string, which is why JSON.stringify embeds the URL rather than an object dump.
 			 */
@@ -2234,10 +2258,12 @@ declare const pm: {
 		/**
 		 * Set a local variable: read before every other scope by pm.variables and {{name}} for the rest of the run, and never stored. Later reads answer the value as set; its string form is what {{name}} substitutes.
 		 * 
+		 * The optional third argument is read as on the other scopes, but this scope is never stored or masked, so a secret flag on it has no effect.
+		 * 
 		 * Example:
 		 * pm.variables.set('signature', sig);
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * Every enabled variable from every tier, merged in precedence order - each name resolves to what pm.variables.get() would answer.
 		 */
@@ -2356,15 +2382,19 @@ declare const request: {
 interface VayuShelfModules {
 	'crypto-js': typeof import('crypto-js');
 	'uuid': typeof import('uuid');
+	'lodash': typeof import('lodash');
+	'moment': typeof import('moment');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
  * const uuid = require('uuid');
  * const id = uuid();
+ * const _ = require('lodash');
+ * const moment = require('moment');
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2545,13 +2575,6 @@ declare const alert: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled lodash. Its replacement is require('lodash'), which Vayu's require() does not load either. The Array and Object built-ins (map, filter, flatMap, Object.entries, Object.fromEntries) cover most uses.
- */
-declare const _: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
  * Postman's bundled JSON Schema validator. Its replacement is require('ajv'), which Vayu's require() does not load either.
  */
 declare const tv4: never;
@@ -2569,13 +2592,6 @@ declare const xml2Json: never;
  * Postman's bundled HTML parser. Its replacement is require('cheerio'), which Vayu's require() does not load either.
  */
 declare const cheerio: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's bundled moment. Its replacement is require('moment'), which Vayu's require() does not load either. The Date built-in is what a script has.
- */
-declare const moment: never;
 
 /**
  * Not available in the Vayu script sandbox.
@@ -2623,4 +2639,13 @@ declare module 'uuid' {
 		version(uuid: string): number;
 	};
 	export = uuid;
+}
+
+declare module 'lodash' {
+	export = _;
+}
+
+declare module 'moment' {
+	const moment: any;
+	export = moment;
 }

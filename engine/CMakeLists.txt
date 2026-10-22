@@ -702,6 +702,8 @@ if(QUICKJS_FOUND)
     # The vendored libraries `require()` hands out (#2650): one row each.
     include(cmake/embed_js.cmake)
     vayu_embed_js(vayu_core UUID_JS vendor/uuid/uuid.min.js)
+    vayu_embed_js(vayu_core LODASH_JS vendor/lodash/lodash.min.js)
+    vayu_embed_js(vayu_core MOMENT_JS vendor/moment/moment.min.js)
 
     # Disable C99 extension warnings for the QuickJS glue (QuickJS macros use
     # compound literals). One list for both, so a file added to the glue cannot

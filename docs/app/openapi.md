@@ -825,7 +825,7 @@ Not a failure, and it says which of these it was:
 | The spec no longer declares this operation | The contract moved and this request did not |
 | The spec declares no response for this status | A 500 nothing documented, for instance |
 | No schema for this content type | The status is declared; this media type is not |
-| The body is not JSON | A JSON Schema cannot describe HTML |
+| The body is not JSON, or nests past 100 levels | A JSON Schema cannot describe HTML, and a body that deep is not walked |
 | There was no response | The request never reached a server |
 
 A response the document writes as a reference -
@@ -900,7 +900,8 @@ That is the difference from the coverage block sitting directly above it, whose
 every number is exact - and it is why the two carry a sentence each saying which
 kind they are.
 
-A response whose body is not JSON, or whose status the document declares nothing
+A response whose body is not JSON (or nests past 100 levels), or whose status the
+document declares nothing
 for, is **not checked** rather than failed. It did not break its contract; no
 schema spoke about it.
 

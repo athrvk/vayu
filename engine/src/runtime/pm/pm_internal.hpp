@@ -84,6 +84,10 @@ struct RuntimeState {
     /// from a value the script threw: both arrive as a pending exception at the
     /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
     bool interrupted = false;
+    /// The script stack budget this runtime was configured with, which
+    /// `load_library` restores after a library's evaluation raised it. 0 is
+    /// QuickJS's "no limit".
+    std::size_t stack_size = 0;
     /// Promises rejected with no handler attached, in rejection order, each a
     /// reference the rejection tracker took (#2531). Emptied, every reference
     /// freed, before an execution releases its context: a held promise pins

@@ -635,8 +635,9 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.request.url" }, { "detail", "string & object (writable pre-request)" },
     { "documentation",
     "The full request URL, as Postman's Url object: protocol, host, port, "
-    "path, query and hash, plus getHost(), getPath(), getQueryString() and "
-    "toString(). {{variables}} are already resolved here.\n\nIt still behaves "
+    "path, query and hash, plus getHost(), getPath(), getQueryString(), "
+    "addQueryParams(), removeQueryParams() and toString(). {{variables}} are "
+    "already resolved here.\n\nIt still behaves "
     "as the string it used to be - concatenation, template literals, ==, the "
     "String methods and .length all give the full URL - so `===` and `typeof` "
     "are the two things that changed. Assign a string to retarget "
@@ -846,6 +847,34 @@ nlohmann::json get_script_completions () {
     "Both re-parse the whole URL in place; editing a single member (pushing "
     "to path, changing a query entry) is not supported." },
     { "sortText", "2_pm_request_url_update" } });
+
+    completions.push_back ({ { "label", "pm.request.url.addQueryParams" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.addQueryParams(\"${1:a=1&b=2}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.url.addQueryParams(params: string | { key: string, value?: "
+    "string | number | boolean | null } | ReadonlyArray<string | { key: "
+    "string, "
+    "value?: string | number | boolean | null }>): void" },
+    { "documentation",
+    "Append several parameters at once, duplicates kept. Takes a query string "
+    "(\"a=1&b=2\"; a leading ? is dropped), an array of \"a=1\" strings and "
+    "{ key, value } objects, or one { key, value } object. Each is encoded the "
+    "way query.add encodes it. Every item is checked before any is added, so a "
+    "bad one leaves the URL as it was." },
+    { "sortText", "2_pm_request_url_addQueryParams" } });
+
+    completions.push_back (
+    { { "label", "pm.request.url.removeQueryParams" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.url.removeQueryParams(${1:[\"page\", \"sort\"]})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.removeQueryParams(params: string | ReadonlyArray<string | { key: string }>): void" },
+    { "documentation",
+    "Remove every parameter of each name given: a name, or an array of names "
+    "and { key } objects. A name that is not there is a no-op. Unlike "
+    "Postman, a single { key } object outside an array is an error rather "
+    "than a silent no-op - wrap it in an array." },
+    { "sortText", "2_pm_request_url_removeQueryParams" } });
 
     completions.push_back ({ { "label", "Retarget the request URL" }, { "kind", KIND_SNIPPET },
     { "insertText", "pm.request.url = \"${1:https://api.example.com/v2/users}\";" },
@@ -1400,12 +1429,17 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.environment.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.environment.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.environment.set(name: string, value: any): void" },
+    { "detail", "pm.environment.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set an environment variable. Later reads in this run answer the value "
     "as set; its string form is what {{name}} substitutes and what is "
-    "persisted.\n\nExample:\npm.environment.set('auth_token', "
-    "response.token);" },
+    "persisted.\n\nThe optional third argument is a type name ('string', "
+    "'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { "
+    "type, secret }. { secret: true } marks the variable secret, "
+    "{ secret: false } clears the flag. Run snapshots mask a secret from the "
+    "next run on, not the run that set "
+    "it.\n\nExample:\npm.environment.set('auth_token', "
+    "response.token, { secret: true });" },
     { "sortText", "1_pm_environment_set" } });
 
     // ========================================
@@ -1429,11 +1463,17 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.globals.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.globals.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.globals.set(name: string, value: any): void" },
+    { "detail", "pm.globals.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set a global variable. Later reads in this run answer the value as set; "
     "its string form is what {{name}} substitutes and what is "
-    "persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');" },
+    "persisted.\n\nThe optional third argument is a type name ('string', "
+    "'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { "
+    "type, secret }. { secret: true } marks the variable secret, "
+    "{ secret: false } clears the flag. Run snapshots mask a secret from the "
+    "next run on, not the run that set "
+    "it.\n\nExample:\npm.globals.set('api_key', 'new_key', { secret: "
+    "true });" },
     { "sortText", "1_pm_globals_set" } });
 
     // ========================================
@@ -1460,14 +1500,19 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.collectionVariables.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.collectionVariables.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.collectionVariables.set(name: string, value: any): void" },
+    { "detail", "pm.collectionVariables.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set a collection variable on the request's own collection - it shadows a "
     "parent collection's variable of the same name rather than changing it. "
     "Later reads in this run answer the value as set; its string form is "
     "what {{name}} substitutes and what is "
-    "persisted.\n\nExample:\npm.collectionVariables.set('base_url', "
-    "'https://api.example.com');" },
+    "persisted.\n\nThe optional third argument is a type name ('string', "
+    "'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { "
+    "type, secret }. { secret: true } marks the variable secret, "
+    "{ secret: false } clears the flag. Run snapshots mask a secret from the "
+    "next run on, not the run that set "
+    "it.\n\nExample:\npm.collectionVariables.set('token', t, { secret: "
+    "true });" },
     { "sortText", "1_pm_collectionVariables_set" } });
 
     // ========================================
@@ -1558,12 +1603,14 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.variables.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.variables.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.variables.set(name: string, value: any): void" },
+    { "detail", "pm.variables.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set a local variable: read before every other scope by pm.variables and "
     "{{name}} for the rest of the run, and never stored. Later reads answer "
     "the value as set; its string form is what {{name}} "
-    "substitutes.\n\nExample:\npm.variables.set('signature', sig);" },
+    "substitutes.\n\nThe optional third argument is read as on the other "
+    "scopes, but this scope is never stored or masked, so a secret flag on it "
+    "has no effect.\n\nExample:\npm.variables.set('signature', sig);" },
     { "sortText", "1_pm_variables_set" } });
 
     completions.push_back ({ { "label", "pm.variables.unset" },
@@ -2026,7 +2073,7 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_atob" } });
 
     // ========================================
-    // require() and the library it loads (#2578)
+    // require() and the libraries it loads (#2578)
     // ========================================
     // One entry for every module. `detail` is display text (the return type is
     // the module itself, which differs per name); script_types.cpp declares
@@ -2039,11 +2086,26 @@ nlohmann::json get_script_completions () {
     "Load a library Vayu bundles. On the shelf: " + shelf_names ("", ", ") +
     ". crypto-js answers the same object as the CryptoJS global. uuid is npm's "
     "uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and "
-    "the module is itself callable, so uuid() is a v4. Any other name throws "
-    "\"Cannot find module\" and lists the shelf: nothing is read from disk or "
-    "fetched.\n\nExample:\nconst CryptoJS = require('crypto-js');\n"
-    "const uuid = require('uuid');\nconst id = uuid();" },
+    "the module is itself callable, so uuid() is a v4. lodash is npm's lodash "
+    "4.17.21 and answers the same object as the _ global. moment is npm's "
+    "moment 2.31.0, English only, with no moment-timezone, and has no global. "
+    "Any other name throws \"Cannot find module\" and lists the shelf: nothing "
+    "is read from disk or fetched.\n\nExample:\n"
+    "const CryptoJS = require('crypto-js');\n"
+    "const uuid = require('uuid');\nconst id = uuid();\n"
+    "const _ = require('lodash');\nconst moment = require('moment');" },
     { "sortText", "2_require" } });
+
+    // `any`: lodash's few hundred members are not restated here, and a partial
+    // list would flag the ones it left out on correct code.
+    completions.push_back ({ { "label", "_" }, { "kind", KIND_VARIABLE },
+    { "insertText", "_" }, { "detail", "any (lodash 4.17.21)" },
+    { "documentation",
+    "Postman's bundled lodash: npm's lodash 4.17.21, the whole library, and "
+    "the same object as require('lodash').\n\nLoaded the first time a script "
+    "reads it.\n\nExample:\nconst id = _.get(pm.response.json(), "
+    "'data.items[0].id');" },
+    { "sortText", "2__" } });
 
     completions.push_back ({ { "label", "CryptoJS" }, { "kind", KIND_VARIABLE },
     { "insertText", "CryptoJS" }, { "detail", "crypto-js, as Vayu provides it" },

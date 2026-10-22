@@ -126,8 +126,14 @@ import {
 	loadMcpEnabled,
 	saveMcpEnabled,
 } from "./mcp/store.js";
-import { connectClient, type McpConnectClient } from "./mcp/connect.js";
+import type { McpConnectClient } from "./mcp/connect.js";
 import { McpListener } from "./mcp/listener.js";
+import {
+	buildMcpStatus,
+	classifyStartError,
+	connectWhileRunning,
+	type McpStartError,
+} from "./mcp/status.js";
 import type { McpDataChangedEvent } from "./mcp/tools.js";
 import type { VayuMcpService } from "./mcp/index.js";
 import {
@@ -151,7 +157,6 @@ import {
 	ENGINE_PORT_CANDIDATES,
 	MCP_HOST,
 	MCP_PORT,
-	MCP_ENDPOINT_URL,
 	APP_USER_MODEL_ID,
 	APP_NAME,
 	USER_DATA_DIR_NAME,
@@ -215,6 +220,9 @@ let engineStartup: Promise<void> | null = null;
 let engineStartFailure: string | null = null;
 // The MCP port, bound while the server is enabled. See mcp/listener.ts.
 let mcpListener: McpListener | null = null;
+// Why the last start failed, for `mcp:status`; null once a start succeeds, the
+// server is stopped, or the preference turns it off (#2368).
+let mcpStartError: McpStartError | null = null;
 // The MCP service behind it (Streamable HTTP, exposing the engine to agents; see
 // mcp/index.ts), built by the first request the listener receives - null until
 // then, and read as "not loaded yet" by the Settings IPC below.
@@ -1059,7 +1067,19 @@ function loadMcp(): Promise<McpModule> {
 	return mcpModulePromise;
 }
 
+// One start at a time: Retry clicked twice would otherwise bind a second
+// listener against the first one's port and record Vayu's own bind as a conflict.
+let mcpStarting: Promise<void> | null = null;
+
 async function startMcp() {
+	mcpStarting ??= runStartMcp().finally(() => {
+		mcpStarting = null;
+	});
+	return mcpStarting;
+}
+
+async function runStartMcp() {
+	mcpStartError = null;
 	try {
 		// Inside the try, not ahead of it: this is the first thing in the whole app
 		// to touch the persisted MCP config, so it is where a store failure lands.
@@ -1101,12 +1121,19 @@ async function startMcp() {
 		appLogger().info("mcp", "MCP server listening", { url: listener.url });
 	} catch (error) {
 		// The MCP server is a non-critical convenience - a bind failure (e.g. port
-		// in use) must not take down the app. Log and continue.
+		// in use) must not take down the app. Log it, keep it for `mcp:status` so
+		// Settings can say why nothing is listening, and continue.
+		mcpStartError = classifyStartError(error, { host: MCP_HOST, port: MCP_PORT });
 		appLogger().error("mcp", "Failed to start MCP server (continuing without it)", {
 			error: String(error),
+			code: mcpStartError.code,
 		});
 		mcpListener = null;
 	}
+}
+
+function currentMcpStatus(enabled: boolean) {
+	return buildMcpStatus({ listener: mcpListener, enabled, error: mcpStartError });
 }
 
 /**
@@ -1135,6 +1162,9 @@ async function stopMcp() {
 	// the listener's close would otherwise wait on. A later start builds a fresh
 	// service on first request.
 	mcpService = null;
+	// Before the early return: a server that never bound has no listener to stop
+	// but may still hold the failure from its last attempt.
+	mcpStartError = null;
 	if (!listener) return;
 	try {
 		await service?.stop();
@@ -1267,11 +1297,7 @@ function setupIpcHandlers() {
 
 	// MCP server status - used by Settings to show the connect URL and state.
 	ipcMain.handle("mcp:status", () => {
-		return {
-			running: mcpListener?.isRunning() ?? false,
-			url: mcpListener?.url ?? MCP_ENDPOINT_URL,
-			enabled: loadMcpEnabled(),
-		};
+		return currentMcpStatus(loadMcpEnabled());
 	});
 
 	// One-click connect: register the Vayu endpoint with a client via its own CLI
@@ -1281,8 +1307,7 @@ function setupIpcHandlers() {
 		if (client !== "claude" && client !== "vscode") {
 			return { ok: false, reason: "unsupported", message: "Unsupported client" };
 		}
-		const url = mcpListener?.url ?? MCP_ENDPOINT_URL;
-		return connectClient(client as McpConnectClient, url);
+		return connectWhileRunning(client as McpConnectClient, mcpListener);
 	});
 
 	// Toggle the MCP server on/off from Settings. Persists the preference and
@@ -1292,14 +1317,11 @@ function setupIpcHandlers() {
 		saveMcpEnabled(on);
 		if (on && !mcpListener) {
 			await startMcp();
-		} else if (!on && mcpListener) {
+		} else if (!on) {
+			// Also when nothing is listening: it is what drops a failed start's error.
 			await stopMcp();
 		}
-		return {
-			running: mcpListener?.isRunning() ?? false,
-			url: mcpListener?.url ?? MCP_ENDPOINT_URL,
-			enabled: on,
-		};
+		return currentMcpStatus(on);
 	});
 
 	// Current MCP safety config (allowlist / caps / writes) for the Settings panel.

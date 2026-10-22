@@ -8348,6 +8348,20 @@ std::string shelf_answer (ScriptEngine& engine, Request& request, const std::str
     return result.success ? env["out"].value : "threw: " + result.error_message;
 }
 
+/// Stack budget for a test that calls into a bundled library and asserts what
+/// it answers. MSVC at /Od under ASan overflowed the default 256 KB inside
+/// lodash and moment calls (`_.isEqual`, `.format`), so those answers would
+/// depend on a frame size, not on the library. The stack-budget behaviour
+/// itself is pinned by RequireShelfLibrariesLoadUnderAShallowInterpreterStack
+/// and the restore test after it. Half of the 1 MB stack a Windows thread has.
+constexpr std::size_t LIBRARY_CALL_STACK_BYTES = std::size_t{ 512 } * 1024;
+
+ScriptConfig library_call_config () {
+    ScriptConfig config;
+    config.stack_size = LIBRARY_CALL_STACK_BYTES;
+    return config;
+}
+
 } // namespace
 
 // The acceptance case: Postman's signing call, through require.
@@ -8454,7 +8468,7 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (refusal.find ("(crypto-js, uuid)"), std::string::npos)
+    EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash, moment)"), std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
     << refusal;
@@ -8614,6 +8628,296 @@ TEST_F (ScriptEngineTest, RequireShelfUuidEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (shelf_answer (engine, request, "require('uuid').v4().length + require('uuid')().length"),
     "72");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+}
+
+// require('lodash') and the `_` global are npm's lodash 4.17.21, vendored (#2651).
+
+TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "_.get({ a: [{ b: 3 }] }, 'a[0].b')", "3" },
+    { "require('lodash').get({ a: [{ b: 3 }] }, ['a', '0', 'b'])", "3" },
+    { "_.get({}, 'a.b', 'fallback')", "fallback" },
+    { "JSON.stringify(_.chunk(['a', 'b', 'c', 'd', 'e'], 2))", R"([["a","b"],["c","d"],["e"]])" },
+    { "JSON.stringify(_.groupBy([6.1, 4.2, 6.3], Math.floor))", R"({"4":[4.2],"6":[6.1,6.3]})" },
+    { "JSON.stringify(_.groupBy(['one', 'two', 'three'], 'length'))", R"({"3":["one","two"],"5":["three"]})" },
+    { "_.isEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })", "true" },
+    { "_.isEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 3 }] })", "false" },
+    { "(function () { var o = { a: [{ b: 1 }] }, c = _.cloneDeep(o); "
+      "c.a[0].b = 2; return [o.a[0].b, c.a[0].b, c.a !== o.a].join(); })()",
+    "1,2,true" },
+    { "_.map([1, 2, 3], function (n) { return n * 2; }).join()", "2,4,6" },
+    { "_([1, 2, 3, 4]).filter(function (n) { return n % 2 === 0; }).sum()", "6" },
+    { "_.VERSION", "4.17.21" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// One module for the global and the require, whichever the script reaches first.
+TEST_F (ScriptEngineTest, RequireShelfLodashIsOneModuleForRequireAndTheGlobal) {
+    EXPECT_EQ (shelf_answer (engine, request,
+               "typeof _ + ' ' + (require('lodash') === _) + ' ' + "
+               "(require('lodash') === require('lodash'))"),
+    "function true true");
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "(function () { var l = require('lodash'); return (l === _) + ' ' + "
+    "typeof l.get; })()"),
+    "true function");
+}
+
+// lodash takes its CommonJS branch inside the glue, so it assigns no global
+// of its own, and the sandbox gives it no Node to find: no `module`, `exports`,
+// `process` or `global` is in a built context, before or after it loads.
+TEST_F (ScriptEngineTest, RequireShelfLodashLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
+    const std::string probe =
+    "[typeof module, typeof exports, typeof process, typeof global, typeof "
+    "define].join(' ')";
+    EXPECT_EQ (shelf_answer (roomy, request, probe),
+    "undefined undefined undefined undefined undefined");
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('lodash').get({}, 'a'); _.noop(); return "
+    "Object.getOwnPropertyNames(globalThis).sort().join() === before; })()"),
+    "true");
+    EXPECT_EQ (shelf_answer (roomy, request, "(require('lodash'), " + probe + ")"),
+    "undefined undefined undefined undefined undefined");
+}
+
+// An assignment replaces `_` as it would any global, without loading lodash,
+// and a script's own `_` is its own.
+TEST_F (ScriptEngineTest, RequireShelfLodashGlobalCanBeReassigned) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "(_ = 1, _ + 1)"), "2");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before);
+    EXPECT_EQ (shelf_answer (engine, request, "(function () { var _ = 'mine'; return _; })()"),
+    "mine");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before);
+}
+
+// lodash reads the `_` global while it evaluates (its noConflict value), which
+// is the shelf's own accessor mid-load. Read through either door, the library
+// is evaluated once and the global ends up as the library. Mutations: evaluate
+// the shelf in `setup_require_shelf` and the first count fails; let the getter
+// replace itself with the mid-load `undefined` and the last answer does; drop
+// the in-progress entry in `load_library` and that read recurses until the
+// stack runs out, so every lodash case throws.
+TEST_F (ScriptEngineTest, RequireShelfLodashEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "_.get({ a: 1 }, 'a') + require('lodash').get({ a: 1 }, 'a')"),
+    "2");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    EXPECT_EQ (shelf_answer (roomy, request, "(require('lodash'), typeof _ + (_ === require('lodash')))"),
+    "functiontrue");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
+// require('moment') is npm's moment 2.31.0 (the English-only min build),
+// vendored (#2652). Postman binds no `moment` global, so there is only the
+// module. Local-time cases use a calendar date and format it back, which does
+// not move with the host's zone; the rest read moment.utc and fixed instants,
+// never the clock.
+TEST_F (ScriptEngineTest, RequireShelfMomentAnswersKnownCalls) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "require('moment')('2026-10-21').add(1, 'day').format('YYYY-MM-DD')", "2026-10-22" },
+    { "require('moment').utc(0).toISOString()", "1970-01-01T00:00:00.000Z" },
+    { "require('moment').utc('2026-10-21T12:00:00Z').format('dddd, MMMM Do "
+      "YYYY, h:mm a')",
+    "Wednesday, October 21st 2026, 12:00 pm" },
+    { "require('moment').utc('2026-10-21').unix()", "1792540800" },
+    { "require('moment').utc('2026-10-21').isBefore(require('moment').utc('"
+      "2026-10-22'))",
+    "true" },
+    { "require('moment').utc('2026-10-22').isBefore(require('moment').utc('"
+      "2026-10-21'))",
+    "false" },
+    { "require('moment').utc('2026-10-22').diff(require('moment').utc('2026-10-"
+      "21'), 'hours')",
+    "24" },
+    { "require('moment').utc('2026-01-31').add(1, "
+      "'month').format('YYYY-MM-DD')",
+    "2026-02-28" },
+    { "require('moment').utc('2026-10-21').startOf('month').format()", "2026-10-01T00:00:00Z" },
+    { "require('moment').utc('2026-02-30').isValid()", "false" },
+    { "require('moment').duration(90, 'minutes').asHours()", "1.5" },
+    { "require('moment').version", "2.31.0" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// A destructured member is the one the module holds, and every require answers
+// one module.
+TEST_F (ScriptEngineTest, RequireShelfMomentDestructuredAndDirectAgree) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { const { utc, duration } = require('moment'); "
+    "return [utc(0).toISOString() === require('moment').utc(0).toISOString(), "
+    "duration(1, 'day').asHours(), "
+    "require('moment') === require('moment')].join(); })()"),
+    "true,24,true");
+}
+
+// moment's UMD takes its CommonJS branch inside the glue, so it assigns no
+// global: Postman has none either, so `moment` stays undeclared before and
+// after a require, and nothing else is added to the global object.
+TEST_F (ScriptEngineTest, RequireShelfMomentLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
+    const std::string probe =
+    "[typeof moment, typeof module, typeof exports, typeof define].join(' ')";
+    EXPECT_EQ (shelf_answer (roomy, request, probe), "undefined undefined undefined undefined");
+    EXPECT_EQ (shelf_answer (roomy, request, "(require('moment'), " + probe + ")"),
+    "undefined undefined undefined undefined");
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('moment').utc(0).format(); return "
+    "Object.getOwnPropertyNames(globalThis).sort().join() === before; })()"),
+    "true");
+}
+
+// The English-only build has no locale files. moment.locale('fr') asks the
+// sandbox's require for './locale/fr', which refuses, and moment keeps
+// English: the call answers 'en' and throws nothing a script would see.
+TEST_F (ScriptEngineTest, RequireShelfMomentFallsBackToEnglishForAnotherLocale) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (shelf_answer (roomy, request, "require('moment').locale('fr') + ' ' + require('moment').locale()"),
+    "en en");
+    EXPECT_EQ (shelf_answer (roomy, request, "require('moment').utc('2026-10-21').locale('fr').format('MMMM')"),
+    "October");
+}
+
+// Mutations: evaluate the shelf in `setup_require_shelf` and the first count
+// fails; let the glue assign a `moment` global and the leaves-no-global case
+// fails.
+TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request, "require('moment').utc(0).year() + require('moment').utc(0).month()"),
+    "1970");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+}
+
+// A library's parse depth is Vayu's own, not the script's to budget (#2652):
+// MSVC at /Od under ASan has frames large enough that lodash and moment
+// overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
+// budget cannot stand in for that, because the toolchain decides what a frame
+// costs: 24 KB runs a trivial script on GCC at -O0 and cannot on macOS under
+// ASan. So the budget is found at run time, the smallest one at which both
+// wrappers the tests put around a library run here, library-free. A library
+// needs well over that on every toolchain, so without the raise the load fails
+// with the RangeError "Maximum call stack size exceeded" and with it the
+// library loads. Measured, KB of budget, without the raise:
+//   GCC -O0:  wrappers run at 14, moment loads from 29, lodash from 45
+//   GCC -O3:  wrappers run at 12, moment loads from 22, lodash from 33
+// The raise must also end with the library: recursion afterwards reaches the
+// depth it reached before the require (healthy: equal, 7 at -O0 and 19 at -O3),
+// not the depth the 768 KB library budget allows (broken: 580 and 1112).
+namespace {
+
+/// Script text that defines `depth ()`, the number of calls a runaway
+/// recursion makes before the interpreter's RangeError.
+constexpr const char* DEPTH_PROBE = R"(
+    function depth() {
+        var reached = 0;
+        function descend() { reached++; descend(); }
+        try { descend(); } catch (e) { if (!(e instanceof RangeError)) { throw e; } }
+        return reached;
+    }
+)";
+
+ScriptConfig shallow_stack_config (std::size_t budget) {
+    ScriptConfig config;
+    config.stack_size = budget;
+    return config;
+}
+
+/// An expression that makes the same native call a library load starts with,
+/// `require (...)`, and is refused before any library is evaluated.
+constexpr const char* REFUSED_REQUIRE =
+"(function () { try { require('absent'); } catch (e) { return 'refused'; } "
+"})()";
+
+/// The smallest stack budget, climbing 8 KB in 2 KB steps to 256 KB, at which
+/// both wrappers the tests put around a library run on this build: the
+/// recursion probe, and a script that calls `require` (a native call checks the
+/// stack before it is entered, so it needs more than a bare script does). 0
+/// when none does.
+std::size_t shallowest_working_stack (Request& request) {
+    constexpr std::size_t KIB = 1024;
+    for (std::size_t budget = 8 * KIB; budget <= 256 * KIB; budget += 2 * KIB) {
+        ScriptEngine candidate{ shallow_stack_config (budget) };
+        Environment probe_env;
+        const auto depth_result = candidate.execute_prerequest (
+        std::string (DEPTH_PROBE) + "pm.environment.set('d', String(depth()));",
+        request, probe_env);
+        if (depth_result.success &&
+        shelf_answer (candidate, request, REFUSED_REQUIRE) == "refused") {
+            return budget;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+// Only the load is asserted: calling into lodash is the script's own stack and
+// needs more than the wrappers' budget.
+TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack) {
+    const std::size_t budget = shallowest_working_stack (request);
+    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the wrapper scripts";
+    ScriptEngine shallow{ shallow_stack_config (budget) };
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('lodash').get"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('moment').utc"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof _.get"), "function")
+    << "at " << budget << " bytes";
+}
+
+TEST_F (ScriptEngineTest, RequireShelfRestoresTheScriptsStackBudgetAfterALibraryLoads) {
+    const std::size_t budget = shallowest_working_stack (request);
+    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the wrapper scripts";
+    ScriptEngine shallow{ shallow_stack_config (budget) };
+    Environment shallow_env;
+    const auto result = shallow.execute_prerequest (std::string (DEPTH_PROBE) + R"(
+        var before = depth();
+        require('lodash');
+        require('moment');
+        var after = depth();
+        pm.environment.set('before', String(before));
+        pm.environment.set('after', String(after));
+    )",
+    request, shallow_env);
+
+    ASSERT_TRUE (result.success) << result.error_message << " at " << budget << " bytes";
+    const auto before = std::stoul (shallow_env["before"].value);
+    const auto after  = std::stoul (shallow_env["after"].value);
+    ASSERT_GT (before, 0u);
+    EXPECT_LE (after, before + (before / 2))
+    << "recursion after require() ran under the library's budget, not the "
+       "script's (budget "
+    << budget << " bytes)";
 }
 
 // The defect #2578 measured: a crypto-js signing script failed and the request

@@ -348,7 +348,7 @@ constexpr auto BINDING_KEYWORDS = std::to_array<BindingKeyword> ({
 });
 
 /**
- * The names the script declares itself. A script with its own `_` or `moment`
+ * The names the script declares itself. A script with its own `tv4` or `cheerio`
  * is not reading Postman's global of that name, and counting it would name
  * every script that keeps a value under one of those words. A name is declared
  * by a binding keyword, a parameter list, or sitting before `=>`.
@@ -506,11 +506,9 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "require()", Anchor::Bare, "require", "(", Exemption::ShelfModule },
 { "pm.require", Anchor::Bare, "pm.require", "" },
 { "script.packages", Anchor::Elsewhere, "", "" },
-{ "_", Anchor::Bare, "_", "" },
 { "tv4", Anchor::Bare, "tv4", "" },
 { "xml2Json", Anchor::Bare, "xml2Json", "" },
 { "cheerio", Anchor::Bare, "cheerio", "" },
-{ "moment", Anchor::Bare, "moment", "" },
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.
 { "Buffer", Anchor::Bare, "Buffer", "" },

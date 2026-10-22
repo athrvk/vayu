@@ -1271,6 +1271,33 @@ pm.request.url.query.remove('page');                    // every match, not the 
 pm.request.url.query.clear();                           // and the '?' with them
 ```
 
+`addQueryParams()` and `removeQueryParams()` are Postman's `Url`-level spellings
+of `add` and `remove` for several parameters at once:
+
+```javascript
+pm.request.url.addQueryParams('a=1&b=2');                // a query string
+pm.request.url.addQueryParams(['c=3', { key: 'd', value: 4 }, { key: 'flag' }]);
+pm.request.url.addQueryParams({ key: 'trace', value: 'abc' }); // or one object
+
+pm.request.url.removeQueryParams('page');                // every match of a name
+pm.request.url.removeQueryParams(['a', { key: 'b' }]);   // names and { key } objects
+```
+
+`addQueryParams` takes a query string (split on `&`, each segment at its first
+`=`; `flag` is a bare key and `a=` an empty value), an array of one-param
+strings and `{ key, value }` objects, or a single `{ key, value }` object.
+Every item is checked before any is added, so a bad one throws a `TypeError`
+and leaves the URL as it was, and an empty key is refused as in `query.add`.
+Parameters are appended with duplicates kept, encoded by the rule `add` uses.
+A string inside an array is **one** parameter, so `['a=1&b=2']` adds `a` with
+the value `1&b=2` (the `&` encoded as `%26`). `removeQueryParams` takes a name,
+or an array of names and `{ key }` objects, and removes every parameter of each;
+a name that is not there is a no-op, and an empty or non-string item is a
+`TypeError`. Two differences from Postman: a leading `?` on the query string is
+dropped (Postman keeps it as part of the first key), and
+`removeQueryParams({ key: 'page' })` outside an array throws where Postman's
+removes nothing.
+
 Five rules behind those, each the reason for a decision you might otherwise
 undo:
 
@@ -1466,10 +1493,14 @@ const token = pm.environment.get('auth_token');
 
 // Set variable (persists to environment)
 pm.environment.set('auth_token', 'new_token_value');
+
+// Set a secret variable in one call
+pm.environment.set('auth_token', 'new_token_value', { secret: true });
 ```
 
 `set()` on an existing name replaces its value and keeps the variable's `secret`,
-`type` and creation time. It also turns `enabled` on (#2479): a set is a write of a
+`type` and creation time, unless its third argument names one (below). It also
+turns `enabled` on (#2479): a set is a write of a
 value the script means to use, so a row unticked in the variables editor is ticked
 again, and the script's own `get`, `has` and `replaceIn` and the `{{name}}` pass
 before the send all see it. A name that does not exist yet is
@@ -1543,12 +1574,48 @@ Two limits:
 - **A later write replaces it.** An `extract.*` element writes a whole new
   variable, so its text replaces a value a script set earlier.
 
+### The third argument of `set` (#2664)
+
+`set(name, value, options)` reads Postman's optional third argument
+(postman-collection 5.3.0), in either of its two shapes:
+
+- **a string** is a type: `set('n', 1, 'number')`;
+- **an object** contributes `type` when it is a string and `secret` when it is a
+  boolean: `set('token', t, { secret: true })`, `set('n', 1, { type: 'number' })`.
+
+Anything else (`null`, a number, an object whose members are the wrong kind) is
+ignored, as Postman ignores it. The type names map onto the four Vayu declares:
+`string`, `number` and `boolean` are their own, `json`, `object` and `array` are
+`json`, and any other name (`any`, `default`, a word Postman has no type for)
+leaves the row's type as it was. **`"secret"` is not a Postman type**; as the
+string, or as the object's `type`, it marks the variable secret and leaves the
+type alone - the same reading the importer gives `type: "secret"`. An explicit
+`secret` boolean beside it wins, so `{ type: 'secret', secret: false }` is not
+secret, and `{ secret: false }` on its own clears the flag of a secret row.
+
+Each field the argument names is set on a new row and on an existing one; a field
+it does not name keeps what the row has, so `set(name, value)` is exactly what it
+was before. The stored text follows the type the set declares, not the one the
+row had: `set('filter', { a: 1 }, 'json')` stores the document `{"a":1}` (#2568),
+where the same set on a default-type row stores `[object Object]`.
+
+A changed flag or type is more than a value change, so the run's delta writes the
+row whole and it reaches the stored scope. **The flag takes effect from the next
+read of the scope**: `secret_variable_values`, which decides what a run snapshot
+masks, reads the stored scopes when a run starts, so the value is masked from the
+next run on and not inside the run that made it secret. The variables editor and
+an MCP agent's withholding read the stored flag too.
+
+`pm.variables.set` is the local scope and takes the argument like the others, but
+that scope is never stored and never masked, so a `secret` flag on it has no
+effect.
+
 ### The six methods every scope has
 
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time; turns `enabled` on |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
@@ -1646,7 +1713,7 @@ console.log(pm.variables.toObject()); // every tier, merged, the local scope win
 
 ### The local scope (`pm.variables.set`)
 
-`pm.variables.set(name, value)` writes Postman's *local* scope (issue #2564):
+`pm.variables.set(name, value, options?)` writes Postman's *local* scope (issue #2564):
 the strongest tier of all, above a bound data row, and never stored anywhere.
 It is for a value a script computes for this run and nothing after it - a
 signature, a nonce, a counter - which no named scope can hold without the
@@ -1667,7 +1734,9 @@ pm.variables.get('nonce'); // the number as set
   `{{data.column}}` is the row's own spelling and never reads the local scope.
 - **The writes are the scoped ones.** `set` keeps the value's type for the
   run and stores its string form for `{{name}}`, exactly as
-  [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does;
+  [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does, and it
+  reads [the third argument](#the-third-argument-of-set-2664) too, though a
+  `secret` flag here is never stored or masked;
   `unset(name)` removes one local name, so the tiers below it answer again;
   `clear()` empties the local scope. None of the three touches the
   environment, the collections or the globals.
@@ -2756,8 +2825,8 @@ carry from one script to the next belongs in a variable scope
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
 four timer functions, Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...) and two bundled libraries, `crypto-js` and `uuid`
-([below](#the-require-shelf)).
+`responseBody`, ...) and four bundled libraries, `crypto-js`, `uuid`, `lodash`
+and `moment` ([below](#the-require-shelf)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2771,8 +2840,9 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')` and `require('uuid')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')` and `require('moment')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
+| `_` | The same `lodash` module as a global, loaded on first read |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
 | `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
 
@@ -2794,9 +2864,9 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Of the libraries Postman bundles, only `CryptoJS` and `uuid` run (`uuid` has no
-global, it is `require('uuid')` only). The others (`_`,
-`moment`, `tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
+Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid` and `moment`
+run (`uuid` and `moment` have no global, they are `require` only, as in
+Postman). The others (`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2808,14 +2878,24 @@ lists them.
 There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`). Today the shelf
-holds two libraries, `crypto-js` and `uuid`. `CryptoJS` is the `crypto-js`
-module bound as a global, so both spellings of a Postman signing script work:
+holds four libraries, `crypto-js`, `uuid`, `lodash` and `moment`. `CryptoJS` is the
+`crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
+a Postman script work:
 
 ```javascript
 const CryptoJS = require('crypto-js');
 const signature = CryptoJS.HmacSHA256(payload, secret).toString(CryptoJS.enc.Hex);
 pm.request.headers.upsert({ key: 'X-Signature', value: signature });
 ```
+
+A library is evaluated under its own stack budget, not the script's
+(`constants::script_engine::SHELF_LIBRARY_STACK_SIZE`, 768 KB; a script whose
+`scriptStackSize` is larger keeps it). The library is Vayu's own vendored
+source, and how much native stack QuickJS's parser needs for it depends on the
+toolchain: MSVC at `/Od` under AddressSanitizer overflowed the default 256 KB
+`scriptStackSize` evaluating lodash and moment (#2652), while GCC at `-O0` loads
+them from 46 KB and 30 KB. The script's budget is put back as soon as the
+library has loaded, so the script's own recursion is limited exactly as before.
 
 #### `crypto-js`
 
@@ -2891,7 +2971,78 @@ pays nothing, and nothing is shared between executions.
 The Postman import's script scan reads `require('uuid')` as the library it is,
 so a collection that uses it is not named in `meta.unsupportedScriptApis`.
 
-The libraries Postman also lets a script `require` - `lodash`, `moment`, `ajv`,
+#### `lodash`
+
+`require('lodash')` and the `_` global are **the npm `lodash` package itself**,
+version 4.17.21, the full build (`lodash.min.js`, 73,015 bytes) vendored
+unmodified (`engine/vendor/lodash/`, MIT; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+It is the whole library, not a subset, so every lodash 4 function is there,
+chaining (`_(list).filter(f).sum()`) included:
+
+```javascript
+const items = pm.response.json().items;
+pm.environment.set('firstId', _.get(items, '[0].id'));
+pm.environment.set('pages', _.chunk(items, 10).length);
+const byStatus = require('lodash').groupBy(items, 'status');
+pm.test('every item is grouped', () => pm.expect(_.sumBy(_.values(byStatus), 'length')).to.equal(items.length));
+```
+
+`_` and `require('lodash')` are one object within an execution, whichever the
+script reaches first. Assigning `_` (`_ = something`) replaces the global
+without loading lodash, and a script's own `const _ = ...` is its own. lodash
+takes its CommonJS branch inside the shelf's glue, so loading it adds no global
+and finds no Node: the sandbox has no `module`, `exports`, `process` or
+`global`.
+
+**Cost.** Evaluated on first read of `_` or first `require('lodash')` in an
+execution, never when a context is built, so a script that touches neither pays
+nothing. First use costs about 10 ms in a `-O2` build and 24 ms in a Debug
+build (QuickJS parsing and running the 73 KB library, measured in a fresh
+context, best of 20); the evaluated module then holds about 800 KB of the
+script's 64 MB limit until the execution ends. Nothing is shared between
+executions, so the next script that uses it pays again.
+
+The Postman import's script scan does not name `_` or `require('lodash')`.
+
+#### `moment`
+
+`require('moment')` is **the npm `moment` package itself**, version 2.31.0, its
+`min/moment.min.js` (60,887 bytes) vendored unmodified (`engine/vendor/moment/`,
+MIT; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+It is the build Postman's sandbox gives `require('moment')`: plain moment,
+English only, no `moment-timezone` (Postman 6.8.0 ships 2.30.1). It is reached
+only through `require`, as in Postman: **there is no `moment` global**, and a
+bare `moment` in a script is a `ReferenceError` unless the script declares it.
+
+```javascript
+const moment = require('moment');
+pm.environment.set('expires', moment.utc().add(1, 'hour').toISOString());
+pm.environment.set('stamp', moment('2026-10-21').add(1, 'day').format('YYYY-MM-DD'));
+const age = moment.utc(pm.response.json().createdAt).diff(moment.utc('2026-01-01'), 'days');
+```
+
+Parsing and formatting without `utc` use the engine host's time zone, as moment
+does in Node, so a script that must give the same answer everywhere uses
+`moment.utc`. The build carries no locale files: `moment.locale('fr')` asks the
+shelf's `require` for `./locale/fr`, is refused, and moment keeps English, so
+the call returns `'en'` and throws nothing. `moment.tz` does not exist.
+moment takes its CommonJS branch inside the shelf's glue, so loading it adds no
+global.
+
+**Cost.** Evaluated on the first `require('moment')` in an execution, never
+when a context is built, so a script that does not require it pays nothing.
+First use costs about 8 ms in a `-O2` build and 17 ms in a Debug build (QuickJS
+parsing and running the 61 KB library, measured in a fresh context, median of
+101; [First-load cost](building.md#first-load-cost) has the method); the
+evaluated module then holds about 550 KB of the script's 64 MB limit until the
+execution ends. Nothing is shared between executions, so the next script that
+requires it pays again.
+
+The Postman import's script scan does not name `require('moment')`.
+
+The libraries Postman also lets a script `require` - `ajv`,
 `tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins - are
 **not** on the shelf: `require` of one throws, and a Postman import names the
 script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
@@ -3135,7 +3286,7 @@ The **language** is current; what is missing is the **host environment**:
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: `require()` answers only the
-  [shelf](#the-require-shelf) (`crypto-js`, `uuid`); `fs`, `http`, `crypto`
+  [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`, `moment`); `fs`, `http`, `crypto`
   and every other module throw `Cannot find module`.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at

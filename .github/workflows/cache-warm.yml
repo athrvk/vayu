@@ -148,13 +148,15 @@ jobs:
           # string. Normalise that one difference, require exact equality for
           # everything else.
           #
-          # The key also carries the runner image (`matrix.os`, with
-          # `ubuntu-24.04` for the one job that has no matrix, codeql.yml's).
-          # vcpkg's archives are only valid for the compiler that built them,
-          # and actions/cache never overwrites a key, so while the Linux release
-          # built on ubuntu-22.04 and every other Linux job on ubuntu-24.04
-          # shared one key, whichever saved first owned it and the other always
-          # rebuilt its dependencies from source.
+          # The key also carries the image (`matrix.os`, with `ubuntu-24.04`
+          # for the one job that has no matrix, codeql.yml's). On the Linux
+          # release leg that is the label `container-ubuntu-22.04`, naming the
+          # container the build runs in, not the runner hosting it. vcpkg's
+          # archives are only valid for the compiler that built them, and
+          # actions/cache never overwrites a key, so while the Linux release
+          # built on 22.04 and every other Linux job on 24.04 shared one key,
+          # whichever saved first owned it and the other always rebuilt its
+          # dependencies from source.
           # sanitizers.yml and engine-tidy-scan.yml carry the same pin and were
           # outside this list until the 0.24.0 baseline bump found them: a bump
           # that updated only the guarded four would have left them checking out
@@ -349,17 +351,23 @@ jobs:
     # Guard first: if the keys disagree, warming the wrong key helps nobody.
     needs: guard
     if: github.event_name != 'pull_request'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
+    # Empty on the legs that name no container, which then run on the runner.
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
-        # The runner images release.yml builds on, not the pull-request matrix's:
+        # The images release.yml builds on, not the pull-request matrix's:
         # the vcpkg key carries the image (see the guard), so warming
         # ubuntu-24.04 would fill a key the Linux release never asks for. The
-        # guard asserts this list and release.yml's stay equal.
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        # guard asserts this list and release.yml's stay equal; the Linux leg
+        # is release.yml's container on its runner, for the reasons given
+        # there (#2634), including why the run-cmake paths are relative.
+        os: [container-ubuntu-22.04, windows-latest, macos-latest]
         include:
-          - os: ubuntu-22.04
+          - os: container-ubuntu-22.04
+            runner: ubuntu-24.04
+            container: ubuntu:22.04
             preset: linux-prod
           - os: windows-latest
             preset: windows-prod
@@ -381,24 +389,18 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
+      # release.yml's step, for its reasons.
+      - name: Install git and zstd (container)
+        if: matrix.container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build \
-            build-essential \
-            pkg-config \
-            ca-certificates \
-            autoconf \
-            autoconf-archive \
-            automake \
-            libtool
-
-      # The release's compiler, or neither the vcpkg archives nor the sccache
-      # entries this job writes are the ones the release looks up.
+      # The release's build tools and compiler, or neither the vcpkg archives
+      # nor the sccache entries this job writes are the ones the release looks
+      # up.
       - name: Set up the Linux release toolchain
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux-release-toolchain
@@ -429,6 +431,22 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
+      # The same CMake and Ninja release.yml's container leg builds with.
+      - name: Put vcpkg's CMake and Ninja on PATH (container)
+        if: matrix.container
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in cmake ninja; do
+            exe=$("$VCPKG_ROOT/vcpkg" fetch "$tool" | tail -n 1)
+            if [ ! -x "$exe" ]; then
+              echo "::error::'vcpkg fetch $tool' answered '$exe', which is not an executable." >&2
+              exit 1
+            fi
+            "$exe" --version | head -1
+            dirname "$exe" >> "$GITHUB_PATH"
+          done
+
       # sccache, set up exactly as release.yml and pr-tests.yml do (the guard job
       # asserts the launcher and backend stay in step). The compile below runs
       # through it and its entries land in the master GHA scope, so a tag build
@@ -451,7 +469,7 @@ jobs:
       - name: Warm vcpkg archives and the engine sccache scope
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
-          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          cmakeListsTxtPath: 'engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
@@ -464,7 +482,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
-          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          cmakeListsTxtPath: 'engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
@@ -529,14 +547,30 @@ jobs:
     # spending runner minutes on any cache at all.
     needs: guard
     if: github.event_name != 'pull_request'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        # ubuntu-24.04 for pr-tests.yml's app jobs, and release.yml's container
+        # as well: setup-node's key is the same in and out of it, but the
+        # store's path is not (the container's HOME is /github/home), and
+        # actions/cache versions an entry by its path.
+        os: [ubuntu-24.04, container-ubuntu-22.04, windows-latest, macos-latest]
+        include:
+          - os: container-ubuntu-22.04
+            runner: ubuntu-24.04
+            container: ubuntu:22.04
     timeout-minutes: 20
 
     steps:
+      # release.yml's step, for its reasons.
+      - name: Install git and zstd (container)
+        if: matrix.container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # pnpm first, then setup-node: setup-node shells out to pnpm to locate the

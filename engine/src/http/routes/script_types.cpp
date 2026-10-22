@@ -152,11 +152,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 
 // The libraries Postman bundles that Vayu's require() shelf does not carry,
 // each saying what Vayu has instead. One that ships leaves this list (#2578).
-{ "_",
-"Postman's bundled lodash. Its replacement is require('lodash'), which "
-"Vayu's require() does not load either. The Array and Object built-ins "
-"(map, filter, flatMap, Object.entries, Object.fromEntries) cover most "
-"uses." },
 { "tv4",
 "Postman's bundled JSON Schema validator. Its replacement is "
 "require('ajv'), which Vayu's require() does not load either." },
@@ -166,10 +161,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "cheerio",
 "Postman's bundled HTML parser. Its replacement is require('cheerio'), "
 "which Vayu's require() does not load either." },
-{ "moment",
-"Postman's bundled moment. Its replacement is require('moment'), which "
-"Vayu's require() does not load either. The Date built-in is what a "
-"script has." },
 { "Backbone",
 "Postman's bundled Backbone, which it names no replacement for. Vayu has "
 "no Backbone." },
@@ -187,8 +178,8 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
  *
  * `body` is what sits inside `declare module '<name>' { ... }`, tab-indented
  * and ending in the `export =` that names the module's value: a module with a
- * global to point at is one line (crypto-js), and one with none (uuid, which
- * has no global) carries its own declaration.
+ * global to point at is one line (crypto-js, lodash), and one with none (uuid,
+ * moment) carries its own declaration.
  *
  * `script_types_test.cpp` runs `require(name)` in the real script engine for
  * every module declared here, and checks that every name `require` accepts
@@ -239,6 +230,13 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 "\t\tversion(uuid: string): number;\n"
 "\t};\n"
 "\texport = uuid;\n" },
+{ "lodash", "\texport = _;\n" },
+// `any`, as lodash's `_` is: moment's API is not restated here, and a partial
+// list would flag the members it left out on correct code. Postman gives
+// moment no global, so the module carries its own declaration.
+{ "moment",
+"\tconst moment: any;\n"
+"\texport = moment;\n" },
 });
 
 /**
@@ -865,8 +863,9 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
  * The entry's `detail` cannot give each module its own return type, and a pair
  * of overloads would turn a name off the shelf from TS2345 into TS2769 "No
  * overload matches" - the less direct message. One generic signature keyed on
- * the names keeps the parameter a literal union (`require('lodash')` is "not
- * assignable to 'crypto-js' | 'uuid'"). Only the entry's documentation is read.
+ * the names keeps the parameter a literal union (`require('ajv')` is "not
+ * assignable to 'crypto-js' | 'uuid' | 'lodash' | 'moment'"). Only the entry's
+ * documentation is read.
  */
 void render_require (std::string& out, const TypeNode& require) {
     out += "interface VayuShelfModules {\n";

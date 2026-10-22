@@ -852,6 +852,45 @@ TEST_F (LoadStrategyTest, ARequestRefusedBeforeTheWireIsAnErrorWithNoLatency) {
     EXPECT_EQ (mc.latency_samples (), 0u);
 }
 
+// The same rule when it is libcurl, not the pre-send gate, that refuses the
+// URL: a raw space sent as typed is refused before anything is resolved, so a
+// run made only of such requests reports no latency at all (#2412). Port 1
+// refuses a connection, so a transfer that did reach the wire would be timed.
+// Mutation-check: set `transfer_attempted` true unconditionally in
+// `extract_response` and every request joins the histogram.
+TEST_F (LoadStrategyTest, ARunWhoseEveryUrlLibcurlRefusesHasNoLatencySamples) {
+    constexpr size_t ITERATIONS = 3;
+    nlohmann::json config       = {
+        { "mode", "iterations" },
+        { "iterations", ITERATIONS },
+        { "concurrency", 1 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-unparsable-url-latency", config);
+    context->event_loop =
+    std::make_unique<vayu::http::EventLoop> (vayu::http::EventLoopConfig{});
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method               = vayu::HttpMethod::GET;
+    request.url                  = "http://127.0.0.1:1/a b";
+    request.timeout_ms           = 5000;
+    request.disable_url_encoding = true;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    const auto& mc = *context->metrics_collector;
+    const bool settled =
+    vayu::tests::wait_until ([&] () { return mc.total_errors () == ITERATIONS; });
+    context->event_loop->stop (true);
+
+    ASSERT_TRUE (settled) << "errors recorded: " << mc.total_errors ();
+    EXPECT_EQ (context->requests_sent.load (), ITERATIONS);
+    EXPECT_EQ (mc.latency_count (), 0);
+    EXPECT_EQ (mc.latency_samples (), 0u);
+}
+
 // ============================================================================
 // Open-loop pacing: rate fidelity, the wall-clock deadline, and ramp-down
 // ============================================================================

@@ -29,7 +29,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
-| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim) and `require('uuid')` (npm's `uuid`, vendored; callable) - any other module throws; see [The `require` shelf](#the-require-shelf) |
+| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored) and `require('moment')` (npm's `moment`, vendored; English only) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -71,9 +71,24 @@ only ever one member for `all()` to report for it.
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
 on a variable that already exists updates its value and keeps the existing `secret` flag and
-`type`, but makes the row **enabled**: a script that sets a name means to use it, so a row
+`type` (unless the third argument names one, below), but makes the row **enabled**: a script that sets a name means to use it, so a row
 unticked in the variables editor is ticked again by the `set` (and persisted that way). A
 `set` on a new name creates it with the defaults (not secret, enabled, `type: "string"`).
+
+`set` takes Postman's optional third argument (issue #2664, postman-collection 5.3.0), in
+either of its two shapes: a string is a type, `set('n', 1, 'number')`, and an object
+contributes `type` when it is a string and `secret` when it is a boolean,
+`set('token', t, { secret: true })`. Anything else is ignored. `string`, `number`,
+`boolean` and `json` declare their own type, `object` and `array` declare `json`, and any
+other type name (`any`, `default`) leaves the type as it was. `"secret"` - as the string or as
+`type` - marks the variable secret and leaves the type alone: Postman has no such type, this
+is the reading the importer gives a variable of `type: "secret"`. An explicit `secret`
+boolean wins over it, and `{ secret: false }` clears the flag. Both fields apply to a new
+and to an existing row; a field the argument does not name keeps what the row has. The
+text stored follows the type the set declares, so `set('o', {a: 1}, 'json')` stores the
+JSON document. A flag reaches disk with the run, and run snapshots mask a secret from the
+next run on, not within the run that set it. `pm.variables.set` takes the argument too,
+but the local scope is never stored or masked, so a flag there has no effect.
 `unset(name)` removes it outright, which is not the same as setting it to `""`: an emptied
 variable is still an enabled row that `{{name}}` resolves to.
 
@@ -112,7 +127,7 @@ row's value **typed**, exactly as `pm.iterationData.get` does (a number column r
 number); a column the row does not carry falls through to the three scopes as an ordinary
 name, not a failed bind. With no row bound, `pm.variables` behaves exactly as before.
 
-**`pm.variables.set(name, value)` writes Postman's *local* scope** (issue #2564), the top
+**`pm.variables.set(name, value, options?)` writes Postman's *local* scope** (issue #2564), the top
 tier, above the row: every read above answers from it first, `replaceIn` and
 `pm.sendRequest` substitute it, and a `{{name}}` composition could not answer goes out
 carrying it, so a pre-request `pm.variables.set("sig", …)` reaches a `{{sig}}` header. It
@@ -398,9 +413,9 @@ and the other SHA-2 hashers are the `crypto-js` shelf's, see
 
 `require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
 `Cannot find module '<name>'` for any other name; it reads no file and fetches
-nothing. The shelf holds two libraries, `crypto-js` and `uuid`. `crypto-js` is
-also bound as the global `CryptoJS`, so both spellings of Postman's signing
-scripts run:
+nothing. The shelf holds four libraries, `crypto-js`, `uuid`, `lodash` and
+`moment`. `crypto-js` is also bound as the global `CryptoJS` and `lodash` as `_`,
+so both spellings of a Postman script run:
 
 ```javascript
 const CryptoJS = require('crypto-js');
@@ -454,9 +469,43 @@ nothing until a script requires it. The import's notice does not name a
 `require('uuid')`. The engine-side detail is in
 [scripting.md](../engine/scripting.md#the-require-shelf).
 
-**Not on the shelf:** `lodash` (`_`), `moment`, `ajv` and `tv4`, `xml2js`
-(`xml2Json`), `cheerio`, `csv-parse`, `chai` and Node's built-ins (`crypto`, `fs`,
-`buffer`, ...). `require` of one throws, the editor underlines `_`, `moment`,
+**`lodash`** is npm's `lodash` package (4.17.21), the whole library vendored
+unmodified, and the `_` global is the same object as `require('lodash')`:
+
+```javascript
+const id = _.get(pm.response.json(), 'items[0].id');
+const pages = require('lodash').chunk(pm.response.json().items, 10);
+pm.environment.set('pageCount', pages.length);
+```
+
+Assigning `_` replaces the global without loading the library, and a script's
+own `const _ = ...` is its own. First use (a read of `_` or a
+`require('lodash')`) costs about 10 ms (`-O2`) to 24 ms (Debug build) and
+about 800 KB of the script's memory, per execution; a script that touches
+neither pays nothing. The import's notice names neither.
+
+**`moment`** is npm's `moment` package (2.31.0), vendored unmodified as its
+`min/moment.min.js`, and is reached only through `require`, as in Postman:
+there is no `moment` global. It is the same build Postman's sandbox gives
+`require('moment')` (plain moment, English only, no `moment-timezone`);
+Postman 6.8.0 ships 2.30.1, one minor release behind:
+
+```javascript
+const moment = require('moment');
+pm.environment.set('expires', moment.utc().add(1, 'hour').toISOString());
+pm.test('issued today', () => pm.expect(moment(pm.response.json().issued).isSame(moment(), 'day')).to.be.true);
+```
+
+`moment.locale('fr')` and every other locale fall back to English with no
+error, because the build carries no locale files; `moment.tz` does not exist.
+First use (a `require('moment')`) costs about 8 ms (`-O2`) to
+17 ms (Debug build) and about 550 KB of the script's memory, per
+execution; a script that does not require it pays nothing. The import's notice
+does not name `require('moment')`.
+
+**Not on the shelf:** `ajv` and `tv4`, `xml2js` (`xml2Json`),
+`cheerio`, `csv-parse`, `chai`, `moment-timezone` and Node's built-ins
+(`crypto`, `fs`, `buffer`, ...). `require` of one throws, the editor underlines
 `tv4`, `xml2Json`, `cheerio` and `Backbone` as unusable, and a Postman import
 names the request in `meta.unsupportedScriptApis`.
 
@@ -1373,9 +1422,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
   show the template in
 - `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
-- **`require(...)` of anything but `crypto-js` and `uuid`, `script.packages` and the
-  libraries Postman bundles beyond `CryptoJS`** - `_` (lodash), `tv4`,
-  `xml2Json`, `cheerio`, `moment` and `Backbone`. The sandbox has no module
+- **`require(...)` of anything but `crypto-js`, `uuid`, `lodash` and `moment`,
+  `script.packages` and the libraries Postman bundles beyond `CryptoJS` and
+  `_`** - `tv4`, `xml2Json`, `cheerio` and `Backbone`. The sandbox has no module
   system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
   covers the hashers and their HMACs and nothing else of `CryptoJS`, so a
   `CryptoJS` member outside that list is named by the import notice, also when
@@ -1388,7 +1437,7 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   [above](#timers-run-before-the-script-ends-and-do-not-wait))
 - Chai and chai-postman members outside the list in
   [Assertion chains](#assertion-chains-pmexpect), the `require()`-able libraries
-  (`chai`, `lodash`, `moment`, …) and chai-postman's own `postmanRequest`,
+  (`chai`, `ajv`, …) and chai-postman's own `postmanRequest`,
   `postmanResponse` and `postmanRequestOrResponse`. Each throws a `TypeError`
   rather than reporting a pass. A flag that changes what the matcher after it
   asserts (`any`, `own`, `ordered`, `itself`) is never accepted as a no-op for
@@ -1451,7 +1500,8 @@ pm.request.body = JSON.stringify({ n: 2 });
 - **`url` is Postman's `Url` object, not a string** (#991 - the owner decision that
   compatibility wins over the shipped string shape). `protocol`, `host`, `port`, `path`,
   `hash`, `query` with `get`/`has`/`all`/`toObject`/`count`, plus `getHost()`,
-  `getPath()`, `getQueryString()`, `toString()` and `update()`. It still behaves as a
+  `getPath()`, `getQueryString()`, `toString()`, `update()`, `addQueryParams()` and
+  `removeQueryParams()`. It still behaves as a
   string in every context JavaScript allows - concatenation, template literals, `==`,
   `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
   `===` and `typeof`. The full surface and the migration note are in
@@ -1462,6 +1512,11 @@ pm.request.body = JSON.stringify({ n: 2 });
   query carries Postman's `PropertyList` writers - `add`, `upsert`, `remove`,
   `clear`. A URL nobody edited is sent as the exact bytes it arrived as, because
   the parts are recomposed only when a member actually changed.
+  `url.addQueryParams(params)` and `url.removeQueryParams(params)` take several
+  at once. Two divergences, both deliberate: a leading `?` on an `addQueryParams`
+  query string is dropped (Postman keeps it in the first key), and
+  `removeQueryParams({ key })` outside an array throws a `TypeError` where
+  Postman's matches nothing.
 - **`body` is Postman's `RequestBody` object, not a string** (#1003 - the same trade
   #991 made for the URL). `mode` (`urlencoded` / `formdata` / `graphql` / `file` / `raw` -
   every other content mode reads `raw`), `raw`, the `urlencoded` / `formdata` field lists,
@@ -1663,13 +1718,17 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 
 - the host globals of a browser or Node: `fetch`, `URL`, `Buffer`, ...
 - the libraries Postman bundles that the [`require` shelf](#the-require-shelf)
-  does not carry: `_`, `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`
-  (`CryptoJS` and `require` are declared as the real thing, with
-  `declare module 'crypto-js'` and `declare module 'uuid'` so `require('crypto-js')`
-  and `require('uuid')` type; both come from the one `SHELF_MODULES` table in
-  `script_types.cpp`, and `require` takes only the names on it)
+  does not carry: `tv4`, `xml2Json`, `cheerio` and `Backbone`
+  (`CryptoJS`, `_` and `require` are declared as the real thing, with
+  `declare module 'crypto-js'`, `declare module 'uuid'`,
+  `declare module 'lodash'` and `declare module 'moment'` so each
+  `require(...)` of them types; all come from the one `SHELF_MODULES` table in
+  `script_types.cpp`, and `require` takes only the names on it. `_` and the
+  `moment` module are declared `any`: their members are not restated, and a
+  partial list would underline the rest on correct code. `moment` has no global
+  declaration, as Postman has no global)
 
-Hover names the replacement Postman itself gives: `_` is `require('lodash')`, and
+Hover names the replacement Postman itself gives: `tv4` is `require('ajv')`, and
 says what Vayu has instead. The `postman` object is
 declared as the methods it has, each hover naming the `pm.*` method it aliases, and
 Postman's pre-`pm.*` globals (`tests`, `responseBody`, ...) as the values they are
@@ -1677,8 +1736,8 @@ Postman's pre-`pm.*` globals (`tests`, `responseBody`, ...) as the values they a
 are correct code to the editor as they are to the engine.
 
 A name is declared `never`, so a call, a member access or an assignment is an error
-(`_.map(...)`, `moment().format()`). `never` is assignable to everything, so a bare read
-into something that takes anything (`console.log(moment)`) is left unflagged: hover
+(`tv4.validate(...)`, `cheerio.load(...)`). `never` is assignable to everything, so a bare read
+into something that takes anything (`console.log(tv4)`) is left unflagged: hover
 still names the replacement there.
 
 **A script that declares one of these names itself is not flagged.** `const data =

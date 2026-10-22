@@ -139,6 +139,7 @@ add_executable(vayu_tests
     request_builder_test.cpp
     config_snapshot_test.cpp
     run_origin_test.cpp
+    request_body_depth_test.cpp
     execute_auth_provenance_test.cpp
     execute_binary_body_test.cpp
     execute_transport_failure_test.cpp
@@ -406,6 +407,7 @@ set(vayu_scratch_database_suites
     LoadReplayEventsTest
     LoadScriptScopesTest
     LoadStrategyTest
+    MetricsCollectorFlushTest
     MidRunRefreshTest
     MockIssuerTest
     MockServerTest
@@ -421,6 +423,7 @@ set(vayu_scratch_database_suites
     RecordDesignResultTest
     RelayTest
     ReorderRouteTest
+    RequestBodyDepthRouteTest
     RequestComposerTest
     RequestsRouteTest
     ResourceWriteRouteTest

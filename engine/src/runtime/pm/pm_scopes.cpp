@@ -249,10 +249,19 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
     return JS_UNDEFINED;
 }
 
+// What `set`'s optional third argument asked for (Postman's
+// `VariableScope#set(key, value, options)`, postman-collection 5.3.0). A field
+// left empty means "keep what the row has".
+struct SetOptions {
+    std::optional<std::string> type; // one of string, number, boolean, json
+    std::optional<bool> secret;
+};
+
 // Update a variable's value while preserving an existing key's secret and type
-// fields; a brand-new key gets the current defaults. Shared by every scope's
-// set(), `pm.variables.set` included, so a script that re-sets an existing
-// (e.g. secret) variable does not silently strip its flag or reset its type.
+// fields, unless `options` names one; a brand-new key gets the current
+// defaults plus whatever `options` names. Shared by every scope's set(),
+// `pm.variables.set` included, so a script that re-sets an existing (e.g.
+// secret) variable does not silently strip its flag or reset its type.
 //
 // `enabled` is the one field a set deliberately turns on (#2479). A set is a
 // write of a value the script intends to use, so leaving the row unticked would
@@ -265,19 +274,29 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
 // may invent a `created_at`, because it is the only place the engine creates a
 // variable - stamping an existing one would sort it below rows the user added
 // after it.
-void set_variable_preserving (Environment& map, const std::string& key, std::string value, ScriptValue carried) {
+void set_variable_preserving (Environment& map,
+const std::string& key,
+std::string value,
+ScriptValue carried,
+const SetOptions& options) {
     auto it = map.find (key);
     if (it != map.end ()) {
         it->second.value        = std::move (value);
         it->second.script_value = std::move (carried);
-        it->second.enabled      = true; // keeps secret, type and created_at
+        it->second.enabled      = true; // keeps created_at
     } else {
         Variable created{ std::move (value), false, true }; // new var: current defaults
         created.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
                              .count ();
         created.script_value = std::move (carried);
-        map[key]             = std::move (created);
+        it = map.insert_or_assign (key, std::move (created)).first;
+    }
+    if (options.type) {
+        it->second.type = *options.type;
+    }
+    if (options.secret) {
+        it->second.secret = *options.secret;
     }
 }
 
@@ -317,6 +336,70 @@ bool is_declared_json (const Environment& map, const std::string& key) {
     return it != map.end () && it->second.type == "json";
 }
 
+// Vayu's declared type for a Postman type name, or none for a name that leaves
+// the type alone (`any`, `default`, an unknown word). `array` and `object` are
+// Postman's spellings of what Vayu stores as `json`.
+std::optional<std::string> declared_type_for (const std::string& name) {
+    if (name == "string" || name == "number" || name == "boolean" || name == "json") {
+        return name;
+    }
+    if (name == "object" || name == "array") {
+        return std::string{ "json" };
+    }
+    return std::nullopt;
+}
+
+// A type name `set` was given. `"secret"` is not a Postman type; it is the
+// importer's reading of `type: "secret"` (`import_document.cpp`), so a script
+// can say it the same way: the flag is set and the declared type is left alone.
+void apply_type_name (SetOptions& options, const std::string& name) {
+    if (name == "secret") {
+        options.secret = true;
+        return;
+    }
+    options.type = declared_type_for (name);
+}
+
+// `name` of the options object, or undefined when reading it throws: a getter
+// that throws is an options object that names nothing, and the exception must
+// not stay pending behind a `set` that returns normally.
+JSValue read_option_property (JSContext* ctx, JSValueConst options, const char* name) {
+    JSValue value = JS_GetPropertyStr (ctx, options, name);
+    if (JS_IsException (value)) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return JS_UNDEFINED;
+    }
+    return value;
+}
+
+// Postman's rules for the third argument: a string is a type; an object
+// contributes `type` when it is a string and `secret` when it is a boolean
+// (an explicit `secret` beats a `type: "secret"` beside it); anything else is
+// ignored.
+SetOptions read_set_options (JSContext* ctx, JSValueConst arg) {
+    SetOptions options;
+    if (JS_IsString (arg)) {
+        apply_type_name (options, js_to_string (ctx, arg));
+        return options;
+    }
+    if (!JS_IsObject (arg)) {
+        return options;
+    }
+
+    JSValue type = read_option_property (ctx, arg, "type");
+    if (JS_IsString (type)) {
+        apply_type_name (options, js_to_string (ctx, type));
+    }
+    JS_FreeValue (ctx, type);
+
+    JSValue secret = read_option_property (ctx, arg, "secret");
+    if (JS_IsBool (secret)) {
+        options.secret = JS_ToBool (ctx, secret) != 0;
+    }
+    JS_FreeValue (ctx, secret);
+    return options;
+}
+
 // The text a set stores. It is Postman's `Variable#toString`: JavaScript's
 // string conversion, except that `undefined` is "" rather than "undefined". So
 // `{{name}}`, the wire and storage read what Postman's would.
@@ -324,22 +407,25 @@ bool is_declared_json (const Environment& map, const std::string& key) {
 // A row declared `json` stores an object or an array as its JSON text instead:
 // the string conversion is "[object Object]", which the row's own read cannot
 // parse back, and `{{name}}` should substitute the document (#2568). Only the
-// declared type decides this, so a default-type row keeps Postman's text.
-std::string stored_text (JSContext* ctx,
-const Environment& map,
-const std::string& key,
-JSValueConst value,
-const ScriptValue& carried) {
+// declared type decides this, so a default-type row keeps Postman's text. The
+// declared type is the one this set leaves behind, not the one the row had, so
+// `set(name, {...}, 'json')` stores the document it declares.
+std::string
+stored_text (JSContext* ctx, JSValueConst value, const ScriptValue& carried, bool declared_json) {
     if (JS_IsUndefined (value)) {
         return {};
     }
-    if (carried.kind == ScriptValue::Kind::Json && is_declared_json (map, key)) {
+    if (carried.kind == ScriptValue::Kind::Json && declared_json) {
         return carried.json;
     }
     return js_to_string (ctx, value);
 }
 
 // The value itself rides beside the text for the run's own reads (#2529).
+//
+// The third argument is read for every scope, `pm.variables.set` included. The
+// local scope (#2564) is never persisted and `secret_variable_values` never
+// reads it, so a flag set there has no effect beyond the run's own variable.
 JSValue
 js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -352,11 +438,14 @@ js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_UNDEFINED;
     }
 
-    std::string key     = js_to_string (ctx, argv[0]);
+    std::string key = js_to_string (ctx, argv[0]);
+    const SetOptions options = argc > 2 ? read_set_options (ctx, argv[2]) : SetOptions{};
     ScriptValue carried = script_value_of (ctx, argv[1]);
-    std::string text    = stored_text (ctx, *variables, key, argv[1], carried);
+    const bool declared_json =
+    options.type ? *options.type == "json" : is_declared_json (*variables, key);
+    std::string text = stored_text (ctx, argv[1], carried, declared_json);
 
-    set_variable_preserving (*variables, key, std::move (text), std::move (carried));
+    set_variable_preserving (*variables, key, std::move (text), std::move (carried), options);
 
     return JS_UNDEFINED;
 }
@@ -438,7 +527,7 @@ void setup_pm_variable_scope (JSContext* ctx, JSValue pm, const VariableScopeBin
     JS_SetPropertyStr (ctx, scope, "get",
     JS_NewCFunctionMagic (ctx, js_pm_scope_get, "get", 1, JS_CFUNC_generic_magic, magic));
     JS_SetPropertyStr (ctx, scope, "set",
-    JS_NewCFunctionMagic (ctx, js_pm_scope_set, "set", 2, JS_CFUNC_generic_magic, magic));
+    JS_NewCFunctionMagic (ctx, js_pm_scope_set, "set", 3, JS_CFUNC_generic_magic, magic));
     JS_SetPropertyStr (ctx, scope, "has",
     JS_NewCFunctionMagic (ctx, js_pm_scope_has, "has", 1, JS_CFUNC_generic_magic, magic));
     JS_SetPropertyStr (ctx, scope, "unset",
@@ -789,7 +878,7 @@ void setup_pm_variables (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, variables, "replaceIn",
     JS_NewCFunction (ctx, js_pm_variables_replace_in, "replaceIn", 1));
     JS_SetPropertyStr (ctx, variables, "set",
-    JS_NewCFunctionMagic (ctx, js_pm_scope_set, "set", 2, JS_CFUNC_generic_magic, SCOPE_LOCAL));
+    JS_NewCFunctionMagic (ctx, js_pm_scope_set, "set", 3, JS_CFUNC_generic_magic, SCOPE_LOCAL));
     JS_SetPropertyStr (ctx, variables, "unset",
     JS_NewCFunctionMagic (
     ctx, js_pm_scope_unset, "unset", 1, JS_CFUNC_generic_magic, SCOPE_LOCAL));

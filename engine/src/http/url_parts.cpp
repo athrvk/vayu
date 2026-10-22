@@ -73,6 +73,15 @@ std::vector<std::string> split_path (std::string_view raw) {
 
 } // namespace
 
+UrlQueryParam parse_query_param (std::string_view segment) {
+    const size_t equals = segment.find ('=');
+    if (equals == std::string_view::npos) {
+        return { std::string (segment), std::nullopt };
+    }
+    return { std::string (segment.substr (0, equals)),
+        std::string (segment.substr (equals + 1)) };
+}
+
 std::vector<UrlQueryParam> parse_query_params (std::string_view query) {
     std::vector<UrlQueryParam> params;
     while (!query.empty ()) {
@@ -80,13 +89,7 @@ std::vector<UrlQueryParam> parse_query_params (std::string_view query) {
         const std::string_view pair =
         amp == std::string_view::npos ? query : query.substr (0, amp);
         if (!pair.empty ()) {
-            const size_t equals = pair.find ('=');
-            if (equals == std::string_view::npos) {
-                params.push_back ({ std::string (pair), std::nullopt });
-            } else {
-                params.push_back ({ std::string (pair.substr (0, equals)),
-                std::string (pair.substr (equals + 1)) });
-            }
+            params.push_back (parse_query_param (pair));
         }
         if (amp == std::string_view::npos) {
             break;

@@ -471,8 +471,12 @@ void register_spec_diff_routes (RouteContext& ctx) {
     ctx.server.Post (
     "/specs/diff", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = diff_spec_response (ctx.db, json);
+            auto json = parse_request_json (req.body);
+            if (!json) {
+                refuse_request_body (res, "POST /specs/diff", json.error ());
+                return;
+            }
+            auto [status, body] = diff_spec_response (ctx.db, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /specs/diff - " + std::to_string (status) + ": " +

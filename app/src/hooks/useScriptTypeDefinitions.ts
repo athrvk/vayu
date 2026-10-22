@@ -60,7 +60,7 @@ export const SCRIPT_LIB = ["es2022"];
  * What suppressing 2304 costs is every undeclared name drawing nothing. The
  * engine keeps the names a script is likeliest to reach for by declaring them
  * as `never` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`, `URL`,
- * Postman's bundled `_` and `moment`), so using one is a type error with the
+ * Postman's bundled `tv4` and `cheerio`), so using one is a type error with the
  * replacement on hover.
  *
  * Narrow this list rather than widening it: every code here is a real mistake

@@ -717,6 +717,51 @@ TEST (ScriptCompletions, TheRequireSnippetOffersEveryShelfModule) {
     EXPECT_TRUE (found);
 }
 
+// lodash's `_` (#2651) is offered, and what the runtime binds under it is the
+// library the entry names.
+TEST (ScriptCompletions, TheLodashGlobalIsOfferedAndBound) {
+    const auto completions = get_script_completions ();
+    const auto* item       = find_by_label (completions, "_");
+    ASSERT_NE (item, nullptr) << "the _ global is not offered";
+    EXPECT_NE (item->value ("documentation", std::string{}).find ("require('lodash')"),
+    std::string::npos);
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    const auto result =
+    engine.execute_test ("if (typeof _ !== 'function' || _.VERSION !== "
+                         "'4.17.21') throw new Error('not lodash');",
+    request, response, env);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
+// moment (#2652) is reached only through require, as in Postman: the entry for
+// `require` says so, and no `moment` global is offered or bound.
+TEST (ScriptCompletions, MomentIsOfferedThroughRequireAndHasNoGlobal) {
+    const auto completions = get_script_completions ();
+    const auto* require    = find_by_label (completions, "require");
+    ASSERT_NE (require, nullptr);
+    const std::string documentation = require->value ("documentation", std::string{});
+    EXPECT_NE (documentation.find ("moment is npm's moment 2.31.0"), std::string::npos)
+    << documentation;
+    EXPECT_EQ (find_by_label (completions, "moment"), nullptr)
+    << "moment is not a global in Postman";
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    const auto result    = engine.execute_test (
+    "if (typeof moment !== 'undefined' || require('moment').version !== "
+       "'2.31.0') throw new Error('not the shelf moment');",
+    request, response, env);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no

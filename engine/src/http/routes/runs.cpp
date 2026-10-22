@@ -217,7 +217,7 @@ struct SendingTotals {
 
 // Report fields that live outside the DetailedReport struct: whole-run counters
 // the report injects into its `summary` object. Filled from the run's stored
-// summary.
+// summary, or a live load run's collector (apply_live_counters).
 //
 // `optin.performance.Padding` is right that size-ordering these fields would
 // save 44 bytes, and the trade is refused deliberately: the layout is by report
@@ -239,10 +239,11 @@ struct ReportExtras {
     // recounted from it (a run with neither keeps the sampled figures).
     bool status_codes_overridden = false;
     // False when the stored summary says nothing was timed (`latency.count`
-    // of 0 - a collection run in which no step sent). The report then leaves
-    // `latency` out: its fields default to 0, which would read as steps that
-    // answered instantly. A summary with no `count` (every load run, and runs
-    // stored before collection runs wrote one) keeps the block.
+    // of 0 - a collection run in which no step sent), and for a live load run,
+    // whose percentiles cannot be read yet. The report then leaves `latency`
+    // out: its fields default to 0, which would read as steps that answered
+    // instantly. A summary with no `count` (every load run, and runs stored
+    // before collection runs wrote one) keeps the block.
     bool latency_measured = true;
     // Script-validation tallies; `has_tests` false leaves the report's
     // testValidation section out entirely.
@@ -1713,6 +1714,41 @@ select_report_results (const std::vector<vayu::db::Result>& results, size_t cap)
 }
 
 /**
+ * A load run's whole-run counters while it is not terminal (#2659), in place
+ * of the rows it writes only as it finishes. Only the collector's atomic reads:
+ * its percentile, phase, stream and custom-metric readers walk histograms the
+ * event-loop workers are still writing and are safe only after the drain, so
+ * `latency` stays out until the summary brings it. A null @p context (a run no
+ * manager holds) leaves every count at zero.
+ */
+void apply_live_counters (const vayu::core::RunContext* context,
+double duration_s,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
+    extras.latency_measured = false;
+    if (context == nullptr || !context->metrics_collector) {
+        return;
+    }
+    const auto& collector          = *context->metrics_collector;
+    report.total_requests          = collector.total_requests ();
+    report.status_codes            = collector.status_code_distribution ();
+    extras.status_codes_overridden = true;
+    if (duration_s > 0) {
+        report.avg_rps = static_cast<double> (report.total_requests) / duration_s;
+        report.throughput = report.avg_rps;
+        report.send_rate = static_cast<double> (context->requests_sent.load ()) / duration_s;
+    }
+    extras.cancelled_requests = collector.cancelled ();
+    extras.peak_concurrency = static_cast<double> (context->peak_in_flight.load ());
+    extras.dropped_total  = static_cast<double> (collector.dropped_requests ());
+    extras.queue_wait_avg = collector.average_queue_wait ();
+    extras.bytes_sent     = static_cast<double> (collector.total_bytes_sent ());
+    extras.bytes_received = static_cast<double> (collector.total_bytes_received ());
+    extras.http_version_downgraded =
+    static_cast<double> (collector.http_version_downgraded ());
+}
+
+/**
  * The run's own exchanges, for a design or load run - a design run has exactly
  * one and a load run's percentiles do not need per-request rows past a
  * representative few. Past @p cap rows the kept ones are the failures first,
@@ -1752,33 +1788,33 @@ nlohmann::json build_report_results (const std::vector<vayu::db::Result>& result
  * The whole-run aggregates come from `runs.summary` - the values the run itself
  * computed at completion - laid over a report calculated from the run's sampled
  * `results`. A run with no summary is still pending or running, or never
- * reached a terminal status because the engine died (#2436), and reports from
- * those sampled results alone rather than erroring. Either way a report is one
- * run row plus its sampled results.
+ * reached a terminal status because the engine died (#2436), and reports
+ * without one rather than erroring.
  *
  * Extracted so the wiring is covered without an in-process HTTP server - see
  * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
  */
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id) {
+std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
+const std::string& run_id,
+vayu::core::RunManager* live_runs) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
     }
 
-    // A load run that is not terminal is read without its traces (#2548): a
-    // client re-reads this report on a timer until the run ends, and the
-    // trace-derived parts (`errors.types`, the phase averages, `slowRequests`,
-    // `results[].trace`) then take their no-trace answers. Decided from the
-    // same row `metadata.status` reports, so a run that turns terminal before
-    // the results read is answered as the running run this report says it is.
-    // Design and scenario runs store their rows just before the status flips,
-    // and their one-shot readers (response restore, the step list) need
-    // `trace` from a report fetched in that gap, so they always read it.
+    // A load run that is not terminal reads no row (#2659): a client re-reads
+    // this report on a timer until the run ends, and the run writes its rows
+    // only as it finishes, so a report built from them is all zeros and then a
+    // growing prefix of the flush. Its counts come from the collector instead
+    // (apply_live_counters below).
+    // Decided from the same row `metadata.status` reports. Design and scenario
+    // runs store their rows just before the status flips, and their one-shot
+    // readers (response restore, the step list) need them, `trace` included,
+    // from a report fetched in that gap, so they always read them.
     const bool live_load =
     run->type == vayu::RunType::Load && !vayu::is_terminal (run->status);
     const auto results =
-    live_load ? db.get_results_without_traces (run_id) : db.get_results (run_id);
+    live_load ? std::vector<vayu::db::Result>{} : db.get_results (run_id);
 
     double duration_s = 0;
     if (run->start_time > 0) {
@@ -1789,12 +1825,19 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
     auto report =
     vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
 
-    // `summary` is written only at terminal status (#2436), so no usable one
-    // means the run is still pending/running or the engine died before it got
-    // there. The report then stands on the sampled `results` alone -
-    // `calculate_detailed_report` above - and `metadata.status` is how a
-    // reader tells the two apart.
+    // `summary` is written as the run finishes (#2436), so no usable one means
+    // the run is still pending/running or the engine died before it got there.
+    // The report then stands on the sampled `results` alone -
+    // `calculate_detailed_report` above - or, for a live load run, on its
+    // collector; `metadata.status` is how a reader tells them apart. Once a
+    // live load run's summary is stored it is the whole-run answer, as it is
+    // for a finished run.
     ReportExtras extras;
+    if (live_load && run->summary.empty ()) {
+        const auto context =
+        live_runs != nullptr ? live_runs->get_run_or_retained (run_id) : nullptr;
+        apply_live_counters (context.get (), duration_s, report, extras);
+    }
     apply_run_summary (run->summary, report, extras);
 
     const double target_rps =
@@ -2084,7 +2127,7 @@ void handle_get_run_report (RouteContext& ctx, const httplib::Request& req, http
     vayu::utils::log_info (
     "run", "GET /runs/:id/report - Generating report for run: " + run_id);
     try {
-        auto [status, body] = run_report_response (ctx.db, run_id);
+        auto [status, body] = run_report_response (ctx.db, run_id, &ctx.run_manager);
         if (status == 404) {
             vayu::utils::log_warning (
             "run", "GET /runs/:id/report - Run not found: " + run_id);

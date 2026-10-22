@@ -554,6 +554,35 @@ TEST (CurlToError, ATargetsVerificationFailureDoesNotBlameTheProxy) {
 }
 
 // ============================================================================
+// curl_transfer_attempted - which failures reached the network (#2412)
+// ============================================================================
+
+// A fresh handle has reached no peer, which is what a transfer libcurl refused
+// before connecting reads. Only the two request-refusal codes leave the
+// latency population; a code raised by work on the network stays in it,
+// whatever the peer reads. The peer half (the same codes after real hops) is
+// `UrlSchemeRedirect.ARedirectToFtpIsRefusedOnBothDrivers`. Mutation-check:
+// make the helper answer false for every code and the second loop fails;
+// answer true and the first does.
+TEST (CurlTransferAttempted, OnlyARefusalBeforeConnectingIsNotAnAttempt) {
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    for (CURL* handle : { static_cast<CURL*> (nullptr), curl }) {
+        for (const CURLcode code : { CURLE_URL_MALFORMAT, CURLE_UNSUPPORTED_PROTOCOL }) {
+            EXPECT_FALSE (vayu::http::detail::curl_transfer_attempted (handle, code))
+            << curl_easy_strerror (code);
+        }
+        for (const CURLcode code : { CURLE_OK, CURLE_OPERATION_TIMEDOUT, CURLE_COULDNT_RESOLVE_HOST,
+             CURLE_COULDNT_CONNECT, CURLE_SSL_CERTPROBLEM, CURLE_SSL_CACERT_BADFILE,
+             CURLE_SSL_CRL_BADFILE, CURLE_BAD_FUNCTION_ARGUMENT }) {
+            EXPECT_TRUE (vayu::http::detail::curl_transfer_attempted (handle, code))
+            << curl_easy_strerror (code);
+        }
+    }
+    curl_easy_cleanup (curl);
+}
+
+// ============================================================================
 // The host and port beside the transfer are the ones it dials (#2465)
 // ============================================================================
 //

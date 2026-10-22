@@ -260,10 +260,9 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	 * access that follows is the error.
 	 */
 	it.each([
-		["_.map([1], function (n) { return n; });", 2339],
-		["require('lodash');", 2345],
+		["require('ajv');", 2345],
 		["xml2Json(pm.response.text());", 2349],
-		["moment().format();", 2349],
+		["tv4.validate(pm.response.json(), {});", 2339],
 		["fetch('https://example.com');", 2349],
 	])("%s is an error (TS%i)", (source, code) => {
 		expect(errorsOf(source)).toContain(`TS${code}`);
@@ -328,6 +327,42 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	it("reports a uuid member npm does not have, and a result of the wrong type", () => {
 		expect(errorsOf("require('uuid').nope;")).toContain("TS2339");
 		expect(errorsOf("/** @type {number} */ const n = require('uuid')();")).toContain("TS2322");
+	});
+
+	/*
+	 * lodash runs (#2651), as the `_` global Postman binds and as
+	 * require('lodash'), so the lines a Postman script writes with it read clean.
+	 */
+	it("declares lodash as the _ global and as require('lodash')", () => {
+		expect(
+			errorsOf(
+				[
+					"_.map([1], function (n) { return n; });",
+					"const lodash = require('lodash');",
+					"const id = lodash.get(pm.response.json(), 'items[0].id');",
+					"const pages = _.chunk([1, 2, 3], 2);",
+					"const total = _([1, 2]).sum();",
+					"pm.environment.set('id', id + pages.length + total + _.VERSION);",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	/*
+	 * moment runs (#2652) as require('moment') only: Postman binds no global of
+	 * that name, so the module is declared and nothing else is.
+	 */
+	it("declares require('moment') as the module a Postman script reads", () => {
+		expect(
+			errorsOf(
+				[
+					"const moment = require('moment');",
+					"const day = moment('2026-10-21').add(1, 'day').format('YYYY-MM-DD');",
+					"const utc = moment.utc(0).toISOString();",
+					"pm.environment.set('day', day + utc);",
+				].join("\n")
+			)
+		).toBe("");
 	});
 
 	/*
