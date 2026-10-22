@@ -3325,7 +3325,9 @@ describe("run_collection_smoke", () => {
 			const advertised = z.toJSONSchema(
 				TOOLS.find((t) => t.name === "run_collection_smoke")!.outputSchema!,
 				{ io: "output" }
-			) as { properties: { results: { items: { properties: Record<string, unknown> } } } };
+			) as unknown as {
+				properties: { results: { items: { properties: Record<string, unknown> } } };
+			};
 			const declared = Object.keys(advertised.properties.results.items.properties);
 			expect(declared).toContain("folder");
 			for (const row of summary.results) {
