@@ -294,9 +294,6 @@ const KNOWN_BREACHES: Readonly<Record<string, string>> = {
 	"electron/main.ts :: Scripting Guide": "#2287",
 	"electron/main.ts :: Report an Issue": "#2287",
 
-	// An engine setting's label, quoted by hand; it moves with the engine's.
-	"src/services/curl/parseCurl.ts :: Custom CA Certificates": "#2293",
-
 	"src/components/shared/ScriptLifecycleSummary.tsx :: Setup / Teardown": "#2296",
 	"src/constants/appearance.ts :: System Mono": "#2296",
 	"src/modules/history/main/components/PerformanceTab.tsx :: P50 (Median)": "#2296",
@@ -420,7 +417,7 @@ describe("the Title Case rule", () => {
 	it("judges each name in a settings path on its own", () => {
 		expect(isTitleCase("Engine > Data & retention")).toBe(false);
 		expect(isTitleCase("Settings › Network & connectivity")).toBe(false);
-		expect(isTitleCase("Settings › Network › Custom CA Certificates")).toBe(true);
+		expect(isTitleCase("Settings › Network › Certificate Authority Store")).toBe(true);
 	});
 
 	it("reads text with a sentence break as prose", () => {

@@ -77,7 +77,7 @@ export function monitorError(draft: MonitorDraft, maxSeries = MONITOR_MAX_SERIES
 		return "Name at least one metric to read from the endpoint, one per line.";
 	}
 	if (series.length > maxSeries) {
-		return `At most ${maxSeries} metrics can be charted; you named ${series.length}. Raise "Server Monitoring Metric Limit" in Settings to chart more.`;
+		return `At most ${maxSeries} metrics can be charted; you named ${series.length}. Raise "Server monitoring metric limit" in Settings to chart more.`;
 	}
 	return null;
 }

@@ -99,7 +99,7 @@ describe("the response pane", () => {
 		// and neither is discoverable from libcurl's message. Both are named.
 		render(<ClientErrorView errorCode="SSL_ERROR" errorMessage="unable to get local issuer" />);
 
-		expect(screen.getByText(/Custom CA Certificates/)).toBeInTheDocument();
+		expect(screen.getByText(/Custom CA certificates/)).toBeInTheDocument();
 		expect(screen.getByText(/Verify TLS certificate/)).toBeInTheDocument();
 	});
 
