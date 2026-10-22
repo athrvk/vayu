@@ -119,6 +119,8 @@ class RequestBodyDepthRouteTest : public ::testing::Test {
         vayu::http::routes::register_spec_describe_routes (*ctx_);
         vayu::http::routes::register_spec_export_routes (*ctx_);
         vayu::http::routes::register_postman_export_routes (*ctx_);
+        vayu::http::routes::register_run_routes (*ctx_);
+        vayu::http::routes::register_config_routes (*ctx_);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -212,6 +214,11 @@ constexpr const char* GENERIC_CODE = "bad_request";
 const std::vector<CodedRoute>& other_routes () {
     static const std::vector<CodedRoute> routes = {
         { "POST", "/compose", "invalid_compose_request", R"({"extra":)", "}" },
+        // The handlers of these two dump the core's answer, which quotes the
+        // bytes a parse stopped at: the not-JSON case below sends a non-UTF-8
+        // byte, and a strict dump answered it 500.
+        { "PUT", "/runs/missing/baseline", GENERIC_CODE, R"({"extra":)", "}" },
+        { "POST", "/config", "invalid_config", R"({"extra":)", "}" },
         { "POST", "/reorder", GENERIC_CODE, R"({"moves":[],"extra":)", "}" },
         { "POST", "/specs/bind", GENERIC_CODE, R"({"spec":{"content":)", "}}" },
         { "POST", "/specs/sync", GENERIC_CODE, R"({"extra":)", "}" },

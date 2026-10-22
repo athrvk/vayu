@@ -661,7 +661,10 @@ void register_config_routes (RouteContext& ctx) {
         try {
             auto [status, response_body] = apply_config_update (ctx.db, req.body);
             res.status = status;
-            res.set_content (response_body.dump (2), "application/json");
+            // `replace`: a parse refusal quotes the bytes it stopped at (#2671).
+            res.set_content (response_body.dump (2, ' ', false,
+                             nlohmann::json::error_handler_t::replace),
+            "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "config", "POST /config - Error: " + std::string (e.what ()));

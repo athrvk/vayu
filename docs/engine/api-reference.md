@@ -147,9 +147,10 @@ the depth refusal then shares: `invalid_compose_request` on `POST /compose`,
 on `/mock-issuer`, `invalid_config` on `POST /config`. `POST /execute` and
 `POST /runs` hold the same bound; see their sections. A route that accepts an
 empty body (`POST /mock/start`, `POST /mock-issuer/start`, the `/inbox` writes)
-reads it as no body at all rather than as a parse failure. The import routes are held to the same 128
-levels: their documents travel as a string (`content`) or as flat lists linked
-by temp ids, so a legitimate body is far shallower. A document's own nesting is
+reads it as no body at all rather than as a parse failure. The import routes
+are held to the same 128 levels: their documents travel as a string
+(`content`) or as flat lists linked by temp ids, so a legitimate body is far
+shallower. A document's own nesting is
 bounded separately, where the engine reads it.
 
 ## Removed route aliases
