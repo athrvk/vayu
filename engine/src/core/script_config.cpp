@@ -8,6 +8,7 @@
 #include "vayu/core/script_config.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #include "vayu/core/constants.hpp"
 
@@ -16,14 +17,14 @@ namespace vayu::core {
 namespace script_limits = vayu::core::constants::script_engine;
 
 uint64_t resolve_script_timeout_ms (int64_t stored) {
-    if (stored < static_cast<int64_t> (script_limits::SCRIPT_TIMEOUT_MIN_MS)) {
+    if (std::cmp_less (stored, script_limits::SCRIPT_TIMEOUT_MIN_MS)) {
         return script_limits::TIMEOUT_MS;
     }
     return std::min (static_cast<uint64_t> (stored), script_limits::SCRIPT_TIMEOUT_MAX_MS);
 }
 
 size_t resolve_script_stack_size (int64_t stored) {
-    if (stored < static_cast<int64_t> (script_limits::STACK_SIZE_MIN)) {
+    if (std::cmp_less (stored, script_limits::STACK_SIZE_MIN)) {
         return script_limits::STACK_SIZE_MIN;
     }
     return std::min (static_cast<size_t> (stored), script_limits::STACK_SIZE_MAX);
