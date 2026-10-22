@@ -195,6 +195,7 @@ function SeriesCharts({
 						history={data}
 						isCompleted
 						syncKey={SYNC_KEY}
+						mode={mode}
 						breakpoint={breakpoint}
 						anomalies={anomalies}
 						sleeps={sleeps}

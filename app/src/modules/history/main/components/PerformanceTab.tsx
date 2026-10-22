@@ -120,6 +120,7 @@ export default function PerformanceTab({
 								history={timeSeries}
 								isCompleted
 								syncKey={CHART_SYNC.history}
+								mode={derived.mode}
 								breakpoint={derived.breakpoint}
 								anomalies={anomalies}
 								sleeps={hostSleeps}

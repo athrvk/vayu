@@ -19,7 +19,7 @@
  */
 
 import { useEffect } from "react";
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import type { RampOverlay } from "../../../utils/metricsTransforms";
@@ -27,17 +27,23 @@ import { CONCURRENCY_LABEL, IN_FLIGHT_LABEL } from "@/constants/load-test-modes"
 import {
 	RequestRateChart,
 	ConnectionsChart,
+	ErrorRateChart,
 	LatencyBreakdownChart,
 	LatencyPercentilesChart,
 	ServerVitalsChart,
 } from "./TimeSeriesCharts";
+import { SCATTER_LEGEND } from "./legend";
+import type { Marker } from "./plugins";
+import type { Breakpoint } from "../../../utils/computeBreakpoint";
+import { useClientSettingsStore } from "@/stores";
+import { DEFAULT_SLO_THRESHOLD_MS } from "@/constants/client-settings";
 import { CustomMetricsChart } from "./CustomMetricsChart";
 import { ResponseTimeVsConcurrencyChart } from "./ScatterAndDistribution";
 
 const mockState = vi.hoisted(() => ({
 	constructions: 0,
 	series: [] as { label: string; bandTo?: number }[],
-	markers: [] as { label: string }[],
+	markers: [] as Marker[],
 	props: {} as { yMin?: number | null; y2Label?: string; data?: (number | null)[][] },
 }));
 
@@ -46,7 +52,7 @@ const mockState = vi.hoisted(() => ({
 vi.mock("./UPlotChart", () => ({
 	UPlotChart: (props: {
 		series: { label: string; bandTo?: number }[];
-		markers?: { label: string }[];
+		markers?: Marker[];
 		yMin?: number | null;
 		y2Label?: string;
 		data?: (number | null)[][];
@@ -277,5 +283,168 @@ describe("charts' y base", () => {
 		}));
 		render(<CustomMetricsChart history={history} />);
 		expect(mockState.props.yMin).toBeNull();
+	});
+});
+
+describe("the breakpoint line on the time charts (#2698)", () => {
+	const CROSSED: Breakpoint = {
+		crossed: true,
+		concurrency: 12,
+		timeSeconds: 2,
+		p99Ms: 303,
+		sloMs: 200,
+		atRunStart: false,
+	};
+
+	/** The charts that take a breakpoint, each rendered with the same crossed run. */
+	const CHARTS = {
+		percentiles: (mode: string | undefined, breakpoint: Breakpoint | null) => (
+			<LatencyPercentilesChart history={historyOf(4)} mode={mode} breakpoint={breakpoint} />
+		),
+		rate: (mode: string | undefined, breakpoint: Breakpoint | null) => (
+			<RequestRateChart history={historyOf(4)} mode={mode} breakpoint={breakpoint} />
+		),
+		concurrency: (mode: string | undefined, breakpoint: Breakpoint | null) => (
+			<ConnectionsChart history={historyOf(4)} mode={mode} breakpoint={breakpoint} />
+		),
+		errors: (mode: string | undefined, breakpoint: Breakpoint | null) => (
+			<ErrorRateChart history={historyOf(4)} mode={mode} breakpoint={breakpoint} />
+		),
+	};
+	type ChartName = keyof typeof CHARTS;
+	const ALL = Object.keys(CHARTS) as ChartName[];
+
+	function verticalMarkers(
+		chart: ChartName,
+		mode: string | undefined,
+		breakpoint: Breakpoint | null = CROSSED
+	): Marker[] {
+		const { unmount } = render(CHARTS[chart](mode, breakpoint));
+		const found = mockState.markers.filter((m) => m.orient === "vertical");
+		unmount();
+		return found;
+	}
+
+	it("names the SLO crossed and keeps the observed p99 out of the label", () => {
+		const [marker] = verticalMarkers("percentiles", "ramp_up");
+		expect(marker.label).toBe("p99 > SLO 200ms");
+		expect(marker.label).not.toContain("303");
+	});
+
+	it("leaves the SLO's number out of the label when none was in play", () => {
+		const [marker] = verticalMarkers("percentiles", "ramp_up", { ...CROSSED, sloMs: null });
+		expect(marker.label).toBe("p99 > SLO");
+	});
+
+	it("puts the observed p99 and the load at the crossing in the hover", () => {
+		const [marker] = verticalMarkers("percentiles", "ramp_up");
+		expect(marker.hover).toBe("p99 303ms at 12 virtual users");
+	});
+
+	it("counts requests in flight, not users, where the mode holds no users", () => {
+		const hover = (concurrency: number) =>
+			verticalMarkers("percentiles", "constant_rps", { ...CROSSED, concurrency })[0].hover;
+		expect(hover(12)).toBe("p99 303ms at 12 requests in flight");
+		expect(hover(1)).toBe("p99 303ms at 1 request in flight");
+	});
+
+	it("drops the hover's load clause when the crossing recorded none", () => {
+		const [marker] = verticalMarkers("percentiles", "ramp_up", {
+			...CROSSED,
+			concurrency: null,
+		});
+		expect(marker.hover).toBe("p99 303ms");
+	});
+
+	it.each(ALL)("draws the line on the %s chart of a ramp_up run", (chart) => {
+		expect(verticalMarkers(chart, "ramp_up")).toHaveLength(1);
+	});
+
+	it.each(["constant_concurrency", "constant_rps", "iterations", "capacity", undefined])(
+		"draws it on the percentile chart alone in mode %s",
+		(mode) => {
+			expect(verticalMarkers("percentiles", mode)).toHaveLength(1);
+			for (const chart of ALL.filter((c) => c !== "percentiles")) {
+				expect(verticalMarkers(chart, mode), chart).toEqual([]);
+			}
+		}
+	);
+
+	it.each(ALL)(
+		"draws no line on the %s chart when the first reading was already over",
+		(chart) => {
+			expect(verticalMarkers(chart, "ramp_up", { ...CROSSED, atRunStart: true })).toEqual([]);
+			expect(
+				verticalMarkers(chart, "constant_rps", { ...CROSSED, atRunStart: true })
+			).toEqual([]);
+		}
+	);
+
+	it("draws no line for a run that never crossed", () => {
+		const notCrossed: Breakpoint = {
+			...CROSSED,
+			crossed: false,
+			concurrency: null,
+			timeSeconds: null,
+			p99Ms: null,
+		};
+		expect(verticalMarkers("percentiles", "ramp_up", notCrossed)).toEqual([]);
+	});
+});
+
+describe("LatencyPercentilesChart - the SLO line (#2698)", () => {
+	const horizontals = () => mockState.markers.filter((m) => m.orient === "horizontal");
+	afterEach(() => useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS }));
+
+	it("draws the SLO the breakpoint was judged against, named as the scatter names it", () => {
+		render(
+			<LatencyPercentilesChart
+				history={historyOf(4)}
+				mode="constant_concurrency"
+				breakpoint={{
+					crossed: true,
+					concurrency: 12,
+					timeSeconds: 2,
+					p99Ms: 303,
+					sloMs: 350,
+					atRunStart: false,
+				}}
+			/>
+		);
+		expect(horizontals()).toEqual([
+			{ orient: "horizontal", value: 350, label: "SLO 350ms", role: SCATTER_LEGEND.slo.role },
+		]);
+	});
+
+	it("draws the client setting when the breakpoint holds none", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 450 });
+		render(<LatencyPercentilesChart history={historyOf(4)} breakpoint={null} />);
+		expect(horizontals().map((m) => [m.value, m.label])).toEqual([[450, "SLO 450ms"]]);
+	});
+
+	it("draws it for a run that never crossed, and for one that began over it", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 200 });
+		render(
+			<LatencyPercentilesChart
+				history={historyOf(4)}
+				mode="ramp_up"
+				breakpoint={{
+					crossed: true,
+					concurrency: 10,
+					timeSeconds: 0,
+					p99Ms: 400,
+					sloMs: 200,
+					atRunStart: true,
+				}}
+			/>
+		);
+		expect(mockState.markers.map((m) => [m.orient, m.label])).toEqual([
+			["horizontal", "SLO 200ms"],
+		]);
+	});
+
+	it("plots the three percentiles only, the SLO being a line and not a series", () => {
+		render(<LatencyPercentilesChart history={historyOf(4)} />);
+		expect(mockState.series.map((s) => s.label)).toEqual(["p50", "p95", "p99"]);
 	});
 });

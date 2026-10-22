@@ -219,3 +219,16 @@ describe("MetricsView send-rate legend follows the series (#2393)", () => {
 		expect(entries[0].chart.series.map((s) => s.label)).not.toContain("send rate");
 	});
 });
+
+describe("MetricsView percentile legend names the SLO line (#2698)", () => {
+	it("lists SLO beside the percentiles, over a chart that draws that line", () => {
+		const entries = legendEntries(RUNS[1]).filter((e) =>
+			e.chart.series.some((s) => s.label === "p99")
+		);
+		expect(entries.map((e) => e.label)).toEqual(["p50", "p95", "p99", "SLO"]);
+		const slo = entries.find((e) => e.label === "SLO");
+		expect(isDrawnWithRole(slo as LegendEntryView, "other")).toBe(true);
+		// The line is a marker; the chart's series stay the three percentiles.
+		expect(entries[0].chart.series.map((s) => s.label)).toEqual(["p50", "p95", "p99"]);
+	});
+});
