@@ -346,3 +346,9 @@ export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
  * path are unchanged.
  */
 export const UPDATE_STARTUP_CHECK_DELAY_MS = 60 * 1000;
+/**
+ * Deadline for the GitHub attestations lookup that gates an install (#2372).
+ * The API answers in well under a second; without a deadline a connection
+ * that never answers would hold the downloaded update forever.
+ */
+export const UPDATE_ATTESTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
