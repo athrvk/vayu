@@ -15,6 +15,7 @@ import { secretsShape, withholdRowListSecrets, withheldPointer } from "../withho
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
+	callEngineStructured,
 	confirmDestructive,
 	confirmedInput,
 	echoShape,
@@ -25,6 +26,7 @@ import {
 	writesDisabled,
 } from "./kit.js";
 import { MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
+import { requestExamplesSchema } from "./output-schemas.js";
 import {
 	boundExampleBodies,
 	describeExample,
@@ -50,9 +52,10 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		inputSchema: {
 			requestId: z.string().describe("Saved request whose examples to list."),
 		},
+		outputSchema: requestExamplesSchema,
 		handler: async (args, ctx, signal) => {
 			const requestId = requireStr(args, "requestId");
-			return callEngine(
+			return callEngineStructured(
 				ctx,
 				() => ctx.client.listRequestExamples(requestId, signal),
 				(rows) => boundExampleBodies(secretsShape(ctx, withholdRowListSecrets)(rows))

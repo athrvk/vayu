@@ -11,8 +11,9 @@
  *        the safety guards (allowlist / caps / confirmation), and returns a
  *        result. Schemas are Zod (the SDK validates arguments and generates the
  *        JSON Schema for `tools/list`); tools carry MCP annotations (readOnly /
- *        destructive hints + a display title) and some declare an output schema
- *        for structured results. Transport-agnostic - the same registry backs
+ *        destructive hints + a display title); every read tool declares an
+ *        output schema for structured results, bar the bare-array reads
+ *        (`output-schema.conformance.test.ts`). Transport-agnostic - the same registry backs
  *        both the Streamable HTTP server (Electron) and the stdio CLI.
  *
  * The definitions live under `tools/` (#1918), one `<domain>.tools.ts` per

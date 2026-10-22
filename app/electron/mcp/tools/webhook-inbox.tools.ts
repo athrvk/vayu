@@ -16,6 +16,7 @@ import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
+	callEngineStructured,
 	confirmDestructive,
 	confirmedInput,
 	engineErrorResult,
@@ -29,7 +30,7 @@ import {
 } from "./kit.js";
 import { MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
 import { describeInbox, PAGE_CURSOR_SENTENCE, pagedRead } from "./run-housekeeping.js";
-import { inboxCapturePageSchema } from "./output-schemas.js";
+import { inboxCapturePageSchema, inboxListSchema } from "./output-schemas.js";
 import {
 	boundInboxCaptures,
 	DEFAULT_INBOX_CAPTURE_LIMIT,
@@ -117,7 +118,9 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listInboxes(signal)),
+		outputSchema: inboxListSchema,
+		handler: (_args, ctx, signal) =>
+			callEngineStructured(ctx, () => ctx.client.listInboxes(signal)),
 	},
 	{
 		name: "stop_webhook_inbox",

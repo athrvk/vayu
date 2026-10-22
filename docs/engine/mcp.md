@@ -243,8 +243,18 @@ How the name reaches the tool differs by era and transport:
 Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
 **annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint` + a display title), and a **Zod** input schema (arguments are
-validated by the SDK). A few declare an `outputSchema` and return validated
-`structuredContent` alongside the text rendering.
+validated by the SDK). Every **read** tool declares an `outputSchema` and
+returns validated `structuredContent` alongside the text rendering, except the
+six whose answer is not an object: `list_collections`, `list_environments`,
+`list_requests`, `list_client_certificates` and `get_live_metrics` answer a bare
+JSON array, and `export_run_report` answers the document's own text. An
+`outputSchema` is object-rooted, and reshaping those answers would break every
+agent that reads them. The read schemas are loose and name only the stable
+keys, so a field the engine adds still arrives; a non-object engine answer is
+wrapped as `{ "raw": ... }` rather than refused, because the SDK reports a
+rejected result as a broken tool and hides the body.
+`output-schema.conformance.test.ts` fails a read tool that is on neither side
+of that line, and an exception that stops being true.
 
 The four categories partition tools by what they can do - and thus which gate
 applies: **read** (inspection; returns workspace data, with secrets withheld unless the
@@ -2743,14 +2753,16 @@ off, 181,447 with writes on, down from 136,705 and 211,549; the caps sit about
 list to 121,210 (reveal off) and 118,484 (reveal on), and those two caps were
 re-set to that plus 5%. The envelope schema on the five paged reads (#2445)
 added about 2.9 KB to each pair: 127,059 / 124,333 bytes with writes off and
-194,425 / 190,028 with writes on (reveal off / on), under caps of 128,500 /
-125,800 and 196,000 / 191,600. The same file fails on a sentence of 150 or more
+194,425 / 190,028 with writes on (reveal off / on). The loose schemas on the 23
+other object-rooted reads added 7,866 bytes more to every row, about 340 bytes
+a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
+under caps of 136,300 / 133,600 and 204,400 / 199,900. The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the
 withholding rules and the error definition moved that way, and
 `VARIABLE_PRECEDENCE_SENTENCE` stays under 150 so its deliberate repetition
 passes), and on any `Withheld` or `<redacted>` in a description of a session
-with reveal on. A tool that adds output schemas (the rest of #2445) or a long description
+with reveal on. A tool that adds an output schema or a long description
 lands under the caps or raises them in its own diff.
 
 ## Deferred

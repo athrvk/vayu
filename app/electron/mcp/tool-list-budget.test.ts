@@ -40,10 +40,11 @@
  * #2445's paged-read envelope schema on the five paged reads added about
  * 2,930 B to every row: 124,128 / 121,402 B writes off and 191,494 / 187,097 B
  * writes on became 127,059 / 124,333 and 194,425 / 190,028, and the caps went
- * to 128,500 / 125,800 and 196,000 / 191,600 (about 1% above each). The rest
- * of #2445 (an output schema on every other read tool) grows the list again
- * and must land under these caps, or raise them in its own diff, where a
- * reviewer sees it.
+ * to 128,500 / 125,800 and 196,000 / 191,600 (about 1% above each). The loose
+ * schemas on the 23 other object-rooted reads (the rest of #2445) added 7,866 B
+ * to every row, about 340 B a tool: 134,925 / 132,199 B writes off and
+ * 202,291 / 197,894 B writes on, and the caps went to 136,300 / 133,600 and
+ * 204,400 / 199,900 (about 1% above each).
  * #2444 (the safety caps and allowlist) and the write-gate task wording add to
  * the instructions, not to `tools/list`, so they spend none of this budget.
  */
@@ -65,10 +66,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 51, maxBytes: 128_500 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 51, maxBytes: 125_800 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 79, maxBytes: 196_000 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 79, maxBytes: 191_600 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 51, maxBytes: 136_300 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 51, maxBytes: 133_600 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 79, maxBytes: 204_400 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 79, maxBytes: 199_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

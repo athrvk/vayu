@@ -26,6 +26,7 @@ import {
 	optionalPageLimit,
 	str,
 	structuredResult,
+	structuredRoot,
 	ToolArgError,
 } from "./kit.js";
 
@@ -101,15 +102,11 @@ function pageCursor(value: unknown, noun: string): PageCursor | null {
 }
 
 /**
- * @p shaped as the record a paged read answers, its `pagination` carrying
- * @p cursor. A non-object answer is wrapped as `{ raw }` rather than returned
- * bare, for the reason `get_engine_health` wraps one: the declared
- * `outputSchema` would reject it, and the SDK reports that as a broken tool
- * while hiding the engine's body.
+ * @p shaped as the record a paged read answers (see {@link structuredRoot} for
+ * a non-object answer), its `pagination` carrying @p cursor.
  */
 function pageRecord(shaped: unknown, cursor: PageCursor | null): Record<string, unknown> {
-	if (!isRecord(shaped)) return { raw: shaped ?? null };
-	if (!cursor) return shaped;
+	if (!cursor || !isRecord(shaped)) return structuredRoot(shaped);
 	const pagination = isRecord(shaped.pagination) ? shaped.pagination : {};
 	return { ...shaped, pagination: { ...pagination, ...cursor } };
 }

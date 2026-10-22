@@ -39,6 +39,7 @@ import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngine,
 	callEngineForRunOutput,
+	callEngineStructured,
 	engineErrorResult,
 	errorResult,
 	optionalOffset,
@@ -63,11 +64,16 @@ import {
 } from "./run-housekeeping.js";
 import { markPartialReport, projectRunStatus } from "./run-status.js";
 import {
+	appFocusSchema,
+	engineConfigSchema,
 	engineHealthSchema,
 	isEngineHealthShape,
+	requestRowSchema,
 	runPageSchema,
+	runReportSchema,
 	runSamplePageSchema,
 	runSeriesPageSchema,
+	runStatusSchema,
 } from "./output-schemas.js";
 
 /**
@@ -135,6 +141,7 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
+		outputSchema: appFocusSchema,
 		handler: async (_args, ctx) => {
 			const focus = ctx.appFocus?.();
 			if (!focus) {
@@ -221,8 +228,9 @@ export const READ_TOOLS: McpTool[] = [
 				.string()
 				.describe("Saved request ID, the (req_...) of a Vayu reference line."),
 		},
+		outputSchema: requestRowSchema,
 		handler: (args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getRequest(requireStr(args, "requestId"), signal),
 				secretsShape(ctx, withholdRowSecrets)
@@ -352,10 +360,12 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to fetch.") },
+		outputSchema: runReportSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			return callEngineForRunOutput(ctx, () => ctx.client.getRunReport(runId, signal), {
 				bound: (report) => markPartialReport(boundRunReport(report)),
+				structured: true,
 				signal,
 			});
 		},
@@ -374,10 +384,12 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to read, as a start tool returned it.") },
+		outputSchema: runStatusSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			return callEngineForRunOutput(ctx, () => readRunRow(ctx, runId, signal), {
 				bound: (row) => projectRunStatus(row),
+				structured: true,
 				signal,
 			});
 		},
@@ -546,8 +558,9 @@ export const READ_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
+		outputSchema: engineConfigSchema,
 		handler: (_args, ctx, signal) =>
-			callEngine(
+			callEngineStructured(
 				ctx,
 				() => ctx.client.getConfig(signal),
 				secretsShape(ctx, withholdConfigCredentials)
