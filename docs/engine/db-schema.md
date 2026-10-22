@@ -393,11 +393,12 @@ the release that carries a bump says so in its notes. The gate first shipped in 
 and earlier have none, and opening a newer workspace with one rebuilds `requests` and `collections`
 empty (their `pre_request_script` / `post_request_script` columns are `NOT NULL` with no default, which
 sqlite_orm cannot add to an existing table) and then copies that emptied file over `<db>.bak`, with no
-error. A shipped binary cannot be changed, so nothing in the engine can stop that. The Windows
-installer and `winget` cannot gate an install either: a check added to a newer installer does not
-exist in the older installer being run, and `winget` runs the vendor installer of whichever version
-is pinned. On Windows the only protection is not installing an older version over a newer
-workspace; restore a Workspace backup first if you must.
+error. A shipped binary cannot be changed, so nothing in the engine can stop that. `install.sh`
+refuses to install a version below `0.27.0` over an existing `db/vayu.db` unless given
+`--allow-data-loss`. The Windows installer and `winget` cannot gate an install: a check added to a
+newer installer does not exist in the older installer being run, and `winget` runs the vendor
+installer of whichever version is pinned. On Windows the only protection is not installing an older
+version over a newer workspace; restore a Workspace backup first if you must.
 
 | Version | Change | Migration step |
 |---------|--------|----------------|
