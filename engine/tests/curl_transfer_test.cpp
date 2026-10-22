@@ -644,7 +644,7 @@ TEST_F (CurlTransferTest, AWaitForAConnectionSlotIsQueueWaitNotWireTime) {
     constexpr double kBoundMs =
     std::chrono::duration<double, std::milli> (kHold).count () / 2.0;
 
-    HeldFirstBatchServer server (kSlots, kHold);
+    HeldFirstBatchServer slow_server (kSlots, kHold);
     vayu::http::EventLoopConfig config;
     config.num_workers  = 1; // one multi handle, so one per-host limit
     config.max_per_host = kSlots;
@@ -653,7 +653,7 @@ TEST_F (CurlTransferTest, AWaitForAConnectionSlotIsQueueWaitNotWireTime) {
 
     vayu::Request request;
     request.method = vayu::HttpMethod::GET;
-    request.url    = server.url ();
+    request.url    = slow_server.url ();
     std::vector<vayu::http::RequestHandle> handles;
     handles.reserve (6);
     for (int i = 0; i < 6; ++i) {
