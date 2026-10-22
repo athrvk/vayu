@@ -414,9 +414,10 @@ TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
 // `stop()` returns only once the request it found in flight has been answered,
 // because the daemon tears down the run manager, curl's global state and the
 // database right after it (#2667). The upstream holds the engine's `/execute`
-// handler inside its transfer until it is released, which happens from another
-// thread as `stop()` begins, so the handler is still running when the listener
-// closes. Under ASan a handler that outlived `stop()` is also reported writing
+// handler inside its transfer until it is released from another thread, which
+// races `stop()` the way a real shutdown races a finishing request: the
+// handler is always in flight when `stop()` is called, and usually still
+// running when the listener closes. Under ASan a handler that outlived `stop()` is also reported writing
 // through the destroyed Server. Mutation check: make `stop()` detach the
 // listener thread instead of waiting for it, and the result row is missing when
 // it returns.
