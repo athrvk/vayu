@@ -477,8 +477,8 @@ The libraries the script sandbox's `require()` hands out are the real npm
 builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
 beside its licence and a `README.md` naming the package, the exact version,
 the tarball URL and its registry integrity. csv-parse and xml2js ship no
-single-file build, and chai's (`chai.js`) carries a dependency set Postman does
-not ship, so each of the three files is an esbuild bundle of the package's own
+single-file build, and chai's browser build (`chai.js`) carries a dependency set Postman
+does not ship, so each of the three files is an esbuild bundle of the package's own
 sources (xml2js's with the `sax` and `xmlbuilder` it depends on, chai's with
 its seven dependencies, their licences beside it), and its `README.md` also
 carries the command that reproduces it byte for byte. They are
