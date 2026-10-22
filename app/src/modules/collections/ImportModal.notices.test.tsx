@@ -336,7 +336,7 @@ describe("the import preview's file folders", () => {
 			],
 		});
 
-	it("lists each folder once, and Allow folder opens the picker there", async () => {
+	it("lists each folder once, and Allow folder opens the picker", async () => {
 		vi.spyOn(apiService, "getFileRoots").mockResolvedValue([]);
 		// The bridge's presence is what offers the action; the call is spied below.
 		vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
@@ -359,13 +359,8 @@ describe("the import preview's file folders", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Allow folder /home/me/fixtures" }));
 
-		// The folder is where the picker opens; main allows what is chosen there.
-		await waitFor(() =>
-			expect(allow).toHaveBeenCalledWith({
-				title: "Allow a folder",
-				defaultPath: "/home/me/fixtures",
-			})
-		);
+		// No folder hint: main opens the picker where the last one ended (#2378).
+		await waitFor(() => expect(allow).toHaveBeenCalledWith());
 	});
 
 	it("offers no Allow folder outside Electron, where nothing can allow one", async () => {

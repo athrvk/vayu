@@ -140,7 +140,7 @@ describe("FilesPanel", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
-		await waitFor(() => expect(allowRoot).toHaveBeenCalledWith({ title: "Allow a folder" }));
+		await waitFor(() => expect(allowRoot).toHaveBeenCalledWith());
 		// The row the engine kept, canonical, not the folder as picked.
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(

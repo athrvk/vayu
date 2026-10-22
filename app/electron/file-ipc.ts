@@ -11,8 +11,9 @@
  * - `file:allowFolder` opens the system folder picker and, when the user
  *   chooses a folder, allows it: `POST /file-roots` with the grant secret
  *   (#2356). Settings > Files, the body editor's "Allow folder…" and the
- *   import preview use it. The renderer cannot name the folder - only the
- *   dialog's starting point - because an allowed folder widens what every
+ *   import preview use it. The renderer cannot name the folder, and since #2378
+ *   not the dialog's title or starting point either - it names a dialog by key
+ *   (`FOLDER_DIALOG_TITLES`) - because an allowed folder widens what every
  *   request may read from disk, and the engine refuses that write from anyone
  *   without the secret this process holds. The engine's answer comes back
  *   whole, so the renderer can tell "already allowed" (409) from a refusal.
@@ -136,30 +137,70 @@ export async function statFile(
 	}
 }
 
-/** The folder the user chose in the system picker, or null when they cancelled. */
+/**
+ * The dialogs the renderer may open, by key, and the title each carries. Keyed
+ * rather than text-taking for the reason `app-links.ts` is: a compromised
+ * renderer must not choose what the OS dialog says, since the user is deciding
+ * to widen what requests may read on the strength of that wording. The keys are
+ * mirrored by `allowFolder`'s parameter type in `preload.ts` and
+ * `src/types/electron.d.ts`, neither of which can import from here.
+ */
+export const FOLDER_DIALOG_TITLES = { "allow-folder": "Allow a folder" } as const;
+
+export type FolderDialogKey = keyof typeof FOLDER_DIALOG_TITLES;
+
+/** The title behind a key; an unknown key, or a non-string, throws rather than opening nothing. */
+export function folderDialogTitle(key: unknown): string {
+	if (
+		typeof key !== "string" ||
+		!Object.prototype.hasOwnProperty.call(FOLDER_DIALOG_TITLES, key)
+	) {
+		throw new Error(`Unknown folder dialog: ${String(key)}`);
+	}
+	return FOLDER_DIALOG_TITLES[key as FolderDialogKey];
+}
+
+/**
+ * Where the next folder dialog opens. Held per process and never persisted: the
+ * renderer used to pick the starting folder, and what it hinted was not worth a
+ * channel that lets it name a path.
+ */
+export interface FolderDialogMemory {
+	directory?: string;
+}
+
+/**
+ * The folder the user chose in the system picker, or null when they cancelled.
+ *
+ * Remembered as soon as the picker returns one, before the engine is asked to
+ * allow it: the next dialog starts where this one ended whether the engine
+ * accepted the folder, already had it (409) or was unreachable. A cancel leaves
+ * the last folder alone.
+ */
 export async function chooseFolder(
-	options: unknown,
-	deps: Pick<FileIpcDeps, "showOpenDialog">
+	key: unknown,
+	deps: Pick<FileIpcDeps, "showOpenDialog">,
+	memory: FolderDialogMemory
 ): Promise<string | null> {
-	const raw = options && typeof options === "object" ? (options as Record<string, unknown>) : {};
 	const dialogOptions: DirectoryDialogOptions = {
-		title: typeof raw.title === "string" && raw.title ? raw.title : "Choose a folder",
+		title: folderDialogTitle(key),
 		properties: ["openDirectory", "createDirectory"],
 	};
-	if (typeof raw.defaultPath === "string" && raw.defaultPath) {
-		dialogOptions.defaultPath = raw.defaultPath;
-	}
+	if (memory.directory) dialogOptions.defaultPath = memory.directory;
 	const result = await deps.showOpenDialog(dialogOptions);
 	if (result.canceled) return null;
-	return result.filePaths[0] ?? null;
+	const folder = result.filePaths[0] ?? null;
+	if (folder !== null) memory.directory = folder;
+	return folder;
 }
 
 /** `file:allowFolder`'s whole decision, exported for the test. */
 export async function allowFolder(
-	options: unknown,
-	deps: Pick<FileIpcDeps, "showOpenDialog" | "createFileRoot">
+	key: unknown,
+	deps: Pick<FileIpcDeps, "showOpenDialog" | "createFileRoot">,
+	memory: FolderDialogMemory
 ): Promise<AllowFolderReply> {
-	const folder = await chooseFolder(options, deps);
+	const folder = await chooseFolder(key, deps, memory);
 	if (folder === null) return { outcome: "cancelled" };
 	return { ...(await deps.createFileRoot(folder)), path: folder };
 }
@@ -172,9 +213,10 @@ function assertAppFrame(event: IpcSenderLike, deps: Pick<FileIpcDeps, "isAppFram
 }
 
 export function registerFileIpc(ipc: IpcLike, deps: FileIpcDeps): void {
-	ipc.handle("file:allowFolder", (event, options: unknown) => {
+	const dialogMemory: FolderDialogMemory = {};
+	ipc.handle("file:allowFolder", (event, key: unknown) => {
 		assertAppFrame(event, deps);
-		return allowFolder(options, deps).finally(() => deps.roots.invalidate());
+		return allowFolder(key, deps, dialogMemory).finally(() => deps.roots.invalidate());
 	});
 	ipc.handle("file:removeAllowedFolder", (event, id: unknown): Promise<RemoveFolderReply> => {
 		assertAppFrame(event, deps);
