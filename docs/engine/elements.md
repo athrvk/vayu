@@ -243,8 +243,8 @@ budget.
 `ElementContext::run_pre_script` / `run_post_script`, which the caller (`execute_exchange`, and the
 streaming send's own inline pipeline calls) binds to the exact `execute_script` call design mode has
 always made. The element's own outcome is whether the script ran without throwing; the script's own
-`pm.test` assertions travel inside the same `vayu::ScriptResult` untouched, so a scripted step's
-trace shape is unchanged by this cut-over.
+`pm.test` assertions travel inside the step's `vayu::ScriptResult`, folded beside every other
+level's (see [The step trace](#the-step-trace)).
 
 A **blank** `script.pre` / `.post` / `.setup` / `.teardown` (its own `script` empty or
 whitespace-only, `is_blank_script_element`) is inert everywhere but storage (issue #1609): `POST
@@ -355,6 +355,17 @@ existing `scripts` node - one entry per compiled element that ran at `step.befor
 (`step.between` too, for the sequential run), each
 `{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
+`origin.scope` (`collection` | `folder` | `request`, #2522) is the level the element was declared at;
+`compile_elements` reads it into `CompiledElement::scope` (falling back to `origin.kind`), and
+`ElementPipeline::run` sets `ElementContext::element_scope` from it before each `apply`.
+
+Every level's `script.pre` / `script.post` runs, and each **folds** its result into the step's
+`pre_script_result` / `post_script_result` rather than assigning over it (#2522): tests and console
+lines are appended in run order, each stamped with the element's scope; `success` is false once any
+level's is; the first level that threw is kept as `error_message`, with `error_scope` naming it; and
+`control` is replaced only by an instruction, so a level that asked for nothing does not cancel an
+earlier controller's skip. An `assert.*` or `extract.*` result is stamped with its element's scope
+too.
 `POST /execute`'s live response body carries the same array under the same key - one object, two
 homes, on the `scripts` node's own precedent.
 

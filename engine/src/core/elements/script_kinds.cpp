@@ -21,7 +21,8 @@
  * `core/elements`, which knows nothing about scripting beyond
  * `vayu::ScriptResult`'s shape. The element's own outcome is about whether the
  * script ran without throwing; a script's own `pm.test` assertions travel
- * inside that same `ScriptResult` untouched, exactly as they always have.
+ * inside the step's `ScriptResult`, folded beside every other level's
+ * (`fold_script_result`).
  *
  * `script.setup` / `script.teardown` are `collection_only`: run once per run
  * rather than once per step, attaching one to a request would run it once per
@@ -34,6 +35,58 @@ namespace vayu::core {
 
 namespace {
 
+/**
+ * Folds one level's script result into the step's slot (#2522). A step runs
+ * a script per level - collection, each folder, the request - into one slot
+ * that `assert.*` / `extract.*` and the controllers also write, so each
+ * result is added to what is there, never assigned over it: tests and
+ * console lines appended in run order and stamped with @p scope, `success`
+ * false once any level's is, the first level that threw kept as the error,
+ * and `control` replaced only by an instruction (a script that asked for
+ * nothing does not cancel a controller's skip).
+ */
+void fold_script_result (vayu::ScriptResult& slot,
+vayu::ScriptResult next,
+const std::string& scope) {
+    const bool next_threw = !next.success && !next.error_message.empty ();
+    if (next_threw && slot.error_message.empty ()) {
+        slot.error_message = std::move (next.error_message);
+        slot.error_scope   = scope;
+    }
+    slot.success = slot.success && next.success;
+    for (auto& test : next.tests) {
+        test.scope = scope;
+        slot.tests.push_back (std::move (test));
+    }
+    for (auto& entry : next.console_output) {
+        entry.scope = scope;
+        slot.console_output.push_back (std::move (entry));
+    }
+    if (next.control.kind != vayu::ScriptControl::Kind::None) {
+        slot.control = std::move (next.control);
+    }
+}
+
+/// `script.pre` / `script.post`'s shared `apply`: the element's own outcome
+/// is about this one script, the slot about the whole step.
+void run_step_script (ElementContext& ctx,
+const std::function<vayu::ScriptResult (const std::string&)>& runner,
+vayu::ScriptResult& slot,
+const std::string& script,
+const char* unbound_message) {
+    if (!runner) {
+        ctx.outcome_status  = "error";
+        ctx.outcome_message = unbound_message;
+        return;
+    }
+    auto result        = runner (script);
+    ctx.outcome_status = result.success ? "ok" : "error";
+    if (!result.success) {
+        ctx.outcome_message = result.error_message;
+    }
+    fold_script_result (slot, std::move (result), ctx.element_scope);
+}
+
 class ScriptPreElement final : public Element {
     public:
     explicit ScriptPreElement (const nlohmann::json& config)
@@ -45,16 +98,8 @@ class ScriptPreElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        if (!ctx.run_pre_script) {
-            ctx.outcome_status  = "error";
-            ctx.outcome_message = "no pre-request script runner bound";
-            return;
-        }
-        ctx.pre_script_result = ctx.run_pre_script (script_);
-        ctx.outcome_status    = ctx.pre_script_result.success ? "ok" : "error";
-        if (!ctx.pre_script_result.success) {
-            ctx.outcome_message = ctx.pre_script_result.error_message;
-        }
+        run_step_script (ctx, ctx.run_pre_script, ctx.pre_script_result,
+        script_, "no pre-request script runner bound");
     }
 
     private:
@@ -72,16 +117,8 @@ class ScriptPostElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        if (!ctx.run_post_script) {
-            ctx.outcome_status  = "error";
-            ctx.outcome_message = "no post-request script runner bound";
-            return;
-        }
-        ctx.post_script_result = ctx.run_post_script (script_);
-        ctx.outcome_status = ctx.post_script_result.success ? "ok" : "error";
-        if (!ctx.post_script_result.success) {
-            ctx.outcome_message = ctx.post_script_result.error_message;
-        }
+        run_step_script (ctx, ctx.run_post_script, ctx.post_script_result,
+        script_, "no post-request script runner bound");
     }
 
     private:

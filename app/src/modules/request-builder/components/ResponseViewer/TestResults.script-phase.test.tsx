@@ -83,3 +83,47 @@ describe("TestResults grouped by script", () => {
 		expect(screen.getByText(/failed/)).toBeTruthy();
 	});
 });
+
+/**
+ * Which level an assertion came from (issue #2522). A request runs the
+ * assertions of every collection and folder it inherits, and without a label
+ * the list reads as though the request's own script wrote all of them.
+ */
+describe("TestResults level labels", () => {
+	it("labels a collection's and a folder's assertion, and leaves the rest bare", () => {
+		render(
+			<TestResults
+				results={[
+					{ name: "from the root", passed: true, source: "test", scope: "collection" },
+					{ name: "from a folder", passed: true, source: "test", scope: "folder" },
+					{ name: "from the request", passed: true, source: "test", scope: "request" },
+					{ name: "stored before the field", passed: true, source: "test" },
+				]}
+			/>
+		);
+
+		const card = (name: string) => screen.getByText(name).parentElement as HTMLElement;
+		expect(within(card("from the root")).getByText("Collection")).toBeTruthy();
+		expect(within(card("from a folder")).getByText("Folder")).toBeTruthy();
+		expect(
+			within(card("from the request")).queryByText(/^(Collection|Folder|Request)$/)
+		).toBeNull();
+		expect(
+			within(card("stored before the field")).queryByText(/^(Collection|Folder|Request)$/)
+		).toBeNull();
+	});
+
+	it("draws the label as neutral text, never a status tint", () => {
+		render(
+			<TestResults
+				results={[
+					{ name: "from the root", passed: false, source: "test", scope: "collection" },
+				]}
+			/>
+		);
+
+		const label = screen.getByText("Collection");
+		expect(label).toHaveClass("text-muted-foreground");
+		expect(label.className).not.toContain("status-");
+	});
+});

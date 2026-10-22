@@ -24,6 +24,7 @@
 
 #include <array>
 #include <string>
+#include <string_view>
 
 namespace vayu::http::routes {
 // Declared in execution.cpp.
@@ -31,6 +32,7 @@ nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
 nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
 const vayu::ScriptResult& post_script_result);
+std::string script_failure_text (const vayu::ScriptResult& result, std::string_view phase);
 } // namespace vayu::http::routes
 
 namespace {
@@ -563,6 +565,69 @@ TEST (ScriptResultNode, OmitsTheListWhenNeitherScriptAsserted) {
     build_script_result_node (vayu::ScriptResult{}, vayu::ScriptResult{});
 
     EXPECT_FALSE (node.contains ("testResults")) << node.dump ();
+}
+
+// ============================================================================
+// The level each result came from (issue #2522)
+// ============================================================================
+
+TEST (ScriptResultNode, NamesTheLevelOfEachTestAndConsoleLine) {
+    auto collection_test = failing ("collection must fail", "expected 1 to equal 2");
+    collection_test.scope   = "collection";
+    auto request_test       = passing ("request passes");
+    request_test.scope      = "request";
+    vayu::ScriptResult post = script_with ({ collection_test, request_test });
+    post.console_output.push_back ({ vayu::ConsoleLevel::Warn, "from the folder", "folder" });
+
+    const auto node = build_script_result_node (vayu::ScriptResult{}, post);
+
+    EXPECT_EQ (node["testResults"][0]["scope"], "collection");
+    EXPECT_EQ (node["testResults"][1]["scope"], "request");
+    // `level` stays the console method; the script's level is `scope`.
+    EXPECT_EQ (node["consoleLogs"][0]["level"], "warn");
+    EXPECT_EQ (node["consoleLogs"][0]["scope"], "folder");
+}
+
+// A result no fold stamped - every trace stored before the field - keeps the
+// shape it had, which readers take as the request's own.
+TEST (ScriptResultNode, OmitsTheScopeWhereNoneWasStamped) {
+    vayu::ScriptResult pre = script_with ({ passing ("unstamped") });
+    pre.console_output.push_back ({ vayu::ConsoleLevel::Log, "unstamped" });
+
+    const auto node = build_script_result_node (pre, vayu::ScriptResult{});
+
+    EXPECT_FALSE (node["testResults"][0].contains ("scope")) << node.dump ();
+    EXPECT_FALSE (node["consoleLogs"][0].contains ("scope")) << node.dump ();
+}
+
+TEST (ScriptResultNode, AnInheritedLevelsErrorNamesTheLevel) {
+    vayu::ScriptResult pre;
+    pre.success       = false;
+    pre.error_message = "ReferenceError: postman is not defined";
+    pre.error_scope   = "collection";
+    vayu::ScriptResult post;
+    post.success       = false;
+    post.error_message = "boom";
+    post.error_scope   = "folder";
+
+    const auto node = build_script_result_node (pre, post);
+
+    EXPECT_EQ (node["preScriptError"], "Collection pre-request script failed - ReferenceError: postman is not defined");
+    EXPECT_EQ (node["postScriptError"], "Folder test script failed - boom");
+}
+
+// The request's own script's error is stored exactly as it always was.
+TEST (ScriptResultNode, TheRequestsOwnErrorIsTheBareMessage) {
+    vayu::ScriptResult pre;
+    pre.success       = false;
+    pre.error_message = "x";
+    pre.error_scope   = "request";
+
+    const auto node = build_script_result_node (pre, vayu::ScriptResult{});
+
+    EXPECT_EQ (node["preScriptError"], "x");
+    EXPECT_EQ (vayu::http::routes::script_failure_text (pre, "pre-request"),
+    "Pre-request script failed - x");
 }
 
 } // namespace

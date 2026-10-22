@@ -896,8 +896,13 @@ Notes:
   fails on its tests says which, rather than leaving an agent with `ok: false`
   beside a `200`. Both scripts count, and a pre-request assertion's line is
   prefixed `[pre-request]` (issue #810): it failed before the request went out,
-  which is a different thing to go and look at. The list is cut at ten, the number the engine caps a schema
-  verdict's failures at, while `failed` stays the true count. A response that
+  which is a different thing to go and look at. An assertion from a script the
+  request inherits is prefixed with its level first - `[collection]` or
+  `[folder]`, so `[folder] [pre-request] name: message` (issue #2522) - because
+  the request's own scripts are the wrong place to go looking for it; the
+  request's own assertion carries none. The list is cut at ten, the number the
+  engine caps a schema verdict's failures at, while `failed` stays the true
+  count. A response that
   ran no assertions carries no `tests` node: none ran is not all passed.
   For a collection **bound to an OpenAPI document** each row also carries a
   `schema` verdict (issue #681) and folds it into `ok` the way `testResults`

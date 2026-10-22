@@ -6790,15 +6790,21 @@ still sending any of `preRequestScript`, `preRequestScripts`,
 the by-id path, an element list a caller supplies inline is laid over `POST
 /compose`'s own resolved chain (collection root to leaf, then the request's
 own, minus anything disabled or named by an `inherit.disable` entry, each
-stamped with `origin: {kind: "collection" | "request", id, name?}`) exactly
-as any other inline field overlays the stored one; an inline-only send has no
-chain to resolve one from, so its elements carry no `origin`.
+stamped with `origin: {kind: "collection" | "request", scope, id, name?}`)
+exactly as any other inline field overlays the stored one; an inline-only send
+has no chain to resolve one from, so its elements carry no `origin`. `scope`
+is `collection` for the root, `folder` for every collection below it and
+`request` for the request's own (#2522); `kind` keeps its two values. It is
+what each script result's `scope` (below) is read from, falling back to
+`kind` for an `origin` that carries none.
 
 `vayu::core::ElementPipeline` runs the compiled list at each phase this send
 reaches: `script.pre` elements at `step.before`, immediately before the
 transfer (so a `pm.request` edit reaches the wire); `extract.*` / `assert.*` /
 `script.post` elements at `step.after`, once the response (or, for a
-streaming send, the terminated stream) is in. `assert.*` outcomes append to
+streaming send, the terminated stream) is in. Every level's script runs, in
+list order, and each one's tests and console lines are added to the step's
+result rather than replacing an earlier level's (#2522). `assert.*` outcomes append to
 the same `pm.test()` channel a `script.post` element's assertions do, so the
 response body's `testResults` and `consoleLogs` (see below) do not
 distinguish a declarative assertion from one a script wrote by hand. The
@@ -6926,17 +6932,19 @@ run-shaped way of stating the same field, not a second store.
     {
       "name": "Token was issued",
       "passed": true,
-      "source": "pre"
+      "source": "pre",
+      "scope": "collection"
     },
     {
       "name": "Status is 200",
       "passed": true,
-      "source": "test"
+      "source": "test",
+      "scope": "request"
     }
   ],
   "consoleLogs": [
-    { "source": "pre", "level": "log", "message": "token refreshed" },
-    { "source": "test", "level": "error", "message": "unexpected shape" }
+    { "source": "pre", "scope": "collection", "level": "log", "message": "token refreshed" },
+    { "source": "test", "scope": "request", "level": "error", "message": "unexpected shape" }
   ],
   "validation": {
     "checked": true,
@@ -7036,6 +7044,20 @@ naming the script that made it in `source` (`"pre"` / `"test"`, the spellings
 pre-request assertion failed a collection-run step while appearing in no list.
 An entry stored before that carries no `source`; it is a test script's, which is
 all the list held.
+
+A request runs the scripts of every level it inherits from - the collection's,
+each folder's from the outermost in, then its own - and every level's results
+are listed (#2522). Each `testResults` and `consoleLogs` entry names its level
+in **`scope`**: `collection`, `folder` or `request`. It is not `level`, which a
+console line already uses for the console method. An entry stored before the
+field carries no `scope` and is the request's own; so is one from a payload
+whose `elements` carry no `origin`. `success` folds the same way: a failing
+`pm.test` at any level is a failed assertion, and the first level that throws
+is the error. `preScriptError` / `postScriptError` hold the thrown message as
+they always have when the request's own script threw; when an inherited level
+threw, they name it - "Collection pre-request script failed - <message>",
+"Folder test script failed - <message>". An `assert.*` or `extract.*`
+element's entry carries the `scope` of the level that declared it.
 
 **The four script keys are stored the same way** (issue #725). `testResults`,
 `consoleLogs`, `preScriptError` and `postScriptError` are returned in the body
@@ -8006,7 +8028,9 @@ sub-collection sits, under the sibling order in [Ordering](#ordering) (a
 sub-collection first on an `order` tie). The run follows the render (issues
 #431, #2535). Each step is
 composed through the same path `POST /compose` uses, so a step's request and
-joined scripts are byte-identical to what a Send of that request would run. A
+its resolved `elements` (every collection, folder and request level's scripts,
+each run in turn and each reported with its level, #2522) are what a Send of
+that request would run. A
 collection edited mid-run therefore cannot change the sequence underneath
 itself, and no execution path re-reads the database for request data.
 
@@ -8385,6 +8409,17 @@ scripts said nothing stores no node at all. The `results.error` summary line
 ("3 tests failed - <first name>") is unchanged and stays what the outcome is
 derived from; the node is the list that line summarises.
 
+Every level's scripts run and every level's results land in that node
+(#2522): the collection's, each folder's from the outermost in, then the
+request's own, in that order, each `testResults` and `consoleLogs` entry
+carrying a `scope` of `collection`, `folder` or `request` (absent on a trace
+stored before the field, read as `request`). A failing `pm.test` at any level
+fails the step, and a script that throws at any level errors it; when the level
+that threw is not the request's own, the step error names it - "Collection
+pre-request script failed - ...", "Folder test script failed - ..." - where
+the request's own throw keeps "Pre-request script failed - ..." / "Test script
+failed - ...". When more than one level throws, the first one is reported.
+
 A step of a collection **bound to an OpenAPI document** additionally carries a
 `validation` node (issue #681) - the same object and the same shape
 [`POST /execute`](#post-execute) returns - saying whether its response matched
@@ -8399,8 +8434,8 @@ that passed everything else. The run's rollup is
 | Outcome | Meaning | Effect on the iteration |
 |---------|---------|-------------------------|
 | `passed` | The request completed and every assertion held. | Continues. |
-| `failed` | A `pm.test` assertion did not hold. | Continues - the request itself completed. |
-| `errored`, step | The step did not run clean: the pre-request or test script threw (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
+| `failed` | A `pm.test` assertion did not hold, at the collection, a folder or the request. | Continues - the request itself completed. |
+| `errored`, step | The step did not run clean: the pre-request or test script threw, at any level (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
 | `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
 
@@ -9457,8 +9492,9 @@ collection and for one that sent nothing, and byte-identical to the node its
 stored trace carries, so a watched run and a read-back one agree. `tests` is how
 many of the step's assertions held (issue #724) - two numbers, because the ring
 is fixed-size and a script may make hundreds of them; the list itself rides the
-stored `scripts` node. It counts the **test script's** assertions, exactly the
-ones that node lists, and is absent for a step that asserted none: `0 passed`
+stored `scripts` node. It counts exactly the assertions that node lists -
+both script phases, every level's (#2522), and `assert.*` elements beside
+them - and is absent for a step that asserted none: `0 passed`
 would read as a result. `requestId` names the stored request the step ran
 (issue #831) - the same id `stamp_step_identity` writes onto the stored trace,
 so a step read live and the same step read back from the report name one

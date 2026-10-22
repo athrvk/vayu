@@ -219,12 +219,27 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request);
  * appearing in no list any surface could render.
  *
  * Each key is present only when it has something to say, so a request with no
- * scripts contributes an empty object and stores nothing.
+ * scripts contributes an empty object and stores nothing. An entry's `scope`
+ * names the level that produced it (#2522) and is absent where none was
+ * stamped; `preScriptError` / `postScriptError` are the bare message when the
+ * request's own script threw and `script_failure_text` when an inherited
+ * level did, so the level is named wherever the error is read.
  *
  * Non-static: execution_trace_test.cpp drives it directly.
  */
 [[nodiscard]] nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
 const vayu::ScriptResult& post_script_result);
+
+/**
+ * A thrown script phase as one line, naming the level that threw (#2522):
+ * `"Collection pre-request script failed - <message>"`, `"Folder test script
+ * failed - ..."`, and for the request's own (or an unstamped) script
+ * `"Pre-request script failed - ..."` / `"Test script failed - ..."`.
+ * @p phase is `"pre-request"` or `"test"`. A collection run's step error and
+ * an inherited level's `preScriptError` / `postScriptError` are this text.
+ */
+[[nodiscard]] std::string
+script_failure_text (const vayu::ScriptResult& result, std::string_view phase);
 
 /** Execute one script, turning any exception into a failed `ScriptResult`. */
 vayu::ScriptResult execute_script (vayu::runtime::ScriptEngine& engine,

@@ -52,22 +52,41 @@ describe("elementsParts", () => {
 				kind: "script.pre",
 				enabled: true,
 				config: {},
-				origin: { kind: "collection", id: "root", name: "Root" },
+				origin: { kind: "collection", scope: "collection", id: "root", name: "Root" },
 			},
 			{
 				id: "l1",
 				kind: "extract.json",
 				enabled: true,
 				config: {},
-				origin: { kind: "collection", id: "leaf", name: "Leaf" },
+				origin: { kind: "collection", scope: "folder", id: "leaf", name: "Leaf" },
 			},
 			{
 				id: "req1",
 				kind: "assert.status",
 				enabled: true,
 				config: {},
-				origin: { kind: "request", id: "req_1" },
+				origin: { kind: "request", scope: "request", id: "req_1" },
 			},
+		]);
+	});
+
+	it("stamps the root as collection, every collection below it as folder, and the request as request", () => {
+		// What the engine stamps for a stored request's chain (issue #2522): an
+		// inline Send reports the same level for the same script, so a folder's
+		// failing test is not blamed on the collection.
+		const chain: Collection[] = [
+			collection("root", "Root", [element({ id: "r1", kind: "script.pre" })]),
+			collection("mid", "Mid", [element({ id: "m1", kind: "script.pre" })]),
+			collection("leaf", "Leaf", [element({ id: "l1", kind: "script.post" })]),
+		];
+		const parts = elementsParts(chain, "req_1", [element({ id: "q1", kind: "script.post" })]);
+
+		expect(parts?.map((p) => [p.id, p.origin?.kind, p.origin?.scope])).toEqual([
+			["r1", "collection", "collection"],
+			["m1", "collection", "folder"],
+			["l1", "collection", "folder"],
+			["q1", "request", "request"],
 		]);
 	});
 

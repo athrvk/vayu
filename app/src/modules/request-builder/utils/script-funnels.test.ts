@@ -32,27 +32,32 @@ import { responseFromRunResult, type RunResultSample } from "./restore-response"
  *
  * One from each script, carrying the `source` the engine stamps (issue #810):
  * the phase is inside the object both funnels pass through, so a funnel that
- * rebuilt the list instead of carrying it would drop it here first.
+ * rebuilt the list instead of carrying it would drop it here first. The same
+ * goes for the `scope` (issue #2522): one entry from each level, so a funnel
+ * that rebuilt an entry from named fields loses it on the first one.
  */
 const TEST_RESULTS: TestResult[] = [
-	{ name: "Token was issued", passed: true, source: "pre" },
+	{ name: "Token was issued", passed: true, source: "pre", scope: "collection" },
+	{ name: "Folder is tagged", passed: true, source: "test", scope: "folder" },
 	{
 		name: "Body carries an id",
 		passed: false,
 		error: "expected undefined to equal 1",
 		source: "test",
+		scope: "request",
 	},
 ];
 
 const CONSOLE_LOGS: ConsoleLogEntry[] = [
-	{ source: "pre", level: "log", message: "token refreshed" },
-	{ source: "test", level: "error", message: "unexpected shape" },
+	{ source: "pre", scope: "collection", level: "log", message: "token refreshed" },
+	{ source: "test", scope: "request", level: "error", message: "unexpected shape" },
 ];
 
 /** The four keys as the engine writes them, live body and stored node alike. */
 const SCRIPTS = {
 	testResults: TEST_RESULTS,
 	consoleLogs: CONSOLE_LOGS,
+	preScriptError: "Collection pre-request script failed - boom",
 	postScriptError: "ReferenceError: pmm is not defined",
 };
 
@@ -89,6 +94,7 @@ describe("the live funnel", () => {
 		const live = responseFromExecuteResult(executeResult(SCRIPTS));
 		expect(live.testResults).toEqual(TEST_RESULTS);
 		expect(live.consoleLogs).toEqual(CONSOLE_LOGS);
+		expect(live.preScriptError).toBe(SCRIPTS.preScriptError);
 		expect(live.postScriptError).toBe(SCRIPTS.postScriptError);
 	});
 });
@@ -98,6 +104,7 @@ describe("the restore funnel", () => {
 		const restored = responseFromRunResult(runResult(SCRIPTS));
 		expect(restored?.testResults).toEqual(TEST_RESULTS);
 		expect(restored?.consoleLogs).toEqual(CONSOLE_LOGS);
+		expect(restored?.preScriptError).toBe(SCRIPTS.preScriptError);
 		expect(restored?.postScriptError).toBe(SCRIPTS.postScriptError);
 	});
 
@@ -113,6 +120,16 @@ describe("the restore funnel", () => {
 });
 
 describe("funnel parity", () => {
+	it("carries each entry's scope, live and restored alike", () => {
+		const live = responseFromExecuteResult(executeResult(SCRIPTS));
+		const restored = responseFromRunResult(runResult(SCRIPTS));
+
+		const scopes = (r: { testResults?: TestResult[] } | null | undefined) =>
+			r?.testResults?.map((t) => t.scope);
+		expect(scopes(live)).toEqual(["collection", "folder", "request"]);
+		expect(scopes(restored)).toEqual(scopes(live));
+	});
+
 	it("shows the same assertions live and restored", () => {
 		// The point of the engine storing the object it returned rather than the
 		// app deriving a second one: a run reopened from History is the run that

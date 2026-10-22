@@ -9,7 +9,7 @@
  * Normalising the engine's console output into what the panel renders.
  *
  * The engine sends one entry per line carrying the script that wrote it and the
- * `console.*` method that was called - `{source, level, message}`. Both used to
+ * `console.*` method that was called - `{source, scope?, level, message}`. Both used to
  * be missing: the source was a `"[pre] "` text prefix, indistinguishable from a
  * script logging that string itself, and the level was discarded at the QuickJS
  * binding, so every line reached this panel looking identical whether the
@@ -21,12 +21,14 @@
  * everything as anyway.
  */
 
-import type { ConsoleLevel, ConsoleLogEntry, ScriptSource } from "@/types";
+import type { ConsoleLevel, ConsoleLogEntry, ElementScope, ScriptSource } from "@/types";
 
 export type LogSource = ScriptSource;
 
 export interface ParsedLog {
 	source: LogSource;
+	/** The level whose script printed the line (#2522); absent is the request's own. */
+	scope?: ElementScope;
 	level: ConsoleLevel;
 	message: string;
 }
@@ -59,6 +61,7 @@ export function parseConsoleLogs(logs: Array<ConsoleLogEntry | string>): ParsedL
 			? fromLegacyString(log)
 			: {
 					source: log.source === "pre" ? "pre" : "test",
+					scope: log.scope,
 					level: coerceLevel(log.level),
 					// `console.log()` with no argument is a real thing a script does,
 					// and a vanished line is worse than a blank one.

@@ -34,6 +34,17 @@ describe("structured entries", () => {
 		]);
 	});
 
+	it("carries the scope each line came from, and none for a line without one", () => {
+		// Issue #2522: the rebuild names its fields, so a key it does not name is
+		// dropped - the engine would send a level nothing ever displays.
+		const [inherited, own] = parseConsoleLogs([
+			{ source: "pre", scope: "collection", level: "log", message: "from the root" },
+			{ source: "pre", level: "log", message: "stored before the field" },
+		]);
+		expect(inherited.scope).toBe("collection");
+		expect(own.scope).toBeUndefined();
+	});
+
 	it("reads a level it has never heard of as `log` rather than dropping the line", () => {
 		// What a *newer* engine would send. A line the panel refuses to draw is
 		// worse than one drawn in the plain tone.

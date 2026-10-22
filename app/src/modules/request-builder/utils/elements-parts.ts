@@ -60,15 +60,18 @@ export function elementsParts(
 ): ResolvedElement[] | undefined {
 	const disabled = disabledAncestorIds(requestElements);
 	const parts: ResolvedElement[] = [];
-	for (const c of chain) {
+	for (const [depth, c] of chain.entries()) {
+		// The chain is root first, so every collection after it is a folder; the
+		// engine stamps a stored request's chain the same way (#2522).
+		const scope = depth === 0 ? "collection" : "folder";
 		for (const el of c.elements) {
 			if (disabled.has(el.id)) continue;
-			parts.push({ ...el, origin: { kind: "collection", id: c.id, name: c.name } });
+			parts.push({ ...el, origin: { kind: "collection", scope, id: c.id, name: c.name } });
 		}
 	}
 	for (const el of requestElements) {
 		if (el.kind === "inherit.disable") continue;
-		parts.push({ ...el, origin: { kind: "request", id: requestId } });
+		parts.push({ ...el, origin: { kind: "request", scope: "request", id: requestId } });
 	}
 	return parts.length > 0 ? parts : undefined;
 }

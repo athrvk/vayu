@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ScriptSource, TestResult } from "@/types";
 import { SCRIPT_SECTIONS } from "./console/script-sections";
 import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
+import ScopeTag from "./ScopeTag";
 
 export interface TestResultsProps {
 	results: readonly TestResult[];
@@ -58,7 +59,9 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 	 *
 	 * Neutral text rather than that table's identity tones: in this list colour
 	 * already means a verdict, and a green section heading over a failed
-	 * assertion would be saying the opposite of the card under it.
+	 * assertion would be saying the opposite of the card under it. The level an
+	 * inherited assertion came from (issue #2522) is a `ScopeTag` for the same
+	 * reason.
 	 */
 	const groups = SOURCES.map((source) => ({
 		source,
@@ -131,6 +134,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 										>
 											{test.name}
 										</p>
+										<ScopeTag scope={test.scope} className="block" />
 										{test.error && (
 											<pre className="text-label text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words">
 												{test.error}

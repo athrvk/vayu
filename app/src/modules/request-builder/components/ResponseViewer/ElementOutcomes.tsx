@@ -11,11 +11,13 @@
  * What each of a step's non-script elements did - extractors, assertions and
  * timers - beside `TestResults`, which stays the script kinds' `pm.test`
  * outcomes in their own unchanged shape. Same card layout as `TestResults`,
- * one icon per outcome rather than a pass/fail split. A failure's message (an
- * assertion's failure text, an extractor's miss reason) is on hover so the row
- * stays one line; a timer's wait (`waitedMs`, which is 0 for a silenced timer
- * and still worth saying) and a passing row's message (a `control.transaction`'s
- * name) are what the row is for, so they print inline (#1941).
+ * one icon per outcome rather than a pass/fail split. A row's message - an
+ * assertion's failure text, an extractor's miss reason, the error an element
+ * raised, a `control.transaction`'s name - prints inline, and so does a timer's
+ * wait (`waitedMs`, which is 0 for a silenced timer and still worth saying)
+ * (#1941). The message was on hover only for a failure, which left an errored
+ * element as a bare chip with its one explanation hidden (#2522); a long one
+ * truncates on the row and the card's `title` holds the whole text.
  */
 
 import { AlertTriangle, CheckCircle, CircleSlash, HelpCircle, XCircle } from "lucide-react";
@@ -54,11 +56,6 @@ const OUTCOME_CARD_CLASS: Record<ElementOutcome["outcome"], string> = {
 	skipped: "bg-muted/50 border-border",
 };
 
-/** A passing row's message is its label (a transaction's name), not a diagnosis. */
-function inlineMessage(outcome: ElementOutcome): string | undefined {
-	return outcome.outcome === "ok" && outcome.message ? outcome.message : undefined;
-}
-
 export default function ElementOutcomes({ outcomes, inset = true }: ElementOutcomesProps) {
 	if (outcomes.length === 0) return null;
 
@@ -68,7 +65,6 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 			<div className="space-y-1.5">
 				{outcomes.map((outcome, i) => {
 					const Icon = OUTCOME_ICON[outcome.outcome] ?? AlertTriangle;
-					const label = inlineMessage(outcome);
 					return (
 						<div
 							key={`${outcome.id}-${i}`}
@@ -76,7 +72,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 								"p-2.5 rounded-md border",
 								OUTCOME_CARD_CLASS[outcome.outcome]
 							)}
-							title={label ? undefined : outcome.message}
+							title={outcome.message}
 						>
 							<div className="flex items-center gap-2">
 								<Icon
@@ -96,13 +92,13 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 								<span className="text-micro text-muted-foreground">
 									{outcome.outcome}
 								</span>
-								{label && (
-									<span className="text-micro text-foreground truncate">
-										{label}
+								{outcome.message && (
+									<span className="min-w-0 truncate text-micro text-foreground">
+										{outcome.message}
 									</span>
 								)}
 								{outcome.waitedMs !== undefined && (
-									<span className="text-micro text-muted-foreground tabular-nums">
+									<span className="shrink-0 text-micro text-muted-foreground tabular-nums">
 										· {formatLatency(outcome.waitedMs)}
 									</span>
 								)}
