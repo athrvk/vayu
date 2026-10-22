@@ -86,8 +86,8 @@ updates:
     commit-message:
       prefix: ci
 
-  # Electron only, and only within the 44 line. A major Electron bump is a
-  # planned migration, not a routine pull request, so it is ignored; the
+  # Electron only. A major Electron bump is a planned migration, not a
+  # routine pull request, so it is ignored; the
   # `allow` list keeps the rest of app/'s tree out.
   #
   # `cooldown` equals `minimumReleaseAge` in app/pnpm-workspace.yaml (seven
