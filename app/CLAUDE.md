@@ -84,11 +84,15 @@ everything.
   (`queries/health.ts`), and the Dock renders `error` as **Not saved**. A 4xx
   is the exception: the engine's verdict on the payload is `final`
   (`isFinalError`, #1889), so autosave does not re-send it and the next edit is
-  what tries again. **A
+  what tries again. A 507 (disk full, #2423) is not: `isFinalError` leaves
+  every 5xx alone, so it retries on the same backoff, and the save reports
+  `disk-full` so the toast leads with "Disk full". **A
   quit or close never discards a save silently** (#1489): `save-flush.ts`
-  answers `{ saved, failed, pending }` and `flushNeedsConfirmation` decides
-  whether the main process asks before the window goes. Each context reports
-  its own verdict (`SaveOutcome`: saved, failed, final or pending) rather than the
+  answers `{ saved, failed, pending, reason? }` and `flushNeedsConfirmation`
+  decides whether the main process asks before the window goes; `reason` is
+  `"disk-full"` only when every failure was one, and the prompt then says the
+  disk is full instead of blaming the engine. Each context reports
+  its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
   store reading back the one shared status; a save an editor declines to send
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
   blame the engine for it. An editor takes part

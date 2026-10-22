@@ -25,7 +25,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore } from "@/stores/save-store";
+import { useSaveStore, type FlushTally } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";
 import { TIMING } from "@/config/timing";
 import { useSaveManager } from "./useSaveManager";
@@ -350,5 +350,74 @@ describe("a save the engine rejected with a 4xx", () => {
 			await vi.advanceTimersByTimeAsync(5000);
 		});
 		expect(onSave).toHaveBeenCalledTimes(2);
+	});
+});
+
+/**
+ * The engine answers a write its volume has no room for with 507 (#2423). It
+ * clears when space is freed, so unlike a 4xx it is retried; unlike a dead
+ * engine it has a cause the toast and the quit prompt can name.
+ */
+describe("a save the disk had no room for", () => {
+	const diskFull = () =>
+		new ApiError(
+			507,
+			"insufficient_storage",
+			"The disk holding Vayu's data is full - free up space and try again"
+		);
+
+	it("leads the failure text with the cause and keeps the engine's sentence", async () => {
+		const onSave = vi.fn().mockRejectedValueOnce(diskFull());
+		mountManager({ entityId: "req_1", onSave });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+
+		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().lastErrorMessage).toBe(
+			"Disk full - The disk holding Vayu's data is full - free up space and try again"
+		);
+	});
+
+	it("keeps the generic lead for a 4xx", async () => {
+		const onSave = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(400, "bad_request", "name is required"));
+		mountManager({ entityId: "req_1", onSave });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+
+		expect(useSaveStore.getState().lastErrorMessage).toBe("Couldn't save - name is required");
+	});
+
+	it("is retried on the backoff and saved once space returns", async () => {
+		const onSave = vi.fn().mockRejectedValueOnce(diskFull()).mockResolvedValueOnce(undefined);
+		mountManager({ entityId: "req_1", onSave });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(2);
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("reaches the quit flush as a disk-full failure, not a generic one", async () => {
+		const onSave = vi.fn().mockRejectedValue(diskFull());
+		mountManager({ entityId: "req_1", onSave });
+
+		let result: FlushTally | undefined;
+		await act(async () => {
+			result = await useSaveStore.getState().flushAll();
+		});
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0, reason: "disk-full" });
 	});
 });

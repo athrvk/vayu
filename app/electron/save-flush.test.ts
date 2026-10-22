@@ -323,6 +323,49 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 		}
 	});
 
+	it("says the disk is full, not that the engine is down, when the failure was a full disk", () => {
+		const prompt = buildFlushFailurePrompt("quit", {
+			saved: 0,
+			failed: 2,
+			pending: 0,
+			reason: "disk-full",
+		});
+		expect(prompt.message).toBe("Couldn't save 2 edits - the disk is full.");
+		expect(prompt.detail).toBe(
+			"Quitting anyway discards them. Free up space, then keep working to save again."
+		);
+		expect(prompt.message).not.toContain("engine");
+		expect(prompt.detail).not.toContain("engine");
+		expect(prompt.buttons).toEqual(["Quit anyway", "Keep working"]);
+	});
+
+	it("counts a pending edit beside a disk-full failure in the subject", () => {
+		const prompt = buildFlushFailurePrompt("window-close", {
+			saved: 0,
+			failed: 1,
+			pending: 1,
+			reason: "disk-full",
+		});
+		expect(prompt.message).toBe("Couldn't save 2 edits - the disk is full.");
+	});
+
+	it("ignores a reason on a result with no failure", () => {
+		const prompt = buildFlushFailurePrompt("quit", {
+			saved: 0,
+			failed: 0,
+			pending: 1,
+			reason: "disk-full",
+		});
+		expect(prompt.message).toBe("One edit couldn't be saved as it is.");
+		expect(prompt.detail).not.toContain("Free up space");
+	});
+
+	it("keeps the engine wording for a failure with no reason", () => {
+		const prompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 1, pending: 0 });
+		expect(prompt.message).toBe("Couldn't save one edit - the engine isn't responding.");
+		expect(prompt.message).not.toContain("disk");
+	});
+
 	it("does not blame the engine for an edit that was only blocked", () => {
 		const prompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 0, pending: 1 });
 		expect(prompt.message).toBe("One edit couldn't be saved as it is.");

@@ -31,6 +31,18 @@ function unwrapIpcError(error: unknown): Error {
 }
 
 /**
+ * What the renderer's before-quit flush reports. Mirrors `FlushResult` in
+ * electron/save-flush.ts, inlined because this file is a CommonJS script and
+ * must not grow imports.
+ */
+interface FlushResult {
+	saved: number;
+	failed: number;
+	pending: number;
+	reason?: "disk-full";
+}
+
+/**
  * The channel a picked file's path is reported to main on (#2356). Main's
  * spelling is `FILE_PICKED_CHANNEL` in electron/file-grants.ts, which this
  * CommonJS script cannot import; `preload-grant-channel.test.ts` holds the two
@@ -592,12 +604,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Before quit flush handler. ACKs main once the callback settles, with the
 	// outcome the callback reports, so quit can resume immediately instead of
 	// waiting out the fallback timeout - and so a failed or incomplete flush is
-	// not read as a clean one (#1489). The shape mirrors `FlushResult` in
-	// electron/save-flush.ts, inlined because this file is a CommonJS script
-	// and must not grow imports.
-	onBeforeQuit: (callback: () => Promise<{ saved: number; failed: number; pending: number }>) => {
+	// not read as a clean one (#1489).
+	onBeforeQuit: (callback: () => Promise<FlushResult>) => {
 		const handler = async () => {
-			let result: { saved: number; failed: number; pending: number };
+			let result: FlushResult;
 			try {
 				result = await callback();
 			} catch {
