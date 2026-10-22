@@ -22,6 +22,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/script_config.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/core/transaction_histograms.hpp"
 #include "vayu/http/request_exchange.hpp"
@@ -1325,15 +1326,7 @@ RunManager& manager) {
         auto scopes = vayu::http::routes::load_script_variable_scopes (
         db, environment_id, asked.collection_id);
 
-        vayu::runtime::ScriptConfig script_config;
-        script_config.timeout_ms = static_cast<uint64_t> (
-        db.get_config_int ("scriptTimeout", constants::script_engine::TIMEOUT_MS));
-        script_config.memory_limit = static_cast<size_t> (db.get_config_int (
-        "scriptMemoryLimit", constants::script_engine::MEMORY_LIMIT));
-        script_config.stack_size   = static_cast<size_t> (
-        db.get_config_int ("scriptStackSize", constants::script_engine::STACK_SIZE));
-        script_config.enable_console = db.get_config_bool (
-        "scriptEnableConsole", constants::script_engine::ENABLE_CONSOLE);
+        vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
         // Payload-level, exactly as `POST /execute` reads it: whether a script
         // may send is a property of who asked for this run.
         script_config.allow_send_request =

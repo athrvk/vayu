@@ -580,6 +580,7 @@ add_library(vayu_core STATIC
     src/core/import_document.cpp
     src/core/jmeter_import.cpp
     src/core/script_api_scan.cpp
+    src/core/script_config.cpp
     src/core/openapi_document.cpp
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp

@@ -16,6 +16,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_runner.hpp"
+#include "vayu/core/script_config.hpp"
 #include "vayu/core/trailing_window.hpp"
 #include "vayu/core/worker_count.hpp"
 #include "vayu/http/client.hpp"
@@ -507,15 +508,7 @@ vayu::db::Database& db) {
     // Create script engine for validation, bounded by the same timeout/limits
     // the execute path reads so an infinite-loop test script cannot spin the
     // run's worker thread forever.
-    vayu::runtime::ScriptConfig script_config;
-    script_config.timeout_ms     = static_cast<uint64_t> (db.get_config_int (
-    "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
-    script_config.memory_limit   = static_cast<size_t> (db.get_config_int (
-    "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
-    script_config.stack_size     = static_cast<size_t> (db.get_config_int (
-    "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
-    script_config.enable_console = db.get_config_bool (
-    "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+    vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
     // Read off the run's own payload, through the same reader `POST /execute`
     // uses. The `tests` script here is the same script a Send runs, so it must
     // not have pm.sendRequest in one and not the other - and a run's script
@@ -1721,20 +1714,11 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
  * `script.setup` / `script.teardown` (#1499) share this run-level
  * `ScriptConfig` recipe with every other script the run executes - reading it
  * twice (once for each dispatch site) rather than once and threading it
- * through would be the same five config keys kept in sync by hand at two call
- * sites instead of one.
+ * through would be the same config keys read at two call sites instead of one.
  */
 vayu::runtime::ScriptConfig read_lifecycle_script_config (vayu::db::Database& db,
 const nlohmann::json& config) {
-    vayu::runtime::ScriptConfig script_config;
-    script_config.timeout_ms     = static_cast<uint64_t> (db.get_config_int (
-    "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
-    script_config.memory_limit   = static_cast<size_t> (db.get_config_int (
-    "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
-    script_config.stack_size     = static_cast<size_t> (db.get_config_int (
-    "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
-    script_config.enable_console = db.get_config_bool (
-    "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+    vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
     script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
     return script_config;
 }

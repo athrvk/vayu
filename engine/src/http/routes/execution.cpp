@@ -32,6 +32,7 @@
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/schema_validation.hpp"
+#include "vayu/core/script_config.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -1780,16 +1781,9 @@ DesignSend& send) {
     send.run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
     // What both scripts run under. Read here rather than inside each path
-    // because it is three config lookups; the QuickJS runtime itself - the part
+    // because it is four config lookups; the QuickJS runtime itself - the part
     // that is not free - is still built only where a script exists.
-    send.script_config.timeout_ms = static_cast<uint64_t> (ctx.db.get_config_int (
-    "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
-    send.script_config.memory_limit = static_cast<size_t> (ctx.db.get_config_int (
-    "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
-    send.script_config.stack_size = static_cast<size_t> (ctx.db.get_config_int (
-    "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
-    send.script_config.enable_console = ctx.db.get_config_bool (
-    "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+    send.script_config = vayu::core::read_script_config (ctx.db);
     // Payload-level, not config-level: whether a script may send is a property
     // of *who asked for this execution*, not of the installation. Absent means
     // no - see ScriptConfig::allow_send_request.

@@ -74,6 +74,7 @@ add_executable(vayu_tests
     platform_test.cpp
     file_lock_test.cpp
     worker_count_test.cpp
+    script_config_test.cpp
     argument_rules_test.cpp
     transport_policy_test.cpp
     loopback_guard_test.cpp
@@ -373,6 +374,8 @@ set(vayu_scratch_database_suites
     CollectionsRouteTest
     ConfigRouteTest
     ConfigSeedTest
+    ScriptConfigDbTest
+    ScriptConfigExecuteTest
     ConfigSnapshotExecuteTest
     ExecuteAuthProvenanceTest
     ExecuteBinaryBodyTest
