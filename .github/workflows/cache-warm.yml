@@ -603,12 +603,15 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # release.yml's step, for its reasons.
-      - name: Install git and zstd (container)
+      # release.yml's step, for its reasons, plus libatomic1: pnpm 11 is a
+      # standalone binary that links libatomic.so.1, which the bare image lacks
+      # (exit 127 at Setup pnpm). release.yml gets it as a dependency of GCC 13
+      # from the toolchain action, which this job does not run.
+      - name: Install git, zstd and libatomic1 (container)
         if: matrix.container
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd libatomic1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
