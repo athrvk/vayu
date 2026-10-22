@@ -116,7 +116,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const seriesFailure = useMemo<SeriesFailure | undefined>(() => {
 		if (!isSeriesError) return undefined;
 		return {
-			message: seriesError?.message ?? "The engine returned no time-series data.",
+			message: seriesError?.message ?? "Vayu's engine returned no time-series data.",
 			retry: () => void refetchSeries(),
 		};
 	}, [isSeriesError, seriesError, refetchSeries]);
@@ -141,7 +141,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const monitorFailure = useMemo<SeriesFailure | undefined>(() => {
 		if (!isMonitorError) return undefined;
 		return {
-			message: monitorError?.message ?? "The engine returned no server-vitals data.",
+			message: monitorError?.message ?? "Vayu's engine returned no server-vitals data.",
 			retry: () => void refetchMonitor(),
 		};
 	}, [isMonitorError, monitorError, refetchMonitor]);
@@ -193,7 +193,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const compareRequestId = run?.requestId ?? null;
 
 	/*
-	 * A "Compare with..." chosen on this run's History row (#2164) lands here as
+	 * A "Compare with…" chosen on this run's History row (#2164) lands here as
 	 * a store target, because `openTab` can only name the run. Handed over once
 	 * and cleared, so reopening the tab later opens on the report. The tab may
 	 * already be open, so this cannot be a mount-time initial state.

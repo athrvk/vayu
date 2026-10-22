@@ -107,7 +107,7 @@ describe("ActivityRail - the six view buttons", () => {
 		const button = screen.getByRole("button", { name: "Collections" });
 		fireEvent.focus(button);
 		expect(
-			await screen.findByText(`Collections ${formatChord(DRAWER_VIEW_CHORDS.collections)}`)
+			await screen.findByText(formatChord(DRAWER_VIEW_CHORDS.collections))
 		).toBeInTheDocument();
 	});
 
@@ -127,7 +127,7 @@ describe("ActivityRail - the six view buttons", () => {
 			renderRail();
 			fireEvent.focus(screen.getByRole("button", { name: label }));
 			const tooltip = await screen.findByRole("tooltip");
-			expect(tooltip.textContent).toBe(`${label} ${formatChord(DRAWER_VIEW_CHORDS[view])}`);
+			expect(tooltip.textContent).toBe(`${label}${formatChord(DRAWER_VIEW_CHORDS[view])}`);
 		}
 	);
 

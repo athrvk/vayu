@@ -91,7 +91,7 @@ export function createFileTrustClient(deps: FileTrustClientDeps): FileTrustClien
 		read: (response: Response) => Promise<T>
 	): Promise<EngineWrite<T>> {
 		if (init.gated && secret === null) {
-			return { outcome: "unreachable", message: "The engine has not been started yet." };
+			return { outcome: "unreachable", message: "Vayu's engine has not been started yet." };
 		}
 		const headers: Record<string, string> = {};
 		if (init.gated && secret !== null) headers[ENGINE_GRANT_SECRET_HEADER] = secret;

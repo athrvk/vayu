@@ -28,7 +28,12 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 # clean CI runner and answers differently on a developer Mac with Vayu open.
 TMPROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPROOT"' EXIT
-mkdir -p "$TMPROOT/system" "$TMPROOT/home" "$TMPROOT/data"
+mkdir -p "$TMPROOT/system" "$TMPROOT/home" "$TMPROOT/data" "$TMPROOT/user"
+
+# The downgrade gate reads the workspace under $HOME, and the older-version
+# installs below would be refused on a machine whose real Vayu has a database.
+HOME="$TMPROOT/user"
+unset XDG_CONFIG_HOME
 
 DEFAULT_INSTALL_DIR="$TMPROOT/system"
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
@@ -80,6 +85,19 @@ if parse_args --purge 2>/dev/null; then fail "--purge without --uninstall should
 # this file reads the same globals.
 parse_args
 [ "$PURGE" = "0" ] || fail "a rejected parse should not leave PURGE set"
+
+# parse_args: --allow-data-loss, reset between calls, and rejected where it
+# would be silently ignored (an uninstall removes nothing it could lose).
+parse_args --allow-data-loss
+[ "$ALLOW_DATA_LOSS" = "1" ] || fail "ALLOW_DATA_LOSS should be 1, got $ALLOW_DATA_LOSS"
+parse_args
+[ "$ALLOW_DATA_LOSS" = "0" ] || fail "ALLOW_DATA_LOSS should reset to 0, got $ALLOW_DATA_LOSS"
+if parse_args --uninstall --allow-data-loss 2>/dev/null; then
+	fail "--allow-data-loss with --uninstall should fail"
+fi
+parse_args
+[ "$ALLOW_DATA_LOSS" = "0" ] || fail "a rejected parse should not leave ALLOW_DATA_LOSS set"
+usage | grep -q -- "--allow-data-loss" || fail "--help should document --allow-data-loss"
 
 printf 'PASS: parse_args\n'
 
@@ -906,6 +924,98 @@ if [ "$last_quit" -ge "$swap" ] || [ "$last_quit" -le "$download" ]; then
 fi
 
 printf 'PASS: running-app guard\n'
+
+# --- downgrade gate ------------------------------------------------------------
+# Engines before FIRST_GATED_VERSION have no schema-version check and empty a
+# workspace a newer one has used (#2427), so install.sh refuses to put one over
+# an existing database. Run on both platforms because the database lives in a
+# different directory on each; the paths are spelled out here rather than read
+# back from data_dir so a wrong helper cannot agree with itself.
+running_pids() { :; }
+gate_home="$TMPROOT/gate-home"
+gate_xdg="$TMPROOT/gate-xdg"
+platform() { printf '%s\n' "$GATE_PLATFORM"; }
+gate_install() { # <version>
+	VAYU_DRYRUN=1 VAYU_VERSION="$1" HOME="$gate_home" XDG_CONFIG_HOME="$gate_xdg" do_install 2>&1
+}
+gate_uninstall() {
+	VAYU_DRYRUN=1 HOME="$gate_home" XDG_CONFIG_HOME="$gate_xdg" do_uninstall 2>&1
+}
+expect_proceeds() { # <version> <why>
+	local rc=0
+	out="$(gate_install "$1")" || rc=$?
+	[ "$rc" = "0" ] || fail "$GATE_PLATFORM: $1 $2 should install, exited $rc: $out"
+	grep -q "curl -fL" <<<"$out" || fail "$GATE_PLATFORM: $1 $2 should reach the download"
+}
+
+version_at_least 0.9.0 "$FIRST_GATED_VERSION" && fail "0.9.0 is below $FIRST_GATED_VERSION (numeric, not lexical)"
+version_at_least 0.27.0 "$FIRST_GATED_VERSION" || fail "$FIRST_GATED_VERSION is at least itself"
+
+gate_platforms_run=0
+for GATE_PLATFORM in Darwin Linux; do
+	rm -rf "$gate_home" "$gate_xdg"
+	mkdir -p "$gate_home"
+	case "$GATE_PLATFORM" in
+		Darwin) workspace="$gate_home/Library/Application Support/Vayu" ;;
+		*)      workspace="$gate_xdg/Vayu" ;;
+	esac
+
+	[ "$(HOME="$gate_home" XDG_CONFIG_HOME="$gate_xdg" data_dir)" = "$workspace" ] \
+		|| fail "$GATE_PLATFORM: data_dir should be $workspace"
+	out="$(gate_uninstall)"
+	grep -qxF "  $workspace" <<<"$out" \
+		|| fail "$GATE_PLATFORM: uninstall should name the same data dir as data_dir: $out"
+
+	expect_proceeds 0.26.0 "with no workspace database"
+
+	mkdir -p "$workspace/db"
+	: >"$workspace/db/vayu.db"
+
+	rc=0
+	out="$(gate_install 0.26.0)" || rc=$?
+	[ "$rc" != "0" ] || fail "$GATE_PLATFORM: 0.26.0 over a workspace should be refused"
+	grep -q "0.27.0" <<<"$out" || fail "$GATE_PLATFORM: the refusal should name 0.27.0"
+	grep -q -- "--allow-data-loss" <<<"$out" || fail "$GATE_PLATFORM: the refusal should name the override"
+	grep -q "requests and collection" <<<"$out" || fail "$GATE_PLATFORM: the refusal should say what is at risk"
+	# Refused before anything is fetched, quit or announced.
+	if grep -q "curl -fL\|Installing Vayu\|Updating Vayu" <<<"$out"; then
+		fail "$GATE_PLATFORM: a refused install must not start: $out"
+	fi
+	rc=0
+	out="$(gate_install 0.9.0)" || rc=$?
+	[ "$rc" != "0" ] || fail "$GATE_PLATFORM: 0.9.0 should be refused (numeric compare)"
+
+	expect_proceeds 0.27.0 "at the first gated version"
+	expect_proceeds 0.40.0 "above the first gated version"
+
+	ALLOW_DATA_LOSS=1
+	expect_proceeds 0.26.0 "with --allow-data-loss"
+	grep -q "can empty your requests and collections" <<<"$out" \
+		|| fail "$GATE_PLATFORM: the override should say what it risks"
+	ALLOW_DATA_LOSS=0
+
+	# Nothing to lose: a directory where the file should be is not a database.
+	rm "$workspace/db/vayu.db"
+	mkdir "$workspace/db/vayu.db"
+	expect_proceeds 0.26.0 "with no readable database file"
+	rmdir "$workspace/db/vayu.db"
+
+	gate_platforms_run=$((gate_platforms_run + 1))
+done
+[ "$gate_platforms_run" = "2" ] || fail "the gate should be exercised on both platforms, ran $gate_platforms_run"
+
+# Re-running the version that is already installed stays a no-op instead of
+# being refused over a workspace it would not touch.
+GATE_PLATFORM=Linux
+stamp_saved="$(cat "$LINUX_VERSION_FILE")"
+printf '0.26.0\n' >"$LINUX_VERSION_FILE"
+mkdir -p "$gate_xdg/Vayu/db"
+: >"$gate_xdg/Vayu/db/vayu.db"
+out="$(gate_install 0.26.0)" || fail "the installed version should be a no-op, not a refusal: $out"
+grep -q "already installed" <<<"$out" || fail "the installed version should report nothing to do"
+printf '%s\n' "$stamp_saved" >"$LINUX_VERSION_FILE"
+
+printf 'PASS: downgrade gate\n'
 
 # Must stay last: this leaves running_pids and platform stubbed.
 # A fresh install (nothing running to reopen) reaches the offer; an update that

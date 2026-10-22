@@ -79,6 +79,7 @@ fi
 MODE="install"
 PURGE=0
 FORCE=0
+ALLOW_DATA_LOSS=0
 
 # Everything this script says goes through these three, so "did it explain
 # itself" is answerable by reading them rather than by auditing 40 printfs, and
@@ -167,6 +168,7 @@ parse_args() {
 	MODE="install"
 	PURGE=0
 	FORCE=0
+	ALLOW_DATA_LOSS=0
 
 	# The documented command is `bash -c "$(curl …)"`, and bash assigns the
 	# first word *after* the script text to $0 rather than $1. So a flag
@@ -189,6 +191,7 @@ parse_args() {
 			--uninstall) MODE="uninstall" ;;
 			--purge) PURGE=1 ;;
 			--force) FORCE=1 ;;
+			--allow-data-loss) ALLOW_DATA_LOSS=1 ;;
 			--help|-h) MODE="help" ;;
 			*)
 				printf 'Unknown option: %s\n' "$1" >&2
@@ -203,6 +206,10 @@ parse_args() {
 	# install and then ignoring it is the same silent-drop defect as above.
 	if [ "$PURGE" = "1" ] && [ "$MODE" != "uninstall" ]; then
 		warn '--purge removes your Vayu data and only applies to --uninstall.'
+		return "$EXIT_USAGE"
+	fi
+	if [ "$ALLOW_DATA_LOSS" = "1" ] && [ "$MODE" = "uninstall" ]; then
+		warn '--allow-data-loss only applies to an install.'
 		return "$EXIT_USAGE"
 	fi
 }
@@ -742,6 +749,12 @@ sha256_of() {
 FIRST_CHECKSUMMED_VERSION="0.33.0"
 FIRST_ATTESTED_VERSION="0.40.0"
 
+# The first engine that checks PRAGMA user_version before opening a workspace.
+# Earlier ones have no check: opened on a workspace a newer engine has stamped,
+# they recreate the requests and collections tables empty and overwrite the
+# database's .bak with the result (#2427).
+FIRST_GATED_VERSION="0.27.0"
+
 # The oldest macOS the app launches on. Moves with docs/index.md and
 # VAYU_MACOS_DEPLOYMENT_TARGET in engine/CMakeLists.txt.
 MACOS_MIN_VERSION="13.3"
@@ -760,6 +773,38 @@ version_at_least() {
 		[ "$h" -lt "$w" ] && return 1
 	done
 	return 0
+}
+
+# Where the app keeps the workspace (USER_DATA_DIR_NAME in
+# app/electron/constants.ts). The uninstall paths and the downgrade gate share it.
+data_dir() {
+	case "$(platform)" in
+		Darwin) printf '%s\n' "$HOME/Library/Application Support/Vayu" ;;
+		*)      printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/Vayu" ;;
+	esac
+}
+
+# Refuse to put a pre-gate version over a workspace database. Only the file's
+# presence is checked, not the version stamped in it: that needs a SQLite
+# reader this script cannot assume, and a pre-gate engine cannot tell either.
+# An absent or unreadable database has nothing to lose, so it is let through.
+refuse_ungated_over_workspace() {
+	local version="$1" dir db
+	version_at_least "$version" "$FIRST_GATED_VERSION" && return 0
+	dir="$(data_dir)"
+	db="$dir/db/vayu.db"
+	[ -f "$db" ] && [ -r "$db" ] || return 0
+	if [ "$ALLOW_DATA_LOSS" = "1" ]; then
+		warn "Installing Vayu $version over the workspace in $dir (--allow-data-loss)."
+		warn "It can empty your requests and collections and overwrite the .bak copy."
+		return 0
+	fi
+	warn "Refusing to install Vayu $version over the workspace in $dir."
+	warn "Versions before $FIRST_GATED_VERSION cannot tell a newer workspace from their own:"
+	warn 'opening one empties your requests and collections and overwrites the automatic'
+	warn '.bak copy, with no error.'
+	warn "Install $FIRST_GATED_VERSION or later, or take a Workspace backup in Settings and"
+	die 'pass --allow-data-loss to install this version anyway.'
 }
 
 # Verify the build-provenance attestation when `gh` can. It proves the asset
@@ -1073,6 +1118,10 @@ do_install() {
 			exit "$EXIT_OK"
 		fi
 
+		# After the skip, so re-running the version already installed stays a
+		# no-op, and before anything is downloaded or quit.
+		refuse_ungated_over_workspace "$version"
+
 		if [ -n "$installed" ]; then
 			printf 'Updating Vayu %s to %s...\n' "$installed" "$version"
 		else
@@ -1154,9 +1203,7 @@ uninstall_macos() {
 	# the default path so a nothing-installed run still says what it looked for.
 	paths="$(existing_app_paths)"
 	[ -n "$paths" ] || paths="$APP_PATH"
-	# The directory the app names itself (USER_DATA_DIR_NAME in
-	# app/electron/constants.ts).
-	support="$HOME/Library/Application Support/Vayu"
+	support="$(data_dir)"
 	prefs="$HOME/Library/Preferences/$APP_BUNDLE_ID.plist"
 	logs="$HOME/Library/Logs/vayu-client"
 	caches="$HOME/Library/Caches/$APP_BUNDLE_ID"
@@ -1197,10 +1244,8 @@ uninstall_macos() {
 
 uninstall_linux() {
 	local config cache autostart
-	# The app names its data directory itself (USER_DATA_DIR_NAME in
-	# app/electron/constants.ts). The cache is still Electron's own, named
-	# after the package.
-	config="${XDG_CONFIG_HOME:-$HOME/.config}/Vayu"
+	# The cache is still Electron's own, named after the package.
+	config="$(data_dir)"
 	cache="${XDG_CACHE_HOME:-$HOME/.cache}/vayu-client"
 	# The Start at login entry the app writes itself (app/electron/login-item.ts).
 	# Left behind it would try to launch a deleted AppImage at every login.
@@ -1259,6 +1304,7 @@ Vayu installer - macOS and Linux (x86_64)
   update:         same command - it replaces the app in place and keeps your data
   pin version:    VAYU_VERSION=x.y.z bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)"
   reinstall:      bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --force
+  pre-0.27.0:     VAYU_VERSION=0.26.0 bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --allow-data-loss
   uninstall:      bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --uninstall [--purge]
   this help:      bash -c "\$(curl --proto '=https' --tlsv1.2 -fsSL $url)" -- --help
 
@@ -1273,6 +1319,12 @@ elsewhere) and ad-hoc signs it. Linux installs the AppImage under
 Updating quits a running Vayu first (it asks). Set VAYU_ASSUME_YES=1 to skip
 the prompt. Re-running when the latest version is already installed does
 nothing unless --force is given.
+
+Versions before 0.27.0 have no database version check: opened on a workspace
+0.27.0 or later has used, they empty its requests and collections and overwrite
+its .bak copy. So a pinned VAYU_VERSION below 0.27.0 is refused while a
+workspace exists, before anything is downloaded, unless --allow-data-loss is
+given. Take a Workspace backup in Settings first.
 
 When it finishes it offers to open Vayu (never with VAYU_ASSUME_YES=1,
 without a terminal, or on Linux without a display). It refuses a macOS older than 13.3 before downloading

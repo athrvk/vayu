@@ -105,9 +105,9 @@ export function CookiesCard() {
 					<CardTitle>{COOKIES.label}</CardTitle>
 				</div>
 				<CardDescription>
-					Cookies the engine stores while you send requests, so a session survives to the
-					next one. Kept per environment and only in memory - they are gone when Vayu
-					closes, and load tests never use them.
+					Cookies Vayu&apos;s engine stores while you send requests, so a session survives
+					to the next one. Kept per environment and only in memory - they are gone when
+					Vayu closes, and load tests never use them.
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-4">

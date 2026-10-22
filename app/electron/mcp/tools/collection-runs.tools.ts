@@ -14,6 +14,7 @@ import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
 import { ENVIRONMENT_DEFAULT_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
 import { runOutputShape, withheldPointer } from "../withhold.js";
+import type { EngineClient } from "../engine-client.js";
 import type { McpTool } from "./contract.js";
 import {
 	engineErrorResult,
@@ -47,7 +48,37 @@ import {
 	smokeScopeCaveat,
 } from "./output-schemas.js";
 import { startedRunNextStep } from "./run-status.js";
-import { preflightScenarioSteps, scenarioBlock } from "./scenario-runs.js";
+import { preflightScenarioSteps, scenarioBlock, walkCollectionRequests } from "./scenario-runs.js";
+
+/** One saved request a smoke run sends, and - on a `recursive` run - the collections it sits under. */
+interface SmokeTarget {
+	item: unknown;
+	folder?: string;
+}
+
+/** How a row's `folder` joins the collection names from the root down. */
+const FOLDER_SEPARATOR = " / ";
+
+/**
+ * What a smoke run sends: the collection's direct requests, or - `recursive` -
+ * the whole tree in the order `run_collection` runs it.
+ */
+async function smokeTargets(
+	client: EngineClient,
+	collectionId: string,
+	recursive: boolean,
+	signal?: AbortSignal
+): Promise<SmokeTarget[]> {
+	if (!recursive) {
+		const direct = await client.listRequests(collectionId, signal);
+		return (Array.isArray(direct) ? direct : []).map((item) => ({ item }));
+	}
+	const walked = await walkCollectionRequests(client, collectionId, true, signal);
+	return walked.map(({ request, folder }) => ({
+		item: request,
+		folder: folder.join(FOLDER_SEPARATOR),
+	}));
+}
 
 export const COLLECTION_RUN_TOOLS: McpTool[] = [
 	{
@@ -55,7 +86,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic and, as the app's Send does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_POINTER +
@@ -75,6 +106,10 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				.describe(
 					`Environment whose variables resolve {{templates}} in every request, and whose cookie jar they share. ${ENVIRONMENT_DEFAULT_SENTENCE}`
 				),
+			recursive: z
+				.boolean()
+				.optional()
+				.describe("Also run sub-collections; each row names its `folder`."),
 			failOnSchemaError: failOnSchemaErrorInput({
 				unit: "request",
 				defaultsOn: true,
@@ -89,28 +124,30 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			// Read once, before any traffic: it decides how every row is judged,
 			// and a per-row read of one argument could only ever be wrong twice.
 			const failOnSchemaError = args.failOnSchemaError !== false;
+			const recursive = args.recursive === true;
 			// Before the per-row loop: inside it, an unknown id would be one failed
 			// row per request rather than the one refusal it is.
 			let environmentId: string | undefined;
-			let requests: unknown;
+			let list: SmokeTarget[];
 			try {
 				environmentId = await resolveEnvironmentId(args, ctx, signal);
-				requests = await ctx.client.listRequests(collectionId, signal);
+				list = await smokeTargets(ctx.client, collectionId, recursive, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err, ctx);
 			}
-			const list = Array.isArray(requests) ? requests : [];
 			// Read before any traffic flows: after the loop this call competes with
 			// a cancellation the run itself may have raised, and the disclosure has
-			// to survive that.
-			const children = await childCollectionNames(ctx.client, collectionId, signal);
+			// to survive that. A recursive run left nothing out to disclose.
+			const children = recursive
+				? []
+				: await childCollectionNames(ctx.client, collectionId, signal);
 			const results: Array<Record<string, unknown>> = [];
 			let passed = 0;
 			let failed = 0;
 			let skipped = 0;
 
-			for (const item of list) {
+			for (const { item, folder } of list) {
 				const req = (item ?? {}) as {
 					id?: string;
 					name?: string;
@@ -119,6 +156,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					auth?: unknown;
 				};
 				const name = String(req.name ?? req.id ?? "request");
+				const where = folder === undefined ? {} : { folder };
 				// Compose the request the same way the app's Send does - engine-side
 				// (`POST /compose`): variables resolved, stored/inherited auth
 				// applied, and the chain's + its own scripts attached.
@@ -132,6 +170,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				} catch (err) {
 					results.push({
 						name,
+						...where,
 						method: String(req.method ?? "GET"),
 						url: smokeRowUrl(ctx, req.url, req.auth),
 						ok: false,
@@ -149,6 +188,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				if (!gate.ok) {
 					results.push({
 						name,
+						...where,
 						method,
 						url: shownUrl,
 						ok: false,
@@ -191,6 +231,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					const ok = code >= 200 && code < 400 && testsOk && schemaOk;
 					results.push({
 						name,
+						...where,
 						method,
 						url: shownUrl,
 						ok,
@@ -203,6 +244,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				} catch (err) {
 					results.push({
 						name,
+						...where,
 						method,
 						url: shownUrl,
 						ok: false,

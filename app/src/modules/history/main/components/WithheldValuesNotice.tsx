@@ -40,9 +40,9 @@ export function WithheldValuesNotice({
 
 	return (
 		<Callout severity="warning" title="Withheld values" className={className}>
-			The engine withholds secrets from a stored run, so this run&apos;s {names.join(" and ")}{" "}
-			holds <code>{WITHHELD_MARKER}</code> where one was. Sending this copy sends that text
-			literally; replace it first.
+			Vayu&apos;s engine withholds secrets from a stored run, so this run&apos;s{" "}
+			{names.join(" and ")} holds <code>{WITHHELD_MARKER}</code> where one was. Sending this
+			copy sends that text literally; replace it first.
 		</Callout>
 	);
 }

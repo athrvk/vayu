@@ -295,6 +295,14 @@ export function describeImport(answer: unknown): string {
 			.join(", ");
 		text += ` Not everything imported: ${named}.`;
 	}
+	// The engine's own count, not a guess from the tree: an importer decides
+	// whether it filed anything under folders, and by what (`meta.folderStrategy`).
+	const folders = num(meta.folderCount);
+	if (folders > 0) {
+		text +=
+			` Requests are filed under ${folders} sub-collection(s); to run them all pass ` +
+			`recursive: true to run_collection or run_collection_smoke.`;
+	}
 	return text;
 }
 
@@ -401,6 +409,10 @@ export function describeImportPreview(summary: Record<string, unknown>): string 
 	let text = `Nothing was stored. Importing this ${format} would create ${num(meta.requestCount)} request(s) in ${num(meta.folderCount)} folder(s)`;
 	if (num(meta.environmentCount) > 0) text += ` and ${num(meta.environmentCount)} environment(s)`;
 	text += ".";
+	if (num(meta.folderCount) > 0) {
+		text +=
+			" To run them all after importing, pass recursive: true to run_collection or run_collection_smoke.";
+	}
 	if (skipped.length > 0) {
 		text += ` It would not carry: ${skipped.map((e) => `${num(e.count)} ${String(e.kind)}`).join(", ")}.`;
 	}

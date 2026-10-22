@@ -95,7 +95,7 @@ export default function UrlInput({ className }: UrlInputProps) {
 			value={request.url}
 			onChange={handleUrlChange}
 			onPaste={handlePaste}
-			placeholder="Paste a URL or a curl command"
+			placeholder="Paste a URL or a cURL command"
 			// Explicit, because the placeholder is an instruction, not the field's
 			// name, and it is withheld entirely once the URL contains a variable.
 			aria-label="Request URL"

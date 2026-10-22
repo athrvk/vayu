@@ -27,7 +27,7 @@
  * model (`entityAt`), so no row carries a handler and none has to stay mounted
  * for the gesture to survive: the capture is the tree's.
  *
- * **One move goes through one function.** A drop, an Alt+Arrow, a "Move to..."
+ * **One move goes through one function.** A drop, an Alt+Arrow, a "Move to…"
  * and an Undo all end in `applyPlacement`, so the optimistic write, the
  * announcement, the reveal and the undo offer cannot drift between the four
  * ways a row can move.
@@ -112,7 +112,7 @@ export interface TreeDnd {
 	treeHandlers: TreeDragHandlers;
 	/** Text for the tree's live region; empty until something moves. */
 	announcement: string;
-	/** The row whose "Move to..." dialog is open. */
+	/** The row whose "Move to…" dialog is open. */
 	moveTarget: TreeEntity | null;
 	closeMoveDialog: () => void;
 	/** Dialog choice: append the row after every child of `ownerId`. */
@@ -260,7 +260,7 @@ export function useTreeDnd({
 
 	/**
 	 * The one write path. Every way a row can move - a drop, Alt+Arrow, the
-	 * "Move to..." dialog, an Undo - lands here, so the batch, the announcement
+	 * "Move to…" dialog, an Undo - lands here, so the batch, the announcement
 	 * and the reveal are the same three steps in the same order whichever
 	 * gesture started it.
 	 *
@@ -728,7 +728,7 @@ export function useTreeDnd({
 	);
 
 	/**
-	 * Move up / Move down / Move to..., for a row's `⋯` menu and its right-click
+	 * Move up / Move down / Move to…, for a row's `⋯` menu and its right-click
 	 * menu (#1690).
 	 *
 	 * The tree reordered by drag and by Alt+Arrow only, and neither is
@@ -758,7 +758,7 @@ export function useTreeDnd({
 					onSelect: () => moveByKeyboard(entity, "down"),
 				},
 				{
-					label: "Move to...",
+					label: "Move to…",
 					icon: ArrowRightLeft,
 					onSelect: () => setMoveTarget(entity),
 				},
@@ -767,7 +767,7 @@ export function useTreeDnd({
 		[moveByKeyboard, siblingPosition]
 	);
 
-	/* ── "Move to..." ─────────────────────────────────────────────────────── */
+	/* ── "Move to…" ─────────────────────────────────────────────────────── */
 
 	const moveToOwner = useCallback(
 		(entity: TreeEntity, ownerId: string | null) => {

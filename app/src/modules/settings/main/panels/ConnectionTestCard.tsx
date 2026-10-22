@@ -92,7 +92,7 @@ function proxyLine(proxy: ConnectionTestResult["proxy"]): string {
 	if (proxy.url) return `Through ${proxy.url} (${proxy.mode})`;
 	if (proxy.mode === "off") return "Sent direct - the proxy is switched off";
 	if (proxy.mode === "environment")
-		return "Whatever http_proxy and https_proxy name, which the engine does not read itself";
+		return "Whatever http_proxy and https_proxy name, which Vayu's engine does not read itself";
 	if (proxy.mode === "system") return "Sent direct - nothing resolved from this system";
 	return "Sent direct";
 }

@@ -55,6 +55,26 @@ function TooltipHint({ className, ...props }: React.ComponentProps<"span">) {
 }
 
 /**
+ * A tooltip's first line when the control has a keyboard shortcut: the label,
+ * then the chord in a `TooltipHint`.
+ *
+ * Every shortcut tooltip in the app renders through this, so the chord sits in
+ * the one tinted primitive at the one gap whichever control it belongs to. The
+ * chord is not parenthesised: a "(Ctrl+K)" written into the label string would
+ * live outside `TooltipHint`, in the plain foreground, and the spacing would be
+ * a string template away from drifting per call site.
+ * → `tooltip-shortcut-format.test.tsx`
+ */
+function TooltipShortcutLabel({ label, shortcut }: { label: string; shortcut: React.ReactNode }) {
+	return (
+		<span className="flex items-center gap-1.5">
+			<span>{label}</span>
+			<TooltipHint>{shortcut}</TooltipHint>
+		</span>
+	);
+}
+
+/**
  * A tooltip's value line, with the hint that says where the value came from.
  *
  * **The two never share a flex row** (issue #1195). `TooltipContent` is capped
@@ -90,4 +110,12 @@ function TooltipValue({
 	);
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipHint, TooltipValue, TooltipProvider };
+export {
+	Tooltip,
+	TooltipTrigger,
+	TooltipContent,
+	TooltipHint,
+	TooltipShortcutLabel,
+	TooltipValue,
+	TooltipProvider,
+};

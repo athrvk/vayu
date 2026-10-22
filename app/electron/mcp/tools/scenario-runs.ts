@@ -43,7 +43,7 @@ import {
 	withMcpOrigin,
 } from "./compose.js";
 import { collectionParent, type CollectionRow, readCollectionRows } from "./cascade.js";
-import { mergeSiblings, readRequestRows } from "./sibling-order.js";
+import { mergeSiblings, type OrderedRow, readRequestRows } from "./sibling-order.js";
 
 /** A step of a scenario plan, as much of it as the pre-flight walk needs. */
 interface ScenarioStepRow {
@@ -51,23 +51,77 @@ interface ScenarioStepRow {
 	name: string;
 }
 
+/** A `GET /requests` row met by {@link walkCollectionRequests}, kept whole. */
+export type WalkedRequestRow = OrderedRow & Record<string, unknown>;
+
+/** One request of the walk and the collections it sits under. */
+export interface WalkedRequest {
+	request: WalkedRequestRow;
+	/**
+	 * Collection names from the walk's root down to the request's own collection,
+	 * root included. Empty when the walk was not recursive.
+	 */
+	folder: string[];
+}
+
 /**
- * The saved requests a scenario run will execute, in the order the engine will
- * execute them (issue #754).
+ * The saved requests under a collection, in the order the engine's scenario plan
+ * executes them (issue #754), each with the collections above it.
  *
  * Mirrors `collect_requests` (`engine/src/core/scenario_plan.cpp`): without
  * `recursive` a collection's direct requests are the whole plan; with it, each
  * collection's sub-collections and requests are walked as one sibling list
  * (#2535), a request emitted where it sits and a sub-collection's whole subtree
- * where the sub-collection sits - the order the sidebar renders. The order
- * matters here for one reason - the pre-flight refusal names the first step
- * that fails - so a walk in some other order would name a different step than
- * the run would have reached first. `recursive-run-order-conformance.json`
- * pins this walk to the engine's (`sibling-order.conformance.test.ts`).
+ * where the sub-collection sits - the order the sidebar renders.
+ * `recursive-run-order-conformance.json` pins this walk to the engine's
+ * (`sibling-order.conformance.test.ts`).
  *
  * The `visited` set is the same guard the engine's walk carries: a corrupted
  * `parentId` (a self-parent, an A -> B -> A loop) must terminate rather than
  * enumerate forever.
+ */
+export async function walkCollectionRequests(
+	client: Pick<EngineClient, "listCollections" | "listRequests">,
+	collectionId: string,
+	recursive: boolean,
+	signal?: AbortSignal
+): Promise<WalkedRequest[]> {
+	const requestsIn = async (id: string) => readRequestRows(await client.listRequests(id, signal));
+	if (!recursive)
+		return (await requestsIn(collectionId)).map((request) => ({ request, folder: [] }));
+
+	// One read, grouped by parent; each parent's folders are merged with its
+	// requests below, so their order here does not matter.
+	const collectionRows = readCollectionRows(await client.listCollections(signal));
+	const foldersOf = new Map<string, CollectionRow[]>();
+	const nameOf = new Map<string, string>();
+	for (const row of collectionRows) {
+		nameOf.set(row.id, typeof row.name === "string" ? row.name : row.id);
+		const parent = collectionParent(row);
+		if (parent === null) continue;
+		foldersOf.set(parent, [...(foldersOf.get(parent) ?? []), row]);
+	}
+
+	const ordered: WalkedRequest[] = [];
+	const visited = new Set<string>();
+	const walk = async (id: string, path: string[]): Promise<void> => {
+		if (visited.has(id)) return;
+		visited.add(id);
+		for (const child of mergeSiblings(foldersOf.get(id) ?? [], await requestsIn(id))) {
+			if (child.kind === "request") ordered.push({ request: child, folder: path });
+			else await walk(child.id, [...path, nameOf.get(child.id) ?? child.id]);
+		}
+	};
+	await walk(collectionId, [nameOf.get(collectionId) ?? collectionId]);
+	return ordered;
+}
+
+/**
+ * The saved requests a scenario run will execute, in the order the engine will
+ * execute them: {@link walkCollectionRequests} as plan steps. The order matters
+ * here for one reason - the pre-flight refusal names the first step that fails -
+ * so a walk in some other order would name a different step than the run would
+ * have reached first.
  */
 export async function scenarioStepRows(
 	client: Pick<EngineClient, "listCollections" | "listRequests">,
@@ -75,30 +129,8 @@ export async function scenarioStepRows(
 	recursive: boolean,
 	signal?: AbortSignal
 ): Promise<ScenarioStepRow[]> {
-	const requestsIn = async (id: string) => readRequestRows(await client.listRequests(id, signal));
-	if (!recursive) return (await requestsIn(collectionId)).map(toStepRow);
-
-	// One read, grouped by parent; each parent's folders are merged with its
-	// requests below, so their order here does not matter.
-	const foldersOf = new Map<string, CollectionRow[]>();
-	for (const row of readCollectionRows(await client.listCollections(signal))) {
-		const parent = collectionParent(row);
-		if (parent === null) continue;
-		foldersOf.set(parent, [...(foldersOf.get(parent) ?? []), row]);
-	}
-
-	const ordered: ScenarioStepRow[] = [];
-	const visited = new Set<string>();
-	const walk = async (id: string): Promise<void> => {
-		if (visited.has(id)) return;
-		visited.add(id);
-		for (const child of mergeSiblings(foldersOf.get(id) ?? [], await requestsIn(id))) {
-			if (child.kind === "request") ordered.push(toStepRow(child));
-			else await walk(child.id);
-		}
-	};
-	await walk(collectionId);
-	return ordered;
+	const walked = await walkCollectionRequests(client, collectionId, recursive, signal);
+	return walked.map(({ request }) => toStepRow(request));
 }
 
 /** A `GET /requests` row as a plan step, named the way the engine's refusal names it. */

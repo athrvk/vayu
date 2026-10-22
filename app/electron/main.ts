@@ -998,8 +998,8 @@ async function startEngine() {
 		// Show error dialog to user
 		const { dialog } = await import("electron");
 		await dialog.showErrorBox(
-			"Couldn't start the engine",
-			`${error}\n\nCheck the logs for details.`
+			"Couldn't start Vayu's engine",
+			`${error instanceof Error ? error.message : String(error)}\n\nCheck the logs for details.`
 		);
 		app.quit();
 	}

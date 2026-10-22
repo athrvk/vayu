@@ -624,7 +624,7 @@ describe("the row's own ⋯ menu", () => {
 			new PointerEvent("pointerdown", { bubbles: true, button: 0 })
 		);
 
-		const item = await screen.findByText("Move to...");
+		const item = await screen.findByText("Move to…");
 		fireEvent.pointerDown(item, { button: 0, pointerId: 9, clientX: 200, clientY: 200 });
 
 		// And no amount of movement over the open menu starts a drag, or takes
@@ -638,7 +638,7 @@ describe("the row's own ⋯ menu", () => {
 	});
 });
 
-describe("Move to...", () => {
+describe("Move to…", () => {
 	it("moves the row and offers an undo that puts it back", async () => {
 		renderTree();
 		const source = requestRow("r1");
@@ -647,7 +647,7 @@ describe("Move to...", () => {
 		)!;
 		// Radix opens its dropdown on pointerdown, not click.
 		fireEvent.pointerDown(menu, new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
-		fireEvent.click(await screen.findByText("Move to..."));
+		fireEvent.click(await screen.findByText("Move to…"));
 		const dialog = await screen.findByRole("dialog");
 		fireEvent.click(within(dialog).getByRole("button", { name: "Beta" }));
 
@@ -687,7 +687,7 @@ describe("Move to...", () => {
 			/more actions/i.test(b.getAttribute("aria-label") ?? "")
 		)!;
 		fireEvent.pointerDown(menu, new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
-		fireEvent.click(await screen.findByText("Move to..."));
+		fireEvent.click(await screen.findByText("Move to…"));
 		const dialog = await screen.findByRole("dialog");
 
 		expect(within(dialog).getByRole("button", { name: "Beta" })).toBeInTheDocument();

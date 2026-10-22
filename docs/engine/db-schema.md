@@ -388,8 +388,17 @@ changes `make_vayu_storage`'s mapping - an added column included - because `sync
 without `preserve`: an older engine opening a database with a column it does not map would rebuild
 that table without it. It is also bumped by a migration step that must run exactly once and that an
 older engine must not read past (versions `4`, `6` and `7`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
-workspace, every engine built before the bump refuses it at startup (the refusal above), so the
-release that carries a bump says so in its notes.
+workspace, every engine that carries the version gate refuses it at startup (the refusal above), so
+the release that carries a bump says so in its notes. The gate first shipped in `0.27.0`: `0.26.0`
+and earlier have none, and opening a newer workspace with one rebuilds `requests` and `collections`
+empty (their `pre_request_script` / `post_request_script` columns are `NOT NULL` with no default, which
+sqlite_orm cannot add to an existing table) and then copies that emptied file over `<db>.bak`, with no
+error. A shipped binary cannot be changed, so nothing in the engine can stop that. `install.sh`
+refuses to install a version below `0.27.0` over an existing `db/vayu.db` unless given
+`--allow-data-loss`. The Windows installer and `winget` cannot gate an install: a check added to a
+newer installer does not exist in the older installer being run, and `winget` runs the vendor
+installer of whichever version is pinned. On Windows the only protection is not installing an older
+version over a newer workspace; restore a Workspace backup first if you must.
 
 | Version | Change | Migration step |
 |---------|--------|----------------|

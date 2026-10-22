@@ -144,7 +144,7 @@ export function ProfileFields({
 					hint={
 						mode === "capacity"
 							? "The first level the search measures. It steps up from here while latency holds."
-							: `${CONCURRENCY_LABEL} at the start of the ramp. The engine climbs from here to the target.`
+							: `${CONCURRENCY_LABEL} at the start of the ramp. Vayu climbs from here to the target.`
 					}
 				/>
 			)}

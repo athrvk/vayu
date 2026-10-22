@@ -876,7 +876,7 @@ export const apiService = {
 		// fields there is no run to stop and no URL to tail, and the response
 		// pane would sit on "streaming" forever.
 		if (!answer?.runId || !answer?.eventsUrl) {
-			throw new Error("The engine accepted the stream but named no run to follow");
+			throw new Error("Vayu's engine accepted the stream but named no run to follow");
 		}
 		return answer;
 	},
@@ -1141,7 +1141,7 @@ export const apiService = {
 
 		// The stream closed having said neither. Nothing was fetched, and calling
 		// that an empty document would hand the parser a file the user never had.
-		throw new Error("The engine's fetch ended without returning a document");
+		throw new Error("Vayu's engine ended the fetch without returning a document");
 	},
 
 	/**

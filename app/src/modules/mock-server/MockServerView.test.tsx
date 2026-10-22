@@ -121,6 +121,17 @@ describe("MockServerView", () => {
 		expect(screen.getByText("250ms latency, 30% of answers fail")).toBeInTheDocument();
 	});
 
+	it.each([
+		[0.4, "0.4ms latency"],
+		[1500, "1.50s latency"],
+	])("formats a %s ms latency through formatLatency", (latencyMs, text) => {
+		vi.mocked(useMockServersQuery).mockReturnValue({
+			data: [{ ...MOCK, latencyMs }],
+		} as ReturnType<typeof useMockServersQuery>);
+		render(<MockServerView />);
+		expect(screen.getByText(text)).toBeInTheDocument();
+	});
+
 	it("says any origin for the default policy", () => {
 		render(<MockServerView />);
 		expect(screen.getByText("Origins: any")).toBeInTheDocument();

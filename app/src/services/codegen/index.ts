@@ -43,7 +43,7 @@ export interface CodeTarget {
 }
 
 export const CODE_TARGETS: readonly CodeTarget[] = [
-	{ id: "curl", label: "curl", language: "bash", generate: generateCurl },
+	{ id: "curl", label: "cURL", language: "bash", generate: generateCurl },
 	{ id: "fetch", label: "JS fetch", language: "javascript", generate: generateFetch },
 	{ id: "python", label: "Python requests", language: "python", generate: generatePython },
 	{ id: "httpie", label: "HTTPie", language: "bash", generate: generateHttpie },

@@ -54,7 +54,13 @@ import { useEffect, useState } from "react";
 
 import { useRequestBuilderContext } from "../../context";
 import { useDashboardStore, useTabsStore } from "@/stores";
-import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger, LabelSwap } from "@/components/ui";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipShortcutLabel,
+	TooltipTrigger,
+	LabelSwap,
+} from "@/components/ui";
 import { formatChord, type Chord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import { cn } from "@/lib/utils";
@@ -73,10 +79,10 @@ import UrlInput from "./UrlInput";
  * The `Kbd` primitive is not used for the chord here either: it is a keycap
  * built for `--muted` on a panel, and `TooltipContent` paints `--primary-fill`
  * with a white label, so a cap would be a grey chip stamped on the accent.
- * `TooltipHint` in mono is the one tint that reads on that fill; a hand-written
- * 70% alpha measured 2.50:1 on Sunset (`tooltip-hint-contrast.test.ts`).
+ * `TooltipHint` is the one tint that reads on that fill; a hand-written 70%
+ * alpha measured 2.50:1 on Sunset (`tooltip-hint-contrast.test.ts`).
  */
-function Hint({
+export function Hint({
 	chord,
 	label,
 	children,
@@ -88,9 +94,8 @@ function Hint({
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>{children}</TooltipTrigger>
-			<TooltipContent side="bottom" className="flex items-center gap-2">
-				<span>{label}</span>
-				<TooltipHint className="font-mono">{formatChord(chord)}</TooltipHint>
+			<TooltipContent side="bottom">
+				<TooltipShortcutLabel label={label} shortcut={formatChord(chord)} />
 			</TooltipContent>
 		</Tooltip>
 	);

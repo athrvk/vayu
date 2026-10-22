@@ -1210,7 +1210,7 @@ describe("pass/fail budgets", () => {
 			).toBeInTheDocument();
 			expect(screen.queryByText(/as before/i)).not.toBeInTheDocument();
 			expect(
-				screen.getByText(/Starts from Settings > Dashboard > SLO threshold/)
+				screen.getByText(/Starts from Settings › Dashboard › SLO threshold/)
 			).toBeInTheDocument();
 		});
 
@@ -1235,7 +1235,7 @@ describe("pass/fail budgets", () => {
 			useClientSettingsStore.getState().setSloThresholdMs(200);
 			open();
 			expect(carriedNotice()).toHaveTextContent(
-				"Budgets prefilled: p99 latency at most 200 ms (from Settings > Dashboard > SLO threshold). They will judge this run."
+				"Budgets prefilled: p99 latency at most 200 ms (from Settings › Dashboard › SLO threshold). They will judge this run."
 			);
 			expect(carriedNotice()).not.toHaveTextContent(/last load test/);
 		});

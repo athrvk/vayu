@@ -185,7 +185,7 @@ export default function HistoryDetail() {
 		return (
 			<ErrorState
 				title="Couldn't load this run"
-				detail={detail ?? "The engine returned nothing for this run."}
+				detail={detail ?? "Vayu's engine returned nothing for this run."}
 				onRetry={() => void refetchRun()}
 			/>
 		);
@@ -196,7 +196,7 @@ export default function HistoryDetail() {
 		return (
 			<ErrorState
 				title="Couldn't load this run"
-				detail={detail ?? "The engine returned no report for this run."}
+				detail={detail ?? "Vayu's engine returned no report for this run."}
 				onRetry={() => void refetchReport()}
 			/>
 		);

@@ -63,7 +63,7 @@ export function useEngine(): UseEngineReturn {
 				return result;
 			} catch (err) {
 				const errorMessage =
-					err instanceof Error ? err.message : "Couldn't connect to the engine.";
+					err instanceof Error ? err.message : "Couldn't connect to Vayu's engine.";
 				const errorCode = err instanceof ApiError ? err.errorCode : "ENGINE_ERROR";
 
 				setError(errorMessage);

@@ -258,13 +258,13 @@ function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 const TRUNCATED_BODY_NOTE =
 	"This run's request body was too large to store in full, so only a slice was kept. It is not written back, to avoid overwriting the saved body with an incomplete copy.";
 const WITHHELD_URL_NOTE =
-	"The engine withheld a secret from this run's URL, so it is not written back, to avoid overwriting the saved URL with a placeholder.";
+	"Vayu's engine withheld a secret from this run's URL, so it is not written back, to avoid overwriting the saved URL with a placeholder.";
 const WITHHELD_PARAMS_NOTE =
-	"The engine withheld a secret from this run's URL or params, so the params are not written back, to avoid overwriting the saved params with a placeholder.";
+	"Vayu's engine withheld a secret from this run's URL or params, so the params are not written back, to avoid overwriting the saved params with a placeholder.";
 const WITHHELD_BODY_NOTE =
-	"The engine withheld a secret from this run's request body, so it is not written back, to avoid overwriting the saved body with a placeholder.";
+	"Vayu's engine withheld a secret from this run's request body, so it is not written back, to avoid overwriting the saved body with a placeholder.";
 const WITHHELD_HEADERS_NOTE =
-	"The engine withholds credential values from a stored run, so the request's own value for each of these headers is kept.";
+	"Vayu's engine withholds credential values from a stored run, so the request's own value for each of these headers is kept.";
 const PATHLESS_FILE_NOTE =
 	"This run did not record which file it sent, so the saved body is left alone rather than pointed at no file.";
 

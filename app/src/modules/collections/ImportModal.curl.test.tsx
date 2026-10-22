@@ -61,7 +61,7 @@ describe("ImportModal curl paste", () => {
 		renderModal();
 		pasteAndDetect("");
 		expect(screen.queryByRole("tab", { name: /Paste JSON/i })).toBeNull();
-		expect(screen.getByPlaceholderText(/or a curl command/i)).toBeTruthy();
+		expect(screen.getByPlaceholderText(/or a cURL command/)).toBeTruthy();
 	});
 
 	it("offers to open the command as a request instead of sending it to the engine", async () => {
@@ -70,7 +70,7 @@ describe("ImportModal curl paste", () => {
 		pasteAndDetect(CURL);
 
 		expect(
-			await screen.findByText(/This is a curl command\. Open it as a new request\./)
+			await screen.findByText(/This is a cURL command\. Open it as a new request\./)
 		).toBeTruthy();
 		expect(screen.queryByText(/Unrecogni[sz]ed format/i)).toBeNull();
 		expect(parse).not.toHaveBeenCalled();
@@ -99,11 +99,11 @@ describe("ImportModal curl paste", () => {
 	it("drops the offer when the text is edited", async () => {
 		renderModal();
 		pasteAndDetect(CURL);
-		await screen.findByText(/This is a curl command/);
+		await screen.findByText(/This is a cURL command/);
 
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: "{}" } });
 
-		expect(screen.queryByText(/This is a curl command/)).toBeNull();
+		expect(screen.queryByText(/This is a cURL command/)).toBeNull();
 	});
 
 	it("still sends a document to the engine", async () => {
@@ -112,7 +112,7 @@ describe("ImportModal curl paste", () => {
 		pasteAndDetect('{"info":{}}');
 
 		await waitFor(() => expect(parse).toHaveBeenCalledTimes(1));
-		expect(screen.queryByText(/This is a curl command/)).toBeNull();
+		expect(screen.queryByText(/This is a cURL command/)).toBeNull();
 		expect(flow.newRequest).not.toHaveBeenCalled();
 	});
 });

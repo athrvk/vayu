@@ -24,8 +24,8 @@ export const TOOLTIPS = {
 			Requests sent against requests owed over the sending window: the target rate times the
 			time spent sending, up to the configured duration. 100% = every request the target
 			called for went out. The end-of-run wait for slow responses is not counted, so a slow
-			server does not lower it. Below ~95% means the engine couldn&apos;t send fast enough, or
-			the in-flight cap dropped requests.
+			server does not lower it. Below ~95% means Vayu&apos;s engine couldn&apos;t send fast
+			enough, or the in-flight cap dropped requests.
 		</>
 	),
 	achievedThroughput:
@@ -110,11 +110,11 @@ export const TOOLTIPS = {
 	rampDeviation:
 		"Mean absolute gap between achieved (measured) and configured virtual users, as a percent of target. Counts both undershoot and overshoot, so a ramp that runs over target reads high.",
 	latencyDistribution:
-		"HDR percentile plot. X is percentile (log-scaled so the tail dominates); Y is latency. The curve's steepness from p95 → p99 is the tail story. Sourced from the engine's HdrHistogram.",
+		"HDR percentile plot. X is percentile (log-scaled so the tail dominates); Y is latency. The curve's steepness from p95 → p99 is the tail story. Sourced from Vayu's HdrHistogram.",
 	avgRequestTiming:
 		"Average breakdown of where each HTTP request spent time, in flight order. Computed across the timing-sampled subset of requests (enable save_timing_breakdown to populate). Helps isolate whether latency lives in DNS, network setup, or the server.",
 	phasePercentiles:
-		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 is one a minority of requests paid: TLS or Connect behaving that way is connection churn under load, which an average hides. Requires the engine's phaseHistograms setting.",
+		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 is one a minority of requests paid: TLS or Connect behaving that way is connection churn under load, which an average hides. Requires the phaseHistograms setting of Vayu's engine.",
 	streamEvents:
 		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended. Time to first event is the First byte row above: a stream's first byte is its first event's.",
 } satisfies Record<string, ReactNode>;

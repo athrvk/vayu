@@ -181,9 +181,9 @@ export default function HeadersPanel() {
 						<div className="px-1">
 							<Eyebrow>Added by Vayu</Eyebrow>
 							<p className="text-xs text-muted-foreground mt-0.5">
-								Sent by the engine unless you untick one here. A header of the same
-								name in the table above wins. An untick here is for this send only
-								and is not saved; to leave one off every send, use the Settings tab.
+								Sent by Vayu unless you untick one here. A header of the same name
+								in the table above wins. An untick here is for this send only and is
+								not saved; to leave one off every send, use the Settings tab.
 							</p>
 						</div>
 						{declared.map((header) => (
