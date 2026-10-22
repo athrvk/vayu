@@ -87,6 +87,15 @@ nlohmann::json valid_config () {
         { "response_sample_rate", 10 }, { "timeout", 30000 } };
 }
 
+// `valid_config` in another mode, without the rate only `constant_rps` takes
+// (#2396).
+nlohmann::json valid_config_in (const char* mode) {
+    auto config    = valid_config ();
+    config["mode"] = mode;
+    config.erase ("rps");
+    return config;
+}
+
 // Assert rejection and that the message names the offending key - a 400 whose
 // body does not say which field is wrong is barely better than a crash.
 void expect_rejected (const nlohmann::json& config, const std::string& key) {
@@ -185,18 +194,20 @@ vayu::core::constants::run_config::MAX_CONCURRENCY },
 // An iterations run stops on its count alone, and `-1` cast to a size_t was a
 // run that never ended until stopped (#1893). 0 is not "unlimited" either.
 { "Iterations", "iterations", "iterations", 1, vayu::core::constants::run_config::MAX_ITERATIONS },
-// The two spellings of the arrival rate. 0 asks for no rate, which is legal in
-// a mode that does not need one; `constant_rps` has its own rule below.
-{ "Rps", "rps", "constant_concurrency", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
-{ "TargetRps", "targetRps", "constant_concurrency", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
+// The two spellings of the arrival rate, on the one mode that takes either
+// (#2396). 0 asks for no rate; the other spelling carries the one
+// `constant_rps` requires, so the bound read is this spelling's alone.
+{ "Rps", "rps", "constant_rps", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
+{ "TargetRps", "targetRps", "constant_rps", 0, vayu::core::constants::run_config::MAX_TARGET_RPS },
 });
 
 class RunConfigBoundedCount : public ::testing::TestWithParam<BoundedCountCase> {
     protected:
     static nlohmann::json config_with (const BoundedCountCase& c, int64_t value) {
-        auto config = valid_config ();
-        if (c.mode != nullptr) {
-            config["mode"] = c.mode;
+        auto config = c.mode == nullptr ? valid_config () : valid_config_in (c.mode);
+        if (config["mode"] == "constant_rps") {
+            config["rps"]       = 100;
+            config["targetRps"] = 100;
         }
         config[c.key] = value;
         return config;
@@ -314,8 +325,7 @@ TEST (RunConfigValidation, AnUnreadableRampUpDurationIsRejected) {
     for (const nlohmann::json& bad : { nlohmann::json ("10sec"), nlohmann::json ("soon"),
          nlohmann::json ("-1s"), nlohmann::json (""), nlohmann::json ("1e3s"),
          nlohmann::json (-1), nlohmann::json (true), nlohmann::json::array ({ 1 }) }) {
-        auto config              = valid_config ();
-        config["mode"]           = "ramp_up";
+        auto config              = valid_config_in ("ramp_up");
         config["rampUpDuration"] = bad;
         expect_rejected (config, "rampUpDuration");
     }
@@ -326,8 +336,7 @@ TEST (RunConfigValidation, RampUpDurationAcceptsZeroAndNumbersOfSeconds) {
          nlohmann::json ("0s"), nlohmann::json (0), nlohmann::json (10),
          nlohmann::json (2.5), nlohmann::json ("10s"), nlohmann::json ("500ms"),
          nlohmann::json (" 1M "), nlohmann::json (nullptr) }) {
-        auto config              = valid_config ();
-        config["mode"]           = "ramp_up";
+        auto config              = valid_config_in ("ramp_up");
         config["rampUpDuration"] = good;
         EXPECT_FALSE (validate_run_config (config).has_value ())
         << "expected " << good.dump () << " to be accepted";
@@ -384,6 +393,62 @@ TEST (RunConfigValidation, OnlyALiteralConstantRpsNeedsARate) {
         }
         EXPECT_FALSE (validate_run_config (config).has_value ()) << "mode '" << mode << "'";
     }
+}
+
+// --- A rate on any other mode changed the load model (#2396) ---------------
+//
+// Mutation check: delete the `check_rate_only_on_constant_rps` call in
+// validate_run_config and every refusal below is accepted.
+
+TEST (RunConfigValidation, ARateOnAnyModeButConstantRpsIsRefusedNamingFieldAndMode) {
+    for (const char* mode : { "constant_concurrency", "ramp_up", "iterations", "capacity" }) {
+        for (const char* key : { "rps", "targetRps" }) {
+            auto config       = valid_config_in (mode);
+            config[key]       = 100;
+            const auto reason = validate_run_config (config);
+            ASSERT_HAS_VALUE (reason) << mode << " with " << key;
+            EXPECT_NE (reason->find (std::string ("'") + key + "'"), std::string::npos)
+            << *reason;
+            EXPECT_NE (reason->find (std::string ("'") + mode + "'"), std::string::npos)
+            << *reason;
+            EXPECT_NE (reason->find ("'constant_rps'"), std::string::npos) << *reason;
+        }
+    }
+}
+
+TEST (RunConfigValidation, AZeroRateIsAcceptedOnEveryClosedLoopMode) {
+    for (const char* mode : { "constant_concurrency", "ramp_up", "iterations", "capacity" }) {
+        for (const char* key : { "rps", "targetRps" }) {
+            auto config       = valid_config_in (mode);
+            config[key]       = 0;
+            const auto reason = validate_run_config (config);
+            EXPECT_FALSE (reason.has_value ())
+            << mode << " with " << key << ": 0 refused: " << reason.value_or ("");
+        }
+    }
+}
+
+// The factory reads an absent `mode` as `constant_rps`, so a rate there is the
+// rate that mode paces at, not a stray one.
+TEST (RunConfigValidation, AModeLessBodyMayCarryARate) {
+    for (const char* key : { "rps", "targetRps" }) {
+        auto config = valid_config ();
+        config.erase ("mode");
+        config.erase ("rps");
+        config[key]       = 100;
+        const auto reason = validate_run_config (config);
+        EXPECT_FALSE (reason.has_value ())
+        << key << " refused: " << reason.value_or ("");
+    }
+}
+
+// An unrecognised mode runs closed loop, so a rate beside it is refused too.
+TEST (RunConfigValidation, ARateBesideAnUnrecognisedModeIsRefused) {
+    auto config         = valid_config_in ("constant_rate");
+    config["targetRps"] = 100;
+    const auto reason   = validate_run_config (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("'constant_rate'"), std::string::npos) << *reason;
 }
 
 // --- Type guards: a wrong-typed number also throws from `config.value` -----
@@ -683,8 +748,7 @@ TEST (RunConfigValidation, AMonitorIntervalOutOfRangeIsRejectedByTheRunRoute) {
 // is one the engine accepts.
 
 TEST (RunConfigValidation, AValidCapacityConfigIsAccepted) {
-    auto config            = valid_config ();
-    config["mode"]         = "capacity";
+    auto config            = valid_config_in ("capacity");
     config["sloMs"]        = 250;
     config["stepDuration"] = "5s";
     EXPECT_FALSE (validate_run_config (config).has_value ());
@@ -982,6 +1046,7 @@ TEST_F (RunConfigValidationRouteTest, AnUnusableFieldIsRefusedBeforeAnyRow) {
         { { "mode", "ramp_up" }, { "duration", "1s" }, { "rampUpDuration", "10sec" } } },
         { "iterations", { { "mode", "iterations" }, { "iterations", -1 } } },
         { "targetRps", { { "mode", "constant_rps" }, { "duration", "1s" } } },
+        { "ramp_up", { { "mode", "ramp_up" }, { "duration", "1s" }, { "targetRps", 100 } } },
         { "carriedBudgets",
         { { "mode", "iterations" }, { "iterations", 1 }, { "carriedBudgets", "latencyP99Ms" } } },
     };

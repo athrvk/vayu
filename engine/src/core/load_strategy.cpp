@@ -339,6 +339,15 @@ double requested_rps (const nlohmann::json& config) {
     return rps != 0.0 ? rps : rate ("targetRps");
 }
 
+bool is_constant_rps_mode (const nlohmann::json& config) {
+    const auto mode = config.find ("mode");
+    return mode == config.end () || mode->is_null () || *mode == "constant_rps";
+}
+
+double open_loop_rate (const nlohmann::json& config) {
+    return is_constant_rps_mode (config) ? requested_rps (config) : 0.0;
+}
+
 namespace {
 
 /// A non-negative JSON integer - the shape every `{fixedMs}` / `{minMs,
@@ -1121,7 +1130,9 @@ class ConstantLoadStrategy : public LoadStrategy {
         config, "duration", constants::run_config::DEFAULT_DURATION_MS);
         SubmissionRequest live (context, request);
 
-        const double target_rps = requested_rps (config);
+        // Chosen by mode (#2396): `constant_concurrency`, and a mode-less body
+        // with no rate, hold N in flight even when a stray rate rides along.
+        const double target_rps = open_loop_rate (config);
         if (target_rps > 0.0) {
             run_rate_limited (context, db, live, duration_ms, target_rps);
         } else {

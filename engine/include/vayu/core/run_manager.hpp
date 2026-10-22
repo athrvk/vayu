@@ -136,9 +136,7 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
         parse_duration_ms (declared->get_ref<const std::string&> ()).value_or (DEFAULT_DURATION_MS);
     }
 
-    double target_rps = config.value ("rps", 0.0);
-    if (target_rps == 0.0)
-        target_rps = config.value ("targetRps", 0.0);
+    double target_rps = open_loop_rate (config);
     if (target_rps == 0.0)
         target_rps = 1000.0; // default estimate
 
@@ -146,6 +144,17 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
     (static_cast<double> (duration_ms) / 1000.0) * target_rps * 1.2);
     return std::max (reserved, MIN_RESERVED);
 }
+
+/**
+ * @brief Set @p loop's token bucket from @p config: `open_loop_rate` and twice
+ *        it as the burst, so both are 0 on every mode but `constant_rps`
+ *        (#2396).
+ *
+ * `per_worker_config` splits a non-zero rate into a bucket per worker, which
+ * throttles a closed-loop run below the concurrency it is labelled with.
+ * `configure_event_loop`'s only source for the two fields.
+ */
+void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config);
 
 /**
  * @brief Engine-config-backed defaults a run needs at construction time.

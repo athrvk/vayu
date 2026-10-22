@@ -8115,9 +8115,76 @@ describe("start_load_run resolves and states the load shape", () => {
 		);
 	});
 
-	test("a targetRps that paces the run sends no concurrency", async () => {
+	test("a targetRps with no mode is a constant_rps run and sends no concurrency", async () => {
 		const sent = await sentShape({ url: "https://api.example.com", targetRps: 100 });
-		expect(sent).toEqual({ mode: "constant_concurrency", targetRps: 100, duration: "60s" });
+		expect(sent).toEqual({ mode: "constant_rps", targetRps: 100, duration: "60s" });
+	});
+
+	test("no mode and no rate stays constant_concurrency, and a zero rate is no rate", async () => {
+		expect(await sentShape({ url: "https://api.example.com" })).toMatchObject({
+			mode: "constant_concurrency",
+		});
+		expect(await sentShape({ url: "https://api.example.com", targetRps: 0 })).toEqual({
+			mode: "constant_concurrency",
+			concurrency: 100,
+			targetRps: 0,
+			duration: "60s",
+		});
+	});
+
+	test("a stated mode is never replaced by the rate, and the engine's refusal reaches the agent", async () => {
+		// One rule in one place (#2396): the tool forwards the rate and the engine
+		// answers it, rather than a second copy of the rule resolving it away.
+		const refusal =
+			"'targetRps' selects an open-loop arrival rate and is only available for mode 'constant_rps'; for 'constant_concurrency' set 'concurrency' instead, or send a rate of 0.";
+		const client = fakeClient({
+			startRun: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 400",
+						400,
+						JSON.stringify({ error: refusal })
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com",
+				mode: "constant_concurrency",
+				targetRps: 100,
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("Engine error (400)");
+		expect(firstText(res)).toContain("only available for mode 'constant_rps'");
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toMatchObject({ mode: "constant_concurrency", targetRps: 100 });
+	});
+
+	test("the rate cap judges a rate on any mode, the inferred constant_rps included", async () => {
+		const tight = { ...allowed, maxRps: 1000 };
+		for (const mode of [undefined, "constant_rps", "constant_concurrency"]) {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				{
+					url: "https://api.example.com",
+					...(mode ? { mode } : {}),
+					targetRps: 5000,
+					confirmed: true,
+				},
+				ctxWith(client, tight)
+			);
+			expect(res.isError, String(mode)).toBe(true);
+			expect(firstText(res), String(mode)).toMatch(
+				/targetRps 5000 exceeds the MCP cap of 1000/
+			);
+			expect(client.startRun).not.toHaveBeenCalled();
+		}
 	});
 
 	test("the preview states the shape in words and plans the resolved fields", async () => {
@@ -8141,7 +8208,23 @@ describe("start_load_run resolves and states the load shape", () => {
 				ctxWith(client, allowed)
 			)
 		);
-		expect(paced).toContain("(constant_concurrency, 25 requests/s, open loop, 120 s)?");
+		expect(paced).toContain("(constant_rps, 25 requests/s, open loop, 120 s)?");
+
+		// A stated mode keeps its own wording: only constant_rps is open loop.
+		const closed = firstText(
+			await dispatchTool(
+				"start_load_run",
+				{
+					url: "https://api.example.com",
+					mode: "constant_concurrency",
+					targetRps: 25,
+					duration: "2m",
+				},
+				ctxWith(client, allowed)
+			)
+		);
+		expect(closed).toContain("(constant_concurrency, 100 virtual users, closed loop, 120 s)?");
+		expect(closed).not.toContain("open loop");
 	});
 
 	test("the started result carries the shape beside nextStep", async () => {
@@ -8236,6 +8319,10 @@ describe("start_load_run resolves and states the load shape", () => {
 		}
 		expect(checked).toBeGreaterThan(0);
 		expect(shape.mode.description).toMatch(/default constant_concurrency/);
+		expect(shape.mode.description).toMatch(/or constant_rps given `targetRps`/);
+		expect(shape.targetRps.description).toMatch(
+			/constant_rps only; the engine refuses it on other modes/
+		);
 	});
 });
 

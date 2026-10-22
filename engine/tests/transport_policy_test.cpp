@@ -78,7 +78,6 @@ void configure_event_loop (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::shared_ptr<RunContext>& context,
 size_t concurrency,
-double target_rps,
 int timeout_ms,
 int configured_workers,
 int default_max_per_host);
@@ -770,7 +769,7 @@ class LoadRunScriptTransportTest : public TransportPolicyDbTest {
     /// scripts assert on are the recorded samples below.
     void configure_run (const std::shared_ptr<vayu::core::RunContext>& context) const {
         vayu::core::configure_event_loop (*db_, context->config, context,
-        /*concurrency=*/1, /*target_rps=*/0.0, /*timeout_ms=*/5000,
+        /*concurrency=*/1, /*timeout_ms=*/5000,
         /*configured_workers=*/1, /*default_max_per_host=*/1);
     }
 

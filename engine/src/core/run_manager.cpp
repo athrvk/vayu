@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <iostream>
 
@@ -1322,6 +1323,11 @@ vayu::http::CookieJar& cookie_jar) {
     });
 }
 
+void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config) {
+    loop.target_rps = open_loop_rate (config);
+    loop.burst_size = loop.target_rps > 0.0 ? loop.target_rps * 2.0 : 0.0;
+}
+
 /**
  * The event loop this run drives, configured, started and published.
  *
@@ -1335,17 +1341,17 @@ void configure_event_loop (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::shared_ptr<RunContext>& context,
 size_t concurrency,
-double target_rps,
 int timeout_ms,
 int configured_workers,
 int default_max_per_host) {
     // Configure EventLoop
     vayu::http::EventLoopConfig loop_config;
     loop_config.num_workers = static_cast<size_t> (configured_workers); // Already resolved (see resolve_worker_count)
-    loop_config.max_concurrent    = std::max (concurrency, size_t{ 100 });
-    loop_config.max_per_host      = static_cast<size_t> (default_max_per_host);
-    loop_config.target_rps        = target_rps;
-    loop_config.burst_size        = target_rps > 0 ? target_rps * 2.0 : 0.0;
+    loop_config.max_concurrent = std::max (concurrency, size_t{ 100 });
+    loop_config.max_per_host   = static_cast<size_t> (default_max_per_host);
+    apply_open_loop_rate (loop_config, config);
+    // A token bucket on any other mode throttles a closed-loop run (#2396).
+    assert (loop_config.target_rps <= 0.0 || is_constant_rps_mode (config));
     loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
     vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
     // Read once for the run and held for it - see EventLoopConfig::transport
@@ -1378,7 +1384,7 @@ int default_max_per_host) {
     vayu::utils::log_debug ("run", "EventLoop config",
     { { "runId", context->run_id }, { "workers", configured_workers },
     { "maxConcurrent", loop_config.max_concurrent }, { "maxPerHost", loop_config.max_per_host },
-    { "targetRps", target_rps }, { "timeoutMs", timeout_ms } });
+    { "targetRps", loop_config.target_rps }, { "timeoutMs", timeout_ms } });
 
     // Create, start, and only then publish the event loop. The metrics
     // thread has been ticking since before this thread first ran (both are
@@ -2138,14 +2144,11 @@ RunManager& manager) {
         // Per-test config can override defaults
         size_t concurrency =
         static_cast<size_t> (config.value ("concurrency", default_max_concurrent));
-        double target_rps = config.value ("rps", 0.0); // 0 = unlimited
-        if (target_rps == 0.0) {
-            target_rps = config.value ("targetRps", 0.0);
-        }
-        int timeout_ms = config.value ("timeout", 30000);
+        const double target_rps = open_loop_rate (config); // 0 = unlimited
+        int timeout_ms          = config.value ("timeout", 30000);
 
-        configure_event_loop (db, config, context, concurrency, target_rps,
-        timeout_ms, configured_workers, default_max_per_host);
+        configure_event_loop (db, config, context, concurrency, timeout_ms,
+        configured_workers, default_max_per_host);
 
         vayu::Request request;
         if (!build_load_request (db, db_ptr, config, context, timeout_ms, request)) {

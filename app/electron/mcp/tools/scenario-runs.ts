@@ -335,8 +335,8 @@ export async function startScenarioLoadRun(
 	const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
 	const modeRefusal = scenarioModeRefusal(mode);
 	if (modeRefusal) return errorResult(modeRefusal);
-	// The engine refuses a rate on either spelling, because either one selects
-	// the open-loop path regardless of the declared mode.
+	// The engine's scenario validator refuses a rate on either spelling, on any
+	// mode: a scenario has no open-loop executor.
 	if (typeof args.targetRps === "number" && args.targetRps > 0) {
 		return errorResult(
 			`"targetRps" is not available for scenario runs: it selects an open-loop arrival rate, ` +
