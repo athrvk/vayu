@@ -341,6 +341,12 @@ describe("readNotifyRequest", () => {
 		).toThrow(TypeError);
 	});
 
+	it("refuses a title that is only whitespace once newlines and tabs become spaces", () => {
+		expect(() => readNotifyRequest({ kind: "update-ready", title: "\n\t", body: "b" })).toThrow(
+			TypeError
+		);
+	});
+
 	it("refuses a kind outside the closed list, and a kind that is not a string", () => {
 		expect(() => readNotifyRequest({ ...request(), kind: "k" })).toThrow(/kind/);
 		expect(() => readNotifyRequest({ ...request(), kind: "" })).toThrow(/kind/);

@@ -109,7 +109,7 @@ export function setupOAuthIpcHandlers(deps: OAuthIpcDeps): void {
 	// "Open in Browser", which asks the scheme question of an arbitrary `href`.
 	const openExternalUrl = createExternalUrlOpener({
 		isFocused: deps.isFocused,
-		now: Date.now,
+		now: () => performance.now(),
 		openExternal: (url) => shell.openExternal(url),
 	});
 	ipcMain.handle("shell:openExternalUrl", (_e, url: unknown) => openExternalUrl(url));

@@ -250,7 +250,7 @@ export function readNotifyRequest(value: unknown): NotifyRequest {
 		throw new TypeError("notify: `body` must be a string");
 	}
 	const cleanTitle = sanitizeNotifyText(title, NOTIFY_TITLE_MAX);
-	if (cleanTitle.length === 0) {
+	if (cleanTitle.trim().length === 0) {
 		throw new TypeError("notify: `title` must be a non-empty string");
 	}
 	return {
