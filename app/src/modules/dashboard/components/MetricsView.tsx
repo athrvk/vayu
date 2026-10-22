@@ -67,41 +67,16 @@ import {
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { ChartLegend } from "./charts/ChartLegend";
 import {
-	THROUGHPUT_LEGEND,
-	LATENCY_LEGEND,
-	PERCENTILE_LEGEND,
-	SCATTER_LEGEND,
-	type LegendEntry,
+	LATENCY_ENTRIES,
+	PERCENTILE_ENTRIES,
+	SCATTER_ENTRIES,
+	throughputLegend,
 } from "./charts/uplot/legend";
 import { hasSendRate } from "./charts/uplot/buildData";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 
 /** The HDR card's footer figures, drawn as dashes until the report has them. */
 const HDR_FOOTER_STATS = ["min", "mean", "p50", "p95", "p99", "max"] as const;
-
-const LATENCY_ENTRIES: readonly LegendEntry[] = Object.values(LATENCY_LEGEND);
-const PERCENTILE_ENTRIES: readonly LegendEntry[] = Object.values(PERCENTILE_LEGEND);
-const SCATTER_ENTRIES: readonly LegendEntry[] = Object.values(SCATTER_LEGEND);
-
-/**
- * The throughput card's key: the send-rate entry only when the chart draws that
- * line, the target line only when it draws one, the ramp pair only on a ramp.
- */
-function throughputLegend(
-	targetRps: number | undefined,
-	hasRamp: boolean,
-	hasSend: boolean
-): LegendEntry[] {
-	const { throughput, sendRate, target, configured, achieved } = THROUGHPUT_LEGEND;
-	return [
-		throughput,
-		...(hasSend ? [sendRate] : []),
-		...(targetRps && targetRps > 0
-			? [{ ...target, label: `target ${formatRate(targetRps)} req/s` }]
-			: []),
-		...(hasRamp ? [configured, achieved] : []),
-	];
-}
 
 function MetricsView({
 	metrics,
