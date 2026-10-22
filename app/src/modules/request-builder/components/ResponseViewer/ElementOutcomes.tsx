@@ -20,6 +20,7 @@
 
 import { AlertTriangle, CheckCircle, CircleSlash, HelpCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatLatency } from "@/lib/format-number";
 import type { ElementOutcome } from "@/types";
 import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
 
@@ -102,7 +103,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 								)}
 								{outcome.waitedMs !== undefined && (
 									<span className="text-micro text-muted-foreground tabular-nums">
-										· {outcome.waitedMs} ms
+										· {formatLatency(outcome.waitedMs)}
 									</span>
 								)}
 							</div>
