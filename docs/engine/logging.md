@@ -159,6 +159,11 @@ port. Neither app-side file sets `tid`: the main process has no per-connection
 worker threads the way the engine does, so the field would name nothing a
 reader could use.
 
+The app creates `logs/` `0700` and each file `0600` on Linux and macOS (the
+engine's own rule, `SECURITY.md`, "Data at rest"), subject to the process
+`umask` and applied when the directory or file is created. Windows ignores the
+mode, so a new file inherits the directory's ACL.
+
 **One floor for both files.** The engine's `logLevel` config entry governs
 `app_<stamp>.log` too - the app introduces no setting of its own. `log.ts`
 buffers every record in memory until the sidecar answers `GET /config` once

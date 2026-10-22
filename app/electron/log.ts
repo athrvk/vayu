@@ -307,7 +307,7 @@ class LogChannel {
 			this.rotate();
 		}
 		try {
-			fs.appendFileSync(this.filePath as string, line);
+			fs.appendFileSync(this.filePath as string, line, { mode: LOG_FILE_MODE });
 			this.currentBytes += bytes;
 		} catch {
 			// @deliberate a full disk or a yanked volume is not worth losing every
@@ -319,7 +319,7 @@ class LogChannel {
 	private ensureFile(logsDir: string): boolean {
 		if (this.filePath) return true;
 		try {
-			fs.mkdirSync(logsDir, { recursive: true });
+			fs.mkdirSync(logsDir, { recursive: true, mode: LOG_DIR_MODE });
 		} catch {
 			return false;
 		}
@@ -349,6 +349,15 @@ class LogChannel {
 		this.currentBytes = 0;
 	}
 }
+
+/**
+ * Owner-only, as the engine makes its own `logs/` (`SECURITY.md`, "Data at
+ * rest"). `mode` is subject to the umask and applies only when the directory
+ * or file is created; Windows ignores it and a new file inherits the
+ * directory's ACL (the engine's protected ACL on the data directory).
+ */
+const LOG_DIR_MODE = 0o700;
+const LOG_FILE_MODE = 0o600;
 
 const channels = new Map<string, LogChannel>();
 
