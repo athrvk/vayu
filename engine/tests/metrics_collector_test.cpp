@@ -9,10 +9,14 @@
 
 #include <atomic>
 #include <map>
+#include <memory>
 #include <thread>
 #include <vector>
 
 #include "optional_assert.hpp"
+#include "temp_database.hpp"
+#include "vayu/db/database.hpp"
+#include "vayu/utils/metrics_helper.hpp"
 
 using namespace vayu::core;
 
@@ -751,6 +755,102 @@ TEST_F (MetricsCollectorTest, StoresAllErrors) {
     EXPECT_EQ (errors[0].error_message, "Timeout error");
     EXPECT_EQ (errors[1].error_code, vayu::ErrorCode::ConnectionFailed);
     EXPECT_EQ (errors[2].error_code, vayu::ErrorCode::DnsError);
+}
+
+// A stored error row carries the same duration the latency population
+// counted, so the Samples tab and the no-summary report read it too (#2412).
+class MetricsCollectorFlushTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH  = "test_metrics_collector_flush.db";
+    static constexpr const char* RUN_ID   = "run_flush";
+    static constexpr double TIMEOUT_MS    = 2000.0;
+    static constexpr double QUEUE_WAIT_MS = 30.0;
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+
+        vayu::db::Run run;
+        run.id              = RUN_ID;
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Completed;
+        run.config_snapshot = R"({"url":"https://x.test/","method":"GET"})";
+        run.start_time      = 100;
+        run.end_time        = 200;
+        db_->create_run (run);
+    }
+
+    void TearDown () override {
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    /// The run's stored rows, after the collector has flushed them.
+    std::vector<vayu::db::Result> flushed (MetricsCollector& collector) {
+        collector.flush_to_database (*db_);
+        return db_->get_results (RUN_ID);
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+};
+
+TEST_F (MetricsCollectorFlushTest, ATimedOutTransferIsStoredAtItsDuration) {
+    MetricsCollector collector (RUN_ID);
+    collector.record_error (vayu::ErrorCode::Timeout, "timed out", "{}",
+    nullptr, AttemptDuration{ TIMEOUT_MS, QUEUE_WAIT_MS });
+
+    const auto rows = flushed (collector);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].status_code, 0);
+    EXPECT_EQ (rows[0].error, "timed out");
+    EXPECT_DOUBLE_EQ (rows[0].latency_ms, TIMEOUT_MS);
+}
+
+TEST_F (MetricsCollectorFlushTest, AnErrorThatNeverLeftIsStoredWithNoDuration) {
+    MetricsCollector collector (RUN_ID);
+    collector.record_error (vayu::ErrorCode::InvalidUrl, "refused", "{}");
+
+    const auto rows = flushed (collector);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].error, "refused");
+    EXPECT_DOUBLE_EQ (rows[0].latency_ms, 0.0);
+}
+
+// The report a run without a stored summary gets is built from these stored
+// rows alone, so its tail must be the live histogram's tail (#2412): 5 timeouts
+// in 100 requests put p99 and max at the timeout, where a row stored at 0 ms
+// reads both as 10. Sizes stay under the success reservoir (1000) and the error
+// cap (10000), so every request has a row and the two populations are equal.
+// Mutation-check: store `0.0` for an error row's latency in flush_to_database
+// and p99 and max here read 10 ms.
+TEST_F (MetricsCollectorFlushTest, TheNoSummaryReportTailAgreesWithTheLiveHistogram) {
+    constexpr size_t SUCCESSES = 95;
+    constexpr size_t TIMEOUTS  = 5;
+    // HdrHistogram at 3 significant figures holds a value to 0.1%.
+    constexpr double HDR_TOLERANCE_MS = 2.0;
+
+    MetricsCollector collector (RUN_ID);
+    for (size_t i = 0; i < SUCCESSES; ++i) {
+        collector.record_success (
+        200, 10.0, 0.0, R"({"totalMs":10})", SuccessTraceReason::Sampled);
+    }
+    for (size_t i = 0; i < TIMEOUTS; ++i) {
+        collector.record_error (vayu::ErrorCode::Timeout, "timed out", "{}",
+        nullptr, AttemptDuration{ TIMEOUT_MS, 0.0 });
+    }
+    const auto live = collector.calculate_percentiles ();
+
+    const auto rows = flushed (collector);
+    ASSERT_EQ (rows.size (), SUCCESSES + TIMEOUTS);
+    const auto report = vayu::utils::MetricsHelper::calculate_detailed_report (rows, 1.0);
+
+    EXPECT_EQ (report.total_requests, SUCCESSES + TIMEOUTS);
+    EXPECT_NEAR (live.p99, TIMEOUT_MS, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_p99, TIMEOUT_MS, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_max, TIMEOUT_MS, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_p99, live.p99, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_max, live.max, HDR_TOLERANCE_MS);
 }
 
 // ============================================================================

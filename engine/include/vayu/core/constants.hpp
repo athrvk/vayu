@@ -572,6 +572,20 @@ constexpr size_t STACK_SIZE = size_t{ 256 } * 1024;
 /// it, so the setting can only be lowered.
 constexpr size_t STACK_SIZE_MIN = size_t{ 64 } * 1024;
 constexpr size_t STACK_SIZE_MAX = STACK_SIZE;
+/**
+ * @brief Stack budget while a bundled `require()` library (lodash, moment) is
+ *        evaluated, in bytes (768KB).
+ *
+ * That source is Vayu's own vendored code, so its parse depth is not the
+ * user's to budget, and a frame is a different size on every toolchain: MSVC
+ * at /Od under ASan overflowed `STACK_SIZE` inside QuickJS's own parser on
+ * lodash (73KB) and moment (61KB). A library evaluates under the larger of
+ * this and the script's own budget, then the script's budget is restored.
+ * It must fit the thread that runs the script with room to spare: 1MB is the
+ * smallest stack an engine thread has (Windows), and the limit is measured
+ * from where the runtime was built, a little way down it.
+ */
+constexpr size_t SHELF_LIBRARY_STACK_SIZE = size_t{ 768 } * 1024;
 /// Whether to enable console output from scripts
 constexpr bool ENABLE_CONSOLE = true;
 /**
@@ -1176,6 +1190,17 @@ constexpr size_t MAX_BYTES = import_limit (spec_document::MAX_CONFIGURABLE_BYTES
 static_assert (MAX_BYTES > scenario::MAX_CONFIGURABLE_DATA_BYTES + IMPORT_HEADROOM_BYTES,
 "a collection run carrying the largest data set maxScenarioDataBytes allows "
 "must still fit under the body ceiling");
+
+/// Deepest a JSON request body may nest where `parse_request_json` reads it
+/// (#2417). A stack bound, not a policy: nlohmann parses iteratively but
+/// `dump ()` and the copy constructor recurse, and the routes do each to the
+/// whole body or to a field of it. A data cell
+/// (`spec_document::MAX_READ_DEPTH`, #2362) sits up to four levels below the
+/// body (`scenario` > `data` > row > cell), so a cell at its own bound must
+/// still fit under this one.
+constexpr size_t MAX_JSON_DEPTH = 128;
+static_assert (MAX_JSON_DEPTH >= spec_document::MAX_READ_DEPTH + 4,
+"a data cell nested to its own bound must not trip the body's");
 } // namespace request_body
 
 /**

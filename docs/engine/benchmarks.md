@@ -1030,6 +1030,19 @@ python scripts/perf/measure_engine.py \
     --mock ./mock-server --out perf-engine.json
 ```
 
+`scripts/perf/measure_report_poll.py` (#2659, not run by the workflow) times
+`GET /runs/:id/report` polled every 100 ms against a 500 rps, 30 s run to a
+closed port, which stores the 10,000-row error cap as it finishes. It reads
+each poll's engine-side time from the engine's own `http` log record and splits
+the polls into the live phase and the finalization window (status still
+`running` after the load stopped), counting those that overlapped the results
+write. Three runs by default:
+
+```bash
+python scripts/perf/measure_report_poll.py \
+    --engine engine/build-release/vayu-engine --out report-poll.json
+```
+
 ## Reproduce it
 
 ```bash

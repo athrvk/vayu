@@ -768,7 +768,8 @@ class ScriptEngine::Impl {
         // Install a wall-clock deadline interrupt so infinite-loop scripts
         // cannot hang the thread. The RuntimeState is owned by this runtime
         // (freed with it) and refreshed before each execute().
-        auto* rt_state = new RuntimeState ();
+        auto* rt_state       = new RuntimeState ();
+        rt_state->stack_size = config.stack_size;
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
         JS_SetHostPromiseRejectionTracker (rt, &script_rejection_tracker, rt_state);

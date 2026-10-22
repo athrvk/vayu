@@ -1525,6 +1525,19 @@ struct ExecuteRefusal {
     }
 };
 
+/// The `data` row's cell bound (#2362) as `parse_request_json`'s field bound, so
+/// a deep cell is refused in `read_data_row`'s words rather than the body's.
+RouteResult refuse_overdeep_send_row (const nlohmann::json& json) {
+    const auto data = json.find ("data");
+    if (data == json.end () || !data->is_object ()) {
+        return {};
+    }
+    if (auto refusal = vayu::core::refuse_overdeep_cell (*data, "data", std::nullopt)) {
+        return route_error (400, *refusal);
+    }
+    return {};
+}
+
 /**
  * Everything `POST /execute` reads and can refuse before any run row exists.
  *
@@ -1537,15 +1550,16 @@ struct ExecuteRefusal {
  */
 std::optional<ExecuteRefusal>
 read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePayload& out) {
-    // Parse and validate request
-    nlohmann::json json;
-    try {
-        json = nlohmann::json::parse (req.body);
-    } catch (const nlohmann::json::exception& e) {
-        vayu::utils::log_warning (
-        "http", "POST /execute - Invalid JSON: " + std::string (e.what ()));
-        return "Invalid JSON: " + std::string (e.what ());
+    // Depth-checked before anything copies the payload, `build_design_send`'s
+    // snapshot of the same text included.
+    auto parsed = parse_request_json (req.body, {}, refuse_overdeep_send_row);
+    if (!parsed) {
+        const auto& error   = parsed.error ().body.at ("error");
+        std::string message = error.value ("message", std::string ());
+        vayu::utils::log_warning ("http", "POST /execute - " + message);
+        return ExecuteRefusal{ std::move (message), error.value ("code", std::string ()) };
     }
+    nlohmann::json json = std::move (*parsed);
 
     // Read before anything is built or written, with the other pre-row
     // validation: a malformed flag must be a 400, not a run the caller
@@ -2427,7 +2441,8 @@ void erase_null_members (nlohmann::json& json) {
  * `handle_start_load_test` dumps the whole payload for the stored snapshot
  * before either reader runs, and `dump ()` recurses: a cell nested deep enough
  * crashes the engine there, so the readers' own check comes too late. This
- * runs right after the parse. Both readers keep the check, so a caller of
+ * runs right after the parse, as `parse_request_json`'s field bound, ahead of
+ * the whole body's. Both readers keep the check, so a caller of
  * `resolve_scenario` or `read_load_data_set` is held to it too.
  */
 RouteResult refuse_overdeep_run_data (const nlohmann::json& json) {
@@ -2843,22 +2858,15 @@ const char* started_message (bool is_scenario, bool is_scenario_load) {
 void handle_start_load_test (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
-    // Parse JSON
-    nlohmann::json json;
-    try {
-        json = nlohmann::json::parse (req.body);
-    } catch (const nlohmann::json::exception& e) {
-        vayu::utils::log_warning (
-        "http", "POST /runs - Invalid JSON: " + std::string (e.what ()));
-        send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
+    // Depth-checked before anything copies or dumps the payload, `snapshot_body`
+    // below first.
+    auto parsed =
+    parse_request_json (req.body, "invalid_run_config", refuse_overdeep_run_data);
+    if (!parsed) {
+        refuse_request_body (res, "POST /runs", parsed.error ());
         return;
     }
-    // Before anything copies or dumps the payload, `snapshot_body` below first.
-    if (const auto depth = refuse_overdeep_run_data (json); !depth) {
-        res.status = depth.error ().status;
-        res.set_content (depth.error ().body.dump (), "application/json");
-        return;
-    }
+    nlohmann::json json = std::move (*parsed);
     erase_null_members (json);
     // What the stored snapshot is built from: the body as sent, less the
     // nulls, taken before validation normalizes anything in `json`.

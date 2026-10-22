@@ -124,7 +124,10 @@ stored on your requests and saves what they set, as the app's Send does.
 
 An agent backed by a hosted model forwards what it reads to that model's
 provider. Treat connecting an agent as granting it read access to the rest of
-your workspace, and keep the server off until you want that.
+your workspace. The server is on by default and listens on loopback only; switch
+it off in Settings > MCP if you do not want the endpoint open. If another
+program already holds the port, Settings > MCP says so and disables the connect
+actions, so an agent is never pointed at an endpoint Vayu is not serving.
 
 The run history in Vayu's own screens is not masked: a request that references a
 secret sends it, so the stored trace and inbox captures keep what went over the
@@ -198,8 +201,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.
-- **Server disable.** The MCP server can be turned off entirely from Settings;
-  while off the endpoint does not accept connections.
+- **Server disable.** The MCP server is on by default and can be turned off
+  entirely from Settings; while off the endpoint does not accept connections.
+  When the port is taken the server does not start, Settings > MCP shows why and
+  offers no endpoint to copy, and one-click connect refuses.
 
 **Why there is no auth token on the endpoint.** Any local process could already
 reach the engine's REST API on `127.0.0.1:9876`; the MCP endpoint on `:9877`

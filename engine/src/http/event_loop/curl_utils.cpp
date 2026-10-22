@@ -13,10 +13,13 @@
 #include <cassert>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include "vayu/core/constants.hpp"
@@ -183,14 +186,11 @@ std::optional<Error> validate_transferable (const Request& request) {
             "HEAD requests cannot carry a body - remove the body or use GET" };
     }
     // The file rule (`file_ref.hpp`) ran once for this send or run, before
-    // any driver; what is left here is the proof it did. A binary body without
-    // its plan-time members never went through it, and is refused rather than
-    // read on the transfer's behalf.
-    if (has_body && request.body.mode == BodyMode::Binary &&
-    !vayu::http::is_prepared (request.body.file)) {
-        return Error{
-            ErrorCode::InternalError, "Body file '" + request.body.file.src + "' was not checked before the send - this driver skipped the file rule"
-        };
+    // any driver; what is left here is the proof it did.
+    if (has_body) {
+        if (auto unplanned = vayu::http::unplanned_file_ref (request.body)) {
+            return Error{ ErrorCode::InternalError, std::move (*unplanned) };
+        }
     }
     // Header text that would end or truncate the line it is written into. Here
     // rather than in `build_request_header_list` because that function has no
@@ -231,34 +231,73 @@ Response error_response (const Error& error) {
 
 namespace {
 
+/// One transfer's read position in a file part's `ApprovedFile`. libcurl owns
+/// it from `curl_mime_data_cb` on and frees it with the part; the open file
+/// stays the plan's, shared by every transfer of the run.
+struct PartReader {
+    std::shared_ptr<const vayu::http::ApprovedFile> file;
+    std::uint64_t offset = 0;
+};
+
+size_t read_part (char* buffer, size_t size, size_t nitems, void* arg) {
+    auto* reader                  = static_cast<PartReader*> (arg);
+    const std::uint64_t remaining = reader->file->size () - reader->offset;
+    const auto wanted =
+    static_cast<size_t> (std::min<std::uint64_t> (size * nitems, remaining));
+    const auto got =
+    reader->file->read_at (reader->offset, std::span<char> (buffer, wanted));
+    if (!got) {
+        return CURL_READFUNC_ABORT;
+    }
+    // A file truncated under the handle reads 0 before the part's promised
+    // length, which libcurl refuses on its own, naming the bytes it missed.
+    reader->offset += *got;
+    return *got;
+}
+
+/// libcurl rewinds a part for a redirect or an auth retry.
+int seek_part (void* arg, curl_off_t offset, int origin) {
+    auto* reader = static_cast<PartReader*> (arg);
+    if (origin != SEEK_SET || offset < 0 ||
+    static_cast<std::uint64_t> (offset) > reader->file->size ()) {
+        return CURL_SEEKFUNC_CANTSEEK;
+    }
+    reader->offset = static_cast<std::uint64_t> (offset);
+    return CURL_SEEKFUNC_OK;
+}
+
+void free_part (void* arg) {
+    const std::unique_ptr<PartReader> reader (static_cast<PartReader*> (arg));
+}
+
+/// A file part read from the file the plan approved, never from `src`
+/// (#2416); `validate_transferable` has refused a part without one.
+void attach_file_part (curl_mimepart* part, const FormField& field) {
+    // Owned by the part once attached: libcurl calls `free_part` with it.
+    PartReader* reader =
+    std::make_unique<PartReader> (PartReader{ field.approved, 0 }).release ();
+    if (curl_mime_data_cb (part, static_cast<curl_off_t> (field.approved->size ()),
+        &read_part, &seek_part, &free_part, reader) != CURLE_OK) {
+        free_part (reader);
+    }
+    curl_mime_filename (part, vayu::http::declared_file_name (field).c_str ());
+    curl_mime_type (part, vayu::http::file_part_content_type (field).c_str ());
+}
+
 /// A `form-data` body as a libcurl multipart tree, owned by @p source.
 void attach_multipart (CURL* curl, const Request& request, BodySource& source) {
     // Multipart: libcurl encodes the parts and generates the boundary, so
     // the body and the Content-Type that describes it cannot disagree.
-    //
-    // A file part is `curl_mime_filedata`, which means libcurl reads the
-    // file *during the transfer* - so a load run re-reads it once per
-    // iteration (the page cache absorbs that; slurping it into memory at
-    // plan time would trade a bounded read for an unbounded allocation and
-    // a snapshot that goes stale). The file rule (`file_ref.hpp`) already
-    // checked it once for the send or the run, so a failure here is a
-    // file that vanished since, which libcurl reports on its own.
     curl_mime* mime = curl_mime_init (curl);
     source.mime     = mime;
     for (const auto& field : vayu::http::enabled_fields (request.body.fields)) {
         curl_mimepart* part = curl_mime_addpart (mime);
         curl_mime_name (part, field.key.c_str ());
         if (field.type == FormFieldType::File) {
-            curl_mime_filedata (part, field.src.c_str ());
-            // filedata already declares the basename; an explicit name
-            // overrides it, which is how an imported part keeps the
-            // filename the exporting app recorded.
-            if (!field.file_name.empty ()) {
-                curl_mime_filename (part, field.file_name.c_str ());
-            }
-        } else {
-            curl_mime_data (part, field.value.c_str (), field.value.size ());
+            attach_file_part (part, field);
+            continue;
         }
+        curl_mime_data (part, field.value.c_str (), field.value.size ());
         if (!field.content_type.empty ()) {
             curl_mime_type (part, field.content_type.c_str ());
         }
@@ -1213,6 +1252,36 @@ const ConnectedPeerCheck* peer_check) {
     return error;
 }
 
+namespace {
+
+/// The codes libcurl raises while checking the request it was handed, before
+/// it resolves a name or opens a socket: a URL it cannot parse, a scheme the
+/// handle's allowlist refuses. Each also has a source after the wire (a
+/// redirect's `Location`, a status line naming an unknown HTTP version), which
+/// `reached_a_peer` tells apart. Every other code is raised by work on the
+/// network: a TLS file libcurl cannot read (`CURLE_SSL_CERTPROBLEM`,
+/// `CURLE_SSL_CACERT_BADFILE`, `CURLE_SSL_CRL_BADFILE`) is read during the
+/// handshake, after the TCP connect.
+bool refused_before_connecting (CURLcode code) {
+    return code == CURLE_URL_MALFORMAT || code == CURLE_UNSUPPORTED_PROTOCOL;
+}
+
+/// libcurl clears the primary address when a transfer starts and sets it once
+/// a connection, new or reused, is up at the IP level, even when the TLS
+/// handshake above it then fails. A redirect's earlier hop leaves it set for a
+/// later hop's refusal.
+bool reached_a_peer (CURL* curl) {
+    char* ip = nullptr;
+    return curl != nullptr && get_info<CURLINFO_PRIMARY_IP> (curl, &ip) == CURLE_OK &&
+    ip != nullptr && *ip != '\0';
+}
+
+} // namespace
+
+bool curl_transfer_attempted (CURL* curl, CURLcode code) {
+    return !refused_before_connecting (code) || reached_a_peer (curl);
+}
+
 const ClientCertRule* apply_transport_policy (CURL* curl,
 const TransportPolicy& policy,
 bool verify_ssl,
@@ -1494,7 +1563,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     response.timing.wire_ms       = wire_ms;       // new
     response.timing.queue_wait_ms = queue_wait_ms; // new
     apply_phase_timings (response.timing, phase_times);
-    response.transfer_attempted = true;
+    response.transfer_attempted = curl_transfer_attempted (curl, result);
 
     // Wire byte counts (body + headers), for throughput-in-bytes metrics.
     curl_off_t dl_bytes = 0, ul_bytes = 0;

@@ -61,6 +61,12 @@ class FileAccessPolicy {
     /// allowed.
     [[nodiscard]] bool allows (const std::string& path) const;
 
+    /// The canonical path `allows` approved @p path as, or nothing when it
+    /// does not. A reader opens this, never @p path again: a link swapped in
+    /// at @p path since names another file (#2416).
+    [[nodiscard]] std::optional<std::filesystem::path> approved_path (
+    const std::string& path) const;
+
     /// Component-wise containment of two already-canonical paths: @p candidate
     /// is @p root itself or lies below it.
     [[nodiscard]] static bool contains (const std::filesystem::path& root,
