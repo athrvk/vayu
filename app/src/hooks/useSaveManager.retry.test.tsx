@@ -366,7 +366,7 @@ describe("a save the disk had no room for", () => {
 			"The disk holding Vayu's data is full - free up space and try again"
 		);
 
-	it("leads the failure text with the cause and keeps the engine's sentence", async () => {
+	it("shows the engine's sentence under the generic lead, with no lead of its own", async () => {
 		const onSave = vi.fn().mockRejectedValueOnce(diskFull());
 		mountManager({ entityId: "req_1", onSave });
 
@@ -376,7 +376,7 @@ describe("a save the disk had no room for", () => {
 
 		expect(useSaveStore.getState().status).toBe("error");
 		expect(useSaveStore.getState().lastErrorMessage).toBe(
-			"Disk full - The disk holding Vayu's data is full - free up space and try again"
+			"Couldn't save - The disk holding Vayu's data is full - free up space and try again"
 		);
 	});
 

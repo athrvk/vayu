@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { TIMING } from "@/config/timing";
+import { ApiError } from "@/services/http-client";
 import { useSaveStore, type SaveOutcome } from "./save-store";
 import { useToastStore } from "./toast-store";
 
@@ -361,6 +362,43 @@ describe("flushAll", () => {
 				failed: 1,
 				pending: 1,
 				reason: "disk-full",
+			});
+		});
+
+		describe("a context whose save rejects", () => {
+			const rejectWith = (id: string, error: Error) =>
+				useSaveStore.getState().registerContext({
+					id,
+					name: id,
+					save: () => Promise.reject(error),
+					hasPendingChanges: true,
+				});
+
+			it("is disk-full when the engine answered 507", async () => {
+				rejectWith(
+					"request-1",
+					new ApiError(
+						507,
+						"insufficient_storage",
+						"The disk holding Vayu's data is full"
+					)
+				);
+
+				await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+					saved: 0,
+					failed: 1,
+					pending: 0,
+					reason: "disk-full",
+				});
+			});
+
+			it("names no cause for any other rejection", async () => {
+				rejectWith("request-1", new ApiError(503, "unavailable", "busy"));
+
+				const result = await useSaveStore.getState().flushAll();
+
+				expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
+				expect(result).not.toHaveProperty("reason");
 			});
 		});
 

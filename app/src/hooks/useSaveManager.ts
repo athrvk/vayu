@@ -23,6 +23,7 @@ import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
 import { TIMING } from "@/config/timing";
 import { SaveBlockedError } from "@/lib/elements";
+import { isDiskFullError } from "@/lib/disk-full";
 import { isFinalError } from "@/lib/query-client";
 
 /**
@@ -32,24 +33,6 @@ import { isFinalError } from "@/lib/query-client";
  * the three drift apart.
  */
 const saveContextId = (entityId: string) => `request-${entityId}`;
-
-/** The engine's answer to a write the data folder's volume has no room for (#2423). */
-const HTTP_INSUFFICIENT_STORAGE = 507;
-
-const isDiskFullError = (error: unknown) =>
-	error instanceof ApiError && error.statusCode === HTTP_INSUFFICIENT_STORAGE;
-
-/**
- * The toast and the Dock's "Not saved" tooltip. A full disk leads with its
- * cause, because the engine's sentence is the remedy and the reader needs the
- * problem first; every other failure keeps the generic lead.
- */
-function saveFailureText(error: unknown): string {
-	if (!(error instanceof Error)) return "Couldn't save";
-	return isDiskFullError(error)
-		? `Disk full - ${error.message}`
-		: `Couldn't save - ${error.message}`;
-}
 
 interface UseSaveManagerOptions {
 	/** Unique identifier for this save context (e.g., request ID) */
@@ -239,7 +222,9 @@ export function useSaveManager({
 					return "pending";
 				}
 				console.error("Save failed:", error);
-				failSave(saveFailureText(error));
+				failSave(
+					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+				);
 
 				// A 4xx is the engine's verdict on this payload, not a hiccup - a
 				// timed-out or refused connection is the shape a dead engine

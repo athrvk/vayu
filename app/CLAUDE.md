@@ -86,14 +86,22 @@ everything.
   (`isFinalError`, #1889), so autosave does not re-send it and the next edit is
   what tries again. A 507 (disk full, #2423) is not: `isFinalError` leaves
   every 5xx alone, so it retries on the same backoff, and the save reports
-  `disk-full` so the toast leads with "Disk full". **A
+  `disk-full` (`isDiskFullError`, `lib/disk-full.ts`) - the toast stays the
+  generic `Couldn't save - <engine message>`, since the engine's sentence
+  already names the cause and the action. **A
   quit or close never discards a save silently** (#1489): `save-flush.ts`
   answers `{ saved, failed, pending, reason? }` and `flushNeedsConfirmation`
   decides whether the main process asks before the window goes; `reason` is
   `"disk-full"` only when every failure was one, and the prompt then says the
   disk is full instead of blaming the engine. Each context reports
   its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
-  store reading back the one shared status; a save an editor declines to send
+  store reading back the one shared status; only a context whose save rejects
+  with the `ApiError` can report `disk-full` (`useSaveManager`,
+  `useDraftSaveContext`'s collection editors, the store's own catch), while one that publishes
+  through `failSave` and resolves (`SettingsMain`, `VariableTableEditor`,
+  `variable-commit`, the inbox `CannedResponseControls`) is judged by the status it published and reads `failed` (`failSave` is
+  handed text, not the error), so the quit prompt keeps its generic wording
+  for it; a save an editor declines to send
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
   blame the engine for it. An editor takes part
   by registering a save context; one that saves on its own is outside all of

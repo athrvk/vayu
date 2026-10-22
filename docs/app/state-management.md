@@ -751,8 +751,8 @@ share) and no retry is armed. The status stays `error` - the Dock keeps saying
 "Not saved" - and the next edit re-arms the debounce. A 5xx, a timeout or an
 unreachable engine keeps retrying. So does a 507, the engine's answer to a
 write the data folder's volume has no room for (#2423): `performSave` reports
-it as `"disk-full"`, leads the toast with "Disk full" and keeps the engine's
-sentence after it, and the backoff above carries on until space returns. The
+it as `"disk-full"`; the toast is the generic "Couldn't save - <engine message>",
+because the engine's sentence already names the cause and the action, and the backoff above carries on until space returns. The
 retry is the app's own timer; nothing here reads the 503's `Retry-After`. Cmd/Ctrl+S and the
 entity-switch/quit goodbye flush still call `performSave` directly and report
 their own outcome once - retrying either would save into a pane the user has
@@ -789,13 +789,20 @@ its cause (a 507, #2423); `flushAll` counts it in `failed` too, and sets
 `reason: "disk-full"` on its result only when every failed context was
 disk-full. One failure of another kind beside it leaves the key out, because
 then "the disk is full" would be only part of the story. The key is absent, not
-`undefined`, when there is no cause.
+`undefined`, when there is no cause. Three places turn a rejected save into
+`"disk-full"`, all through `isDiskFullError` (`lib/disk-full.ts`): `performSave`
+(`useSaveManager`), the `useDraftSaveContext` save (the collection editors, whose saves reject)
+and `runSave`'s own catch in the store.
 
 A context that resolves with nothing (`SettingsMain`, `VariableTableEditor`,
 `variable-commit`) is judged by the status it published, as before: `error` is
 `failed`, and `pending` (#1381) is `pending`, because a context that saw an edit
 land mid-write publishes it for the payload that went out not holding that edit.
-Otherwise `runSave` fills in the silence. The `pending` that
+A context that resolves having published through `failSave` - `SettingsMain`,
+`VariableTableEditor`, `variable-commit` and the inbox's `CannedResponseControls`
+(whose `persist` catches its own rejection) - cannot report `"disk-full"`: `failSave` takes the message, not the error, so such a context
+reads `failed` even when its write met a 507, and the quit prompt keeps its
+generic wording for it. Otherwise `runSave` fills in the silence. The `pending` that
 `completeSaveThenIdle` itself publishes while a sibling is dirty is not read back
 as the next void context's own.
 

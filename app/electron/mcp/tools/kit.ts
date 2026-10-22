@@ -67,24 +67,28 @@ export function withCaveat(result: ToolResult, caveat: string): ToolResult {
 }
 
 /**
- * What an agent should do about the two statuses the engine answers a storage
- * failure with (#2423). Neither is a verdict on the arguments, which a 400
- * would be, so the call is worth repeating unchanged once the cause clears.
+ * The engine's busy-database sentence (`send_exception`, `routes.hpp`). A 503
+ * is not enough to match on: the engine also answers 503 while it is shutting
+ * down, where a retry is wrong, and both carry the code `unavailable`.
  */
-function retryHint(status: number): string {
-	if (status === 507) {
-		return " The disk holding Vayu's data is full. Retry the call after space is freed.";
-	}
-	if (status === 503) {
-		return " The engine's database was busy. The call is retryable.";
-	}
+const BUSY_DATABASE = /database is busy/i;
+
+/**
+ * What an agent should do about the two answers the engine gives a storage
+ * failure (#2423). Neither is a verdict on the arguments, which a 400 would be,
+ * so the call is worth repeating unchanged once the cause clears. The body
+ * already names the cause; this adds only the action.
+ */
+function retryHint(err: EngineRequestError): string {
+	if (err.status === 507) return " Retry the call after space is freed.";
+	if (err.status === 503 && BUSY_DATABASE.test(err.body)) return " Retry the call in a moment.";
 	return "";
 }
 
 export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
 	if (err instanceof EngineRequestError) {
 		return errorResult(
-			`Engine error (${err.status}): ${err.body || err.message}${retryHint(err.status)}`
+			`Engine error (${err.status}): ${err.body || err.message}${retryHint(err)}`
 		);
 	}
 	const msg = err instanceof Error ? err.message : String(err);

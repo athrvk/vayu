@@ -20,6 +20,7 @@
 import { create } from "zustand";
 
 import { TIMING } from "@/config/timing";
+import { isDiskFullError } from "@/lib/disk-full";
 import { useToastStore } from "./toast-store";
 
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
@@ -196,6 +197,9 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// publish `pending` (`completeSaveThenIdle` holds another dirty context
 	// against a success), and the next context to resolve would read that as its
 	// own verdict. The batch fills in once, after every verdict is in.
+	//
+	// Silence cannot name a cause: `failSave` receives text, not the error, so
+	// such a context reads `failed` even when its write met a 507.
 	const outcomeFromPublishedStatus = (context: SaveContext, fillIn: FillIn): SaveOutcome => {
 		const published = get().status;
 		if (published === "error") return "failed";
@@ -237,7 +241,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			get().failSave(
 				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
 			);
-			return "failed";
+			return isDiskFullError(error) ? "disk-full" : "failed";
 		}
 	};
 
