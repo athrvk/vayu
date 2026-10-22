@@ -318,6 +318,11 @@ describe("server instructions, per host", () => {
 		expect(text).not.toMatch(APP_ONLY_WORDING);
 	});
 
+	it("names the iterations cap beside the other load caps", async () => {
+		const text = await instructionsFor("app", {});
+		expect(text).toMatch(/RPS, virtual-user, duration and iteration caps/);
+	});
+
 	it("keeps the Settings path for an app session", async () => {
 		const text = await instructionsFor("app", {});
 		expect(text).toContain("turn on Write access in Vayu Settings → MCP");

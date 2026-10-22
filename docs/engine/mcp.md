@@ -2033,7 +2033,7 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 | `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
 | `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". Two runs of different types get the tool's refusal instead, with no delta embedded. An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
 | `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
-| `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
+| `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data); tells the model to read `get_safety_config` first, so a profile is sized to the session's caps and allowlist (#2444). |
 
 `summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one
 error definition in their text, from `error-definition.ts`'s
@@ -2459,7 +2459,9 @@ not a secret, and `checkAllowlist` already prints the whole list on any refusal.
 The three gates (`allowWrites`, `allowNetworkSettings`, `revealSecretsToAgents`)
 are on/off only, and `disabledTools` is reported as a count, because the server
 instructions name no tool and `tools/list` is already the authority on which
-exist. `maxResponseSamples` is not in the answer; the other four caps are.
+exist. `maxResponseSamples` is not in the answer; the other four caps are. The
+server instructions name all four load caps (RPS, virtual users, duration,
+iterations) without their values.
 
 The renderer never sets these directly: `main.ts` sanitizes every change
 (`sanitizeSafetyInput` - normalizes/de-dupes hosts, holds each cap to a whole
