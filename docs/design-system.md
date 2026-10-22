@@ -265,12 +265,15 @@ that still existed.
 entries and paints each swatch through `ROLE_TOKEN`, the table the canvas
 resolves its strokes through; a band swatch uses the same `BAND_FILL_ALPHA` as
 the chart's band fill. The entries are declared once in `charts/uplot/legend.ts`
-(`THROUGHPUT_LEGEND`, `LATENCY_LEGEND`, `PERCENTILE_LEGEND`, `SCATTER_LEGEND`);
-the chart modules build their series and markers from them, so the key and the
-plot read one object. A hand-written `hsl(var(--x))` swatch is how thirteen legends came to
+(`THROUGHPUT_LEGEND`, `LATENCY_LEGEND`, `PERCENTILE_LEGEND`, `SCATTER_LEGEND`)
+and the lists each card renders sit beside them (`PERCENTILE_ENTRIES`,
+`SCATTER_ENTRIES`, `throughputLegend`); the chart modules build their series and
+markers from the declarations, and `MetricsView` and History's Performance tab
+render the same lists (#2697), so the key and the plot read one object. A hand-written `hsl(var(--x))` swatch is how thirteen legends came to
 disagree with their charts, nine of them in hue. `MetricsView.legend.test.tsx`
 renders the dashboard and checks each entry against the series and markers its
-card's chart was given. The status-code legend is the one exception: it is
+card's chart was given; `PerformanceTab.legend.test.tsx` does the same for
+History. The status-code legend is the one exception: it is
 driven by `STATUS_CLASS_CSS_VAR`, the same table its bands resolve through.
 
 **`-text` variants for legible text.** The base `--success` / `--warning` /
