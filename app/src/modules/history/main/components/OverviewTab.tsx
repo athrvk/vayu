@@ -227,6 +227,7 @@ export default function OverviewTab({
 					onOpenSample && ((key) => openSample({ kind: "errorType", key }))
 				}
 				hasSamples={(target) => locateSample(sampleRows, target) !== null}
+				sampling={report.sampling}
 			/>
 
 			{/* Past the totals and the verdicts: this is the count behind the

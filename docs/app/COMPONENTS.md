@@ -1635,6 +1635,21 @@ lets the caller refuse a row: it is drawn disabled and reads "No sample of this
 was kept". The history Overview passes the handlers (#2213), to open the
 Samples tab at an example of the row.
 
+The optional `sampling` prop (`report.sampling`) feeds one note under By error
+type (#2400): "N errors beyond the first M are not broken down by type", with
+the sentence that the counts cover only the stored errors and the totals above
+are exact. M is `errors.withDetails`, the stored-record count, N is
+`sampling.errorsDropped`. It is a `Callout` (`severity="info"`) written in
+`ErrorSummary` rather than a `SampleRetentionNote` budget: errors past the
+store's cap are refused, not displaced, and the sentence is about a breakdown,
+not a sampled list. It draws only when `errorsDropped > 0` **and** the type
+counts sum to less than the no-response count. A run stored since the engine
+counts every error by type has `errors.types` adding up to the no-response
+total whatever `errorsDropped` says, so the note would be false there; older
+runs and design-mode runs build the types from the stored records and fall
+short. An absent `sampling` is silent (absent is "cannot tell", the rule
+`SampleRetentionNote` states above).
+
 ## Threshold Verdict (`components/shared/ThresholdVerdict.tsx`)
 
 The run's verdict against the pass/fail budgets it declared
