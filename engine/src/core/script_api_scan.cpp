@@ -507,7 +507,6 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "pm.require", Anchor::Bare, "pm.require", "" },
 { "script.packages", Anchor::Elsewhere, "", "" },
 { "tv4", Anchor::Bare, "tv4", "" },
-{ "xml2Json", Anchor::Bare, "xml2Json", "" },
 { "cheerio", Anchor::Bare, "cheerio", "" },
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.

@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only) and `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input) - any other module throws; see [The `require` shelf](#the-require-shelf) |
+| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input) and `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -413,10 +413,11 @@ and the other SHA-2 hashers are the `crypto-js` shelf's, see
 
 `require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
 `Cannot find module '<name>'` for any other name; it reads no file and fetches
-nothing. The shelf holds five libraries, `crypto-js`, `uuid`, `lodash`,
-`moment` and `csv-parse/lib/sync`, each matched as the whole name.
+nothing. The shelf holds six libraries, `crypto-js`, `uuid`, `lodash`,
+`moment`, `csv-parse/lib/sync` and `xml2js`, each matched as the whole name.
 `crypto-js` is also bound as the global `CryptoJS` and `lodash` as `_`,
-so both spellings of a Postman script run:
+so both spellings of a Postman script run (`xml2Json` is a global too, but a
+parse function over `xml2js` rather than the module, as in Postman):
 
 ```javascript
 const CryptoJS = require('crypto-js');
@@ -526,10 +527,37 @@ script's memory, per execution; a script that does not require it pays
 nothing. The import's notice does not name `require('csv-parse/lib/sync')`,
 and still names every other `csv-parse` path.
 
-**Not on the shelf:** `ajv` and `tv4`, `xml2js` (`xml2Json`),
+**`xml2js`** is npm's `xml2js` package (0.6.2), bundled into one file with the
+`sax` (1.2.4) and `xmlbuilder` (11.0.1) it depends on, the versions Postman's
+sandbox ships, and is reached as `require('xml2js')`. Postman's `xml2Json`
+global is there too: its helper over the same library, a synchronous
+`parseString` with `explicitArray: false`, `trim: true` and
+`mergeAttrs: false`:
+
+```javascript
+const doc = xml2Json(pm.response.text());   // <order><id>7</id></order> is { order: { id: '7' } }
+require('xml2js').parseString(pm.response.text(), (err, result) => {
+    pm.test('the body is XML', () => pm.expect(err).to.equal(null));
+});
+```
+
+`xml2Json` answers `undefined` for a document the parser refuses (Postman
+drops the error) and `null` for empty input; `require('xml2js')` hands the
+error, with sax's message, to the callback. The module is xml2js's whole
+export (`parseString`, `parseStringPromise`, `Parser`, `Builder`, ...). An
+`async: true` parse calls back through a zero-delay timer, which runs before
+the script ends, so a `pm.test` inside the callback is recorded. The input is
+a string; a `Buffer` is not supported, and a `Parser`'s event emitter carries
+`on`, `emit` and `removeAllListeners` only. `xml2js/lib/parser`, `sax` and
+`xmlbuilder` throw like any name off the shelf. First use (either name) costs
+about 16 ms (`-O2`) to 42 ms (Debug build) and about 900 KB
+of the script's memory, per execution; a script that touches neither pays
+nothing. The import's notice names neither.
+
+**Not on the shelf:** `ajv` and `tv4`,
 `cheerio`, `csv-parse` at any path but `csv-parse/lib/sync`, `chai`,
 `moment-timezone` and Node's built-ins (`crypto`, `fs`, `buffer`, ...).
-`require` of one throws, the editor underlines `tv4`, `xml2Json`, `cheerio` and
+`require` of one throws, the editor underlines `tv4`, `cheerio` and
 `Backbone` as unusable, and a Postman import names the request in
 `meta.unsupportedScriptApis`.
 
@@ -1446,9 +1474,10 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
   show the template in
 - `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
-- **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment` and
-  `csv-parse/lib/sync`, `script.packages` and the libraries Postman bundles
-  beyond `CryptoJS` and `_`** - `tv4`, `xml2Json`, `cheerio` and `Backbone`. The sandbox has no module
+- **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment`,
+  `csv-parse/lib/sync` and `xml2js`, `script.packages` and the libraries
+  Postman bundles beyond `CryptoJS`, `_` and `xml2Json`** - `tv4`, `cheerio`
+  and `Backbone`. The sandbox has no module
   system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
   covers the hashers and their HMACs and nothing else of `CryptoJS`, so a
   `CryptoJS` member outside that list is named by the import notice, also when
@@ -1743,11 +1772,11 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 
 - the host globals of a browser or Node: `fetch`, `URL`, `Buffer`, ...
 - the libraries Postman bundles that the [`require` shelf](#the-require-shelf)
-  does not carry: `tv4`, `xml2Json`, `cheerio` and `Backbone`
-  (`CryptoJS`, `_` and `require` are declared as the real thing, with
-  `declare module 'crypto-js'`, `declare module 'uuid'`,
-  `declare module 'lodash'`, `declare module 'moment'` and
-  `declare module 'csv-parse/lib/sync'` so each
+  does not carry: `tv4`, `cheerio` and `Backbone`
+  (`CryptoJS`, `_`, `xml2Json` and `require` are declared as the real thing,
+  with `declare module 'crypto-js'`, `declare module 'uuid'`,
+  `declare module 'lodash'`, `declare module 'moment'`,
+  `declare module 'csv-parse/lib/sync'` and `declare module 'xml2js'` so each
   `require(...)` of them types; all come from the one `SHELF_MODULES` table in
   `script_types.cpp`, and `require` takes only the names on it. `_` and the
   `moment` module are declared `any`: their members are not restated, and a
@@ -1755,7 +1784,8 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
   is the parse function, taking a string and any options object and answering
   `any`, because `columns` and `objname` change the records' shape. `moment`
   and `csv-parse/lib/sync` have no global declaration, as Postman has no
-  global)
+  global. The `xml2js` module declares its members, and `xml2Json` is declared
+  as the function `xml2Json(xml: string): any`)
 
 Hover names the replacement Postman itself gives: `tv4` is `require('ajv')`, and
 says what Vayu has instead. The `postman` object is

@@ -15,10 +15,12 @@
  * library is Vayu's own source (the crypto-js shim) or a vendored npm build
  * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
  * around it (`uuid`, #2650; `lodash`, #2651; `moment`, #2652;
- * `csv-parse/lib/sync`, #2653). A name is matched whole, so a sub-path is on
- * the shelf only as itself. A library global (`CryptoJS`, `_`) is an accessor
- * that loads its library on first read and then replaces itself with the
- * value, as `responseCookies` does; a library with no global (`uuid`, `moment`,
+ * `csv-parse/lib/sync`, #2653; `xml2js`, #2654). A name is matched whole, so a
+ * sub-path is on the shelf only as itself. A library global (`CryptoJS`, `_`,
+ * `xml2Json`) is an accessor that loads its library on first read and then
+ * replaces itself with the value, as `responseCookies` does; the value is the
+ * module, or what the row's adapter builds from it (`xml2Json` is a function
+ * over xml2js, not xml2js). A library with no global (`uuid`, `moment`,
  * `csv-parse/lib/sync`) is reached only through `require`, as in Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
@@ -26,7 +28,8 @@
  * (`release_context`), so a library evaluated there would be paid for by every
  * element whether or not it touches the library. Within one execution the
  * evaluated module is kept in `ContextData::shelf_modules`, so `require` and
- * the global answer the same object.
+ * the global share one evaluation of a library (and, where the global is the
+ * module, answer the same object).
  */
 
 #include "pm/pm_internal.hpp"
@@ -54,9 +57,11 @@
 #include "vayu/embedded/lodash_js.hpp"
 #include "vayu/embedded/moment_js.hpp"
 #include "vayu/embedded/uuid_js.hpp"
+#include "vayu/embedded/xml2js_js.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/digest.hpp"
 #include "vayu/utils/sodium_init.hpp"
+#include "xml2js_glue.hpp"
 
 namespace vayu::runtime::pm_detail {
 namespace {
@@ -180,6 +185,7 @@ constexpr auto SHELF = std::to_array<ShelfLibrary> ({
 { MOMENT_MODULE, MOMENT_GLUE_OPEN, vayu::runtime::embedded::MOMENT_JS, MOMENT_GLUE_CLOSE, nullptr },
 { CSV_PARSE_SYNC_MODULE, CSV_PARSE_GLUE_OPEN,
 vayu::runtime::embedded::CSV_PARSE_SYNC_JS, CSV_PARSE_GLUE_CLOSE, nullptr },
+{ XML2JS_MODULE, XML2JS_GLUE_OPEN, vayu::runtime::embedded::XML2JS_JS, XML2JS_GLUE_CLOSE, nullptr },
 });
 
 // The import scan reads SHELF_MODULE_NAMES; a library here that is not there
@@ -208,11 +214,17 @@ constexpr std::size_t shelf_index (std::string_view name) {
 struct ShelfGlobal {
     const char* name;
     std::size_t library; ///< An index into SHELF.
+    /// Source evaluating to a function that takes the library's module and
+    /// returns the global's value; empty when the global is the module itself.
+    /// It runs once, on the global's first read, and adds nothing to the
+    /// module, so `require` still answers the library as it ships.
+    std::string_view adapter;
 };
 
 constexpr auto SHELF_GLOBALS = std::to_array<ShelfGlobal> ({
-{ "CryptoJS", shelf_index (CRYPTO_JS_MODULE) },
-{ "_", shelf_index (LODASH_MODULE) },
+{ "CryptoJS", shelf_index (CRYPTO_JS_MODULE), {} },
+{ "_", shelf_index (LODASH_MODULE), {} },
+{ "xml2Json", shelf_index (XML2JS_MODULE), XML2JSON_FROM_XML2JS },
 });
 
 static_assert (
@@ -346,7 +358,33 @@ int replace_global (JSContext* ctx, const char* name, JSValue value) {
     return JS_DefinePropertyValueStr (ctx, global.get (), name, value, JS_PROP_C_W_E);
 }
 
-/// A library global's getter: the library, which then replaces the accessor.
+/// What @p shelf_global holds once @p exported, its library's module, is
+/// loaded: the module, or what the row's adapter builds from it. Takes the
+/// @p exported reference.
+JSValue shelf_global_value (JSContext* ctx, const ShelfGlobal& shelf_global, JSValue exported) {
+    if (shelf_global.adapter.empty ()) {
+        return exported;
+    }
+    // The adapter is Vayu's source too, so its parse is not the script's to
+    // budget either.
+    const LibraryStackBudget stack_budget (ctx);
+    // A std::string carries the terminator JS_Eval reads past the length.
+    const std::string source (shelf_global.adapter);
+    const std::string file = "<" + std::string (shelf_global.name) + ">";
+    ScopedValue adapter (ctx,
+    JS_Eval (ctx, source.data (), source.size (), file.c_str (),
+    JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT));
+    if (JS_IsException (adapter.get ())) {
+        JS_FreeValue (ctx, exported);
+        return JS_EXCEPTION;
+    }
+    JSValue value = JS_Call (ctx, adapter.get (), JS_UNDEFINED, 1, &exported);
+    JS_FreeValue (ctx, exported);
+    return value;
+}
+
+/// A library global's getter: the library (or its adapter's value), which
+/// then replaces the accessor.
 JSValue js_shelf_global_get (JSContext* ctx,
 JSValueConst /*this_val*/,
 int /*argc*/,
@@ -359,11 +397,15 @@ int magic) {
     if (JS_IsException (exported) || JS_IsUndefined (exported)) {
         return exported;
     }
-    if (replace_global (ctx, shelf_global.name, JS_DupValue (ctx, exported)) < 0) {
-        JS_FreeValue (ctx, exported);
+    JSValue value = shelf_global_value (ctx, shelf_global, exported);
+    if (JS_IsException (value)) {
+        return value;
+    }
+    if (replace_global (ctx, shelf_global.name, JS_DupValue (ctx, value)) < 0) {
+        JS_FreeValue (ctx, value);
         return JS_EXCEPTION;
     }
-    return exported;
+    return value;
 }
 
 /// A library global's setter: an assignment replaces it, as it would any

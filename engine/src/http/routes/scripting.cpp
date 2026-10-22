@@ -2092,14 +2092,33 @@ nlohmann::json get_script_completions () {
     "csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version "
     "Postman bundles: the module is parse(input, options), input a string, "
     "and it has no global; bare csv-parse and its other paths are not on the "
-    "shelf. Any other name throws \"Cannot find module\" and lists the shelf: "
-    "nothing is read from disk or fetched.\n\nExample:\n"
+    "shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman "
+    "bundles: parseString, parseStringPromise, Parser and Builder, a string "
+    "input; its global, xml2Json, is a synchronous parse over it rather than "
+    "the module. Any other name throws \"Cannot find module\" and lists the "
+    "shelf: nothing is read from disk or fetched.\n\nExample:\n"
     "const CryptoJS = require('crypto-js');\n"
     "const uuid = require('uuid');\nconst id = uuid();\n"
     "const _ = require('lodash');\nconst moment = require('moment');\n"
     "const parse = require('csv-parse/lib/sync');\n"
-    "const rows = parse(pm.response.text(), { columns: true });" },
+    "const rows = parse(pm.response.text(), { columns: true });\n"
+    "const xml2js = require('xml2js');\n"
+    "xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));" },
     { "sortText", "2_require" } });
+
+    completions.push_back ({ { "label", "xml2Json" }, { "kind", KIND_FUNCTION },
+    { "insertText", "xml2Json(${1:xml})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "xml2Json(xml: string): any" },
+    { "documentation",
+    "Postman's bundled XML parser: xml2js 0.6.2's parseString with Postman's "
+    "options (explicitArray: false, trim: true, mergeAttrs: false), answered "
+    "synchronously. A child element read once is its value and one repeated is "
+    "an array; attributes sit under $ and an element's text beside them under "
+    "_. A document the parser refuses answers undefined and empty input null; "
+    "require('xml2js') has the error and the other options.\n\nLoaded the "
+    "first time a script reads it.\n\nExample:\n"
+    "const order = xml2Json(pm.response.text()).order;" },
+    { "sortText", "2_xml2Json" } });
 
     // `any`: lodash's few hundred members are not restated here, and a partial
     // list would flag the ones it left out on correct code.

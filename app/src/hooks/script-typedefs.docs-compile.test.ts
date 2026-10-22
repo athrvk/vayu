@@ -261,7 +261,6 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	 */
 	it.each([
 		["require('ajv');", 2345],
-		["xml2Json(pm.response.text());", 2349],
 		["tv4.validate(pm.response.json(), {});", 2339],
 		["fetch('https://example.com');", 2349],
 	])("%s is an error (TS%i)", (source, code) => {
@@ -384,6 +383,33 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 		).toBe("");
 		expect(errorsOf("require('csv-parse');")).toContain("TS2345");
 		expect(errorsOf("require('csv-parse/lib/sync')(42);")).toContain("TS2345");
+	});
+
+	/*
+	 * xml2js runs (#2654), as require('xml2js') and as Postman's xml2Json
+	 * global over it: the parse and build calls a Postman script makes read
+	 * clean, and a sub-path of the package or a non-string document stays an
+	 * error.
+	 */
+	it("declares require('xml2js') and xml2Json as what they run", () => {
+		expect(
+			errorsOf(
+				[
+					"const xml2js = require('xml2js');",
+					"xml2js.parseString(pm.response.text(), (err, doc) => {",
+					"\tif (!err) pm.environment.set('id', doc.order.id[0]);",
+					"});",
+					"xml2js.parseString('<a/>', { explicitArray: false }, (err, doc) => console.log(err, doc));",
+					"xml2js.parseStringPromise('<a/>').then((doc) => console.log(doc));",
+					"const xml = new xml2js.Builder({ headless: true }).buildObject({ a: 1 });",
+					"const order = xml2Json(pm.response.text()).order;",
+					"pm.environment.set('order', order.id + xml);",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("require('xml2js/lib/parser');")).toContain("TS2345");
+		expect(errorsOf("xml2Json(42);")).toContain("TS2345");
+		expect(errorsOf("require('xml2js').parseString(42);")).toContain("TS2345");
 	});
 
 	/*

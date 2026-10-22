@@ -2842,9 +2842,10 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')` and `require('csv-parse/lib/sync')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')` and `require('xml2js')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `_` | The same `lodash` module as a global, loaded on first read |
+| `xml2Json(xml)` | Postman's synchronous XML parse over the shelf's `xml2js`, loaded on first read - see [`xml2js`](#xml2js) |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
 | `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
 
@@ -2866,9 +2867,10 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid`, `moment`
-and `csv-parse/lib/sync` run (`uuid`, `moment` and `csv-parse/lib/sync` have
-no global, they are `require` only, as in Postman). The others (`tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
+Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid`, `moment`,
+`csv-parse/lib/sync` and `xml2js` with its `xml2Json` global run (`uuid`,
+`moment` and `csv-parse/lib/sync` have no global, they are `require` only, as
+in Postman). The others (`tv4`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2881,10 +2883,11 @@ There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`), and it is
 matched whole: `csv-parse/lib/sync` is on the shelf and `csv-parse` is not.
-Today the shelf holds five libraries, `crypto-js`, `uuid`, `lodash`, `moment`
-and `csv-parse/lib/sync`. `CryptoJS` is the
+Today the shelf holds six libraries, `crypto-js`, `uuid`, `lodash`, `moment`,
+`csv-parse/lib/sync` and `xml2js`. `CryptoJS` is the
 `crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
-a Postman script work:
+a Postman script work; `xml2Json` is not a module but Postman's parse function
+over `xml2js`, bound the same lazy way:
 
 ```javascript
 const CryptoJS = require('crypto-js');
@@ -3099,8 +3102,80 @@ The Postman import's script scan does not name
 `require('csv-parse/lib/sync')`; it still names `require('csv-parse')` and every
 other path under the package.
 
+#### `xml2js`
+
+`require('xml2js')` is **the npm `xml2js` package, version 0.6.2**, bundled by
+esbuild with the two packages it depends on, `sax` 1.2.4 and `xmlbuilder`
+11.0.1, into one 98,939-byte file (`engine/vendor/xml2js/`; xml2js and
+xmlbuilder MIT, sax ISC, all three licences beside it; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+These are the versions Postman's sandbox 6.8.0 ships, so a parse answers the
+shape and the error messages a Postman script was written against. The module
+is xml2js's whole export: `parseString`, `parseStringPromise`, `Parser`,
+`Builder`, `ValidationError`, `defaults` and `processors`.
+
+```javascript
+const xml2js = require('xml2js');
+xml2js.parseString(pm.response.text(), (err, doc) => {
+    pm.test('the order parsed', () => pm.expect(err).to.equal(null));
+    if (!err) pm.environment.set('orderId', doc.order.id[0]);
+});
+const body = xml2Json(pm.response.text());   // { order: { id: '7', ... } }
+```
+
+- With xml2js's defaults every child element is an array
+  (`<a><b>1</b></a>` is `{ a: { b: ['1'] } }`), attributes sit under `$` and
+  an element's text beside them under `_`; `explicitArray: false` gives a
+  child read once as its value and one repeated as an array.
+- A document the parser refuses reaches the callback as an `Error` carrying
+  sax's message (`Unclosed root tag`, `Unexpected close tag`,
+  `Non-whitespace before first tag.`, `Invalid character entity`), with the
+  line and column after it. Empty input is not an error: the callback is
+  handed `null`.
+- **When the callback runs.** With `async: false`, xml2js's default, the
+  callback has run before `parseString` returns. With `async: true` the parse
+  is scheduled through a zero-delay `setTimeout`, one per 10,000 characters,
+  and the sandbox runs every timer before the script ends
+  ([Timers](#timers-settimeout-and-setinterval)), so the callback still runs
+  inside the script and a `pm.test` in it is recorded. `parseStringPromise`
+  settles the same way.
+- `new xml2js.Builder(options).buildObject(object)` writes XML back.
+- The input is a string. The bundle carries the Node pieces xml2js reaches (an
+  `EventEmitter` with `on`, `emit` and `removeAllListeners`, a `setImmediate`
+  standing on `setTimeout`, and two stubs for `stream` and `string_decoder`)
+  inside itself, so loading it adds no global. What was cut is the rest of
+  Node's emitter: a script that calls `once` or `off` on a `Parser` gets a
+  `TypeError`. A `Buffer` is not supported; the sandbox has none.
+- Only the whole name loads it: `xml2js/lib/parser`, `sax` and `xmlbuilder` are
+  refused like any name off the shelf.
+
+**`xml2Json(xml)`** is Postman's own helper, the call its sandbox makes:
+`parseString` with `explicitArray: false`, `trim: true` and
+`mergeAttrs: false`, answering what the callback was handed, synchronously.
+`xml2Json('<a><b> 1 </b><b>2</b></a>')` is `{ a: { b: ['1', '2'] } }`. A
+document the parser refuses answers `undefined` (Postman drops the error, so
+reach for `require('xml2js')` to see it) and empty input answers `null`.
+`xml2Json` is a function over the library, not the library: `xml2Json !==
+require('xml2js')`, and the module carries nothing it does not ship with. Both
+share one evaluation of the library, whichever the script reaches first.
+Assigning `xml2Json` replaces the global without loading anything.
+
+**Cost.** Evaluated on the first `require('xml2js')` or first read of
+`xml2Json` in an execution, never when a context is built, so a script that
+touches neither pays nothing. First use costs about 16 ms in a `-O2`
+build and 42 ms in a Debug build (QuickJS parsing and running the 99 KB
+bundle, measured in a fresh context, median of 101;
+[First-load cost](building.md#first-load-cost) has the method); the evaluated
+module then holds about 900 KB of the script's 64 MB limit until the
+execution ends. Nothing is shared between executions, so the next script that
+uses it pays again.
+
+The Postman import's script scan names neither `xml2Json` nor
+`require('xml2js')`; it still names `require('xml2js/lib/parser')` and every
+other path under the package.
+
 The libraries Postman also lets a script `require` - `ajv`,
-`tv4`, `xml2js`, `cheerio`, `chai` and Node's built-ins, and `csv-parse` at
+`tv4`, `cheerio`, `chai` and Node's built-ins, and `csv-parse` at
 any path but `csv-parse/lib/sync` - are
 **not** on the shelf: `require` of one throws, and a Postman import names the
 script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)

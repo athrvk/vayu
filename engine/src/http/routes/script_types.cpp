@@ -155,9 +155,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "tv4",
 "Postman's bundled JSON Schema validator. Its replacement is "
 "require('ajv'), which Vayu's require() does not load either." },
-{ "xml2Json",
-"Postman's bundled XML parser. Its replacement is require('xml2js'), "
-"which Vayu's require() does not load either." },
 { "cheerio",
 "Postman's bundled HTML parser. Its replacement is require('cheerio'), "
 "which Vayu's require() does not load either." },
@@ -179,7 +176,7 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
  * `body` is what sits inside `declare module '<name>' { ... }`, tab-indented
  * and ending in the `export =` that names the module's value: a module with a
  * global to point at is one line (crypto-js, lodash), and one with none (uuid,
- * moment, csv-parse/lib/sync) carries its own declaration.
+ * moment, csv-parse/lib/sync, xml2js) carries its own declaration.
  *
  * `script_types_test.cpp` runs `require(name)` in the real script engine for
  * every module declared here, and checks that every name `require` accepts
@@ -244,6 +241,33 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 "\tconst parse: (input: string, options?: { [option: string]: unknown }) => "
 "any;\n"
 "\texport = parse;\n" },
+// xml2js 0.6.2's whole export. `xml2Json` is not this module but a function
+// over it, declared from its own completion entry. A Parser instance is `any`:
+// it is an event emitter whose members (options, saxParser, on, reset, ...)
+// scripts rarely reach and a partial list would flag.
+{ "xml2js",
+"\ttype Options = { [option: string]: unknown };\n"
+"\ttype Callback = (err: Error | null, result?: any) => void;\n"
+"\ttype Processor = (value: string, name?: string) => any;\n"
+"\tconst xml2js: {\n"
+"\t\tparseString(xml: string, callback?: Callback): unknown;\n"
+"\t\tparseString(xml: string, options: Options, callback?: Callback): "
+"unknown;\n"
+"\t\tparseStringPromise(xml: string, options?: Options): Promise<any>;\n"
+"\t\tParser: new (options?: Options) => any;\n"
+"\t\tBuilder: new (options?: Options) => { options: Options; "
+"buildObject(root: unknown): string };\n"
+"\t\tValidationError: new (message: string) => Error;\n"
+"\t\tdefaults: { '0.1': Options; '0.2': Options };\n"
+"\t\tprocessors: {\n"
+"\t\t\tnormalize: Processor;\n"
+"\t\t\tfirstCharLowerCase: Processor;\n"
+"\t\t\tstripPrefix: Processor;\n"
+"\t\t\tparseNumbers: Processor;\n"
+"\t\t\tparseBooleans: Processor;\n"
+"\t\t};\n"
+"\t};\n"
+"\texport = xml2js;\n" },
 });
 
 /**
@@ -872,7 +896,7 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
  * overload matches" - the less direct message. One generic signature keyed on
  * the names keeps the parameter a literal union (`require('ajv')` is "not
  * assignable to 'crypto-js' | 'uuid' | 'lodash' | 'moment' |
- * 'csv-parse/lib/sync'"). Only the entry's documentation is read.
+ * 'csv-parse/lib/sync' | 'xml2js'"). Only the entry's documentation is read.
  */
 void render_require (std::string& out, const TypeNode& require) {
     out += "interface VayuShelfModules {\n";

@@ -2385,10 +2385,11 @@ interface VayuShelfModules {
 	'lodash': typeof import('lodash');
 	'moment': typeof import('moment');
 	'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');
+	'xml2js': typeof import('xml2js');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman bundles: parseString, parseStringPromise, Parser and Builder, a string input; its global, xml2Json, is a synchronous parse over it rather than the module. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
@@ -2398,6 +2399,8 @@ interface VayuShelfModules {
  * const moment = require('moment');
  * const parse = require('csv-parse/lib/sync');
  * const rows = parse(pm.response.text(), { columns: true });
+ * const xml2js = require('xml2js');
+ * xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2476,6 +2479,16 @@ declare function setTimeout(callback: (...args: any[]) => void, delay?: number, 
  * The object is read once the script has finished, in key order, after the pm.test results: a key assigned twice is one result, with the last value. pm.test(name, fn) is what to write in a new script.
  */
 declare const tests: { [key: string]: any };
+
+/**
+ * Postman's bundled XML parser: xml2js 0.6.2's parseString with Postman's options (explicitArray: false, trim: true, mergeAttrs: false), answered synchronously. A child element read once is its value and one repeated is an array; attributes sit under $ and an element's text beside them under _. A document the parser refuses answers undefined and empty input null; require('xml2js') has the error and the other options.
+ * 
+ * Loaded the first time a script reads it.
+ * 
+ * Example:
+ * const order = xml2Json(pm.response.text()).order;
+ */
+declare function xml2Json(xml: string): any;
 
 /**
  * Not available in the Vayu script sandbox.
@@ -2585,13 +2598,6 @@ declare const tv4: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled XML parser. Its replacement is require('xml2js'), which Vayu's require() does not load either.
- */
-declare const xml2Json: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
  * Postman's bundled HTML parser. Its replacement is require('cheerio'), which Vayu's require() does not load either.
  */
 declare const cheerio: never;
@@ -2656,4 +2662,27 @@ declare module 'moment' {
 declare module 'csv-parse/lib/sync' {
 	const parse: (input: string, options?: { [option: string]: unknown }) => any;
 	export = parse;
+}
+
+declare module 'xml2js' {
+	type Options = { [option: string]: unknown };
+	type Callback = (err: Error | null, result?: any) => void;
+	type Processor = (value: string, name?: string) => any;
+	const xml2js: {
+		parseString(xml: string, callback?: Callback): unknown;
+		parseString(xml: string, options: Options, callback?: Callback): unknown;
+		parseStringPromise(xml: string, options?: Options): Promise<any>;
+		Parser: new (options?: Options) => any;
+		Builder: new (options?: Options) => { options: Options; buildObject(root: unknown): string };
+		ValidationError: new (message: string) => Error;
+		defaults: { '0.1': Options; '0.2': Options };
+		processors: {
+			normalize: Processor;
+			firstCharLowerCase: Processor;
+			stripPrefix: Processor;
+			parseNumbers: Processor;
+			parseBooleans: Processor;
+		};
+	};
+	export = xml2js;
 }

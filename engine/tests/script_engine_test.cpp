@@ -8457,8 +8457,9 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (
-    refusal.find ("(crypto-js, uuid, lodash, moment, csv-parse/lib/sync)"), std::string::npos)
+    EXPECT_NE (refusal.find (
+               "(crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js)"),
+    std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
     << refusal;
@@ -8952,6 +8953,243 @@ TEST_F (ScriptEngineTest, RequireShelfCsvParseEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
+// require('xml2js') is npm's xml2js 0.6.2 with sax 1.2.4 and xmlbuilder
+// 11.0.1, bundled (#2654), the versions Postman's sandbox ships; `xml2Json` is
+// Postman's synchronous parse over it. Every answer was checked against the
+// unbundled packages on Node.
+namespace {
+
+/// A function expression that parses its first argument with xml2js's
+/// parseString and its options, and answers what the callback was handed: the
+/// result as JSON, the error's first line, or "no callback".
+constexpr const char* XML2JS_PARSE =
+"(function (xml, options) { var out = 'no callback'; "
+"require('xml2js').parseString(xml, options || {}, function (e, r) { "
+"out = e ? (e instanceof Error) + ' ' + e.message.split('\\n')[0] : "
+"JSON.stringify(r); }); return out; })";
+
+std::string xml2js_parse (const std::string& arguments) {
+    std::string call = XML2JS_PARSE;
+    call += '(';
+    call += arguments;
+    call += ')';
+    return call;
+}
+
+} // namespace
+
+TEST_F (ScriptEngineTest, RequireShelfXml2jsAnswersKnownCalls) {
+    ScriptEngine roomy{ library_call_config () };
+    struct Xml2jsAnswer {
+        std::string arguments;
+        const char* expected;
+    };
+    const auto answers = std::to_array<Xml2jsAnswer> ({
+    { R"('<a><b>1</b></a>')", R"({"a":{"b":["1"]}})" },
+    { R"('<a><b>1</b></a>', { explicitArray: false })", R"({"a":{"b":"1"}})" },
+    // Attributes sit under `$` and an element's text beside them under `_`.
+    { R"('<a x="1" y="2"><b k="v">t</b></a>')",
+    R"({"a":{"$":{"x":"1","y":"2"},"b":[{"_":"t","$":{"k":"v"}}]}})" },
+    { R"('<a x="1"><b>t</b></a>', { mergeAttrs: true })", R"({"a":{"x":["1"],"b":["t"]}})" },
+    { R"('<a><b>1</b><b>2</b></a>', { explicitArray: false })", R"({"a":{"b":["1","2"]}})" },
+    { R"('<?xml version="1.0"?><r><![CDATA[<x>]]></r>')", R"({"r":"<x>"})" },
+    { R"('<a>&amp;&lt;&#65;&#x42;</a>')", R"({"a":"&<AB"})" },
+    { R"('<a><B>1</B></a>', { normalizeTags: true })", R"({"a":{"b":["1"]}})" },
+    { R"('<a>1</a>', { explicitRoot: false })", R"("1")" },
+    { R"('<a b=1>x</a>', { strict: false })", R"({"A":{"_":"x","$":{"B":"1"}}})" },
+    { R"('<a><n>42</n><b>true</b><s>x</s></a>', { explicitArray: false, )"
+      R"(valueProcessors: [require('xml2js').processors.parseNumbers, )"
+      R"(require('xml2js').processors.parseBooleans] })",
+    R"({"a":{"n":42,"b":true,"s":"x"}})" },
+    { R"('<a xmlns:p="u"><p:b>1</p:b></a>', { explicitArray: false, )"
+      R"(tagNameProcessors: [require('xml2js').processors.stripPrefix] })",
+    R"({"a":{"$":{"xmlns:p":"u"},"b":"1"}})" },
+    // Empty input is not an error: the callback is handed null.
+    { "''", "null" },
+    });
+    for (const auto& answer : answers) {
+        EXPECT_EQ (shelf_answer (roomy, request, xml2js_parse (answer.arguments)),
+        answer.expected)
+        << answer.arguments;
+    }
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "new (require('xml2js').Builder)({ headless: true, renderOpts: { "
+    "pretty: false } }).buildObject({ a: { $: { k: 'v' }, b: ['1', "
+    "'2'] } })"),
+    R"(<a k="v"><b>1</b><b>2</b></a>)");
+}
+
+// A document sax refuses reaches the callback as an Error carrying sax's own
+// message, and with `async: false` (the default) the callback has run before
+// parseString returns.
+TEST_F (ScriptEngineTest, RequireShelfXml2jsHandsAMalformedDocumentToTheCallback) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto REFUSED = std::to_array<ShelfAnswer> ({
+    { "'<a><b>1</b>'", "true Unclosed root tag" },
+    { "'<a></b>'", "true Unexpected close tag" },
+    { "'not xml'", "true Non-whitespace before first tag." },
+    { "'<a>&bogus;</a>'", "true Invalid character entity" },
+    { "'<a b=1>x</a>'", "true Unquoted attribute value" },
+    });
+    for (const auto& refused : REFUSED) {
+        EXPECT_EQ (shelf_answer (roomy, request, xml2js_parse (refused.expression)),
+        refused.expected)
+        << refused.expression;
+    }
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(function () { var order = []; require('xml2js').parseString("
+               "'<a/>', function () { order.push('callback'); }); "
+               "order.push('returned'); return order.join(); })()"),
+    "callback,returned");
+}
+
+// `xml2Json` is Postman's helper: parseString with explicitArray false, trim
+// on and attributes kept apart, answering what the callback was handed, so a
+// refused document is `undefined` and empty input `null`. It is the same
+// parse as the module's with those options.
+TEST_F (ScriptEngineTest, RequireShelfXml2JsonIsPostmansSynchronousParse) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "JSON.stringify(xml2Json('<a>1</a>'))", R"({"a":"1"})" },
+    { R"(JSON.stringify(xml2Json('<a><b> 1 </b><b>2</b><c k="v">t</c></a>')))",
+    R"({"a":{"b":["1","2"],"c":{"_":"t","$":{"k":"v"}}}})" },
+    { "JSON.stringify(xml2Json('<a><b>1</b><c/></a>'))", R"({"a":{"b":"1","c":""}})" },
+    { "typeof xml2Json('<a><b>1</b>')", "undefined" },
+    { "typeof xml2Json('not xml')", "undefined" },
+    { "xml2Json('')", "null" },
+    { "typeof xml2Json", "function" },
+    { "xml2Json === require('xml2js')", "false" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "JSON.stringify(xml2Json('<r k=\"v\"> x </r>')) === " +
+               xml2js_parse ("'<r k=\"v\"> x </r>', { explicitArray: false, "
+                             "async: false, trim: true, mergeAttrs: false }")),
+    "true");
+}
+
+// An `async: true` parse goes through the bundle's setImmediate, a zero-delay
+// setTimeout, and the sandbox runs every timer before the script ends: the
+// callback has not run when parseString returns, and a pm.test inside it is
+// recorded. A document over xml2js's 10,000-character chunk takes one timer
+// per chunk, each queued by the one before. parseStringPromise settles the
+// same way.
+TEST_F (ScriptEngineTest, RequireShelfXml2jsAsyncCallbackRunsBeforeTheScriptEnds) {
+    ScriptEngine roomy{ library_call_config () };
+    response.body     = "<order><id>7</id></order>";
+    const auto result = roomy.execute_test (R"JS(
+        var xml2js = require('xml2js');
+        var called = false;
+        xml2js.parseString(pm.response.text(), { async: true, explicitArray: false }, function (err, doc) {
+            called = true;
+            pm.test('the async parse called back', function () {
+                pm.expect(err).to.equal(null);
+                pm.expect(doc.order.id).to.equal('7');
+            });
+        });
+        pm.environment.set('called at return', String(called));
+        var big = '<a>' + new Array(3001).join('<b>1</b>') + '</a>';
+        xml2js.parseString(big, { async: true, explicitArray: false }, function (err, doc) {
+            pm.environment.set('chunks', String(err === null && doc.a.b.length));
+        });
+        xml2js.parseStringPromise('<a><b>2</b></a>').then(function (doc) {
+            pm.environment.set('promised', doc.a.b[0]);
+        });
+        xml2js.parseStringPromise('<a>').catch(function (err) {
+            pm.environment.set('rejected', err.message.split('\n')[0]);
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_EQ (result.tests[0].name, "the async parse called back");
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (env["called at return"].value, "false");
+    EXPECT_EQ (env["chunks"].value, "3000");
+    EXPECT_EQ (env["promised"].value, "2");
+    EXPECT_EQ (env["rejected"].value, "Unclosed root tag");
+}
+
+// The bundle's Node shims (events, timers, stream, string_decoder) are locals
+// of its own wrapper and the glue's `module` and `exports` are the factory's,
+// so none of them reaches the script, before or after a parse; the global
+// object gains nothing, and the module carries only xml2js's own exports
+// (`xml2Json` is built beside it, not stored on it).
+TEST_F (ScriptEngineTest, RequireShelfXml2jsLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
+    const std::string probe =
+    "[typeof module, typeof exports, typeof Buffer, typeof process, typeof "
+    "setImmediate, typeof sax, typeof EventEmitter, typeof xml2js].join(' ')";
+    const std::string undefined_all =
+    "undefined undefined undefined undefined undefined undefined undefined "
+    "undefined";
+    EXPECT_EQ (shelf_answer (roomy, request, probe), undefined_all);
+    EXPECT_EQ (shelf_answer (roomy, request, "(xml2Json('<a/>'), " + probe + ")"), undefined_all);
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('xml2js').parseString('<a/>', function () {}); "
+    "xml2Json('<a/>'); new (require('xml2js').Builder)().buildObject({ a: 1 "
+    "}); return Object.getOwnPropertyNames(globalThis).sort().join() === "
+    "before; })()"),
+    "true");
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(xml2Json('<a/>'), Object.getOwnPropertyNames(require('xml2js'))"
+    ".join())"),
+    "defaults,processors,ValidationError,Builder,Parser,parseString,"
+    "parseStringPromise");
+}
+
+// Only the whole name loads it: the package's own files and its two
+// dependencies are refused as any name off the shelf is, and none of them
+// evaluates the library.
+TEST_F (ScriptEngineTest, RequireShelfXml2jsRefusesEveryOtherPath) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    for (const char* name : { "xml2js/lib/parser", "xml2js/lib/xml2js",
+         "xml2js/", "XML2JS", "sax", "xmlbuilder", "xml2json" }) {
+        const std::string refusal =
+        shelf_answer (engine, request, "require('" + std::string (name) + "')");
+        EXPECT_NE (refusal.find ("Cannot find module '" + std::string (name) + "'"),
+        std::string::npos)
+        << refusal;
+    }
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a refused name evaluated a library";
+}
+
+// `xml2Json` and require('xml2js') share one evaluation of the library,
+// whichever the script reaches first, and an assignment replaces the global
+// without loading it. Mutation: evaluate the shelf in `setup_require_shelf`
+// and the first count fails.
+TEST_F (ScriptEngineTest, RequireShelfXml2jsEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "xml2Json('<a>1</a>').a + " + xml2js_parse ("'<b>2</b>'") +
+               " + typeof xml2Json + (xml2Json === xml2Json)"),
+    R"(1{"b":"2"}functiontrue)");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(require('xml2js'), typeof require('xml2js').parseString + "
+               "xml2Json('<a>3</a>').a)"),
+    "function3");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+
+    EXPECT_EQ (shelf_answer (roomy, request, "(xml2Json = 5, xml2Json + 1)"), "6");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
 // A library's parse depth is Vayu's own, not the script's to budget (#2652):
 // MSVC at /Od under ASan has frames large enough that lodash and moment
 // overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
@@ -9026,6 +9264,10 @@ TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('moment').utc"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('csv-parse/lib/sync')"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('xml2js').parseString"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof xml2Json"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof _.get"), "function")
     << "at " << budget << " bytes";
