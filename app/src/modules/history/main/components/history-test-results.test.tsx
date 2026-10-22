@@ -163,7 +163,7 @@ describe("History Samples - the synthetic failure row", () => {
 
 		// One captured sample, not two - the failure row has no request behind it
 		// and rendered as a junk status-0 card.
-		expect(screen.getByText("1 samples shown")).toBeInTheDocument();
+		expect(screen.getByText("1 sample shown")).toBeInTheDocument();
 		expect(screen.queryByText(/Script validation failures/)).not.toBeInTheDocument();
 	});
 

@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { ImportOrchestrator, type ImportApi } from "./orchestrator";
+import { logError } from "@/errors/error-logger";
 import { assignTempIds } from "./assign-ids";
 import type { ImportResult, RequestDraft } from "./types";
 import type { ImportApplyRequest, VariableValue } from "@/types";
+
+// The logger reads `window`, which the node environment does not have.
+vi.mock("@/errors/error-logger", () => ({ logError: vi.fn() }));
 
 /**
  * Fake engine. `idMap` echoes every tempId it was sent unless `drop` names one,
@@ -348,6 +352,47 @@ describe("ImportOrchestrator", () => {
 		await expect(new ImportOrchestrator(api).run(withTempIds, opts)).rejects.toThrow(
 			/Import incomplete/
 		);
+	});
+
+	describe("the incomplete-import message", () => {
+		async function messageWhenDropping(count: number): Promise<string> {
+			const withTempIds = fixture();
+			const root = withTempIds.collections[0];
+			const dropped = [root.tempId!, root.requests[0].tempId!].slice(0, count);
+			const { api } = fakeApi({ drop: dropped });
+			const failure = await new ImportOrchestrator(api)
+				.run(withTempIds, opts)
+				.catch((e) => e);
+			expect(failure).toBeInstanceOf(Error);
+			return (failure as Error).message;
+		}
+
+		it("counts one item in the singular", async () => {
+			expect(await messageWhenDropping(1)).toBe("Import incomplete: 1 item wasn't created.");
+		});
+
+		it("counts several items in the plural", async () => {
+			expect(await messageWhenDropping(2)).toBe(
+				"Import incomplete: 2 items weren't created."
+			);
+		});
+
+		it("keeps the temp ids out of the message and in the log", async () => {
+			vi.mocked(logError).mockClear();
+			const withTempIds = fixture();
+			const droppedRequest = withTempIds.collections[0].requests[0].tempId!;
+			const { api } = fakeApi({ drop: [droppedRequest] });
+			const message = await new ImportOrchestrator(api)
+				.run(withTempIds, opts)
+				.catch((e: Error) => e.message);
+			expect(message).not.toContain(droppedRequest);
+			expect(message).not.toContain("(s)");
+			expect(logError).toHaveBeenCalledWith(
+				expect.any(Error),
+				"high",
+				expect.objectContaining({ metadata: { uncreatedTempIds: [droppedRequest] } })
+			);
+		});
 	});
 
 	it("throws before calling the engine when a draft has no temp id", async () => {
