@@ -1135,7 +1135,9 @@ Notes:
   request that already went out. `run_collection_smoke` bounds the other side of
   this: a call runs at most `limit` requests (25 by default), so one call stays
   inside a typical client budget and a longer collection is resumed by `offset`
-  rather than lost to a timeout.
+  rather than lost to a timeout. It also sends a progress notification per row
+  when the client asks, which a client that resets its timeout on progress
+  (`resetTimeoutOnProgress`) can use to outlast a slow API.
 
 ### Naming what the user means
 
