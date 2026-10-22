@@ -116,7 +116,9 @@ scattered strings land the same way.
   a dash (the repo bans em-dashes everywhere), "…" for an ellipsis.
 - **Numbers and units.** Always state the unit (ms or s, never a bare
   number). One format via `Intl`, not hand-built string concatenation. Real
-  plural handling via `Intl.PluralRules`, never "request(s)". The digits come
+  plural handling via `Intl.PluralRules` (`pluralize` for a noun, `pickByCount`
+  for a sentence whose verb agrees), never "request(s)" or `n === 1 ? "" : "s"`
+  (`plural-rule.test.ts`). The digits come
   from `lib/format-number.ts`: `formatNumber` for counts, `formatMs` for
   milliseconds and `formatRate` for per-second rates (two decimals under 10,
   whole numbers above, thousands separators), `formatPercent` for percentages
@@ -240,11 +242,14 @@ from creeping back in afterward. These hold it:
   opening "Could not" or "Failed to" (#2295), and `config_seed_test.cpp`
   `EveryEngineSettingLabelIsSentenceCase` over the setting labels the Settings
   page renders verbatim (#2293).
-- **Narrow scanners**, one rule each, are filed by their own issues and not yet
-  written; each adds its rule to the scan above when it lands: bare
-  "the engine" (`voice-bare-engine.test.ts`, #2298), hand-built plurals and
-  "(s)" (`plural-rule.test.ts`, #2307), and the ASCII ellipsis, `Settings >`
-  and "curl" (`user-text-spelling.test.ts`, #2299).
+- **Narrow scanners**, one rule each, are filed by their own issues; each adds
+  its rule to the scan above when it lands. Landed: hand-built plurals and
+  "(s)" (`plural-rule.test.ts`, #2307), which reads "(s)" in the same strings
+  and refuses a `=== 1` / `!== 1` ternary whose branches differ only by the
+  plural suffix or are an agreement pair ("is"/"are", "it"/"them"); the fix is
+  `pluralize` or `pickByCount` from `modules/dashboard/utils/format.ts`. Not yet
+  written: bare "the engine" (`voice-bare-engine.test.ts`, #2298), and the
+  ASCII ellipsis, `Settings >` and "curl" (`user-text-spelling.test.ts`, #2299).
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
 `file :: literal`, each entry naming the open issue that retires it. The commit
