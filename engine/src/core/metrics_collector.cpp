@@ -740,7 +740,8 @@ std::optional<AttemptDuration> attempt) {
     const size_t error_index = total_errors_.fetch_add (1, std::memory_order_relaxed);
     // A code outside the enum cannot name a type; slot 0 (None) reads "unknown".
     const auto type_slot = static_cast<size_t> (code);
-    error_type_counts_.at (type_slot < ERROR_CODE_COUNT ? type_slot : 0).fetch_add (1, std::memory_order_relaxed);
+    const size_t slot    = type_slot < ERROR_CODE_COUNT ? type_slot : 0;
+    error_type_counts_.at (slot).fetch_add (1, std::memory_order_relaxed);
 
     // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
     // bucket them under code 0. This keeps the status-code distribution summing
