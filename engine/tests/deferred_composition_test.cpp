@@ -42,6 +42,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -411,6 +412,28 @@ TEST_F (DeferredCompositionTest, ALoadRunOfADeferredPayloadSendsTheStoredValueNo
     ASSERT_EQ (status, 202) << body.dump ();
     await_run (body.value ("runId", std::string ()));
     EXPECT_EQ (echo.header ("Authorization"), "Bearer old");
+}
+
+// The load run's other half: a `script.pre` marked inline runs per submission,
+// so each submission's residual pass answers the deferred name with the value
+// that submission's script set, against its own scope overlay. Mutation check:
+// make `runs_a_pre_request_script` (request_composer.cpp) answer false, and
+// every submission sends the stored `Bearer old`.
+TEST_F (DeferredCompositionTest, ALoadRunsInlinePreRequestScriptSetsTheValueEverySubmissionSends) {
+    const vayu::tests::EchoServer echo;
+    seed_environment ({ { "token", "old" } });
+    seed_request (echo.url (), { { "Authorization", "Bearer {{token}}" } },
+    "pm.environment.set('token', 'new');");
+
+    json payload = as_single_iteration_run (compose ());
+    payload["requestElements"][0]["config"]["inline"] = true;
+    payload["iterations"]                             = 3;
+
+    const auto [status, body] = post ("/runs", payload);
+    ASSERT_EQ (status, 202) << body.dump ();
+    await_run (body.value ("runId", std::string ()));
+    EXPECT_EQ (echo.header_per_request ("Authorization"),
+    (std::vector<std::string>{ "Bearer new", "Bearer new", "Bearer new" }));
 }
 
 // --- OAuth 2.0 (#2521): resolved after the script, then acquired --------------
