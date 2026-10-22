@@ -943,8 +943,8 @@ std::string part_f (const EchoServer& server) {
 
 using FormPartWireTest = BinaryBodyWireTest;
 
-// The finding: the rule approves a file, then the link at its path is
-// re-pointed before the transfer. Both drivers send the approved file, under
+// The rule approves a file, then the link at its path is re-pointed before
+// the transfer. Both drivers send the approved file, under
 // the name the request gave it. Mutation check: read the part from
 // `field.src` again in `attach_multipart` (`curl_mime_filedata`) and the other
 // file's bytes arrive.
@@ -981,13 +981,15 @@ TEST_F (FormPartWireTest, AFileReplacedAfterTheCheckSendsTheApprovedOne) {
     Request request       = form_part_request (server_->url (), src);
     FilePlan plan (allowing (scratch_));
     ASSERT_FALSE (plan.prepare (request));
+    // Renamed over the held file rather than removed and rewritten, so a
+    // platform that refuses either refuses the one step and skips.
+    const std::string replacement = scratch_.write ("data.new", "replacement");
     std::error_code ec;
-    fs::remove (src, ec);
+    fs::rename (replacement, src, ec);
     if (ec) {
         GTEST_SKIP ()
-        << "this platform cannot remove a file held open: " << ec.message ();
+        << "this platform cannot replace a file held open: " << ec.message ();
     }
-    ASSERT_EQ (scratch_.write ("data.bin", "replacement"), src);
 
     Client client;
     const auto sent = client.send (request).value ();
