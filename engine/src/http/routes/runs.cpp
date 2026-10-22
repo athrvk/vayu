@@ -1796,7 +1796,11 @@ nlohmann::json build_report_results (const std::vector<vayu::db::Result>& result
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id,
 vayu::core::RunManager* live_runs) {
-    auto run = db.get_run (run_id);
+    // Off the DB mutex (#2679): a live load run's report is polled while its
+    // results flush, and this row is the poll's only read. The rows read below
+    // come after it, on the main connection, so they are never older than the
+    // status they are chosen by.
+    auto run = db.get_run_snapshot (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
     }

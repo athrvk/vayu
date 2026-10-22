@@ -195,9 +195,10 @@ Three things worth knowing about where it sits:
   second one: the truncating checkpoint below has to run on the connection that holds the file
   mapping, because Windows refuses to truncate a file another connection still has mapped
   (`mmap_size`) - from a second connection the rewrite committed and the file stayed its old size.
-  (`POST /workspace/backup`'s `VACUUM INTO` is the one that runs on its own separate connection, since
-  it writes a different file.) Nothing contends for it: `init` runs before the HTTP listener
-  starts, and the instance lock has already refused a second engine.
+  (`POST /workspace/backup`'s `VACUUM INTO` runs on its own separate connection, since it writes
+  a different file, and so does the [run-row reader](#runs), which maps nothing and opens only
+  after `init`.) Nothing contends for it: `init` runs before the HTTP listener starts, and the
+  instance lock has already refused a second engine.
 - **The `VACUUM` is followed by a `wal_checkpoint(TRUNCATE)`.** Under WAL the rewritten image
   lands in the `-wal` file and the database is not resized until a checkpoint copies it back, so
   without it the pass would free every page it set out to and leave the file exactly as large as
@@ -1597,6 +1598,16 @@ after a run reaches a **terminal** status (design mode's `record_design_result`,
 completion/failure paths in `run_manager.cpp`). What a prune frees is disk the file keeps until
 [Reclaiming freed pages](#reclaiming-freed-pages) gives it back.
 
+**A run row read without the DB mutex** (#2679). `Database::get_run_snapshot` reads one row
+through a second connection to the file, read-only (`query_only`), unmapped (`mmap_size = 0`) and
+guarded by its own small mutex, never the DB mutex. WAL lets it read the last commit while the
+main connection writes, so it waits on neither a results chunk nor the automatic WAL checkpoint
+inside that chunk's commit, which holds the DB mutex for 21-35 ms about every 4,500 rows, and it
+does not see a transaction still in flight. It is opened on its first call, after `init`'s
+migration, reclamation and checkpoint have run, and closed before the main connection, which
+stays the last to close and so the one that checkpoints and deletes the `-wal`. `get_run` stays
+the read under the DB mutex, the one a read-then-write composes with.
+
 ---
 
 ### `oauth_tokens`
@@ -1797,9 +1808,11 @@ takes its counts from the run's in-memory collector until the status turns termi
 the [`body_blobs`](#body_blobs) those introduce, are written by `Database::add_results_batch` in
 chunks of `RESULTS_WRITE_CHUNK_ROWS` (250) results, one transaction each, staying off the DB
 mutex for 1 ms between chunks (#2548): the mutex is not fair, and a writer that re-locks at once
-wins it back from the reader it just woke. A reader that lands during the flush (a report poll's
-run-row read among them) waits for one chunk (about 7 ms in a Release build) rather than the whole
-write, and one that reads this table may see the run's results part-written. A body row always commits with its result; a failure part-way keeps the
+wins it back from the reader it just woke. A reader that lands during the flush waits for one
+chunk (about 7 ms in a Release build, 21-35 ms for the one whose commit runs the automatic WAL
+checkpoint) rather than the whole write, and one that reads this table may see the run's results
+part-written. A report poll waits for neither: its one read, the run row, takes no DB mutex
+([`runs`](#runs), #2679). A body row always commits with its result; a failure part-way keeps the
 chunks already committed. Blob dedup spans the whole flush, not one chunk.
 
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,

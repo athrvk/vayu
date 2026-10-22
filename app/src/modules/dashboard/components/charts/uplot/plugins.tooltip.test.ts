@@ -145,9 +145,9 @@ describe("tooltipPlugin", () => {
 		});
 
 		it("adds the caption as a second line under the time header", () => {
-			const tip = hoverStack({ theme: THEME, caption: "responses / 0.5 s" });
+			const tip = hoverStack({ theme: THEME, caption: "responses" });
 			expect(tip.children[0].textContent).toBe("1.0s");
-			expect(tip.children[1].textContent).toBe("responses / 0.5 s");
+			expect(tip.children[1].textContent).toBe("responses");
 		});
 	});
 });

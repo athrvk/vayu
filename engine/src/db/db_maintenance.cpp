@@ -1251,8 +1251,10 @@ void Database::init () {
     impl_->storage.pragma.synchronous (synchronous);
 
     // Get busy timeout in milliseconds
-    impl_->storage.pragma.busy_timeout (get_config_int (
-    "dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS));
+    const int busy_timeout_ms =
+    get_config_int ("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
+    impl_->storage.pragma.busy_timeout (busy_timeout_ms);
+    impl_->busy_timeout_ms.store (busy_timeout_ms);
 
     // All three are read back from the connection rather than echoed from the
     // config rows: what the engine asked for and what SQLite holds are two
