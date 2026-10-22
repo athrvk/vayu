@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import type { FileRoot } from "@/types";
 
@@ -91,6 +91,36 @@ describe("FilesPanel", () => {
 		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
 	});
 
+	it("offers the picker inside the empty state, as the only folder button", () => {
+		const { container } = renderPanel();
+		const empty = container.querySelector('[data-slot="empty-state"]');
+
+		expect(empty).not.toBeNull();
+		expect(
+			within(empty as HTMLElement).getByRole("button", { name: "Allow folder…" })
+		).toBeVisible();
+		// A second button below the card body would offer the same act twice.
+		expect(screen.getAllByRole("button", { name: /folder/i })).toHaveLength(1);
+		expect(screen.queryByRole("button", { name: "Choose folder…" })).toBeNull();
+	});
+
+	it("offers the picker below the list, once, when folders are allowed", () => {
+		roots.push({ id: "r1", path: "/data/fixtures", createdAt: 1 });
+		const { container } = renderPanel();
+
+		const list = screen.getByRole("list", { name: "Allowed folders" });
+		const button = screen.getByRole("button", { name: "Choose folder…" });
+		expect(container.querySelector('[data-slot="empty-state"]')).toBeNull();
+		expect(screen.queryByRole("button", { name: "Allow folder…" })).toBeNull();
+		expect(list.contains(button)).toBe(false);
+		expect(
+			list.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			screen.getAllByRole("button", { name: /folder/i }).filter((b) => !list.contains(b))
+		).toHaveLength(1);
+	});
+
 	it("says so when nothing is allowed", () => {
 		const { container } = renderPanel();
 		expect(screen.getByText(FILES_EMPTY_TITLE)).toBeInTheDocument();
@@ -108,7 +138,7 @@ describe("FilesPanel", () => {
 		});
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
 		await waitFor(() => expect(allowRoot).toHaveBeenCalledWith({ title: "Allow a folder" }));
 		// The row the engine kept, canonical, not the folder as picked.
@@ -136,7 +166,7 @@ describe("FilesPanel", () => {
 		});
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith("/data is already an allowed folder.", "info")
@@ -153,7 +183,7 @@ describe("FilesPanel", () => {
 		});
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
@@ -167,7 +197,7 @@ describe("FilesPanel", () => {
 		allowRoot.mockResolvedValue({ outcome: "unreachable", path: "/data", message: "x" });
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
@@ -181,7 +211,7 @@ describe("FilesPanel", () => {
 		allowRoot.mockResolvedValue({ outcome: "cancelled" });
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
 		await waitFor(() => expect(allowRoot).toHaveBeenCalled());
 		expect(showToast).not.toHaveBeenCalled();
@@ -201,6 +231,15 @@ describe("FilesPanel", () => {
 		vi.stubGlobal("electronAPI", undefined);
 		renderPanel();
 		expect(screen.queryByRole("button", { name: "Choose folder…" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Allow folder…" })).toBeNull();
+	});
+
+	it("keeps the empty state's title, with no button, when there is no picker", () => {
+		vi.stubGlobal("electronAPI", undefined);
+		const { container } = renderPanel();
+		expect(screen.getByText(FILES_EMPTY_TITLE)).toBeInTheDocument();
+		expect(container.querySelector('[data-slot="empty-state"]')).not.toBeNull();
+		expect(screen.queryAllByRole("button")).toHaveLength(0);
 	});
 
 	it("declares the surface its folder dividers read", () => {

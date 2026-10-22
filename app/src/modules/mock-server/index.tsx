@@ -51,6 +51,7 @@ import { TimeValue } from "@/components/shared/TimeValue";
 import { mockServerReference } from "@/lib/agent-reference";
 import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
+import { formatLatency } from "@/lib/format-number";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -189,7 +190,9 @@ export default function MockServerView() {
 					</div>
 				</div>
 				<p className="pl-6 text-xs text-muted-foreground">
-					{mock.latencyMs > 0 ? `${mock.latencyMs}ms latency` : "No added latency"}
+					{mock.latencyMs > 0
+						? `${formatLatency(mock.latencyMs)} latency`
+						: "No added latency"}
 					{mock.errorRatePct > 0 && `, ${mock.errorRatePct}% of answers fail`}
 				</p>
 				{/* A line of its own: the list can be 32 long, and the knobs above are
