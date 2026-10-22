@@ -793,6 +793,24 @@ TEST (RunExportHtmlTest, NoResponseRequestsAreListedOnceAndNeverAsHttp0) {
     EXPECT_EQ (untyped.find ("HTTP 0"), std::string::npos);
 }
 
+// Types that stop at the error store's cap leave part of code 0 unnamed: it
+// stays as one "No response" row holding the remainder (300 - 50), so each
+// request is listed once. Mutation check: drop code 0 whenever a type row
+// exists and the row, and its 250, are gone.
+TEST (RunExportHtmlTest, NoResponseRemainderIsOneRowWhenTypesStopAtTheCap) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["errors"]["types"] = { { "timeout", 50 } };
+    const std::string html                = render_run_export_html (document);
+
+    const std::vector<std::string> expected{ "HTTP 500", "HTTP 503", "No response", "timeout" };
+    const auto labels = error_row_labels (html);
+    ASSERT_FALSE (labels.empty ()) << html;
+    EXPECT_EQ (labels, expected);
+    EXPECT_NE (html.find ("<th scope=\"row\">No response</th><td>250</td>"),
+    std::string::npos);
+    EXPECT_EQ (html.find ("HTTP 0"), std::string::npos);
+}
+
 TEST (RunExportHtmlTest, PassAndFailAreAlwaysAWordBesideTheColour) {
     const auto word_after = [] (const std::string& html, std::string_view open) {
         const auto at = html.find (open);

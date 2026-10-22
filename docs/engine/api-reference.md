@@ -4494,11 +4494,13 @@ The sections, in order:
    judged each (`<= 30 ms - missed`).
 6. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
    transport error type. A request that got no response is listed once, under
-   its error type: status code 0 counts the same requests, so it has no row of
-   its own and no row reads `HTTP 0` (issue #2400). When the report lists no
-   error type for them (a run stored before the per-type counts past the
-   error store's cap), code 0 is one `No response` row, the app's words, so
-   the count is not lost. The HTML report reads the same table.
+   its error type: status code 0 counts the same requests, so no row reads
+   `HTTP 0` (issue #2400). A `No response` row (the app's words) appears only
+   when the error types sum to less than code 0, which is a run stored before
+   the per-type counts, whose types stop at the error store's cap; its count is
+   the remainder (code 0 minus the types' sum), so the requests no type names
+   are not lost and none is listed twice. With no error types at all it holds
+   the whole of code 0. The HTML report reads the same table.
 7. `## Compared with <base reference>`, only when the document has a
    `comparison`: each metric's base, this run, change and a word from the
    delta's own `direction` (`improved`, `regressed`, `unchanged`, or `not
@@ -10399,12 +10401,12 @@ distribution, code `0` being the requests that got no response. `types` counts
 those no-response requests by what went wrong (`timeout`, `connection_failed`,
 `dns_failed`, ...), so its counts sum to `byStatusCode`'s code `0`. For a load
 run, a collection load run included, they are counted as the run happened and
-stored in its summary (issue #2400), exact past the error store's cap. `withDetails` is how many error
-records the run kept, at most `maxStoredErrors`, so past the cap it is smaller
-than `types` adds up to. Load runs stored before issue #2400, and
-design-mode collection runs, have no stored per-type counts: their `types`
-counts the kept records, and past the cap covers only the first
-`maxStoredErrors` errors.
+stored in its summary (issue #2400), exact past the error store's cap.
+`withDetails` is how many error records the run kept, at most
+`maxStoredErrors`, so past the cap it is smaller than `types` adds up to.
+Load runs stored before issue #2400, and design-mode collection runs, have no
+stored per-type counts: their `types` counts the kept records, and past the cap
+covers only the first `maxStoredErrors` errors.
 
 **`slowRequests`** is present when the run set a `slow_threshold_ms` above `0`.
 `count` is every successful completion at or past `thresholdMs`, counted as it

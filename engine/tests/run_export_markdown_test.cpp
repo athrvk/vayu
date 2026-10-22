@@ -292,6 +292,25 @@ TEST (RunExportMarkdownTest, NoResponseIsOneRowWhenNoTypeListsThem) {
     EXPECT_EQ (text.find ("HTTP 0"), std::string::npos) << text;
 }
 
+// A run stored before the per-type counts has types that stop at the error
+// store's cap, so they sum to less than code 0. The requests no type names stay
+// as one "No response" row holding the remainder, so each is listed once.
+// Mutation check: drop code 0 whenever a type row exists and the row, and its
+// 250, are gone.
+TEST (RunExportMarkdownTest, NoResponseRemainderIsOneRowWhenTypesStopAtTheCap) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["errors"]["types"] = { { "timeout", 50 } };
+    const std::string text = render_run_export_markdown (document);
+
+    // Most frequent first; the remainder 250 sorts between 300 and 50.
+    const std::vector<std::string> expected{ "HTTP 500", "HTTP 503", "No response", "timeout" };
+    const auto labels = error_row_labels (text);
+    ASSERT_FALSE (labels.empty ()) << text;
+    EXPECT_EQ (labels, expected) << text;
+    EXPECT_NE (text.find ("| No response | 250      |"), std::string::npos) << text;
+    EXPECT_EQ (text.find ("HTTP 0"), std::string::npos) << text;
+}
+
 TEST (RunExportMarkdownTest, AStoppedRunSaysHowFarItGot) {
     const std::string text =
     render_run_export_markdown (read_document ("stopped-early"));

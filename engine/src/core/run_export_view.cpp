@@ -711,19 +711,36 @@ ReportText status_code_label (const std::string& code) {
     return code == "0" ? words (std::string (NO_RESPONSE_LABEL)) : "HTTP " + user (code);
 }
 
-/// Empty rows when the run recorded no error. Code 0 is the sum of the type
-/// rows, so it is listed only when there are none to list each request under:
-/// a run whose types were never counted keeps its no-response total (#2400).
+/// Settles code 0 against the type rows so each no-response request is listed
+/// once: the remainder the types do not account for stays as the code row, and
+/// the row goes when the types cover it (#2400). A run stored before the
+/// per-type counts has types that stop at the error store's cap, so the
+/// remainder is the requests no type row can name.
+void settle_no_response (std::vector<CountedLabel>& codes,
+const std::vector<CountedLabel>& types) {
+    double typed = 0;
+    for (const CountedLabel& type : types) {
+        typed += type.count;
+    }
+    for (CountedLabel& code : codes) {
+        if (code.key == "0") {
+            code.count -= typed;
+        }
+    }
+    std::erase_if (
+    codes, [] (const CountedLabel& code) { return code.count <= 0; });
+}
+
+/// Empty rows when the run recorded no error. Never an `HTTP 0` row: the
+/// requests that got no response appear under their types, plus one
+/// @ref NO_RESPONSE_LABEL row for any the types do not cover.
 Table errors_table (const ordered& document) {
     Table table{ { "Error", "Requests" }, {} };
     auto codes =
     counted (document, { "report", "errors", "byStatusCode" }, status_code_label);
     auto types = counted (document, { "report", "errors", "types" },
     [] (const std::string& type) { return user (type); });
-    if (!types.empty ()) {
-        std::erase_if (
-        codes, [] (const CountedLabel& code) { return code.key == "0"; });
-    }
+    settle_no_response (codes, types);
     append_capped (table.rows, std::move (codes), "codes");
     append_capped (table.rows, std::move (types), "types");
     return table;
