@@ -940,9 +940,9 @@ class ScriptEngine::Impl {
             message.emplace ("Script stopped after running ");
             message->append (std::to_string (cap));
             message->append (
-            " promise jobs and timer callbacks: with no script timeout "
-            "(scriptTimeout 0) that is the limit on asynchronous work, and the "
-            "rest were not run");
+            " promise jobs and timer callbacks: with no script deadline "
+            "that is the limit on asynchronous work, and the rest were not "
+            "run");
             return message;
         }
         return std::nullopt;

@@ -1379,7 +1379,8 @@ Default configuration values (from `constants.hpp`):
 | DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
 | Max Response Body | 32MB | Per load-test transfer; larger fails the request |
 | Script Memory | 64MB | QuickJS memory limit |
-| Script Timeout | 5s | Script execution timeout |
+| Script Timeout | 5s | Script execution timeout (1ms to 60s; there is no "no limit") |
+| Script Stack | 256KB | QuickJS stack size (64KB to 256KB, lowered only) |
 | Stats Interval | 100ms | Metrics collection interval |
 
 ## Data Directory Structure
