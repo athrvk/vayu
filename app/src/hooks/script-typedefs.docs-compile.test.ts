@@ -413,6 +413,37 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	});
 
 	/*
+	 * chai runs (#2655) as require('chai') only, a separate object from
+	 * pm.expect: the expect, assert, should and use calls a script makes read
+	 * clean, an assertion chain is not restated (any member types), and a
+	 * top-level member chai lacks or a sub-path of the package stays an error.
+	 */
+	it("declares require('chai') as the library's top-level members", () => {
+		expect(
+			errorsOf(
+				[
+					"const chai = require('chai');",
+					"const { expect, assert } = require('chai');",
+					"pm.test('chai', () => {",
+					"\texpect(pm.response.json().id).to.equal(7);",
+					"\texpect(1, 'context').to.be.a('number').and.not.equal(2);",
+					"\tassert.deepEqual({ a: 1 }, { a: 1 });",
+					"\tassert(true, 'holds');",
+					"});",
+					"chai.should();",
+					"chai.use((lib, utils) => console.log(lib, utils)).config.truncateThreshold = 0;",
+					"const failure = new chai.AssertionError('x', { actual: 1 });",
+					"pm.environment.set('v', chai.version + failure.message + String(failure.showDiff));",
+					"try { expect.fail('stop'); } catch (e) { console.log(e); }",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("require('chai/lib/chai');")).toContain("TS2345");
+		expect(errorsOf("require('chai').nope;")).toContain("TS2339");
+		expect(errorsOf("require('chai').config.truncateThreshold = 'x';")).toContain("TS2322");
+	});
+
+	/*
 	 * Postman's pre-pm.* globals run (#2577), each declared as the value it is,
 	 * so the lines a legacy test script opens with draw nothing - and a member
 	 * the value's type does not have is still an error.
