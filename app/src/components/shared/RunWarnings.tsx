@@ -25,6 +25,8 @@ import type { RunReport } from "@/types/domain";
 const TITLES: Record<string, string> = {
 	unresolved_tokens: "Unresolved variables were sent",
 	pre_request_script_skipped: "Pre-request script won't run",
+	// The run did everything; the generic title would say it did not (#2394).
+	per_host_limit_raised: "Connections per host were raised",
 };
 
 export interface RunWarningsProps {

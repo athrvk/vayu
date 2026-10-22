@@ -82,11 +82,12 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "1", "10000", std::nullopt, now }));
 
     seed (keywords ({ "socket", "pool" }) (ConfigEntry{ "eventLoopMaxPerHost",
-    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max connections per host (per worker)",
-    "Concurrency limit for a specific target API host. Critical for respecting "
-    "target rate limits. "
-    "Lower values are gentler on the target; higher values maximize "
-    "throughput.",
+    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Connections per host (per worker)",
+    "The fewest connections one worker may open to a single host. A load "
+    "test raises it to cover its virtual users (concurrency divided by "
+    "workers), because a request waiting for a connection would otherwise "
+    "be timed as the target's latency, and the run's warnings say when it "
+    "did. To go easier on a target, lower the run's concurrency instead.",
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST),
     "1", "1000", std::nullopt, now }));
 

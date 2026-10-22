@@ -50,6 +50,7 @@
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 #include "vayu/utils/reentrant.hpp"
 
 namespace fs = std::filesystem;
@@ -1040,7 +1041,352 @@ const std::function<ProbeResult (const std::string&)>& probe) {
     }
 }
 
+// ============================================================================
+// Snapshots into `backups/`: the workspace backup a user asks for (issue #987)
+// and the copy a start takes before it rewrites stored rows (issue #2426)
+// ============================================================================
+
 namespace {
+
+/// The two halves of a snapshot's file name. Retention only ever removes a file
+/// carrying both, so anything else that has found its way into `backups/` -
+/// including a copy the user made themselves - is left where it is.
+constexpr std::string_view BACKUP_PREFIX    = "vayu-";
+constexpr std::string_view BACKUP_EXTENSION = ".db";
+
+/// Bound on the collision walk below. A thousand snapshots inside one
+/// millisecond is not a case that happens; the loop is finite so that a
+/// filesystem answering `exists` wrongly cannot hang a request.
+constexpr int BACKUP_NAME_ATTEMPTS = 1000;
+
+/// The config row retention reads, here and in `backup_workspace`.
+constexpr std::string_view MAX_BACKUPS_RETAINED_KEY = "maxBackupsRetained";
+
+/// `backups/` beside the database at @p db_path.
+fs::path backups_directory_for (const std::string& db_path) {
+    return fs::path (db_path).parent_path () / "backups";
+}
+
+/**
+ * A snapshot's file name for the instant @p stamp_ms, or an empty string for an
+ * instant that cannot be converted.
+ *
+ * `vayu-YYYYMMDD-HHMMSS-mmm.db`, or `vayu-YYYYMMDD-HHMMSS-mmm-<label>.db` for
+ * one a start took on its own (`pre-v4`). UTC rather than local time, so a
+ * machine that changes timezone does not reorder its own backups, and the stamp
+ * is fixed-width and first so the names sort chronologically as *text* - which
+ * is what lets retention pick the oldest without asking the filesystem for an
+ * mtime it may round, or may not have preserved across a copy.
+ */
+std::string backup_file_name (int64_t stamp_ms, std::string_view label) {
+    const auto seconds = static_cast<std::time_t> (stamp_ms / 1000);
+    const auto millis  = static_cast<int> (stamp_ms % 1000);
+    const std::string stamp = vayu::utils::format_utc_time (seconds, "%Y%m%d-%H%M%S");
+    if (stamp.empty ()) {
+        return {};
+    }
+    const std::string suffix = label.empty () ? std::string{} : "-" + std::string (label);
+    return std::format ("{}{}-{:03d}{}{}", BACKUP_PREFIX, stamp, millis, suffix, BACKUP_EXTENSION);
+}
+
+/// Whether @p name is a file this feature wrote - the only kind retention removes.
+bool is_backup_file_name (const std::string& name) {
+    return name.starts_with (BACKUP_PREFIX) && name.ends_with (BACKUP_EXTENSION) &&
+    name.size () > BACKUP_PREFIX.size () + BACKUP_EXTENSION.size ();
+}
+
+/**
+ * Copy the database at @p source into @p destination with `VACUUM INTO`.
+ *
+ * @return an empty string on success, or what SQLite refused.
+ *
+ * On a connection of its own rather than the one every write is serialized
+ * through - `open_workspace_connection` says why: a `VACUUM INTO` of a large
+ * workspace occupies its connection for as
+ * long as the copy takes, and on the shared one that is every other endpoint
+ * waiting behind a button someone pressed. Under WAL a second reader sees every
+ * committed transaction and blocks no writer, so the snapshot is consistent and
+ * costs the running engine nothing but disk bandwidth.
+ *
+ * The destination is *bound*, not concatenated: a path is user data on every
+ * platform and a quote in a directory name would otherwise be a SQL fragment.
+ */
+/**
+ * @param on_connection told the connection once it is open, and `nullptr`
+ *        just before it closes, so a caller on another thread can
+ *        `sqlite3_interrupt` the copy; answering false refuses the copy
+ *        before it starts. Empty for a caller with nothing to interrupt.
+ */
+std::string vacuum_into (const std::string& source,
+const std::string& destination,
+const std::function<bool (sqlite3*)>& on_connection = {}) {
+    std::string message;
+    sqlite3* connection = open_workspace_connection (source,
+    std::chrono::milliseconds (vayu::core::constants::database::BUSY_TIMEOUT_MS), message);
+    if (connection == nullptr) {
+        return message;
+    }
+    if (on_connection && !on_connection (connection)) {
+        sqlite3_close (connection);
+        return "cancelled before the copy started";
+    }
+
+    sqlite3_stmt* statement = nullptr;
+    int rc = sqlite3_prepare_v2 (connection, "VACUUM INTO ?", -1, &statement, nullptr);
+    if (rc != SQLITE_OK) {
+        message = sqlite3_errmsg (connection);
+        sqlite3_close (connection);
+        return message;
+    }
+    // SQLITE_TRANSIENT: sqlite copies the text, so `destination` need not
+    // outlive the bind - which it does anyway, said here so a later refactor
+    // cannot quietly make the lifetime load-bearing.
+    sqlite3_bind_text (statement, 1, destination.c_str (), -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step (statement) != SQLITE_DONE) {
+        message = sqlite3_errmsg (connection);
+    }
+    sqlite3_finalize (statement);
+    if (on_connection) {
+        on_connection (nullptr);
+    }
+    sqlite3_close (connection);
+    return message;
+}
+
+/**
+ * Remove all but the newest @p keep snapshots from @p directory.
+ *
+ * @return how many files were removed. @p keep of 0 or less is unlimited, which
+ *         is what the `maxBackupsRetained` entry documents.
+ */
+int64_t prune_backup_files (const fs::path& directory, int keep) {
+    if (keep <= 0) {
+        return 0;
+    }
+    std::error_code ec;
+    std::vector<fs::path> snapshots;
+    for (const auto& entry : fs::directory_iterator (directory, ec)) {
+        if (entry.is_regular_file (ec) &&
+        is_backup_file_name (entry.path ().filename ().string ())) {
+            snapshots.push_back (entry.path ());
+        }
+    }
+    if (snapshots.size () <= static_cast<size_t> (keep)) {
+        return 0;
+    }
+    // Chronological, because the names are fixed-width UTC stamps - see
+    // `backup_file_name`.
+    std::sort (snapshots.begin (), snapshots.end ());
+
+    int64_t removed        = 0;
+    const size_t to_remove = snapshots.size () - static_cast<size_t> (keep);
+    for (size_t i = 0; i < to_remove; ++i) {
+        // `.at` rather than a subscript: the index is computed above, and one
+        // predictable compare turns a wrong bound into a throw the route
+        // reports instead of a read past the end that deletes something else.
+        const fs::path& oldest = snapshots.at (i);
+        std::error_code remove_ec;
+        if (fs::remove (oldest, remove_ec)) {
+            ++removed;
+        } else {
+            // Best-effort: a snapshot that will not delete is a file the user
+            // still has, which is the safe direction for this feature to fail
+            // in. It is said out loud rather than swallowed, because a
+            // retention setting that silently stops applying grows a disk.
+            vayu::utils::log_warning ("db",
+            "Could not prune the backup " + oldest.string () + ": " + remove_ec.message ());
+        }
+    }
+    return removed;
+}
+
+/// Says so when a snapshot could not be flushed to disk. Never an error: the
+/// file is whole and validated, and failing here would delete a good backup to
+/// report a durability gap the next refresh closes.
+void warn_unless_flushed (bool flushed, std::string_view what, const fs::path& path) {
+    if (flushed) {
+        return;
+    }
+    vayu::utils::log_warning ("db",
+    "Could not flush " + std::string (what) + " to disk; it may not survive a power loss",
+    { { "path", path.string () } });
+}
+
+/// Removes a database file and the `-wal` / `-shm` beside it, reporting nothing:
+/// every caller is clearing a path it is about to write, or one it has just
+/// decided is not a snapshot, and a leftover is the next attempt's to clear.
+void remove_db_file_set (const fs::path& file) {
+    std::error_code ec;
+    fs::remove (file, ec);
+    fs::remove (fs::path (file.string () + "-wal"), ec);
+    fs::remove (fs::path (file.string () + "-shm"), ec);
+}
+
+/// A snapshot `write_snapshot` wrote, and the instant its name carries.
+struct WrittenSnapshot {
+    fs::path path;
+    int64_t stamp_ms = 0;
+};
+
+/**
+ * `VACUUM INTO` the database at @p db_path into a new file in `backups/`
+ * beside it, named for @p stamp_ms and @p label, then flush it.
+ *
+ * A taken name is stepped over rather than written through, exactly as the
+ * corruption quarantine does - and that is also what keeps SQLite happy, since
+ * `VACUUM INTO` refuses a destination that already exists.
+ *
+ * @return the snapshot, or why there is none. A copy that failed leaves no
+ *         file under a snapshot's name: retention would count it and a
+ *         restore would reach for it.
+ */
+std::expected<WrittenSnapshot, std::string>
+write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view label) {
+    const fs::path directory = backups_directory_for (db_path);
+    std::error_code ec;
+    fs::create_directories (directory, ec);
+    if (ec && !fs::is_directory (directory)) {
+        return std::unexpected ("Could not create the backup directory " +
+        directory.string () + ": " + ec.message ());
+    }
+
+    int64_t stamp = stamp_ms;
+    fs::path destination;
+    for (int attempt = 0; attempt < BACKUP_NAME_ATTEMPTS; ++attempt, ++stamp) {
+        const std::string name = backup_file_name (stamp, label);
+        if (name.empty ()) {
+            return std::unexpected (
+            "Could not name a backup for the instant " + std::to_string (stamp));
+        }
+        std::error_code exists_ec;
+        if (fs::path candidate = directory / name; !fs::exists (candidate, exists_ec)) {
+            destination = std::move (candidate);
+            break;
+        }
+    }
+    if (destination.empty ()) {
+        return std::unexpected (
+        "Could not find an unused backup name in " + directory.string ());
+    }
+
+    if (const std::string refusal = vacuum_into (db_path, destination.string ());
+    !refusal.empty ()) {
+        remove_db_file_set (destination);
+        return std::unexpected (
+        "Could not write the backup to " + destination.string () + ": " + refusal);
+    }
+
+    // The file, then the entry that names it: a snapshot someone is told
+    // exists must not vanish with the next power loss.
+    warn_unless_flushed (vayu::platform::fsync_file (destination.string ()),
+    "the workspace backup", destination);
+    warn_unless_flushed (vayu::platform::fsync_directory (directory.string ()),
+    "the backup directory entry", directory);
+    return WrittenSnapshot{ destination, stamp };
+}
+
+/// `maxBackupsRetained` as the workspace at @p connection stores it, read
+/// before any `Database` exists to ask; the default when there is no row yet
+/// or it does not parse, as `get_config_int` answers.
+int configured_backup_retention (sqlite3* connection) {
+    constexpr int fallback = vayu::core::constants::database::MAX_BACKUPS_RETAINED;
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, "SELECT value FROM config_entries WHERE key = ?1;",
+        -1, &statement, nullptr) != SQLITE_OK) {
+        return fallback;
+    }
+    sqlite3_bind_text (statement, 1, MAX_BACKUPS_RETAINED_KEY.data (),
+    static_cast<int> (MAX_BACKUPS_RETAINED_KEY.size ()), SQLITE_STATIC);
+    std::optional<int> configured;
+    if (sqlite3_step (statement) == SQLITE_ROW) {
+        if (const char* text = column_text (statement, 0); text != nullptr) {
+            configured = vayu::utils::parse_number<int> (text);
+        }
+    }
+    sqlite3_finalize (statement);
+    return configured.value_or (fallback);
+}
+
+/// Whether the database at @p connection holds any table. A file that holds
+/// none has nothing to copy. A schema SQLite will not read counts as holding
+/// tables, so the copy is attempted and its failure is the one reported.
+bool holds_tables (sqlite3* connection) {
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1;",
+        -1, &statement, nullptr) != SQLITE_OK) {
+        return true;
+    }
+    const int rc = sqlite3_step (statement);
+    sqlite3_finalize (statement);
+    return rc != SQLITE_DONE;
+}
+
+/**
+ * The copy a start takes before it rewrites stored rows (issue #2426): one
+ * `backups/` snapshot labelled @p label, then retention to @p keep, the same
+ * cap a workspace backup is held to.
+ *
+ * @return the snapshot's path, or why there is none; the caller decides what
+ *         a rewrite without a copy means for it.
+ */
+std::expected<fs::path, std::string>
+snapshot_before_rewrite (const std::string& db_path, std::string_view label, int keep) {
+    const auto written = write_snapshot (db_path, config_seeds::now_ms (), label);
+    if (!written) {
+        return std::unexpected (written.error ());
+    }
+    vayu::utils::log_info ("db", "Saved a copy of the workspace before rewriting it",
+    { { "path", written->path.string () } });
+    prune_backup_files (backups_directory_for (db_path), keep);
+    return written->path;
+}
+
+/**
+ * Removes the safety copies engines before issue #2426 wrote beside the
+ * database at @p db_file and never removed - `.pre-migration.bak` and
+ * `.pre-upgrade.bak`, with their `-wal` and `-shm` - when written before
+ * @p written_before, so a copy this process made is never the one removed.
+ */
+void remove_legacy_safety_copies (const fs::path& db_file, fs::file_time_type written_before) {
+    for (const char* suffix : { ".pre-migration.bak", ".pre-upgrade.bak" }) {
+        const fs::path copy = db_file.string () + suffix;
+        std::error_code ec;
+        const auto written = fs::last_write_time (copy, ec);
+        if (ec || written >= written_before) {
+            continue;
+        }
+        remove_db_file_set (copy);
+        vayu::utils::log_info ("db",
+        "Removed a safety copy an earlier version left beside the database",
+        { { "path", copy.string () } });
+    }
+}
+
+} // namespace
+
+namespace {
+
+/**
+ * `migrate_before_sync`'s copy of a workspace it is about to raise from
+ * @p from_version: `backups/vayu-<stamp>-pre-v<from_version>.db`, held to the
+ * workspace's own `maxBackupsRetained`. A file with no table is not copied.
+ *
+ * @throws std::runtime_error, the migration's own refusal, when the copy
+ *         cannot be written: a migration is not run without one.
+ */
+void snapshot_before_migration (sqlite3* connection, const std::string& path, int64_t from_version) {
+    if (!holds_tables (connection)) {
+        return;
+    }
+    const auto copy = snapshot_before_rewrite (path,
+    "pre-v" + std::to_string (from_version), configured_backup_retention (connection));
+    if (!copy) {
+        throw_migration_failure (path,
+        "no copy of it could be saved first (" +
+        copy.error () + "). Free disk space or make the backups folder writable, then start Vayu again");
+    }
+}
 
 /// The writes of `migrate_before_sync`'s transaction: the script fold, the
 /// file-trust rewrite, the sibling-order shift, the stamp and the `COMMIT`.
@@ -1091,21 +1437,33 @@ const std::vector<SiblingOrderShift>& order_shifts) {
  * `DROP COLUMN`s them; that is what makes the fold's timing load-bearing
  * rather than cosmetic.
  *
+ * Before anything raises the version, @p snapshot `Take` writes
+ * `backups/vayu-<stamp>-pre-v<N>.db` (`snapshot_before_rewrite`): the copy an
+ * engine at version N can still open, which nothing else keeps once
+ * `<db>.bak` is refreshed from the migrated file (issue #2426). A file with no
+ * table is not copied.
+ *
+ * @param snapshot `Skip` only for the probe, whose candidates (a `.bak`, the
+ *        refresh's own snapshot) are not the workspace a person will go back to.
  * @param on_connection told the connection once it is open, before anything
  *        is read from it; a test installs a `sqlite3_commit_hook` here. Empty
  *        in production.
  *
+ * @return whether @p path was already at `SCHEMA_VERSION`, so nothing was
+ *         written; false also for a file this pass did not open.
+ *
  * @throws std::runtime_error naming both versions if @p path was written by
- *         a newer engine, or if a step of the migration failed - a row of the
- *         fold, the `BEGIN`, the stamp or the `COMMIT` (the transaction is
- *         rolled back first, so a throw here never leaves a half-migrated
- *         file and the next start runs the migration again).
+ *         a newer engine, or if a step of the migration failed - the snapshot,
+ *         a row of the fold, the `BEGIN`, the stamp or the `COMMIT` (the
+ *         transaction is rolled back first, so a throw here never leaves a
+ *         half-migrated file and the next start runs the migration again).
  */
-void migrate_before_sync (const std::string& path,
+bool migrate_before_sync (const std::string& path,
 std::chrono::milliseconds busy_timeout,
+PreMigrationSnapshot snapshot,
 const std::function<void (sqlite3*)>& on_connection) {
     if (!fs::exists (path)) {
-        return; // A fresh install: sync_schema creates the new mapping outright.
+        return false; // A fresh install: sync_schema creates the new mapping outright.
     }
     // `has_sqlite_header`'s own comment measured this: opening a file SQLite
     // does not even recognise deletes the `-wal` / `-shm` beside it before
@@ -1116,7 +1474,7 @@ const std::function<void (sqlite3*)>& on_connection) {
     // opens a corrupt file first; a file with no valid header is corruption's
     // question, not a migration's, so it is left untouched here.
     if (!has_sqlite_header (path)) {
-        return;
+        return false;
     }
 
     std::string error;
@@ -1124,7 +1482,7 @@ const std::function<void (sqlite3*)>& on_connection) {
     if (raw_connection == nullptr) {
         // Not this pass's question to answer - the probe this runs ahead of
         // is what decides whether the file is usable at all.
-        return;
+        return false;
     }
     std::unique_ptr<sqlite3, decltype (&sqlite3_close)> connection (
     raw_connection, &sqlite3_close);
@@ -1134,13 +1492,19 @@ const std::function<void (sqlite3*)>& on_connection) {
 
     const auto version =
     read_pragma_int (connection.get (), "PRAGMA user_version;", error);
-    if (!version || *version == SCHEMA_VERSION) {
-        return;
+    if (!version) {
+        return false;
+    }
+    if (*version == SCHEMA_VERSION) {
+        return true;
     }
     if (*version > SCHEMA_VERSION) {
         throw std::runtime_error ("The database at " + path + " was written by schema version " +
         std::to_string (*version) + ", newer than this engine's (version " +
         std::to_string (SCHEMA_VERSION) + "). Upgrade Vayu to open it.");
+    }
+    if (snapshot == PreMigrationSnapshot::Take) {
+        snapshot_before_migration (connection.get (), path, *version);
     }
 
     const bool requests_need_fold = table_has_script_columns (connection.get (), "requests");
@@ -1169,18 +1533,8 @@ const std::function<void (sqlite3*)>& on_connection) {
         // changes nothing stored, but is still reported.
         stamp_schema_version (connection.get (), path);
         log_file_trust_plan (trust_plan);
-        return;
+        return false;
     }
-
-    // Kept until the next successful start (issue #1487's rule) - the one
-    // copy of a pre-cutover row's exact script text, of every body and
-    // allowed folder the file-trust step rewrites, and of every request
-    // `order` before the sibling-order shift, if any were ever found to have
-    // gone wrong.
-    const fs::path db_file (path);
-    fs::path pre_migration_backup = db_file;
-    pre_migration_backup += ".pre-migration.bak";
-    copy_db_files (db_file, pre_migration_backup);
 
     exec_or_throw (connection.get (), "BEGIN IMMEDIATE;", path);
     try {
@@ -1195,6 +1549,7 @@ const std::function<void (sqlite3*)>& on_connection) {
         vayu::utils::log_info ("db", "Moved each collection's requests after its sub-folders in one sibling order",
         { { "collections", order_shifts.size () } });
     }
+    return false;
 }
 
 const std::optional<RecoveryRecord>& Database::recovery () const {
@@ -1463,15 +1818,17 @@ int64_t Database::strip_stored_managed_headers () {
         return 0;
     }
 
-    // `<db>.pre-upgrade.bak` is written once, right before the first row this
-    // pass ever rewrites, and nothing after this call touches it again -
-    // unlike `<db>.bak`, which the *next* clean start refreshes from whatever
-    // the live file holds by then (issue #1487). It is the one place the
-    // pre-strip rows survive more than a single restart.
-    const fs::path db_file (impl_->opened_file);
-    fs::path pre_upgrade_backup = db_file;
-    pre_upgrade_backup += ".pre-upgrade.bak";
-    copy_db_files (db_file, pre_upgrade_backup);
+    // The pre-strip rows survive in a `backups/` snapshot, not in `<db>.bak`,
+    // which this same start refreshes from the rewritten file (issue #1487).
+    // Without that copy the pass does not run and stays unmarked, so the next
+    // start tries again (issue #2426).
+    const auto copy = snapshot_before_rewrite (impl_->opened_file, "pre-repair",
+    get_config_int (std::string (MAX_BACKUPS_RETAINED_KEY),
+    vayu::core::constants::database::MAX_BACKUPS_RETAINED));
+    if (!copy) {
+        throw std::runtime_error (
+        "no copy of the workspace could be saved before rewriting it: " + copy.error ());
+    }
 
     // One transaction for the whole rewrite, not one implicit commit per row -
     // the same shape `seed_default_config` uses and for the same reason:
@@ -1510,157 +1867,6 @@ Database::BackupSlot::~BackupSlot () {
     }
 }
 
-// ============================================================================
-// Workspace backup (issue #987) - a snapshot the user owns
-// ============================================================================
-
-namespace {
-
-/// The two halves of a snapshot's file name. Retention only ever removes a file
-/// carrying both, so anything else that has found its way into `backups/` -
-/// including a copy the user made themselves - is left where it is.
-constexpr std::string_view BACKUP_PREFIX    = "vayu-";
-constexpr std::string_view BACKUP_EXTENSION = ".db";
-
-/// Bound on the collision walk below. A thousand snapshots inside one
-/// millisecond is not a case that happens; the loop is finite so that a
-/// filesystem answering `exists` wrongly cannot hang a request.
-constexpr int BACKUP_NAME_ATTEMPTS = 1000;
-
-/**
- * A snapshot's file name for the instant @p stamp_ms, or an empty string for an
- * instant that cannot be converted.
- *
- * `vayu-YYYYMMDD-HHMMSS-mmm.db`. UTC rather than local time, so a machine that
- * changes timezone does not reorder its own backups, and fixed-width so the
- * names sort chronologically as *text* - which is what lets retention pick the
- * oldest without asking the filesystem for an mtime it may round, or may not
- * have preserved across a copy.
- */
-std::string backup_file_name (int64_t stamp_ms) {
-    const auto seconds = static_cast<std::time_t> (stamp_ms / 1000);
-    const auto millis  = static_cast<int> (stamp_ms % 1000);
-    const std::string stamp = vayu::utils::format_utc_time (seconds, "%Y%m%d-%H%M%S");
-    if (stamp.empty ()) {
-        return {};
-    }
-    return std::format ("{}{}-{:03d}{}", BACKUP_PREFIX, stamp, millis, BACKUP_EXTENSION);
-}
-
-/// Whether @p name is a file this feature wrote - the only kind retention removes.
-bool is_backup_file_name (const std::string& name) {
-    return name.starts_with (BACKUP_PREFIX) && name.ends_with (BACKUP_EXTENSION) &&
-    name.size () > BACKUP_PREFIX.size () + BACKUP_EXTENSION.size ();
-}
-
-/**
- * Copy the database at @p source into @p destination with `VACUUM INTO`.
- *
- * @return an empty string on success, or what SQLite refused.
- *
- * On a connection of its own rather than the one every write is serialized
- * through - `open_workspace_connection` says why: a `VACUUM INTO` of a large
- * workspace occupies its connection for as
- * long as the copy takes, and on the shared one that is every other endpoint
- * waiting behind a button someone pressed. Under WAL a second reader sees every
- * committed transaction and blocks no writer, so the snapshot is consistent and
- * costs the running engine nothing but disk bandwidth.
- *
- * The destination is *bound*, not concatenated: a path is user data on every
- * platform and a quote in a directory name would otherwise be a SQL fragment.
- */
-/**
- * @param on_connection told the connection once it is open, and `nullptr`
- *        just before it closes, so a caller on another thread can
- *        `sqlite3_interrupt` the copy; answering false refuses the copy
- *        before it starts. Empty for a caller with nothing to interrupt.
- */
-std::string vacuum_into (const std::string& source,
-const std::string& destination,
-const std::function<bool (sqlite3*)>& on_connection = {}) {
-    std::string message;
-    sqlite3* connection = open_workspace_connection (source,
-    std::chrono::milliseconds (vayu::core::constants::database::BUSY_TIMEOUT_MS), message);
-    if (connection == nullptr) {
-        return message;
-    }
-    if (on_connection && !on_connection (connection)) {
-        sqlite3_close (connection);
-        return "cancelled before the copy started";
-    }
-
-    sqlite3_stmt* statement = nullptr;
-    int rc = sqlite3_prepare_v2 (connection, "VACUUM INTO ?", -1, &statement, nullptr);
-    if (rc != SQLITE_OK) {
-        message = sqlite3_errmsg (connection);
-        sqlite3_close (connection);
-        return message;
-    }
-    // SQLITE_TRANSIENT: sqlite copies the text, so `destination` need not
-    // outlive the bind - which it does anyway, said here so a later refactor
-    // cannot quietly make the lifetime load-bearing.
-    sqlite3_bind_text (statement, 1, destination.c_str (), -1, SQLITE_TRANSIENT);
-
-    if (sqlite3_step (statement) != SQLITE_DONE) {
-        message = sqlite3_errmsg (connection);
-    }
-    sqlite3_finalize (statement);
-    if (on_connection) {
-        on_connection (nullptr);
-    }
-    sqlite3_close (connection);
-    return message;
-}
-
-/**
- * Remove all but the newest @p keep snapshots from @p directory.
- *
- * @return how many files were removed. @p keep of 0 or less is unlimited, which
- *         is what the `maxBackupsRetained` entry documents.
- */
-int64_t prune_backup_files (const fs::path& directory, int keep) {
-    if (keep <= 0) {
-        return 0;
-    }
-    std::error_code ec;
-    std::vector<fs::path> snapshots;
-    for (const auto& entry : fs::directory_iterator (directory, ec)) {
-        if (entry.is_regular_file (ec) &&
-        is_backup_file_name (entry.path ().filename ().string ())) {
-            snapshots.push_back (entry.path ());
-        }
-    }
-    if (snapshots.size () <= static_cast<size_t> (keep)) {
-        return 0;
-    }
-    // Chronological, because the names are fixed-width UTC stamps - see
-    // `backup_file_name`.
-    std::sort (snapshots.begin (), snapshots.end ());
-
-    int64_t removed        = 0;
-    const size_t to_remove = snapshots.size () - static_cast<size_t> (keep);
-    for (size_t i = 0; i < to_remove; ++i) {
-        // `.at` rather than a subscript: the index is computed above, and one
-        // predictable compare turns a wrong bound into a throw the route
-        // reports instead of a read past the end that deletes something else.
-        const fs::path& oldest = snapshots.at (i);
-        std::error_code remove_ec;
-        if (fs::remove (oldest, remove_ec)) {
-            ++removed;
-        } else {
-            // Best-effort: a snapshot that will not delete is a file the user
-            // still has, which is the safe direction for this feature to fail
-            // in. It is said out loud rather than swallowed, because a
-            // retention setting that silently stops applying grows a disk.
-            vayu::utils::log_warning ("db",
-            "Could not prune the backup " + oldest.string () + ": " + remove_ec.message ());
-        }
-    }
-    return removed;
-}
-
-} // namespace
-
 // Whether the database at `path` opens and carries this build's schema.
 //
 // The same probe answers for the main file and for the `.bak` beside it
@@ -1684,7 +1890,7 @@ std::chrono::milliseconds busy_timeout) {
         // `journal_mode`, and `sync_schema ()` below is what would
         // `DROP COLUMN` the pre-cutover script columns before this
         // migration ever got to read them (issue #1514).
-        migrate_before_sync (path, busy_timeout);
+        migrate_before_sync (path, busy_timeout, PreMigrationSnapshot::Skip);
         Impl probe (path, busy_timeout);
         probe.storage.sync_schema ();
         return {};
@@ -1700,28 +1906,6 @@ std::chrono::milliseconds busy_timeout) {
 }
 
 namespace {
-/// Says so when a snapshot could not be flushed to disk. Never an error: the
-/// file is whole and validated, and failing here would delete a good backup to
-/// report a durability gap the next refresh closes.
-void warn_unless_flushed (bool flushed, std::string_view what, const fs::path& path) {
-    if (flushed) {
-        return;
-    }
-    vayu::utils::log_warning ("db",
-    "Could not flush " + std::string (what) + " to disk; it may not survive a power loss",
-    { { "path", path.string () } });
-}
-
-/// Removes a database file and the `-wal` / `-shm` beside it, reporting nothing:
-/// every caller is clearing a path it is about to write, or one it has just
-/// decided is not a snapshot, and a leftover is the next attempt's to clear.
-void remove_db_file_set (const fs::path& file) {
-    std::error_code ec;
-    fs::remove (file, ec);
-    fs::remove (fs::path (file.string () + "-wal"), ec);
-    fs::remove (fs::path (file.string () + "-shm"), ec);
-}
-
 constexpr std::string_view NOT_VALIDATED_REFUSAL =
 "this start did not validate the database, so the backup is left as it is";
 
@@ -1766,7 +1950,7 @@ std::expected<void, std::string> Database::refresh_recovery_backup () {
     if (!impl_->recovery_backup_due) {
         return std::unexpected (std::string (NOT_VALIDATED_REFUSAL));
     }
-    return replace_recovery_backup (
+    auto refreshed = replace_recovery_backup (
     [this] (sqlite3* connection) {
         std::lock_guard<std::mutex> lock (impl_->recovery_backup_mutex);
         if (connection != nullptr && impl_->recovery_backup_cancelled) {
@@ -1776,6 +1960,13 @@ std::expected<void, std::string> Database::refresh_recovery_backup () {
         return true;
     },
     std::chrono::steady_clock::time_point::max ());
+    // Only once a backup of the validated file exists, and only on a start
+    // that found the file already current: the start that migrated it is not
+    // "a later start" than the one that wrote a copy.
+    if (refreshed && impl_->opened_at_current_schema) {
+        remove_legacy_safety_copies (impl_->opened_file, impl_->opened_at);
+    }
+    return refreshed;
 }
 
 std::expected<void, std::string> Database::refresh_recovery_backup_on_shutdown (
@@ -1943,7 +2134,7 @@ void Database::finish_recovery_backup_refresh () {
 }
 
 std::string Database::backups_directory () const {
-    return (fs::path (impl_->opened_file).parent_path () / "backups").string ();
+    return backups_directory_for (impl_->opened_file).string ();
 }
 
 std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t now) {
@@ -1963,54 +2154,11 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
         ": a snapshot is named for the instant it was taken" });
     }
 
-    const fs::path directory = backups_directory ();
-    std::error_code ec;
-    fs::create_directories (directory, ec);
-    if (ec && !fs::is_directory (directory)) {
-        return std::unexpected (BackupFailure{ false,
-        "Could not create the backup directory " + directory.string () + ": " +
-        ec.message () });
+    const auto written = write_snapshot (impl_->opened_file, now, {});
+    if (!written) {
+        return std::unexpected (BackupFailure{ false, written.error () });
     }
-
-    // A taken name is stepped over rather than written through, exactly as the
-    // corruption quarantine does - and here it is also what keeps SQLite happy,
-    // since `VACUUM INTO` refuses a destination that already exists.
-    int64_t stamp = now;
-    fs::path destination;
-    for (int attempt = 0; attempt < BACKUP_NAME_ATTEMPTS; ++attempt, ++stamp) {
-        const std::string name = backup_file_name (stamp);
-        if (name.empty ()) {
-            return std::unexpected (BackupFailure{ false,
-            "Could not name a backup for the instant " + std::to_string (stamp) });
-        }
-        std::error_code exists_ec;
-        if (fs::path candidate = directory / name; !fs::exists (candidate, exists_ec)) {
-            destination = std::move (candidate);
-            break;
-        }
-    }
-    if (destination.empty ()) {
-        return std::unexpected (BackupFailure{ false,
-        "Could not find an unused backup name in " + directory.string () });
-    }
-
-    if (const std::string refusal = vacuum_into (impl_->opened_file, destination.string ());
-    !refusal.empty ()) {
-        // A failed VACUUM INTO can leave a partial file behind, and a partial
-        // file with a snapshot's name is worse than no snapshot: retention
-        // would count it, and a restore would reach for it.
-        std::error_code remove_ec;
-        fs::remove (destination, remove_ec);
-        return std::unexpected (BackupFailure{ false,
-        "Could not write the backup to " + destination.string () + ": " + refusal });
-    }
-
-    // The file, then the entry that names it: the user is told the backup
-    // exists, so it must not vanish with the next power loss.
-    warn_unless_flushed (vayu::platform::fsync_file (destination.string ()),
-    "the workspace backup", destination);
-    warn_unless_flushed (vayu::platform::fsync_directory (directory.string ()),
-    "the backup directory entry", directory);
+    const fs::path& destination = written->path;
 
     std::error_code size_ec;
     const auto size = fs::file_size (destination, size_ec);
@@ -2018,15 +2166,15 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
     BackupRecord record;
     record.path       = destination.string ();
     record.size_bytes = size_ec ? 0 : static_cast<int64_t> (size);
-    record.created_at = stamp;
+    record.created_at = written->stamp_ms;
     // Retention runs *after* the snapshot exists, and a failure here must not
     // turn a backup that succeeded into a reported failure - the user has the
     // file they asked for, and the worst this leaves behind is one snapshot too
     // many. This is also what makes the declared "never throws" true: it is the
     // one step that reads the database.
     try {
-        record.pruned = prune_backup_files (directory,
-        get_config_int ("maxBackupsRetained",
+        record.pruned = prune_backup_files (destination.parent_path (),
+        get_config_int (std::string (MAX_BACKUPS_RETAINED_KEY),
         vayu::core::constants::database::MAX_BACKUPS_RETAINED));
     } catch (const std::exception& e) {
         vayu::utils::log_warning (

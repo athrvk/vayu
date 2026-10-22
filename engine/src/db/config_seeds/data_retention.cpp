@@ -151,7 +151,8 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     keywords ({ "restore", "cleanup" }) (ConfigEntry{ "maxBackupsRetained",
     std::to_string (vayu::core::constants::database::MAX_BACKUPS_RETAINED), "integer", "Max backups retained",
     "Keep at most this many workspace snapshots in the backups folder beside "
-    "the database; older ones are removed after each new backup. Each snapshot "
+    "the database; older ones are removed after each new backup. The copy Vayu "
+    "saves before an update changes the workspace counts too. Each snapshot "
     "is a compacted copy of the whole workspace - collections, environments, "
     "secrets and run history - so a higher value, or 0 for unlimited, costs "
     "disk. Only files Vayu wrote are ever removed; a copy you put there "

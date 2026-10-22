@@ -18,8 +18,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -833,9 +836,9 @@ TEST_F (DefaultHeaderConfigTest, ASecondStartupSkipsTheScanOnceEverythingIsMarke
 
 // Issue #1487, point 3: `<db>.bak` is refreshed from the *current* file on
 // every clean start, including the one that just stripped these rows, so by
-// the next launch it no longer holds them. `<db>.pre-upgrade.bak` is written
-// once, before the first rewrite, and nothing after that touches it again.
-TEST_F (DefaultHeaderConfigTest, ThePreUpgradeBackupPreservesTheRowsBeforeTheFirstRewrite) {
+// the next launch it no longer holds them. The pass saves a `backups/` copy
+// before its first rewrite instead (#2426).
+TEST_F (DefaultHeaderConfigTest, TheRepairPassSavesACopyBeforeTheFirstRewrite) {
     vayu::db::Collection collection;
     collection.id   = "col_backup";
     collection.name = "Backup";
@@ -849,23 +852,69 @@ TEST_F (DefaultHeaderConfigTest, ThePreUpgradeBackupPreservesTheRowsBeforeTheFir
     managed.headers = R"([{"key":"X-Vayu-Version","value":"0.1.1","enabled":true}])";
     db_->save_request (managed);
 
-    const std::string backup_path = std::string (DB_PATH) + ".pre-upgrade.bak";
-    ASSERT_FALSE (std::filesystem::exists (backup_path))
+    const auto repair_copies = [this] {
+        std::vector<std::string> found;
+        std::error_code ec;
+        for (const auto& entry :
+        std::filesystem::directory_iterator (db_->backups_directory (), ec)) {
+            if (entry.path ().filename ().string ().ends_with (
+                "-pre-repair.db")) {
+                found.push_back (entry.path ().string ());
+            }
+        }
+        return found;
+    };
+    ASSERT_TRUE (repair_copies ().empty ())
     << "nothing should exist before the pass has ever rewritten a row";
 
     reset_managed_headers_marker ();
     EXPECT_EQ (db_->strip_stored_managed_headers (), 1);
 
-    ASSERT_TRUE (std::filesystem::exists (backup_path))
+    const auto copies = repair_copies ();
+    ASSERT_EQ (copies.size (), 1U)
     << "the pre-rewrite snapshot was not written";
 
-    vayu::db::Database backup (backup_path);
-    auto pre_rewrite = backup.get_request ("req_backup_managed");
-    ASSERT_HAS_VALUE (pre_rewrite);
-    EXPECT_NE (pre_rewrite->headers.find ("X-Vayu-Version"), std::string::npos)
-    << "the snapshot should hold the row as it was before the strip touched it";
+    {
+        vayu::db::Database backup (copies.front ());
+        auto pre_rewrite = backup.get_request ("req_backup_managed");
+        ASSERT_HAS_VALUE (pre_rewrite);
+        EXPECT_NE (pre_rewrite->headers.find ("X-Vayu-Version"), std::string::npos)
+        << "the snapshot should hold the row as it was before the strip "
+           "touched it";
+    }
+    vayu::tests::remove_database_files (copies.front ());
+}
 
-    vayu::tests::remove_database_files (backup_path);
+// With no copy the pass rewrites nothing and stays unmarked, so the next start
+// tries again. Mutation check: ignore what `snapshot_before_rewrite` answers
+// in `strip_stored_managed_headers` and the row is rewritten.
+TEST_F (DefaultHeaderConfigTest, WithNoCopyTheRepairPassDoesNotRunAndRetries) {
+    vayu::db::Collection collection;
+    collection.id   = "col_no_copy";
+    collection.name = "No copy";
+    db_->create_collection (collection);
+
+    vayu::db::Request managed;
+    managed.id            = "req_no_copy";
+    managed.collection_id = "col_no_copy";
+    managed.name          = "Managed";
+    managed.url           = "https://example.com/";
+    managed.headers = R"([{"key":"X-Vayu-Version","value":"0.1.1","enabled":true}])";
+    db_->save_request (managed);
+
+    // A file where the folder goes, so the folder cannot be created.
+    const std::string backups = db_->backups_directory ();
+    std::ofstream (backups) << "not a directory";
+    reset_managed_headers_marker ();
+
+    EXPECT_THROW (db_->strip_stored_managed_headers (), std::runtime_error);
+    EXPECT_FALSE (db_->get_config_bool ("managedHeadersStripped", false));
+    auto untouched = db_->get_request ("req_no_copy");
+    ASSERT_HAS_VALUE (untouched);
+    EXPECT_EQ (untouched->headers, managed.headers);
+
+    std::filesystem::remove (backups);
+    EXPECT_EQ (db_->strip_stored_managed_headers (), 1);
 }
 
 } // namespace

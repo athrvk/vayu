@@ -643,20 +643,50 @@ const std::vector<std::string>& seeded_from) {
 CurlPhaseTimes read_phase_times (CURL* curl) {
     CurlPhaseTimes times;
     get_info<CURLINFO_TOTAL_TIME> (curl, &times.total);
+    curl_off_t queue_us = 0;
+    get_info<CURLINFO_QUEUE_TIME_T> (curl, &queue_us);
+    times.queue = static_cast<double> (queue_us) / 1e6;
     get_info<CURLINFO_NAMELOOKUP_TIME> (curl, &times.namelookup);
     get_info<CURLINFO_CONNECT_TIME> (curl, &times.connect);
     get_info<CURLINFO_APPCONNECT_TIME> (curl, &times.appconnect);
+    get_info<CURLINFO_PRETRANSFER_TIME> (curl, &times.pretransfer);
     get_info<CURLINFO_STARTTRANSFER_TIME> (curl, &times.starttransfer);
     return times;
 }
 
+double curl_queue_seconds (const CurlPhaseTimes& times) {
+    const double ceiling =
+    times.pretransfer > 0.0 ? std::min (times.pretransfer, times.total) : times.total;
+    return std::max (0.0, std::min (times.queue, ceiling));
+}
+
+double wire_seconds (const CurlPhaseTimes& times) {
+    return times.total - curl_queue_seconds (times);
+}
+
 void apply_phase_timings (Timing& timing, const CurlPhaseTimes& times) {
-    const double appconnect = times.appconnect > 0.0 ? times.appconnect : times.connect;
-    timing.dns_ms = std::max (0.0, times.namelookup * 1000.0);
-    timing.connect_ms = std::max (0.0, (times.connect - times.namelookup) * 1000.0);
-    timing.tls_ms = std::max (0.0, (appconnect - times.connect) * 1000.0);
-    timing.first_byte_ms = std::max (0.0, (times.starttransfer - appconnect) * 1000.0);
-    timing.download_ms = std::max (0.0, (times.total - times.starttransfer) * 1000.0);
+    const double queue     = curl_queue_seconds (times);
+    const auto after_queue = [queue] (double timer) {
+        return std::max (0.0, timer - queue);
+    };
+    const double namelookup = after_queue (times.namelookup);
+    const double connect    = after_queue (times.connect);
+    const double appconnect =
+    times.appconnect > 0.0 ? after_queue (times.appconnect) : connect;
+    const double starttransfer = after_queue (times.starttransfer);
+    timing.dns_ms              = namelookup * 1000.0;
+    timing.connect_ms = std::max (0.0, (connect - namelookup) * 1000.0);
+    timing.tls_ms     = std::max (0.0, (appconnect - connect) * 1000.0);
+    timing.first_byte_ms = std::max (0.0, (starttransfer - appconnect) * 1000.0);
+    timing.download_ms =
+    std::max (0.0, (after_queue (times.total) - starttransfer) * 1000.0);
+}
+
+void apply_transfer_timing (Timing& timing, const CurlPhaseTimes& times, double perceived_ms) {
+    timing.total_ms      = perceived_ms;
+    timing.wire_ms       = wire_seconds (times) * 1000.0;
+    timing.queue_wait_ms = std::max (0.0, perceived_ms - timing.wire_ms);
+    apply_phase_timings (timing, times);
 }
 
 std::optional<Error> add_to_multi (CURLM* multi_handle, CURL* easy) {
@@ -1486,7 +1516,6 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // "errors sometimes carry timing" branch permanently dead. The
     // single-request client has always extracted first for this reason.
     const CurlPhaseTimes phase_times = read_phase_times (curl);
-    const double wire_seconds        = phase_times.total;
 
     // Negotiated protocol - what actually got used, not what was requested.
     // Empty when curl reports CURL_HTTP_VERSION_NONE or anything this driver
@@ -1504,34 +1533,28 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     response.http_version_downgraded = vayu::http::http_version_downgraded (
     data->request.http_version, response.http_version);
 
-    // Get curl timing info - these are wire-only (libcurl's view)
     // Perceived latency: wall-clock from submit() to now. steady_clock is
     // monotonic so it's not affected by NTP jumps.
     auto completion = std::chrono::steady_clock::now ();
     double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - data->submitted_at).count ();
+    apply_transfer_timing (response.timing, phase_times, perceived_ms);
 
-    double wire_ms = wire_seconds * 1000.0;
-    // Clamp queue_wait to >= 0 to absorb sub-microsecond clock jitter where
-    // perceived_ms can appear marginally smaller than wire_ms. A discrepancy
-    // larger than 1ms indicates a real problem (wrong stamp point, clock
-    // skew between steady_clock and curl's TOTAL_TIME, etc.) - debug builds
-    // trip an assert; release builds log a warning so the signal isn't lost
-    // silently in the clamp. Without this, a future regression that moves
-    // `submitted_at` later in the pipeline would zero out queue_wait_ms in
-    // production while CI stays green.
-    double delta = perceived_ms - wire_ms;
+    // queue_wait_ms is clamped at 0 to absorb sub-microsecond clock jitter
+    // where perceived_ms can appear marginally smaller than wire_ms. A
+    // discrepancy larger than 1ms indicates a real problem (wrong stamp point,
+    // clock skew between steady_clock and curl's TOTAL_TIME, etc.) - debug
+    // builds trip an assert; release builds log a warning so the signal isn't
+    // lost silently in the clamp. Without this, a future regression that
+    // moves `submitted_at` later in the pipeline would zero out queue_wait_ms
+    // in production while CI stays green.
+    const double delta = perceived_ms - response.timing.wire_ms;
     assert (delta > -1.0 && "perceived_ms - wire_ms below -1ms - clock issue?");
     if (delta < -1.0) {
         vayu::utils::log_warning ("client", "queue_wait clock skew - submitted_at stamp may be set after curl wire start",
-        { { "perceivedMs", perceived_ms }, { "wireMs", wire_ms }, { "deltaMs", delta } });
+        { { "perceivedMs", perceived_ms },
+        { "wireMs", response.timing.wire_ms }, { "deltaMs", delta } });
     }
-    double queue_wait_ms = std::max (0.0, delta);
-
-    response.timing.total_ms      = perceived_ms;  // redefined as perceived
-    response.timing.wire_ms       = wire_ms;       // new
-    response.timing.queue_wait_ms = queue_wait_ms; // new
-    apply_phase_timings (response.timing, phase_times);
     response.transfer_attempted = curl_transfer_attempted (curl, result);
 
     // Wire byte counts (body + headers), for throughput-in-bytes metrics.

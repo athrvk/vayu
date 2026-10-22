@@ -868,6 +868,85 @@ TEST_F (DbRecoveryTest, AShutdownAfterARecoveredStartLeavesTheBackupItJudgedAlon
     EXPECT_EQ (read_file (backup.string ()), backup_bytes);
 }
 
+// ============ The safety copies earlier engines left (#2426) ============
+//
+// `<db>.pre-migration.bak` and `<db>.pre-upgrade.bak` were written beside the
+// database and never removed. They go on a later start than the one that
+// migrated, once that start has refreshed `<db>.bak`.
+
+/// The legacy copies beside @p db_path and their sidecars, each written with
+/// @p mtime.
+std::vector<std::filesystem::path> write_legacy_safety_copies (const std::string& db_path,
+std::filesystem::file_time_type mtime) {
+    std::vector<std::filesystem::path> written;
+    for (const char* copy : { ".pre-migration.bak", ".pre-upgrade.bak" }) {
+        for (const char* suffix : { "", "-wal", "-shm" }) {
+            const std::filesystem::path path = db_path + copy + suffix;
+            std::ofstream (path, std::ios::binary)
+            << "a copy an older engine wrote";
+            std::filesystem::last_write_time (path, mtime);
+            written.push_back (path);
+        }
+    }
+    return written;
+}
+
+/// One start the way the daemon makes it: open, init, then the refresh it
+/// starts once listening.
+void start_and_refresh (const std::string& db_path) {
+    vayu::db::Database db (db_path);
+    db.init ();
+    const auto refreshed = db.refresh_recovery_backup ();
+    ASSERT_HAS_VALUE (refreshed) << refreshed.error ();
+}
+
+// Mutation check: drop the `remove_legacy_safety_copies` call in
+// `refresh_recovery_backup` and they are still there after the second start;
+// drop its `opened_at_current_schema` condition and they are gone after the
+// first.
+TEST_F (DbRecoveryTest, LegacyPreMigrationFilesAreRemovedOnALaterStart) {
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+    }
+    {
+        const RawConnection connection = open_raw (DB_PATH);
+        ASSERT_EQ (
+        exec_sql (connection.get (),
+        "PRAGMA user_version = " + std::to_string (vayu::db::SCHEMA_VERSION - 1)),
+        "");
+    }
+    const auto copies = write_legacy_safety_copies (DB_PATH,
+    std::filesystem::file_time_type::clock::now () - std::chrono::hours (1));
+
+    start_and_refresh (DB_PATH); // migrates
+    for (const auto& copy : copies) {
+        EXPECT_TRUE (std::filesystem::exists (copy))
+        << "the migrating start removed " << copy;
+    }
+
+    start_and_refresh (DB_PATH);
+    for (const auto& copy : copies) {
+        EXPECT_FALSE (std::filesystem::exists (copy)) << copy << " was left behind";
+    }
+}
+
+// Mutation check: drop the mtime condition in `remove_legacy_safety_copies`
+// and the copy is removed.
+TEST_F (DbRecoveryTest, ASafetyCopyWrittenSinceTheStartBeganIsKept) {
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+    }
+    const auto copies = write_legacy_safety_copies (DB_PATH,
+    std::filesystem::file_time_type::clock::now () + std::chrono::hours (1));
+
+    start_and_refresh (DB_PATH);
+    for (const auto& copy : copies) {
+        EXPECT_TRUE (std::filesystem::exists (copy)) << copy;
+    }
+}
+
 // ==================== The probe's classification (#2420) ====================
 
 std::system_error sqlite_failure (int code) {

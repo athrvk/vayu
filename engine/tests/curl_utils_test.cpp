@@ -23,12 +23,15 @@
 #include "vayu/http/transport_policy.hpp"
 
 using vayu::http::detail::apply_phase_timings;
+using vayu::http::detail::apply_transfer_timing;
+using vayu::http::detail::curl_queue_seconds;
 using vayu::http::detail::curl_to_error;
 using vayu::http::detail::CurlPhaseTimes;
 using vayu::http::detail::extract_hostname;
 using vayu::http::detail::extract_port;
 using vayu::http::detail::parse_authority;
 using vayu::http::detail::validate_transferable;
+using vayu::http::detail::wire_seconds;
 
 // The regression this file exists for: a port literal above INT_MAX made
 // std::stoi throw std::out_of_range out of the worker thread's initial
@@ -380,6 +383,76 @@ TEST (ApplyPhaseTimings, EveryPhaseIsClampedAtZero) {
     EXPECT_GE (timing.tls_ms, 0.0);
     EXPECT_GE (timing.first_byte_ms, 0.0);
     EXPECT_GE (timing.download_ms, 0.0);
+}
+
+// ============================================================================
+// libcurl's connection-slot queue (#2394) - never time on the wire
+// ============================================================================
+
+// Every timer below is a reading curl 8.23 gave for twelve transfers on two
+// connection slots against a target that answers in 300ms (one connection
+// reused, so no DNS or connect phase). This transfer waited once: QUEUE_TIME
+// is exact and TOTAL includes it.
+TEST (CurlQueueTime, AWaitIsTakenOffTheWireTimeAndTheFirstByte) {
+    CurlPhaseTimes times;
+    times.queue         = 0.3042;
+    times.pretransfer   = 0.3044;
+    times.starttransfer = 0.6047;
+    times.total         = 0.6475;
+
+    EXPECT_NEAR (curl_queue_seconds (times), 0.3042, 1e-9);
+    EXPECT_NEAR (wire_seconds (times), 0.3433, 1e-9);
+
+    vayu::Timing timing;
+    apply_phase_timings (timing, times);
+    EXPECT_NEAR (timing.first_byte_ms, 300.5, 1e-6)
+    << "the wait for a slot is not the target's time to first byte";
+    EXPECT_NEAR (timing.download_ms, 42.8, 1e-6);
+}
+
+// This one was passed over by the pending queue several times, and curl adds
+// the whole wait so far on each retry: QUEUE_TIME reads 6006ms on a 2027ms
+// transfer. PRETRANSFER (stamped once) bounds it. Mutation-check: bound by
+// TOTAL alone in curl_queue_seconds and the wire time goes to 0.
+TEST (CurlQueueTime, AnOvercountedQueueIsBoundedByPretransfer) {
+    CurlPhaseTimes times;
+    times.queue         = 6.0063;
+    times.pretransfer   = 1.6835;
+    times.starttransfer = 1.9840;
+    times.total         = 2.0274;
+
+    EXPECT_NEAR (curl_queue_seconds (times), 1.6835, 1e-9);
+    EXPECT_NEAR (wire_seconds (times), 0.3439, 1e-9);
+}
+
+// A transfer that failed before PRETRANSFER (a timeout while queued, a refused
+// connect) has no PRETRANSFER to bound it, so only TOTAL does.
+TEST (CurlQueueTime, WithoutPretransferOnlyTheTotalBoundsTheQueue) {
+    CurlPhaseTimes times;
+    times.queue = 0.2;
+    times.total = 0.5;
+    EXPECT_NEAR (curl_queue_seconds (times), 0.2, 1e-9);
+
+    times.queue = 0.9;
+    EXPECT_NEAR (curl_queue_seconds (times), 0.5, 1e-9);
+    EXPECT_NEAR (wire_seconds (times), 0.0, 1e-9);
+}
+
+// The three drivers' one copy: perceived is the total, the wire excludes
+// libcurl's queue, and queue wait is everything before the wire.
+TEST (CurlQueueTime, TransferTimingCountsLibcurlsQueueAsQueueWait) {
+    CurlPhaseTimes times;
+    times.queue         = 0.3;
+    times.pretransfer   = 0.3;
+    times.starttransfer = 0.6;
+    times.total         = 0.65;
+
+    vayu::Timing timing;
+    apply_transfer_timing (timing, times, /*perceived_ms=*/660.0);
+    EXPECT_DOUBLE_EQ (timing.total_ms, 660.0);
+    EXPECT_NEAR (timing.wire_ms, 350.0, 1e-6);
+    EXPECT_NEAR (timing.queue_wait_ms, 310.0, 1e-6);
+    EXPECT_NEAR (timing.first_byte_ms, 300.0, 1e-6);
 }
 
 // ============================================================================

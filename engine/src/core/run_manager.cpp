@@ -1349,7 +1349,16 @@ int default_max_per_host) {
     vayu::http::EventLoopConfig loop_config;
     loop_config.num_workers = static_cast<size_t> (configured_workers); // Already resolved (see resolve_worker_count)
     loop_config.max_concurrent = std::max (concurrency, size_t{ 100 });
-    loop_config.max_per_host   = static_cast<size_t> (default_max_per_host);
+    const auto configured_per_host =
+    static_cast<size_t> (std::max (default_max_per_host, 1));
+    loop_config.max_per_host = effective_max_per_host (configured_per_host,
+    concurrency, static_cast<size_t> (std::max (configured_workers, 0)));
+    context->configured_max_per_host = configured_per_host;
+    context->effective_max_per_host  = loop_config.max_per_host;
+    vayu::utils::log_info ("run", "Per-host connection limit",
+    { { "runId", context->run_id }, { "configured", configured_per_host },
+    { "effective", loop_config.max_per_host },
+    { "workers", configured_workers }, { "concurrency", concurrency } });
     apply_open_loop_rate (loop_config, config);
     // A token bucket on any other mode throttles a closed-loop run (#2396).
     assert (loop_config.target_rps <= 0.0 || is_constant_rps_mode (config));
@@ -1546,8 +1555,11 @@ struct RunTotals {
  * learns about one - and, for a scenario run, a step whose pre-request
  * script did not run inline (#1938). Neither refuses the run: a
  * literal `{{` can be deliberate in a body, and a run that already sent
- * every request must still be reported as finished. Empty for a run with
- * nothing to say, which is what lets the caller omit the key entirely.
+ * every request must still be reported as finished. Also a per-host
+ * connection limit the run raised above `eventLoopMaxPerHost` (#2394), so a
+ * run that opened more connections than the setting says is not silent about
+ * it. Empty for a run with nothing to say, which is what lets the caller omit
+ * the key entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     nlohmann::json warnings = nlohmann::json::array ();
@@ -1566,6 +1578,16 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
         }
         warnings.push_back ({ { "code", "unresolved_tokens" },
         { "message", message }, { "count", affected }, { "names", names } });
+    }
+
+    if (context->effective_max_per_host > context->configured_max_per_host) {
+        warnings.push_back ({ { "code", "per_host_limit_raised" },
+        { "message",
+        "Connections per host raised from " + std::to_string (context->configured_max_per_host) +
+        " to " + std::to_string (context->effective_max_per_host) +
+        " per worker to cover this run's virtual users" },
+        { "configured", context->configured_max_per_host },
+        { "effective", context->effective_max_per_host } });
     }
 
     if (context->scenario) {

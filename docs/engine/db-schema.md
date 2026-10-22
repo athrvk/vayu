@@ -58,6 +58,7 @@ window costs a slower start rather than a refusal. What happens next:
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
+| An older `user_version` | Before anything raises the version, a copy is saved to `backups/vayu-<stamp>-pre-v<N>.db` ([the copy before a migration](#the-copy-before-a-migration-issue-2426)). If it cannot be written, nothing is touched and the daemon does not start | (the exception, naming the path and why the copy failed) |
 | Cannot be examined (locked, disk full, read-only, I/O error) | Nothing is touched, the daemon does not start, the reason is named | (the exception, naming the path, the SQLite code and message, and what to do) |
 | Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe, flushed to disk and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy. A clean shutdown after a session that wrote anything takes the same snapshot again (#2421), so the backup holds that session's work | Nothing |
 | Corrupt, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
@@ -94,12 +95,44 @@ up looking like a fresh install.
 > `POST /workspace/backup` / `vayu-cli backup`, described in
 > [architecture.md](architecture.md#workspace-backups).
 
-> **`<db>.pre-upgrade.bak` is different: it is written once.** A one-time
-> repair pass (below) takes it immediately before its first rewrite, and
-> nothing after that touches it again - unlike `<db>.bak`, which the same start
-> refreshes, once it listens, from a file the repair has already rewritten, and
-> its clean shutdown refreshes again. It
-> is the one place the pre-repair rows survive the start that repaired them.
+> **The copy taken before a rewrite is in `backups/`, not beside the
+> database.** `<db>.bak` is refreshed, once the engine listens, from a file the
+> migration or repair has already rewritten, so it cannot be the way back.
+> [The copy before a migration](#the-copy-before-a-migration-issue-2426) is.
+
+### The copy before a migration (issue #2426)
+
+Before `migrate_before_sync` raises `user_version` - on the stamp-only path as
+well as before the transaction of a step that rewrites rows - the constructor's
+call writes a `VACUUM INTO` snapshot of the file to
+`backups/vayu-<stamp>-pre-v<N>.db` beside it, where `N` is the version the file
+had. It is the copy an engine at version `N` opens, and the only one: the
+`<db>.bak` refresh that follows replaces the backup from the migrated file.
+
+- **No copy, no migration.** When the snapshot cannot be written (the folder
+  cannot be created, the disk is full) the constructor throws `Vayu could not
+  migrate the database at <path> to schema version <V>: no copy of it could be
+  saved first (...)`, the daemon does not start, and the file is left byte for
+  byte as it was. A file that holds no table yet is not copied.
+- **The same retention as a workspace backup.** It is pruned with
+  `maxBackupsRetained` (default 5, `0` = unlimited), counted together with the
+  snapshots `POST /workspace/backup` writes, the setting read from the file
+  before any `Database` exists. It is the newest file when it is written, so
+  the start that writes it never prunes it; five later backups do. Exempting it
+  from the count was weighed and declined: a full copy of every stored
+  credential that nothing ever removes is what this replaced.
+- **Only the constructor's own call takes it.** `probe_database` runs the same
+  migration on a candidate it is about to judge (a `.bak` recovery may restore,
+  the refresh's own snapshot), which is not the workspace a person goes back
+  to, and takes none.
+- **The header-strip pass takes one too**, labelled `pre-repair`
+  ([below](#the-header-strip-pass-issues-1487-1491)).
+
+Engines before this wrote `<db>.pre-migration.bak` and `<db>.pre-upgrade.bak`
+(with their `-wal` and `-shm`) beside the database and never removed them. They
+are removed on a later start than the one that migrated: one that validated,
+found the file already at `SCHEMA_VERSION` before writing anything, and has
+refreshed `<db>.bak`. A file modified since that start began is left alone.
 
 ### The quarantine (issue #984)
 
@@ -243,8 +276,10 @@ nothing left to touch pays close to nothing for it:
   skips the scan outright rather than re-running it to confirm nothing changed. #1492 will give
   this kind of migration bookkeeping a proper home; until then a config entry is where this
   file's other internal-only flags already live.
-- **`<db>.pre-upgrade.bak`** is written once, immediately before the first row this pass ever
-  rewrites - see the backup note above.
+- **A `backups/vayu-<stamp>-pre-repair.db` snapshot** is written immediately before the first row
+  this pass ever rewrites, under the same retention as
+  [the copy before a migration](#the-copy-before-a-migration-issue-2426). When it cannot be
+  written the pass rewrites nothing and leaves its marker unset, so the next start tries again.
 - **Trash is caught up on restore, not on the startup scan.** A request already in the trash when
   this pass runs is skipped, so it stays byte-identical for as long as it sits there; restoring it
   (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on
@@ -269,13 +304,13 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
    rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
-   is a fast no-op. `0` (every database written before this issue, folded by #1513's pass or not)
-   proceeds to fold. `1` and `2` have no script column left, so they skip the fold and are only stamped.
+   is a fast no-op. Anything older is copied first ([the copy before a
+   migration](#the-copy-before-a-migration-issue-2426)). `0` (every database written before this
+   issue, folded by #1513's pass or not) proceeds to fold. `1` and `2` have no script column left,
+   so they skip the fold and are only stamped.
 2. **Fold, if either table still has a script column.** For each of `requests` and `collections`
    that does (either `pre_request_script` or `post_request_script` alone is enough - a table needs
-   folding for): `<db>.pre-migration.bak` is written once, immediately before the first row is
-   rewritten (issue #1487's rule - the one on-disk copy of the exact pre-cutover script text if the
-   fold below were ever found wrong), then in one transaction, per table: read its actual column set
+   folding for), in one transaction, per table: read its actual column set
    fresh (`PRAGMA table_info`), `ALTER TABLE ... ADD COLUMN elements TEXT NOT NULL DEFAULT '[]'` when
    the column is not there yet - a genuinely pre-cutover database (older than #1513) never ran the
    additive pass that would have added it, so this migration is the first thing that does - and
@@ -285,8 +320,8 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
    {"script": "..."}}` for each non-blank script column *not already represented* in `elements` (the
    check that makes a database #1513's additive pass already folded safe to re-run through this
    migration without a duplicate), and write the row back. A database neither table needs folding
-   for (a fresh install, or one some other path already brought to this shape) skips the backup and
-   the transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
+   for (a fresh install, or one some other path already brought to this shape) skips the
+   transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
    that caused it. A refused `BEGIN IMMEDIATE` (another writer holds the lock), a refused stamp and
    a failed `COMMIT` are treated the same way: each throws that message through the same
    `exec_or_throw` helper (a failed `COMMIT` is rolled back first), and the stamp-only path throws
@@ -348,8 +383,8 @@ database below version `6`, after the fold:
 `file_grants` is created by this step (`CREATE TABLE IF NOT EXISTS`, `FILE_GRANTS_DDL` in
 `db_maintenance.cpp`) because it runs before `sync_schema ()`; the statement is exactly what the
 mapping generates, or `sync_schema ()` would rebuild the table empty. All of it is planned before
-anything is written, so a database with nothing to change is only stamped; otherwise
-`<db>.pre-migration.bak` is written first, as for the fold. A second run finds nothing to change
+anything is written, so a database with nothing to change is only stamped; either way the
+[copy before a migration](#the-copy-before-a-migration-issue-2426) is written first. A second run finds nothing to change
 and grants nothing twice. A database already at `6` does not run it on its way to a later
 version (`plan_file_trust_migration` plans nothing from `6` on), so a root rule that has since
 moved never removes a folder allowed under the rule it was written with. **The cost**: a body a
@@ -375,8 +410,8 @@ transaction, for any database below version `7`, after the file-grants step:
   sub-folder, trashed or live, is untouched.
 
 `plan_sibling_order_shift` (`db_maintenance.cpp`) reads one shift per collection before anything
-is written, so a database with no request beside a sub-folder is only stamped; otherwise
-`<db>.pre-migration.bak` is written first, as for the fold. A plan read SQLite refuses throws
+is written, so a database with no request beside a sub-folder is only stamped; either way the
+[copy before a migration](#the-copy-before-a-migration-issue-2426) is written first. A plan read SQLite refuses throws
 rather than reading as "nothing to shift", and a refused shift rolls the whole transaction back
 with `user_version` unmoved. The step is not idempotent on its own - run twice, it would shift
 twice - so the version stamp, written in the same transaction, is its only done-marker.
@@ -389,7 +424,10 @@ without `preserve`: an older engine opening a database with a column it does not
 that table without it. It is also bumped by a migration step that must run exactly once and that an
 older engine must not read past (versions `4`, `6` and `7`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
 workspace, every engine that carries the version gate refuses it at startup (the refusal above), so
-the release that carries a bump says so in its notes. The gate first shipped in `0.27.0`: `0.26.0`
+the release that carries a bump says so in its notes. The way back is the
+[copy before a migration](#the-copy-before-a-migration-issue-2426): install the older release, then
+restore `backups/vayu-<stamp>-pre-v<N>.db` as [architecture.md](architecture.md#restoring)
+describes; anything written since the update is not in it. The gate first shipped in `0.27.0`: `0.26.0`
 and earlier have none, and opening a newer workspace with one rebuilds `requests` and `collections`
 empty (their `pre_request_script` / `post_request_script` columns are `NOT NULL` with no default, which
 sqlite_orm cannot add to an existing table) and then copies that emptied file over `<db>.bak`, with no
@@ -1835,8 +1873,9 @@ chunks already committed. Blob dedup spans the whole flush, not one chunk.
 
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
-latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time
-spent queued inside the generator. A buffered design send adds a ninth, **`engineMs`** (#2132):
+latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME` less its wait for a connection slot (#2394);
+`queueWaitMs = totalMs − wireMs` is time spent queued before the wire, inside the generator or in
+libcurl (see [the split](api-reference.md#post-execute)). A buffered design send adds a ninth, **`engineMs`** (#2132):
 Vayu's own cost for that exchange, the handler's elapsed time less `wireMs`, script time and an OAuth 2.0 token fetch, taken
 before the write (see [One timing
 convention](api-reference.md#post-execute)). No other writer stores it.

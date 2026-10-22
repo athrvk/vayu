@@ -446,12 +446,19 @@ const std::vector<std::string>& seeded_from);
 
 /**
  * @brief libcurl's cumulative phase timers, in seconds, for one transfer.
+ *
+ * Every timer counts from the transfer's start, which is before libcurl waits
+ * for a connection slot (`CURLMOPT_MAX_HOST_CONNECTIONS`), so each one
+ * includes that wait (#2394). `queue` is the wait as libcurl reports it
+ * (`CURLINFO_QUEUE_TIME_T`); read it through @ref curl_queue_seconds.
  */
 struct CurlPhaseTimes {
     double total         = 0.0;
+    double queue         = 0.0;
     double namelookup    = 0.0;
     double connect       = 0.0;
     double appconnect    = 0.0;
+    double pretransfer   = 0.0;
     double starttransfer = 0.0;
 };
 
@@ -461,15 +468,49 @@ struct CurlPhaseTimes {
 CurlPhaseTimes read_phase_times (CURL* curl);
 
 /**
+ * @brief How long libcurl held the transfer waiting for a connection slot, in
+ *        seconds: `CURLINFO_QUEUE_TIME_T`, bounded by PRETRANSFER and TOTAL.
+ *
+ * curl 8.23 overstates the raw reading: every retry out of the pending state
+ * adds the whole wait so far again (`TIMER_POSTQUEUE` in lib/progress.c), so a
+ * transfer passed over more than once can report more queue than its total -
+ * measured, 6006ms on a 2027ms transfer. The wait ends before PRETRANSFER,
+ * which is stamped once, so that bounds it. The bound's cost: a slot that
+ * opens a fresh connection after a retried wait counts its DNS, connect and
+ * TLS as queue. A transfer that never reached PRETRANSFER is bounded by TOTAL
+ * alone.
+ */
+[[nodiscard]] double curl_queue_seconds (const CurlPhaseTimes& times);
+
+/**
+ * @brief The transfer's time on the wire, in seconds: TOTAL less
+ *        @ref curl_queue_seconds.
+ */
+[[nodiscard]] double wire_seconds (const CurlPhaseTimes& times);
+
+/**
  * @brief Turn cumulative phase timers into the non-negative per-phase durations
  *        stored in `Timing` and rendered by the app.
  *
- * `CURLINFO_APPCONNECT_TIME` is 0 for plain HTTP and for a reused keep-alive
- * connection, so the naive successive differences render TLS as a negative
- * duration and let TTFB absorb the connect time. A zero appconnect means "no
- * TLS phase" and collapses onto connect; every delta is clamped at 0.
+ * Each timer is measured after libcurl's queue (@ref curl_queue_seconds), so a
+ * transfer that waited for a slot on a reused connection does not report the
+ * wait as time to first byte. `CURLINFO_APPCONNECT_TIME` is 0 for plain HTTP
+ * and for a reused keep-alive connection, so the naive successive differences
+ * render TLS as a negative duration and let TTFB absorb the connect time. A
+ * zero appconnect means "no TLS phase" and collapses onto connect; every delta
+ * is clamped at 0.
  */
 void apply_phase_timings (Timing& timing, const CurlPhaseTimes& times);
+
+/**
+ * @brief A finished transfer's `Timing` from its clocks: @p perceived_ms as the
+ *        total, @ref wire_seconds as the wire time, the rest as queue wait,
+ *        and the phases.
+ *
+ * The one copy the event loop, the Client and the SSE stream share, so a
+ * design send and a load run cannot disagree about what queue wait means.
+ */
+void apply_transfer_timing (Timing& timing, const CurlPhaseTimes& times, double perceived_ms);
 
 /**
  * @brief Hand a configured easy handle to a multi handle.

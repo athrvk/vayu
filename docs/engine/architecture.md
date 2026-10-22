@@ -322,7 +322,13 @@ system resolver. Three rules make that safe:
 
 **Configuration:**
 - Max concurrent requests per worker: 1000 (configurable)
-- Max connections per host: 100
+- Max connections per host: 200 per worker (`eventLoopMaxPerHost`), raised
+  by a load run to each worker's share of its virtual users,
+  `ceil(concurrency / workers)` (`effective_max_per_host`, #2394), and reported
+  as a `per_host_limit_raised` run warning when it was. Below that share libcurl
+  queues the rest of a worker's transfers while the run counts them in flight;
+  that wait is libcurl's `CURLINFO_QUEUE_TIME_T`, taken off the wire time and
+  counted as queue wait (`detail::curl_queue_seconds`)
 - Poll timeout: 1ms (kept short because a submission interrupts the poll via
   `curl_multi_wakeup`; on Windows see **Timer resolution** below for what makes
   a 1ms wait 1ms)
@@ -1402,7 +1408,7 @@ Default configuration values (from `constants.hpp`):
 |---------|---------|-------------|
 | Port | 9876 | HTTP server port |
 | Max Concurrent | 1000 | Per worker event loop |
-| Max Per Host | 100 | Connections per hostname |
+| Max Per Host | 200 | Connections per hostname, per worker; a load run raises it to cover its virtual users |
 | Poll Timeout | 10ms | Event loop poll interval |
 | DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
 | Max Response Body | 32MB | Per load-test transfer; larger fails the request |
@@ -1420,7 +1426,8 @@ data/
 │   ├── vayu.db.bak      # Re-snapshotted once listening and at a clean shutdown - crash recovery, not a user backup
 │   ├── ca-bundle.pem    # The merged CA bundle written when custom certificates are configured
 │   └── backups/
-│       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
+│       ├── vayu-<stamp>.db          # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
+│       └── vayu-<stamp>-pre-v<N>.db # Saved before an update migrated the workspace from schema N
 ├── logs/
 │   ├── engine_<stamp>.log   # One file per daemon start (UTC timestamps inside, %Y%m%d_%H%M%S in the name)
 │   ├── engine_<stamp>.log.1 # The rotated half of a file that reached the size cap
@@ -1458,9 +1465,17 @@ snapshot and writes a defragmented database that is complete on its own.
 
 Names are UTC and fixed-width so they sort chronologically as text. After each
 backup the newest `maxBackupsRetained` snapshots are kept (default 5, `0` =
-unlimited) and older ones removed - **only files matching `vayu-<stamp>.db`**,
-so a copy you put in that directory yourself is left alone. A second backup
-requested while one is running is refused with `409` rather than queued.
+unlimited) and older ones removed - **only files matching `vayu-<stamp>.db` or
+`vayu-<stamp>-<label>.db`**, so a copy you put in that directory yourself is
+left alone. A second backup requested while one is running is refused with
+`409` rather than queued.
+
+The engine writes into the same directory on its own, under the same count:
+`vayu-<stamp>-pre-v<N>.db` before an update migrates the workspace from schema
+version `N`, and `vayu-<stamp>-pre-repair.db` before a one-time repair pass
+rewrites stored rows ([db-schema.md](db-schema.md#the-copy-before-a-migration-issue-2426)).
+A start that cannot write the first refuses to migrate rather than migrate
+without it.
 
 #### Restoring
 
@@ -1474,6 +1489,11 @@ Restore by hand, with the engine stopped.
    belong to the database you just replaced, and leaving them behind reapplies
    its writes on top of the snapshot.
 4. Start Vayu again.
+
+**Going back to an older Vayu.** An older engine refuses a workspace a newer
+one migrated. The `vayu-<stamp>-pre-v<N>.db` the update saved is the workspace
+as schema version `N` held it: install the older release, then restore that
+snapshot with the steps above. Anything written since the update is not in it.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
