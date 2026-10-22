@@ -445,7 +445,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					resolve();
 				},
 				onError: (error: unknown) => {
-					failSave(error instanceof Error ? error.message : "Couldn't save");
+					failSave(error instanceof Error ? error.message : "Couldn't save", error);
 					reject(error);
 				},
 			};

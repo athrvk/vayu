@@ -402,6 +402,67 @@ describe("flushAll", () => {
 			});
 		});
 
+		describe("a context that publishes its failure through failSave and resolves (#2685)", () => {
+			const diskFull = () =>
+				new ApiError(507, "insufficient_storage", "The disk holding Vayu's data is full");
+
+			const registerSilent = (id: string, cause?: unknown) =>
+				useSaveStore.getState().registerContext({
+					id,
+					name: id,
+					save: () => {
+						useSaveStore.getState().failSave(`Couldn't save ${id}`, cause);
+						return Promise.resolve();
+					},
+					hasPendingChanges: true,
+				});
+
+			it("is disk-full when failSave was handed the 507", async () => {
+				registerSilent("settings", diskFull());
+
+				await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+					saved: 0,
+					failed: 1,
+					pending: 0,
+					reason: "disk-full",
+				});
+			});
+
+			it("is failed, with no cause, when failSave was handed none", async () => {
+				registerSilent("settings");
+
+				const result = await useSaveStore.getState().flushAll();
+
+				expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
+				expect(result).not.toHaveProperty("reason");
+			});
+
+			it("is failed, with no cause, when failSave was handed any other error", async () => {
+				registerSilent("settings", new ApiError(503, "unavailable", "busy"));
+
+				expect(await useSaveStore.getState().flushAll()).not.toHaveProperty("reason");
+			});
+
+			it("drops the cause when a later cause-less failure replaces it", async () => {
+				useSaveStore.getState().failSave("Couldn't save", diskFull());
+				expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
+
+				registerSilent("settings");
+				const result = await useSaveStore.getState().flushAll();
+
+				expect(useSaveStore.getState().lastErrorDiskFull).toBe(false);
+				expect(result).not.toHaveProperty("reason");
+			});
+
+			it("clears the cause on reset", () => {
+				useSaveStore.getState().failSave("Couldn't save", diskFull());
+
+				useSaveStore.getState().reset();
+
+				expect(useSaveStore.getState().lastErrorDiskFull).toBe(false);
+			});
+		});
+
 		it("has no 'reason' key when nothing failed", async () => {
 			registerContext("request-1", true);
 

@@ -109,6 +109,14 @@ interface SaveState {
 	 */
 	lastErrorMessage: string | null;
 
+	/**
+	 * Whether the last `failSave` was handed the engine's 507 as its cause
+	 * (#2685). It is how a context that publishes its failure and then resolves
+	 * gets judged `disk-full` rather than `failed`; `failSave` and `reset` write
+	 * it together with `lastErrorMessage`, so it never outlives the message.
+	 */
+	lastErrorDiskFull: boolean;
+
 	// Active save context - the context that's currently focused/active
 	activeContextId: string | null;
 
@@ -139,7 +147,12 @@ interface SaveState {
 	 * nobody and is therefore measured against all of them.
 	 */
 	completeSaveThenIdle: (reportingContextId?: string) => void;
-	failSave: (error: string) => void;
+	/**
+	 * Report a failed save. `cause` is the error behind `message` when there is
+	 * one: a 507 in it is recorded so a context that resolves after publishing
+	 * the failure still counts as `disk-full` (see `outcomeFromPublishedStatus`).
+	 */
+	failSave: (message: string, cause?: unknown) => void;
 	/**
 	 * Withdraw the edit `contextId` reported as unsaved because it was thrown
 	 * away, not written: nothing was saved, so the Dock goes back to `idle`
@@ -198,11 +211,11 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// against a success), and the next context to resolve would read that as its
 	// own verdict. The batch fills in once, after every verdict is in.
 	//
-	// Silence cannot name a cause: `failSave` receives text, not the error, so
-	// such a context reads `failed` even when its write met a 507.
+	// The cause comes from the `cause` that context handed `failSave`, so a
+	// 507 reads `disk-full` here; a failSave given no cause reads `failed`.
 	const outcomeFromPublishedStatus = (context: SaveContext, fillIn: FillIn): SaveOutcome => {
-		const published = get().status;
-		if (published === "error") return "failed";
+		const { status: published, lastErrorDiskFull } = get();
+		if (published === "error") return lastErrorDiskFull ? "disk-full" : "failed";
 		if (published === "pending") return "pending";
 		fillIn(context);
 		return "saved";
@@ -239,7 +252,8 @@ export const useSaveStore = create<SaveState>((set, get) => {
 				: outcomeFromPublishedStatus(context, fillIn);
 		} catch (error) {
 			get().failSave(
-				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
+				error
 			);
 			return isDiskFullError(error) ? "disk-full" : "failed";
 		}
@@ -248,6 +262,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	return {
 		status: "idle",
 		lastErrorMessage: null,
+		lastErrorDiskFull: false,
 		activeContextId: null,
 		contexts: new Map(),
 
@@ -307,9 +322,13 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			}, TIMING.SAVED_STATUS_DURATION_MS);
 		},
 
-		failSave: (error) => {
-			set({ status: "error", lastErrorMessage: error });
-			useToastStore.getState().showToast(error, "error");
+		failSave: (message, cause) => {
+			set({
+				status: "error",
+				lastErrorMessage: message,
+				lastErrorDiskFull: isDiskFullError(cause),
+			});
+			useToastStore.getState().showToast(message, "error");
 		},
 
 		discardPendingSave: (contextId) => {
@@ -319,7 +338,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			get().reset();
 		},
 
-		reset: () => set({ status: "idle", lastErrorMessage: null }),
+		reset: () => set({ status: "idle", lastErrorMessage: null, lastErrorDiskFull: false }),
 
 		// Context management
 		registerContext: (context) => {

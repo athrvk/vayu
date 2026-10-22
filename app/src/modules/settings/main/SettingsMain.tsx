@@ -355,7 +355,8 @@ export default function SettingsMain() {
 				failSave(
 					err instanceof Error
 						? `Couldn't save settings - ${err.message}`
-						: "Couldn't save settings"
+						: "Couldn't save settings",
+					err
 				);
 			}
 		},

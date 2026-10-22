@@ -31,6 +31,7 @@ import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
 import { useSaveStore } from "@/stores/save-store";
+import { ApiError } from "@/services/http-client";
 import type { ResolvedVariable } from "@/types";
 
 const globalsMutate = vi.fn();
@@ -159,5 +160,48 @@ describe("VariablesSection - a rejected variable edit", () => {
 
 		delete resolved.missing;
 		resolved.host = { value: "example.com", scope: "global" };
+	});
+});
+
+describe("VariablesSection - a variable edit the engine answered 507 at quit (#2685)", () => {
+	beforeEach(() => {
+		globalsMutate.mockReset();
+		useToastStore.setState({ toasts: [] });
+		useSaveStore.getState().reset();
+	});
+
+	/** Edit and blur with the write held in flight, then start the quit-time flush. */
+	async function flushWhileInFlight(rejectWith: Error) {
+		let handlers: { onError: (e: Error) => void; onSettled: () => void } | null = null;
+		globalsMutate.mockImplementation((_payload: unknown, h: NonNullable<typeof handlers>) => {
+			handlers = h;
+		});
+		renderSection();
+		const input = valueInput();
+		act(() => {
+			fireEvent.change(input, { target: { value: "example.org" } });
+			fireEvent.blur(input);
+		});
+		const flush = useSaveStore.getState().flushAll();
+		await act(async () => {
+			handlers?.onError(rejectWith);
+			handlers?.onSettled();
+			await flush;
+		});
+		return flush;
+	}
+
+	it("reaches the quit prompt as disk-full", async () => {
+		const result = await flushWhileInFlight(
+			new ApiError(507, "insufficient_storage", "The disk holding Vayu's data is full")
+		);
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0, reason: "disk-full" });
+	});
+
+	it("names no cause for any other failure", async () => {
+		const result = await flushWhileInFlight(new ApiError(503, "unavailable", "busy"));
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
 	});
 });

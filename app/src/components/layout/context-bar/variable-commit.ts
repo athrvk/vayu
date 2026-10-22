@@ -226,9 +226,9 @@ export function useVariableCommit(): (
 		const newValue = input.value;
 		if (newValue === resolved.value) return;
 
-		const rollBack = (message: string) => {
+		const rollBack = (message: string, cause?: unknown) => {
 			input.value = resolved.value;
-			failSave(message);
+			failSave(message, cause);
 		};
 		// `failSave` is the app's one save-failure surface (it toasts and sets the
 		// Dock's status) - see the note on it in save-store.
@@ -261,7 +261,10 @@ export function useVariableCommit(): (
 				const current = scope.read();
 				if (current) scope.write(mergeVariableChanges(current, { [name]: previous }));
 				const fallback = `Couldn't save {{${name}}}`;
-				rollBack(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+				rollBack(
+					error instanceof Error ? `${fallback} - ${error.message}` : fallback,
+					error
+				);
 			},
 			onSettled: settle,
 		});

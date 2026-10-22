@@ -95,13 +95,15 @@ everything.
   `"disk-full"` only when every failure was one, and the prompt then says the
   disk is full instead of blaming the engine. Each context reports
   its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
-  store reading back the one shared status; only a context whose save rejects
-  with the `ApiError` can report `disk-full` (`useSaveManager`,
-  `useDraftSaveContext`'s collection editors, the store's own catch), while one that publishes
-  through `failSave` and resolves (`SettingsMain`, `VariableTableEditor`,
-  `variable-commit`, the inbox `CannedResponseControls`) is judged by the status it published and reads `failed` (`failSave` is
-  handed text, not the error), so the quit prompt keeps its generic wording
-  for it; a save an editor declines to send
+  store reading back the one shared status. A 507 reaches that verdict three
+  ways: a save that rejects with the `ApiError` (`useSaveManager`,
+  `useDraftSaveContext`'s collection editors, the store's own catch), a save
+  that returns the verdict itself (the inbox `CannedResponseControls`), and a
+  context that publishes through `failSave` and resolves (`SettingsMain`,
+  `variable-commit`), which is judged by the status it published and so must
+  pass the error as `failSave(message, error)` - the store keeps whether it was
+  a 507 (`lastErrorDiskFull`), and a call that omits the error reads `failed`
+  (#2685); a save an editor declines to send
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
   blame the engine for it. An editor takes part
   by registering a save context; one that saves on its own is outside all of
