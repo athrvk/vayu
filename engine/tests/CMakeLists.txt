@@ -406,6 +406,7 @@ set(vayu_scratch_database_suites
     LoadReplayEventsTest
     LoadScriptScopesTest
     LoadStrategyTest
+    MetricsCollectorFlushTest
     MidRunRefreshTest
     MockIssuerTest
     MockServerTest

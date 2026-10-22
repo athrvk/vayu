@@ -146,8 +146,10 @@ struct CapturedExchange {
  * @brief Record for a single request result (lighter than db::Result)
  */
 struct ResultRecord {
-    int64_t timestamp    = 0;
-    int status_code      = 0;
+    int64_t timestamp = 0;
+    int status_code   = 0;
+    /// On an error record, the failed transfer's duration (AttemptDuration),
+    /// or 0 for a request that never left.
     double latency_ms    = 0.0;
     ErrorCode error_code = ErrorCode::None;
     std::string error_message;

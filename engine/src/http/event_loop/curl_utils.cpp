@@ -1213,6 +1213,36 @@ const ConnectedPeerCheck* peer_check) {
     return error;
 }
 
+namespace {
+
+/// The codes libcurl raises while checking the request it was handed, before
+/// it resolves a name or opens a socket: a URL it cannot parse, a scheme the
+/// handle's allowlist refuses. Each also has a source after the wire (a
+/// redirect's `Location`, a status line naming an unknown HTTP version), which
+/// `reached_a_peer` tells apart. Every other code is raised by work on the
+/// network: a TLS file libcurl cannot read (`CURLE_SSL_CERTPROBLEM`,
+/// `CURLE_SSL_CACERT_BADFILE`, `CURLE_SSL_CRL_BADFILE`) is read during the
+/// handshake, after the TCP connect.
+bool refused_before_connecting (CURLcode code) {
+    return code == CURLE_URL_MALFORMAT || code == CURLE_UNSUPPORTED_PROTOCOL;
+}
+
+/// libcurl clears the primary address when a transfer starts and sets it once
+/// a connection, new or reused, is up at the IP level, even when the TLS
+/// handshake above it then fails. A redirect's earlier hop leaves it set for a
+/// later hop's refusal.
+bool reached_a_peer (CURL* curl) {
+    char* ip = nullptr;
+    return curl != nullptr && get_info<CURLINFO_PRIMARY_IP> (curl, &ip) == CURLE_OK &&
+    ip != nullptr && *ip != '\0';
+}
+
+} // namespace
+
+bool curl_transfer_attempted (CURL* curl, CURLcode code) {
+    return !refused_before_connecting (code) || reached_a_peer (curl);
+}
+
 const ClientCertRule* apply_transport_policy (CURL* curl,
 const TransportPolicy& policy,
 bool verify_ssl,
@@ -1494,7 +1524,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     response.timing.wire_ms       = wire_ms;       // new
     response.timing.queue_wait_ms = queue_wait_ms; // new
     apply_phase_timings (response.timing, phase_times);
-    response.transfer_attempted = true;
+    response.transfer_attempted = curl_transfer_attempted (curl, result);
 
     // Wire byte counts (body + headers), for throughput-in-bytes metrics.
     curl_off_t dl_bytes = 0, ul_bytes = 0;

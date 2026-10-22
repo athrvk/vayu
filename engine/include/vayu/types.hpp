@@ -896,16 +896,21 @@ struct Response {
     Timing timing;
 
     /**
-     * @brief True when libcurl ran a transfer for this response, so `timing`
-     *        is a measurement - answered or not (#2384).
+     * @brief True when libcurl ran a transfer for this response that reached
+     *        the network, so `timing` is a measurement - answered or not
+     *        (#2384).
      *
      * Set by each driver where it stamps `timing` after a transfer
-     * (`extract_response`, `Client::send`, `consume_sse_stream`), and false on
-     * a response built for a request that never left: `error_response`, a
-     * residual or file-rule refusal, a default `Response`. It decides which
-     * failures join a run's latency population. `timing.total_ms > 0` cannot
-     * say it: a refusal reads 0 and so could a real transfer under a coarse
-     * clock.
+     * (`extract_response`, `Client::send`, `consume_sse_stream`) from
+     * `detail::curl_transfer_attempted`, and false on a response built for a
+     * request that never left: `error_response`, a residual or file-rule
+     * refusal, a default `Response`. A transfer libcurl refused before it
+     * resolved or connected (a URL it cannot parse, a scheme the handle does
+     * not allow) is false too (#2412); a resolve failure, a refused connection
+     * and a TLS file libcurl could not read are attempts, because each is
+     * raised by work on the network. It decides which failures join a run's
+     * latency population. `timing.total_ms > 0` cannot say it: a refusal reads
+     * 0 and so could a real transfer under a coarse clock.
      */
     bool transfer_attempted = false;
 

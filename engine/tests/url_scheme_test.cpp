@@ -278,6 +278,9 @@ TEST (UrlSchemeRedirect, ARedirectToAFileUrlIsAProtocolErrorNotARead) {
 // libcurl's own default already keeps a redirect off `file`, but not off FTP:
 // its default redirect allowlist is HTTP, HTTPS, FTP and FTPS. Port 1 refuses
 // the connection, so a handle that followed would report CONNECTION_FAILED.
+// The refusal's code is the one a refused URL gets, but the first hop was
+// answered, so the transfer is timed (#2412). Mutation-check: drop the peer
+// half of `curl_transfer_attempted` and both drivers read it as never sent.
 TEST (UrlSchemeRedirect, ARedirectToFtpIsRefusedOnBothDrivers) {
     const vayu::tests::EchoServer server;
     auto request = get (server.redirect_to ("ftp://127.0.0.1:1/pub/x"));
@@ -287,6 +290,7 @@ TEST (UrlSchemeRedirect, ARedirectToFtpIsRefusedOnBothDrivers) {
     const auto sent = client.send (request);
     ASSERT_TRUE (sent.is_ok ());
     expect_protocol_refusal (sent.value ());
+    EXPECT_TRUE (sent.value ().transfer_attempted);
 
     vayu::http::EventLoop loop;
     loop.start ();
@@ -295,16 +299,38 @@ TEST (UrlSchemeRedirect, ARedirectToFtpIsRefusedOnBothDrivers) {
     loop.stop ();
     ASSERT_TRUE (looped.is_ok ());
     expect_protocol_refusal (looped.value ());
+    EXPECT_TRUE (looped.value ().transfer_attempted);
 }
 
 // A URL naming no scheme passes the URL check (that is today's behaviour), and
 // libcurl guesses one from the host. An `ftp.` host guesses FTP, which the
-// handle's allowlist refuses before anything is resolved.
+// handle's allowlist refuses before anything is resolved, so no driver times
+// it (#2412). Mutation-check: set `transfer_attempted` true unconditionally in
+// any one driver and its half fails.
 TEST (UrlSchemeRedirect, AGuessedSchemeIsHeldToTheHandlesAllowlist) {
+    const vayu::Request request = get ("ftp.localhost:1/pub/x");
+
     vayu::http::Client client;
-    const auto result = client.send (get ("ftp.localhost:1/pub/x"));
-    ASSERT_TRUE (result.is_ok ());
-    expect_protocol_refusal (result.value ());
+    const auto sent = client.send (request);
+    ASSERT_TRUE (sent.is_ok ());
+    expect_protocol_refusal (sent.value ());
+    EXPECT_FALSE (sent.value ().transfer_attempted);
+
+    vayu::http::EventLoop loop;
+    loop.start ();
+    const auto looped = loop.submit_async (request).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (looped.is_ok ());
+    expect_protocol_refusal (looped.value ());
+    EXPECT_FALSE (looped.value ().transfer_attempted);
+
+    vayu::http::SseStreamRequest spec;
+    spec.run_id  = "run_guessed_scheme";
+    spec.request = request;
+    vayu::http::SseStreamContext context (spec.run_id, spec.limits);
+    const auto streamed = vayu::http::consume_sse_stream (spec, context);
+    expect_protocol_refusal (streamed);
+    EXPECT_FALSE (streamed.transfer_attempted);
 }
 
 /// What one transfer through a bare handle ended with.

@@ -77,6 +77,19 @@ const Request* request               = nullptr,
 const ConnectedPeerCheck* peer_check = nullptr);
 
 /**
+ * @brief Whether a transfer libcurl finished with @p code reached the network,
+ *        which is what `Response::transfer_attempted` records (#2412).
+ *
+ * False only for a URL libcurl could not parse or a scheme the handle refuses,
+ * and then only while @p curl never reached a peer: a redirect whose target
+ * is refused, and a reply libcurl cannot read, arrive as the same codes after
+ * real hops. Every other code, a resolve failure and an unreadable client
+ * certificate included, is an attempt. Read before anything else reuses the
+ * handle. A null handle reads as one that reached no peer.
+ */
+[[nodiscard]] bool curl_transfer_attempted (CURL* curl, CURLcode code);
+
+/**
  * @brief Put the transport policy on a handle: the protocols it may speak, TLS
  *        verification and the proxy.
  *
