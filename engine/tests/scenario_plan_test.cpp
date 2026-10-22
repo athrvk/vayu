@@ -403,13 +403,57 @@ TEST_F (ScenarioPlanTest, StepMatchesWhatComposeReturnsForTheSameRequest) {
     EXPECT_TRUE (saw_pre);
     EXPECT_TRUE (saw_post);
 
-    // Environment variables resolved, and auth applied into the plan.
-    EXPECT_EQ (step.request.url, "https://api.example.test/orders/42");
-    ASSERT_EQ (step.request.headers.count ("Authorization"), 1u);
-    EXPECT_EQ (step.request.headers.at ("Authorization"), "Bearer s3cret");
+    // The collection's pre-request script runs before this step, so its names
+    // wait for the pass after it (#2521) and its credential for the auth
+    // applied after it (#2473) - not written into the plan.
+    EXPECT_EQ (step.request.url, "https://{{host}}/orders/{{id}}");
+    EXPECT_EQ (step.request.headers.count ("Authorization"), 0u);
+    EXPECT_TRUE (step.auth_after_scripts);
 
     EXPECT_EQ (step.name, "Request req");
     EXPECT_EQ (step.stored_url, "https://{{host}}/orders/{{id}}");
+}
+
+// The same request with no pre-request script above it: the plan carries the
+// environment's values and the applied auth, exactly as before #2521.
+TEST_F (ScenarioPlanTest, AnUnscriptedStepResolvesItsNamesAndAuthIntoThePlan) {
+    seed_collection ("col", "");
+    seed_request ("req", "col", /*order=*/0, "https://{{host}}/orders/{{id}}",
+    /*auth=*/R"({"mode":"bearer","token":"{{token}}"})");
+    seed_environment ("env",
+    R"({"host":{"value":"api.example.test","enabled":true},
+        "id":{"value":"42","enabled":true},
+        "token":{"value":"s3cret","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps.at (0);
+    EXPECT_EQ (step.request.url, "https://api.example.test/orders/42");
+    ASSERT_EQ (step.request.headers.count ("Authorization"), 1u);
+    EXPECT_EQ (step.request.headers.at ("Authorization"), "Bearer s3cret");
+    EXPECT_FALSE (step.auth_after_scripts);
+}
+
+// A scripted step under the run's deferred generators (#995, #2521): the
+// generator is still split into the per-iteration template, once, and the
+// deferred name is not - the residual pass after the script answers it.
+TEST_F (ScenarioPlanTest, AScriptedStepSplitsItsGeneratorAndLeavesItsNameToThePass) {
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"",
+    /*pre_script=*/"pm.environment.set('id', '9');");
+    seed_request ("req", "col", 0, "https://api.example.test/{{$randomUUID}}/{{id}}");
+    seed_environment ("env", R"({"id":{"value":"42","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps.at (0);
+
+    EXPECT_EQ (step.request.url, "https://api.example.test/{{$randomUUID}}/{{id}}");
+    ASSERT_EQ (step.data_template.fields.size (), 1u);
+    EXPECT_EQ (step.data_template.fields[0].tokens, std::vector<std::string>{ "$randomUUID" });
 }
 
 // Issue #995. A plan step is composed once and sent per iteration, so its

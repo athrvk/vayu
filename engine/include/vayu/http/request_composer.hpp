@@ -21,11 +21,14 @@
  * execute-ready payload that `POST /execute` / `POST /runs` accept unchanged.
  *
  * Composition is deliberately *pure* - it never sends, never creates a run
- * row, and never runs a script. Interpolation therefore always happens
- * strictly before the pre-request script (decision D1 of #226: today's
- * semantics, not Postman's script-first order), and a payload that skips
- * composition is never interpolated at all, so nothing can be resolved twice
- * (D12).
+ * row, and never runs a script. A request no pre-request script runs before is
+ * interpolated here, once (decision D1 of #226). One that has a pre-request
+ * script - its own `script.pre` or one a folder or the collection composes in -
+ * keeps every name a scope answers written as `{{name}}` (issue #2521,
+ * Postman's script-first order): the residual pass resolves it after the
+ * script, against what the script set, and the payload's `deferredVariables`
+ * lists it. A payload that skips composition is never interpolated here at
+ * all, so nothing is resolved twice (D12).
  *
  * The behavioural contracts (issue #226, "Behaviour that must not change"):
  *  - an unknown plain name keeps its braces, and so does an unknown `$name`
@@ -357,6 +360,32 @@ bool encode,
 const BoundColumnNames& bound_columns = {},
 DynamicResolution dynamic             = DynamicResolution::Generate);
 
+/// The variable whose value cannot be written into a header line, and whether
+/// its bytes end that line or cut it short (`http/header_text.hpp`).
+struct HeaderTextRefusal {
+    std::string variable;
+    bool line_break = true;
+};
+
+/**
+ * @ref resolve_template for header text: the same lookup, recording in
+ * @p refusal the first variable whose value could not be spelled in a header
+ * line (issue #738). Checked on each substituted value rather than on the
+ * finished text, so a CR the user typed into the header is not blamed on a
+ * variable; the pre-send gate refuses that one, naming the header.
+ *
+ * The residual pass resolves a header through this too (#2521): a request a
+ * pre-request script runs before keeps its variables written through
+ * composition, so this is where such a variable is first seen.
+ */
+std::string resolve_header_template (const std::string& input,
+const VariableValues& vars,
+std::optional<HeaderTextRefusal>& refusal);
+
+/// The refusal a header-bound variable carrying an unspellable byte reads as,
+/// answered under `UNSENDABLE_HEADER_CODE` (`http/header_text.hpp`).
+[[nodiscard]] std::string describe_header_text_refusal (const HeaderTextRefusal& refusal);
+
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.
  *
@@ -501,6 +530,12 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
  * family belongs to each iteration rather than to this one composition (issue
  * #995, `DynamicResolution::Defer`). A client that omits both composes exactly
  * as it always did.
+ *
+ * Whether the request has a pre-request script is read from the composed
+ * `elements`, never from the caller (#2521). When it has, the 200 body carries
+ * **`deferredVariables`**: the sorted names left written because a scope
+ * answers them and the script may change that answer. Absent when none was.
+ * It describes this answer only; `POST /execute` and `POST /runs` ignore it.
  *
  * Extracted from the route (routes/compose.cpp) so request_composer_test.cpp
  * can drive it against a real database without an in-process HTTP server,

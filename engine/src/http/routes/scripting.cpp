@@ -636,8 +636,11 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "The full request URL, as Postman's Url object: protocol, host, port, "
     "path, query and hash, plus getHost(), getPath(), getQueryString(), "
-    "addQueryParams(), removeQueryParams() and toString(). {{variables}} are "
-    "already resolved here.\n\nIt still behaves "
+    "addQueryParams(), removeQueryParams() and toString(). In a pre-request "
+    "script a {{variable}} is still written as its token, and resolves after "
+    "the script against what it set; a test script reads the URL as "
+    "sent.\n\nIt "
+    "still behaves "
     "as the string it used to be - concatenation, template literals, ==, the "
     "String methods and .length all give the full URL - so `===` and `typeof` "
     "are the two things that changed. Assign a string to retarget "

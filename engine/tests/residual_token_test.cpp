@@ -11,9 +11,11 @@
  *
  * The pattern every imported Postman collection with authentication is written
  * in: a pre-request script fetches a token, `pm.environment.set("token", …)`,
- * and the request sends `Bearer {{token}}`. Composition runs strictly before
- * that script (#226's decision D1), so the send used to carry the *previous*
- * run's token - or nothing at all on the first - and said nothing about it.
+ * and the request sends `Bearer {{token}}`. Resolved before that script, the
+ * send carried the *previous* run's token - or nothing at all on the first -
+ * and said nothing about it. Composition leaves the token written for a
+ * request a pre-request script runs before (#2521), and this pass answers it
+ * after the script.
  *
  * Two halves are pinned here:
  *
@@ -240,10 +242,12 @@ TEST (ResidualTokens, InheritsTheNestedResolutionAndItsCycleBound) {
     EXPECT_EQ (cycled.url, "https://example.test/{{a}}");
 }
 
-/// The guard that matters: a script redefining a name composition **already
-/// answered** must not rewrite what composition sent. It cannot, and the reason
-/// is structural rather than a rule the pass enforces - a substituted token's
-/// `{{name}}` text is gone from the request, so there is nothing left to match.
+/// The pass never resolves twice: text composition substituted - every name of
+/// a request no pre-request script runs before - is finished, even when a
+/// script defines the name again, because the `{{name}}` text is gone from the
+/// request and there is nothing left to match. A request a script *does* run
+/// before reaches the pass with its names still written (#2521,
+/// `request_composer_test.cpp`), which is how the script's value gets in.
 /// Composed here by the real resolver, so the text under test is the text
 /// `POST /compose` would have produced.
 TEST (ResidualTokens, ARedefinedNameDoesNotRewriteWhatCompositionSubstituted) {
@@ -582,6 +586,62 @@ TEST (ResidualTokens, ANameOfOnlyPaddingIsTheEmptyNameRefusal) {
     EXPECT_EQ (refusal->code, "empty_header_name");
 }
 
+// --- a header variable that cannot sit in a line (#738, #2521) ---------------
+//
+// Composition refuses a variable whose value ends or cuts a header line, naming
+// it (`unsendable_header`). A request a pre-request script runs before reaches
+// this pass with that variable still written, so the refusal is this pass's,
+// in the same words and under the same code. Mutation check: resolve header
+// values with `resolve_template` (drop `resolve_header_values`) and the first
+// two fail on the refusal they no longer get; resolve names with it in
+// `resolve_header_names` and the third does.
+
+TEST (ResidualTokens, AHeaderValueVariableCarryingALineBreakIsRefusedByName) {
+    vayu::Request request;
+    request.url                = "https://{{host}}/x";
+    request.headers["X-Note"]  = "pre-{{note}}";
+    const vayu::Request before = request;
+
+    auto scopes = environment_with ("note", "ok\r\nX-Admin: true");
+    scopes.environment["host"].value = "api.example.com";
+    const auto refusal = resolve_residual_tokens (request, scopes);
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->error.code, vayu::ErrorCode::InternalError);
+    EXPECT_EQ (refusal->code, "unsendable_header");
+    EXPECT_NE (refusal->error.message.find ("{{note}}"), std::string::npos)
+    << refusal->error.message;
+    // Refused before anything was rewritten: no forged line, no resolved URL.
+    EXPECT_EQ (request.headers, before.headers);
+    EXPECT_EQ (request.url, before.url);
+}
+
+TEST (ResidualTokens, AHeaderValueVariableCarryingANulIsRefusedToo) {
+    vayu::Request request;
+    request.url               = "https://api.example.com/x";
+    request.headers["X-Note"] = "{{note}}";
+
+    const auto refusal = resolve_residual_tokens (
+    request, environment_with ("note", std::string ("a\0b", 3)));
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->code, "unsendable_header");
+}
+
+TEST (ResidualTokens, AHeaderNameVariableCarryingALineBreakIsRefusedByName) {
+    vayu::Request request;
+    request.url                 = "https://api.example.com/x";
+    request.headers["{{name}}"] = "v";
+
+    const auto refusal =
+    resolve_residual_tokens (request, environment_with ("name", "X-A\r\nX-Admin"));
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->code, "unsendable_header");
+    EXPECT_NE (refusal->error.message.find ("{{name}}"), std::string::npos)
+    << refusal->error.message;
+}
+
 // --- the load path's per-VU overlay (issue #1495) ----------------------------
 //
 // `ScopeOverlay` is what makes `resolve_residual_tokens` safe to call once per
@@ -801,6 +861,25 @@ TEST_F (ResidualTokenExchangeTest, AStillUnknownNameGoesOutLiteral) {
 
     ASSERT_EQ (outcome.response.status_code, 200);
     EXPECT_EQ (server_->header ("X-Tenant"), "{{tenant}}");
+}
+
+/// The refusal stops the send and keeps its rule's code beside the status-0
+/// response, which `POST /execute` answers as `refusalCode`. Mutation check:
+/// drop the `refusal_code` write in `execute_exchange` and the code is lost.
+TEST_F (ResidualTokenExchangeTest, ARefusedHeaderVariableIsNeverSentAndKeepsItsCode) {
+    vayu::Request request;
+    request.url               = server_->url () + "/users";
+    request.headers["X-Note"] = "{{note}}";
+
+    ScriptVariableScopes scopes;
+    auto outcome = send (std::move (request), scopes,
+    "pm.environment.set('note', 'ok\\r\\nX-Admin: true');");
+
+    EXPECT_EQ (server_->requests_seen (), 0) << "the forged line went out";
+    EXPECT_EQ (outcome.response.status_code, 0);
+    EXPECT_NE (outcome.response.error_message.find ("{{note}}"), std::string::npos)
+    << outcome.response.error_message;
+    EXPECT_EQ (outcome.refusal_code, "unsendable_header");
 }
 
 /// A skipped step sends nothing, so there is nothing to resolve for: the

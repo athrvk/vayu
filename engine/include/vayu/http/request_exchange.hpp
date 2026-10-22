@@ -565,6 +565,11 @@ struct ExchangeOutcome {
     /// subtracts it from the handler's elapsed time to report `timing.engineMs`
     /// as Vayu's own cost; a collection run does not read it.
     double script_ms = 0.0;
+    /// The rule's code when the residual pass or the late auth refused the
+    /// send (@ref ResidualRefusal::code), beside the status-0 `response`
+    /// carrying its sentence; empty otherwise. `POST /execute` answers it as
+    /// `refusalCode`.
+    std::string refusal_code;
     /**
      * Whether the request was actually sent.
      *
@@ -603,18 +608,17 @@ struct ResidualRefusal {
  * a pre-request script has just written (issue #1008).
  *
  * Composition still happens first, and still exactly once: this pass only ever
- * sees names composition could not answer, because since #1009 those keep their
- * braces instead of resolving to `""`. A value composition *did* substitute is
- * finished text here - the pass reads the request, not composition's decisions -
- * so nothing is resolved twice.
+ * sees the names composition left written - one it could not answer (#1009),
+ * and every name a scope answers in a request a pre-request script runs
+ * before (#2521). A value composition *did* substitute is finished text here -
+ * the pass reads the request, not composition's decisions - so nothing is
+ * resolved twice.
  *
  * It exists because the canonical imported auth pattern is a pre-request script
  * that fetches a token, `pm.environment.set("token", …)`, and a request that
- * sends `Bearer {{token}}`. Composition ran before the script, so without this
- * the send carried the *previous* run's token, or `""` on the first - silently,
- * and against a lenient API successfully. Postman resolves after the script;
- * this is the half of that order Vayu can adopt without moving composition
- * (#226's decision D1 stands - see docs/app/variable-resolution.md).
+ * sends `Bearer {{token}}`. Resolved before the script, the send carried the
+ * *previous* run's token - silently, and against a lenient API successfully.
+ * Postman resolves after the script, and so does a scripted request here.
  *
  * The same rules composition resolves by, because it is the same resolver: a
  * name nothing answers stays literal, a value holding tokens of its own is
@@ -625,15 +629,16 @@ struct ResidualRefusal {
  * @param scopes Read as the scripts left them; the same layering
  *               `pm.variables.get` reads a name through.
  *
- * A request holding no `{{` at all - nearly all of them, composition having
- * resolved what it could - pays one search per field and nothing else.
+ * A request holding no `{{` at all - every unscripted request whose names
+ * composition answered - pays one search per field and nothing else.
  *
- * @return why this request must not be sent, if resolving a header name
- *         produced one the request already carried (`http/header_names.hpp`,
- *         issue #1051) or no name at all (issue #1084) - the two things this
- *         pass can produce that a send cannot survive, because the map holds
- *         one value per name and what is left of an empty one is a `": value"`
- *         line. `std::nullopt` is the ordinary answer, the request resolved in
+ * @return why this request must not be sent: a header variable whose value
+ *         ends or cuts the line (`UNSENDABLE_HEADER_CODE`, refused before
+ *         anything is rewritten), or a resolved header name that lands on one
+ *         the request already carries (`http/header_names.hpp`, issue #1051),
+ *         is nothing (#1084) or is not a token (#2467) - each refused in the
+ *         words and under the code `POST /compose` uses for it.
+ *         `std::nullopt` is the ordinary answer, the request resolved in
  *         place.
  */
 [[nodiscard]] std::optional<ResidualRefusal>
@@ -656,9 +661,10 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
 
 /**
  * Apply auth the build deferred because a credential holds a name only the
- * variable scopes answer (`core::credentials_await_scripts`, issue #2473):
- * each credential resolved against @p vars by the resolver the residual pass
- * uses, then `apply_auth`.
+ * variable scopes answer (`core::credentials_await_scripts`, issue #2473) -
+ * one nothing answered at composition, or any name of a request a pre-request
+ * script runs before (#2521): each credential resolved against @p vars by the
+ * resolver the residual pass uses, then `apply_auth`.
  *
  * Called after the pre-request script and the residual pass, never before:
  * the point is that `pm.environment.set("password", …)` reaches a basic pair

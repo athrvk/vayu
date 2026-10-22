@@ -3066,6 +3066,31 @@ TEST_F (ScenarioRunnerTest, APasswordThePreRequestScriptSetsReachesTheWireThroug
     EXPECT_EQ (vayu::tests::basic_pair_of (seen[0].authorization), "user:s3cret");
 }
 
+// Issue #2521: a value a pre-request script replaces reaches a later step even
+// though the environment already held one - the stored value used to be
+// substituted when the plan was composed, before any script ran. One
+// collection-level script runs before both steps; its run for the first sets
+// the token and the second sends it. Mutation check: make
+// `runs_a_pre_request_script` (request_composer.cpp) answer false and the
+// second step sends `Bearer old`.
+TEST_F (ScenarioRunnerTest, AValueAnEarlierStepsScriptReplacesReachesALaterStep) {
+    seed_collection_with_elements ("col_1", "",
+    json::array ({ { { "id", "el_col_pre" }, { "kind", "script.pre" }, { "enabled", true },
+    { "config", { { "script", "if (pm.info.requestName === 'login') { pm.environment.set('token', 'new'); }" } } } } }));
+    seed_environment ("env_1", R"({"token":{"value":"old","enabled":true}})");
+    seed_request ("req_a", 0, "/ok", "", "", "", "login");
+    seed_request ("req_b", 1, "/echo-auth", "", "", "", "use",
+    R"([{"key":"Authorization","value":"Bearer {{token}}","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].path, "/echo-auth");
+    EXPECT_EQ (seen[1].authorization, "Bearer new");
+}
+
 // Mixed credentials: the row answers its half at the bind and the script the
 // other, each iteration, through the one plan. Mutation check: bind with
 // `bind_iteration` instead of `bind_iteration_holding_auth` in

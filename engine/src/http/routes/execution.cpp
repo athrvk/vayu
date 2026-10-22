@@ -2377,6 +2377,11 @@ std::chrono::steady_clock::time_point handler_start) {
     // What auth wrote, so a reader that masks the answer (the MCP server) can
     // tell the credential in `rawRequest` from any other query parameter (#1845).
     record_auth_provenance (body, exchange.request);
+    // The refused rule's code (`ResidualRefusal`), the one a streaming send
+    // answers its 400 with, beside the status-0 response carrying its words.
+    if (!exchange.refusal_code.empty ()) {
+        body["refusalCode"] = exchange.refusal_code;
+    }
     // `replace`: the body is UTF-8 or base64 by now, but a header value off
     // the wire can still carry a byte that is not (#2458).
     res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),

@@ -586,22 +586,25 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     *db_, json{ { "requestId", "req_1" }, { "environmentId", "env_1" } });
     ASSERT_EQ (status, 200) << payload.dump ();
 
-    // Variables: environment > chain leaf > chain root.
-    EXPECT_EQ (payload["url"], "https://env.test/api/leaf-path");
+    // A pre-request script runs before this request (the root's and its own),
+    // so every name a scope answers keeps its braces for the pass after the
+    // script (#2521), and the payload names them. The precedence they would
+    // resolve by is `ResolvesAnUnscriptedRequestThroughTheChainsPrecedence`'s.
+    EXPECT_EQ (payload["url"], "https://{{host}}/api/{{path}}");
     EXPECT_EQ (payload["method"], "POST");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "host", "path", "token" }));
 
-    // Headers: enabled-only, empty keys dropped, values resolved.
+    // Headers: enabled-only, empty keys dropped.
     EXPECT_EQ (payload["headers"],
-    json::parse (R"([{"name":"X-Token","value":"leaf-token"}])"));
+    json::parse (R"([{"name":"X-Token","value":"{{token}}"}])"));
 
-    // Body content resolved.
     EXPECT_EQ (payload["body"]["mode"], "json");
-    EXPECT_EQ (payload["body"]["content"], "{\"host\":\"env.test\"}");
+    EXPECT_EQ (payload["body"]["content"], "{\"host\":\"{{host}}\"}");
 
-    // Inherit resolved through the chain to root's bearer, then its
-    // {{token}} resolved - the walk and the substitution compose.
+    // Inherit still resolved through the chain to root's bearer; its
+    // {{token}} waits with the rest.
     EXPECT_EQ (payload["auth"]["mode"], "bearer");
-    EXPECT_EQ (payload["auth"]["token"], "leaf-token");
+    EXPECT_EQ (payload["auth"]["token"], "{{token}}");
 
     // Elements: chain root->leaf (each level's own elements in the order
     // seeded: pre then post) then the request's own (issue #1514's cut-over -
@@ -640,6 +643,244 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     // Ids echoed so the composed payload can be POSTed to /execute unchanged.
     EXPECT_EQ (payload["requestId"], "req_1");
     EXPECT_EQ (payload["environmentId"], "env_1");
+}
+
+// The same chain with no pre-request script anywhere above the request: every
+// name resolves here, environment over leaf over root, and nothing is deferred.
+TEST_F (RequestComposerTest, ResolvesAnUnscriptedRequestThroughTheChainsPrecedence) {
+    seed_collection ("root", "",
+    R"({"host":{"value":"root.test","enabled":true},"path":{"value":"root-path","enabled":true}})",
+    R"({"mode":"bearer","token":"{{token}}"})", "", "console.log('root post');");
+    seed_collection ("leaf", "root",
+    R"({"path":{"value":"leaf-path","enabled":true},"token":{"value":"leaf-token","enabled":true}})");
+    seed_environment ("env_1", R"({"host":{"value":"env.test","enabled":true}})");
+
+    auto r    = make_request ("req_1", "leaf");
+    r.headers = R"([{"key":"X-Token","value":"{{token}}","enabled":true}])";
+    r.body    = R"({"mode":"json","content":"{\"host\":\"{{host}}\"}"})";
+    r.auth    = R"({"mode":"inherit"})";
+    db_->save_request (r);
+
+    auto [status, payload] = vayu::http::compose_request_core (
+    *db_, json{ { "requestId", "req_1" }, { "environmentId", "env_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+
+    EXPECT_EQ (payload["url"], "https://env.test/api/leaf-path");
+    EXPECT_EQ (payload["headers"],
+    json::parse (R"([{"name":"X-Token","value":"leaf-token"}])"));
+    EXPECT_EQ (payload["body"]["content"], "{\"host\":\"env.test\"}");
+    // The walk and the substitution compose.
+    EXPECT_EQ (payload["auth"]["token"], "leaf-token");
+    EXPECT_FALSE (payload.contains ("deferredVariables")) << payload.dump ();
+}
+
+// --- a request a pre-request script runs before (#2521) ----------------------
+//
+// Postman resolves `{{name}}` after the pre-request script, so a script's new
+// value is what goes out. Composition keeps every name a scope answers written
+// for such a request, the residual pass resolves it after the script, and
+// `deferredVariables` names what was kept. Decided from the elements alone.
+//
+// Mutation check for the block: make `runs_a_pre_request_script` answer false
+// and every deferral assertion below fails on a resolved value.
+
+/// A `script.pre` element, @p enabled as given.
+json pre_script_element (const std::string& id, const std::string& script, bool enabled = true) {
+    return { { "id", id }, { "kind", "script.pre" }, { "enabled", enabled },
+        { "config", { { "script", script } } } };
+}
+
+TEST_F (RequestComposerTest, ARequestsOwnPreRequestScriptKeepsEveryNameAScopeAnswers) {
+    seed_collection ("col", "");
+    seed_environment ("env_1", R"({"host":{"value":"api.test","enabled":true},
+                                   "token":{"value":"old","enabled":true},
+                                   "id":{"value":"7","enabled":true}})");
+    const json request = { { "method", "post" }, { "url", "https://{{host}}/users/:id" },
+        { "params",
+        json::array ({ { { "key", "id" }, { "value", "{{id}}" }, { "in", "path" } } }) },
+        { "headers",
+        json::array ({ { { "name", "X-Token" }, { "value", "Bearer {{token}}" } },
+        { { "name", "X-Unknown" }, { "value", "{{nobody}}" } } }) },
+        { "body", { { "mode", "text" }, { "content", "t={{token}}" } } },
+        { "auth", { { "mode", "basic" }, { "username", "u" }, { "password", "{{token}}" } } },
+        { "elements",
+        json::array ({ pre_script_element ("el_pre", "pm.environment.set('token', 'new');") }) } };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "request", request }, { "collectionId", "col" }, { "environmentId", "env_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+
+    EXPECT_EQ (payload["url"], "https://{{host}}/users/:id");
+    // The path row waits for the pass that answers its token (#1764).
+    EXPECT_EQ (payload["params"][0]["value"], "{{id}}");
+    EXPECT_EQ (header_of (payload, "X-Token"), "Bearer {{token}}");
+    EXPECT_EQ (payload["body"]["content"], "t={{token}}");
+    EXPECT_EQ (payload["auth"]["password"], "{{token}}");
+    // A name nothing answers keeps its braces as it always has, and is not
+    // listed: no scope answered it, so nothing was deferred.
+    EXPECT_EQ (header_of (payload, "X-Unknown"), "{{nobody}}");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "host", "id", "token" }));
+
+    // The same request without the script composes as it always did.
+    json unscripted = request;
+    unscripted.erase ("elements");
+    auto [plain_status, plain] = vayu::http::compose_request_core (*db_,
+    json{ { "request", unscripted }, { "collectionId", "col" }, { "environmentId", "env_1" } });
+    ASSERT_EQ (plain_status, 200) << plain.dump ();
+    EXPECT_EQ (plain["url"], "https://api.test/users/7");
+    EXPECT_EQ (header_of (plain, "X-Token"), "Bearer old");
+    EXPECT_EQ (plain["body"]["content"], "t=old");
+    EXPECT_EQ (plain["auth"]["password"], "old");
+    EXPECT_FALSE (plain.contains ("deferredVariables")) << plain.dump ();
+}
+
+// A folder's or the collection's script runs before every request under it,
+// so it defers the request's names the same way its own does.
+TEST_F (RequestComposerTest, AFoldersPreRequestScriptDefersTheRequestsNamesToo) {
+    seed_collection ("root", "", R"({"token":{"value":"old","enabled":true}})",
+    "", "pm.collectionVariables.set('token', 'new');");
+    seed_collection ("folder", "root");
+    auto r = make_request ("req_1", "folder");
+    r.url  = "https://example.test/x";
+    r.headers = R"([{"key":"Authorization","value":"Bearer {{token}}","enabled":true}])";
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (header_of (payload, "Authorization"), "Bearer {{token}}");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "token" }));
+}
+
+// Only a script that runs defers: a blank one is inert (#1609), a disabled one
+// and one `inherit.disable` switches off do not run, and a post-request script
+// runs after the send.
+TEST_F (RequestComposerTest, AScriptThatDoesNotRunBeforeTheSendDefersNothing) {
+    seed_collection ("root", "", R"({"token":{"value":"old","enabled":true}})",
+    "", "pm.collectionVariables.set('token', 'new');");
+    const std::vector<std::pair<std::string, json>> cases = {
+        { "blank", json::array ({ pre_script_element ("el_own", "  \n\t") }) },
+        { "disabled",
+        json::array ({ pre_script_element ("el_own", "pm.environment.set('token','x');", false) }) },
+        { "post",
+        json::array ({ { { "id", "el_post" }, { "kind", "script.post" }, { "enabled", true },
+        { "config", { { "script", "pm.environment.set('token','x');" } } } } }) },
+    };
+    // The inherited one is switched off by every case's request, so only the
+    // request's own element is left to decide.
+    for (const auto& [name, own] : cases) {
+        json elements = own;
+        elements.push_back ({ { "id", "el_off" }, { "kind", "inherit.disable" },
+        { "enabled", true }, { "config", { { "elementId", "el_pre_root" } } } });
+        auto r = make_request ("req_" + name, "root");
+        r.url  = "https://example.test/x";
+        r.headers = R"([{"key":"Authorization","value":"Bearer {{token}}","enabled":true}])";
+        r.elements = elements.dump ();
+        db_->save_request (r);
+
+        auto [status, payload] = vayu::http::compose_request_core (
+        *db_, json{ { "requestId", "req_" + name } });
+        ASSERT_EQ (status, 200) << name << ": " << payload.dump ();
+        EXPECT_EQ (header_of (payload, "Authorization"), "Bearer old") << name;
+        EXPECT_FALSE (payload.contains ("deferredVariables"))
+        << name << ": " << payload.dump ();
+    }
+}
+
+// The names the per-iteration bind owns resolve exactly as before, because the
+// bind runs before the script and must still see its tokens: a generator is
+// generated once, here; the data namespace and a bound column keep their
+// braces for the row, unlisted; and a name whose value reaches either is
+// resolved here, so the bind meets the token it binds.
+TEST_F (RequestComposerTest, NamesTheBindOwnsAreNotDeferredByAScript) {
+    seed_collection ("col", "");
+    seed_environment ("env_1", R"({"user":{"value":"{{data.user}}","enabled":true},
+                                   "username":{"value":"env-name","enabled":true},
+                                   "token":{"value":"old","enabled":true}})");
+    const json request = { { "method", "get" }, { "url", "https://example.test/x" },
+        { "headers",
+        json::array ({ { { "name", "X-Id" }, { "value", "{{$guid}}" } },
+        { { "name", "X-Col" }, { "value", "{{data.col}}" } },
+        { { "name", "X-User" }, { "value", "{{user}}" } },
+        { { "name", "X-Name" }, { "value", "{{username}}" } },
+        { { "name", "X-Token" }, { "value", "{{token}}" } } }) },
+        { "elements", json::array ({ pre_script_element ("el_pre", "console.log(1);") }) } };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "request", request }, { "collectionId", "col" },
+    { "environmentId", "env_1" }, { "dataColumns", json::array ({ "username" }) } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+
+    const std::string id = header_of (payload, "X-Id").get<std::string> ();
+    EXPECT_EQ (id.find ("{{"), std::string::npos) << id;
+    EXPECT_EQ (header_of (payload, "X-Col"), "{{data.col}}");
+    EXPECT_EQ (header_of (payload, "X-User"), "{{data.user}}");
+    EXPECT_EQ (header_of (payload, "X-Name"), "{{username}}");
+    EXPECT_EQ (header_of (payload, "X-Token"), "{{token}}");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "token" }));
+}
+
+// Two things a script must not reach through a deferral: a file path (the
+// residual pass never resolves one, so a script cannot choose the file sent)
+// and an OAuth 2.0 config, whose token is acquired before the script runs.
+TEST_F (RequestComposerTest, AFilePathAndAnOAuth2ConfigResolveHereEvenUnderAScript) {
+    seed_collection ("col", "", R"({"fixtures":{"value":"/data/fx","enabled":true},
+                                    "idp":{"value":"https://idp.test","enabled":true},
+                                    "name":{"value":"photo","enabled":true}})");
+    const json request = { { "method", "post" }, { "url", "https://example.test" },
+        { "body",
+        { { "mode", "form-data" },
+        { "fields",
+        json::array ({ { { "key", "a" }, { "type", "file" },
+        { "src", "{{fixtures}}/p.png" }, { "fileName", "{{name}}.png" } } }) } } },
+        { "auth",
+        { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" },
+        { "accessTokenUrl", "{{idp}}/token" }, { "clientId", "cid" } } } } },
+        { "elements", json::array ({ pre_script_element ("el_pre", "console.log(1);") }) } };
+
+    auto [status, payload] = vayu::http::compose_request_core (
+    *db_, json{ { "request", request }, { "collectionId", "col" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["body"]["fields"][0]["src"], "/data/fx/p.png");
+    EXPECT_EQ (payload["body"]["fields"][0]["fileName"], "{{name}}.png");
+    EXPECT_EQ (payload["auth"]["config"]["accessTokenUrl"], "https://idp.test/token");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "name" }));
+}
+
+// A header variable carrying a line break is refused where it resolves: here
+// for a request no script runs before, at the send for one a script does,
+// since the script may change it (`residual_token_test.cpp` has that half).
+TEST_F (RequestComposerTest, AHeaderVariableUnderAScriptIsLeftForTheSendToJudge) {
+    seed_environment ("env_1", R"({"note":{"value":"ok\r\nX-Admin: true","enabled":true}})");
+    json request = { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", { { "X-Note", "{{note}}" } } } };
+
+    auto [refused, refusal] = vayu::http::compose_request_core (
+    *db_, json{ { "request", request }, { "environmentId", "env_1" } });
+    EXPECT_EQ (refused, 400) << refusal.dump ();
+
+    request["elements"] =
+    json::array ({ pre_script_element ("el_pre", "console.log(1);") });
+    auto [status, payload] = vayu::http::compose_request_core (
+    *db_, json{ { "request", request }, { "environmentId", "env_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (header_of (payload, "X-Note"), "{{note}}");
+}
+
+// `deferredVariables` is composition's answer about this composition: one an
+// inline request carries back in from an earlier answer is dropped, not echoed.
+TEST_F (RequestComposerTest, ADeferredVariablesFieldSentBackInIsNotEchoed) {
+    seed_environment ("env_1", R"({"host":{"value":"api.test","enabled":true}})");
+    const json request = { { "method", "GET" }, { "url", "https://{{host}}/x" },
+        { "deferredVariables", json::array ({ "host", "stale" }) } };
+
+    auto [status, payload] = vayu::http::compose_request_core (
+    *db_, json{ { "request", request }, { "environmentId", "env_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://api.test/x");
+    EXPECT_FALSE (payload.contains ("deferredVariables")) << payload.dump ();
 }
 
 // Issue #1609: a blank script.pre/post is inert, including at composition -
