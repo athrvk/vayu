@@ -137,8 +137,11 @@ export function asMcpSend(
 	ctx: ToolContext
 ): Record<string, unknown> {
 	const client = ctx.clientName?.();
+	// The composed answer's list of deferred names is for the agent that asked
+	// to compose; the send has no use for it.
+	const { deferredVariables: _deferredVariables, ...sendable } = payload;
 	return {
-		...payload,
+		...sendable,
 		origin: client === undefined ? { kind: "mcp" } : { kind: "mcp", client },
 		targetPolicy: { allowAll: ctx.config.allowAll, allowedHosts: [...ctx.config.allowlist] },
 	};

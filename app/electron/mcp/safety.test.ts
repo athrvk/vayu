@@ -212,6 +212,18 @@ describe("targetPolicyRefusal", () => {
 		expect(text).toContain(settingRemedy("allowlist", host));
 	});
 
+	test("covers an OAuth 2.0 token endpoint refusal, not only the request URL", () => {
+		const oauth = 'Host "evil.test" (the OAuth 2.0 accessTokenUrl) is not allowed.';
+		const text = targetPolicyRefusal(
+			{ refusalCode: "target_not_allowed", errorMessage: oauth },
+			"app"
+		);
+		expect(text).toContain(oauth);
+		expect(text).toContain("OAuth 2.0 token endpoint");
+		expect(text).toContain("accessTokenUrl");
+		expect(text).toContain("refreshTokenUrl");
+	});
+
 	test("asks for a resolved URL when the host could not be determined", () => {
 		const text = targetPolicyRefusal(
 			{ refusalCode: "target_host_unknown", errorMessage: "Could not determine." },

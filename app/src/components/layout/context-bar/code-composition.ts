@@ -31,8 +31,20 @@ export type SnippetSettings = Pick<RequestState, "stream" | "disableCookies">;
 
 export interface CodeComposition {
 	payload: ComposedRequest;
+	/**
+	 * The names a pre-request script runs before, which the payload still holds
+	 * as `{{name}}` (#2521). Empty when nothing was deferred.
+	 */
+	deferredVariables: string[];
 	/** The draft's settings when the editor was composed; null for the saved row. */
 	editorSettings: SnippetSettings | null;
+}
+
+function compositionOf(
+	payload: ComposedRequest,
+	editorSettings: SnippetSettings | null
+): CodeComposition {
+	return { payload, deferredVariables: payload.deferredVariables ?? [], editorSettings };
 }
 
 /** The compose body for @p draft - the one Send builds for the same draft. */
@@ -59,11 +71,11 @@ export async function composeForCode(
 			requestId,
 			...(environmentId ? { environmentId } : {}),
 		});
-		return { payload, editorSettings: null };
+		return compositionOf(payload, null);
 	}
 	const payload = await apiService.composeRequest(
 		editorComposeBody(draft, requestId, environmentId)
 	);
 	const { stream, disableCookies } = draft.request;
-	return { payload, editorSettings: { stream, disableCookies } };
+	return compositionOf(payload, { stream, disableCookies });
 }

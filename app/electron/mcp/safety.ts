@@ -205,7 +205,7 @@ const TARGET_REFUSAL_CODES: ReadonlySet<string> = new Set([
 function targetRefusalText(code: unknown, message: unknown, host: McpHost): string | undefined {
 	if (typeof code !== "string" || !TARGET_REFUSAL_CODES.has(code)) return undefined;
 	const said = typeof message === "string" ? message : "The engine refused the target host.";
-	const lead = `The MCP allowlist is applied to the URL a request is about to send, after its pre-request script. ${said}`;
+	const lead = `The MCP allowlist is applied, after the pre-request script, to the URL a request is about to send and to the host of an OAuth 2.0 token endpoint (accessTokenUrl, refreshTokenUrl) it is about to post to. ${said}`;
 	if (code !== "target_not_allowed") return `${lead} Resolve the URL before sending.`;
 	return `${lead} Ask the user to ${settingRemedy("allowlist", host)} before retrying.`;
 }

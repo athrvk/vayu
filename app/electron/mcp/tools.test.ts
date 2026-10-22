@@ -10675,12 +10675,12 @@ describe("every MCP send carries the session's target policy", () => {
 	];
 	const cases = senders.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
 
-	/** The `targetPolicy` @p sender's one send carried under @p safety. */
-	async function policySent(
+	/** The payload @p sender's one send carried under @p safety. */
+	async function payloadSent(
 		{ tool, args, sentTo }: McpSender,
 		safety: Partial<McpSafetyConfig>,
 		composedExtra: Record<string, unknown> = {}
-	): Promise<unknown> {
+	): Promise<Record<string, unknown>> {
 		const client = fakeClient({
 			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
 			composeRequest: vi.fn().mockImplementation((body: { request?: object }) =>
@@ -10695,8 +10695,28 @@ describe("every MCP send carries the session's target policy", () => {
 		await dispatchTool(tool, args, ctxWith(client, safety));
 		const send = client[sentTo] as ReturnType<typeof vi.fn>;
 		expect(send).toHaveBeenCalledTimes(1);
-		return (send.mock.calls[0][0] as Record<string, unknown>).targetPolicy;
+		return send.mock.calls[0][0] as Record<string, unknown>;
 	}
+
+	/** The `targetPolicy` @p sender's one send carried under @p safety. */
+	async function policySent(
+		sender: McpSender,
+		safety: Partial<McpSafetyConfig>,
+		composedExtra: Record<string, unknown> = {}
+	): Promise<unknown> {
+		return (await payloadSent(sender, safety, composedExtra)).targetPolicy;
+	}
+
+	// Composition's answer about itself (#2521) is for the agent that composed;
+	// the engine would ignore it on these routes, but it is not part of a send.
+	test.each(cases)("%s does not forward composition's deferredVariables", async (_, sender) => {
+		const sent = await payloadSent(
+			sender,
+			{ allowlist: ["api.example.com"] },
+			{ deferredVariables: ["token"] }
+		);
+		expect(sent).not.toHaveProperty("deferredVariables");
+	});
 
 	test.each(cases)("%s states the session's allowlist", async (_, sender) => {
 		expect(await policySent(sender, { allowlist: ["api.example.com"] })).toStrictEqual({

@@ -638,8 +638,17 @@ export interface ComposeRequestRequest {
  * extra fields rode through composition verbatim (e.g. the resolved
  * `elements` array a load run renames onto `requestElements` - scripts are
  * never interpolated).
+ *
+ * `deferredVariables` (#2521) is an answer about the composition, not part of
+ * the request: the names a pre-request script runs before, left written as
+ * `{{name}}` in the payload because the script may replace them. Sorted, and
+ * absent when nothing was deferred. It is for display; `useEngine` strips it
+ * from the payload a send hands on to `/execute` or `/runs`.
  */
-export type ComposedRequest = ExecuteRequestRequest & Record<string, unknown>;
+export type ComposedRequest = ExecuteRequestRequest &
+	Record<string, unknown> & {
+		deferredVariables?: string[];
+	};
 
 /**
  * StartLoadTestRequest - Matches POST /run backend endpoint
