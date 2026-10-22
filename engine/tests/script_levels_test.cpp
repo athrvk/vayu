@@ -201,7 +201,7 @@ TEST_F (ScriptLevelFold, AnEarlierAssertionSurvivesALaterScript) {
 }
 
 // A controller's skip at an outer level is not cancelled by a script that
-// asked for nothing; a later script's own instruction does replace it.
+// asked for nothing; a later script's own instruction does replace it (below).
 TEST_F (ScriptLevelFold, AnEarlierSkipSurvivesALaterScriptThatAskedForNothing) {
     answers["request_pre"] = vayu::ScriptResult{};
     json skip_unless_gold  = { { "id", "el_if" }, { "kind", "control.if" },
@@ -216,18 +216,21 @@ TEST_F (ScriptLevelFold, AnEarlierSkipSurvivesALaterScriptThatAskedForNothing) {
 }
 
 TEST_F (ScriptLevelFold, ALaterInstructionReplacesAnEarlierOne) {
-    vayu::ScriptResult jumps;
-    jumps.control.kind        = vayu::ScriptControl::Kind::Next;
-    jumps.control.target      = "Login";
-    answers["collection_pre"] = jumps;
-    answers["request_pre"]    = vayu::ScriptResult{};
+    vayu::ScriptResult collection_jumps;
+    collection_jumps.control.kind   = vayu::ScriptControl::Kind::Next;
+    collection_jumps.control.target = "Login";
+    vayu::ScriptResult request_jumps;
+    request_jumps.control.kind   = vayu::ScriptControl::Kind::Next;
+    request_jumps.control.target = "Checkout";
+    answers["collection_pre"]    = collection_jumps;
+    answers["request_pre"]       = request_jumps;
 
     run (Phase::StepBefore,
     json::array ({ script_element ("script.pre", "collection_pre", "collection"),
     script_element ("script.pre", "request_pre", "request") }));
 
     EXPECT_EQ (pre.control.kind, vayu::ScriptControl::Kind::Next);
-    EXPECT_EQ (pre.control.target, "Login");
+    EXPECT_EQ (pre.control.target, "Checkout");
 }
 
 TEST_F (ScriptLevelFold, AFolderLevelResultIsScopedFolder) {

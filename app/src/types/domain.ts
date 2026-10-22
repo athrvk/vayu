@@ -829,7 +829,7 @@ export interface ResolvedElement extends ElementDef {
 export interface ElementOutcome {
 	id: string;
 	kind: string;
-	origin?: { kind: "collection" | "request"; scope?: ElementScope; id: string; name?: string };
+	origin?: { kind: "collection" | "request"; id: string; name?: string };
 	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
 	message?: string;
 	waitedMs?: number;

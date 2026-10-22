@@ -188,7 +188,7 @@ describe("ScenarioStepCard script results", () => {
 		const element: ElementOutcome = {
 			id: "root-pre",
 			kind: "script.pre",
-			origin: { kind: "collection", scope: "collection", id: "c1", name: "Root" },
+			origin: { kind: "collection", id: "c1", name: "Root" },
 			outcome: "error",
 			message: "Collection pre-request script failed - token is not defined",
 		};
