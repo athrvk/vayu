@@ -1300,12 +1300,16 @@ still builds its own `ScriptPart[]` from its editor state, a different concern
 inside the inline `request` object (issue #1517): `/execute` refuses those two
 names outright now that `elements` is the only script source, so the tool
 reads them, folds each into an ad-hoc `script.pre` / `script.post` element,
-and appends both after compose - alongside any ad-hoc `elements` argument the
-agent gave directly - so they run in addition to whatever the composed
-request already carried, never replacing it. On the by-id branch the append
-happens to the composed payload rather than in the compose body, because the
-engine's inline overlay replaces a whole key and an inline `elements` would
-drop the collection chain's and the request's own. `start_load_run`'s ad-hoc
+and adds both after the stored ones - alongside any ad-hoc `elements` argument
+the agent gave directly - so they run in addition to whatever the composed
+request already carried, never replacing it. On the by-id branch that takes
+two compositions: the engine's inline overlay replaces a whole key, so the
+first, by id, reads the collection chain's and the request's own list, and the
+second composes again with that list plus the ad-hoc entries as the inline
+`elements`. Composition decides from the elements it sees whether a
+pre-request script runs before the send (#2521), so a name an ad-hoc
+`preRequestScript` sets is left for it rather than resolved to the stored
+value first. A call with nothing ad hoc composes once. `start_load_run`'s ad-hoc
 `postRequestScript` / `tests` folds the same way now (issue #1594):
 `POST /runs` reads a single target's step-level elements under
 `requestElements`, a key distinct from `elements` there (see below), so the
@@ -1382,7 +1386,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   submission), and so does `run_request` with a `requestId` and no `url`.
   An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
   `postRequestScript` instead (folded into elements, above), since an ad-hoc
-  call has no chain to compose from, and they are appended after the stored
+  call has no chain to compose from, and they are composed after the stored
   ones when it sends a saved request; `start_load_run` takes the same
   `postRequestScript` for a URL-only run, folded into `requestElements` the
   same way, as described above. Those two are supplied per call, are refused while

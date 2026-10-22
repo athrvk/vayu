@@ -6775,6 +6775,79 @@ describe("dispatchTool", () => {
 			expect((executed(client).elements as unknown[])[4]).toEqual(extractor);
 		});
 
+		test("an ad-hoc preRequestScript is composed with the stored list, so a name it sets waits for it (#2521)", async () => {
+			// Mutation check: append the ad-hoc elements to the by-id composition
+			// instead of composing again, and the engine never sees the script:
+			// `{{token}}` goes out as the stored value it resolved before the
+			// script could set it.
+			const own = {
+				id: "el_own",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('own', function () {});" },
+			};
+			type Element = { id?: string; kind?: string };
+			// The engine's rule in miniature: a `script.pre` among the composed
+			// elements leaves `{{token}}` written and names it; without one the
+			// stored value is resolved in.
+			const composeRequest = vi
+				.fn()
+				.mockImplementation(({ request }: { request?: { elements?: Element[] } }) => {
+					const elements = request?.elements ?? [own];
+					const scripted = elements.some((el) => el.kind === "script.pre");
+					return Promise.resolve({
+						method: "GET",
+						url: "https://api.example.com/users",
+						headers: [
+							{
+								name: "Authorization",
+								value: scripted ? "Bearer {{token}}" : "Bearer stored",
+							},
+						],
+						elements,
+						requestId: "req_1",
+						...(scripted ? { deferredVariables: ["token"] } : {}),
+					});
+				});
+			const client = fakeClient({ listEnvironments: listingEnv1(), composeRequest });
+			const res = await dispatchTool(
+				"run_request",
+				{
+					requestId: "req_1",
+					environmentId: "env_1",
+					preRequestScript: "pm.environment.set('token', 'new');",
+				},
+				ctxWith(client, { ...OFF, revealSecretsToAgents: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeRequest).toHaveBeenCalledTimes(2);
+			const recomposed = composeRequest.mock.calls[1][0] as {
+				requestId?: string;
+				environmentId?: string;
+				request?: { elements?: Element[] };
+			};
+			expect(recomposed).toMatchObject({ requestId: "req_1", environmentId: "env_1" });
+			expect(recomposed.request?.elements?.map((el) => el.id)).toEqual([
+				"el_own",
+				"mcp-script-pre",
+			]);
+			expect(executed(client).headers).toEqual([
+				{ name: "Authorization", value: "Bearer {{token}}" },
+			]);
+			expect(executed(client)).not.toHaveProperty("deferredVariables");
+		});
+
+		test("a by-id send with nothing ad hoc composes once", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.composeRequest).toHaveBeenCalledTimes(1);
+		});
+
 		test("a stored literal credential runs with reveal off and is not echoed", async () => {
 			const KEY = "stored-typed-key";
 			const client = fakeClient({
