@@ -43,11 +43,11 @@ class PerHostLimitRunTest : public ::testing::Test {
     /// numbers on purpose: each worker pre-allocates `max(concurrency, 100)`
     /// curl handles, and nothing is ever submitted to this loop.
     std::shared_ptr<vayu::core::RunContext>
-    configure (size_t concurrency, int workers, int configured_per_host) const {
+    configure (size_t concurrency, int pool_size, int setting) const {
         auto context = std::make_shared<vayu::core::RunContext> (
         "run-per-host", nlohmann::json::object ());
         vayu::core::configure_event_loop (*db_, context->config, context,
-        concurrency, /*timeout_ms=*/5000, workers, configured_per_host);
+        concurrency, /*timeout_ms=*/5000, pool_size, setting);
         return context;
     }
 
@@ -72,8 +72,7 @@ class PerHostLimitRunTest : public ::testing::Test {
 // default_max_per_host` in configure_event_loop and both the recorded limit
 // and the warning fail.
 TEST_F (PerHostLimitRunTest, ALimitBelowEachWorkersShareIsRaisedAndReported) {
-    const auto context =
-    configure (/*concurrency=*/40, /*workers=*/4, /*configured_per_host=*/4);
+    const auto context = configure (/*concurrency=*/40, /*pool_size=*/4, /*setting=*/4);
 
     EXPECT_EQ (context->configured_max_per_host, 4u);
     EXPECT_EQ (context->effective_max_per_host, 10u);
@@ -88,8 +87,7 @@ TEST_F (PerHostLimitRunTest, ALimitBelowEachWorkersShareIsRaisedAndReported) {
 
 // The setting already covers each worker's share: kept, and nothing to say.
 TEST_F (PerHostLimitRunTest, ALimitThatCoversEachWorkersShareIsKeptSilently) {
-    const auto context =
-    configure (/*concurrency=*/40, /*workers=*/4, /*configured_per_host=*/200);
+    const auto context = configure (/*concurrency=*/40, /*pool_size=*/4, /*setting=*/200);
 
     EXPECT_EQ (context->configured_max_per_host, 200u);
     EXPECT_EQ (context->effective_max_per_host, 200u);

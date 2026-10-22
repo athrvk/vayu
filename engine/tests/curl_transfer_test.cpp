@@ -655,6 +655,7 @@ TEST_F (CurlTransferTest, AWaitForAConnectionSlotIsQueueWaitNotWireTime) {
     request.method = vayu::HttpMethod::GET;
     request.url    = server.url ();
     std::vector<vayu::http::RequestHandle> handles;
+    handles.reserve (6);
     for (int i = 0; i < 6; ++i) {
         handles.push_back (loop.submit_async (request));
     }
