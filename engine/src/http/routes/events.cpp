@@ -23,6 +23,7 @@
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -115,18 +116,24 @@ httplib::DataSink& sink) {
  * Always answers `false` - the provider is done when this returns. Every stream
  * ends with a statement of why, including one whose consumer had already drained
  * the ring: the reason is the answer to "did I see everything?", so it cannot be
- * inferable only from having been connected at the right moment. The exception
- * is a lost claim, where the slot - and the completion frame with it - belongs
- * to the stream that took it over.
+ * inferable only from having been connected at the right moment. The
+ * exceptions are a lost claim, where the slot - and the completion frame with
+ * it - belongs to the stream that took it over, and a server that is stopping
+ * (@p stopping, #2683), where the relay ends but the stream has not.
  */
 bool relay_run_events (const std::shared_ptr<vayu::http::SseStreamContext>& context,
 size_t resume_from,
 vayu::http::LiveClaim claim,
+const std::atomic<bool>& stopping,
 httplib::DataSink& sink) {
     auto offset     = resume_from;
     auto last_write = std::chrono::steady_clock::now ();
 
     while (sink.is_writable ()) {
+        if (stopping) {
+            context->release_claim (claim);
+            return false;
+        }
         const RelayStep step =
         relay_events_step (context, claim, offset, last_write, sink);
         if (step == RelayStep::Closed) {
@@ -197,8 +204,9 @@ void handle_run_events (RouteContext& ctx, const httplib::Request& req, httplib:
     }
 
     res.set_content_provider ("text/event-stream",
-    [context, resume_from, claim = *claim] (size_t, httplib::DataSink& sink) {
-        return relay_run_events (context, resume_from, claim, sink);
+    [context, resume_from, claim = *claim, &stopping = ctx.server_stopping] (
+    size_t, httplib::DataSink& sink) {
+        return relay_run_events (context, resume_from, claim, stopping, sink);
     });
 }
 

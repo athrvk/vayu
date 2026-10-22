@@ -25,6 +25,7 @@
  * never receives this one's fixes.
  */
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -454,6 +455,12 @@ struct ExchangeInputs {
     /// has nothing to interrupt) and for anything that predates this field,
     /// which is exactly the old, uninterruptible behaviour.
     std::function<bool ()> should_stop;
+    /// `ClientConfig::cancel` for this exchange's send and every
+    /// `pm.sendRequest` its scripts make (issue #2683): `POST /execute` passes
+    /// `RouteContext::server_stopping`, so `Server::stop()` ends the transfer
+    /// rather than waiting on it. Null leaves both uncancellable, as the
+    /// scenario runner's are.
+    const std::atomic<bool>* cancel = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
     /// the run has none. Borrowed for the length of the call and outlived by
     /// the run's `ScenarioExecution` (issue #356).

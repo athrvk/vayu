@@ -10,6 +10,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -151,7 +152,9 @@ struct AuthApplyResult {
  *
  * A user-supplied header always wins (injection is skipped when the target
  * header already exists - matched case-insensitively). `db` is reserved for
- * oauth2 token lookup and may be null.
+ * oauth2 token lookup and may be null; `cancel` is the token request's
+ * `ClientConfig::cancel` (issue #2683), set only inside a management-API
+ * handler.
  *
  * A bearer token and an API key's name and value are trimmed of the spaces and
  * tabs around them (issue #2467): a pasted credential's trailing blank would
@@ -161,21 +164,28 @@ struct AuthApplyResult {
  * with nothing written. Basic credentials are not trimmed: a password may end
  * in a space, and the pair is encoded as typed.
  */
-AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db);
+AuthApplyResult apply_auth (vayu::Request& req,
+const Auth& auth,
+vayu::db::Database* db,
+const std::atomic<bool>* cancel = nullptr);
 
 /**
  * @brief Convenience overload: parse then apply. Used by direct callers/tests.
  */
-AuthApplyResult
-apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db);
+AuthApplyResult apply_auth (vayu::Request& req,
+const nlohmann::json& auth,
+vayu::db::Database* db,
+const std::atomic<bool>* cancel = nullptr);
 
 /**
  * @brief Route-level pre-flight for POST /run: for oauth2 configs, acquire the
  *        token now (cache-aware, warming the cache for the run worker) so an
  *        unauthorizable run is rejected before it is created. No-op for every
- *        other mode.
+ *        other mode. `cancel` as `apply_auth`'s.
  */
-AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db);
+AuthApplyResult preflight_auth (const nlohmann::json& auth,
+vayu::db::Database& db,
+const std::atomic<bool>* cancel = nullptr);
 
 /**
  * @brief The `Authorization` value an oauth2 config places for an access token.

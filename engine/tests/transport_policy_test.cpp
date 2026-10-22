@@ -27,6 +27,7 @@
 #include <httplib.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -62,9 +63,11 @@
 #include "vayu/runtime/script_engine.hpp"
 
 namespace vayu::http::routes {
-// Declared in import.cpp; returns {http_status, json_body}.
+// Declared in import.cpp; returns {http_status, json_body}. No server owns
+// these sends, so nothing cancels them.
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
-const vayu::http::TransportPolicy& transport);
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel = nullptr);
 } // namespace vayu::http::routes
 
 namespace vayu::core {

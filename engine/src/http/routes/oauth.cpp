@@ -23,6 +23,7 @@
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <utility>
 
@@ -64,10 +65,12 @@ int64_t now_ms_epoch () {
 
 /**
  * Acquire (or return cached) token for the config in `request_body`.
- * Separated from the route for unit testing, like import_fetch.
+ * Separated from the route for unit testing, like import_fetch. @p cancel is
+ * the route's `RouteContext::server_stopping` (issue #2683).
  */
-std::pair<int, nlohmann::json>
-oauth2_token_post (vayu::db::Database& db, const std::string& request_body) {
+std::pair<int, nlohmann::json> oauth2_token_post (vayu::db::Database& db,
+const std::string& request_body,
+const std::atomic<bool>* cancel) {
     const auto parsed = parse_request_json (
     request_body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
     if (!parsed) {
@@ -87,7 +90,7 @@ oauth2_token_post (vayu::db::Database& db, const std::string& request_body) {
         interactive      = std::move (ex);
     }
 
-    auto result = oauth::acquire_token (db, config, force, interactive);
+    auto result = oauth::acquire_token (db, config, force, interactive, nullptr, cancel);
     if (auto* err = std::get_if<oauth::TokenError> (&result)) {
         return { err->http_status, token_error_body (*err) };
     }
@@ -144,8 +147,8 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Post ("/oauth2/token",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        auto [status, body] = oauth2_token_post (ctx.db, req.body);
-        res.status          = status;
+        auto [status, body] = oauth2_token_post (ctx.db, req.body, &ctx.server_stopping);
+        res.status = status;
         // A parse refusal quotes the bytes it stopped at, and so does a
         // provider's reply, so a strict dump could throw on either.
         res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
@@ -188,7 +191,7 @@ void register_oauth_routes (RouteContext& ctx) {
         }
         const auto st = ctx.authorize_manager.complete (ctx.db,
         body->value ("attemptId", std::string{}),
-        body->value ("callbackUrl", std::string{}));
+        body->value ("callbackUrl", std::string{}), &ctx.server_stopping);
         res.status    = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (), "application/json");
     });
