@@ -610,7 +610,7 @@ struct Database::Impl {
 
     /// When the constructor began, so a copy written since is never mistaken
     /// for one an earlier process left.
-    std::filesystem::file_time_type opened_at{};
+    std::filesystem::file_time_type opened_at;
 
     /// The background refresh of `<db>.bak` (`Database::start_recovery_backup_refresh`).
     /// The connection is published for as long as its `VACUUM INTO` runs so a
