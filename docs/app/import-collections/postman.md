@@ -144,7 +144,8 @@ of, and each request, folder or collection that uses any is named in
 [`meta.unsupportedScriptApis`](#options--lossy-behavior). The list is a table in
 `engine/src/core/script_api_scan.cpp` (`API_RULES`): `require(...)` of a module
 that is not on [the `require` shelf](../pm-api-compatibility.md#the-require-shelf)
-(`crypto-js`, `uuid`, `lodash` and `moment`, the names the scan reads from the call's string
+(`crypto-js`, `uuid`, `lodash`, `moment` and `csv-parse/lib/sync`, each matched
+whole, the names the scan reads from the call's string
 literal; a computed name such as `require(name)` is named) and `pm.require`, a non-empty
 `script.packages`, the libraries Postman bundles that the shelf does not carry
 (`tv4`, `xml2Json`, `cheerio`, `Backbone`), `Buffer`, `pm.variables.set`,
@@ -154,7 +155,9 @@ chai-postman's `.postmanRequest`, `.postmanResponse` and `.postmanRequestOrRespo
 (`engine/tests/fixtures/chai-conformance.json` is the authority, and
 `script_api_scan_test.cpp` holds the table to it). `require('crypto-js')`, the
 `CryptoJS` members the shim defines (#2578), `require('uuid')` (#2650) and lodash,
-as `_` or `require('lodash')` (#2651), and `require('moment')` (#2652), run, so they are not named; the rest of
+as `_` or `require('lodash')` (#2651), `require('moment')` (#2652) and
+`require('csv-parse/lib/sync')` (#2653), run, so they are not named
+(`require('csv-parse')` and every other path under it still are); the rest of
 crypto-js is, under the one name `CryptoJS` (`CryptoJS.AES`, `PBKDF2`, `SHA3`,
 `RIPEMD160`, `algo.*`, `enc.Base64url`, `lib.WordArray.random`, a computed
 `CryptoJS[name]`, ...), whether it is read off `CryptoJS`, off a name bound to it

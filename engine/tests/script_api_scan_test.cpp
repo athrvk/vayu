@@ -351,6 +351,23 @@ TEST (ScriptApiScan, MomentIsNotNamedAsTheModule) {
     EXPECT_EQ (names_in ("require('moment-timezone');"), Names{ "require()" });
 }
 
+// csv-parse runs (#2653) as the one path Postman exposes, matched whole: the
+// bare package and every other path under it are still named, the 5.x
+// `csv-parse/sync` among them.
+TEST (ScriptApiScan, CsvParseIsNotNamedAsTheSyncPathOnly) {
+    for (const char* script :
+    { "require('csv-parse/lib/sync');",
+    "const parse = require('csv-parse/lib/sync'); parse(t, { columns: true });",
+    "require(\"csv-parse/lib/sync\")(text);", "require('csv-parse/lib/sync').AES;" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+    for (const char* script : { "require('csv-parse');", "require('csv-parse/lib/index');",
+         "require('csv-parse/lib/sync.js');", "require('csv-parse/sync');",
+         "require('csv-parse/lib/sync/x');", "require('CSV-PARSE/lib/sync');" }) {
+        EXPECT_EQ (names_in (script), Names{ "require()" }) << script;
+    }
+}
+
 TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
     // Off the shelf, or a name that only starts like one.
     EXPECT_EQ (names_in ("require('ajv');"), Names{ "require()" });

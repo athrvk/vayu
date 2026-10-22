@@ -2384,10 +2384,11 @@ interface VayuShelfModules {
 	'uuid': typeof import('uuid');
 	'lodash': typeof import('lodash');
 	'moment': typeof import('moment');
+	'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
@@ -2395,6 +2396,8 @@ interface VayuShelfModules {
  * const id = uuid();
  * const _ = require('lodash');
  * const moment = require('moment');
+ * const parse = require('csv-parse/lib/sync');
+ * const rows = parse(pm.response.text(), { columns: true });
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2648,4 +2651,9 @@ declare module 'lodash' {
 declare module 'moment' {
 	const moment: any;
 	export = moment;
+}
+
+declare module 'csv-parse/lib/sync' {
+	const parse: (input: string, options?: { [option: string]: unknown }) => any;
+	export = parse;
 }

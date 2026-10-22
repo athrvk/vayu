@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored) and `require('moment')` (npm's `moment`, vendored; English only) - any other module throws; see [The `require` shelf](#the-require-shelf) |
+| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only) and `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -413,8 +413,9 @@ and the other SHA-2 hashers are the `crypto-js` shelf's, see
 
 `require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
 `Cannot find module '<name>'` for any other name; it reads no file and fetches
-nothing. The shelf holds four libraries, `crypto-js`, `uuid`, `lodash` and
-`moment`. `crypto-js` is also bound as the global `CryptoJS` and `lodash` as `_`,
+nothing. The shelf holds five libraries, `crypto-js`, `uuid`, `lodash`,
+`moment` and `csv-parse/lib/sync`, each matched as the whole name.
+`crypto-js` is also bound as the global `CryptoJS` and `lodash` as `_`,
 so both spellings of a Postman script run:
 
 ```javascript
@@ -503,11 +504,34 @@ First use (a `require('moment')`) costs about 8 ms (`-O2`) to
 execution; a script that does not require it pays nothing. The import's notice
 does not name `require('moment')`.
 
+**`csv-parse`** is npm's `csv-parse` package (1.2.4), its sync parser bundled
+into one file, and is reached as `require('csv-parse/lib/sync')`, the one path
+Postman's sandbox exposes and the version it pins. The module is the parse
+function and has no global:
+
+```javascript
+const parse = require('csv-parse/lib/sync');
+const rows = parse(pm.response.text(), { columns: true, skip_empty_lines: true });
+pm.environment.set('firstId', rows[0].id);
+```
+
+The options are 1.2.4's (`delimiter`, `columns`, `skip_empty_lines`,
+`relax_column_count`, `auto_parse`, `rowDelimiter`, ...), not the renamed ones
+of later majors, and a malformed record throws csv-parse's own error
+(`Quoted field not terminated at line 3`). The input is a string; a `Buffer`
+is not supported. `require('csv-parse')`, csv-parse 5's `csv-parse/sync` and
+every other path under the package throw like any name off the shelf. First
+use costs about 1.3 ms (`-O2`) to 2.6 ms (Debug build) and about 90 KB of the
+script's memory, per execution; a script that does not require it pays
+nothing. The import's notice does not name `require('csv-parse/lib/sync')`,
+and still names every other `csv-parse` path.
+
 **Not on the shelf:** `ajv` and `tv4`, `xml2js` (`xml2Json`),
-`cheerio`, `csv-parse`, `chai`, `moment-timezone` and Node's built-ins
-(`crypto`, `fs`, `buffer`, ...). `require` of one throws, the editor underlines
-`tv4`, `xml2Json`, `cheerio` and `Backbone` as unusable, and a Postman import
-names the request in `meta.unsupportedScriptApis`.
+`cheerio`, `csv-parse` at any path but `csv-parse/lib/sync`, `chai`,
+`moment-timezone` and Node's built-ins (`crypto`, `fs`, `buffer`, ...).
+`require` of one throws, the editor underlines `tv4`, `xml2Json`, `cheerio` and
+`Backbone` as unusable, and a Postman import names the request in
+`meta.unsupportedScriptApis`.
 
 ### Timers run before the script ends, and do not wait
 
@@ -1422,9 +1446,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
   show the template in
 - `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
-- **`require(...)` of anything but `crypto-js`, `uuid`, `lodash` and `moment`,
-  `script.packages` and the libraries Postman bundles beyond `CryptoJS` and
-  `_`** - `tv4`, `xml2Json`, `cheerio` and `Backbone`. The sandbox has no module
+- **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment` and
+  `csv-parse/lib/sync`, `script.packages` and the libraries Postman bundles
+  beyond `CryptoJS` and `_`** - `tv4`, `xml2Json`, `cheerio` and `Backbone`. The sandbox has no module
   system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
   covers the hashers and their HMACs and nothing else of `CryptoJS`, so a
   `CryptoJS` member outside that list is named by the import notice, also when
@@ -1722,12 +1746,16 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
   does not carry: `tv4`, `xml2Json`, `cheerio` and `Backbone`
   (`CryptoJS`, `_` and `require` are declared as the real thing, with
   `declare module 'crypto-js'`, `declare module 'uuid'`,
-  `declare module 'lodash'` and `declare module 'moment'` so each
+  `declare module 'lodash'`, `declare module 'moment'` and
+  `declare module 'csv-parse/lib/sync'` so each
   `require(...)` of them types; all come from the one `SHELF_MODULES` table in
   `script_types.cpp`, and `require` takes only the names on it. `_` and the
   `moment` module are declared `any`: their members are not restated, and a
-  partial list would underline the rest on correct code. `moment` has no global
-  declaration, as Postman has no global)
+  partial list would underline the rest on correct code. `csv-parse/lib/sync`
+  is the parse function, taking a string and any options object and answering
+  `any`, because `columns` and `objname` change the records' shape. `moment`
+  and `csv-parse/lib/sync` have no global declaration, as Postman has no
+  global)
 
 Hover names the replacement Postman itself gives: `tv4` is `require('ajv')`, and
 says what Vayu has instead. The `postman` object is

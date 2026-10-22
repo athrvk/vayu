@@ -14,11 +14,12 @@
  * there is no loader behind it, so nothing reads a file or the network. A
  * library is Vayu's own source (the crypto-js shim) or a vendored npm build
  * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
- * around it (`uuid`, #2650; `lodash`, #2651; `moment`, #2652). A library
- * global (`CryptoJS`, `_`) is an accessor that loads its library on first read
- * and then replaces itself with the value, as `responseCookies` does; a library
- * with no global (`uuid`, `moment`) is reached only through `require`, as in
- * Postman.
+ * around it (`uuid`, #2650; `lodash`, #2651; `moment`, #2652;
+ * `csv-parse/lib/sync`, #2653). A name is matched whole, so a sub-path is on
+ * the shelf only as itself. A library global (`CryptoJS`, `_`) is an accessor
+ * that loads its library on first read and then replaces itself with the
+ * value, as `responseCookies` does; a library with no global (`uuid`, `moment`,
+ * `csv-parse/lib/sync`) is reached only through `require`, as in Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
  * context is built: every script gets a freshly built context
@@ -44,10 +45,12 @@
 #include <sodium.h>
 
 #include "crypto_js_shim.hpp"
+#include "csv_parse_glue.hpp"
 #include "lodash_glue.hpp"
 #include "moment_glue.hpp"
 #include "uuid_glue.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/embedded/csv_parse_sync_js.hpp"
 #include "vayu/embedded/lodash_js.hpp"
 #include "vayu/embedded/moment_js.hpp"
 #include "vayu/embedded/uuid_js.hpp"
@@ -175,6 +178,8 @@ constexpr auto SHELF = std::to_array<ShelfLibrary> ({
 { UUID_MODULE, UUID_GLUE_OPEN, vayu::runtime::embedded::UUID_JS, UUID_GLUE_CLOSE, uuid_natives },
 { LODASH_MODULE, LODASH_GLUE_OPEN, vayu::runtime::embedded::LODASH_JS, LODASH_GLUE_CLOSE, nullptr },
 { MOMENT_MODULE, MOMENT_GLUE_OPEN, vayu::runtime::embedded::MOMENT_JS, MOMENT_GLUE_CLOSE, nullptr },
+{ CSV_PARSE_SYNC_MODULE, CSV_PARSE_GLUE_OPEN,
+vayu::runtime::embedded::CSV_PARSE_SYNC_JS, CSV_PARSE_GLUE_CLOSE, nullptr },
 });
 
 // The import scan reads SHELF_MODULE_NAMES; a library here that is not there

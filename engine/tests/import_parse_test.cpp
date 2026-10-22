@@ -2506,6 +2506,9 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Moment",
     R"j(["const moment = require('moment');","const d = moment.utc(0).format();"])j") +
     "," +
+    request_with_script ("Csv",
+    R"j(["const parse = require('csv-parse/lib/sync');","const rows = parse(pm.response.text(), { columns: true });"])j") +
+    "," +
     request_with_script ("Cipher",
     R"j(["const c = require('crypto-js');","const e = CryptoJS.AES.encrypt('x', 'k');"])j") +
     "," +
@@ -2518,9 +2521,10 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     // the crypto-js members the shim defines (#2578), as the global and as
     // `require('crypto-js')`, so "Legacy tests" and "Shelf" are not named, and
     // `require('uuid')` runs (#2650), so "Uuid" is not either, nor is "Lodash"
-    // (`_` and `require('lodash')`, #2651) or "Moment" (`require('moment')`,
-    // #2652); "Cipher" reaches past the shim and
-    // is. "Module" requires a name off the shelf and is.
+    // (`_` and `require('lodash')`, #2651), "Moment" (`require('moment')`,
+    // #2652) or "Csv" (`require('csv-parse/lib/sync')`, #2653); "Cipher"
+    // reaches past the shim and is. "Module" requires a name off the shelf and
+    // is.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
         {"request":"Library","names":["tv4"]},

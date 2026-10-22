@@ -705,6 +705,7 @@ if(QUICKJS_FOUND)
     vayu_embed_js(vayu_core UUID_JS vendor/uuid/uuid.min.js)
     vayu_embed_js(vayu_core LODASH_JS vendor/lodash/lodash.min.js)
     vayu_embed_js(vayu_core MOMENT_JS vendor/moment/moment.min.js)
+    vayu_embed_js(vayu_core CSV_PARSE_SYNC_JS vendor/csv-parse/csv-parse-sync.min.js)
 
     # Disable C99 extension warnings for the QuickJS glue (QuickJS macros use
     # compound literals). One list for both, so a file added to the glue cannot

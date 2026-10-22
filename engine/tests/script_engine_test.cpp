@@ -8457,7 +8457,8 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash, moment)"), std::string::npos)
+    EXPECT_NE (
+    refusal.find ("(crypto-js, uuid, lodash, moment, csv-parse/lib/sync)"), std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
     << refusal;
@@ -8808,6 +8809,149 @@ TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
+// require('csv-parse/lib/sync') is npm's csv-parse 1.2.4 sync parser, bundled
+// (#2653), the version Postman's sandbox exposes at that path and only there.
+// The module is the parse function. Every answer was checked against the
+// unbundled package on Node.
+TEST_F (ScriptEngineTest, RequireShelfCsvParseAnswersKnownCalls) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n1,2', { columns: true })))",
+    R"([{"a":"1","b":"2"}])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n1,2')))", R"([["a","b"],["1","2"]])" },
+    // A quoted field keeps its delimiter, and a doubled quote is one quote.
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('"a,b",c\n"say ""hi""",d')))",
+    R"([["a,b","c"],["say \"hi\"","d"]])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a;b\n1;2', { delimiter: ';', columns: true })))",
+    R"([{"a":"1","b":"2"}])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a\tb\n1\t2', { delimiter: '\t' })))",
+    R"([["a","b"],["1","2"]])" },
+    // An empty line is a record of one empty field unless it is skipped.
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n\n1,2\n')))", R"([["a","b"],[""],["1","2"]])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n\n1,2\n', { skip_empty_lines: true })))",
+    R"([["a","b"],["1","2"]])" },
+    // 1.2.4's option names, which later majors renamed.
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n1,2', { auto_parse: true })))",
+    R"([["a","b"],[1,2]])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n1,2,3', { relax_column_count: true })))",
+    R"([["a","b"],["1","2","3"]])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\r\n1,2\r\n', { columns: true })))",
+    R"([{"a":"1","b":"2"}])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')(' a , b ', { trim: true })))", R"([["a","b"]])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('id,v\n1,x\n2,y', { columns: true, objname: 'id' })))",
+    R"({"1":{"id":"1","v":"x"},"2":{"id":"2","v":"y"}})" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('')))", "[]" },
+    // 1.2.4 drops a short or long last record that has no line ending after
+    // it rather than throwing; Postman's copy does the same.
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n1,2,3')))", R"([["a","b"]])" },
+    { R"(JSON.stringify(require('csv-parse/lib/sync')('a,b\n1')))", R"([["a","b"]])" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// A malformed record throws csv-parse's own Error, with its own message, which
+// a script can catch.
+TEST_F (ScriptEngineTest, RequireShelfCsvParseThrowsTheLibrarysOwnError) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto REFUSED = std::to_array<ShelfAnswer> ({
+    { R"(require('csv-parse/lib/sync')('a,b\n"1,2'))", "Quoted field not terminated at line 3" },
+    { R"(require('csv-parse/lib/sync')('a,b\n1,2,3\n'))", "Number of columns is inconsistent on line 2" },
+    { R"(require('csv-parse/lib/sync')('a,b\n"1",2\n"x"y,3\n'))",
+    R"(Invalid closing quote at line 3; found "y" instead of delimiter ",")" },
+    });
+    for (const auto& refused : REFUSED) {
+        const std::string answer = shelf_answer (roomy, request, refused.expression);
+        EXPECT_NE (answer.find ("threw: "), std::string::npos)
+        << refused.expression << " answered " << answer;
+        EXPECT_NE (answer.find (refused.expected), std::string::npos)
+        << refused.expression << ": " << answer;
+    }
+    EXPECT_EQ (shelf_answer (roomy, request,
+               R"((function () { try { require('csv-parse/lib/sync')('"a'); } )"
+               R"(catch (e) { return (e instanceof Error) + ' ' + e.message; } })())"),
+    "true Quoted field not terminated at line 2");
+}
+
+// The module is the function, so there is nothing to destructure: a binding
+// and a direct call are the same function and answer the same records, and
+// every require answers one module.
+TEST_F (ScriptEngineTest, RequireShelfCsvParseBoundAndDirectAgree) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (shelf_answer (roomy, request,
+               R"((function () { const parse = require('csv-parse/lib/sync'); )"
+               R"(return [typeof parse, parse === require('csv-parse/lib/sync'), )"
+               R"(JSON.stringify(parse('a\n1')) === )"
+               R"(JSON.stringify(require('csv-parse/lib/sync')('a\n1'))].join(); })())"),
+    "function,true,true");
+}
+
+// The bundle's Node shims (Buffer, stream, util, string_decoder) are locals
+// of its own wrapper and the glue's `module` is the factory's, so none of them
+// reaches the script, before or after a parse, and the global object gains
+// nothing.
+TEST_F (ScriptEngineTest, RequireShelfCsvParseLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
+    const std::string probe =
+    "[typeof module, typeof exports, typeof define, typeof Buffer, typeof "
+    "process, typeof parse, typeof StringDecoder, typeof setImmediate].join(' "
+    "')";
+    const std::string undefined_all =
+    "undefined undefined undefined undefined undefined undefined undefined "
+    "undefined";
+    EXPECT_EQ (shelf_answer (roomy, request, probe), undefined_all);
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "(require('csv-parse/lib/sync')('a,b\\n1,2'), " + probe + ")"),
+    undefined_all);
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('csv-parse/lib/sync')('a,b\\n1,2', "
+    "{ columns: true }); return "
+    "Object.getOwnPropertyNames(globalThis).sort().join() === before; "
+    "})()"),
+    "true");
+}
+
+// Only the whole name loads it: Postman exposes csv-parse at this one path,
+// so the bare package, the 5.x `csv-parse/sync` and every other path under it
+// are refused as any name off the shelf is, and none of them evaluates the
+// library. Mutation: let `js_require` accept any name starting `csv-parse`
+// and every case here loads it instead.
+TEST_F (ScriptEngineTest, RequireShelfCsvParseRefusesEveryOtherPath) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    for (const char* name : { "csv-parse", "csv-parse/lib/other", "csv-parse/lib/index",
+         "csv-parse/lib/sync.js", "csv-parse/sync", "csv-parse/lib" }) {
+        const std::string refusal =
+        shelf_answer (engine, request, "require('" + std::string (name) + "')");
+        EXPECT_NE (refusal.find ("Cannot find module '" + std::string (name) + "'"),
+        std::string::npos)
+        << refusal;
+        EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
+        << refusal;
+    }
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a refused name evaluated a library";
+}
+
+// Mutation: evaluate the shelf in `setup_require_shelf` and the first count
+// fails.
+TEST_F (ScriptEngineTest, RequireShelfCsvParseEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "require('csv-parse/lib/sync')('a\\n1').length + "
+               "require('csv-parse/lib/sync')('a\\n1\\n2').length"),
+    "5");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+}
+
 // A library's parse depth is Vayu's own, not the script's to budget (#2652):
 // MSVC at /Od under ASan has frames large enough that lodash and moment
 // overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
@@ -8880,6 +9024,8 @@ TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('lodash').get"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('moment').utc"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('csv-parse/lib/sync')"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof _.get"), "function")
     << "at " << budget << " bytes";
