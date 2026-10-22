@@ -8969,7 +8969,11 @@ constexpr const char* XML2JS_PARSE =
 "JSON.stringify(r); }); return out; })";
 
 std::string xml2js_parse (const std::string& arguments) {
-    return std::string (XML2JS_PARSE) + "(" + arguments + ")";
+    std::string call = XML2JS_PARSE;
+    call += '(';
+    call += arguments;
+    call += ')';
+    return call;
 }
 
 } // namespace
