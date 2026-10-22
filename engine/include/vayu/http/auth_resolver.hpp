@@ -8,6 +8,7 @@
  */
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/types.hpp"
 
 #include <cstdint>
@@ -152,6 +153,12 @@ struct AuthApplyResult {
  * header already exists - matched case-insensitively). `db` is reserved for
  * oauth2 token lookup and may be null.
  *
+ * `target_policy`, when the caller states one (#2521), judges an OAuth 2.0
+ * config's token endpoints (`refuse_token_endpoints`) before the token cache
+ * is read or anything is posted: a refused host is `ok == false`,
+ * `InvalidUrl`, with `detail_code` `target_not_allowed` or
+ * `target_host_unknown`. Every other mode contacts nothing and ignores it.
+ *
  * A bearer token and an API key's name and value are trimmed of the spaces and
  * tabs around them (issue #2467): a pasted credential's trailing blank would
  * otherwise go out inside the header value, and a padded name as a line with a
@@ -160,21 +167,28 @@ struct AuthApplyResult {
  * with nothing written. Basic credentials are not trimmed: a password may end
  * in a space, and the pair is encoded as typed.
  */
-AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db);
+AuthApplyResult apply_auth (vayu::Request& req,
+const Auth& auth,
+vayu::db::Database* db,
+const TargetPolicy* target_policy = nullptr);
 
 /**
  * @brief Convenience overload: parse then apply. Used by direct callers/tests.
  */
-AuthApplyResult
-apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db);
+AuthApplyResult apply_auth (vayu::Request& req,
+const nlohmann::json& auth,
+vayu::db::Database* db,
+const TargetPolicy* target_policy = nullptr);
 
 /**
  * @brief Route-level pre-flight for POST /run: for oauth2 configs, acquire the
  *        token now (cache-aware, warming the cache for the run worker) so an
  *        unauthorizable run is rejected before it is created. No-op for every
- *        other mode.
+ *        other mode. `target_policy` is judged as `apply_auth` judges it.
  */
-AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db);
+AuthApplyResult preflight_auth (const nlohmann::json& auth,
+vayu::db::Database& db,
+const TargetPolicy* target_policy = nullptr);
 
 /**
  * @brief The `Authorization` value an oauth2 config places for an access token.

@@ -26,8 +26,10 @@
  * with each entry trimmed and lower-cased; `allowAll` admits any host that can
  * be determined; a host that cannot be determined is refused either way.
  *
- * It covers the request about to be sent, not a redirect hop the server
- * answers with, and not a `pm.sendRequest` a script makes.
+ * It covers the request about to be sent and every endpoint an OAuth 2.0
+ * token for it is acquired from (`refuse_token_endpoints`), whose URL a script
+ * can set as easily as the request's; not a redirect hop a server answers
+ * with, and not a `pm.sendRequest` a script makes.
  */
 
 #include <expected>
@@ -51,6 +53,12 @@ inline constexpr std::string_view TARGET_NOT_ALLOWED_CODE =
 /// A refusal of a URL whose host cannot be determined, which no policy admits.
 inline constexpr std::string_view TARGET_HOST_UNKNOWN_CODE =
 "target_host_unknown";
+
+/// Whether @p code is one of the two a host is refused under, for a caller
+/// relaying a refusal that may be a target policy's or something else's.
+[[nodiscard]] constexpr bool is_target_refusal_code (std::string_view code) {
+    return code == TARGET_NOT_ALLOWED_CODE || code == TARGET_HOST_UNKNOWN_CODE;
+}
 
 /// The 400 both routes answer a malformed `targetPolicy` with.
 inline constexpr std::string_view INVALID_TARGET_POLICY_CODE =
@@ -85,5 +93,16 @@ read_target_policy (const nlohmann::json& payload);
  */
 [[nodiscard]] std::optional<TargetRefusal>
 refuse_target (const TargetPolicy& policy, const vayu::Request& request);
+
+/**
+ * Whether @p policy refuses acquiring a token for the OAuth 2.0 @p config: the
+ * host of each URL `oauth::acquire_token` may post to
+ * (`oauth::TOKEN_ENDPOINT_MEMBERS`, an empty one skipped), judged by the rule
+ * @ref refuse_target applies, under the same codes. Both members are judged
+ * whether or not this acquisition would reach them, so the verdict does not
+ * depend on what the token cache holds. Nothing when every host is allowed.
+ */
+[[nodiscard]] std::optional<TargetRefusal>
+refuse_token_endpoints (const TargetPolicy& policy, const nlohmann::json& config);
 
 } // namespace vayu::http

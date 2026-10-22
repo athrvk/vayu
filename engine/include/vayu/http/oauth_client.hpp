@@ -33,6 +33,12 @@ std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
 "code", "redirect_uri", "code_verifier", "refresh_token", "username", "password",
 "scope", "state", "code_challenge", "code_challenge_method", "response_type" });
 
+/// The config members naming a URL @ref acquire_token posts to: the grant's
+/// endpoint, and the refresh endpoint, which falls back to it when empty. A
+/// caller's target policy judges both (`refuse_token_endpoints`, #2521).
+constexpr auto TOKEN_ENDPOINT_MEMBERS =
+std::to_array<std::string_view> ({ "accessTokenUrl", "refreshTokenUrl" });
+
 /// The config lists of extra request parameters, in the order the cache key
 /// reads them (`cache_key`).
 constexpr std::string_view AUTHORIZATION_PARAMS = "authorizationParams";

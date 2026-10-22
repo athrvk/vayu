@@ -385,6 +385,9 @@ struct ScenarioResolveOptions {
     /// once, here, before any script, and refuses a config name nothing
     /// answers by then.
     bool oauth2_after_scripts = false;
+    /// The run's caller's host rule (#2521), judged on the token endpoints of
+    /// every OAuth 2.0 token acquired here, before any is posted. Null for none.
+    const vayu::http::TargetPolicy* target_policy = nullptr;
 };
 
 /**
@@ -397,6 +400,10 @@ struct ScenarioResolveOptions {
 struct ScenarioResolution {
     bool ok = false;
     std::string error;
+    /// The code a refusal carries when it has its own (`target_not_allowed`,
+    /// `target_host_unknown`, #2521); empty for every other refusal, which the
+    /// route answers as `invalid_scenario`.
+    std::string error_code;
     ScenarioRequest request;
     ScenarioPlan plan;
     /// The validated `data` rows, for `ScenarioExecution::data_rows`.

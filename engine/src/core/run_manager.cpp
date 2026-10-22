@@ -1451,8 +1451,11 @@ vayu::Request& request) {
     // `{{$vu}}` binds off the iteration, so a run sent without `data` at all
     // defers for it too. Keying this on whether the run had rows is what used
     // to send an identity token in a credential base64-encoded as written.
-    auto built = vayu::http::build_request (
-    config, db_ptr, timeout_ms, context->load_auth.auth_resolution ());
+    // The route's pre-flight judged the token endpoints already; judged again
+    // here so no caller of the run reaches one the policy refuses (#2521).
+    const auto& target_policy = context->target_policy;
+    auto built = vayu::http::build_request (config, db_ptr, timeout_ms,
+    context->load_auth.auth_resolution (), target_policy ? &*target_policy : nullptr);
     if (!built.ok) {
         vayu::utils::log_error ("run",
         built.parse_failed ? std::string ("Load test: invalid request format") :

@@ -25,18 +25,32 @@
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/utils/json.hpp"
 
 namespace vayu::core {
 
 namespace {
 
-ScenarioResolution invalid (std::string reason) {
+ScenarioResolution invalid (std::string reason, std::string code = {}) {
     ScenarioResolution resolution;
-    resolution.ok    = false;
-    resolution.error = std::move (reason);
+    resolution.ok         = false;
+    resolution.error      = std::move (reason);
+    resolution.error_code = std::move (code);
     return resolution;
 }
+
+/// Why one step cannot be planned, and the code when the refusal has its own
+/// (a target policy's, #2521). A bare reason converts, so a refusal with no
+/// code is written as it always was.
+struct StepRefusal {
+    std::string reason;
+    std::string code;
+
+    StepRefusal (std::string text, std::string refusal_code = {})
+    : reason (std::move (text)), code (std::move (refusal_code)) {
+    }
+};
 
 /// The human-readable half of a compose error. `routes::error_message_of` is
 /// the shared reader for this shape, but it lives behind `routes.hpp`, which
@@ -326,7 +340,7 @@ ScenarioResolution& resolution) {
  *        was its node's first occurrence. `resolve_scenario` compiles every
  *        step's array only after that pass, from this output.
  */
-std::optional<std::string> resolve_step (vayu::db::Database& db,
+std::optional<StepRefusal> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
 const vayu::db::Collection& collection,
 bool has_data,
@@ -421,10 +435,13 @@ nlohmann::json& raw_elements_out) {
     const auto auth_resolution = auth_template.empty () && !auth_after_scripts ?
     vayu::http::AuthResolution::Apply :
     vayu::http::AuthResolution::Defer;
-    auto built =
-    vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
+
+    auto built = vayu::http::build_request (
+    payload, &db, options.timeout_ms, auth_resolution, options.target_policy);
     if (!built.ok || built.parse_failed) {
-        return ("Cannot compose " + describe_step (index, row) + ": " + built.error_message);
+        return StepRefusal{ "Cannot compose " + describe_step (index, row) +
+            ": " + built.error_message,
+            vayu::http::is_target_refusal_code (built.detail_code) ? built.detail_code : "" };
     }
 
     // Split once, here, so no executor re-scans this step per iteration -
@@ -870,9 +887,9 @@ const ScenarioResolveOptions& options) {
     resolution.plan.steps.reserve (rows.size ());
     std::vector<nlohmann::json> raw_elements (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
-        if (auto reason = resolve_step (db, options, *collection, has_data, bound_columns,
-            index, rows[index], resolution.plan, raw_elements[index])) {
-            return invalid (*reason);
+        if (auto refusal = resolve_step (db, options, *collection, has_data,
+            bound_columns, index, rows[index], resolution.plan, raw_elements[index])) {
+            return invalid (std::move (refusal->reason), std::move (refusal->code));
         }
     }
     mark_scope_entries (raw_elements);

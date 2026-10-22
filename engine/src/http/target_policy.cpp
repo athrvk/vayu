@@ -17,6 +17,7 @@
 
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
@@ -63,10 +64,10 @@ const nlohmann::json& hosts) {
     return out;
 }
 
-/// The host the transfer would dial, as the MCP server's `extractHost` reads
-/// one, or nothing when the URL names none it could compare.
-std::optional<std::string> comparable_host (const vayu::Request& request) {
-    const std::string host = detail::parse_authority (wire_url (request)).host;
+/// The host @p url would dial, as the MCP server's `extractHost` reads one, or
+/// nothing when it names none it could compare.
+std::optional<std::string> comparable_host (std::string_view url) {
+    const std::string host = detail::parse_authority (std::string (url)).host;
     // A template the residual pass left is a name nothing answered, not a host.
     if (host.empty () || host.find ("{{") != std::string::npos ||
     host.find ("}}") != std::string::npos) {
@@ -84,6 +85,31 @@ std::string joined (const std::vector<std::string>& hosts) {
         out += host;
     }
     return out;
+}
+
+/// @p policy's verdict on @p url, which the refusal calls @p subject.
+std::optional<TargetRefusal>
+refuse_url (const TargetPolicy& policy, std::string_view url, std::string_view subject) {
+    const auto host = comparable_host (url);
+    if (!host) {
+        return TargetRefusal{ "Could not determine the target host from " +
+            std::string (subject) +
+            " (it may be empty or hold an unresolved {{variable}}), so this "
+            "request's target policy cannot allow it. Nothing was sent.",
+            TARGET_HOST_UNKNOWN_CODE };
+    }
+    if (policy.allow_all ||
+    std::ranges::find (policy.allowed_hosts, *host) != policy.allowed_hosts.end ()) {
+        return std::nullopt;
+    }
+    std::string message =
+    "Host \"" + *host + "\", which " + std::string (subject) + " names, ";
+    message += policy.allowed_hosts.empty () ?
+    std::string ("is refused: this request's target policy allows no host.") :
+    "is not allowed by this request's target policy (allowed hosts: " +
+    joined (policy.allowed_hosts) + ").";
+    message += " Nothing was sent.";
+    return TargetRefusal{ std::move (message), TARGET_NOT_ALLOWED_CODE };
 }
 
 } // namespace
@@ -121,27 +147,31 @@ const nlohmann::json& payload) {
 
 std::optional<TargetRefusal>
 refuse_target (const TargetPolicy& policy, const vayu::Request& request) {
-    const auto host = comparable_host (request);
-    if (!host) {
-        return TargetRefusal{
-            "Could not determine the target host from the URL about "
-            "to be sent (it may be empty or hold an unresolved "
-            "{{variable}}), so this request's target policy cannot "
-            "allow it. Nothing was sent.",
-            TARGET_HOST_UNKNOWN_CODE
-        };
-    }
-    if (policy.allow_all ||
-    std::ranges::find (policy.allowed_hosts, *host) != policy.allowed_hosts.end ()) {
+    return refuse_url (policy, wire_url (request), "the URL about to be sent");
+}
+
+std::optional<TargetRefusal> refuse_token_endpoints (const TargetPolicy& policy,
+const nlohmann::json& config) {
+    if (!config.is_object ()) {
         return std::nullopt;
     }
-    std::string message = "Host \"" + *host + "\", which the URL about to be sent names, ";
-    message += policy.allowed_hosts.empty () ?
-    std::string ("is refused: this request's target policy allows no host.") :
-    "is not allowed by this request's target policy (allowed hosts: " +
-    joined (policy.allowed_hosts) + ").";
-    message += " Nothing was sent.";
-    return TargetRefusal{ std::move (message), TARGET_NOT_ALLOWED_CODE };
+    for (const std::string_view member : oauth::TOKEN_ENDPOINT_MEMBERS) {
+        // An empty or non-string member posts nothing: `acquire_token` refuses
+        // the config, or the refresh falls back to the token URL.
+        const auto url = config.find (member);
+        if (url == config.end () || !url->is_string ()) {
+            continue;
+        }
+        const auto& text = url->get_ref<const std::string&> ();
+        if (text.empty ()) {
+            continue;
+        }
+        const std::string subject = "the OAuth 2.0 " + std::string (member);
+        if (auto refusal = refuse_url (policy, text, subject)) {
+            return refusal;
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace vayu::http

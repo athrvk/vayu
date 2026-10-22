@@ -1748,8 +1748,10 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // bind below applies them once the row has reached them.
     const int request_timeout_ms = resolve_request_timeout_ms (json,
     ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-    auto built =
-    vayu::http::build_request (json, &ctx.db, request_timeout_ms, row_auth.resolution);
+    // An OAuth 2.0 token acquired here has its endpoints judged by the policy
+    // before anything is posted (#2521).
+    auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms,
+    row_auth.resolution, *target_policy ? &**target_policy : nullptr);
     if (built.parse_failed) {
         vayu::utils::log_warning ("http",
         "POST /execute - Invalid request format: " + built.error_message);
@@ -1994,7 +1996,7 @@ const vayu::http::TargetPolicy* target_policy) {
         return refusal;
     }
     if (late_auth) {
-        LateTokenAcquisition acquisition{ &db };
+        LateTokenAcquisition acquisition{ &db, target_policy };
         if (auto refusal =
             apply_late_auth (request, std::move (*late_auth), scopes, &acquisition)) {
             return refusal;
@@ -2439,28 +2441,51 @@ std::chrono::steady_clock::time_point handler_start) {
 }
 
 /**
- * Everything a design send does once its run row exists: answer an auth
- * failure, hand a stream to its worker, or run the buffered exchange.
+ * Answer a build that failed once the run row exists: its auth was not applied
+ * (an OAuth 2.0 token not acquired), or the caller's target policy refused the
+ * endpoint that token comes from (#2521). A refusal of the second kind answers
+ * as a refused final URL does, so a token acquired at the build and one
+ * acquired after the script are refused alike: a stream's 400 under the code,
+ * a buffered send's `refusalCode`. Otherwise the failed result is recorded
+ * against the run and the error returned in the body with its
+ * `authErrorCode` (engine returns 200; the status lives in the body).
+ */
+void answer_failed_build (RouteContext& ctx,
+httplib::Response& res,
+const vayu::http::RequestBuild& built,
+DesignSend& send) {
+    const bool target_refused = vayu::http::is_target_refusal_code (built.detail_code);
+    if (target_refused && send.stream.value) {
+        const std::string run_id = vayu::utils::invariant_value (
+        send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
+        refuse_stream_before_it_opens (
+        ctx, res, run_id, 400, built.error_message, built.detail_code);
+        return;
+    }
+    vayu::Response failed;
+    failed.status_code   = 0;
+    failed.status_text   = vayu::http::status_text (0);
+    failed.error_code    = built.error_code;
+    failed.error_message = built.error_message;
+    record_design_result (ctx.db, send.run_id, send.request, failed);
+    res.status          = 200;
+    nlohmann::json body = vayu::json::serialize (failed);
+    body[target_refused ? "refusalCode" : "authErrorCode"] = built.detail_code;
+    res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
+    "application/json");
+}
+
+/**
+ * Everything a design send does once its run row exists: answer a failed
+ * build, hand a stream to its worker, or run the buffered exchange.
  */
 void dispatch_design_send (RouteContext& ctx,
 httplib::Response& res,
 const vayu::http::RequestBuild& built,
 DesignSend& send,
 std::chrono::steady_clock::time_point handler_start) {
-    // Auth failure: record a failed result against the run and return the
-    // error in the body (engine returns 200; the status lives in the body).
     if (!built.ok) {
-        vayu::Response auth_resp;
-        auth_resp.status_code   = 0;
-        auth_resp.status_text   = vayu::http::status_text (0);
-        auth_resp.error_code    = built.error_code;
-        auth_resp.error_message = built.error_message;
-        record_design_result (ctx.db, send.run_id, send.request, auth_resp);
-        nlohmann::json body   = vayu::json::serialize (auth_resp);
-        body["authErrorCode"] = built.detail_code;
-        res.status            = 200;
-        res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
-        "application/json");
+        answer_failed_build (ctx, res, built, send);
         return;
     }
 
@@ -2630,14 +2655,16 @@ const nlohmann::json& json) {
  */
 /**
  * Every refusal `POST /runs` makes on the payload alone, before a run row
- * exists - so a rejected request leaves nothing behind. @p origin receives the
- * payload's `origin`, which is read here because reading it is validating it.
+ * exists - so a rejected request leaves nothing behind. @p origin and
+ * @p target_policy receive the payload's `origin` and `targetPolicy`, which are
+ * read here because reading them is validating them.
  */
 std::optional<RouteError> validate_load_request (RouteContext& ctx,
 nlohmann::json& json,
 bool is_scenario,
 bool is_scenario_load,
-RunOrigin& origin) {
+RunOrigin& origin,
+std::optional<vayu::http::TargetPolicy>& target_policy) {
     // Refused before the run row exists, and never quietly downgraded to a
     // closed-loop mode: a run that measured something other than what was
     // asked for is worse than no run at all.
@@ -2707,12 +2734,15 @@ RunOrigin& origin) {
     origin = std::move (*read_origin);
 
     // Read again by the run itself (`RunContext::target_policy`); refused here
-    // so a malformed one leaves no run behind.
-    if (auto policy = vayu::http::read_target_policy (json); !policy) {
+    // so a malformed one leaves no run behind, and kept for the token
+    // acquisitions the plan and the pre-flight make before the run exists.
+    auto policy = vayu::http::read_target_policy (json);
+    if (!policy) {
         vayu::utils::log_warning ("http", "POST /runs - " + policy.error ());
         return RouteError{ 400,
             error_body (400, policy.error (), vayu::http::INVALID_TARGET_POLICY_CODE) };
     }
+    target_policy = std::move (*policy);
 
     // Validate required fields
     if (!is_scenario) {
@@ -2771,11 +2801,13 @@ RunOrigin& origin) {
 std::optional<RouteError> resolve_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
 bool is_scenario_load,
+const vayu::http::TargetPolicy* target_policy,
 std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
 nlohmann::json& scenario_manifest) {
     vayu::core::ScenarioResolveOptions options;
     // Only the sequential runner's steps acquire their token at the send.
     options.oauth2_after_scripts = !is_scenario_load;
+    options.target_policy        = target_policy;
     if (auto it = json.find ("environmentId"); it != json.end () && it->is_string ()) {
         options.environment_id = it->get<std::string> ();
     }
@@ -2794,7 +2826,9 @@ nlohmann::json& scenario_manifest) {
     if (!resolved.ok) {
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid scenario: " + resolved.error);
-        return RouteError{ 400, error_body (400, resolved.error, "invalid_scenario") };
+        return RouteError{ 400,
+            error_body (400, resolved.error,
+            resolved.error_code.empty () ? "invalid_scenario" : resolved.error_code) };
     }
     scenario_manifest = vayu::core::build_scenario_manifest (
     resolved.request, resolved.plan, resolved.spec);
@@ -2834,10 +2868,11 @@ nlohmann::json& scenario_manifest) {
 std::optional<RouteError> resolve_and_validate_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
 bool is_scenario_load,
+const vayu::http::TargetPolicy* target_policy,
 std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
 nlohmann::json& scenario_manifest) {
-    if (auto rejection = resolve_run_scenario (
-        ctx, json, is_scenario_load, scenario_execution, scenario_manifest)) {
+    if (auto rejection = resolve_run_scenario (ctx, json, is_scenario_load,
+        target_policy, scenario_execution, scenario_manifest)) {
         return rejection;
     }
     if (!is_scenario_load) {
@@ -2864,10 +2899,14 @@ nlohmann::json& scenario_manifest) {
  * A scenario payload carries no run-level `auth` - each step's auth was
  * resolved at plan time, and a step that could not be authorized already failed
  * resolution with a 400 - so this is the single-request path's check alone.
+ * An OAuth 2.0 token endpoint @p target_policy refuses is a 400 under the
+ * policy's code, before anything is posted (#2521).
  */
-std::optional<RouteError> preflight_run_auth (RouteContext& ctx, const nlohmann::json& json) {
-    auto preflight =
-    vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+std::optional<RouteError> preflight_run_auth (RouteContext& ctx,
+const nlohmann::json& json,
+const vayu::http::TargetPolicy* target_policy) {
+    auto preflight = vayu::http::preflight_auth (
+    json.value ("auth", nlohmann::json ()), ctx.db, target_policy);
     if (!preflight.ok) {
         vayu::utils::log_warning (
         "http", "POST /runs - Auth pre-flight failed: " + preflight.message);
@@ -3019,18 +3058,22 @@ httplib::Response& res) {
     const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
 
     RunOrigin origin;
-    if (auto rejection =
-        validate_load_request (ctx, json, is_scenario, is_scenario_load, origin)) {
+    std::optional<vayu::http::TargetPolicy> target_policy;
+    if (auto rejection = validate_load_request (
+        ctx, json, is_scenario, is_scenario_load, origin, target_policy)) {
         res.status = rejection->status;
         res.set_content (rejection->body.dump (), "application/json");
         return;
     }
 
+    const vayu::http::TargetPolicy* target_policy_ptr =
+    target_policy ? &*target_policy : nullptr;
+
     std::shared_ptr<const vayu::core::ScenarioExecution> scenario_execution;
     nlohmann::json scenario_manifest;
     if (is_scenario) {
-        if (auto rejection = resolve_and_validate_run_scenario (ctx, json,
-            is_scenario_load, scenario_execution, scenario_manifest)) {
+        if (auto rejection = resolve_and_validate_run_scenario (ctx, json, is_scenario_load,
+            target_policy_ptr, scenario_execution, scenario_manifest)) {
             res.status = rejection->status;
             res.set_content (rejection->body.dump (), "application/json");
             return;
@@ -3092,7 +3135,7 @@ httplib::Response& res) {
     log_started_run (json, run, run_id, scenario_execution.get ());
 
     if (!is_scenario) {
-        if (auto rejection = preflight_run_auth (ctx, json)) {
+        if (auto rejection = preflight_run_auth (ctx, json, target_policy_ptr)) {
             res.status = rejection->status;
             res.set_content (rejection->body.dump (), "application/json");
             return;

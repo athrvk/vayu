@@ -783,8 +783,9 @@ LateTokenAcquisition* acquisition) {
     if (auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth)) {
         oauth2->config = vayu::http::resolve_json_strings (oauth2->config, vars);
     }
-    auto applied = vayu::http::apply_auth (
-    request, auth, acquisition != nullptr ? acquisition->token_cache : nullptr);
+    auto applied = vayu::http::apply_auth (request, auth,
+    acquisition != nullptr ? acquisition->token_cache : nullptr,
+    acquisition != nullptr ? acquisition->target_policy : nullptr);
     if (acquisition != nullptr) {
         acquisition->fetch_ms += applied.token_fetch_ms;
     }
@@ -1081,7 +1082,7 @@ ExchangeInputs inputs) {
         refusal = refuse_disallowed_target (inputs.target_policy, outcome.request);
     }
     if (!refusal && inputs.late_auth) {
-        LateTokenAcquisition acquisition{ inputs.token_cache };
+        LateTokenAcquisition acquisition{ inputs.token_cache, inputs.target_policy };
         refusal = apply_late_auth (
         outcome.request, std::move (*inputs.late_auth), scopes, &acquisition);
         outcome.auth_fetch_ms = acquisition.fetch_ms;

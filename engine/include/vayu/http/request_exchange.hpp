@@ -553,7 +553,8 @@ struct ExchangeInputs {
 
     /// The hosts the caller allows this exchange to reach (`target_policy.hpp`),
     /// judged after the pre-request script and the residual pass and before
-    /// the late auth, so a refused target fetches no token either. Null for a
+    /// the late auth, so a refused target fetches no token either; the late
+    /// auth then judges its OAuth 2.0 token endpoints by it too. Null for a
     /// caller that states none, which sends wherever the request names.
     const vayu::http::TargetPolicy* target_policy = nullptr;
 };
@@ -627,6 +628,10 @@ struct ResidualRefusal {
 struct LateTokenAcquisition {
     /// The token cache `apply_auth` reads and writes; null refuses OAuth 2.0.
     vayu::db::Database* token_cache = nullptr;
+    /// The caller's host rule, judged on the resolved config's token endpoints
+    /// before the cache is read (`refuse_token_endpoints`): a script can set
+    /// the `accessTokenUrl` as easily as the request's URL. Null for none.
+    const vayu::http::TargetPolicy* target_policy = nullptr;
     /// Added to by every acquisition (`AuthApplyResult::token_fetch_ms`).
     double fetch_ms = 0.0;
 };
@@ -705,12 +710,14 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * An OAuth 2.0 config (#2521) has every string resolved the same way, and only
  * then is its token acquired through @p acquisition's cache, so the cache key
  * is the resolved config's and a script that changed a client secret or scope
- * reaches the token endpoint.
+ * reaches the token endpoint. The endpoints it would post to are judged by
+ * @p acquisition's target policy first, as resolved.
  *
  * @return why the send must not go out, in the residual pass's shape, when
- *         `apply_auth` fails: an api key name that is not a header name, or an
- *         OAuth 2.0 token not acquired (`oauth2_no_database` with no
- *         @p acquisition).
+ *         `apply_auth` fails: an api key name that is not a header name, an
+ *         OAuth 2.0 token endpoint the target policy refuses (`InvalidUrl`,
+ *         `target_not_allowed` or `target_host_unknown`), or an OAuth 2.0
+ *         token not acquired (`oauth2_no_database` with no @p acquisition).
  */
 [[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,

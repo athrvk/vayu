@@ -15,7 +15,9 @@
  * script (`pm.request.url`, or the variable a deferred `{{host}}` resolves
  * from) to a host the policy does not list and assert the echo server saw
  * nothing; each refusal has a twin the same policy admits, so a check that
- * refused everything would fail too.
+ * refused everything would fail too. The OAuth 2.0 cases steer the
+ * `accessTokenUrl` the same ways and assert the token server saw nothing
+ * either: the token request carries the client's id and secret.
  *
  * Every send dials 127.0.0.1; `localhost` is the host the policy leaves out,
  * so a refused case resolves no name at all.
@@ -23,7 +25,9 @@
  * Mutation check: make `refuse_disallowed_target` (request_exchange.cpp)
  * answer nothing, and the design-send cases send; drop the
  * `config.target_policy` branch in `submit_pending_transfers`
- * (event_loop_worker.cpp), and the load cases do.
+ * (event_loop_worker.cpp), and the load cases do; drop the
+ * `refuse_token_endpoints` branch in `resolve_oauth2` (auth_resolver.cpp), and
+ * the token cases reach the token server.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
@@ -43,10 +47,12 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -61,7 +67,9 @@ namespace {
 using nlohmann::json;
 using vayu::http::read_target_policy;
 using vayu::http::refuse_target;
+using vayu::http::refuse_token_endpoints;
 using vayu::http::TargetPolicy;
+using vayu::tests::MockTokenServer;
 
 constexpr const char* ENV_ID     = "env_1";
 constexpr const char* REQUEST_ID = "req_1";
@@ -78,6 +86,22 @@ TargetPolicy allowing (std::vector<std::string> hosts) {
 
 json policy_allowing (const json& hosts) {
     return { { "allowAll", false }, { "allowedHosts", hosts } };
+}
+
+/// A client-credentials auth block posting to @p token_url.
+json client_credentials (const std::string& token_url) {
+    return { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" },
+        { "accessTokenUrl", token_url }, { "clientId", "cid" },
+        { "clientSecret", "secret" }, { "credentialsPlacement", "body" } } } };
+}
+
+/// @p tokens' `/token` endpoint, named by @p host.
+std::string token_url (const MockTokenServer& tokens, const std::string& host) {
+    std::string url = tokens.url ("/token");
+    url.replace (url.find ("127.0.0.1"), std::string ("127.0.0.1").size (), host);
+    return url;
 }
 
 /// A refusal body's `error.code`, "" for any other answer.
@@ -168,6 +192,41 @@ TEST (TargetPolicyRefusal, AHostThatCannotBeDeterminedIsRefusedUnderAllowAll) {
     }
 }
 
+// Both URLs a token acquisition may post to are judged, whatever the cache
+// holds: a refresh endpoint off the list is refused beside a listed token URL.
+TEST (TargetPolicyTokenEndpoints, EveryEndpointTheAcquisitionMayPostToIsJudged) {
+    const auto policy = allowing ({ "idp.example.com" });
+    const json listed{ { "accessTokenUrl", "https://IDP.example.com/token" } };
+    EXPECT_FALSE (refuse_token_endpoints (policy, listed));
+
+    json refresh_off_list               = listed;
+    refresh_off_list["refreshTokenUrl"] = "https://evil.example.com/refresh";
+    const auto refused = refuse_token_endpoints (policy, refresh_off_list);
+    ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->code, vayu::http::TARGET_NOT_ALLOWED_CODE);
+    EXPECT_NE (refused->message.find ("refreshTokenUrl"), std::string::npos)
+    << refused->message;
+    EXPECT_NE (refused->message.find ("\"evil.example.com\""), std::string::npos)
+    << refused->message;
+
+    // An empty refresh URL posts nothing of its own: the refresh falls back to
+    // the token URL.
+    json empty_refresh               = listed;
+    empty_refresh["refreshTokenUrl"] = "";
+    EXPECT_FALSE (refuse_token_endpoints (policy, empty_refresh));
+}
+
+TEST (TargetPolicyTokenEndpoints, AllowAllAdmitsAnyEndpointButNotAnUnknownHost) {
+    const TargetPolicy all{ .allow_all = true, .allowed_hosts = {} };
+    EXPECT_FALSE (refuse_token_endpoints (
+    all, json{ { "accessTokenUrl", "https://anything.example/token" } }));
+
+    const auto unknown = refuse_token_endpoints (
+    all, json{ { "accessTokenUrl", "https://{{idp}}/token" } });
+    ASSERT_HAS_VALUE (unknown);
+    EXPECT_EQ (unknown->code, vayu::http::TARGET_HOST_UNKNOWN_CODE);
+}
+
 // --- Through the routes ------------------------------------------------------
 
 class TargetPolicyRouteTest : public ::testing::Test {
@@ -217,11 +276,13 @@ class TargetPolicyRouteTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
     }
 
-    /// `req_1`, a GET to @p url, with @p pre_script as its own `script.pre`
-    /// (run inline under load when @p inline_script).
+    /// `req_1`, a GET to @p url under @p auth, with @p pre_script as its own
+    /// `script.pre` (run inline under load when @p inline_script), or no
+    /// element at all when it is empty.
     void seed_request (const std::string& url,
     const std::string& pre_script,
-    bool inline_script = false) const {
+    bool inline_script = false,
+    const json& auth   = json{ { "mode", "noauth" } }) const {
         json config{ { "script", pre_script } };
         if (inline_script) {
             config["inline"] = true;
@@ -233,13 +294,14 @@ class TargetPolicyRouteTest : public ::testing::Test {
         r.method        = vayu::HttpMethod::GET;
         r.url           = url;
         r.headers       = "[]";
-        r.elements      = json::array (
-        { { { "id", "el_pre" }, { "kind", "script.pre" }, { "enabled", true },
-             { "config",
-             config } } }).dump ();
-        r.auth       = R"({"mode":"noauth"})";
-        r.created_at = 1;
-        r.updated_at = 1;
+        r.elements      = pre_script.empty () ?
+             json::array ().dump () :
+             json::array ({ { { "id", "el_pre" }, { "kind", "script.pre" },
+                          { "enabled", true }, { "config", config } } })
+        .dump ();
+        r.auth          = auth.dump ();
+        r.created_at    = 1;
+        r.updated_at    = 1;
         db_->save_request (r);
     }
 
@@ -516,4 +578,173 @@ TEST_F (TargetPolicyRouteTest, AScenarioLoadStepSteeredOffTheListIsRefused) {
     seed_request (echo.url (), steer_to (echo, "127.0.0.1"), /*inline_script=*/true);
     run_to_the_end (collection_run (policy_allowing ({ "127.0.0.1" }), true));
     EXPECT_EQ (echo.requests_seen (), 1);
+}
+
+// --- The OAuth 2.0 token endpoint ---------------------------------------------
+
+// The token request is a send too: a script that moves the `accessTokenUrl` off
+// the list is refused before the token server or the target sees anything.
+TEST_F (TargetPolicyRouteTest, AScriptSteeringTheTokenUrlOffTheListIsRefusedBeforeTheTokenRequest) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (),
+    "pm.environment.set('tokenUrl', '" + token_url (tokens, "localhost") + "');",
+    false, client_credentials ("{{tokenUrl}}"));
+
+    const json answer = execute (policy_allowing ({ "127.0.0.1" }));
+
+    EXPECT_EQ (tokens.hits (), 0) << "the steered token request went out";
+    EXPECT_EQ (echo.requests_seen (), 0);
+    EXPECT_EQ (answer.value ("status", -1), 0) << answer.dump ();
+    EXPECT_EQ (answer.value ("refusalCode", ""), "target_not_allowed") << answer.dump ();
+    const std::string message = answer.value ("errorMessage", "");
+    EXPECT_NE (message.find ("accessTokenUrl"), std::string::npos) << message;
+    EXPECT_NE (message.find ("\"localhost\""), std::string::npos) << message;
+}
+
+TEST_F (TargetPolicyRouteTest, AScriptSettingAListedTokenUrlAcquiresAndAppliesTheToken) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (),
+    "pm.environment.set('tokenUrl', '" + tokens.url ("/token") + "');", false,
+    client_credentials ("{{tokenUrl}}"));
+
+    const json answer = execute (policy_allowing ({ "127.0.0.1" }));
+
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+TEST_F (TargetPolicyRouteTest, AllowAllAcquiresFromWhicheverTokenUrlTheScriptSets) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (),
+    "pm.environment.set('tokenUrl', '" + tokens.url ("/token") + "');", false,
+    client_credentials ("{{tokenUrl}}"));
+
+    const json answer = execute (json{ { "allowAll", true } });
+
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
+}
+
+TEST_F (TargetPolicyRouteTest, NoPolicyAcquiresFromWhicheverTokenUrlTheScriptSets) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (),
+    "pm.environment.set('tokenUrl', '" + tokens.url ("/token") + "');", false,
+    client_credentials ("{{tokenUrl}}"));
+
+    const auto [status, answer] = post ("/execute", compose ());
+
+    EXPECT_EQ (status, 200) << answer.dump ();
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
+}
+
+TEST_F (TargetPolicyRouteTest, AStreamingSendWhoseScriptSteersTheTokenUrlIsRefusedBeforeItOpens) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (),
+    "pm.environment.set('tokenUrl', '" + token_url (tokens, "localhost") + "');",
+    false, client_credentials ("{{tokenUrl}}"));
+    json payload            = compose ();
+    payload["targetPolicy"] = policy_allowing ({ "127.0.0.1" });
+    payload["stream"]       = true;
+
+    const auto [status, answer] = post ("/execute", payload);
+
+    EXPECT_EQ (status, 400) << answer.dump ();
+    EXPECT_EQ (error_code (answer), "target_not_allowed") << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 0);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// Unscripted, the token is acquired when the request is built, and the same
+// rule holds there, in the same answer shapes.
+TEST_F (TargetPolicyRouteTest, AnUnscriptedTokenUrlOffTheListIsRefusedAtTheBuild) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (), "", false,
+    client_credentials (token_url (tokens, "localhost")));
+
+    const json answer = execute (policy_allowing ({ "127.0.0.1" }));
+    EXPECT_EQ (answer.value ("status", -1), 0) << answer.dump ();
+    EXPECT_EQ (answer.value ("refusalCode", ""), "target_not_allowed") << answer.dump ();
+    EXPECT_FALSE (answer.contains ("authErrorCode")) << answer.dump ();
+
+    json stream            = compose ();
+    stream["targetPolicy"] = policy_allowing ({ "127.0.0.1" });
+    stream["stream"]       = true;
+    const auto [stream_status, stream_answer] = post ("/execute", stream);
+    EXPECT_EQ (stream_status, 400) << stream_answer.dump ();
+    EXPECT_EQ (error_code (stream_answer), "target_not_allowed")
+    << stream_answer.dump ();
+
+    EXPECT_EQ (tokens.hits (), 0);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// Judged before the cache is read: a token an earlier send cached for the
+// refused endpoint is not carried to the target either.
+TEST_F (TargetPolicyRouteTest, ACachedTokenForARefusedTokenUrlIsNotSent) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    const json auth = client_credentials (token_url (tokens, "localhost"));
+    seed_request (echo.url (), "", false, auth);
+    vayu::db::OAuthToken cached;
+    cached.cache_key    = vayu::http::oauth::cache_key (auth["config"]);
+    cached.access_token = "CACHED";
+    cached.token_type   = "Bearer";
+    cached.created_at   = 1;
+    db_->save_oauth_token (cached);
+
+    const json answer = execute (policy_allowing ({ "127.0.0.1" }));
+
+    EXPECT_EQ (answer.value ("refusalCode", ""), "target_not_allowed") << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 0);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// A run acquires before it exists: the pre-flight of a single-request run and
+// the plan of a collection run, sequential or under load, are each a 400 under
+// the policy's code with no run behind it.
+TEST_F (TargetPolicyRouteTest, ARunWhoseTokenUrlIsOffTheListIsRefusedBeforeItStarts) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (), "", false,
+    client_credentials (token_url (tokens, "localhost")));
+    const json policy = policy_allowing ({ "127.0.0.1" });
+
+    json single = compose ();
+    single.erase ("elements");
+    single.update ({ { "mode", "iterations" }, { "iterations", 1 },
+    { "concurrency", 1 }, { "targetPolicy", policy } });
+    for (const json& payload :
+    { single, collection_run (policy, false), collection_run (policy, true) }) {
+        const auto [status, answer] = post ("/runs", payload);
+        EXPECT_EQ (status, 400) << answer.dump ();
+        EXPECT_EQ (error_code (answer), "target_not_allowed") << answer.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_EQ (tokens.hits (), 0);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// The sequential runner acquires a scripted step's token at its send, after
+// the script: the step is refused there and the token server sees nothing.
+TEST_F (TargetPolicyRouteTest, ACollectionRunStepWhoseScriptSteersTheTokenUrlIsRefused) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_request (echo.url (),
+    "pm.environment.set('tokenUrl', '" + token_url (tokens, "localhost") + "');",
+    false, client_credentials ("{{tokenUrl}}"));
+
+    const std::string refused =
+    run_to_the_end (collection_run (policy_allowing ({ "127.0.0.1" }), false));
+    EXPECT_EQ (tokens.hits (), 0) << "the steered token request went out";
+    EXPECT_EQ (echo.requests_seen (), 0);
+    EXPECT_NE (result_errors (refused).find ("accessTokenUrl"), std::string::npos)
+    << result_errors (refused);
 }
