@@ -885,7 +885,7 @@ Every entry below was verified by locating the read site in the engine source.
 | Key | Read site | When it applies |
 |---|---|---|
 | `workers` | `core/run_manager.cpp` | **Per run.** No restart - and the entry says so since [#873](https://github.com/athrvk/vayu/issues/873), which dropped the `requiresRestart: true` it had carried |
-| `eventLoopMaxPerHost` | `core/run_manager.cpp` | Per run |
+| `eventLoopMaxPerHost` | `core/run_manager.cpp` | Per run, raised to cover the run's virtual users (#2394) |
 | `eventLoopMaxConcurrent` | `core/run_manager.cpp` | Per run, but **overridden** by the run's own `concurrency` |
 | `dnsCacheTimeout` | `core/run_manager.cpp` | Per run |
 | `scriptEnableConsole` | `core/run_manager.cpp` | Per run |
@@ -939,9 +939,14 @@ are read **per run**, so none needs a restart - and none is flagged
   Bounding it does not hide the demand: requests that come due while the cap is
   reached are counted as **dropped**, so a run that could not keep up says so
   instead of running past its `duration` to catch up.
-- `eventLoopMaxPerHost` - not binding at c=64; 200 → 500 changed nothing. Note it
-  is applied **per worker**, so the effective per-host budget is
-  `workers × maxPerHost`.
+- `eventLoopMaxPerHost` - not binding at c=64; 200 → 500 changed nothing. It
+  is applied **per worker**, and since #2394 a run raises it to cover its
+  virtual users (`ceil(concurrency / workers)` per worker), so it is a floor,
+  not a ceiling. Before that, 4 workers at the default of 200 held a run to
+  800 connections: every virtual user above 800 against an HTTP/1.1 target
+  waited inside libcurl for a connection, and that wait was reported as
+  target latency. A run that raised it says so in its warnings
+  (`per_host_limit_raised`).
 - `dnsCacheTimeout` - set it high (3600) for a fixed target; the hostname never
   needs re-resolution. Worth little on a warm run, since DNS cost per request
   amortises to ~0.005 ms over 60 s.
