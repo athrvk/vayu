@@ -659,7 +659,7 @@ replaced at the path afterwards is not what is sent. A path a data row binds is
 the exception: it is checked when the run starts but opened per submission,
 through the same check again, so a large data file holds no file open per row.
 Its length is the one the
-open saw; a file truncated below it under the open handle aborts the transfer.
+open saw; a file truncated below it under the open handle fails the transfer.
 A part with no declared Content-Type is typed by its filename's extension, then
 its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`,
 `htm`, `html`, `pdf`, `xml`), else `application/octet-stream`. A **disabled**

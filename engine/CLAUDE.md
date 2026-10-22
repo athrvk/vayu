@@ -1043,7 +1043,7 @@ logged as a warning: it means a client skipped composition.
   between the canonicalisation and the open is followed; Windows opens the
   canonical path following a final reparse point, because a cloud placeholder
   is one; and the approved file's content can still change under the handle
-  (the size is the open's, and a file truncated below it aborts the transfer).
+  (the size is the open's, and a file truncated below it fails the transfer).
   A new driver that sends a request body goes through a `FilePlan`, never
   straight to the client.
 

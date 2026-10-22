@@ -995,6 +995,30 @@ TEST_F (FormPartWireTest, AFileReplacedAfterTheCheckSendsTheApprovedOne) {
     EXPECT_EQ (part_f (*server_), "approved bytes");
 }
 
+// The part's length is the one the open saw; a file truncated below it under
+// the handle cannot keep that promise, and the transfer fails rather than send
+// a short or padded part. Mutation check: pad the short read with zeros in
+// `read_part` and the transfer succeeds with bytes the file never held.
+TEST_F (FormPartWireTest, AFileTruncatedUnderTheHandleFailsTheTransfer) {
+    const std::string src = scratch_.write ("data.bin", binary_payload (100000));
+    Request request    = form_part_request (server_->url (), src);
+    request.timeout_ms = 10000;
+    FilePlan plan (allowing (scratch_));
+    ASSERT_FALSE (plan.prepare (request));
+    std::error_code ec;
+    fs::resize_file (src, 10, ec);
+    if (ec) {
+        GTEST_SKIP ()
+        << "this platform cannot truncate a file held open: " << ec.message ();
+    }
+
+    Client client;
+    const auto sent = client.send (request).value ();
+    EXPECT_EQ (sent.status_code, 0);
+    EXPECT_FALSE (sent.error_message.empty ());
+    EXPECT_TRUE (server_->parts ().empty ());
+}
+
 // A data file of many rows names many files. Each is approved at plan time
 // and none is kept open by the plan, so a run cannot run out of descriptors;
 // `fill` opens a row's file for that request alone, and every request sends

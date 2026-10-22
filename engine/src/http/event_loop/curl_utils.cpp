@@ -244,16 +244,13 @@ size_t read_part (char* buffer, size_t size, size_t nitems, void* arg) {
     const std::uint64_t remaining = reader->file->size () - reader->offset;
     const auto wanted =
     static_cast<size_t> (std::min<std::uint64_t> (size * nitems, remaining));
-    if (wanted == 0) {
-        return 0;
-    }
     const auto got =
     reader->file->read_at (reader->offset, std::span<char> (buffer, wanted));
-    // A short file is one truncated under the handle since the plan sized it:
-    // the part's length is already promised, so the transfer is aborted.
-    if (!got || *got == 0) {
+    if (!got) {
         return CURL_READFUNC_ABORT;
     }
+    // A file truncated under the handle reads 0 before the part's promised
+    // length, which libcurl refuses on its own, naming the bytes it missed.
     reader->offset += *got;
     return *got;
 }
