@@ -214,6 +214,10 @@ TEST (ImportFetch, ReturnsBadGatewayOnFetchFailure) {
     auto [status, body] = vayu::http::routes::import_fetch (
     R"({"url":"http://127.0.0.1:1/x"})", vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 502);
+    // The app shows this beneath its own "Couldn't ..." heading (#2295).
+    EXPECT_EQ (
+    body["error"]["message"].get<std::string> ().rfind ("Couldn't fetch", 0), 0u)
+    << body.dump ();
 }
 
 // The upstream's error page is not the document. Handed on as `content`, it

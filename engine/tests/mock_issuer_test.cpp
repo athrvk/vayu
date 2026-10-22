@@ -528,6 +528,9 @@ TEST_F (MockIssuerTest, ASecondIssuerCannotShareARunningIssuersPort) {
     EXPECT_FALSE (refused.ok);
     EXPECT_EQ (refused.http_status, 500);
     EXPECT_EQ (refused.error_code, "mock_issuer_bind_failed");
+    EXPECT_EQ (refused.error_message.rfind ("Couldn't bind ", 0), 0u)
+    << "the app shows this beneath its own \"Couldn't ...\" heading: "
+    << refused.error_message;
     EXPECT_NE (refused.error_message.find (first.issuer_id), std::string::npos)
     << "the refusal must name the holder: " << refused.error_message;
     EXPECT_EQ (mgr.list ()["issuers"].size (), 1u)

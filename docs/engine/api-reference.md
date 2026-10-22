@@ -3503,10 +3503,10 @@ and is fetched exactly as before, loopback and redirects included.
   A source named by a host name that resolves to loopback earns nothing: that
   is what a rebinding DNS answer looks like. With no `sourceUrl`, every
   loopback and link-local peer is refused.
-- The refusal is `502` `Failed to fetch: Cannot send this request: Vayu does
-  not fetch a reference from a loopback or link-local address other than its
-  source document's own host and port - not when the URL names one and not
-  when a host name resolves to one`, on both forms of the route.
+- The refusal is `502` `Couldn't fetch the document: Cannot send this request:
+  Vayu does not fetch a reference from a loopback or link-local address other
+  than its source document's own host and port - not when the URL names one and
+  not when a host name resolves to one`, on both forms of the route.
 - **With a proxy in force the connected peer is the proxy**, so the rule judges
   the proxy's address and the proxy decides where the request goes next. A
   proxy listening on loopback is therefore refused for a reference unless it
@@ -3540,7 +3540,7 @@ never turn into a `500`.
 - `413` `Refused to fetch: <detail>` - the response was over the bound in force.
   The detail names the bound that was applied (the clamped one, not the one
   asked for) and the size when the upstream declared one.
-- `502` `Failed to fetch: <detail>` - the upstream request failed
+- `502` `Couldn't fetch the document: <detail>` - the upstream request failed
   (connection error, transport failure), or a reference's peer was refused
   (see `reference` above).
 - `502` `The server answered HTTP <status>` - the upstream answered, but with a
@@ -5251,8 +5251,9 @@ the bind report it: listeners are bound with `SO_REUSEPORT`, so on Linux a
 second bind on the same address and port *succeeds* and the kernel then splits
 arriving connections between the two listeners, each capturing an effectively
 random half. A port held by a process outside the engine is still reported by
-the bind, with the "in use or unavailable" wording; `port: 0` is never refused
-this way, since the kernel does not hand out a port it is already using.
+the bind (`Couldn't bind <address> - the address may be in use or
+unavailable`); `port: 0` is never refused this way, since the kernel does not
+hand out a port it is already using.
 
 **Response:**
 ```json
@@ -7345,7 +7346,7 @@ says (see the response section above). A streaming send has no `body` in its
 
 **A run row the database cannot write is a `500`.** A recorded send whose run row
 cannot be stored (a busy or locked database, a full disk, an I/O error) answers
-`500` `Failed to create run record` before anything is sent, the same as
+`500` `Couldn't create the run record` before anything is sent, the same as
 [`POST /runs`](#post-runs). The app retries a `5xx` and treats a `4xx` as a
 verdict, so a momentary lock no longer reads as a refused request (#2353). A
 `transient` send writes no row and is unaffected.
@@ -8848,8 +8849,8 @@ behind (#1893).
 
 **A run row the database cannot write is a `500`.** A busy or locked database, a
 full disk or an I/O error while recording the run is the engine's failure, not
-the payload's, so `POST /runs` answers `500` `Failed to create run record`. The
-app retries a `5xx` and treats a `4xx` as a verdict, so a momentary lock no
+the payload's, so `POST /runs` answers `500` `Couldn't create the run record`.
+The app retries a `5xx` and treats a `4xx` as a verdict, so a momentary lock no
 longer reads as a refused request (#2319).
 
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the

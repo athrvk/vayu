@@ -347,7 +347,7 @@ const std::string& mode) {
             out.ok            = false;
             out.http_status   = 500;
             out.error_code    = "oauth2_loopback_failed";
-            out.error_message = "Could not bind a local callback port";
+            out.error_message = "Couldn't bind a local callback port";
             return out;
         }
         attempt->redirect_uri = "http://127.0.0.1:" + std::to_string (port) + "/callback";

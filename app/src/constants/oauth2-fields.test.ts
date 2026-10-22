@@ -41,8 +41,8 @@ describe("humanizeOAuth2Error over the engine's own messages", () => {
 
 	it("leaves a message naming no config field untouched", () => {
 		// The engine emits this one too, and it names nothing the form labels.
-		expect(humanizeOAuth2Error("Could not bind a local callback port")).toBe(
-			"Could not bind a local callback port"
+		expect(humanizeOAuth2Error("Couldn't bind a local callback port")).toBe(
+			"Couldn't bind a local callback port"
 		);
 	});
 

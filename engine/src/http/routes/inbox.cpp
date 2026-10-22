@@ -676,8 +676,9 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         out.http_status   = 409;
         out.error_code    = "inbox_bind_failed";
         out.error_message = started.held_by.empty () ?
-        "Could not bind " + where + " - the address may be in use or unavailable" :
-        "Could not bind " + where + " - " + started.held_by + " is already listening there";
+        "Couldn't bind " + where + " - the address may be in use or unavailable. Pick another port." :
+        "Couldn't bind " + where + " - " + started.held_by +
+        " is already listening there. Pick another port or stop it.";
         return out;
     }
     inbox->port = started.port;

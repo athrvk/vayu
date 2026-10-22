@@ -716,7 +716,7 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
     "127.0.0.1", issuer->settings.port, "mock issuer " + issuer->id);
     if (started.port <= 0) {
         const std::string requested =
-        "Could not bind 127.0.0.1:" + std::to_string (issuer->settings.port);
+        "Couldn't bind 127.0.0.1:" + std::to_string (issuer->settings.port);
         out.ok          = false;
         out.http_status = 500;
         out.error_code  = "mock_issuer_bind_failed";
@@ -725,7 +725,7 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
             requested + " - " + started.held_by + " is already listening there";
         } else {
             out.error_message = issuer->settings.port == 0 ?
-            "Could not bind a local port for the mock issuer" :
+            "Couldn't bind a local port for the mock issuer" :
             requested;
         }
         return out;
