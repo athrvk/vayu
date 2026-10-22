@@ -8802,14 +8802,16 @@ TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
 // overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
 // budget cannot stand in for that, because the toolchain decides what a frame
 // costs: 24 KB runs a trivial script on GCC at -O0 and cannot on macOS under
-// ASan. So the budget is found at run time, the smallest one at which the
-// recursion probe below runs at all here. A library needs several times more
-// than that on every toolchain (GCC at -O0: probe 6 KB, lodash from 46 KB,
-// moment from 30 KB), so without the raise the load fails with the RangeError
-// "Maximum call stack size exceeded" and with it the library loads. The raise
-// must also end with the library: recursion afterwards reaches the depth it
-// reached before the require (healthy: equal within noise), not the depth the
-// 768 KB library budget allows (broken: 30 times deeper or more).
+// ASan. So the budget is found at run time, the smallest one at which both
+// wrappers the tests put around a library run here, library-free. A library
+// needs well over that on every toolchain, so without the raise the load fails
+// with the RangeError "Maximum call stack size exceeded" and with it the
+// library loads. Measured, KB of budget, without the raise:
+//   GCC -O0:  wrappers run at 14, moment loads from 29, lodash from 45
+//   GCC -O3:  wrappers run at 12, moment loads from 22, lodash from 33
+// The raise must also end with the library: recursion afterwards reaches the
+// depth it reached before the require (healthy: equal, 7 at -O0 and 19 at -O3),
+// not the depth the 768 KB library budget allows (broken: 580 and 1112).
 namespace {
 
 /// Script text that defines `depth ()`, the number of calls a runaway
@@ -8823,39 +8825,46 @@ constexpr const char* DEPTH_PROBE = R"(
     }
 )";
 
-/// The smallest stack budget, climbing 8 KB in 2 KB steps to 256 KB, at which
-/// a script that only measures its own recursion depth runs on this build; 0
-/// when none does.
-std::size_t shallowest_working_stack (Request& request) {
-    constexpr std::size_t KIB = 1024;
-    for (std::size_t budget = 8 * KIB; budget <= 256 * KIB; budget += 2 * KIB) {
-        ScriptConfig config;
-        config.stack_size = budget;
-        ScriptEngine candidate{ config };
-        Environment probe_env;
-        const auto result = candidate.execute_prerequest (
-        std::string (DEPTH_PROBE) + "pm.environment.set('d', String(depth()));",
-        request, probe_env);
-        if (result.success) {
-            return budget;
-        }
-    }
-    return 0;
-}
-
 ScriptConfig shallow_stack_config (std::size_t budget) {
     ScriptConfig config;
     config.stack_size = budget;
     return config;
 }
 
+/// An expression that makes the same native call a library load starts with,
+/// `require (...)`, and is refused before any library is evaluated.
+constexpr const char* REFUSED_REQUIRE =
+"(function () { try { require('absent'); } catch (e) { return 'refused'; } "
+"})()";
+
+/// The smallest stack budget, climbing 8 KB in 2 KB steps to 256 KB, at which
+/// both wrappers the tests put around a library run on this build: the
+/// recursion probe, and a script that calls `require` (a native call checks the
+/// stack before it is entered, so it needs more than a bare script does). 0
+/// when none does.
+std::size_t shallowest_working_stack (Request& request) {
+    constexpr std::size_t KIB = 1024;
+    for (std::size_t budget = 8 * KIB; budget <= 256 * KIB; budget += 2 * KIB) {
+        ScriptEngine candidate{ shallow_stack_config (budget) };
+        Environment probe_env;
+        const auto depth_result = candidate.execute_prerequest (
+        std::string (DEPTH_PROBE) + "pm.environment.set('d', String(depth()));",
+        request, probe_env);
+        if (depth_result.success &&
+        shelf_answer (candidate, request, REFUSED_REQUIRE) == "refused") {
+            return budget;
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 // Only the load is asserted: calling into lodash is the script's own stack and
-// needs more than the probe's budget.
+// needs more than the wrappers' budget.
 TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack) {
     const std::size_t budget = shallowest_working_stack (request);
-    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the probe script";
+    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the wrapper scripts";
     ScriptEngine shallow{ shallow_stack_config (budget) };
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('lodash').get"), "function")
     << "at " << budget << " bytes";
@@ -8867,7 +8876,7 @@ TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack
 
 TEST_F (ScriptEngineTest, RequireShelfRestoresTheScriptsStackBudgetAfterALibraryLoads) {
     const std::size_t budget = shallowest_working_stack (request);
-    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the probe script";
+    ASSERT_GT (budget, 0u) << "no budget up to 256 KB ran the wrapper scripts";
     ScriptEngine shallow{ shallow_stack_config (budget) };
     Environment shallow_env;
     const auto result = shallow.execute_prerequest (std::string (DEPTH_PROBE) + R"(
