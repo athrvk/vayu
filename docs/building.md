@@ -425,11 +425,15 @@ The project uses GitHub Actions for automated builds:
   - See [Engine building - Sanitizers](engine/building.md#sanitizers)
 
 - **Warm build cache**: `.github/workflows/cache-warm.yml`
-  - Runs on `master` when `VERSION`, `engine/vcpkg.json` or
-    `app/pnpm-lock.yaml` changes, weekly, or on demand
+  - Runs on `master` when `VERSION`, `engine/vcpkg.json`,
+    `app/pnpm-lock.yaml` or `scripts/install-clang-tidy.sh` changes, weekly, or
+    on demand
   - Resolves the vcpkg dependencies, populates the pnpm store and compiles the
     engine's release configuration for all three platforms, so all three exist
     in the **default-branch cache scope** a release tag reads
+  - Saves the Windows clang-tidy tree there too, the one cache every pull
+    request's Windows lint reads; a push to `master` runs no lint step to save
+    it otherwise
 
 - **Linux runners name their Ubuntu release** (`ubuntu-24.04`), never
   `ubuntu-latest`. That label moves to a new image over a weeks-long rollout,

@@ -32,6 +32,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
+import { isDiskFullError } from "@/lib/disk-full";
 import { SaveBlockedError } from "@/lib/elements";
 import { useSaveStore, type SaveOutcome } from "@/stores/save-store";
 
@@ -100,7 +101,7 @@ export function useDraftSaveContext({
 			}
 			const fallback = `Couldn't save ${name}`;
 			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
-			return "failed";
+			return isDiskFullError(error) ? "disk-full" : "failed";
 		}
 	}, [failSave, markPendingSave, name]);
 

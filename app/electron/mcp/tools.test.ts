@@ -437,6 +437,10 @@ function ctxWith(
 
 const firstText = (r: { content: Array<{ text: string }> }) => r.content[0].text;
 
+/** The engine's one error body shape, `{"error": {"code", "message"}}`. */
+const engineErrorBody = (code: string, message: string) =>
+	JSON.stringify({ error: { code, message } });
+
 /** A context whose client can put a question to the person and answered @p answers. */
 function ctxAsking(
 	client: EngineClient,
@@ -9566,6 +9570,51 @@ describe("run status reads (#2436)", () => {
 			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
 			expect(res.isError).toBe(true);
 			expect(firstText(res)).toBe("Engine error (500): boom");
+		});
+
+		test("a full disk is reported as retryable once space is freed (#2423)", async () => {
+			const body = engineErrorBody(
+				"insufficient_storage",
+				"The disk holding Vayu's data is full - free up space and try again"
+			);
+			const client = fakeClient({
+				getRun: vi.fn().mockRejectedValue(new EngineRequestError("507", 507, body)),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe(
+				`Engine error (507): ${body} Retry the call after space is freed.`
+			);
+		});
+
+		test("a busy database is reported as retryable (#2423)", async () => {
+			const body = engineErrorBody(
+				"unavailable",
+				"The Vayu database is busy - try again in a moment"
+			);
+			const client = fakeClient({
+				getRun: vi.fn().mockRejectedValue(new EngineRequestError("503", 503, body)),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe(`Engine error (503): ${body} Retry the call in a moment.`);
+		});
+
+		test("a 503 from a shutting-down engine carries no retry hint (#2423)", async () => {
+			const body = engineErrorBody("unavailable", "Engine is shutting down");
+			const client = fakeClient({
+				getRun: vi.fn().mockRejectedValue(new EngineRequestError("503", 503, body)),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			expect(firstText(res)).toBe(`Engine error (503): ${body}`);
+		});
+
+		test("an ordinary engine failure carries no retry hint", async () => {
+			const client = fakeClient({
+				getRun: vi.fn().mockRejectedValue(new EngineRequestError("400", 400, "bad")),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			expect(firstText(res)).toBe("Engine error (400): bad");
 		});
 
 		test("requires a runId", async () => {

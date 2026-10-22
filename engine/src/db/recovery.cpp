@@ -7,8 +7,9 @@
 
 /**
  * @file db/recovery.cpp
- * @brief Reading and writing the startup recovery marker (issue #922), and the
- *        quarantined file sets it points at (issue #984).
+ * @brief Reading and writing the startup recovery marker (issue #922), the
+ *        quarantined file sets it points at (issue #984), and the sorting of a
+ *        SQLite failure into what a caller can do about it (#2420, #2423).
  */
 
 #include "vayu/db/recovery.hpp"
@@ -25,6 +26,7 @@
 #include <sqlite3.h>
 #include <sqlite_orm/sqlite_orm.h>
 
+#include "vayu/db/database.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::db {
@@ -42,6 +44,35 @@ int64_t now_ms () {
     using namespace std::chrono;
     return duration_cast<milliseconds> (system_clock::now ().time_since_epoch ())
     .count ();
+}
+
+// The system_error behind @p error when it is a SQLite failure. The category
+// check is what makes the code a SQLite code: a filesystem or socket error
+// carries an errno in the same field, and errno 13 (EACCES) is not SQLITE_FULL.
+const std::system_error* as_sqlite_error (const std::exception& error) {
+    const auto* system_error = dynamic_cast<const std::system_error*> (&error);
+    if (system_error == nullptr ||
+    system_error->code ().category () != sqlite_orm::get_sqlite_error_category ()) {
+        return nullptr;
+    }
+    return system_error;
+}
+
+// sqlite_orm's `what ()` is "<sqlite3_errmsg>: <sqlite3_errstr>", which says
+// "database is locked" twice whenever the two agree.
+std::string sqlite_reason (const std::system_error& error) {
+    const std::string generic = error.code ().message ();
+    const std::string reason  = error.what ();
+    return (reason == generic + ": " + generic) ? generic : reason;
+}
+
+StorageFailure storage_failure_of (int sqlite_code) {
+    switch (sqlite_code) {
+    case SQLITE_FULL: return StorageFailure::Full;
+    case SQLITE_BUSY:
+    case SQLITE_LOCKED: return StorageFailure::Busy;
+    default: return StorageFailure::Other;
+    }
 }
 
 } // namespace
@@ -77,22 +108,25 @@ std::optional<RecoveryOutcome> recovery_outcome_from_string (const std::string& 
 
 ProbeResult classify_probe_failure (const std::exception& error) {
     ProbeResult found{ ProbeResult::Verdict::Unavailable, 0, error.what () };
-    const auto* system_error = dynamic_cast<const std::system_error*> (&error);
-    if (system_error == nullptr ||
-    system_error->code ().category () != sqlite_orm::get_sqlite_error_category ()) {
+    const auto* sqlite_error = as_sqlite_error (error);
+    if (sqlite_error == nullptr) {
         return found;
     }
-    found.sqlite_code = system_error->code ().value ();
-    // sqlite_orm's `what ()` is "<sqlite3_errmsg>: <sqlite3_errstr>", which
-    // says "database is locked" twice whenever the two agree.
-    const std::string generic = system_error->code ().message ();
-    if (found.reason == generic + ": " + generic) {
-        found.reason = generic;
-    }
+    found.sqlite_code = sqlite_error->code ().value ();
+    found.reason      = sqlite_reason (*sqlite_error);
     if (found.sqlite_code == SQLITE_CORRUPT || found.sqlite_code == SQLITE_NOTADB) {
         found.verdict = ProbeResult::Verdict::Corrupt;
     }
     return found;
+}
+
+std::optional<StorageError> classify_storage_error (const std::exception& error) {
+    const auto* sqlite_error = as_sqlite_error (error);
+    if (sqlite_error == nullptr) {
+        return std::nullopt;
+    }
+    return StorageError{ storage_failure_of (sqlite_error->code ().value ()),
+        sqlite_reason (*sqlite_error) };
 }
 
 std::string unavailable_database_message (const std::string& path, const ProbeResult& found) {

@@ -22,6 +22,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/script_config.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/utils/logger.hpp"
@@ -1367,15 +1368,7 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     // function was even called, so a setup script's writes are already in
     // `base_scopes` by the time it is handed in.
 
-    vayu::runtime::ScriptConfig script_config;
-    script_config.timeout_ms = static_cast<uint64_t> (
-    db.get_config_int ("scriptTimeout", constants::script_engine::TIMEOUT_MS));
-    script_config.memory_limit = static_cast<size_t> (
-    db.get_config_int ("scriptMemoryLimit", constants::script_engine::MEMORY_LIMIT));
-    script_config.stack_size = static_cast<size_t> (
-    db.get_config_int ("scriptStackSize", constants::script_engine::STACK_SIZE));
-    script_config.enable_console = db.get_config_bool (
-    "scriptEnableConsole", constants::script_engine::ENABLE_CONSOLE);
+    vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
     script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
 
     auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,

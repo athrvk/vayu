@@ -422,7 +422,9 @@ which case the app picks a fallback (below).
   editor declined to send); a ceiling with no ACK at all is read the same as
   a failure, since nothing is known to have landed. Either case holds the
   quit or close behind one native dialog - "Couldn't save N edits - the
-  engine isn't responding", or "N edits couldn't be saved as they are" when
+  engine isn't responding", "Couldn't save N edits - the disk is full" when
+  every failure was the engine's 507 `insufficient_storage` (the result then
+  carries `reason: "disk-full"`, issue #2423), or "N edits couldn't be saved as they are" when
   the engine is fine and every loss is a pending edit, Quit/Close anyway or
   Keep working - built by `createFlushFailureGate` in `save-flush.ts`
   and shown through the same `dialog.showMessageBox` primitive the crash and

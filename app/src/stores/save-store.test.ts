@@ -21,7 +21,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { TIMING } from "@/config/timing";
-import { useSaveStore } from "./save-store";
+import { ApiError } from "@/services/http-client";
+import { useSaveStore, type SaveOutcome } from "./save-store";
 import { useToastStore } from "./toast-store";
 
 /** A registered context, dirty or clean, with a `save` nothing in here calls. */
@@ -283,6 +284,128 @@ describe("flushAll", () => {
 			saved: 0,
 			failed: 1,
 			pending: 0,
+		});
+	});
+
+	describe("naming the cause of a failure (#2423)", () => {
+		const registerOutcome = (id: string, outcome: SaveOutcome) => {
+			useSaveStore.getState().registerContext({
+				id,
+				name: id,
+				save: () => {
+					useSaveStore.getState().failSave(`Couldn't save ${id}`);
+					return Promise.resolve(outcome);
+				},
+				hasPendingChanges: true,
+			});
+		};
+
+		it("carries 'disk-full' when it explains the only failure", async () => {
+			registerOutcome("request-1", "disk-full");
+
+			await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+				saved: 0,
+				failed: 1,
+				pending: 0,
+				reason: "disk-full",
+			});
+		});
+
+		it("carries 'disk-full' when it explains every one of several failures", async () => {
+			registerOutcome("request-1", "disk-full");
+			registerOutcome("request-2", "disk-full");
+
+			await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+				saved: 0,
+				failed: 2,
+				pending: 0,
+				reason: "disk-full",
+			});
+		});
+
+		it("names no cause when another failure sits beside a disk-full one", async () => {
+			registerOutcome("request-1", "disk-full");
+			registerOutcome("request-2", "failed");
+
+			const result = await useSaveStore.getState().flushAll();
+
+			expect(result).toEqual({ saved: 0, failed: 2, pending: 0 });
+			expect(result).not.toHaveProperty("reason");
+		});
+
+		it("names no cause for a disk-full failure beside a 'final' one", async () => {
+			registerOutcome("request-1", "disk-full");
+			registerOutcome("request-2", "final");
+
+			expect(await useSaveStore.getState().flushAll()).not.toHaveProperty("reason");
+		});
+
+		it("keeps the cause when the failure sits beside a saved or pending context", async () => {
+			// Each reports its own verdict: a silent context would be judged by the
+			// shared status, which the failing sibling has already set to "error".
+			useSaveStore.getState().registerContext({
+				id: "request-1",
+				name: "request-1",
+				save: () => Promise.resolve("saved"),
+				hasPendingChanges: true,
+			});
+			useSaveStore.getState().registerContext({
+				id: "settings",
+				name: "settings",
+				save: () => Promise.resolve("pending"),
+				hasPendingChanges: true,
+			});
+			registerOutcome("request-2", "disk-full");
+
+			expect(await useSaveStore.getState().flushAll()).toEqual({
+				saved: 1,
+				failed: 1,
+				pending: 1,
+				reason: "disk-full",
+			});
+		});
+
+		describe("a context whose save rejects", () => {
+			const rejectWith = (id: string, error: Error) =>
+				useSaveStore.getState().registerContext({
+					id,
+					name: id,
+					save: () => Promise.reject(error),
+					hasPendingChanges: true,
+				});
+
+			it("is disk-full when the engine answered 507", async () => {
+				rejectWith(
+					"request-1",
+					new ApiError(
+						507,
+						"insufficient_storage",
+						"The disk holding Vayu's data is full"
+					)
+				);
+
+				await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+					saved: 0,
+					failed: 1,
+					pending: 0,
+					reason: "disk-full",
+				});
+			});
+
+			it("names no cause for any other rejection", async () => {
+				rejectWith("request-1", new ApiError(503, "unavailable", "busy"));
+
+				const result = await useSaveStore.getState().flushAll();
+
+				expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
+				expect(result).not.toHaveProperty("reason");
+			});
+		});
+
+		it("has no 'reason' key when nothing failed", async () => {
+			registerContext("request-1", true);
+
+			expect(await useSaveStore.getState().flushAll()).not.toHaveProperty("reason");
 		});
 	});
 

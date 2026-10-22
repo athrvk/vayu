@@ -34,6 +34,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "log_capture.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -482,6 +483,26 @@ TEST_F (ScriptLifecycleTest, SequentialThrowingSetupFailsTheRunBeforeAnyStepIsSe
     EXPECT_TRUE (server_->requests ().empty ());
 }
 
+// Issue #2359: the text the failing setup script threw is script-authored, so
+// it is a bounded field of the record and never part of its message.
+// Mutation check: put `e.what ()` back into the message in
+// `execute_scenario_run`'s catch (scenario_runner.cpp) and this reddens.
+TEST_F (ScriptLifecycleTest, SequentialSetupFailureLogsTheThrownTextAsABoundedField) {
+    const vayu::tests::LogCapture log;
+    seed_collection (script_setup_element (
+    vayu::tests::script_throwing (vayu::tests::thrown_text (0))));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_sequential (execution), vayu::RunStatus::Failed);
+
+    const auto records = log.with_msg_prefix ("Scenario run error");
+    ASSERT_EQ (records.size (), 1u);
+    EXPECT_EQ (records[0].at ("msg").get<std::string> (), "Scenario run error");
+    EXPECT_EQ (records[0].at ("runId").get<std::string> (), "run_seq");
+    vayu::tests::expect_script_text_only_bounded_in (records[0], "error");
+}
+
 // Mutation check: drop the `run.end` dispatch call in `execute_scenario_run`
 // and `summary["lifecycle"]` disappears from the stored summary entirely.
 TEST_F (ScriptLifecycleTest, SequentialThrowingTeardownIsRecordedWithoutChangingStatus) {
@@ -599,6 +620,26 @@ TEST_F (ScriptLifecycleTest, LoadThrowingSetupFailsTheRunWithNoSubmissions) {
     EXPECT_EQ (run_load (execution, /*iterations=*/1, /*concurrency=*/3),
     vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
+}
+
+// The load-mode half of SequentialSetupFailureLogsTheThrownTextAsABoundedField.
+// Mutation check: put `*setup_failure` back into the message in `run_worker`'s
+// setup refusal (run_manager.cpp) and this reddens.
+TEST_F (ScriptLifecycleTest, LoadSetupFailureLogsTheThrownTextAsABoundedField) {
+    const vayu::tests::LogCapture log;
+    seed_collection (script_setup_element (
+    vayu::tests::script_throwing (vayu::tests::thrown_text (0))));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/1, /*concurrency=*/3),
+    vayu::RunStatus::Failed);
+
+    const auto records = log.with_msg_prefix ("script.setup failed");
+    ASSERT_EQ (records.size (), 1u);
+    EXPECT_EQ (records[0].at ("msg").get<std::string> (), "script.setup failed");
+    EXPECT_EQ (records[0].at ("runId").get<std::string> (), "run_load");
+    vayu::tests::expect_script_text_only_bounded_in (records[0], "scriptError");
 }
 
 // The load-mode half of SequentialThrowingTeardownIsRecordedWithoutChangingStatus.
@@ -738,6 +779,21 @@ TEST_F (ScriptLifecycleTest, SingleRequestThrowingSetupFailsTheRunWithNoSubmissi
                /*concurrency=*/3),
     vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
+}
+
+// The single-request half of LoadSetupFailureLogsTheThrownTextAsABoundedField.
+TEST_F (ScriptLifecycleTest, SingleRequestSetupFailureLogsTheThrownTextAsABoundedField) {
+    const vayu::tests::LogCapture log;
+
+    EXPECT_EQ (run_single_request_load (script_setup_element (vayu::tests::script_throwing (
+                                        vayu::tests::thrown_text (0))),
+               /*iterations=*/1, /*concurrency=*/3),
+    vayu::RunStatus::Failed);
+
+    const auto records = log.with_msg_prefix ("script.setup failed");
+    ASSERT_EQ (records.size (), 1u);
+    EXPECT_EQ (records[0].at ("msg").get<std::string> (), "script.setup failed");
+    vayu::tests::expect_script_text_only_bounded_in (records[0], "scriptError");
 }
 
 // The single-request half of LoadThrowingTeardownIsRecordedWithoutChangingStatus.

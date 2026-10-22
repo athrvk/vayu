@@ -40,6 +40,7 @@
 #include <nlohmann/json.hpp>
 
 #include "basic_auth_pair.hpp"
+#include "log_capture.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -933,6 +934,35 @@ TEST_F (ScenarioRunnerTest, StopOnErrorEndsTheIteration) {
     EXPECT_EQ (scenario["steps_not_run"].get<size_t> (), 1u);
     EXPECT_TRUE (scenario["stop_on_error"].get<bool> ());
     EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 1u);
+}
+
+// Issue #2359: the line that says where an iteration ended carries the step's
+// error as a bounded field, because that error can hold what a script threw.
+// The stored row keeps the whole text.
+// Mutation check: put `record.error` back into the message in
+// `run_iteration` (scenario_runner.cpp) and this reddens.
+TEST_F (ScenarioRunnerTest, AnIterationEndedByAScriptErrorLogsItsTextAsABoundedField) {
+    const vayu::tests::LogCapture log;
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login",
+    vayu::tests::script_throwing (vayu::tests::thrown_text (0)));
+    seed_request ("req_c", 2, "/observe");
+
+    const auto run_id = start_stopping_on_error (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_NE (rows[1].error.find (vayu::tests::SCRIPT_TAIL), std::string::npos)
+    << "the stored error must stay whole";
+
+    const auto records = log.with_msg_prefix ("Scenario run: iteration");
+    ASSERT_EQ (records.size (), 1u);
+    EXPECT_EQ (records[0].at ("msg").get<std::string> (),
+    "Scenario run: iteration 0 ended at step 'Step req_b'");
+    EXPECT_EQ (records[0].at ("runId").get<std::string> (), run_id);
+    vayu::tests::expect_script_text_only_bounded_in (records[0], "stepError");
 }
 
 // Postman's default for a step that got no response too (the owner decision on

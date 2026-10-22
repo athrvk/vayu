@@ -103,6 +103,31 @@ request's own API-key auth names - plus the request line's query string
 through the same URL rule. curl's own `*` text lines are scrubbed for every
 URL they quote (`Issue another request to this URL: '...'`).
 
+### Text a script authored
+
+Redaction is by field *name* and only for `fields`; `msg` is never scanned, so
+nothing in the engine can tell a credential inside a sentence from the
+sentence. A script chooses what it throws (`throw new Error (token)`), so that
+text is never part of `msg`: the message is fixed (`<Kind> script failed`
+for `execute_script`'s `Pre-request`, `Post-request`, `Setup` and so on,
+`script.setup failed`, `Scenario run error`) and the text rides in one field,
+`scriptError` (`error` for `Scenario run error`, which also reports non-script
+failures; `stepError` on the "iteration ended at step" line, whose cause may be
+a transport failure as well as a script).
+
+The field is bounded: `vayu::utils::bounded_log_text` (`utils/log_text.hpp`)
+keeps at most `kLoggedTextMaxBytes` (512) bytes, cut on a UTF-8 character
+boundary, and appends `...[truncated]` where it cut. Only the copy the logger
+is handed is bounded; the failing step's stored error, the run's trace and the
+`POST /execute` response keep the whole text.
+
+What this does and does not do: it keeps script text out of `msg`, caps its
+size, and puts it where a name-based rule can apply. It does **not** redact the
+value - `scriptError`, `error` and `stepError` are not in the secret set, so a
+credential a script threw is still readable in the first 512 bytes of that
+field, in the file and on the console. A script that must not leak a secret
+must not throw it.
+
 ## Files, rotation and retention
 
 `<data-dir>/logs/engine_<stamp>.log` (the daemon) and

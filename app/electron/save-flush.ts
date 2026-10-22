@@ -45,12 +45,14 @@ export const FLUSH_TIMEOUT_MS = 2000;
  * declined to send, an edit that landed mid-flight). `null` from
  * `SaveFlusher.flush` (the 2s ceiling fired before the renderer answered) is
  * read the same as a result with either nonzero by `flushNeedsConfirmation`
- * below.
+ * below. `reason` names the cause when one explains every failure (#2423);
+ * absent otherwise.
  */
 export interface FlushResult {
 	saved: number;
 	failed: number;
 	pending: number;
+	reason?: "disk-full";
 }
 
 /** The slice of Electron this needs, so a test can pass a fake. */
@@ -174,7 +176,8 @@ export function flushNeedsConfirmation(result: FlushResult | null): boolean {
  * land cleanly. A failed save blames the engine; a save that merely stayed
  * pending does not, because nothing is wrong with the engine and "keep working
  * until it answers" would send the user to wait for something that is not
- * coming.
+ * coming. A failure the renderer traced to a full disk says so instead, because
+ * the engine is answering and waiting would not help either (#2423).
  */
 export function buildFlushFailurePrompt(
 	gesture: "quit" | "window-close",
@@ -186,14 +189,26 @@ export function buildFlushFailurePrompt(
 	const pronoun = lost === 1 ? "it" : "them";
 	const discards = `${verb === "Quit" ? "Quitting" : "Closing"} anyway discards ${pronoun}.`;
 	const blockedOnly = result !== null && result.failed === 0;
+	const buttons: FlushFailurePrompt["buttons"] = [`${verb} anyway`, "Keep working"];
+	if (blockedOnly) {
+		return {
+			message: `${capitalize(subject)} couldn't be saved as ${lost === 1 ? "it is" : "they are"}.`,
+			detail: `${discards} Keep working to finish ${pronoun}, then save again.`,
+			buttons,
+		};
+	}
+	// Checked after `blockedOnly`: a cause explains a failure, and there is none here.
+	if (result?.reason === "disk-full") {
+		return {
+			message: `Couldn't save ${subject} - the disk is full.`,
+			detail: `${discards} Free up space, then keep working to save again.`,
+			buttons,
+		};
+	}
 	return {
-		message: blockedOnly
-			? `${capitalize(subject)} couldn't be saved as ${lost === 1 ? "it is" : "they are"}.`
-			: `Couldn't save ${subject} - the engine isn't responding.`,
-		detail: blockedOnly
-			? `${discards} Keep working to finish ${pronoun}, then save again.`
-			: `${discards} Keep working to try again once the engine answers.`,
-		buttons: [`${verb} anyway`, "Keep working"],
+		message: `Couldn't save ${subject} - the engine isn't responding.`,
+		detail: `${discards} Keep working to try again once the engine answers.`,
+		buttons,
 	};
 }
 

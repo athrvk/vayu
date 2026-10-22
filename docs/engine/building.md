@@ -366,6 +366,11 @@ tracking issue.
   dereferences a null cache. A crash inside the sanitizer runtime, which is why
   no suppression could reach it. **Fixed** by undefining that macro for the TSan
   build only, so httplib compiles its plain synchronous `getaddrinfo` branch.
+  Since #2667 no build defines it: the same branch left a client's resolve
+  running against a returned stack frame on every glibc build, a failed request
+  and then a SIGSEGV that ASan cannot see because glibc is not instrumented.
+  `engine/CMakeLists.txt` removes it from `httplib::httplib`'s interface, and
+  `httplib_resolver_test.cpp` fails if it comes back.
 - **#959** - `windows-asan` failed one test, and it was not an MSVC quirk.
   `js_class_tag` reads an object's class through a `JS_Call`, which checks
   QuickJS's 256 KB interpreter stack; when 64 nested `js_deep_equal` frames
@@ -1690,7 +1695,7 @@ call so the pin lives in one place:
 | Leg | Source | Pinned by |
 |-----|--------|-----------|
 | Linux | `clang-tidy-22` from [apt.llvm.org](https://apt.llvm.org/), the LLVM project's apt repository | The major; apt.llvm.org carries only the newest 22.x patch. Its signing key is checked against the published fingerprint before apt trusts it |
-| Windows | `LLVM-22.1.8-win64.exe` from the LLVM GitHub release; only `clang-tidy.exe` and clang's builtin headers are extracted | The installer's SHA-256, which is the digest LLVM's release workflow attests for the tag. The extracted 73 MB is cached under the script's hash |
+| Windows | `LLVM-22.1.8-win64.exe` from the LLVM GitHub release; only `clang-tidy.exe` and clang's builtin headers are extracted | The installer's SHA-256, which is the digest LLVM's release workflow attests for the tag. The extracted 73 MB is cached under the script's hash, and `cache-warm.yml` saves it on `master` so every pull request reads it |
 
 The runner images' own LLVM is not used: it was 20.1.8 on Windows against
 apt's 19 on Linux, so a finding on one leg alone could be a version difference

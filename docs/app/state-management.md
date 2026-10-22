@@ -749,7 +749,11 @@ rejected the payload itself (a 400, a 413), so `performSave` reports it as
 `"final"` (`isFinalError`, the predicate the query and mutation retry rules
 share) and no retry is armed. The status stays `error` - the Dock keeps saying
 "Not saved" - and the next edit re-arms the debounce. A 5xx, a timeout or an
-unreachable engine keeps retrying. Cmd/Ctrl+S and the
+unreachable engine keeps retrying. So does a 507, the engine's answer to a
+write the data folder's volume has no room for (#2423): `performSave` reports
+it as `"disk-full"`; the toast is the generic "Couldn't save - <engine message>",
+because the engine's sentence already names the cause and the action, and the backoff above carries on until space returns. The
+retry is the app's own timer; nothing here reads the 503's `Retry-After`. Cmd/Ctrl+S and the
 entity-switch/quit goodbye flush still call `performSave` directly and report
 their own outcome once - retrying either would save into a pane the user has
 already left, or double a save they just asked for by hand.
@@ -769,7 +773,7 @@ than rejecting, so `runSave` cannot take a resolved promise for a success. Witho
 that a failed Cmd/Ctrl+S showed "Saved" beside its own failure toast.
 
 **A context's `save` can report its own verdict** (`SaveOutcome`: `"saved"`,
-`"failed"`, `"final"` or `"pending"`; `useSaveManager` and `useDraftSaveContext` do). The
+`"failed"`, `"final"`, `"disk-full"` or `"pending"`; `useSaveManager` and `useDraftSaveContext` do). The
 store-wide `status` is one slot, so two contexts saving in the same tick
 overwrite each other's - reading it back charged one context's failure to the
 other, and `flushAll` counted a save that landed as failed. `runSave` believes
@@ -780,13 +784,25 @@ without persisting its edit: a `SaveBlockedError` (the editor declined to send a
 incomplete element) or an edit that landed while the write was in flight. It is
 not a failure - no toast, no "Not saved", no retry - and `flushAll` counts it in
 `pending`. `"final"` is a failure that will not retry (a 4xx); `flushAll` counts
-it in `failed`.
+it in `failed`. `"disk-full"` is a failure that retries like any other and knows
+its cause (a 507, #2423); `flushAll` counts it in `failed` too, and sets
+`reason: "disk-full"` on its result only when every failed context was
+disk-full. One failure of another kind beside it leaves the key out, because
+then "the disk is full" would be only part of the story. The key is absent, not
+`undefined`, when there is no cause. Three places turn a rejected save into
+`"disk-full"`, all through `isDiskFullError` (`lib/disk-full.ts`): `performSave`
+(`useSaveManager`), the `useDraftSaveContext` save (the collection editors, whose saves reject)
+and `runSave`'s own catch in the store.
 
 A context that resolves with nothing (`SettingsMain`, `VariableTableEditor`,
 `variable-commit`) is judged by the status it published, as before: `error` is
 `failed`, and `pending` (#1381) is `pending`, because a context that saw an edit
 land mid-write publishes it for the payload that went out not holding that edit.
-Otherwise `runSave` fills in the silence. The `pending` that
+A context that resolves having published through `failSave` - `SettingsMain`,
+`VariableTableEditor`, `variable-commit` and the inbox's `CannedResponseControls`
+(whose `persist` catches its own rejection) - cannot report `"disk-full"`: `failSave` takes the message, not the error, so such a context
+reads `failed` even when its write met a 507, and the quit prompt keeps its
+generic wording for it. Otherwise `runSave` fills in the silence. The `pending` that
 `completeSaveThenIdle` itself publishes while a sibling is dirty is not read back
 as the next void context's own.
 
@@ -817,7 +833,7 @@ its own unsaved edit is untouched.
 {
   id: string
   name: string
-  save: () => Promise<SaveOutcome | void>  // SaveOutcome: "saved" | "failed" | "final" | "pending"
+  save: () => Promise<SaveOutcome | void>  // SaveOutcome: "saved" | "failed" | "final" | "disk-full" | "pending"
   hasPendingChanges: boolean
 }
 ```
@@ -829,7 +845,7 @@ const {
   setActiveContext, getActiveContext,
   triggerSave,       // Ctrl/Cmd+S - saves active or first dirty context
   flushAll           // Save all dirty contexts (used before app quit); resolves
-                      // to { saved, failed, pending } - see below
+                      // to { saved, failed, pending, reason? } - see below
 } = useSaveStore();
 ```
 
@@ -3156,8 +3172,10 @@ when the ceiling gave up all looked identical to a clean quit. The renderer's
 ceiling won) is treated the same as a failure - nothing is known to have
 landed. Either case holds the close behind one native dialog,
 `createFlushFailureGate`: "Couldn't save N edits - the engine isn't
-responding" for a failure or the unanswered ceiling, and "N edits couldn't be
-saved as they are" when every loss is a blocked save (`pending` only, where the
+responding" for a failure or the unanswered ceiling, "Couldn't save N edits -
+the disk is full" (detail: "Free up space, then keep working to save again")
+when every failure was a 507 and `FlushResult.reason` says so (#2423), and "N
+edits couldn't be saved as they are" when every loss is a blocked save (`pending` only, where the
 engine is fine), **Quit/Close anyway** or **Keep working**. A clean flush still
 closes with no dialog, exactly as before, and a quit from a signal never asks:
 it logs the flush result at warn and proceeds (#1908). `useTabsStore.closeTab`

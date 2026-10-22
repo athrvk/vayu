@@ -23,9 +23,12 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <string>
 
 #include "echo_server.hpp"
+#include "nested_json.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/form_body.hpp"
@@ -37,6 +40,8 @@ namespace vayu::http {
 namespace {
 
 using vayu::tests::EchoServer;
+
+constexpr std::size_t kBodyDepthBound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
 
 /// A full frame, as a caller who knows the protocol writes it: their own `id`,
 /// their own key order, and a member the spec does not define.
@@ -333,6 +338,28 @@ TEST (JsonRpcBody, ACallWithAHundredThousandMembersIsCompletedInLinearTime) {
     EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
     // Completed, every caller member first and in its order.
     EXPECT_EQ (wire, call.substr (0, call.size () - 1) + R"(,"jsonrpc":"2.0","id":1})");
+}
+
+// The body is a string field, so the request-body depth bound (#2417) never
+// sees what it holds, and completing a call re-serializes it with a `dump ()`
+// that recurses. A call nested past the bound is passed through as typed, the
+// way unreadable text is, rather than overflowing the stack (#2672). Mutation
+// check: pass `ORDERED_JSON_UNBOUNDED` to `parse_ordered_json` and the first
+// assertion crashes the test binary.
+TEST (JsonRpcEnvelope, PassesACallNestedPastTheBoundThroughVerbatim) {
+    const std::string far_too_deep = vayu::tests::nested_object_text (50'000, "1");
+    EXPECT_EQ (jsonrpc_wire_body (far_too_deep), far_too_deep);
+
+    const std::string one_past =
+    vayu::tests::nested_object_text (kBodyDepthBound + 1, "1");
+    EXPECT_EQ (jsonrpc_wire_body (one_past), one_past);
+}
+
+// The other side of the bound: a call that fits is still completed.
+TEST (JsonRpcEnvelope, CompletesACallNestedExactlyToTheBound) {
+    const std::string at_bound = vayu::tests::nested_object_text (kBodyDepthBound, "1");
+    EXPECT_EQ (jsonrpc_wire_body (at_bound),
+    at_bound.substr (0, at_bound.size () - 1) + R"(,"jsonrpc":"2.0","id":1})");
 }
 
 } // namespace

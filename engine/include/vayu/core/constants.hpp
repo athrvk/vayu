@@ -555,8 +555,23 @@ namespace script_engine {
 constexpr size_t MEMORY_LIMIT = size_t{ 64 } * 1024 * 1024;
 /// Script execution timeout in milliseconds
 constexpr uint64_t TIMEOUT_MS = 5000;
+/// The bounds of `scriptTimeout`: the config entry's seeded minimum and
+/// maximum, and the range `read_script_config` clamps a stored value into.
+/// There is no "no limit" value; 1 ms is the shortest deadline expressible.
+constexpr uint64_t SCRIPT_TIMEOUT_MIN_MS = 1;
+constexpr uint64_t SCRIPT_TIMEOUT_MAX_MS = 60000;
 /// Stack size for the script engine in bytes (256KB)
 constexpr size_t STACK_SIZE = size_t{ 256 } * 1024;
+/// The bounds of `scriptStackSize`, shared by the seeded entry and the clamp.
+/// QuickJS measures its ceiling from the stack pointer where the runtime is
+/// created, already some frames into the worker thread, so the ceiling must
+/// leave room for those frames on the smallest thread the engine runs on:
+/// macOS gives a secondary thread 512 KB (Windows 1 MiB) and no engine thread
+/// sets a stack size of its own. A 512 KB ceiling overflows that thread before
+/// QuickJS refuses the recursion; 256 KB, the default, is the size proven on
+/// it, so the setting can only be lowered.
+constexpr size_t STACK_SIZE_MIN = size_t{ 64 } * 1024;
+constexpr size_t STACK_SIZE_MAX = STACK_SIZE;
 /**
  * @brief Stack budget while a bundled `require()` library (lodash, moment) is
  *        evaluated, in bytes (768KB).
@@ -587,14 +602,15 @@ constexpr bool ENABLE_CONSOLE = true;
 constexpr int SEND_REQUEST_LIMIT = 10;
 /**
  * @brief How many promise jobs and timer callbacks, together, one execution
- *        may run when it has no wall-clock deadline (`scriptTimeout` 0).
+ *        may run when it has no wall-clock deadline.
  *
  * The queues a script leaves are drained inside its execution (#2531, #2577),
  * and with a deadline the deadline bounds that drain. Without one, a runaway
  * `while (true) await null;` or a `setInterval` nothing clears would hold the
- * thread forever, so the count bounds it instead. Provisional until #2359
- * settles what `scriptTimeout` 0 means; far above what a script awaiting a few
- * sends queues.
+ * thread forever, so the count bounds it instead. The config cannot produce
+ * that state (`scriptTimeout` has a minimum of 1, #2359); an embedder or a test
+ * that builds a `ScriptConfig` with `timeout_ms` 0 can. Far above what a script
+ * awaiting a few sends queues.
  */
 constexpr size_t MAX_ASYNC_JOBS_WITHOUT_TIMEOUT = 100000;
 /**
@@ -603,8 +619,8 @@ constexpr size_t MAX_ASYNC_JOBS_WITHOUT_TIMEOUT = 100000;
  *
  * The queue lives outside the QuickJS heap, so the script's memory limit does
  * not bound it: a loop that only queues timers would grow the engine process
- * until the deadline, or without end under `scriptTimeout` 0. A script that
- * waits on a few sends holds a handful.
+ * until the deadline, or without end when the engine runs with no
+ * deadline. A script that waits on a few sends holds a handful.
  */
 constexpr size_t MAX_PENDING_TIMERS = 10000;
 } // namespace script_engine
