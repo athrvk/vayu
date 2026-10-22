@@ -91,6 +91,43 @@ describe("report error summary", () => {
 	});
 });
 
+describe("errors past the error store's cap (issue #2400)", () => {
+	// A run stored before exact per-type counts: 10 kept of 50 no-response errors.
+	const capped: RunReport = {
+		...report,
+		summary: {
+			...report.summary,
+			failedRequests: 50,
+			httpErrorRequests: 0,
+			noResponseRequests: 50,
+		},
+		errors: { total: 50, withDetails: 10, types: { timeout: 10 } },
+		sampling: {
+			errorsDropped: 40,
+			successTracesDropped: 0,
+			slowTracesDropped: 0,
+			responseSamplesDropped: 0,
+		},
+	};
+
+	it("tells the reader By error type covers only the stored errors", () => {
+		render(
+			withQueryClient(
+				<OverviewTab
+					report={capped}
+					runId="run_1"
+					derived={reportToDerived(capped)}
+					anomalies={[]}
+				/>
+			)
+		);
+
+		expect(
+			screen.getByText(/40 errors beyond the first 10 are not broken down by type/)
+		).toBeTruthy();
+	});
+});
+
 describe("requests cancelled by Stop (issue #2136)", () => {
 	/** A run the user stopped with a healthy target: cancelled requests, no errors. */
 	const stopped = (cancelledRequests: number | undefined): RunReport => ({

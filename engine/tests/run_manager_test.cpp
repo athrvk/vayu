@@ -1337,6 +1337,33 @@ TEST (FailedRunSummaryInputs, CarriesTheExactSlowCountAndItsThreshold) {
     EXPECT_EQ (summary["slow_requests"]["thresholdMs"].get<int> (), 100);
 }
 
+// #2400: the per-type error counts ride the crashed run's summary too, past the
+// error store's cap, or its report counts the stored records instead. Mutation
+// check: drop the error_types assignment in failed_run_summary_inputs and this
+// reds at an empty object.
+TEST (FailedRunSummaryInputs, CarriesTheExactErrorTypesPastTheStoreCap) {
+    RunContext ctx ("run_failed_types", nlohmann::json::object (), /*max_errors=*/2);
+    for (int i = 0; i < 7; ++i) {
+        ctx.metrics_collector->record_error (vayu::ErrorCode::Timeout, "slow");
+    }
+    ctx.metrics_collector->record_error (vayu::ErrorCode::DnsError, "nx");
+    ASSERT_EQ (ctx.metrics_collector->errors_dropped (), 6u);
+
+    const auto summary = build_run_summary_payload (failed_run_summary_inputs (ctx));
+    EXPECT_EQ (summary["error_types"],
+    (nlohmann::json{ { "dns_failed", 1 }, { "timeout", 7 } }))
+    << summary.dump ();
+}
+
+// A run that recorded no error still writes the key, so a reader can tell it
+// from a summary stored before the counts existed.
+TEST (FailedRunSummaryInputs, ARunWithNoErrorWritesAnEmptyErrorTypesObject) {
+    RunContext ctx ("run_failed_clean", nlohmann::json::object ());
+    const auto summary = build_run_summary_payload (failed_run_summary_inputs (ctx));
+    ASSERT_TRUE (summary.contains ("error_types")) << summary.dump ();
+    EXPECT_EQ (summary["error_types"], nlohmann::json::object ());
+}
+
 // A threshold of 0 measured nothing, so the summary says nothing rather than
 // a 0 a reader would take for "no outliers".
 TEST (FailedRunSummaryInputs, AZeroThresholdKeepsTheSlowSectionOut) {
@@ -1497,4 +1524,25 @@ TEST_F (LoadRunToTerminalTest, ACompletedRunStoresTheExactSlowCount) {
     EXPECT_EQ (summary["slow_requests"]["count"].get<size_t> (), 4u);
     EXPECT_EQ (summary["slow_requests"]["thresholdMs"].get<int> (), 100);
     EXPECT_EQ (summary["sampling"]["slow_traces_dropped"].get<size_t> (), 2u);
+}
+
+// #2400, the same producer for the per-type error counts: every request to
+// `/slow` (500ms) outlives a 100ms timeout - a lower bound again - and the
+// error store keeps 2 of the 4. Mutation check: drop the `error_types`
+// assignment in collect_summary_inputs and this reds at an empty object.
+TEST_F (LoadRunToTerminalTest, ACompletedRunStoresTheExactErrorTypes) {
+    auto cap = db->get_config_entry ("maxStoredErrors");
+    ASSERT_HAS_VALUE (cap);
+    cap->value = "2";
+    db->save_config_entry (*cap);
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 4 }, { "concurrency", 4 }, { "url", server->slow_url () },
+        { "method", "GET" }, { "workers", 1 }, { "timeout", 100 } };
+
+    const auto row = run_to_terminal_row ("run-error-types-e2e", config);
+    ASSERT_HAS_VALUE (row);
+    const auto summary = nlohmann::json::parse (row->summary);
+    EXPECT_EQ (summary["error_types"], (nlohmann::json{ { "timeout", 4 } }))
+    << summary.dump ();
+    EXPECT_EQ (summary["sampling"]["errors_dropped"].get<size_t> (), 2u);
 }

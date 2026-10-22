@@ -693,9 +693,8 @@ constexpr size_t DEFAULT_EXPECTED_REQUESTS = 100000;
 /// a trace blob, so an unlimited store is a straight path to an OOM kill
 /// mid-run. Errors past the cap are still counted (see
 /// MetricsCollector::errors_dropped) and still reach the status-code
-/// distribution - only their individual records are dropped, which truncates
-/// the final report's per-type error breakdown. Raise the key to keep that
-/// breakdown complete on a run with more errors than this.
+/// distribution and the per-type counts (#2400) - only their individual
+/// records are dropped.
 constexpr size_t DEFAULT_MAX_ERRORS = 10000;
 /// Maximum sampled success results to store (config key `max_success_results`;
 /// 0 = unlimited). Retained as a reservoir: past the cap a later completion

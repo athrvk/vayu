@@ -361,7 +361,7 @@ constexpr auto CLASS_LABELS = std::to_array<ClassLabel> ({
 { "2xx/3xx", "2xx" },
 { "4xx", "4xx" },
 { "5xx", "5xx" },
-{ "No response", "none" },
+{ NO_RESPONSE_LABEL, "none" },
 });
 static_assert (CLASS_LABELS.size () == CLASS_COUNT);
 

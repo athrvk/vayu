@@ -20,14 +20,22 @@
  * the By status code / By error type rows into buttons that report their key;
  * without them the rows are plain text. `hasSamples` disables a row the run kept
  * no example of (#2213).
+ *
+ * By error type can cover fewer errors than the total (#2400): a run stored
+ * before the engine kept exact per-type counts breaks down only the errors its
+ * store kept. `sampling.errorsDropped` says how many were not kept, and the
+ * note under the rows says so. It is silent for a run whose types account for
+ * every no-response request, whatever `errorsDropped` reads, because the
+ * breakdown is exact there.
  */
 
 import type { ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, DisabledHint } from "@/components/ui";
+import { Callout } from "./Callout";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
-import { formatErrorPercent } from "@/modules/dashboard/utils/format";
+import { formatErrorPercent, pickByCount } from "@/modules/dashboard/utils/format";
 import type { RunReport } from "@/types";
 
 /**
@@ -113,6 +121,24 @@ function Breakdown({ title, children }: { title: string; children: ReactNode }) 
 	);
 }
 
+/**
+ * Said under By error type when the rows cover only the errors the run stored.
+ * `stored` is the count the breakdown does cover, `dropped` the errors past it.
+ */
+function UntypedErrorsNote({ dropped, stored }: { dropped: number; stored: number }) {
+	const first = formatNumber(stored);
+	const count = formatNumber(dropped);
+	const text = pickByCount(dropped, {
+		one: `${count} error beyond the first ${first} is not broken down by type.`,
+		other: `${count} errors beyond the first ${first} are not broken down by type.`,
+	});
+	return (
+		<Callout severity="info">
+			{text} The counts here cover only the stored errors; the totals above are exact.
+		</Callout>
+	);
+}
+
 /** A row of the card, named the way a caller needs to look it up. */
 export type ErrorRowTarget = { kind: "status"; code: string } | { kind: "errorType"; key: string };
 
@@ -130,6 +156,11 @@ export interface ErrorSummaryProps {
 	 * Absent, every such row is open-able.
 	 */
 	hasSamples?: (target: ErrorRowTarget) => boolean;
+	/**
+	 * The run's retention counts. `errorsDropped` is what By error type did not
+	 * see; absent (an older run) says nothing rather than "nothing was dropped".
+	 */
+	sampling?: RunReport["sampling"];
 }
 
 export function ErrorSummary({
@@ -140,12 +171,17 @@ export function ErrorSummary({
 	onSelectStatus,
 	onSelectErrorType,
 	hasSamples,
+	sampling,
 }: ErrorSummaryProps) {
 	if (!errors || errors.total <= 0) return null;
 
 	const types = Object.entries(errors.types ?? {});
 	const statusCodes = Object.entries(errors.byStatusCode ?? {});
 	const unavailable = (target: ErrorRowTarget) => hasSamples?.(target) === false;
+	// A run that counted every error by type has types adding up to its
+	// no-response requests, so dropped stored records cost the breakdown nothing.
+	const typed = types.reduce((sum, [, count]) => sum + count, 0);
+	const droppedFromTypes = typed < noResponse ? (sampling?.errorsDropped ?? 0) : 0;
 
 	return (
 		<Card className="enter-fade border-destructive/30">
@@ -179,6 +215,12 @@ export function ErrorSummary({
 								unavailable={unavailable({ kind: "errorType", key: errorType })}
 							/>
 						))}
+						{droppedFromTypes > 0 && (
+							<UntypedErrorsNote
+								dropped={droppedFromTypes}
+								stored={errors.withDetails}
+							/>
+						)}
 					</Breakdown>
 				)}
 
