@@ -81,6 +81,8 @@ export const smokeResultSchema = z.object({
 	results: z.array(
 		z.object({
 			name: z.string(),
+			/** Collections above the request, root first; only on a `recursive` run. */
+			folder: z.string().optional(),
 			method: z.string(),
 			url: z.string(),
 			ok: z.boolean(),

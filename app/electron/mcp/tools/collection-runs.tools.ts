@@ -109,7 +109,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			recursive: z
 				.boolean()
 				.optional()
-				.describe("Also run sub-collections; each row names its `folder` (default false)."),
+				.describe("Also run sub-collections; each row names its `folder`."),
 			failOnSchemaError: failOnSchemaErrorInput({
 				unit: "request",
 				defaultsOn: true,

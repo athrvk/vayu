@@ -56,6 +56,7 @@ import {
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
+import { describeImportPreview } from "./tools/spec-bindings.js";
 import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
@@ -3318,6 +3319,18 @@ describe("run_collection_smoke", () => {
 					(call) => (call[0] as { requestId: string }).requestId
 				)
 			).toEqual(["r_user", "r_direct", "r_invoice", "r_refund"]);
+			// The SDK client checks structuredContent against the advertised JSON
+			// schema, where an undeclared row field is refused; zod's own parse
+			// strips it silently, so compare the keys against the emitted schema.
+			const advertised = z.toJSONSchema(
+				TOOLS.find((t) => t.name === "run_collection_smoke")!.outputSchema!,
+				{ io: "output" }
+			) as { properties: { results: { items: { properties: Record<string, unknown> } } } };
+			const declared = Object.keys(advertised.properties.results.items.properties);
+			expect(declared).toContain("folder");
+			for (const row of summary.results) {
+				expect(declared).toEqual(expect.arrayContaining(Object.keys(row)));
+			}
 			// A collection outside the subtree is never read, and the run left
 			// nothing out, so it carries no scope caveat.
 			expect(client.listRequests).not.toHaveBeenCalledWith("c9", undefined);
@@ -11570,6 +11583,16 @@ describe("OpenAPI spec binding tools", () => {
 			expect(allText(res)).toContain("filed under 3 sub-collection(s)");
 			expect(allText(res)).toContain(
 				"recursive: true to run_collection or run_collection_smoke"
+			);
+		});
+
+		test("a preview names the one-call way to run the folders it would create", () => {
+			const meta = { format: "OpenAPI 3.1.0", requestCount: 9, skipped: [] };
+			expect(describeImportPreview({ meta: { ...meta, folderCount: 3 } })).toContain(
+				"recursive: true to run_collection or run_collection_smoke"
+			);
+			expect(describeImportPreview({ meta: { ...meta, folderCount: 0 } })).not.toContain(
+				"recursive"
 			);
 		});
 

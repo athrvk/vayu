@@ -409,6 +409,10 @@ export function describeImportPreview(summary: Record<string, unknown>): string 
 	let text = `Nothing was stored. Importing this ${format} would create ${num(meta.requestCount)} request(s) in ${num(meta.folderCount)} folder(s)`;
 	if (num(meta.environmentCount) > 0) text += ` and ${num(meta.environmentCount)} environment(s)`;
 	text += ".";
+	if (num(meta.folderCount) > 0) {
+		text +=
+			" To run them all after importing, pass recursive: true to run_collection or run_collection_smoke.";
+	}
 	if (skipped.length > 0) {
 		text += ` It would not carry: ${skipped.map((e) => `${num(e.count)} ${String(e.kind)}`).join(", ")}.`;
 	}
