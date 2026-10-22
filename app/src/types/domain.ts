@@ -799,6 +799,14 @@ export interface ElementDef {
 }
 
 /**
+ * The level of the inheritance chain an element, an assertion or a console line
+ * came from (issue #2522): the root collection, any collection below it (a
+ * folder), or the request itself. Finer than an origin's `kind`, which keeps
+ * its two values because its readers branch on them.
+ */
+export type ElementScope = "collection" | "folder" | "request";
+
+/**
  * One element as sent inline to `POST /compose` / `POST /execute` for an
  * ad-hoc send (issue #1512), stamped with where it came from - the
  * generalized, N-kind form of {@link ScriptPart}. Built by
@@ -807,7 +815,7 @@ export interface ElementDef {
  * chain to resolve from.
  */
 export interface ResolvedElement extends ElementDef {
-	origin?: { kind: "collection" | "request"; id?: string; name?: string };
+	origin?: { kind: "collection" | "request"; scope?: ElementScope; id?: string; name?: string };
 }
 
 /**
@@ -821,7 +829,7 @@ export interface ResolvedElement extends ElementDef {
 export interface ElementOutcome {
 	id: string;
 	kind: string;
-	origin?: { kind: "collection" | "request"; id: string; name?: string };
+	origin?: { kind: "collection" | "request"; scope?: ElementScope; id: string; name?: string };
 	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
 	message?: string;
 	waitedMs?: number;
@@ -2302,6 +2310,12 @@ export interface TestResult {
 	 * request went out" from reading as an assertion about the response.
 	 */
 	source?: ScriptSource;
+	/**
+	 * The level whose script made this assertion (issue #2522). Absent on a trace
+	 * stored before the field, and on a send whose elements carry no origin; both
+	 * are the request's own.
+	 */
+	scope?: ElementScope;
 }
 
 /** Which `console.*` method a script line came from. Engine spellings. */
@@ -2324,6 +2338,11 @@ export type ScriptSource = "pre" | "test";
  */
 export interface ConsoleLogEntry {
 	source: ScriptSource;
+	/**
+	 * The level whose script printed this line (issue #2522) - not {@link level},
+	 * which is the `console.*` method. Absent reads as the request's own.
+	 */
+	scope?: ElementScope;
 	level: ConsoleLevel;
 	message: string;
 }

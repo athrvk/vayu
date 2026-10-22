@@ -165,7 +165,7 @@ beforeEach(() => {
 	composeRequest.mockReset().mockResolvedValue({
 		method: "GET",
 		url: "https://api.test/u",
-		elements: [{ ...PRE_SCRIPT, origin: { kind: "request", id: "req_1" } }],
+		elements: [{ ...PRE_SCRIPT, origin: { kind: "request", scope: "request", id: "req_1" } }],
 	});
 	executeRequest.mockReset().mockResolvedValue({ status: 200, body: "", bodyRaw: "" });
 	startLoadTest.mockReset().mockResolvedValue({ runId: "run_1" });
@@ -188,7 +188,7 @@ describe("a load run sends the resolved chain as requestElements", () => {
 
 		const payload = startedPayload();
 		expect(payload.requestElements).toEqual([
-			{ ...PRE_SCRIPT, origin: { kind: "request", id: "req_1" } },
+			{ ...PRE_SCRIPT, origin: { kind: "request", scope: "request", id: "req_1" } },
 		]);
 		// The composed payload's own `elements` (the resolved-chain shape
 		// `POST /compose` answers under) must never survive under the run-level
@@ -203,7 +203,7 @@ describe("a load run sends the resolved chain as requestElements", () => {
 		const payload = startedPayload();
 		expect(payload.elements).toEqual({ scripts: "allInline" });
 		expect(payload.requestElements).toEqual([
-			{ ...PRE_SCRIPT, origin: { kind: "request", id: "req_1" } },
+			{ ...PRE_SCRIPT, origin: { kind: "request", scope: "request", id: "req_1" } },
 		]);
 	});
 });

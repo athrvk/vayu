@@ -11,7 +11,7 @@
 /**
  * What a row says beyond its kind and outcome (issue #1941): a timer's wait
  * and a passing transaction's name, both of which the engine reports and the
- * list used to drop.
+ * list used to drop; and, since #2522, the message of a row that did not pass.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -54,15 +54,20 @@ describe("ElementOutcomes", () => {
 		expect(container.textContent).toBe("Elementsextract.jsonok");
 	});
 
-	it("keeps a failure's message on hover rather than inline", () => {
-		const { container } = render(
-			<ElementOutcomes
-				outcomes={[
-					row({ kind: "assert.status", outcome: "failed", message: "expected 200" }),
-				]}
-			/>
-		);
-		expect(screen.queryByText("expected 200")).toBeNull();
-		expect(container.querySelector('[title="expected 200"]')).not.toBeNull();
-	});
+	it.each(["failed", "error", "missing"] as const)(
+		"prints a %s element's message inline, not only on hover",
+		(outcome) => {
+			// An errored element used to be a bare chip with its one explanation in
+			// a tooltip (issue #2522): the reason is the row's point.
+			const { container } = render(
+				<ElementOutcomes
+					outcomes={[row({ kind: "script.pre", outcome, message: "boom at the root" })]}
+				/>
+			);
+			expect(screen.getByText("boom at the root")).toBeTruthy();
+			// Truncated on the row, so the whole text stays one hover away.
+			expect(screen.getByText("boom at the root")).toHaveClass("truncate");
+			expect(container.querySelector('[title="boom at the root"]')).not.toBeNull();
+		}
+	);
 });

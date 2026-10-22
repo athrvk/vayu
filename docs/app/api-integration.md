@@ -1608,12 +1608,12 @@ replay puts the run's recorded list back on its seeded rows.
   redirects: [],
   timing: { totalMs: 150, engineMs: 3.4, dnsMs: 10, connectMs: 20, ... },
   testResults: [
-    { name: "Token was issued", passed: true, source: "pre" },
-    { name: "Status 200", passed: true, source: "test" }
+    { name: "Token was issued", passed: true, source: "pre", scope: "collection" },
+    { name: "Status 200", passed: true, source: "test", scope: "request" }
   ],
   consoleLogs: [
-    { source: "pre", level: "log", message: "Pre-request" },
-    { source: "test", level: "warn", message: "slow response" }
+    { source: "pre", scope: "collection", level: "log", message: "Pre-request" },
+    { source: "test", scope: "request", level: "warn", message: "slow response" }
   ]
 }
 ```
@@ -1623,6 +1623,19 @@ replay puts the run's recorded list back on its seeded rows.
 by `source` so an assertion made before the request went out does not read as
 one about the response (issue #810). An entry restored from a trace written
 before that carries no `source`, and is read as the test script's.
+
+Both lists also name the **level** that wrote an entry, in `scope`: `collection`
+(the root), `folder` (any collection below it) or `request` (issue #2522). A
+request runs every level's scripts and the engine reports all of them. `scope`
+is not the console `level`; it is absent on a trace stored before the field and
+on a send whose elements carry no origin, and absent reads as the request's own.
+The Tests list and the Console label an inherited level ("Collection",
+"Folder") and leave the request's own bare. An inline Send resolves the chain in
+the renderer (`elements-parts.ts`) and stamps each element's `origin.scope`
+itself - the root as `collection`, every level under it as `folder` - the same
+way the engine stamps a stored request's chain. A script that threw at an
+inherited level is named in `preScriptError` / `postScriptError`
+("Collection pre-request script failed - ...").
 
 `consoleLogs` entries name the script that wrote them and the `console.*` level
 that was called. A bare `string` is the pre-structured shape an older engine

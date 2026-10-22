@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import type { ConsoleLevel } from "@/types";
 import type { ParsedLog } from "./parse-logs";
 import { SCRIPT_SECTIONS, type ScriptKey } from "./script-sections";
+import ScopeTag from "../ScopeTag";
 
 /**
  * How each `console.*` level is drawn.
@@ -163,6 +164,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 								>
 									{tone.gutter}
 								</span>
+								<ScopeTag scope={log.scope} className="leading-5" />
 								<pre
 									className={cn(
 										"min-w-0 flex-1 whitespace-pre-wrap break-words",

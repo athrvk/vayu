@@ -3564,6 +3564,43 @@ describe("run_collection_smoke", () => {
 		]);
 	});
 
+	test("a failing inherited assertion names its level, ahead of the script it ran in", async () => {
+		// Issue #2522: a collection's or a folder's assertion failed this request,
+		// and the request's own script is the wrong place to go looking for it.
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "inherits" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 200,
+				testResults: [
+					{ name: "root check", passed: false, source: "test", scope: "collection" },
+					{ name: "folder setup", passed: false, source: "pre", scope: "folder" },
+					{ name: "own check", passed: false, source: "test", scope: "request" },
+					{ name: "stored before", passed: false, source: "test" },
+					{ name: "unheard of", passed: false, source: "test", scope: "toString" },
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const summary = res.structuredContent as {
+			results: Array<{ tests?: { failures?: string[] } }>;
+		};
+
+		expect(summary.results[0].tests?.failures).toEqual([
+			"[collection] root check",
+			"[folder] [pre-request] folder setup",
+			"own check",
+			"stored before",
+			"unheard of",
+		]);
+	});
+
 	/**
 	 * Nothing caps `testResults` upstream, so a script writing hundreds of
 	 * failing assertions would otherwise put all of them on one row of a matrix

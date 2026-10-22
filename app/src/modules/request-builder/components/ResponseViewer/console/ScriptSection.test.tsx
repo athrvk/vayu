@@ -20,8 +20,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { ScriptError } from "./ScriptSection";
+import { render, screen, within } from "@testing-library/react";
+import { ScriptError, ScriptLogs } from "./ScriptSection";
 import { SCRIPT_SECTIONS } from "./script-sections";
 
 describe("ScriptError", () => {
@@ -41,5 +41,29 @@ describe("ScriptError", () => {
 		const { container } = render(<ScriptError which="pre" message="boom" />);
 
 		expect(container.innerHTML).not.toContain("status-error");
+	});
+});
+
+describe("ScriptLogs level labels", () => {
+	it("names the inherited level of a line, and leaves the request's own unlabelled", () => {
+		render(
+			<ScriptLogs
+				which="pre"
+				logs={[
+					{ source: "pre", scope: "collection", level: "log", message: "root line" },
+					{ source: "pre", scope: "folder", level: "warn", message: "folder line" },
+					{ source: "pre", scope: "request", level: "log", message: "own line" },
+					{ source: "pre", level: "log", message: "stored before the field" },
+				]}
+			/>
+		);
+
+		const row = (message: string) => screen.getByText(message).parentElement as HTMLElement;
+		expect(within(row("root line")).getByText("Collection")).toBeTruthy();
+		expect(within(row("folder line")).getByText("Folder")).toBeTruthy();
+		expect(within(row("own line")).queryByText(/^(Collection|Folder|Request)$/)).toBeNull();
+		expect(
+			within(row("stored before the field")).queryByText(/^(Collection|Folder|Request)$/)
+		).toBeNull();
 	});
 });

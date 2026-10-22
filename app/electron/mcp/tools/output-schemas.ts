@@ -136,6 +136,11 @@ export const smokeResultSchema = z.object({
  */
 const MAX_TEST_FAILURES_PER_ROW = 10;
 
+/** `[collection] ` / `[folder] ` for an inherited level's assertion; nothing for the request's own. */
+function inheritedLevelMarker(scope: unknown): string {
+	return scope === "collection" || scope === "folder" ? `[${scope}] ` : "";
+}
+
 /**
  * Both scripts' assertions, flattened for a tool result (#733).
  *
@@ -149,6 +154,12 @@ const MAX_TEST_FAILURES_PER_ROW = 10;
  * fails for different reasons than one about the response - an agent told only
  * the name would read every failure as the latter. Nothing labels the
  * post-request ones: they are what this list has always been.
+ *
+ * An assertion from an inherited level is labelled too (issue #2522): a request
+ * runs its collection's and its folders' scripts, and an agent told only the
+ * name would look for the failing assertion in the request's own script. The
+ * level marker leads the source one; the request's own assertion and an entry
+ * with no `scope` (a trace stored before the field) carry none.
  */
 export function readTestVerdict(
 	resp: Record<string, unknown>
@@ -159,12 +170,13 @@ export function readTestVerdict(
 		passed?: unknown;
 		error?: unknown;
 		source?: unknown;
+		scope?: unknown;
 	}>;
 	if (tests.length === 0) return undefined;
 	const failed = tests.filter((t) => t.passed === false);
 	const failures = failed.slice(0, MAX_TEST_FAILURES_PER_ROW).map((t) => {
 		const bare = typeof t.name === "string" && t.name ? t.name : "(unnamed test)";
-		const name = t.source === "pre" ? `[pre-request] ${bare}` : bare;
+		const name = `${inheritedLevelMarker(t.scope)}${t.source === "pre" ? "[pre-request] " : ""}${bare}`;
 		const message = typeof t.error === "string" ? t.error.trim() : "";
 		return message ? `${name}: ${message}` : name;
 	});
