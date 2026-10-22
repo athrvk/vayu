@@ -1808,9 +1808,11 @@ takes its counts from the run's in-memory collector until the status turns termi
 the [`body_blobs`](#body_blobs) those introduce, are written by `Database::add_results_batch` in
 chunks of `RESULTS_WRITE_CHUNK_ROWS` (250) results, one transaction each, staying off the DB
 mutex for 1 ms between chunks (#2548): the mutex is not fair, and a writer that re-locks at once
-wins it back from the reader it just woke. A reader that lands during the flush (a report poll's
-run-row read among them) waits for one chunk (about 7 ms in a Release build) rather than the whole
-write, and one that reads this table may see the run's results part-written. A body row always commits with its result; a failure part-way keeps the
+wins it back from the reader it just woke. A reader that lands during the flush waits for one
+chunk (about 7 ms in a Release build, 21-35 ms for the one whose commit runs the automatic WAL
+checkpoint) rather than the whole write, and one that reads this table may see the run's results
+part-written. A report poll waits for neither: its one read, the run row, takes no DB mutex
+([`runs`](#runs), #2679). A body row always commits with its result; a failure part-way keeps the
 chunks already committed. Blob dedup spans the whole flush, not one chunk.
 
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,

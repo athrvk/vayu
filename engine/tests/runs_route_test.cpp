@@ -18,8 +18,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <future>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -39,6 +42,7 @@
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/json.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 
@@ -2056,6 +2060,39 @@ TEST_F (RunsRouteTest, ALiveLoadRunWithNoContextIsReportedAsZerosWithoutARowRead
         EXPECT_FALSE (report.contains ("latency"));
         EXPECT_EQ (report["resultsStored"].get<size_t> (), 0u);
     }
+}
+
+// #2679: the live poll is answered while another thread holds the DB mutex, as
+// a results chunk does during the run's final flush, because the run row is
+// read off the mutex and nothing else is read. Mutation check: read the row
+// with `get_run` again and the report never finishes while the mutex is held.
+TEST_F (RunsRouteTest, ALiveLoadRunsReportDoesNotWaitOnTheDbMutex) {
+    seed ({ .id = "run_flushing", .status = vayu::RunStatus::Running, .start_time = 1000 });
+
+    std::promise<void> holding;
+    std::promise<void> release;
+    std::thread holder ([this, &holding, released = release.get_future ()] {
+        db_->with_lock ([&] {
+            holding.set_value ();
+            released.wait ();
+        });
+    });
+    holding.get_future ().wait ();
+
+    auto report = std::async (std::launch::async, [this] {
+        return vayu::http::routes::run_report_response (*db_, "run_flushing");
+    });
+
+    const bool answered = vayu::tests::wait_until ([&] {
+        return report.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    });
+    release.set_value ();
+    holder.join ();
+
+    ASSERT_TRUE (answered) << "the live report waited on the held DB mutex";
+    const auto [status, body] = report.get ();
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["metadata"]["status"].get<std::string> (), "running");
 }
 
 // A terminal load run is reported from its rows and summary whatever its

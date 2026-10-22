@@ -447,7 +447,9 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   The results go in chunks of `RESULTS_WRITE_CHUNK_ROWS` (250), one transaction and one DB mutex
   acquisition each, with a 1 ms pause off the mutex between chunks (#2548): the run is still
   `running` while it flushes, and a 10,000-row flush written whole held the mutex for 240-400 ms,
-  so a live report poll waited out all of it. A result and its captured body share a chunk; a
+  so a live report poll waited out all of it. The poll now waits for no chunk: it reads only the
+  run row, through `get_run_snapshot`, which takes no DB mutex (#2679, [One read that takes no
+  lock](#one-read-that-takes-no-lock)). A result and its captured body share a chunk; a
   failure part-way keeps the chunks before it
   ([`results`](db-schema.md#results))
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
