@@ -302,6 +302,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `<redacted>` and a field whose name ends `url`/`Url` is stripped to
   scheme/host/path, both in `Logger::write` before either sink sees the
   record (`utils/log_redact.hpp`) - a caller never redacts its own fields.
+  `msg` is never redacted, so text a user's script authored (a thrown message)
+  is a field, bounded through `vayu::utils::bounded_log_text`
+  (`utils/log_text.hpp`, 512 bytes, #2359), and never part of `msg`.
   The file sink writes one JSON line per record (validated in tests against
   `docs/engine/log-record.schema.json`); the console renders the same record
   as text. `vayu::utils::Logger` keeps its console verbosity (`-v 0|1|2`:

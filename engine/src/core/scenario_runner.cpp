@@ -30,6 +30,7 @@
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -1138,8 +1139,9 @@ TransactionHistograms& transactions) {
         if (ended_by_error) {
             vayu::utils::log_warning ("run",
             "Scenario run: iteration " + std::to_string (base.iteration) +
-            " ended at step '" + record.step_name + "' - " + record.error,
-            { { "runId", base.context->run_id } });
+            " ended at step '" + record.step_name + "'",
+            { { "runId", base.context->run_id },
+            { "stepError", vayu::utils::bounded_log_text (record.error) } });
             return record.steps_not_run;
         }
         if (end_iteration) {
@@ -1474,8 +1476,9 @@ RunManager& manager) {
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("run", "Scenario run error: " + std::string (e.what ()),
-        { { "runId", context->run_id } });
+        vayu::utils::log_error ("run", "Scenario run error",
+        { { "runId", context->run_id },
+        { "error", vayu::utils::bounded_log_text (e.what ()) } });
         final_status = vayu::RunStatus::Failed;
     }
 

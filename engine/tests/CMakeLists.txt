@@ -69,6 +69,7 @@ add_executable(vayu_tests
     request_log_test.cpp
     log_category_scan_test.cpp
     log_record_schema_test.cpp
+    script_error_log_test.cpp
     numeric_flag_test.cpp
     high_resolution_timer_test.cpp
     platform_test.cpp

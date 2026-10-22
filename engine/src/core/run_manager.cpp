@@ -27,6 +27,7 @@
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -2162,8 +2163,9 @@ RunManager& manager) {
         // load is sent.
         vayu::http::routes::ScriptVariableScopes base_scopes;
         if (auto setup_failure = run_collection_setup (db, context, base_scopes)) {
-            vayu::utils::log_error ("run", "script.setup failed: " + *setup_failure,
-            { { "runId", context->run_id } });
+            vayu::utils::log_error ("run", "script.setup failed",
+            { { "runId", context->run_id },
+            { "scriptError", vayu::utils::bounded_log_text (*setup_failure) } });
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();

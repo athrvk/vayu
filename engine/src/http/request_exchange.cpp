@@ -30,6 +30,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http::routes {
@@ -459,14 +460,14 @@ const std::string& script_type) {
     try {
         result = engine.execute (script, ctx);
         if (!result.success) {
-            vayu::utils::log_warning (
-            "http", script_type + " script failed: " + result.error_message);
+            vayu::utils::log_warning ("http", script_type + " script failed",
+            { { "scriptError", vayu::utils::bounded_log_text (result.error_message) } });
         }
     } catch (const std::exception& e) {
         result.success       = false;
         result.error_message = std::string ("Script exception: ") + e.what ();
-        vayu::utils::log_error (
-        "http", script_type + " script exception: " + std::string (e.what ()));
+        vayu::utils::log_error ("http", script_type + " script exception",
+        { { "scriptError", vayu::utils::bounded_log_text (e.what ()) } });
     }
     return result;
 }
