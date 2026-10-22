@@ -287,7 +287,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed; sends a progress notification per row when the client sent a `progressToken` (index and status word only, never a name or URL) |
+| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | runs one page of the list, `limit` (default 25, max 100, a larger value refused) from `offset`, and the result's `requestTotal`, `hasMore`, `next.offset` and `note` say what is left; allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed; sends a progress notification per row when the client sent a `progressToken` (index and status word only, never a name or URL) |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
@@ -944,6 +944,38 @@ Notes:
   requests or against a slow API the description steers an agent to
   `run_collection` (one stored run with a run id, read with `get_run_report`),
   leaving the smoke for a bounded pass/fail matrix.
+  **A call runs one page** (#2451): `limit` requests (default 25, max 100; a
+  larger value is refused, not clamped, like every bound in this registry)
+  starting at `offset`. The list - the direct requests, or the whole expansion of
+  a `recursive` run - is read once in the engine's stable order and then sliced
+  `[offset, offset + limit)`, so a collection edited between two calls shifts the
+  window under the second one (the description says so). `total`, `passed`,
+  `failed` and `skipped` keep their meaning as the counts of the rows run **in
+  this call**; the result adds `requestTotal` (the list's size, before the cut),
+  `hasMore`, and - only while `hasMore` is true - `next: {offset}`, the `offset`
+  that resumes. Whenever the call did not run everything in scope the result's
+  own `note` field says so in a sentence (`Ran 25 of 140 requests, starting at
+  offset 0; call again with offset: 25 for the rest.`), in the structured
+  content and so in the JSON text block alike: a default of 25 that cut a
+  collection quietly would read as a whole-collection pass. An `offset` at or
+  past `requestTotal` runs nothing and the note says so (`hasMore` false). A
+  call that ran everything carries `requestTotal` and `hasMore: false` and no
+  note. Progress (below) counts the page, not the collection.
+  **A cancellation returns what finished.** When the call's signal aborts
+  mid-run the loop stops and the result carries the rows completed so far with
+  `cancelled: true`, `hasMore: true` and `next.offset` set to `offset` plus the
+  rows returned. The abort is told from a row's own send error by the signal, not
+  by the error: an aborted fetch rejects like any other failure, but a send that
+  fails with the signal still live stays a failed row and the run goes on. The
+  request in flight at the abort is not a row, and `next.offset` points at it, so
+  resuming sends it again; the note warns it may already have reached the API.
+  The masking reads that follow the loop run without the aborted signal, since
+  one that fails closes the call and would discard the rows. The SDK itself
+  sends no response to a request whose signal aborted (a `notifications/cancelled`
+  for it, or the connection closing), so the partial result is what a caller
+  that reads the handler's return value gets - the tests, `dispatchTool` - and
+  what the cancelled loop no longer does is walk the remaining rows, each a
+  failed fetch the instant after the abort.
   When the client sent a `progressToken` (#2451) the call reports
   `notifications/progress` - `0/total` before the first request, then one per
   row on every path (sent, skipped off the allowlist or failed to compose), with
@@ -1100,7 +1132,10 @@ Notes:
   run row, arrives before this client gives up. If the budget does expire, the
   tool says the call may still have completed and points at `list_runs`; it is
   never reported as an unreachable engine, because a retry could re-send a
-  request that already went out.
+  request that already went out. `run_collection_smoke` bounds the other side of
+  this: a call runs at most `limit` requests (25 by default), so one call stays
+  inside a typical client budget and a longer collection is resumed by `offset`
+  rather than lost to a timeout.
 
 ### Naming what the user means
 

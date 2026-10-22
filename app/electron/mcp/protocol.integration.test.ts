@@ -607,6 +607,67 @@ describe("progress notifications", () => {
 	});
 });
 
+/**
+ * A paged smoke result carries fields beyond the matrix, and the SDK client
+ * refuses a result its advertised schema does not declare (#2451), so the
+ * page is read through the real client rather than the registry's own parse.
+ */
+describe("run_collection_smoke paging", () => {
+	function pagedClient() {
+		const rows = [1, 2, 3, 4, 5].map((n) => ({ id: `r${n}`, name: `req ${n}` }));
+		return fakeClient({
+			listRequests: vi.fn().mockResolvedValue(rows),
+			composeRequest: async ({ requestId }: { requestId: string }) => ({
+				method: "GET",
+				url: `https://api.example.com/${requestId}`,
+			}),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+	}
+
+	it("returns the page, its size and where the next one starts through the SDK's validation", async () => {
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"] },
+			client: pagedClient(),
+		});
+		const res = await client.callTool({
+			name: "run_collection_smoke",
+			arguments: { collectionId: "c1", limit: 2, offset: 2 },
+		});
+		expect(res.isError).toBeFalsy();
+		expect(res.structuredContent).toMatchObject({
+			total: 2,
+			requestTotal: 5,
+			hasMore: true,
+			next: { offset: 4 },
+		});
+		const rows = (res.structuredContent as { results: Array<{ name: string }> }).results;
+		expect(rows.map((row) => row.name)).toEqual(["req 3", "req 4"]);
+		await server.close();
+	});
+
+	it("refuses a limit above 100 before anything is sent", async () => {
+		const engine = pagedClient();
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"] },
+			client: engine,
+		});
+		// Refused as a protocol error or as an error result, whichever the SDK picks.
+		const refused = await client
+			.callTool({
+				name: "run_collection_smoke",
+				arguments: { collectionId: "c1", limit: 101 },
+			})
+			.then(
+				(res) => res.isError === true,
+				() => true
+			);
+		expect(refused).toBe(true);
+		expect(engine.executeRequest).not.toHaveBeenCalled();
+		await server.close();
+	});
+});
+
 describe("resources", () => {
 	it("lists the static resources", async () => {
 		const { client, server } = await connectClient();

@@ -277,10 +277,21 @@ export function isEngineHealthShape(value: unknown): value is Record<string, unk
 
 export const smokeResultSchema = z.object({
 	collectionId: z.string(),
+	/** Rows run in this call (`passed + failed + skipped`), not the collection's size: that is `requestTotal`. */
 	total: z.number(),
 	passed: z.number(),
 	failed: z.number(),
 	skipped: z.number(),
+	/** Requests the collection holds in scope, before the page was cut. */
+	requestTotal: z.number().optional(),
+	/** Whether requests past this page remain; true on a cancelled call. */
+	hasMore: z.boolean().optional(),
+	/** Where the next call resumes; present only while `hasMore` is true. */
+	next: z.object({ offset: z.number() }).optional(),
+	/** True when the call was cancelled mid-run and `results` holds the rows finished by then. */
+	cancelled: z.boolean().optional(),
+	/** The page in words; absent when this call ran everything in scope. */
+	note: z.string().optional(),
 	results: z.array(
 		z.object({
 			name: z.string(),
@@ -506,6 +517,69 @@ export async function childCollectionNames(
 		if (rec.parentId === collectionId) names.push(String(rec.name ?? rec.id ?? "unnamed"));
 	}
 	return names;
+}
+
+/** `limit` default and ceiling of `run_collection_smoke`: a serial run of real traffic, so a page is small. */
+export const DEFAULT_SMOKE_LIMIT = 25;
+export const MAX_SMOKE_LIMIT = 100;
+
+/** What a smoke call knows about its page once the loop has ended. */
+export interface SmokePage {
+	/** Requests in scope, before paging. */
+	requestTotal: number;
+	offset: number;
+	/** Rows finished in this call. */
+	ran: number;
+	/** Rows the page held, which a cancelled call did not finish. */
+	planned: number;
+	cancelled: boolean;
+}
+
+/**
+ * The paging fields of a smoke result, in the result itself: a page cut that
+ * only the caller's arithmetic reveals reads as the whole collection passing.
+ *
+ * `note` is absent when the call ran everything in scope, so it only appears
+ * when there is something to act on. A cancelled call's row in flight is not
+ * among the rows, and `next.offset` points at it: it may have reached the API
+ * before the cancellation did, and the resume sends it again.
+ */
+export function smokePageFields(page: SmokePage): Record<string, unknown> {
+	const { requestTotal, offset, ran, cancelled } = page;
+	const nextOffset = offset + ran;
+	const hasMore = nextOffset < requestTotal;
+	return {
+		requestTotal,
+		hasMore,
+		...(hasMore ? { next: { offset: nextOffset } } : {}),
+		...(cancelled ? { cancelled: true } : {}),
+		...smokePageNote(page, hasMore),
+	};
+}
+
+function smokePageNote(page: SmokePage, hasMore: boolean): { note?: string } {
+	const { requestTotal, offset, ran, planned, cancelled } = page;
+	const nextOffset = offset + ran;
+	if (cancelled) {
+		return {
+			note:
+				`Cancelled after ${ran} of ${planned} requests; \`results\` holds those. The request ` +
+				`in flight is not among them and may have been sent. Resume with offset: ${nextOffset}.`,
+		};
+	}
+	if (hasMore) {
+		return {
+			note:
+				`Ran ${ran} of ${requestTotal} requests, starting at offset ${offset}; ` +
+				`call again with offset: ${nextOffset} for the rest.`,
+		};
+	}
+	if (offset > 0 && ran === 0) {
+		return {
+			note: `offset ${offset} is past the end: the collection has ${requestTotal} requests in scope, so none ran.`,
+		};
+	}
+	return {};
 }
 
 /** The two ways past a direct-only smoke run, as the caveat names them. */
