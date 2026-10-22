@@ -22,12 +22,11 @@ import type { ToolContext, ToolResult } from "./contract.js";
 import {
 	engineErrorResult,
 	isRecord,
-	jsonResult,
 	optionalOffset,
 	optionalPageLimit,
 	str,
+	structuredResult,
 	ToolArgError,
-	withCaveat,
 } from "./kit.js";
 
 /**
@@ -64,26 +63,55 @@ export const DEFAULT_RUN_SAMPLE_LIMIT = 25;
 export const DEFAULT_RUN_SERIES_LIMIT = 100;
 export const MAX_RUN_SERIES_LIMIT = 1_000;
 
+/** How a paged read's description tells an agent to reach the next page. */
+export const PAGE_CURSOR_SENTENCE =
+	"`pagination.nextOffset` is the `offset` to read next (null on the last page), and `pagination.note` says so in words.";
+
+/** Where the next page starts, and the sentence saying so, as `pagination` carries them. */
+interface PageCursor {
+	nextOffset: number | null;
+	note?: string;
+}
+
 /**
- * What a bounded page did *not* return, in words.
+ * What a bounded page did *not* return, disclosed inside the document (#2445).
  *
- * The `{data, pagination}` envelope already carries `total` and `hasMore`, but a
- * bound an agent has to reconstruct from two numbers is one it can miss - the
- * same disclose-in-band rule the smoke matrix and the report's trace budget
- * follow. Empty when the page is the whole answer: a caveat on a complete read
- * is noise that teaches an agent to skip the caveats that matter.
+ * The envelope already carries `total` and `hasMore`, but a bound an agent has
+ * to reconstruct from two numbers is one it can miss - the same disclose-in-band
+ * rule the smoke matrix and the report's trace budget follow. So `nextOffset`
+ * is the offset to read next, and `note` says it in words. `nextOffset` is null
+ * and `note` absent when the page is the whole answer: a caveat on a complete
+ * read is noise that teaches an agent to skip the caveats that matter. `null`
+ * when the engine answered no `pagination` block at all.
  */
-function pageCaveat(value: unknown, noun: string): string {
-	if (!isRecord(value)) return "";
+function pageCursor(value: unknown, noun: string): PageCursor | null {
+	if (!isRecord(value) || !isRecord(value.pagination)) return null;
 	const pagination = value.pagination;
-	if (!isRecord(pagination) || pagination.hasMore !== true) return "";
+	if (pagination.hasMore !== true) return { nextOffset: null };
 	const offset = typeof pagination.offset === "number" ? pagination.offset : 0;
 	const returned = typeof pagination.returned === "number" ? pagination.returned : 0;
 	const total = typeof pagination.total === "number" ? String(pagination.total) : "more";
-	return (
-		`\n\nBounded read: ${returned} of ${total} ${noun}, starting at offset ${offset}. ` +
-		`Read the next page with offset: ${offset + returned}.`
-	);
+	const nextOffset = offset + returned;
+	return {
+		nextOffset,
+		note:
+			`Bounded read: ${returned} of ${total} ${noun}, starting at offset ${offset}. ` +
+			`Read the next page with offset: ${nextOffset}.`,
+	};
+}
+
+/**
+ * @p shaped as the record a paged read answers, its `pagination` carrying
+ * @p cursor. A non-object answer is wrapped as `{ raw }` rather than returned
+ * bare, for the reason `get_engine_health` wraps one: the declared
+ * `outputSchema` would reject it, and the SDK reports that as a broken tool
+ * while hiding the engine's body.
+ */
+function pageRecord(shaped: unknown, cursor: PageCursor | null): Record<string, unknown> {
+	if (!isRecord(shaped)) return { raw: shaped ?? null };
+	if (!cursor) return shaped;
+	const pagination = isRecord(shaped.pagination) ? shaped.pagination : {};
+	return { ...shaped, pagination: { ...pagination, ...cursor } };
 }
 
 /**
@@ -155,14 +183,15 @@ export function runListQuery(args: Record<string, unknown>): RunListQuery {
 }
 
 /**
- * A paginated engine read whose result says what it left behind.
- * {@link callEngine} with a `shape` cannot do this: the caveat is text beside
- * the JSON, not a rewrite of it.
+ * A paginated engine read whose result says what it left behind: one JSON
+ * document, also returned as `structuredContent` for the tools'
+ * `pagedEnvelopeSchema`. A caveat appended as a second text block made
+ * the answer stop parsing as JSON exactly when there was a page two (#2445).
  *
- * `shape` is the same seam {@link callEngine} offers, and it runs before the
- * caveat is computed - a page whose rows carry bodies is bounded here, and the
- * caveat still describes the page the engine answered rather than the cut one
- * (it reads `pagination`, which a body bound does not touch).
+ * `shape` is the same seam {@link callEngine} offers. The cursor is computed
+ * from the engine's unshaped `pagination` and written onto the shaped record
+ * afterwards, so it describes the page the engine answered rather than a
+ * body-bounded copy, and the withholding pass never reads the note.
  */
 export async function pagedRead(
 	ctx: ToolContext,
@@ -176,8 +205,8 @@ export async function pagedRead(
 	} catch (err) {
 		return engineErrorResult(err, ctx);
 	}
-	const caveat = pageCaveat(answer, noun);
-	return withCaveat(jsonResult(shape ? shape(answer) : answer), caveat);
+	const shaped = shape ? shape(answer) : answer;
+	return structuredResult(pageRecord(shaped, pageCursor(answer, noun)));
 }
 
 /**

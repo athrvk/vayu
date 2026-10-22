@@ -110,6 +110,21 @@ function page(data: unknown[], total = data.length, offset = 0) {
 
 const emptyPage = () => page([]);
 
+/** @p envelope as a paged read answers its last page: `nextOffset` null, no `note`. */
+function lastPageAnswer(envelope: ReturnType<typeof page>) {
+	return { ...envelope, pagination: { ...envelope.pagination, nextOffset: null } };
+}
+
+/**
+ * A paged read's `pagination`, read from its one text block parsed as JSON,
+ * after checking that parse agrees with `structuredContent`.
+ */
+function pageOf(res: { content: Array<{ text: string }>; structuredContent?: unknown }) {
+	const parsed = JSON.parse(res.content[0].text) as { pagination: Record<string, unknown> };
+	expect(res.structuredContent).toEqual(parsed);
+	return parsed.pagination;
+}
+
 /**
  * `serialize_token`'s shape (`engine/src/http/oauth_client.cpp`), bearer bytes
  * included - the fakes serve what the engine serves, so the tools' redaction
@@ -9296,23 +9311,30 @@ describe("run housekeeping tools", () => {
 			expect(client.listRuns).not.toHaveBeenCalled();
 		});
 
-		test("a page with more behind it says so, with the next offset", async () => {
+		// #2445: the bound used to ride as a second text block, so page one of
+		// 17 runs stopped parsing as JSON exactly when there was a page two.
+		test("a page with more behind it is one JSON document carrying the next offset", async () => {
 			const client = fakeClient({
-				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }, { id: "run_2" }], 57)),
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }], 17)),
 			});
-			const res = await dispatchTool("list_runs", { limit: 2 }, ctxWith(client));
-			const text = res.content.map((c) => c.text).join("\n");
-			expect(text).toMatch(/2 of 57 runs/);
-			expect(text).toMatch(/offset: 2/);
+			const res = await dispatchTool("list_runs", { limit: 1 }, ctxWith(client));
+			expect(res.content).toHaveLength(1);
+			const pagination = pageOf(res);
+			expect(pagination.hasMore).toBe(true);
+			expect(pagination.nextOffset).toBe(1);
+			expect(pagination.note).toMatch(/1 of 17 runs, starting at offset 0/);
 		});
 
-		test("a complete page carries no caveat", async () => {
+		test("the last page has a null next offset and no note", async () => {
 			const client = fakeClient({
-				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1" }])),
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_17" }], 17, 16)),
 			});
-			const res = await dispatchTool("list_runs", {}, ctxWith(client));
+			const res = await dispatchTool("list_runs", { limit: 1, offset: 16 }, ctxWith(client));
 			expect(res.content).toHaveLength(1);
-			expect(firstText(res)).not.toMatch(/Bounded read/);
+			const pagination = pageOf(res);
+			expect(pagination.hasMore).toBe(false);
+			expect(pagination.nextOffset).toBeNull();
+			expect(pagination).not.toHaveProperty("note");
 		});
 	});
 
@@ -9423,6 +9445,80 @@ describe("run housekeeping tools", () => {
 			expect(res.isError).toBe(true);
 			expect(firstText(res)).toMatch(/404/);
 		});
+	});
+
+	describe("every paged read answers one JSON document its outputSchema accepts", () => {
+		const PAGED_READS = [
+			{ tool: "list_runs", args: {}, method: "listRuns", row: { id: "run_1" } },
+			{
+				tool: "get_run_samples",
+				args: { runId: "run_1" },
+				method: "getRunSamples",
+				row: { resultId: 1 },
+			},
+			{
+				tool: "get_run_timeseries",
+				args: { runId: "run_1" },
+				method: "getRunTimeSeries",
+				row: { rps: 10 },
+			},
+			{
+				tool: "get_run_monitor",
+				args: { runId: "run_1" },
+				method: "getRunMonitorSeries",
+				row: { cpu: 0.5 },
+			},
+			{
+				tool: "get_inbox_captures",
+				args: { inboxId: "inbox_1" },
+				method: "getInboxCaptures",
+				row: { id: 9 },
+			},
+		] as const;
+
+		/** @p tool's declared outputSchema; its absence fails the case rather than skipping it. */
+		function outputSchemaOf(tool: string) {
+			const schema = TOOLS.find((t) => t.name === tool)?.outputSchema;
+			expect(schema, tool).toBeDefined();
+			return schema!;
+		}
+
+		test.each(PAGED_READS)(
+			"$tool: a page with more behind it",
+			async ({ tool, args, method, row }) => {
+				const client = fakeClient({ [method]: vi.fn().mockResolvedValue(page([row], 17)) });
+				const res = await dispatchTool(tool, { ...args, limit: 1 }, ctxWith(client));
+				expect(res.content).toHaveLength(1);
+				const pagination = pageOf(res);
+				expect(pagination.hasMore).toBe(true);
+				expect(pagination.nextOffset).toBe(1);
+				expect(pagination.note).toEqual(expect.any(String));
+				expect(() => outputSchemaOf(tool).parse(res.structuredContent)).not.toThrow();
+			}
+		);
+
+		test.each(PAGED_READS)("$tool: the last page", async ({ tool, args, method, row }) => {
+			const client = fakeClient({ [method]: vi.fn().mockResolvedValue(page([row], 17, 16)) });
+			const res = await dispatchTool(tool, { ...args, offset: 16 }, ctxWith(client));
+			expect(res.content).toHaveLength(1);
+			const pagination = pageOf(res);
+			expect(pagination.nextOffset).toBeNull();
+			expect(pagination).not.toHaveProperty("note");
+			expect(() => outputSchemaOf(tool).parse(res.structuredContent)).not.toThrow();
+		});
+
+		// The schema would reject a bare non-object, and the SDK reports that as
+		// a broken tool while hiding the engine's body.
+		test.each(PAGED_READS)(
+			"$tool: a non-object answer is wrapped, not refused",
+			async ({ tool, args, method }) => {
+				const client = fakeClient({ [method]: vi.fn().mockResolvedValue(null) });
+				const res = await dispatchTool(tool, args, ctxWith(client));
+				expect(res.isError).toBeFalsy();
+				expect(res.structuredContent).toEqual({ raw: null });
+				expect(() => outputSchemaOf(tool).parse(res.structuredContent)).not.toThrow();
+			}
+		);
 	});
 
 	describe("set_run_baseline", () => {
@@ -13973,9 +14069,9 @@ describe("secret withholding", () => {
 			body: "token=<redacted>&p=<redacted>",
 			bodyBytes: 40,
 		});
-		expect(withheld.body.pagination).toEqual(samples.pagination);
+		expect(withheld.body.pagination).toEqual(lastPageAnswer(samples).pagination);
 		const revealed = await read("get_run_samples", client, REVEAL, { runId: "run_1" });
-		expect(revealed.body).toEqual(samples);
+		expect(revealed.body).toEqual(lastPageAnswer(samples));
 	});
 
 	const RUN_ROW = {
@@ -14005,7 +14101,7 @@ describe("secret withholding", () => {
 			dataFileHash: "c".repeat(64),
 			dataFileCastNumbers: true,
 		});
-		expect((await read("list_runs", client, REVEAL)).body).toEqual(runs);
+		expect((await read("list_runs", client, REVEAL)).body).toEqual(lastPageAnswer(runs));
 	});
 
 	test("set_run_baseline masks the run row it echoes unless revealed", async () => {
@@ -14048,7 +14144,7 @@ describe("secret withholding", () => {
 			bodyBytes: 30,
 		});
 		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
-		expect(revealed.body).toEqual(captures);
+		expect(revealed.body).toEqual(lastPageAnswer(captures));
 	});
 
 	test("get_mock_activity masks a secret in a logged path unless revealed", async () => {

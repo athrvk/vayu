@@ -51,6 +51,51 @@ export const runComparisonSchema = z.object({
 	),
 });
 
+/** The engine's `pagination` block, plus the cursor `pagedRead` writes into it. */
+const paginationSchema = z.looseObject({
+	total: z.number().optional(),
+	limit: z.number().optional(),
+	offset: z.number().optional(),
+	returned: z.number().optional(),
+	hasMore: z.boolean().optional(),
+	/** The `offset` to read next; null when this page is the last. */
+	nextOffset: z.number().nullable().optional(),
+	/** The bound in words, present only while `hasMore` is true. */
+	note: z.string().optional(),
+});
+
+/**
+ * The `{data, pagination}` envelope a paged read answers (`pagedRead`), with
+ * @p rowSchema for each row.
+ *
+ * Loose throughout, every field optional: the SDK turns a result its declared
+ * schema rejects into a protocol error that hides the whole answer, so this
+ * names what an agent can rely on without refusing a field the engine adds. A
+ * non-object answer arrives wrapped as `{ raw }`.
+ */
+export function pagedEnvelopeSchema(rowSchema: z.ZodType = z.record(z.string(), z.unknown())) {
+	return z.looseObject({
+		data: z.array(rowSchema).optional(),
+		pagination: paginationSchema.optional(),
+	});
+}
+
+/** `list_runs`: a run row's id, the handle every other run tool takes. */
+export const runPageSchema = pagedEnvelopeSchema(z.looseObject({ id: z.string().optional() }));
+
+/** `get_run_samples`: `resultId` joins a sample to the report's `results[].id`. */
+export const runSamplePageSchema = pagedEnvelopeSchema(
+	z.looseObject({ resultId: z.number().optional() })
+);
+
+/** `get_run_timeseries` / `get_run_monitor`: stored payloads, with no key every row is held to. */
+export const runSeriesPageSchema = pagedEnvelopeSchema();
+
+/** `get_inbox_captures`: the capture's numeric id. */
+export const inboxCapturePageSchema = pagedEnvelopeSchema(
+	z.looseObject({ id: z.number().optional() })
+);
+
 export const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })
 	.passthrough();
