@@ -118,6 +118,28 @@ inline std::filesystem::path enter_process_scratch_dir () {
     "cannot create a unique scratch directory under " + base.string ());
 }
 
+/// The copies a start takes before it migrates or repairs the workspace
+/// (#2426): `backups/vayu-<stamp>-pre-<...>.db` beside @p path. A snapshot a
+/// test asked for itself carries no label and is that test's to remove, so
+/// the directory goes only once it is empty.
+inline void remove_pre_migration_snapshots (const std::string& path) {
+    const auto backups = std::filesystem::path (path).parent_path () / "backups";
+    std::vector<std::filesystem::path> taken;
+    std::error_code backups_ec;
+    for (std::filesystem::directory_iterator it (backups, backups_ec), end;
+    !backups_ec && it != end; it.increment (backups_ec)) {
+        const std::string name = it->path ().filename ().string ();
+        if (name.starts_with ("vayu-") && name.find ("-pre-") != std::string::npos) {
+            taken.push_back (it->path ());
+        }
+    }
+    for (const auto& snapshot : taken) {
+        std::error_code ec;
+        std::filesystem::remove (snapshot, ec);
+    }
+    std::filesystem::remove (backups, backups_ec);
+}
+
 /**
  * Removes every file a `vayu::db::Database` opened at @p path can leave behind.
  *
@@ -144,25 +166,7 @@ inline void remove_database_files (const std::string& path) {
             std::filesystem::remove (base + suffix, ec);
         }
     }
-    // The copies a start takes before it migrates or repairs the workspace
-    // (#2426): `backups/vayu-<stamp>-pre-<...>.db` beside it. A snapshot a test
-    // asked for itself carries no label and is that test's to remove, so the
-    // directory goes only once it is empty.
-    const auto backups = std::filesystem::path (path).parent_path () / "backups";
-    std::vector<std::filesystem::path> taken;
-    std::error_code backups_ec;
-    for (std::filesystem::directory_iterator it (backups, backups_ec), end;
-    !backups_ec && it != end; it.increment (backups_ec)) {
-        const std::string name = it->path ().filename ().string ();
-        if (name.starts_with ("vayu-") && name.find ("-pre-") != std::string::npos) {
-            taken.push_back (it->path ());
-        }
-    }
-    for (const auto& snapshot : taken) {
-        std::error_code ec;
-        std::filesystem::remove (snapshot, ec);
-    }
-    std::filesystem::remove (backups, backups_ec);
+    remove_pre_migration_snapshots (path);
     // The startup recovery marker (issue #922). Only a recovering start writes
     // one, but it is listed here rather than in the one fixture that provokes
     // one: a leaked marker is read by the *next* `Database` opened at this
