@@ -21,7 +21,9 @@
  *   - `addQuitHandler()` registers nothing while the flag is false, which is
  *     why it has to be up for the registration;
  *   - the quit callback reads the flag again before it installs, which is
- *     why dropping it afterwards is enough to stop the install.
+ *     why dropping it afterwards is enough to stop the install;
+ *   - `update-available` is emitted before the download that swaps the file
+ *     starts, which is why `invalidateVerifiedDownload` runs there.
  */
 
 import { readFileSync } from "node:fs";
@@ -79,5 +81,30 @@ describe("electron-updater's quit-time install, as updater.ts relies on it", () 
 		expect(recheck).toBeGreaterThan(-1);
 		expect(install).toBeGreaterThan(-1);
 		expect(recheck).toBeLessThan(install);
+	});
+
+	it("emits update-available before it starts the download, the only way one starts", () => {
+		const check = methodBody(
+			appUpdater,
+			"async doCheckForUpdates() {",
+			"onUpdateAvailable(updateInfo) {"
+		);
+		expect(check).not.toBe("");
+		const announce = check.indexOf("this.onUpdateAvailable(updateInfo);");
+		const download = check.indexOf("this.downloadUpdate(");
+		expect(announce).toBeGreaterThan(-1);
+		expect(download).toBeGreaterThan(announce);
+		// No `await` between the two, so the listener has run before the download is called.
+		expect(check.slice(announce, download)).not.toMatch(/\bawait\b/);
+
+		const onAvailable = methodBody(
+			appUpdater,
+			"onUpdateAvailable(updateInfo) {",
+			"downloadUpdate("
+		);
+		expect(onAvailable).toMatch(/this\.emit\("update-available", updateInfo\);/);
+		// The autoDownload call above is the one caller of the one download path.
+		expect(appUpdater.match(/this\.downloadUpdate\(/g)).toHaveLength(1);
+		expect(appUpdater.match(/this\.doDownloadUpdate\(/g)).toHaveLength(1);
 	});
 });

@@ -29,9 +29,10 @@ let offeredReleaseUrl: string | null = null;
 
 /**
  * The version of the latest download, once its installer's attestation has
- * verified; null until then, and reset by every download (#2372).
- * electron-updater installs whichever file it downloaded last, so neither the
- * restart nor the quit-time install may follow an earlier verification.
+ * verified; null until then, and reset by every announced update and every
+ * download (#2372). electron-updater installs whichever file it downloaded
+ * last, so neither the restart nor the quit-time install may follow an earlier
+ * verification.
  */
 let verifiedVersion: string | null = null;
 /** Bumped per download, so a verification a newer download superseded is dropped. */
@@ -343,6 +344,7 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	autoUpdater.allowPrerelease = false;
 
 	autoUpdater.on("update-available", (info) => {
+		if (strategy === "silent") invalidateVerifiedDownload();
 		offeredReleaseUrl = releaseUrl(info.version);
 		const payload: UpdateAvailablePayload = {
 			version: info.version,
@@ -417,6 +419,10 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
  * that passes raises it again. A quit while the verification is still running
  * installs nothing. `updater-install-gate.test.ts` holds the installed
  * electron-updater to that ordering.
+ *
+ * electron-updater swaps the new file into place before it emits this event,
+ * so the standing verification is dropped earlier, on `update-available`
+ * (`invalidateVerifiedDownload`); this only re-asserts it.
  */
 function holdDownloadForVerification(info: UpdateDownloadedEvent): void {
 	const generation = ++downloadGeneration;
@@ -424,8 +430,29 @@ function holdDownloadForVerification(info: UpdateDownloadedEvent): void {
 	autoUpdater.autoInstallOnAppQuit = true;
 	queueMicrotask(() => {
 		autoUpdater.autoInstallOnAppQuit = false;
-		void verifyDownload(info, generation);
+		verifyDownload(info, generation).catch((err: unknown) =>
+			refuseUnverifiedDownload(info, generation, err)
+		);
 	});
+}
+
+/**
+ * Withdraw the verification of the file staged so far, ahead of a download
+ * that may replace it (#2372).
+ *
+ * `update-available` is the hook because it is the earliest event that always
+ * precedes the swap: `doCheckForUpdates` emits it synchronously before it calls
+ * `downloadUpdate`, and the rename and `setDownloadedFile` run inside that
+ * download, before `update-downloaded`. `checking-for-update` is earlier but
+ * fires on a check that finds nothing or fails, which would leave a verified
+ * download uninstallable with no download to verify again; `download-progress`
+ * is later, and a cached file never emits it. A cached update re-announced by
+ * the periodic check is verified again through `update-downloaded`.
+ */
+function invalidateVerifiedDownload(): void {
+	downloadGeneration++;
+	verifiedVersion = null;
+	autoUpdater.autoInstallOnAppQuit = false;
 }
 
 async function verifyDownload(info: UpdateDownloadedEvent, generation: number): Promise<void> {
@@ -452,6 +479,36 @@ async function verifyDownload(info: UpdateDownloadedEvent, generation: number): 
 	verifiedVersion = info.version;
 	autoUpdater.autoInstallOnAppQuit = true;
 	send("update:downloaded", { version: info.version });
+}
+
+/**
+ * `verifyDownload` threw instead of answering (`app.getPath`, or a send into a
+ * window going away). The renderer cannot be told the update is ready, so the
+ * download is refused like any other failure, and nothing here may throw: this
+ * is the last handler on that promise.
+ */
+function refuseUnverifiedDownload(
+	info: UpdateDownloadedEvent,
+	generation: number,
+	err: unknown
+): void {
+	if (generation !== downloadGeneration) return;
+	verifiedVersion = null;
+	autoUpdater.autoInstallOnAppQuit = false;
+	const reason = `Couldn't verify the update (${describeError(err)}).`;
+	appLogger().error("updater", "Downloaded update could not be verified, not installing it", {
+		version: info.version,
+		file: info.downloadedFile,
+		reason,
+	});
+	const failure: UpdateVerificationFailure = { version: info.version, reason };
+	try {
+		send("update:verificationFailed", failure);
+	} catch (sendErr) {
+		appLogger().error("updater", "Couldn't report the refused update to the window", {
+			error: describeError(sendErr),
+		});
+	}
 }
 
 /**

@@ -974,6 +974,77 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 		expect(quitAndInstall).not.toHaveBeenCalled();
 	});
 
+	it.each(silentPlatforms)(
+		"on %s, withdraws a verification once a newer release is announced, before its file lands",
+		async (_name, platform, appImage) => {
+			// electron-updater renames the new installer into place and only then
+			// emits `update-downloaded`; a restart or quit in between would install
+			// the new, unverified file on the strength of the old verification.
+			const { restartToInstall } = await arm(platform, appImage);
+			finishDownload("1.0.0");
+			await vi.waitFor(() => expect(sent("update:downloaded")).toHaveLength(1));
+
+			listeners.get("update-available")?.({ version: "1.1.0" });
+
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, drops a verification still running when a newer release is announced",
+		async (_name, platform, appImage) => {
+			const answer = holdVerification();
+			const { restartToInstall } = await arm(platform, appImage);
+			finishDownload("1.0.0");
+			await vi.waitFor(() => expect(verifyInstallerAttestation).toHaveBeenCalledTimes(1));
+			const olderVerification = verifyInstallerAttestation.mock.results[0]
+				.value as Promise<unknown>;
+
+			listeners.get("update-available")?.({ version: "1.1.0" });
+			answer({ ok: true });
+			// The updater's continuation was attached to this promise first, so it
+			// has run by the time this await returns.
+			await olderVerification;
+
+			expect(sent("update:downloaded")).toEqual([]);
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+
+			// The announced release still installs once its own download verifies.
+			finishDownload("1.1.0");
+			await vi.waitFor(() =>
+				expect(sent("update:downloaded")).toEqual([{ version: "1.1.0" }])
+			);
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, refuses the download when telling the window it is ready throws",
+		async (_name, platform, appImage) => {
+			const { restartToInstall } = await arm(platform, appImage);
+			currentWindow!.webContents.send.mockImplementation((channel: string) => {
+				if (channel === "update:downloaded") throw new Error("Render frame was disposed");
+			});
+
+			finishDownload("1.0.0");
+			await vi.waitFor(() =>
+				expect(sent("update:verificationFailed")).toEqual([
+					{
+						version: "1.0.0",
+						reason: "Couldn't verify the update (Render frame was disposed).",
+					},
+				])
+			);
+
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
 	it.each([
 		["macOS", "darwin" as NodeJS.Platform, undefined],
 		["the Linux .deb", "linux" as NodeJS.Platform, undefined],
