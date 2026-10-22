@@ -56,6 +56,14 @@ std::optional<Run> Database::get_run (const std::string& id) {
     return runs.front ();
 }
 
+std::optional<Run> Database::get_run_snapshot (const std::string& id) {
+    std::lock_guard<std::mutex> lock (impl_->snapshot_reader_mutex);
+    auto runs = impl_->snapshot_storage ().get_all<Run> (where (c (&Run::id) == id));
+    if (runs.empty ())
+        return std::nullopt;
+    return runs.front ();
+}
+
 void Database::update_run_status (const std::string& id, RunStatus status) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Updating run status",

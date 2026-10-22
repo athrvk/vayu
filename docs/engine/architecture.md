@@ -166,6 +166,19 @@ the write it exists to guard. Both are called out at their site, and they are
 the shape of exception to argue for - bounded, local, and load-bearing - not a
 precedent for reaching further.
 
+#### One read that takes no lock
+
+`Database::get_run_snapshot` (#2679) is the one read that does not take the
+DB mutex: it reads a run row through a second, read-only connection with a
+small mutex of its own, which WAL lets read the last commit while the main
+connection writes. A bounded writer still holds the DB mutex for longer than a
+poll should wait (a results chunk whose commit runs the automatic WAL
+checkpoint); this read waits for none of it. What it gives up is composing
+with anything: it sees only what was committed before it, never a write in
+flight, and no lock scope can include it. A read that decides a write is
+`get_run` under the DB mutex. [`runs`](db-schema.md#runs) has the connection's
+settings.
+
 ### Listeners
 
 This is the engine's whole listener inventory. The management API is the only long-lived one;
