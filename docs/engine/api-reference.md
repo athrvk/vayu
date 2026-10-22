@@ -147,8 +147,9 @@ JSON: <parser message>` (code `bad_request`) (issue
 The bound reads the body's own tree, so JSON carried inside a string field is
 not covered by it. The engine parses a few such fields again and holds each to
 the same 128 levels itself (issue
-[#2672](https://github.com/athrvk/vayu/issues/2672)): a `jsonrpc` body's
-`content` ([the `jsonrpc` envelope](#the-jsonrpc-envelope)).
+[#2672](https://github.com/athrvk/vayu/issues/2672)): a `graphql` or `jsonrpc`
+body's `content` ([the `graphql` envelope](#the-graphql-envelope), [the
+`jsonrpc` envelope](#the-jsonrpc-envelope)).
 
 ## Removed route aliases
 
@@ -516,8 +517,12 @@ caller did not write rather than the one it wrote: `content` is empty, `content`
 is envelope-shaped but does not parse (the same unreadable-envelope case
 above), or the envelope carries a member this transport has no parameter for,
 or one of `operationName` / `variables` / `extensions` whose value is not the
-type the specification gives it. In all three, the request falls back to the
-POST-style JSON body even though the method is `GET`.
+type the specification gives it. A fourth case is an envelope nested deeper than
+128 levels, its own root counted (issue #2672): `content` is a string, so the
+request-body depth bound never looks inside it, and encoding `variables` or
+`extensions` would re-serialize them recursively. Like the unreadable envelope
+it is not split, and the engine does not guess at it. In all four, the request
+falls back to the POST-style JSON body even though the method is `GET`.
 
 #### The `jsonrpc` envelope
 

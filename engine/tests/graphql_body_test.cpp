@@ -27,11 +27,14 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <map>
 #include <string>
 
 #include "echo_server.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/form_body.hpp"
@@ -43,6 +46,14 @@ namespace vayu::http {
 namespace {
 
 using vayu::tests::EchoServer;
+
+constexpr std::size_t kBodyDepthBound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+
+/// `{"query":"{ a }","<member>":{"a":{...1}}}` with the map @p levels deep.
+std::string envelope_with_map (const char* member, std::size_t levels) {
+    return std::string (R"({"query":"{ a }",")") + member + R"(":)" +
+    vayu::tests::nested_object_text (levels, "1") + "}";
+}
 
 /// The full envelope an imported multi-operation request carries: a document
 /// with two named operations, the `operationName` selecting one of them, and a
@@ -397,6 +408,36 @@ TEST (GraphQLGetTransport, ExplicitNullsAreOmittedRatherThanSent) {
     R"({"query":"{ a }","operationName":null,"variables":null})");
     ASSERT_HAS_VALUE (parameters);
     EXPECT_EQ (*parameters, "query=" + percent_encode ("{ a }"));
+}
+
+// `variables` and `extensions` are re-serialized with a `dump ()` that recurses,
+// and the body is a string field the request-body depth bound (#2417) never
+// looks inside. An envelope nested past that bound, counting its own root, keeps
+// the body transport, which carries it verbatim, rather than overflowing the
+// stack (#2672). Mutation check: drop the `exceeds_depth` probe in
+// `graphql_get_parameters` and the first assertion crashes the test binary.
+TEST (GraphQLGetTransport, AnEnvelopeNestedPastTheBoundKeepsTheBodyTransport) {
+    for (const char* member : { "variables", "extensions" }) {
+        EXPECT_FALSE (
+        graphql_get_parameters (envelope_with_map (member, 50'000)).has_value ())
+        << member;
+        // The envelope's own root is the first level, so a map of `kBodyDepthBound`
+        // levels is the first that is one too many.
+        EXPECT_FALSE (
+        graphql_get_parameters (envelope_with_map (member, kBodyDepthBound)).has_value ())
+        << member;
+    }
+}
+
+// The other side of the bound: an envelope that fits is still split.
+TEST (GraphQLGetTransport, AnEnvelopeNestedExactlyToTheBoundIsStillSplit) {
+    const std::string variables =
+    vayu::tests::nested_object_text (kBodyDepthBound - 1, "1");
+    const auto parameters =
+    graphql_get_parameters (envelope_with_map ("variables", kBodyDepthBound - 1));
+    ASSERT_HAS_VALUE (parameters);
+    EXPECT_EQ (*parameters,
+    "query=" + percent_encode ("{ a }") + "&variables=" + percent_encode (variables));
 }
 
 // ---------------------------------------------------------------------------

@@ -91,13 +91,18 @@ namespace vayu::http {
  * alone.
  *
  * **Nothing** - meaning "send this the way it has always been sent" - for the
- * three cases where the fields cannot be recovered:
+ * four cases where the fields cannot be recovered:
  *
  * - An empty body. There is nothing to carry.
  * - Content that is shaped like an envelope but does not parse - the same case
  *   @ref graphql_wire_body passes through rather than wrapping, for the same
  *   reason: acting on a body we could not read is acting on ignorance, and
  *   here it would mean sending a request whose query we invented.
+ * - An envelope nested deeper than `constants::request_body::MAX_JSON_DEPTH`
+ *   levels, its own root counted (#2672). It is a string field, so the
+ *   request-body bound never looked inside it, and encoding `variables` or
+ *   `extensions` re-serializes them recursively. Unreadable, like the one
+ *   above, and the body carries it verbatim.
  * - An envelope carrying a member this transport has no parameter for, or one
  *   whose `operationName`, `variables` or `extensions` is not the type the
  *   specification gives it. Those members were agreed between a user and their

@@ -145,7 +145,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   does not. JSON carried inside a *string* field is outside the request-body
   depth bound (`parse_request_json`, #2417), so whoever parses it bounds it at
   `constants::request_body::MAX_JSON_DEPTH` before anything copies or `dump`s
-  it (#2672): `jsonrpc_wire_body` parses with that depth. Each such site has a
+  it (#2672): `jsonrpc_wire_body` parses with that depth and
+  `graphql_get_parameters` probes `exceeds_depth`. Each such site has a
   crash-depth test and an at-bound test in its suite. Only text the engine wrote
   itself, at a size no client chose, may
   keep `ordered_json::parse`; a stored row is not that (its members are a
