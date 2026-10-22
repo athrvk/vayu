@@ -15,19 +15,6 @@ import { useCopy } from "@/hooks/useCopy";
 import type { UpdateVerificationFailure } from "@/types/electron";
 
 /**
- * Slim banner that appears when a newer Vayu release is available.
- *
- *   - silent platforms (Windows, Linux AppImage): shows a progress bar while
- *     the update downloads in the background, says "Verifying" once the bytes
- *     are in and the installer's build-provenance attestation is being checked,
- *     then a restart-to-install. When the attestation does not verify (issue
- *     #2372) it says why instead and offers the release page; nothing is
- *     installed and there is no restart button.
- *   - macOS (ad-hoc signed): offer to copy the one-line installer command, and
- *     to quit so the command can replace the app it is pasted for.
- *   - other notify platforms (.deb): link to the release page.
- */
-/**
  * The line the banner prints. The failure wins over every other state: it is
  * the one outcome the user has to act on, and its reason is what they need.
  */
@@ -52,6 +39,19 @@ function bannerMessage(
 	return `Downloading Vayu ${update.version}… ${percent}%`;
 }
 
+/**
+ * Slim banner that appears when a newer Vayu release is available.
+ *
+ *   - silent platforms (Windows, Linux AppImage): shows a progress bar while
+ *     the update downloads in the background, says "Verifying" once the bytes
+ *     are in and the installer's build-provenance attestation is being checked,
+ *     then a restart-to-install. When the attestation does not verify (issue
+ *     #2372) it says why instead and offers the release page; nothing is
+ *     installed and there is no restart button.
+ *   - macOS (ad-hoc signed): offer to copy the one-line installer command, and
+ *     to quit so the command can replace the app it is pasted for.
+ *   - other notify platforms (.deb): link to the release page.
+ */
 function UpdateBanner() {
 	const {
 		update,
