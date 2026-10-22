@@ -316,7 +316,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -1579,7 +1579,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     and `iterations` can drive a sequence - `capacity` and `constant_rps` are
     refused with the engine's own reasoning (a knee measured against which
     step's p99? an arrival-rate executor Vayu does not implement), as is any
-    non-zero `targetRps`, which selects that path whatever the declared mode.
+    non-zero `targetRps`: a scenario run is closed loop by design, whatever
+    the declared mode.
   - The collection tree **is** the sequence: there is no step list to send, and
     `recursive: true` walks sub-collections in the sidebar's order: at each
     level the sub-collections and requests are one sibling list, a request runs
@@ -2250,7 +2251,8 @@ takes the strategies' defaults, named in `run_config` and `capacity` in
 
 | Mode | `concurrency` | `startConcurrency` | `duration` | `rampUpDuration` | `iterations` |
 |------|---------------|--------------------|------------|------------------|--------------|
-| `constant_concurrency`, `constant_rps` | 100, none when `targetRps` paces the run | - | 60s | - | - |
+| `constant_concurrency` | 100 | - | 60s | - | - |
+| `constant_rps` | 100, none when `targetRps` paces the run | - | 60s | - | - |
 | `ramp_up` | 100 | 1 | 60s | 10s | - |
 | `iterations` | 10 | - | none (never read) | - | 1000 |
 | `capacity` | 100, the search ceiling | the engine's own | 300s | - | - |
@@ -2259,9 +2261,13 @@ A scenario run (`scenario`) takes its executor's own defaults
 (`execute_scenario_load`, `engine/src/core/scenario_load.cpp`): 10 virtual
 users in each of its three modes, with the same duration, ramp, start and
 iteration defaults as the table. In every mode an omitted `duration` is the
-cap instead when **Max duration** is shorter. A constant run with no
-`targetRps` is closed loop at its virtual users; with one it is open loop and
-no `concurrency` is sent. `capacity`'s `sloMs` and `stepDuration` stay
+cap instead when **Max duration** is shorter. A `constant_concurrency` run is closed loop at
+its virtual users. A `constant_rps` run with a `targetRps` is open loop and no
+`concurrency` is sent; a `mode`-less call with a positive `targetRps` resolves to
+`constant_rps`. A `targetRps` beside an explicit `constant_concurrency` (or any
+other mode but `constant_rps`) is not resolved away: it is forwarded and the
+engine answers `400 invalid_run_config` (#2396), so the one rule stays in the
+engine. `capacity`'s `sloMs` and `stepDuration` stay
 engine-side. `safety.test.ts` reads both engine files, so a changed default
 fails the app suite until the table above and the tool's follow it.
 
@@ -2432,8 +2438,10 @@ copy is tied to the renderer constant by `config.test.ts`, the way
 `MAX_IN_FLIGHT_BOUND` is - `electron/` may not import `src/`.
 
 `maxRps` and `maxConcurrency` bound **different runs**, which is why neither is a
-general "load cap": `targetRps` exists only in `constant_rps`, so `maxRps` is
-inert against a closed-loop run, and `maxConcurrency` bounds the virtual users a
+general "load cap": `targetRps` exists only in `constant_rps` (the engine refuses it
+on every other mode, #2396), so `maxRps` is inert against a closed-loop run -
+though the cap is read from any positive `targetRps` before the engine's refusal,
+so an over-cap rate on another mode is refused for its size first, and `maxConcurrency` bounds the virtual users a
 closed-loop run holds (or a ramp starts from, or a capacity search climbs to) -
 not the in-flight requests of a rate-paced run, which `maxInFlight` governs.
 
