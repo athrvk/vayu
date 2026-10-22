@@ -450,7 +450,7 @@ machine, so the engine sends it only when it lies under a folder allowed in Sett
 is a file picked here. `POST /import/parse` answers each with the `unresolved` the engine derives
 from those (#2356), `true` for a path this machine would refuse; no stored body keeps the key. The Preview reads the drafts (`fileReferenceNeeds` in
 `app/src/modules/collections/import-notices.ts`) and lists each distinct parent folder once,
-with how many files it holds and an **Allow folder...** action (`ImportFileFolders.tsx`, through
+with how many files it holds and an **Allow folder…** action (`ImportFileFolders.tsx`, through
 `hooks/useAllowFolder.ts`) that opens the system folder picker there, inside Electron only:
 main allows the folder the user confirms, since the renderer cannot name one. A collection
 exported on this same machine is one choice per folder rather than a relink per request; a

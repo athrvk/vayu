@@ -61,7 +61,7 @@ describe("ImportModal curl paste", () => {
 		renderModal();
 		pasteAndDetect("");
 		expect(screen.queryByRole("tab", { name: /Paste JSON/i })).toBeNull();
-		expect(screen.getByPlaceholderText(/or a cURL command/i)).toBeTruthy();
+		expect(screen.getByPlaceholderText(/or a cURL command/)).toBeTruthy();
 	});
 
 	it("offers to open the command as a request instead of sending it to the engine", async () => {

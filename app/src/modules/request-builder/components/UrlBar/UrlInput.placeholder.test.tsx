@@ -56,6 +56,6 @@ describe("the URL bar's placeholder", () => {
 		renderUrlInput();
 		// Found by its accessible name: the placeholder must not have displaced it.
 		const input = screen.getByLabelText("Request URL");
-		expect(input.getAttribute("placeholder") ?? "").toMatch(/cURL command/i);
+		expect(input.getAttribute("placeholder") ?? "").toMatch(/cURL command/);
 	});
 });

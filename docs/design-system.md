@@ -2453,7 +2453,7 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   Alt+Home/End to an end), and like the tree stops the event so it never reaches
   the window's Go back.
 - **The row menu carries the same moves with no chord at all**: **Move up**,
-  **Move down** and **"Move to..."** (issue #1690). A chord has to be known
+  **Move down** and **"Move to…"** (issue #1690). A chord has to be known
   before it can be used, so until these existed a keyboard user who had not read
   the shortcut list could not reorder the tree - while the element list had
   carried Move up / Move down in its own menu all along, which made one action
