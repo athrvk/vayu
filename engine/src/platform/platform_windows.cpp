@@ -284,8 +284,10 @@ read_file_at (ReadOnlyFile file, std::uint64_t offset, std::span<char> buffer) {
     // An OVERLAPPED on a synchronous handle is a positional read: it starts at
     // the offset it names and returns once the read completes.
     OVERLAPPED at{};
-    at.Offset         = static_cast<DWORD> (offset & 0xFFFFFFFFULL);
-    at.OffsetHigh     = static_cast<DWORD> (offset >> 32U);
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access) - Win32 declares the offset fields inside an anonymous union
+    at.Offset     = static_cast<DWORD> (offset & 0xFFFFFFFFULL);
+    at.OffsetHigh = static_cast<DWORD> (offset >> 32U);
+    // NOLINTEND(cppcoreguidelines-pro-type-union-access)
     const auto wanted = static_cast<DWORD> (
     std::min<std::size_t> (buffer.size (), std::numeric_limits<DWORD>::max ()));
     DWORD got = 0;
