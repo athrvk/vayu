@@ -763,6 +763,39 @@ TEST (ScriptCompletions, MomentIsOfferedThroughRequireAndHasNoGlobal) {
     EXPECT_TRUE (result.success) << result.error_message;
 }
 
+// csv-parse (#2653) is reached only through its one path, as in Postman: the
+// entry for `require` offers that path and says the rest are not on the shelf,
+// and no global is offered or bound.
+TEST (ScriptCompletions, CsvParseIsOfferedThroughItsSyncPathAndHasNoGlobal) {
+    const auto completions = get_script_completions ();
+    const auto* require    = find_by_label (completions, "require");
+    ASSERT_NE (require, nullptr);
+    const std::string documentation = require->value ("documentation", std::string{});
+    EXPECT_NE (
+    documentation.find ("csv-parse/lib/sync is npm's csv-parse 1.2.4"), std::string::npos)
+    << documentation;
+    EXPECT_NE (documentation.find (
+               "bare csv-parse and its other paths are not on the shelf"),
+    std::string::npos)
+    << documentation;
+    EXPECT_NE (require->value ("insertText", std::string{}).find ("csv-parse/lib/sync"),
+    std::string::npos);
+    EXPECT_EQ (find_by_label (completions, "parse"), nullptr);
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    const auto result =
+    engine.execute_test ("if (typeof parse !== 'undefined' || "
+                         "require('csv-parse/lib/sync')('a\\n1', "
+                         "{ columns: true })[0].a !== '1') throw new "
+                         "Error('not the shelf csv-parse');",
+    request, response, env);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no

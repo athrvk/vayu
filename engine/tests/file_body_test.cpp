@@ -39,6 +39,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -64,6 +65,7 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::http::routes {
 // Defined in requests.cpp and runs.cpp; each is the testable core of one route.
@@ -474,6 +476,8 @@ TEST (FileRule, ThePlanReadsAFileOnceAndFillsEveryCopy) {
     << "shared, not copied";
     EXPECT_EQ (first.body.file.size, payload.size ());
     EXPECT_EQ (first.body.file.sha256, sha256_hex (payload));
+    EXPECT_EQ (first.body.file.approved, nullptr)
+    << "read inline, the file is not held";
 
     Request unseen =
     binary_request ("http://127.0.0.1:1/", scratch.write ("b.bin", "b"));
@@ -493,6 +497,9 @@ TEST (FileRule, ALargeFileIsHashedNotHeld) {
     EXPECT_EQ (request.body.file.inline_bytes, nullptr);
     EXPECT_EQ (request.body.file.size, payload.size ());
     EXPECT_EQ (request.body.file.sha256, sha256_hex (payload));
+    ASSERT_NE (request.body.file.approved, nullptr)
+    << "the file it streams from";
+    EXPECT_EQ (request.body.file.approved->size (), payload.size ());
 }
 
 // ===========================================================================
@@ -603,8 +610,8 @@ TEST_F (BinaryBodyWireTest, ALargeFileStreamsAndKeepsItsMethod) {
 
     const auto before = body_file_opens ();
     auto response = send (binary_request (server_->url (), src, HttpMethod::POST));
-    EXPECT_EQ (body_file_opens () - before, 2u)
-    << "one check-and-hash, one stream";
+    EXPECT_EQ (body_file_opens () - before, 1u)
+    << "one open: the check hashes the file and the transfer streams it";
     EXPECT_EQ (response.status_code, 200) << response.error_message;
     EXPECT_EQ (server_->method (), "POST")
     << "UPLOAD means PUT unless the verb is restored";
@@ -775,14 +782,17 @@ TEST_F (BinaryBodyExchangeTest, AnImportedPathUnderAnAllowedFolderIsSentAndRecor
 // A load run reads a small file once
 // ===========================================================================
 
-/// Counts the uploads that arrived intact.
+/// Counts the uploads that arrived intact; calls @p on_first_hit before
+/// answering the first.
 class CountingServer {
     public:
-    explicit CountingServer (std::string expected)
-    : expected_ (std::move (expected)) {
+    explicit CountingServer (std::string expected, std::function<void ()> on_first_hit = {})
+    : expected_ (std::move (expected)), on_first_hit_ (std::move (on_first_hit)) {
         svr_.new_task_queue = vayu::tests::pooled_task_queue (16);
         svr_.Post ("/up", [this] (const httplib::Request& req, httplib::Response& res) {
-            hits_.fetch_add (1);
+            if (hits_.fetch_add (1) == 0 && on_first_hit_) {
+                on_first_hit_ ();
+            }
             if (req.body == expected_) {
                 intact_.fetch_add (1);
             }
@@ -815,6 +825,7 @@ class CountingServer {
 
     private:
     std::string expected_;
+    std::function<void ()> on_first_hit_;
     httplib::Server svr_;
     std::thread thread_;
     int port_ = 0;
@@ -825,8 +836,8 @@ class CountingServer {
 constexpr const char* LOAD_DB_PATH = "test_file_body_load.db";
 
 // The plan reads the file; the run's transfers share its bytes. Mutation
-// check: route every binary body through the streaming arm of
-// `apply_method_and_body` and the open count becomes 1 + iterations.
+// check: open the file per transfer in `attach_binary` (as a streamed body did
+// before #2678) and the open count becomes 1 + iterations.
 TEST (BinaryBodyLoadRun, ASmallFileIsOpenedOnceForTheWholeRun) {
     global_init ();
     vayu::tests::remove_database_files (LOAD_DB_PATH);
@@ -1000,7 +1011,7 @@ TEST_F (FormPartWireTest, AFileReplacedAfterTheCheckSendsTheApprovedOne) {
 // The part's length is the one the open saw; a file truncated below it under
 // the handle cannot keep that promise, and the transfer fails rather than send
 // a short or padded part. Mutation check: pad the short read with zeros in
-// `read_part` and the transfer succeeds with bytes the file never held.
+// `read_approved` and the transfer succeeds with bytes the file never held.
 TEST_F (FormPartWireTest, AFileTruncatedUnderTheHandleFailsTheTransfer) {
     const std::string src = scratch_.write ("data.bin", binary_payload (100000));
     Request request    = form_part_request (server_->url (), src);
@@ -1026,7 +1037,7 @@ TEST_F (FormPartWireTest, AFileTruncatedUnderTheHandleFailsTheTransfer) {
 // `fill` opens a row's file for that request alone, and every request sends
 // its own row's bytes. A path the run's own request names is kept, once per
 // file however it is spelled. Mutation check: keep every part's open file in
-// `FilePlan::open_part_file` whatever `PartFiles` says and the plan holds one
+// `FilePlan::prepare_part` whatever `OpenFiles` says and the plan holds one
 // per row.
 TEST_F (FormPartWireTest, ADataBoundPathIsApprovedButNotKeptOpenByThePlan) {
     constexpr std::size_t ROWS = 60;
@@ -1062,7 +1073,7 @@ TEST_F (FormPartWireTest, ADataBoundPathIsApprovedButNotKeptOpenByThePlan) {
     const std::string fixed = scratch_.write ("fixed.bin", "fixed");
     for (const std::string& spelling : { fixed, scratch_.dir ("rows") + "/../fixed.bin" }) {
         Request request = form_part_request (server_->url (), spelling);
-        ASSERT_FALSE (files.prepare (request, PartFiles::KeptByPlan));
+        ASSERT_FALSE (files.prepare (request, OpenFiles::KeptByPlan));
     }
     EXPECT_EQ (files.kept_files (), 1u)
     << "two spellings of one file, one open file";
@@ -1167,28 +1178,25 @@ class FormPartServer {
     std::atomic<int> intact_{ 0 };
 };
 
-constexpr const char* FORM_LOAD_DB_PATH = "test_file_body_form_load.db";
+constexpr const char* BODY_LOAD_DB_PATH = "test_file_body_body_load.db";
 
-/// A single-request load run of @p iterations uploading @p src as the part
-/// `f` to @p url, @p concurrency at a time, planned over @p policy as
-/// `POST /runs` plans it. Answers how many times a body file was opened.
-std::uint64_t run_form_part_load (const std::string& url,
-const std::string& src,
+/// A single-request load run of @p iterations sending @p body to @p url,
+/// @p concurrency at a time, planned over @p policy as `POST /runs` plans it.
+/// Answers how many times a body file was opened.
+std::uint64_t run_body_load (const std::string& url,
+const json& body,
 FileAccessPolicy policy,
 int iterations,
 int concurrency) {
     global_init ();
-    vayu::tests::remove_database_files (FORM_LOAD_DB_PATH);
+    vayu::tests::remove_database_files (BODY_LOAD_DB_PATH);
     std::uint64_t opens = 0;
     {
-        vayu::db::Database db (FORM_LOAD_DB_PATH);
+        vayu::db::Database db (BODY_LOAD_DB_PATH);
         db.init ();
-        const json config{ { "method", "POST" }, { "url", url }, { "mode", "iterations" },
-            { "iterations", iterations }, { "concurrency", concurrency },
-            { "body",
-            { { "mode", "form-data" },
-            { "fields",
-            json::array ({ { { "key", "f" }, { "type", "file" }, { "src", src } } }) } } } };
+        const json config{ { "method", "POST" }, { "url", url },
+            { "mode", "iterations" }, { "iterations", iterations },
+            { "concurrency", concurrency }, { "body", body } };
         auto built = build_request (config, &db, 5000, AuthResolution::Apply);
         EXPECT_TRUE (built.ok) << built.error_message;
 
@@ -1198,7 +1206,7 @@ int concurrency) {
         EXPECT_FALSE (refusal) << refusal.value_or ("");
 
         auto context =
-        std::make_shared<vayu::core::RunContext> ("test-form-part-load", config);
+        std::make_shared<vayu::core::RunContext> ("test-body-file-load", config);
         context->file_plan = files;
         context->load_template = vayu::core::tokenize_bindable_fields (built.request);
         EventLoopConfig loop_config;
@@ -1211,9 +1219,21 @@ int concurrency) {
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
         opens = body_file_opens () - before;
     }
-    vayu::tests::remove_database_files (FORM_LOAD_DB_PATH);
+    vayu::tests::remove_database_files (BODY_LOAD_DB_PATH);
     global_cleanup ();
     return opens;
+}
+
+/// `run_body_load` uploading @p src as the form-data part `f`.
+std::uint64_t run_form_part_load (const std::string& url,
+const std::string& src,
+FileAccessPolicy policy,
+int iterations,
+int concurrency) {
+    const json body{ { "mode", "form-data" },
+        { "fields",
+        json::array ({ { { "key", "f" }, { "type", "file" }, { "src", src } } }) } };
+    return run_body_load (url, body, std::move (policy), iterations, concurrency);
 }
 
 // The swap between iterations: the server re-points the link while answering
@@ -1256,6 +1276,213 @@ TEST (FormPartLoadRun, ConcurrentIterationsEachReadTheWholeFile) {
     (void)run_form_part_load (server.url (), src, allowing (scratch), ITERATIONS, 8);
     EXPECT_EQ (server.hits (), ITERATIONS);
     EXPECT_EQ (server.intact (), ITERATIONS);
+}
+
+// ===========================================================================
+// A binary body reads the file the check approved (#2678)
+// ===========================================================================
+
+/// @p link replaced by a link to @p target in one rename, so it names one file
+/// or the other at every instant; false when this filesystem cannot do that.
+bool swap_link (const fs::path& link, const std::string& target) {
+    const fs::path staged = link.string () + ".next";
+    std::error_code ec;
+    fs::remove (staged, ec);
+    fs::create_symlink (target, staged, ec);
+    if (ec) {
+        return false;
+    }
+    fs::rename (staged, link, ec);
+    return !ec;
+}
+
+/// A large payload whose first bytes are @p tag, so two are told apart.
+std::string tagged_large (const std::string& tag) {
+    std::string out = binary_payload (LARGE);
+    out.replace (0, tag.size (), tag);
+    return out;
+}
+
+// The rule approves a streamed body's file, then the link at its path is
+// re-pointed at another before the transfer. Both drivers stream the approved
+// file. Mutation check: stream from `file.src` again in `attach_binary` and
+// the other file's bytes arrive.
+TEST_F (BinaryBodyWireTest, ALinkRepointedAfterTheCheckStreamsTheApprovedFile) {
+    const std::string payload  = tagged_large ("approved");
+    const std::string approved = scratch_.write ("approved.bin", payload);
+    const std::string other = scratch_.write ("other/key.bin", tagged_large ("other"));
+    const fs::path link = scratch_.path () / "upload.bin";
+    if (!point_link (link, approved)) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink";
+    }
+    Request request = binary_request (server_->url (), link.string ());
+    FilePlan plan (FileAccessPolicy ({}, { fs::canonical (approved).string () }));
+    ASSERT_FALSE (plan.prepare (request));
+    ASSERT_TRUE (point_link (link, other));
+
+    Client client;
+    const auto sent = client.send (request).value ();
+    EXPECT_EQ (sent.status_code, 200) << sent.error_message;
+    EXPECT_TRUE (server_->body () == payload) << "the other file was streamed";
+
+    EventLoop loop;
+    loop.start ();
+    const auto result = loop.submit_async (request).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_TRUE (server_->body () == payload) << "the other file was streamed";
+}
+
+// The check and the inline read are one open: a link flipped while a small
+// body is checked is either refused (it named the other file when the rule
+// resolved it) or read from the file the rule approved, never approved as one
+// file and read from the other. The flips race the plan, so the test runs
+// until it has seen both outcomes many times. Mutation check: resolve `src`
+// again for the read in `FilePlan::read_body_file` (open
+// `fs::canonical (file.src)` rather than read the approved open) and some
+// approved reads carry the other file's bytes.
+TEST (BinaryBodyPlan, ALinkFlippedDuringTheCheckIsNeverReadAsTheOtherFile) {
+    ScratchDir scratch;
+    const std::string approved = scratch.write ("approved.bin", "approved bytes");
+    const std::string other = scratch.write ("other/key.pem", "other bytes");
+    const fs::path link     = scratch.path () / "upload.bin";
+    if (!swap_link (link, approved)) {
+        GTEST_SKIP ()
+        << "this filesystem cannot replace a symlink in one rename";
+    }
+    const FileAccessPolicy policy ({}, { fs::canonical (approved).string () });
+
+    std::atomic<bool> stop{ false };
+    std::thread flipper ([&] () {
+        for (bool to_other = true; !stop.load (); to_other = !to_other) {
+            (void)swap_link (link, to_other ? other : approved);
+            std::this_thread::yield ();
+        }
+    });
+    constexpr int EACH_OUTCOME = 50;
+    int accepted               = 0;
+    int refused                = 0;
+    int misread                = 0;
+    const bool both_seen       = vayu::tests::wait_until ([&] () {
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            FilePlan plan (policy); // a fresh plan per attempt: nothing cached
+            Request request = binary_request ("http://127.0.0.1:1/", link.string ());
+            if (plan.prepare (request)) {
+                ++refused;
+                continue;
+            }
+            ++accepted;
+            const auto& bytes = request.body.file.inline_bytes;
+            if (bytes == nullptr || *bytes != "approved bytes") {
+                ++misread;
+            }
+        }
+        return accepted >= EACH_OUTCOME && refused >= EACH_OUTCOME;
+    });
+    stop.store (true);
+    flipper.join ();
+    EXPECT_TRUE (both_seen) << accepted << " accepted, " << refused << " refused";
+    EXPECT_EQ (misread, 0) << "approved as one file and read from the other";
+}
+
+// The swap between iterations, for a streamed body: the server re-points the
+// link while answering the first upload, so every later iteration is submitted
+// after it. Each one streams the approved file, and the run opens it once.
+// Mutation check: stream from `file.src` in `attach_binary` and every
+// iteration after the first sends the other file.
+TEST (BinaryBodyLoadRun, ALinkRepointedMidRunStreamsTheApprovedFileEveryIteration) {
+    ScratchDir scratch;
+    const std::string payload  = tagged_large ("approved");
+    const std::string approved = scratch.write ("approved.bin", payload);
+    const std::string other = scratch.write ("other/key.bin", tagged_large ("other"));
+    const fs::path link = scratch.path () / "upload.bin";
+    if (!point_link (link, approved)) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink";
+    }
+    std::atomic<bool> swapped{ false };
+    CountingServer server (
+    payload, [&] () { swapped.store (point_link (link, other)); });
+
+    constexpr int ITERATIONS = 6;
+    const json body{ { "mode", "binary" }, { "file", { { "src", link.string () } } } };
+    const auto opens = run_body_load (server.url (), body,
+    FileAccessPolicy ({}, { fs::canonical (approved).string () }), ITERATIONS, 2);
+    ASSERT_TRUE (swapped.load ()) << "the link was not re-pointed mid-run";
+    EXPECT_EQ (server.hits (), ITERATIONS);
+    EXPECT_EQ (server.intact (), ITERATIONS);
+    EXPECT_EQ (opens, 1u) << "one open for the whole run, none per transfer";
+}
+
+// Rows of a data file name large files. Each is approved at plan time and none
+// is kept open by the plan; `fill` opens a row's file for that request alone,
+// and every request streams its own row's bytes. A path the run's own request
+// names is kept, once per file however it is spelled. Mutation check: keep a
+// streamed body's open file in `FilePlan::prepare_body_file` whatever
+// `OpenFiles` says and the plan holds one per row.
+TEST_F (BinaryBodyWireTest, ADataBoundLargeFileIsApprovedButNotKeptOpenByThePlan) {
+    constexpr std::size_t ROWS = 3;
+    vayu::core::LoadDataSet data;
+    std::vector<std::string> payloads;
+    for (std::size_t row = 0; row < ROWS; ++row) {
+        payloads.push_back (tagged_large ("row " + std::to_string (row)));
+        const std::string name = "rows/" + std::to_string (row) + ".bin";
+        data.rows.push_back (json{ { "f", scratch_.write (name, payloads.back ()) } });
+    }
+    data.bound_columns = vayu::core::bound_columns_of (data.rows);
+
+    const Request templated = binary_request (server_->url (), "{{data.f}}");
+    FilePlan files (allowing (scratch_));
+    Request planned = templated;
+    ASSERT_FALSE (vayu::core::plan_load_files (files, planned, &data));
+    EXPECT_EQ (files.kept_files (), 0u);
+
+    Client client;
+    const auto fields = vayu::core::tokenize_bindable_fields (templated, data.bound_columns);
+    for (std::size_t row = 0; row < ROWS; ++row) {
+        Request bound = templated;
+        const vayu::core::IterationBinding binding{ &data.rows.at (row), row,
+            vayu::core::IterationIdentity{ 1, 0 } };
+        ASSERT_TRUE (
+        vayu::core::apply_iteration_template (bound, fields, binding).ok);
+        const auto filled = vayu::core::fill_bound_files (&files, templated, bound);
+        ASSERT_TRUE (filled.ok) << filled.error;
+        ASSERT_NE (bound.body.file.approved, nullptr);
+        EXPECT_EQ (client.send (bound).value ().status_code, 200);
+        EXPECT_TRUE (server_->body () == payloads.at (row)) << "row " << row;
+    }
+    EXPECT_EQ (files.kept_files (), 0u);
+
+    const std::string fixed = scratch_.write ("fixed.bin", tagged_large ("fixed"));
+    for (const std::string& spelling : { fixed, scratch_.dir ("rows") + "/../fixed.bin" }) {
+        Request request = binary_request (server_->url (), spelling);
+        ASSERT_FALSE (files.prepare (request, OpenFiles::KeptByPlan));
+    }
+    EXPECT_EQ (files.kept_files (), 1u)
+    << "two spellings of one file, one open file";
+}
+
+// A streamed body's length is the one the open saw; a file truncated below it
+// under the handle cannot keep that promise, and the transfer fails rather
+// than send a short body. Mutation check: pad the short read with zeros in
+// `read_approved` and the transfer succeeds with bytes the file never held.
+TEST_F (BinaryBodyWireTest, AStreamedFileTruncatedUnderTheHandleFailsTheTransfer) {
+    const std::string src = scratch_.write ("big.bin", binary_payload (LARGE));
+    Request request       = binary_request (server_->url (), src);
+    request.timeout_ms    = 10000;
+    FilePlan plan (allowing (scratch_));
+    ASSERT_FALSE (plan.prepare (request));
+    std::error_code ec;
+    fs::resize_file (src, 10, ec);
+    if (ec) {
+        GTEST_SKIP ()
+        << "this platform cannot truncate a file held open: " << ec.message ();
+    }
+
+    Client client;
+    const auto sent = client.send (request).value ();
+    EXPECT_EQ (sent.status_code, 0);
+    EXPECT_FALSE (sent.error_message.empty ());
+    EXPECT_EQ (server_->body (), "");
 }
 
 // ===========================================================================

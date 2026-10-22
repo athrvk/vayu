@@ -366,6 +366,27 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	});
 
 	/*
+	 * csv-parse runs (#2653) as require('csv-parse/lib/sync') only, the one
+	 * path Postman exposes: the module is the parse function and takes a
+	 * string, so a Postman script's call reads clean and the bare package
+	 * stays an error.
+	 */
+	it("declares require('csv-parse/lib/sync') as the parse function", () => {
+		expect(
+			errorsOf(
+				[
+					"const parse = require('csv-parse/lib/sync');",
+					"const rows = parse(pm.response.text(), { columns: true, skip_empty_lines: true });",
+					"const plain = parse('a;b', { delimiter: ';' });",
+					"pm.environment.set('first', rows[0].id + plain.length);",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("require('csv-parse');")).toContain("TS2345");
+		expect(errorsOf("require('csv-parse/lib/sync')(42);")).toContain("TS2345");
+	});
+
+	/*
 	 * Postman's pre-pm.* globals run (#2577), each declared as the value it is,
 	 * so the lines a legacy test script opens with draw nothing - and a member
 	 * the value's type does not have is still an error.

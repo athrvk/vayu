@@ -6,13 +6,13 @@
  */
 
 /**
- * Where the markers plugin puts a vertical marker's label. A recording context
+ * Where the overlays plugin puts a vertical marker's label. A recording context
  * stands in for the canvas, as in `plugins.annotations.test.ts`.
  */
 
 import { describe, it, expect } from "vitest";
 import type uPlot from "uplot";
-import { markersPlugin, type Marker } from "./plugins";
+import { overlaysPlugin, type Marker } from "./plugins";
 import type { UplotTheme, ColorRole } from "./uplotTheme";
 
 const BBOX = { left: 40, top: 10, width: 400, height: 200 };
@@ -46,13 +46,19 @@ function draw(marker: Marker, cx: number) {
 	} as unknown as CanvasRenderingContext2D;
 	const theme = { color: (role: ColorRole) => role } as unknown as UplotTheme;
 	const u = { ctx, bbox: BBOX, valToPos: () => cx } as unknown as uPlot;
-	(markersPlugin(() => [marker], theme).hooks.draw as (u: uPlot) => void)(u);
+	(
+		overlaysPlugin(
+			() => [marker],
+			() => [],
+			theme
+		).hooks.draw as (u: uPlot) => void
+	)(u);
 	return texts;
 }
 
 const marker: Marker = { orient: "vertical", value: 1, label: "This run", role: "info" };
 
-describe("markersPlugin vertical label", () => {
+describe("overlaysPlugin vertical label", () => {
 	it("sits to the right of the line when it fits", () => {
 		expect(draw(marker, 100)).toEqual([{ x: 104, align: "left" }]);
 	});
@@ -62,7 +68,7 @@ describe("markersPlugin vertical label", () => {
 	});
 });
 
-describe("markersPlugin horizontal marker off the visible y range", () => {
+describe("overlaysPlugin horizontal marker off the visible y range", () => {
 	const BOTTOM = BBOX.top + BBOX.height;
 
 	/** Draw `m` at canvas-pixel `cy`, recording the line it strokes and the label it writes. */
@@ -88,7 +94,13 @@ describe("markersPlugin horizontal marker off the visible y range", () => {
 		} as unknown as CanvasRenderingContext2D;
 		const theme = { color: (role: ColorRole) => role } as unknown as UplotTheme;
 		const u = { ctx, bbox: BBOX, valToPos: () => cy } as unknown as uPlot;
-		(markersPlugin(() => [m], theme).hooks.draw as (u: uPlot) => void)(u);
+		(
+			overlaysPlugin(
+				() => [m],
+				() => [],
+				theme
+			).hooks.draw as (u: uPlot) => void
+		)(u);
 		return { lines, labels };
 	}
 

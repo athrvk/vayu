@@ -404,12 +404,12 @@ struct ScenarioResolution {
  *
  * A request whose file paths hold no token is checked as it stands, and a
  * binary body's bytes are read into @p request itself, so every copy a run
- * makes shares them; a file part's open file is kept by the plan
- * (`PartFiles::KeptByPlan`). One whose path a data row binds is bound against
- * each of @p rows through @p bind and each distinct result checked, keeping no
- * part open (`fill` opens it per request); the refusal names the row
- * (`data row N`). A path a row cannot bind is left to the run's own bind,
- * which refuses that row when it is reached.
+ * makes shares them; a file part's open file, or a binary body's too large to
+ * read inline, is kept by the plan (`OpenFiles::KeptByPlan`). One whose path a
+ * data row binds is bound against each of @p rows through @p bind and each
+ * distinct result checked, keeping no file open (`fill` opens it per request);
+ * the refusal names the row (`data row N`). A path a row cannot bind is left
+ * to the run's own bind, which refuses that row when it is reached.
  */
 [[nodiscard]] std::optional<std::string> plan_request_files (vayu::http::FilePlan& files,
 vayu::Request& request,

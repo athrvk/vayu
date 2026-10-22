@@ -179,7 +179,7 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
  * `body` is what sits inside `declare module '<name>' { ... }`, tab-indented
  * and ending in the `export =` that names the module's value: a module with a
  * global to point at is one line (crypto-js, lodash), and one with none (uuid,
- * moment) carries its own declaration.
+ * moment, csv-parse/lib/sync) carries its own declaration.
  *
  * `script_types_test.cpp` runs `require(name)` in the real script engine for
  * every module declared here, and checks that every name `require` accepts
@@ -237,6 +237,13 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 { "moment",
 "\tconst moment: any;\n"
 "\texport = moment;\n" },
+// The module is the parse function. Its options are csv-parse 1.2.4's and are
+// not restated, so any option object types; the answer is `any` because
+// `columns` and `objname` change its shape. Input is a string only.
+{ "csv-parse/lib/sync",
+"\tconst parse: (input: string, options?: { [option: string]: unknown }) => "
+"any;\n"
+"\texport = parse;\n" },
 });
 
 /**
@@ -864,8 +871,8 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
  * of overloads would turn a name off the shelf from TS2345 into TS2769 "No
  * overload matches" - the less direct message. One generic signature keyed on
  * the names keeps the parameter a literal union (`require('ajv')` is "not
- * assignable to 'crypto-js' | 'uuid' | 'lodash' | 'moment'"). Only the entry's
- * documentation is read.
+ * assignable to 'crypto-js' | 'uuid' | 'lodash' | 'moment' |
+ * 'csv-parse/lib/sync'"). Only the entry's documentation is read.
  */
 void render_require (std::string& out, const TypeNode& require) {
     out += "interface VayuShelfModules {\n";

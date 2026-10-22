@@ -18,6 +18,7 @@
 
 import type uPlot from "uplot";
 import type { UplotTheme, ColorRole } from "./uplotTheme";
+import { layoutChartLabels } from "./labelLayout";
 
 /**
  * A reference marker: a dashed line + label. Vertical markers pin an x value (the
@@ -88,50 +89,74 @@ function drawHorizontalMarker(
 	ctx.fillText(label, right ? left + width - inset : left + inset, labelY);
 }
 
-/** Draw reference markers each frame (survives zoom/pan) via the `draw` hook. */
-export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uPlot.Plugin {
+/** A label waiting for the layout: where it anchors, which way it extends, and the extent that gives. */
+interface PendingLabel {
+	text: string;
+	color: string;
+	/** Anchor x; the text extends right of it when `align` is "left", left of it when "right". */
+	anchorX: number;
+	align: "left" | "right";
+	width: number;
+}
+
+/** Rows of labels under the plot's top edge; a third would sit among the series, so a label that fits neither is left to the hover tooltip. */
+const LABEL_LANES = 2;
+
+/** Clear space kept between two labels in one lane, in CSS pixels. */
+const LABEL_GAP_PX = 6;
+
+/** A vertical rule at `cx`, plus the label to lay out beside it. */
+function drawVerticalMarker(
+	ctx: CanvasRenderingContext2D,
+	bbox: uPlot.BBox,
+	m: Marker,
+	cx: number,
+	color: string
+): PendingLabel {
+	const { top, height } = bbox;
+	ctx.beginPath();
+	ctx.moveTo(cx, top);
+	ctx.lineTo(cx, top + height);
+	ctx.stroke();
+	// A marker on the last point sits at the plot's right edge, where the
+	// label would run off the canvas: flip it to the line's left.
+	const inset = 4 * dpr();
+	const width = ctx.measureText(m.label).width;
+	const flip = cx + inset + width > ctx.canvas.width;
 	return {
-		hooks: {
-			draw: (u: uPlot) => {
-				const ctx = u.ctx;
-				const { left, top, width, height } = u.bbox;
-				ctx.save();
-				ctx.lineWidth = 1.5 * dpr();
-				ctx.setLineDash([4 * dpr(), 4 * dpr()]);
-				ctx.font = `${10 * dpr()}px "JetBrains Mono", monospace`;
-				for (const m of getMarkers()) {
-					const color = theme.color(m.role);
-					ctx.strokeStyle = color;
-					ctx.fillStyle = color;
-					if (m.orient === "vertical") {
-						const cx = u.valToPos(m.value, "x", true);
-						// Unlike a horizontal marker, an x marker off the plot is skipped: the
-						// user zoomed past it, and clamping it to an edge would pin a moment
-						// to a place it is not.
-						if (cx < left || cx > left + width) continue;
-						ctx.beginPath();
-						ctx.moveTo(cx, top);
-						ctx.lineTo(cx, top + height);
-						ctx.stroke();
-						// A marker on the last point sits at the plot's right edge, where the
-						// label would run off the canvas: flip it to the line's left.
-						const inset = 4 * dpr();
-						const flip = cx + inset + ctx.measureText(m.label).width > ctx.canvas.width;
-						ctx.textAlign = flip ? "right" : "left";
-						ctx.fillText(m.label, flip ? cx - inset : cx + inset, top + 11 * dpr());
-					} else {
-						drawHorizontalMarker(
-							ctx,
-							u.bbox,
-							m,
-							u.valToPos(m.value, m.scale ?? "y", true)
-						);
-					}
-				}
-				ctx.restore();
-			},
-		},
+		text: m.label,
+		color,
+		anchorX: flip ? cx - inset : cx + inset,
+		align: flip ? "right" : "left",
+		width,
 	};
+}
+
+/** Draw the markers' rules (and horizontal labels) now; the vertical labels come back for the shared layout. */
+function drawMarkers(u: uPlot, markers: readonly Marker[], theme: UplotTheme): PendingLabel[] {
+	const ctx = u.ctx;
+	const { left, width } = u.bbox;
+	const labels: PendingLabel[] = [];
+	ctx.save();
+	ctx.lineWidth = 1.5 * dpr();
+	ctx.setLineDash([4 * dpr(), 4 * dpr()]);
+	for (const m of markers) {
+		const color = theme.color(m.role);
+		ctx.strokeStyle = color;
+		ctx.fillStyle = color;
+		if (m.orient === "horizontal") {
+			drawHorizontalMarker(ctx, u.bbox, m, u.valToPos(m.value, m.scale ?? "y", true));
+			continue;
+		}
+		const cx = u.valToPos(m.value, "x", true);
+		// Unlike a horizontal marker, an x marker off the plot is skipped: the
+		// user zoomed past it, and clamping it to an edge would pin a moment
+		// to a place it is not.
+		if (cx < left || cx > left + width) continue;
+		labels.push(drawVerticalMarker(ctx, u.bbox, m, cx, color));
+	}
+	ctx.restore();
+	return labels;
 }
 
 /**
@@ -162,11 +187,88 @@ const MIN_BAND_PX = 2;
 /** A label needs room, and a 6px band has none - drawing it anyway overlaps the neighbours. */
 const MIN_LABEL_PX = 28;
 
+/** Draw each annotation's band or rule now; the labels come back for the shared layout. */
+function drawAnnotations(
+	u: uPlot,
+	annotations: readonly Annotation[],
+	theme: UplotTheme
+): PendingLabel[] {
+	const ctx = u.ctx;
+	const { left, top, width, height } = u.bbox;
+	const labels: PendingLabel[] = [];
+	for (const a of annotations) {
+		const x1 = u.valToPos(a.startSeconds, "x", true);
+		const x2 = u.valToPos(a.endSeconds, "x", true);
+		// Wholly outside the visible range (the user zoomed past it).
+		if (x2 < left || x1 > left + width) continue;
+		const clipped1 = Math.max(x1, left);
+		const clipped2 = Math.min(x2, left + width);
+		const bandWidth = clipped2 - clipped1;
+		const color = theme.color(a.role);
+
+		if (bandWidth < MIN_BAND_PX) {
+			// An instant (first 5xx) or a window zoomed down to nothing: a
+			// dashed rule, matching how a marker pins a moment.
+			ctx.save();
+			ctx.strokeStyle = color;
+			ctx.lineWidth = 1.5 * dpr();
+			ctx.setLineDash([4 * dpr(), 4 * dpr()]);
+			ctx.beginPath();
+			ctx.moveTo(clipped1, top);
+			ctx.lineTo(clipped1, top + height);
+			ctx.stroke();
+			ctx.restore();
+		} else {
+			ctx.fillStyle = theme.color(a.role, 0.16);
+			ctx.fillRect(clipped1, top, bandWidth, height);
+		}
+
+		// An empty label has nothing to draw and must not hold a lane.
+		if (a.label === "") continue;
+		if (bandWidth >= MIN_LABEL_PX || bandWidth < MIN_BAND_PX) {
+			labels.push({
+				text: a.label,
+				color,
+				anchorX: clipped1 + 4 * dpr(),
+				align: "left",
+				width: ctx.measureText(a.label).width,
+			});
+		}
+	}
+	return labels;
+}
+
+/** Give each label the first free lane and draw it; one with no free lane is left out. */
+function drawLabels(u: uPlot, labels: readonly PendingLabel[]): void {
+	const ctx = u.ctx;
+	const lanes = layoutChartLabels(
+		labels.map((l) => ({
+			x: l.align === "left" ? l.anchorX : l.anchorX - l.width,
+			width: l.width,
+		})),
+		12 * dpr(),
+		LABEL_LANES,
+		LABEL_GAP_PX * dpr()
+	);
+	labels.forEach((label, i) => {
+		const slot = lanes[i];
+		if (!slot) return;
+		ctx.fillStyle = label.color;
+		ctx.textAlign = label.align;
+		ctx.fillText(label.text, label.anchorX, u.bbox.top + 11 * dpr() + slot.offset);
+	});
+}
+
 /**
- * Draw annotation bands each frame (survives zoom/pan), under the same `draw`
- * hook the markers use so both layers sit over the series.
+ * The chart's overlay layer: annotation bands, then marker rules, then every
+ * vertical label from both lists laid out together so no two overlap (#2696).
+ * One `draw` hook, because the layout needs both lists at once. Bands go first
+ * (a background wash the markers' dashed rules must stay legible over), and the
+ * markers' labels are placed before the annotations' so they win a contested
+ * lane. Redrawn each frame, so it survives zoom and pan.
  */
-export function annotationsPlugin(
+export function overlaysPlugin(
+	getMarkers: () => Marker[],
 	getAnnotations: () => Annotation[],
 	theme: UplotTheme
 ): uPlot.Plugin {
@@ -174,42 +276,11 @@ export function annotationsPlugin(
 		hooks: {
 			draw: (u: uPlot) => {
 				const ctx = u.ctx;
-				const { left, top, width, height } = u.bbox;
 				ctx.save();
 				ctx.font = `${10 * dpr()}px "JetBrains Mono", monospace`;
-				ctx.textAlign = "left";
-				for (const a of getAnnotations()) {
-					const x1 = u.valToPos(a.startSeconds, "x", true);
-					const x2 = u.valToPos(a.endSeconds, "x", true);
-					// Wholly outside the visible range (the user zoomed past it).
-					if (x2 < left || x1 > left + width) continue;
-					const clipped1 = Math.max(x1, left);
-					const clipped2 = Math.min(x2, left + width);
-					const bandWidth = clipped2 - clipped1;
-					const color = theme.color(a.role);
-
-					if (bandWidth < MIN_BAND_PX) {
-						// An instant (first 5xx) or a window zoomed down to nothing: a
-						// dashed rule, matching how a marker pins a moment.
-						ctx.save();
-						ctx.strokeStyle = color;
-						ctx.lineWidth = 1.5 * dpr();
-						ctx.setLineDash([4 * dpr(), 4 * dpr()]);
-						ctx.beginPath();
-						ctx.moveTo(clipped1, top);
-						ctx.lineTo(clipped1, top + height);
-						ctx.stroke();
-						ctx.restore();
-					} else {
-						ctx.fillStyle = theme.color(a.role, 0.16);
-						ctx.fillRect(clipped1, top, bandWidth, height);
-					}
-
-					if (bandWidth >= MIN_LABEL_PX || bandWidth < MIN_BAND_PX) {
-						ctx.fillStyle = color;
-						ctx.fillText(a.label, clipped1 + 4 * dpr(), top + 11 * dpr());
-					}
-				}
+				const annotationLabels = drawAnnotations(u, getAnnotations(), theme);
+				const markerLabels = drawMarkers(u, getMarkers(), theme);
+				drawLabels(u, [...markerLabels, ...annotationLabels]);
 				ctx.restore();
 			},
 		},

@@ -237,22 +237,23 @@ Response error_response (const Error& error);
  * A **binary** body is the one mode with two transports. A file the plan read
  * (`FileRef::inline_bytes`, at most `INLINE_FILE_LIMIT`) goes out as
  * `CURLOPT_POSTFIELDS` pointing at the shared bytes - no copy per transfer. A
- * larger one streams: `CURLOPT_UPLOAD` with `INFILESIZE_LARGE`, a read callback
- * over a `FILE*` this transfer owns, and a **seek callback**, which libcurl needs
- * to rewind the body for a redirect or the second leg of Digest/NTLM - without
- * it that leg fails rather than resending. `UPLOAD` means PUT to libcurl, so the
- * method is re-asserted with `CURLOPT_CUSTOMREQUEST` afterwards.
+ * larger one streams from the file the plan opened (`FileRef::approved`,
+ * #2678), never from `src`: `CURLOPT_UPLOAD` with `INFILESIZE_LARGE` the size
+ * that open saw, a read callback at this transfer's own offset, and a **seek
+ * callback**, which libcurl needs to rewind the body for a redirect or the
+ * second leg of Digest/NTLM - without it that leg fails rather than resending.
+ * `UPLOAD` means PUT to libcurl, so the method is re-asserted with
+ * `CURLOPT_CUSTOMREQUEST` afterwards.
  *
  * A **form-data file part** is read through `curl_mime_data_cb` from the file
- * the plan opened (`FormField::approved`, #2416), at this transfer's own
- * offset, with a seek callback for the same rewinds; its filename and
- * Content-Type are set explicitly (`declared_file_name`,
+ * the plan opened (`FormField::approved`, #2416) with the same two callbacks;
+ * its filename and Content-Type are set explicitly (`declared_file_name`,
  * `file_part_content_type`), because libcurl derives neither for a callback
  * part the way it did for a path.
  *
  * @param source Receives what the handle now points into (the multipart tree,
- *        the open file), which must outlive the transfer: a local for the
- *        single-request client, `TransferData::body` for the loop.
+ *        the streamed body's reader), which must outlive the transfer: a local
+ *        for the single-request client, `TransferData::body` for the loop.
  */
 void apply_method_and_body (CURL* curl, const Request& request, BodySource& source);
 

@@ -704,7 +704,8 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     "interface VayuShelfModules {\n\t'crypto-js': typeof import('crypto-js');\n"
     "\t'uuid': typeof import('uuid');\n"
     "\t'lodash': typeof import('lodash');\n"
-    "\t'moment': typeof import('moment');\n}\n"));
+    "\t'moment': typeof import('moment');\n"
+    "\t'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -744,6 +745,20 @@ TEST (ScriptTypesTest, MomentIsDeclaredAsAModuleAndNotAsAGlobal) {
     EXPECT_TRUE (contains (
     dts, "declare module 'moment' {\n\tconst moment: any;\n\texport = moment;\n}\n"));
     EXPECT_FALSE (contains (dts, "declare const moment"));
+}
+
+// csv-parse runs (#2653) as `require('csv-parse/lib/sync')`, whose value is the
+// parse function itself; Postman binds no global for it and exposes no other
+// path, so only that module is declared. The input is a string, as the vendored
+// build reads no Buffer.
+TEST (ScriptTypesTest, CsvParseIsDeclaredAsItsSyncPathOnly) {
+    const std::string dts = generate_script_typedefs ();
+
+    EXPECT_TRUE (contains (dts,
+    "declare module 'csv-parse/lib/sync' {\n\tconst parse: (input: string, "
+    "options?: { [option: string]: unknown }) => any;\n\texport = "
+    "parse;\n}\n"));
+    EXPECT_FALSE (contains (dts, "declare module 'csv-parse' {"));
 }
 
 // uuid has no global to point at (#2650), so its module carries the whole

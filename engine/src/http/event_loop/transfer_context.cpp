@@ -12,7 +12,8 @@ namespace vayu::http::detail {
 BodySource::~BodySource () {
     // Freed after the transfer is done with the handle, which is what
     // curl_mime_free requires; the pool's curl_easy_reset on the next acquire
-    // drops the handle's reference to it either way. The stream closes itself.
+    // drops the handle's reference to it either way. The streamed file closes
+    // with the last holder of it.
     if (mime) {
         curl_mime_free (mime);
     }

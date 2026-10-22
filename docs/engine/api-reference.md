@@ -698,18 +698,19 @@ per iteration in a way no row explains (an identity or generator token) cannot
 be checked ahead and is refused per submission.
 
 **Sending.** The check runs **once per send** and **once per run**, never per
-transfer. A binary body of at most 4 MiB is read in that pass and its bytes are
-shared by every transfer of the run; a larger one is hashed in that pass and
-streamed from disk per transfer (`Content-Length` from the planned size; a
-redirect rewinds it). A binary file that vanishes mid-run fails that transfer
-with libcurl's own read error. A **form part's** file is opened in that pass,
-on the path the check resolved and without following a final symlink, and every
-transfer of the send or run reads that open file: a link re-pointed or a file
-replaced at the path afterwards is not what is sent. A path a data row binds is
-the exception: it is checked when the run starts but opened per submission,
-through the same check again, so a large data file holds no file open per row.
-Its length is the one the
-open saw; a file truncated below it under the open handle fails the transfer.
+transfer. It opens the file it approved, on the path the check resolved and
+without following a final symlink, and everything after reads that open file,
+never the path again: a link re-pointed or a file replaced at the path after
+the check, or between a run's iterations, is not what is sent. A **binary
+body** of at most 4 MiB is read through it in that pass and its bytes are
+shared by every transfer of the run; a larger one is hashed through it in that
+pass and every transfer streams from it (`Content-Length` from the size the
+open saw; a redirect rewinds it). A **form part's** file is read from it by
+every transfer of the send or run. A path a data row binds is the exception:
+it is checked when the run starts but opened per submission, through the same
+check again, so a large data file holds no file open per row. A streamed body's
+or a part's length is the one the open saw; a file truncated below it under the
+open handle fails the transfer.
 A part with no declared Content-Type is typed by its filename's extension, then
 its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`,
 `htm`, `html`, `pdf`, `xml`), else `application/octet-stream`. A **disabled**
@@ -3667,7 +3668,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
 Postman script API Vayu does not run, and which ones - `require()` of a module
-off the `crypto-js` / `uuid` / `lodash` / `moment` shelf, `script.packages`, a bundled library such as
+off the `crypto-js` / `uuid` / `lodash` / `moment` / `csv-parse/lib/sync` shelf, `script.packages`, a bundled library such as
 `tv4`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
@@ -10993,7 +10994,7 @@ the `require()` shelf does not carry (`tv4`, `cheerio`, ...), whose hover names
 the replacement Postman itself gives (`tv4` is `require('ajv')`). `require`,
 `CryptoJS` and `_` are declared as what they are, with a `declare module` for
 each name on the `require()` shelf (`crypto-js` #2578, `uuid` #2650, `lodash`
-#2651, `moment` #2652) and one `require`
+#2651, `moment` #2652, `csv-parse/lib/sync` #2653) and one `require`
 signature keyed on those names, so a name off the shelf is a type error. Postman's `postman` object and its pre-`pm.*`
 globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each

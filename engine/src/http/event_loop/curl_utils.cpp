@@ -15,7 +15,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -84,37 +83,6 @@ bool looks_like_ipv4_literal (std::string_view host) {
         }
     }
     return has_dot;
-}
-
-/// libcurl's read callback for a streamed binary body. A file that could not
-/// be opened (it vanished after the plan checked it) aborts the transfer, which
-/// libcurl reports as its own read failure.
-size_t read_body_file (char* buffer, size_t size, size_t nitems, void* userdata) {
-    auto* stream = static_cast<std::FILE*> (userdata);
-    if (stream == nullptr) {
-        return CURL_READFUNC_ABORT;
-    }
-    const size_t got = std::fread (buffer, size, nitems, stream);
-    if (got < nitems && std::ferror (stream) != 0) {
-        return CURL_READFUNC_ABORT;
-    }
-    return got;
-}
-
-/// libcurl's seek callback, so a redirect or an auth retry can rewind the body.
-int seek_body_file (void* userdata, curl_off_t offset, int origin) {
-    auto* stream = static_cast<std::FILE*> (userdata);
-    if (stream == nullptr) {
-        return CURL_SEEKFUNC_FAIL;
-    }
-    // `fseek` takes a `long`, which is 32 bits on Windows; an offset past it
-    // cannot be honoured there, so it is refused rather than truncated.
-    if (offset > std::numeric_limits<long>::max ()) {
-        return CURL_SEEKFUNC_CANTSEEK;
-    }
-    return std::fseek (stream, static_cast<long> (offset), origin) == 0 ?
-    CURL_SEEKFUNC_OK :
-    CURL_SEEKFUNC_FAIL;
 }
 
 } // namespace
@@ -231,16 +199,10 @@ Response error_response (const Error& error) {
 
 namespace {
 
-/// One transfer's read position in a file part's `ApprovedFile`. libcurl owns
-/// it from `curl_mime_data_cb` on and frees it with the part; the open file
-/// stays the plan's, shared by every transfer of the run.
-struct PartReader {
-    std::shared_ptr<const vayu::http::ApprovedFile> file;
-    std::uint64_t offset = 0;
-};
-
-size_t read_part (char* buffer, size_t size, size_t nitems, void* arg) {
-    auto* reader                  = static_cast<PartReader*> (arg);
+/// libcurl's read callback over a `FileReader`, for a streamed binary body and
+/// a file part alike. Never reads past the size the open saw.
+size_t read_approved (char* buffer, size_t size, size_t nitems, void* arg) {
+    auto* reader                  = static_cast<FileReader*> (arg);
     const std::uint64_t remaining = reader->file->size () - reader->offset;
     const auto wanted =
     static_cast<size_t> (std::min<std::uint64_t> (size * nitems, remaining));
@@ -249,15 +211,18 @@ size_t read_part (char* buffer, size_t size, size_t nitems, void* arg) {
     if (!got) {
         return CURL_READFUNC_ABORT;
     }
-    // A file truncated under the handle reads 0 before the part's promised
-    // length, which libcurl refuses on its own, naming the bytes it missed.
+    // A file truncated under the handle reads 0 before the promised length
+    // (`INFILESIZE_LARGE`, a part's size), which libcurl refuses on its own,
+    // naming the bytes it missed.
     reader->offset += *got;
     return *got;
 }
 
-/// libcurl rewinds a part for a redirect or an auth retry.
-int seek_part (void* arg, curl_off_t offset, int origin) {
-    auto* reader = static_cast<PartReader*> (arg);
+/// libcurl rewinds the body for a redirect or an auth retry. It passes only
+/// `SEEK_SET` (as of 8.23, to an upload's and a part's callback alike), so any
+/// other origin is answered as unseekable rather than guessed at.
+int seek_approved (void* arg, curl_off_t offset, int origin) {
+    auto* reader = static_cast<FileReader*> (arg);
     if (origin != SEEK_SET || offset < 0 ||
     static_cast<std::uint64_t> (offset) > reader->file->size ()) {
         return CURL_SEEKFUNC_CANTSEEK;
@@ -267,17 +232,18 @@ int seek_part (void* arg, curl_off_t offset, int origin) {
 }
 
 void free_part (void* arg) {
-    const std::unique_ptr<PartReader> reader (static_cast<PartReader*> (arg));
+    const std::unique_ptr<FileReader> reader (static_cast<FileReader*> (arg));
 }
 
 /// A file part read from the file the plan approved, never from `src`
 /// (#2416); `validate_transferable` has refused a part without one.
 void attach_file_part (curl_mimepart* part, const FormField& field) {
-    // Owned by the part once attached: libcurl calls `free_part` with it.
-    PartReader* reader =
-    std::make_unique<PartReader> (PartReader{ field.approved, 0 }).release ();
+    // Owned by the part once attached: libcurl calls `free_part` with it. The
+    // open file stays shared by every transfer of the request or the run.
+    FileReader* reader =
+    std::make_unique<FileReader> (FileReader{ field.approved, 0 }).release ();
     if (curl_mime_data_cb (part, static_cast<curl_off_t> (field.approved->size ()),
-        &read_part, &seek_part, &free_part, reader) != CURLE_OK) {
+        &read_approved, &seek_approved, &free_part, reader) != CURLE_OK) {
         free_part (reader);
     }
     curl_mime_filename (part, vayu::http::declared_file_name (field).c_str ());
@@ -307,8 +273,10 @@ void attach_multipart (CURL* curl, const Request& request, BodySource& source) {
     set_opt<CURLOPT_MIMEPOST> (curl, mime);
 }
 
-/// A binary body: the plan's shared bytes, or the file streamed through
-/// @p source. True when it streams, which sets `CURLOPT_UPLOAD`.
+/// A binary body: the plan's shared bytes, or the file the plan approved
+/// streamed through @p source, never `src` (#2678); `validate_transferable`
+/// has refused a body with neither. True when it streams, which sets
+/// `CURLOPT_UPLOAD`.
 bool attach_binary (CURL* curl, const Request& request, BodySource& source) {
     const FileRef& file = request.body.file;
     if (file.inline_bytes) {
@@ -320,16 +288,17 @@ bool attach_binary (CURL* curl, const Request& request, BodySource& source) {
         set_opt<CURLOPT_POSTFIELDS> (curl, file.inline_bytes->data ());
         return false;
     }
-    source.stream = vayu::http::open_body_file (file);
+    source.stream = FileReader{ file.approved, 0 };
     set_opt<CURLOPT_UPLOAD> (curl, 1L);
-    set_opt<CURLOPT_INFILESIZE_LARGE> (curl, static_cast<curl_off_t> (file.size));
-    set_opt<CURLOPT_READFUNCTION> (curl, &read_body_file);
-    set_opt<CURLOPT_READDATA> (curl, source.stream.get ());
+    set_opt<CURLOPT_INFILESIZE_LARGE> (
+    curl, static_cast<curl_off_t> (file.approved->size ()));
+    set_opt<CURLOPT_READFUNCTION> (curl, &read_approved);
+    set_opt<CURLOPT_READDATA> (curl, &source.stream);
     // Mandatory, not an optimisation: a redirect and the second leg of Digest
     // or NTLM rewind the body, and without a seek callback libcurl fails that
     // leg instead of resending.
-    set_opt<CURLOPT_SEEKFUNCTION> (curl, &seek_body_file);
-    set_opt<CURLOPT_SEEKDATA> (curl, source.stream.get ());
+    set_opt<CURLOPT_SEEKFUNCTION> (curl, &seek_approved);
+    set_opt<CURLOPT_SEEKDATA> (curl, &source.stream);
     return true;
 }
 
