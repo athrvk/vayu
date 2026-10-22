@@ -158,8 +158,10 @@ text.
 
 QuickJS has no `AssertionError` class, so this is an `Error` with that `name`
 and the stack a native throw carries; no `AssertionError` global is exposed,
-because chai's is a property of the `chai` module rather than a global and Vayu
-does not ship that module. The same name comes off the
+because chai's is a property of the `chai` module rather than a global. The
+shelf's [`require('chai')`](#chai) is that module, a separate object from
+`pm.expect`, so a `pm.expect` failure is not an instance of
+`require('chai').AssertionError`; test `e.name`. The same name comes off the
 [response assertions](#response-assertions), which are chai in Postman too.
 **A mistake in the script text is still a `TypeError`** - a matcher called with
 no argument, a name nothing implements - because nothing was asserted: the call
@@ -2827,8 +2829,9 @@ carry from one script to the next belongs in a variable scope
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
 four timer functions, Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...) and four bundled libraries, `crypto-js`, `uuid`, `lodash`
-and `moment` ([below](#the-require-shelf)).
+`responseBody`, ...) and seven bundled libraries, `crypto-js`, `uuid`,
+`lodash`, `moment`, `csv-parse/lib/sync`, `xml2js` and `chai`
+([below](#the-require-shelf)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2842,7 +2845,7 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')` and `require('xml2js')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')`, `require('xml2js')` and `require('chai')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `_` | The same `lodash` module as a global, loaded on first read |
 | `xml2Json(xml)` | Postman's synchronous XML parse over the shelf's `xml2js`, loaded on first read - see [`xml2js`](#xml2js) |
@@ -2868,9 +2871,9 @@ synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
 Of the libraries Postman bundles, `CryptoJS`, `_` (lodash), `uuid`, `moment`,
-`csv-parse/lib/sync` and `xml2js` with its `xml2Json` global run (`uuid`,
-`moment` and `csv-parse/lib/sync` have no global, they are `require` only, as
-in Postman). The others (`tv4`, `cheerio`, `Backbone`) are absent. The editor
+`csv-parse/lib/sync`, `xml2js` with its `xml2Json` global, and `chai` run
+(`uuid`, `moment`, `csv-parse/lib/sync` and `chai` have no global, they are
+`require` only, as in Postman). The others (`tv4`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
@@ -2883,8 +2886,8 @@ There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`), and it is
 matched whole: `csv-parse/lib/sync` is on the shelf and `csv-parse` is not.
-Today the shelf holds six libraries, `crypto-js`, `uuid`, `lodash`, `moment`,
-`csv-parse/lib/sync` and `xml2js`. `CryptoJS` is the
+Today the shelf holds seven libraries, `crypto-js`, `uuid`, `lodash`, `moment`,
+`csv-parse/lib/sync`, `xml2js` and `chai`. `CryptoJS` is the
 `crypto-js` module bound as a global and `_` is `lodash`, so both spellings of
 a Postman script work; `xml2Json` is not a module but Postman's parse function
 over `xml2js`, bound the same lazy way:
@@ -3174,8 +3177,63 @@ The Postman import's script scan names neither `xml2Json` nor
 `require('xml2js')`; it still names `require('xml2js/lib/parser')` and every
 other path under the package.
 
+#### `chai`
+
+`require('chai')` is **the npm `chai` package, version 4.4.1**, the version
+Postman's sandbox pins, bundled by esbuild with the seven packages it depends on
+(`assertion-error`, `check-error`, `deep-eql`, `get-func-name`, `loupe`,
+`pathval`, `type-detect`, at the versions Postman's own bundle carries) into
+one 68,034-byte file (`engine/vendor/chai/`; all eight MIT, each licence beside
+it; see [Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+The module is chai's whole export: `expect`, `assert`, `should`, `use`,
+`config`, `AssertionError`, `Assertion`, `util` and `version` (which reads
+`'4.3.8'`: chai 4.4.1's source was never bumped, and Node answers the same).
+
+```javascript
+const { expect, assert } = require('chai');
+pm.test('the order is complete', () => {
+    const order = pm.response.json();
+    expect(order.status).to.equal('complete');
+    assert.deepEqual(order.items, [{ id: 7, qty: 1 }]);
+});
+```
+
+- **It is not `pm.expect`.** `pm.expect` is Vayu's own implementation of
+  chai's `expect` with chai-postman's response members
+  ([`pm.expect()`](#pmexpect)); `require('chai')` is the library itself,
+  a separate object, and loading it changes nothing about `pm.expect`. In
+  Postman the two are one chai with chai-postman installed, so
+  `require('chai').expect(pm.response).to.have.status(200)` runs there; here the
+  module has chai's members only, and that line throws
+  `Invalid Chai property: status`. Use `pm.expect` or `pm.response.to` for the
+  response assertions.
+- **A failure inside `pm.test` is an ordinary failed test** with chai's
+  message: `expect(1).to.equal(2)` records `AssertionError: expected 1 to
+  equal 2`, as a `pm.expect` failure would. Outside a `pm.test` it aborts the
+  script with the same message, as any uncaught throw does. The error is an
+  instance of `require('chai').AssertionError` and carries chai's `actual`,
+  `expected` and `showDiff`.
+- `chai.should()` defines `should` on `Object.prototype` when it is called,
+  not when the module loads, so `(5).should.equal(5)` runs only after the
+  call. Each script gets a fresh context, so the next script starts without it.
+- `chai.use(plugin)` installs a plugin on this module only; nothing reaches
+  `pm.expect`.
+- What the bundle leaves out is host lookups only: `loupe`, chai's value
+  printer, finds no Node `util.inspect` hook and no `process`, so a promise in a
+  failure message prints as `Promise{…}`.
+
+**Cost.** Evaluated on the first `require('chai')` in an execution, never when
+a context is built, so a script that does not require it pays nothing. First
+use costs about 5.5 ms in a `-O2` build and 15 ms in a Debug build (QuickJS
+parsing and running the 68 KB bundle, measured in a fresh context, median of
+101; [First-load cost](building.md#first-load-cost) has the method); the
+evaluated module then holds about 470 KB of the script's 64 MB limit until the
+execution ends. Nothing is shared between executions.
+
+The Postman import's script scan does not name `require('chai')`.
+
 The libraries Postman also lets a script `require` - `ajv`,
-`tv4`, `cheerio`, `chai` and Node's built-ins, and `csv-parse` at
+`tv4`, `cheerio` and Node's built-ins, and `csv-parse` at
 any path but `csv-parse/lib/sync` - are
 **not** on the shelf: `require` of one throws, and a Postman import names the
 script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)

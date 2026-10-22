@@ -477,16 +477,18 @@ The libraries the script sandbox's `require()` hands out are the real npm
 builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
 beside its licence and a `README.md` naming the package, the exact version,
 the tarball URL and its registry integrity. csv-parse and xml2js ship no
-single-file build, so each file is an esbuild bundle of the package's own
-sources (xml2js's with the `sax` and `xmlbuilder` it depends on, whose
-licences sit beside it), and its `README.md` also carries the command that
-reproduces it byte for byte. They are
+single-file build, and chai's browser build (`chai.js`) carries a dependency set Postman
+does not ship, so each of the three files is an esbuild bundle of the package's own
+sources (xml2js's with the `sax` and `xmlbuilder` it depends on, chai's with
+its seven dependencies, their licences beside it), and its `README.md` also
+carries the command that reproduces it byte for byte. They are
 compiled into `vayu_core` as data and evaluated on a script's first `require`
 of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/issues/2650),
 [#2651](https://github.com/athrvk/vayu/issues/2651),
 [#2652](https://github.com/athrvk/vayu/issues/2652),
 [#2653](https://github.com/athrvk/vayu/issues/2653),
-[#2654](https://github.com/athrvk/vayu/issues/2654)).
+[#2654](https://github.com/athrvk/vayu/issues/2654),
+[#2655](https://github.com/athrvk/vayu/issues/2655)).
 
 | Library | Version | Licence | Vendored file |
 |---------|---------|---------|---------------|
@@ -495,6 +497,7 @@ of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/i
 | moment | 2.31.0 | MIT | `engine/vendor/moment/moment.min.js` (the package's `min/moment.min.js`, 60,887 bytes; English only, no locale files) |
 | csv-parse | 1.2.4 | BSD-3-Clause | `engine/vendor/csv-parse/csv-parse-sync.min.js` (the package's `lib/sync.js` and the `lib/index.js` it requires, bundled and minified by esbuild, 11,679 bytes; string input only), loaded as `require('csv-parse/lib/sync')` |
 | xml2js | 0.6.2, with sax 1.2.4 and xmlbuilder 11.0.1 | MIT (sax ISC) | `engine/vendor/xml2js/xml2js.min.js` (xml2js's `lib/`, sax's `lib/sax.js` and xmlbuilder's `lib/`, bundled and minified by esbuild, 98,939 bytes; string input only), loaded as `require('xml2js')` or the `xml2Json` global |
+| chai | 4.4.1, with assertion-error 1.1.0, check-error 1.0.3, deep-eql 4.1.3, get-func-name 2.0.2, loupe 2.3.7, pathval 1.1.1 and type-detect 4.0.8 | MIT | `engine/vendor/chai/chai.min.js` (chai's `lib/` and its dependencies' entry files, bundled and minified by esbuild, 68,034 bytes), loaded as `require('chai')` |
 
 `vayu_embed_js(<target> <symbol> <file>)` (`engine/cmake/embed_js.cmake`) is
 the embed step, one call per library inside the QuickJS block of
@@ -514,8 +517,8 @@ where moment read 58 to 80 ms.
 
 The vendored files are excluded from every formatter and linter
 (`engine/vendor/.clang-format`, the repo-JS ESLint config's ignores) and must
-stay byte-identical to the package (csv-parse's and xml2js's to the build
-each README names; csv-parse's `node-shims.mjs` and xml2js's `shims/` are build
+stay byte-identical to the package (csv-parse's, xml2js's and chai's to the
+build each README names; csv-parse's `node-shims.mjs` and xml2js's `shims/` are build
 input and are not embedded);
 `.gitattributes`' `eol=lf` is a no-op on them because they hold no CR.
 
@@ -537,10 +540,18 @@ Medians of 101 runs after three warm-ups, pinned to one core, gcc 13:
 | moment 2.31.0 as vendored, 61 KB in 8 lines (#2652) | 7.6 ms | 17 ms |
 | csv-parse 1.2.4 sync as vendored, 12 KB in 7 lines (#2653) | 1.3 ms | 2.6 ms |
 | xml2js 0.6.2 with sax and xmlbuilder as vendored, 99 KB in 13 lines (#2654)\* | 16 ms | 42 ms |
+| chai 4.4.1 with its seven dependencies as vendored, 68 KB in 5 lines (#2655)\*\* | 5.5 ms | 15 ms |
 
 \* Measured on a box where csv-parse read 1.5 ms and 3.8 ms, so somewhat
 slower than the rows above. The bundle's 99 KB put it past lodash; its first
 use is the shelf's dearest.
+
+\*\* Measured on a box where csv-parse read 1.2 ms and 2.7 ms, moment 5.2 ms
+and 14 ms, and xml2js 11 ms and 25 ms, so faster than the rows above; chai's
+first use costs about what moment's does. The harness also reads the memory
+the evaluated module holds (the runtime's `malloc_size` after a garbage
+collection, the module still referenced): about 470 KB for chai, 400 KB for
+moment and 620 KB for xml2js.
 
 The stand-in is a UMD-wrapped file of functions, objects and arrow functions
 with short identifiers, lighter per byte than a real library; lodash is the

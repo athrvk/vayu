@@ -176,7 +176,7 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
  * `body` is what sits inside `declare module '<name>' { ... }`, tab-indented
  * and ending in the `export =` that names the module's value: a module with a
  * global to point at is one line (crypto-js, lodash), and one with none (uuid,
- * moment, csv-parse/lib/sync, xml2js) carries its own declaration.
+ * moment, csv-parse/lib/sync, xml2js, chai) carries its own declaration.
  *
  * `script_types_test.cpp` runs `require(name)` in the real script engine for
  * every module declared here, and checks that every name `require` accepts
@@ -268,6 +268,50 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 "\t\t};\n"
 "\t};\n"
 "\texport = xml2js;\n" },
+// chai 4.4.1's top-level export. An assertion chain is `any`: chai's few
+// hundred chain members are not restated, and a partial list would flag the
+// ones it left out on correct code. `should` on a value is not declared, since
+// it exists only once `should()` has run.
+{ "chai",
+"\ttype Assertion = any;\n"
+"\tinterface ExpectStatic {\n"
+"\t\t(value: unknown, message?: string): Assertion;\n"
+"\t\tfail(message?: string): never;\n"
+"\t\tfail(actual: unknown, expected: unknown, message?: string, operator?: "
+"string): never;\n"
+"\t}\n"
+"\tinterface AssertStatic {\n"
+"\t\t(expression: unknown, message?: string): void;\n"
+"\t\t[assertion: string]: (...args: any[]) => any;\n"
+"\t}\n"
+"\tinterface AssertionError extends Error {\n"
+"\t\tshowDiff: boolean;\n"
+"\t\tactual?: unknown;\n"
+"\t\texpected?: unknown;\n"
+"\t\toperator?: string;\n"
+"\t}\n"
+"\tinterface Chai {\n"
+"\t\texpect: ExpectStatic;\n"
+"\t\tassert: AssertStatic;\n"
+"\t\tshould(): any;\n"
+"\t\tShould(): any;\n"
+"\t\tuse(plugin: (chai: any, utils: any) => void): Chai;\n"
+"\t\tconfig: {\n"
+"\t\t\tincludeStack: boolean;\n"
+"\t\t\tshowDiff: boolean;\n"
+"\t\t\ttruncateThreshold: number;\n"
+"\t\t\tuseProxy: boolean;\n"
+"\t\t\tproxyExcludedKeys: string[];\n"
+"\t\t\tdeepEqual: ((expected: unknown, actual: unknown) => boolean) | null;\n"
+"\t\t};\n"
+"\t\tAssertionError: new (message?: string, properties?: object, ssf?: "
+"(...args: any[]) => unknown) => AssertionError;\n"
+"\t\tAssertion: any;\n"
+"\t\tutil: any;\n"
+"\t\tversion: string;\n"
+"\t}\n"
+"\tconst chai: Chai;\n"
+"\texport = chai;\n" },
 });
 
 /**
@@ -896,7 +940,8 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
  * overload matches" - the less direct message. One generic signature keyed on
  * the names keeps the parameter a literal union (`require('ajv')` is "not
  * assignable to 'crypto-js' | 'uuid' | 'lodash' | 'moment' |
- * 'csv-parse/lib/sync' | 'xml2js'"). Only the entry's documentation is read.
+ * 'csv-parse/lib/sync' | 'xml2js' | 'chai'"). Only the entry's documentation is
+ * read.
  */
 void render_require (std::string& out, const TypeNode& require) {
     out += "interface VayuShelfModules {\n";

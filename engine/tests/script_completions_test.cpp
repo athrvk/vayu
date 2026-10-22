@@ -830,6 +830,31 @@ TEST (ScriptCompletions, Xml2jsIsOfferedThroughRequireAndXml2JsonAsItsParse) {
     EXPECT_TRUE (result.success) << result.error_message;
 }
 
+// chai (#2655) is offered through require only: Postman binds no `chai`
+// global, and neither does the runtime.
+TEST (ScriptCompletions, ChaiIsOfferedThroughRequireAndHasNoGlobal) {
+    const auto completions = get_script_completions ();
+    const auto* require    = find_by_label (completions, "require");
+    ASSERT_NE (require, nullptr);
+    const std::string documentation = require->value ("documentation", std::string{});
+    EXPECT_NE (documentation.find ("chai is npm's chai 4.4.1"), std::string::npos)
+    << documentation;
+    EXPECT_NE (documentation.find ("require('chai')"), std::string::npos) << documentation;
+    EXPECT_EQ (find_by_label (completions, "chai"), nullptr)
+    << "chai is not a global in Postman";
+
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    const auto result    = engine.execute_test (
+    "if (typeof chai !== 'undefined' || typeof require('chai').expect !== "
+       "'function') throw new Error('not the shelf chai');",
+    request, response, env);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no

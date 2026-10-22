@@ -396,8 +396,9 @@ JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
  * same backtrace a native throw would, and `message` is defined with the
  * native errors' attributes (writable, configurable, **not** enumerable) so
  * `JSON.stringify(e)` answers what it always did. No `AssertionError` global is
- * exposed - chai's lives on the `chai` module, which Vayu does not ship, and a
- * bare global would be a name Postman scripts cannot rely on either.
+ * exposed - chai's lives on the `chai` module (`require('chai')`, #2655, which
+ * is the library itself and shares nothing with this one), and a bare global
+ * would be a name Postman scripts cannot rely on either.
  *
  * Only *assertion* failures come through here, and that includes the type
  * checks chai makes as assertions of their own, in both polarities: a

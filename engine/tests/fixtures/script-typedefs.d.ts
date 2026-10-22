@@ -2386,10 +2386,11 @@ interface VayuShelfModules {
 	'moment': typeof import('moment');
 	'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');
 	'xml2js': typeof import('xml2js');
+	'chai': typeof import('chai');
 }
 
 /**
- * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman bundles: parseString, parseStringPromise, Parser and Builder, a string input; its global, xml2Json, is a synchronous parse over it rather than the module. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js, chai. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. lodash is npm's lodash 4.17.21 and answers the same object as the _ global. moment is npm's moment 2.31.0, English only, with no moment-timezone, and has no global. csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version Postman bundles: the module is parse(input, options), input a string, and it has no global; bare csv-parse and its other paths are not on the shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman bundles: parseString, parseStringPromise, Parser and Builder, a string input; its global, xml2Json, is a synchronous parse over it rather than the module. chai is npm's chai 4.4.1, the version Postman bundles: expect, assert, should and use, the library itself and a separate object from pm.expect, which loading it leaves unchanged; it has no global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
@@ -2401,6 +2402,8 @@ interface VayuShelfModules {
  * const rows = parse(pm.response.text(), { columns: true });
  * const xml2js = require('xml2js');
  * xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));
+ * const { expect } = require('chai');
+ * expect(pm.response.json().id).to.equal(7);
  */
 declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
@@ -2685,4 +2688,44 @@ declare module 'xml2js' {
 		};
 	};
 	export = xml2js;
+}
+
+declare module 'chai' {
+	type Assertion = any;
+	interface ExpectStatic {
+		(value: unknown, message?: string): Assertion;
+		fail(message?: string): never;
+		fail(actual: unknown, expected: unknown, message?: string, operator?: string): never;
+	}
+	interface AssertStatic {
+		(expression: unknown, message?: string): void;
+		[assertion: string]: (...args: any[]) => any;
+	}
+	interface AssertionError extends Error {
+		showDiff: boolean;
+		actual?: unknown;
+		expected?: unknown;
+		operator?: string;
+	}
+	interface Chai {
+		expect: ExpectStatic;
+		assert: AssertStatic;
+		should(): any;
+		Should(): any;
+		use(plugin: (chai: any, utils: any) => void): Chai;
+		config: {
+			includeStack: boolean;
+			showDiff: boolean;
+			truncateThreshold: number;
+			useProxy: boolean;
+			proxyExcludedKeys: string[];
+			deepEqual: ((expected: unknown, actual: unknown) => boolean) | null;
+		};
+		AssertionError: new (message?: string, properties?: object, ssf?: (...args: any[]) => unknown) => AssertionError;
+		Assertion: any;
+		util: any;
+		version: string;
+	}
+	const chai: Chai;
+	export = chai;
 }

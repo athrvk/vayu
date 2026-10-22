@@ -2512,6 +2512,9 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Xml",
     R"j(["const doc = xml2Json(pm.response.text());","require('xml2js').parseString(pm.response.text(), (e, r) => {});"])j") +
     "," +
+    request_with_script ("Chai module",
+    R"j(["const { expect } = require('chai');","expect(pm.response.json().id).to.equal(7);"])j") +
+    "," +
     request_with_script ("Cipher",
     R"j(["const c = require('crypto-js');","const e = CryptoJS.AES.encrypt('x', 'k');"])j") +
     "," +
@@ -2525,9 +2528,10 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     // `require('crypto-js')`, so "Legacy tests" and "Shelf" are not named, and
     // `require('uuid')` runs (#2650), so "Uuid" is not either, nor is "Lodash"
     // (`_` and `require('lodash')`, #2651), "Moment" (`require('moment')`,
-    // #2652), "Csv" (`require('csv-parse/lib/sync')`, #2653) or "Xml"
-    // (`xml2Json` and `require('xml2js')`, #2654); "Cipher" reaches past the
-    // shim and is. "Module" requires a name off the shelf and is.
+    // #2652), "Csv" (`require('csv-parse/lib/sync')`, #2653), "Xml"
+    // (`xml2Json` and `require('xml2js')`, #2654) or "Chai module"
+    // (`require('chai')`, #2655); "Cipher" reaches past the shim and is.
+    // "Module" requires a name off the shelf and is.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
         {"request":"Library","names":["tv4"]},
