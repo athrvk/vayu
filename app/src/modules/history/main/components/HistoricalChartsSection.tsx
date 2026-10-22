@@ -30,6 +30,9 @@ import {
 	CustomMetricsChart,
 	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
+import { ChartLegend } from "@/modules/dashboard/components/charts/ChartLegend";
+import { throughputLegend } from "@/modules/dashboard/components/charts/uplot/legend";
+import { hasSendRate } from "@/modules/dashboard/components/charts/uplot/buildData";
 import { hasCustomMetrics } from "@/modules/dashboard/utils/metricsTransforms";
 
 interface HistoricalChartsSectionProps {
@@ -188,7 +191,14 @@ function SeriesCharts({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle>Request rate (throughput vs send rate)</CardTitle>
+					{/* This chart draws no target line or ramp pair (only the live view
+					    is told the target), so the key names neither. */}
+					<div className="flex items-baseline justify-between">
+						<CardTitle>Request rate (throughput vs send rate)</CardTitle>
+						<ChartLegend
+							entries={throughputLegend(undefined, false, hasSendRate(data))}
+						/>
+					</div>
 				</CardHeader>
 				<CardContent>
 					<RequestRateChart
