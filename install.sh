@@ -70,11 +70,20 @@ LINUX_ICON_URL="https://athrvk.github.io/vayu/images/vayu-icon.png"
 # thing, so an ordinary run is unaffected.
 VAYU_RELEASE_BASE="${VAYU_RELEASE_BASE:-https://github.com/$REPO/releases/download}"
 VAYU_TTY="${VAYU_TTY:-/dev/tty}"
+# The protocols curl may speak. The e2e test sets "file,https" because its
+# local release is a file:// URL; nothing else should.
+VAYU_CURL_PROTO="${VAYU_CURL_PROTO:-https}"
 if [ -n "${VAYU_ROOT:-}" ]; then
 	DEFAULT_INSTALL_DIR="$VAYU_ROOT/Applications"
 	INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 	APP_PATH="${INSTALL_DIR}/${APP_NAME}.app"
 fi
+
+# Options for every curl this script runs, so a downgrade to http or a redirect
+# off https fails rather than being followed, as the bootstrap command in
+# usage() already insists. Expanded as "${CURL_SAFE[@]}"; it is never empty,
+# which is what keeps that expansion safe under `set -u` on bash 3.2.
+CURL_SAFE=(--proto "=$VAYU_CURL_PROTO" --proto-redir '=https' --tlsv1.2)
 
 MODE="install"
 PURGE=0
@@ -221,7 +230,7 @@ resolve_version() {
 		printf '%s' "${VAYU_VERSION#v}"
 		return 0
 	fi
-	curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+	curl "${CURL_SAFE[@]}" -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
 		| grep '"tag_name"' \
 		| head -1 \
 		| sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/'
@@ -850,7 +859,7 @@ download_asset() {
 	# --retry, because this is 160MB over whatever connection the user has and a
 	# transient failure is the common one. curl retries on transport errors and
 	# 5xx, not on a 404, so a genuinely missing asset still fails immediately.
-	if ! run curl -fL --retry 3 --retry-delay 2 --retry-connrefused "$url" -o "$dest"; then
+	if ! run curl "${CURL_SAFE[@]}" -fL --retry 3 --retry-delay 2 --retry-connrefused "$url" -o "$dest"; then
 		die 'Download failed - nothing was installed.'
 	fi
 
@@ -864,7 +873,7 @@ download_asset() {
 	# older pinned VAYU_VERSION predates it and only warns; so does a call with
 	# no version at all. The fetch retries so that a transient miss is not
 	# mistaken for a removed sidecar.
-	if ! curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "$url.sha256" -o "$dest.sha256" 2>/dev/null; then
+	if ! curl "${CURL_SAFE[@]}" -fsSL --retry 3 --retry-delay 2 --retry-connrefused "$url.sha256" -o "$dest.sha256" 2>/dev/null; then
 		if [ -n "$version" ] && version_at_least "$version" "$FIRST_CHECKSUMMED_VERSION"; then
 			die "No checksum could be fetched for Vayu $version - nothing was installed."
 		fi
@@ -977,7 +986,7 @@ place_linux() {
 	# it sees the response status, so fetching straight to the destination
 	# leaves a zero-byte vayu.png behind on a 404 - which the desktop
 	# environment then caches as the app's icon.
-	if run_quiet curl -fsSL "$LINUX_ICON_URL" -o "$LINUX_ICON_FILE.part"; then
+	if run_quiet curl "${CURL_SAFE[@]}" -fsSL "$LINUX_ICON_URL" -o "$LINUX_ICON_FILE.part"; then
 		run mv -f "$LINUX_ICON_FILE.part" "$LINUX_ICON_FILE"
 	else
 		run rm -f "$LINUX_ICON_FILE.part"

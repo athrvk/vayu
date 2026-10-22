@@ -67,6 +67,7 @@ installer() {
 		XDG_CACHE_HOME="$ROOT/.cache" \
 		VAYU_ROOT="$ROOT/sys" \
 		VAYU_RELEASE_BASE="file://$RELEASES" \
+		VAYU_CURL_PROTO="file,https" \
 		VAYU_ASSUME_YES=1 \
 		VAYU_TTY=/dev/null \
 		VAYU_SUDO="$SUDO_STUB" \

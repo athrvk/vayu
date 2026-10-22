@@ -14,6 +14,9 @@ set -euo pipefail
 
 # Source the installer (at repo root) in test mode so main() does not run.
 VAYU_TEST=1
+# The download cases below fetch file:// URLs, which the installer's https-only
+# curl pin refuses; the pin itself is checked further down.
+VAYU_CURL_PROTO="file,https"
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
 
@@ -317,11 +320,11 @@ touch "$LINUX_APP_BIN" && chmod +x "$LINUX_APP_BIN"
 # Same version -> no download at all.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
 grep -q "already installed" <<<"$out" || fail "a matching version should skip the install"
-if grep -q "curl -fL" <<<"$out"; then fail "a skipped install should not download anything"; fi
+if grep -q "curl .* -fL" <<<"$out"; then fail "a skipped install should not download anything"; fi
 
 # --force reinstalls the same version.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 FORCE=1 do_install 2>&1)"
-grep -q "curl -fL" <<<"$out" || fail "--force should download even at the same version"
+grep -q "curl .* -fL" <<<"$out" || fail "--force should download even at the same version"
 
 # A newer version updates, and says so.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
@@ -508,6 +511,32 @@ curl() {
 unset -f curl
 grep -q -- '--retry 3' <<<"$(grep '\.sha256' "$TMPROOT/curl.log")" \
 	|| fail "the checksum sidecar fetch must retry transient failures"
+
+# Every curl the installer runs is pinned to https (and a redirect to https, TLS
+# 1.2+), as the bootstrap command in usage() already is. Read from the source
+# because the call sites sit behind network paths the suite cannot reach. usage()
+# and comments are dropped: the first prints the bootstrap command for the user
+# to run, the second only mentions curl.
+# shellcheck disable=SC1090  # $INSTALLER is the file sourced at the top
+default_safe="$(unset VAYU_CURL_PROTO; VAYU_TEST=1; . "$INSTALLER"; printf '%s ' "${CURL_SAFE[@]}")"
+[ "$default_safe" = "--proto =https --proto-redir =https --tlsv1.2 " ] \
+	|| fail "CURL_SAFE should default to https-only, got: $default_safe"
+curl_calls="$(awk '/^usage\(\) \{/ {skip = 1} skip && /^}/ {skip = 0; next} !skip' "$INSTALLER" \
+	| grep -v '^[[:space:]]*#' \
+	| grep -E '(^|[^[:alnum:]_-])curl[[:space:]]+("|-)' || true)"
+curl_call_count=0
+while IFS= read -r line; do
+	[ -n "$line" ] || continue
+	curl_call_count=$((curl_call_count + 1))
+	# shellcheck disable=SC2016  # the literal text of the call site, not an expansion
+	case "$line" in
+		*'"${CURL_SAFE[@]}"'*) ;;
+		*--proto*--proto-redir*--tlsv1.2* | *--proto*--tlsv1.2*--proto-redir*) ;;
+		*) fail "curl call without the https pin: $line" ;;
+	esac
+done <<<"$curl_calls"
+[ "$curl_call_count" -ge 4 ] \
+	|| fail "expected at least 4 curl calls in install.sh, scanned $curl_call_count"
 
 version_at_least 0.40.0 0.33.0 || fail "0.40.0 is at least 0.33.0"
 version_at_least 0.33.0 0.33.0 || fail "0.33.0 is at least 0.33.0"
@@ -969,7 +998,7 @@ expect_proceeds() { # <version> <why>
 	local rc=0
 	out="$(gate_install "$1")" || rc=$?
 	[ "$rc" = "0" ] || fail "$GATE_PLATFORM: $1 $2 should install, exited $rc: $out"
-	grep -q "curl -fL" <<<"$out" || fail "$GATE_PLATFORM: $1 $2 should reach the download"
+	grep -q "curl .* -fL" <<<"$out" || fail "$GATE_PLATFORM: $1 $2 should reach the download"
 }
 
 version_at_least 0.9.0 "$FIRST_GATED_VERSION" && fail "0.9.0 is below $FIRST_GATED_VERSION (numeric, not lexical)"
@@ -1002,7 +1031,7 @@ for GATE_PLATFORM in Darwin Linux; do
 	grep -q -- "--allow-data-loss" <<<"$out" || fail "$GATE_PLATFORM: the refusal should name the override"
 	grep -q "requests and collection" <<<"$out" || fail "$GATE_PLATFORM: the refusal should say what is at risk"
 	# Refused before anything is fetched, quit or announced.
-	if grep -q "curl -fL\|Installing Vayu\|Updating Vayu" <<<"$out"; then
+	if grep -q "curl .* -fL\|Installing Vayu\|Updating Vayu" <<<"$out"; then
 		fail "$GATE_PLATFORM: a refused install must not start: $out"
 	fi
 	rc=0
