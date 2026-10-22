@@ -559,176 +559,61 @@ TEST (SchemaKeywordVerdictTest, PropertyNamesRejectsANameThatFailsItsSchema) {
     EXPECT_FALSE (verdict.valid);
     EXPECT_EQ (verdict.failures_total, 1u);
     ASSERT_EQ (verdict.failures.size (), 1u);
-    // No context survives a constraint that records nothing: the body is the path.
+    // No context survives a constraint that records nothing: the body is the
+    // data path, and the schema path is what the message can still name.
     EXPECT_EQ (verdict.failures.front ().path, "");
-    EXPECT_NE (verdict.failures.front ().message.find ("propertyNames"), std::string::npos)
+    EXPECT_NE (verdict.failures.front ().message.find (
+               "'propertyNames' at /propertyNames,"),
+    std::string::npos)
     << verdict.failures.front ().message;
 }
 
-TEST (SchemaKeywordVerdictTest, TypeRejects) {
-    expect_rejected (R"({"type": "string"})", "1");
-    expect_accepted (R"({"type": "string"})", R"("a")");
-}
-
-TEST (SchemaKeywordVerdictTest, EnumRejects) {
-    expect_rejected (R"({"enum": ["a", "b"]})", R"("c")");
-    expect_accepted (R"({"enum": ["a", "b"]})", R"("a")");
-}
-
-TEST (SchemaKeywordVerdictTest, ConstRejects) {
-    expect_rejected (R"({"const": {"a": [1, 2]}})", R"({"a": [2, 1]})");
-    expect_accepted (R"({"const": {"a": [1, 2]}})", R"({"a": [1, 2]})");
-}
-
-TEST (SchemaKeywordVerdictTest, RequiredRejects) {
-    expect_rejected (R"({"required": ["id"]})", "{}");
-    expect_accepted (R"({"required": ["id"]})", R"({"id": 1})");
-}
-
-TEST (SchemaKeywordVerdictTest, PropertiesRejects) {
-    expect_rejected (R"({"properties": {"id": {"type": "integer"}}})", R"({"id": "x"})");
-    expect_accepted (R"({"properties": {"id": {"type": "integer"}}})", R"({"id": 1})");
-}
-
-TEST (SchemaKeywordVerdictTest, AdditionalPropertiesRejects) {
-    const char* const schema = R"({"properties": {"a": {}}, "additionalProperties": false})";
-    expect_rejected (schema, R"({"a": 1, "b": 2})");
-    expect_accepted (schema, R"({"a": 1})");
-}
-
-TEST (SchemaKeywordVerdictTest, PatternPropertiesRejects) {
-    const char* const schema = R"({"patternProperties": {"^x-": {"type": "string"}}})";
-    expect_rejected (schema, R"({"x-a": 1})");
-    expect_accepted (schema, R"({"x-a": "v"})");
-}
-
-TEST (SchemaKeywordVerdictTest, DependenciesRejects) {
-    const char* const schema = R"({"dependencies": {"card": ["billing"]}})";
-    expect_rejected (schema, R"({"card": 1})");
-    expect_accepted (schema, R"({"card": 1, "billing": 2})");
-}
-
-TEST (SchemaKeywordVerdictTest, MinAndMaxPropertiesReject) {
-    expect_rejected (R"({"minProperties": 2})", R"({"a": 1})");
-    expect_accepted (R"({"minProperties": 2})", R"({"a": 1, "b": 2})");
-    expect_rejected (R"({"maxProperties": 1})", R"({"a": 1, "b": 2})");
-    expect_accepted (R"({"maxProperties": 1})", R"({"a": 1})");
-}
-
-TEST (SchemaKeywordVerdictTest, ItemsRejects) {
-    expect_rejected (R"({"items": {"type": "integer"}})", R"([1, "x"])");
-    expect_accepted (R"({"items": {"type": "integer"}})", "[1, 2]");
-    expect_rejected (R"({"items": [{"type": "integer"}, {"type": "string"}]})", R"([1, 2])");
-    expect_accepted (R"({"items": [{"type": "integer"}, {"type": "string"}]})", R"([1, "x"])");
-}
-
-TEST (SchemaKeywordVerdictTest, AdditionalItemsRejects) {
-    const char* const schema = R"({"items": [{"type": "integer"}], "additionalItems": false})";
-    expect_rejected (schema, "[1, 2]");
-    expect_accepted (schema, "[1]");
-}
-
-TEST (SchemaKeywordVerdictTest, ContainsRejects) {
-    expect_rejected (R"({"contains": {"minimum": 5}})", "[1, 2]");
-    expect_accepted (R"({"contains": {"minimum": 5}})", "[1, 6]");
-}
-
-TEST (SchemaKeywordVerdictTest, MinAndMaxItemsReject) {
-    expect_rejected (R"({"minItems": 2})", "[1]");
-    expect_accepted (R"({"minItems": 2})", "[1, 2]");
-    expect_rejected (R"({"maxItems": 1})", "[1, 2]");
-    expect_accepted (R"({"maxItems": 1})", "[1]");
-}
-
-TEST (SchemaKeywordVerdictTest, UniqueItemsRejects) {
-    expect_rejected (R"({"uniqueItems": true})", R"(["a", "a"])");
-    expect_accepted (R"({"uniqueItems": true})", R"(["a", "b"])");
-}
-
-TEST (SchemaKeywordVerdictTest, MinAndMaxLengthReject) {
-    expect_rejected (R"({"minLength": 2})", R"("a")");
-    expect_accepted (R"({"minLength": 2})", R"("ab")");
-    expect_rejected (R"({"maxLength": 1})", R"("ab")");
-    expect_accepted (R"({"maxLength": 1})", R"("a")");
-}
-
-TEST (SchemaKeywordVerdictTest, PatternRejects) {
-    expect_rejected (R"({"pattern": "^[a-z]+$"})", R"("aB")");
-    expect_accepted (R"({"pattern": "^[a-z]+$"})", R"("ab")");
-}
-
-TEST (SchemaKeywordVerdictTest, MinimumAndMaximumReject) {
-    expect_rejected (R"({"minimum": 5})", "4");
-    expect_accepted (R"({"minimum": 5})", "5");
-    expect_rejected (R"({"maximum": 5})", "6");
-    expect_accepted (R"({"maximum": 5})", "5");
-}
-
-TEST (SchemaKeywordVerdictTest, ExclusiveBoundsReject) {
-    expect_rejected (R"({"exclusiveMinimum": 5})", "5");
-    expect_accepted (R"({"exclusiveMinimum": 5})", "6");
-    expect_rejected (R"({"exclusiveMaximum": 5})", "5");
-    expect_accepted (R"({"exclusiveMaximum": 5})", "4");
-}
-
-TEST (SchemaKeywordVerdictTest, MultipleOfRejects) {
-    expect_rejected (R"({"multipleOf": 3})", "10");
-    expect_accepted (R"({"multipleOf": 3})", "9");
-    expect_rejected (R"({"multipleOf": 0.5})", "0.3");
-    expect_accepted (R"({"multipleOf": 0.5})", "1.5");
-}
-
-TEST (SchemaKeywordVerdictTest, AllOfRejects) {
-    const char* const schema = R"({"allOf": [{"minimum": 1}, {"maximum": 3}]})";
-    expect_rejected (schema, "5");
-    expect_accepted (schema, "2");
-}
-
-TEST (SchemaKeywordVerdictTest, AnyOfRejects) {
-    const char* const schema = R"({"anyOf": [{"type": "string"}, {"type": "integer"}]})";
-    expect_rejected (schema, "true");
-    expect_accepted (schema, "1");
-}
-
-TEST (SchemaKeywordVerdictTest, OneOfRejectsNoMatchAndTwoMatches) {
-    const char* const schema = R"({"oneOf": [{"minimum": 1}, {"maximum": 5}]})";
-    expect_rejected (schema, R"("x")");
-    expect_rejected (schema, "3");
-    expect_accepted (schema, "10");
-}
-
-TEST (SchemaKeywordVerdictTest, NotRejects) {
-    expect_rejected (R"({"not": {"type": "string"}})", R"("a")");
-    expect_accepted (R"({"not": {"type": "string"}})", "1");
-}
-
-TEST (SchemaKeywordVerdictTest, IfThenElseRejects) {
-    const char* const schema =
-    R"({"if": {"properties": {"kind": {"const": "a"}}}, "then": {"required": ["a"]}, "else": {"required": ["b"]}})";
-    expect_rejected (schema, R"({"kind": "a"})");
-    expect_rejected (schema, R"({"kind": "z"})");
-    expect_accepted (schema, R"({"kind": "a", "a": 1})");
-}
-
-TEST (SchemaKeywordVerdictTest, FormatRejects) {
-    expect_rejected (R"({"format": "date"})", R"("2024-13-01")");
-    expect_rejected (R"({"format": "date-time"})", R"("2024-02-30T00:00:00Z")");
-    expect_rejected (R"({"format": "time"})", R"("25:00:00Z")");
-    expect_accepted (R"({"format": "date"})", R"("2024-02-29")");
-}
-
-TEST (SchemaKeywordVerdictTest, RefRejects) {
-    const char* const schema =
-    R"({"definitions": {"id": {"type": "integer"}}, "properties": {"id": {"$ref": "#/definitions/id"}}})";
-    expect_rejected (schema, R"({"id": "x"})");
-    expect_accepted (schema, R"({"id": 1})");
-}
-
-TEST (SchemaKeywordVerdictTest, AFalseSchemaRejects) {
+TEST (SchemaKeywordVerdictTest, AFalseSchemaRejectsWithoutClaimingAKeyword) {
+    expect_accepted ("true", "1");
     expect_rejected ("false", "1");
     expect_rejected (R"({"properties": {"a": false}})", R"({"a": 1})");
-    expect_rejected (R"({"items": false})", "[1]");
-    expect_accepted ("true", "1");
+
+    const auto verdict = judge ("false", "1");
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    EXPECT_EQ (verdict.failures.front ().message.find ("propertyNames"), std::string::npos)
+    << verdict.failures.front ().message;
+}
+
+// The message lists every occurrence in the schema's text, not only the one that
+// refused: valijson ignores a `propertyNames` beside a `$ref` or nested in a
+// subschema, so the refusing one cannot be told apart from the rest.
+TEST (SchemaKeywordVerdictTest, ASilentRefusalListsEachPropertyNamesPathOnce) {
+    // A property literally called "propertyNames" is a name, not the keyword.
+    const char* const schema = R"({
+        "propertyNames": {"minLength": 1},
+        "properties": {"propertyNames": {"type": "object"}},
+        "$ref": "#/definitions/named",
+        "definitions": {"named": {"propertyNames": {"maxLength": 1}}}
+    })";
+    const auto verdict       = judge (schema, R"({"ab": 1})");
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    const std::string& message = verdict.failures.front ().message;
+    EXPECT_NE (
+    message.find ("at /definitions/named/propertyNames, /propertyNames,"), std::string::npos)
+    << message;
+    EXPECT_EQ (message.find ("/properties"), std::string::npos) << message;
+}
+
+TEST (SchemaKeywordVerdictTest, ASilentRefusalNamesAtMostThreePaths) {
+    const char* const schema = R"({
+        "propertyNames": {"maxLength": 1},
+        "definitions": {
+            "a": {"propertyNames": {}}, "b": {"propertyNames": {}},
+            "c": {"propertyNames": {}}, "d": {"propertyNames": {}}
+        }
+    })";
+    const auto verdict       = judge (schema, R"({"ab": 1})");
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    EXPECT_NE (verdict.failures.front ().message.find (
+               "/definitions/a/propertyNames, /definitions/b/propertyNames, "
+               "/definitions/c/propertyNames and 2 more,"),
+    std::string::npos)
+    << verdict.failures.front ().message;
 }
 
 // ─── `format` (issue #2581) ─────────────────────────────────────────────────

@@ -355,7 +355,9 @@ Notes on the edges:
   it, so `.an('array').that.includes(1)` does too.
 - **`jsonSchema(schema[, options])` is draft-07** and runs on the engine's
   validator rather than ajv. A failure names the first path that broke the
-  schema. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
+  schema; a constraint that records no detail (`propertyNames`, a `false`
+  schema) yields one failure at the body root that names the schema path
+  instead. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
   such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
   in **both** polarities and is named, because ignoring it would make the schema
   looser (or, under `not`, stricter) and neither verdict could be trusted.

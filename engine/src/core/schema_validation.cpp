@@ -345,81 +345,105 @@ nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& 
     return node;
 }
 
+namespace {
+
+/// A schema node and where it sits in the validation root.
+struct SchemaNode {
+    const nlohmann::json* schema;
+    nlohmann::json::json_pointer pointer;
+};
+
 /**
  * Every subschema of @p node, queued for the walk.
  *
  * `items` is a subschema in draft-07 and a list in draft-04's tuple form; both
  * spellings reach schemas, so both are followed.
  */
-void queue_subschemas (const nlohmann::json& node,
-std::vector<const nlohmann::json*>& pending) {
+void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending) {
     for (const auto& key : subschema_keys ()) {
-        if (auto found = node.find (key); found != node.end () && found->is_object ()) {
-            pending.push_back (&*found);
+        if (auto found = node.schema->find (key);
+        found != node.schema->end () && found->is_object ()) {
+            pending.push_back ({ &*found, node.pointer / key });
         }
     }
     for (const auto& key : subschema_map_keys ()) {
-        if (auto found = node.find (key); found != node.end () && found->is_object ()) {
-            for (const auto& [_, child] : found->items ()) {
-                pending.push_back (&child);
+        if (auto found = node.schema->find (key);
+        found != node.schema->end () && found->is_object ()) {
+            for (const auto& [name, child] : found->items ()) {
+                pending.push_back ({ &child, node.pointer / key / name });
             }
         }
     }
     for (const auto& key : subschema_list_keys ()) {
-        if (auto found = node.find (key); found != node.end () && found->is_array ()) {
-            for (const auto& child : *found) {
-                pending.push_back (&child);
+        if (auto found = node.schema->find (key);
+        found != node.schema->end () && found->is_array ()) {
+            for (size_t index = 0; index < found->size (); ++index) {
+                pending.push_back ({ &(*found)[index], node.pointer / key / index });
             }
         }
     }
-    if (auto items = node.find ("items"); items != node.end ()) {
+    if (auto items = node.schema->find ("items"); items != node.schema->end ()) {
         if (items->is_object ()) {
-            pending.push_back (&*items);
+            pending.push_back ({ &*items, node.pointer / "items" });
         } else if (items->is_array ()) {
-            for (const auto& child : *items) {
-                pending.push_back (&child);
+            for (size_t index = 0; index < items->size (); ++index) {
+                pending.push_back ({ &(*items)[index], node.pointer / "items" / index });
             }
         }
     }
 }
 
-std::vector<std::pair<std::string, size_t>>
-collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
-    const nlohmann::json root = validation_root (schema, ref_roots);
-    std::map<std::string, size_t> counts;
+/**
+ * Calls @p visit (object subschema, its pointer in the validation root) for
+ * every subschema reachable from @p schema, `$ref` targets included.
+ *
+ * Iterative rather than recursive: a schema arrives from outside the engine,
+ * and a deeply nested one must cost stack the process does not have. The
+ * visited set covers `$ref` cycles; the node budget covers a schema that is
+ * merely enormous.
+ */
+template <typename Visit>
+void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visit&& visit) {
     std::unordered_set<std::string> visited_refs;
-
-    // Iterative rather than recursive: a schema arrives from outside the
-    // engine, and a deeply nested one must cost stack the process does not
-    // have. The visited set covers `$ref` cycles; the node budget covers a
-    // schema that is merely enormous.
-    std::vector<const nlohmann::json*> pending = { &schema };
-    size_t visited_nodes                       = 0;
+    std::vector<SchemaNode> pending = { { &schema, nlohmann::json::json_pointer () } };
+    size_t visited_nodes = 0;
     while (!pending.empty () && visited_nodes < limits::MAX_SCHEMA_NODES) {
-        const nlohmann::json* node = pending.back ();
+        const SchemaNode node = std::move (pending.back ());
         pending.pop_back ();
         ++visited_nodes;
-        if (!node->is_object ()) {
+        if (!node.schema->is_object ()) {
             continue;
         }
+        visit (*node.schema, node.pointer);
 
-        for (const auto& [key, value] : node->items ()) {
+        if (auto ref = node.schema->find ("$ref");
+        ref != node.schema->end () && ref->is_string ()) {
+            const auto pointer = ref->get<std::string> ();
+            if (visited_refs.insert (pointer).second) {
+                if (const nlohmann::json* target = resolve_pointer (root, pointer)) {
+                    // resolve_pointer already parsed this text as a pointer.
+                    pending.push_back (
+                    { target, nlohmann::json::json_pointer (pointer.substr (1)) });
+                }
+            }
+        }
+        queue_subschemas (node, pending);
+    }
+}
+
+} // namespace
+
+std::vector<std::pair<std::string, size_t>>
+collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
+    std::map<std::string, size_t> counts;
+    walk_schema (schema, validation_root (schema, ref_roots),
+    [&counts] (const nlohmann::json& node, const nlohmann::json::json_pointer&) {
+        for (const auto& [key, value] : node.items ()) {
             if (unevaluatable_keywords ().contains (key)) {
                 ++counts[key];
             }
         }
-
-        if (auto ref = node->find ("$ref"); ref != node->end () && ref->is_string ()) {
-            const auto pointer = ref->get<std::string> ();
-            if (visited_refs.insert (pointer).second) {
-                if (const nlohmann::json* target = resolve_pointer (root, pointer)) {
-                    pending.push_back (target);
-                }
-            }
-        }
-        queue_subschemas (*node, pending);
-    }
-
+    });
     return { counts.begin (), counts.end () };
 }
 
@@ -483,16 +507,52 @@ void assert_extra_formats (valijson::SchemaParser& parser) {
     parser.addConstraintBuilder ("format", new FormatCheckBuilder);
 }
 
+/// How many schema paths an unrecorded failure lists before "and N more".
+constexpr size_t MAX_NAMED_SCHEMA_PATHS = 3;
+
+/// Every `propertyNames` keyword in @p schema, as a pointer into @p root, sorted.
+std::vector<std::string> property_names_pointers (const nlohmann::json& schema,
+const nlohmann::json& root) {
+    std::vector<std::string> pointers;
+    walk_schema (schema, root,
+    [&pointers] (const nlohmann::json& node, const nlohmann::json::json_pointer& at) {
+        if (node.contains ("propertyNames")) {
+            pointers.push_back ((at / "propertyNames").to_string ());
+        }
+    });
+    // A `$ref` target is reached once through the ref and once in place.
+    std::ranges::sort (pointers);
+    pointers.erase (std::ranges::unique (pointers).begin (), pointers.end ());
+    return pointers;
+}
+
 /**
  * The failure for a body the validator refused without recording why.
  *
- * Its path is the body itself: a constraint that records nothing also leaves no
- * context to point at, so naming a deeper node would be a guess.
+ * Its data path is the body itself: a constraint that records nothing also
+ * leaves no context to point at. The schema is what can still be named, and
+ * `propertyNames` is the keyword valijson refuses silently, so its occurrences
+ * are listed. A `false` schema, or a `$ref` into a document the walk cannot
+ * read, has none; the message then claims no keyword.
  */
-SchemaFailure unrecorded_failure () {
+SchemaFailure unrecorded_failure (const nlohmann::json& schema, const nlohmann::json& root) {
     SchemaFailure failure;
-    failure.message = "Failed to validate against a constraint that reports no "
-                      "detail, such as 'propertyNames'.";
+    const auto pointers = property_names_pointers (schema, root);
+    if (pointers.empty ()) {
+        failure.message = "Failed to validate against a schema constraint that "
+                          "reports no detail.";
+        return failure;
+    }
+    std::string named;
+    for (size_t i = 0; i < std::min (pointers.size (), MAX_NAMED_SCHEMA_PATHS); ++i) {
+        named += (i == 0 ? "" : ", ") + pointers[i];
+    }
+    if (pointers.size () > MAX_NAMED_SCHEMA_PATHS) {
+        named += std::format (" and {} more", pointers.size () - MAX_NAMED_SCHEMA_PATHS);
+    }
+    failure.message = std::format ("Failed to validate against 'propertyNames' "
+                                   "at {}, which reports no detail.",
+    named);
     return failure;
 }
 
@@ -554,16 +614,18 @@ const nlohmann::json& body) {
         verdict.failures = std::move (structural);
     }
 
-    // The validator's own answer outranks the errors it recorded: a constraint
-    // can refuse the body and record nothing (#2719, valijson's `propertyNames`),
-    // and a verdict read from the errors alone would pass it.
+    // Validity is the validator's verdict, not the errors it recorded: a
+    // constraint can refuse the body and record nothing (#2719, valijson's
+    // `propertyNames`), and a verdict read from the errors alone would pass it.
+    // This block makes a refusal always leave a failure, so the count below is
+    // the whole rule.
     if (!accepted && verdict.failures_total == 0) {
         verdict.failures_total = 1;
-        verdict.failures.push_back (unrecorded_failure ());
+        verdict.failures.push_back (unrecorded_failure (schema, root));
     }
 
     verdict.checked = true;
-    verdict.valid   = accepted && verdict.failures_total == 0;
+    verdict.valid   = verdict.failures_total == 0;
     return verdict;
 }
 
