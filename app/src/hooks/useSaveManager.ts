@@ -23,6 +23,7 @@ import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
 import { TIMING } from "@/config/timing";
 import { SaveBlockedError } from "@/lib/elements";
+import { isDiskFullError } from "@/lib/disk-full";
 import { isFinalError } from "@/lib/query-client";
 
 /**
@@ -237,6 +238,7 @@ export function useSaveManager({
 					// waiting.
 					void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
 				}
+				if (isDiskFullError(error)) return "disk-full";
 				return isFinalError(error) ? "final" : "failed";
 			}
 		});

@@ -173,6 +173,7 @@ TEST_F (ErrorShapeRouteTest, DefaultCodeFollowsTheStatus) {
     EXPECT_EQ (error_body (409, "m")["error"]["code"], "conflict");
     EXPECT_EQ (error_body (502, "m")["error"]["code"], "bad_gateway");
     EXPECT_EQ (error_body (503, "m")["error"]["code"], "unavailable");
+    EXPECT_EQ (error_body (507, "m")["error"]["code"], "insufficient_storage");
     EXPECT_EQ (error_body (500, "m")["error"]["code"], "internal_error");
 }
 

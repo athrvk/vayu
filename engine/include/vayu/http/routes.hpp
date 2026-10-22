@@ -102,6 +102,7 @@ inline const char* default_error_code (int status) {
     case 404: return "not_found";
     case 409: return "conflict";
     case 502: return "bad_gateway";
+    case 507: return "insufficient_storage";
     case 503: return "unavailable";
     default: return status >= 500 ? "internal_error" : "error";
     }
@@ -265,6 +266,43 @@ std::string_view code = {}) {
     res.set_content (
     error_body (status, message, code).dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
     "application/json");
+}
+
+/**
+ * @brief Answer the exception a resource write's `catch` caught (#2423).
+ *
+ * A `catch (const std::exception&)` that answered 400 for everything told a
+ * person with a full disk that their request was invalid, and the app does not
+ * retry a 4xx. The cases, by what the caller can do:
+ *
+ * - not a storage failure (a JSON parse error, a validation throw): 400 with
+ *   the exception's text, as before;
+ * - `SQLITE_FULL`: 507 `insufficient_storage` - free space and try again;
+ * - `SQLITE_BUSY` / `SQLITE_LOCKED`: 503 `unavailable` with `Retry-After: 1`;
+ * - any other SQLite failure: 500 `internal_error`.
+ *
+ * SQLite's text goes to the log and never into a storage failure's body: it
+ * names an internal condition the person cannot act on.
+ */
+inline void send_exception (httplib::Response& res, const std::exception& error) {
+    const auto storage = vayu::db::classify_storage_error (error);
+    if (!storage) {
+        send_error (res, 400, error.what ());
+        return;
+    }
+    vayu::utils::log_error ("db", "Storage write failed: " + storage->message);
+    switch (storage->kind) {
+    case vayu::db::StorageFailure::Full:
+        send_error (res, 507,
+        "The disk holding Vayu's data is full - free up space and try again");
+        return;
+    case vayu::db::StorageFailure::Busy:
+        res.set_header ("Retry-After", "1");
+        send_error (res, 503, "The Vayu database is busy - try again in a moment");
+        return;
+    case vayu::db::StorageFailure::Other: break;
+    }
+    send_error (res, 500, "Vayu could not save this change to its database - see the engine log for the cause");
 }
 
 /**

@@ -708,7 +708,7 @@ void register_request_example_routes (RouteContext& ctx) {
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
             "POST /requests/:id/examples - Error: " + std::string (e.what ()));
-            send_error (res, 400, e.what ());
+            send_exception (res, e);
         }
     });
 
@@ -737,7 +737,7 @@ void register_request_example_routes (RouteContext& ctx) {
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
             "PUT /requests/:id/examples/:exampleId - Error: " + std::string (e.what ()));
-            send_error (res, 400, e.what ());
+            send_exception (res, e);
         }
     });
 

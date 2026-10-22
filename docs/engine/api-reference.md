@@ -23,7 +23,8 @@ object carrying a machine-readable `code` and a human-readable `message`:
 
 `code` is per-status unless the route names a more specific one: `bad_request`
 (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict`
-(409), `bad_gateway` (502), `unavailable` (503), `internal_error` (5xx). Routes
+(409), `bad_gateway` (502), `unavailable` (503), `insufficient_storage` (507),
+`internal_error` (any other 5xx). Routes
 with their own vocabulary pass it instead - `invalid_config` (`POST /config`),
 `invalid_run_config` (`POST /runs`), and the `oauth2_*` family.
 
@@ -257,6 +258,24 @@ A field that has **no** default cannot be reset, so `null` is a `400` on either
 verb rather than a silently discarded write. Those fields are a collection's
 `name`, an environment's `name`, and a request's `collectionId`, `name`,
 `method` and `url`. Each is also required on create.
+
+### A storage failure is not a 400
+
+A create or update whose request was fine but whose database write failed does
+not answer `400` (issue #2423), because a `4xx` tells the caller to change the
+request and the app does not retry one. It is told apart by SQLite's own result
+code, and the body never quotes SQLite's text (the engine log does):
+
+| Cause | Status | `code` | The caller should |
+|-------|--------|--------|-------------------|
+| The disk holding the data is full (`SQLITE_FULL`) | `507` | `insufficient_storage` | free space, then repeat the call |
+| The database stayed locked past the busy timeout (`SQLITE_BUSY`, `SQLITE_LOCKED`) | `503` with `Retry-After: 1` | `unavailable` | repeat the call |
+| Any other SQLite failure (I/O error, read-only file, corruption) | `500` | `internal_error` | read the engine log |
+
+An exception that is not SQLite's (a body that is not JSON, a field that fails
+validation) stays a `400`. Every handler of a resource write answers through
+`send_exception` in `routes.hpp`; `SendExceptionGuard` fails the build on one
+that goes back to a bare `400`.
 
 ### A stored JSON field has a write-time cap
 
@@ -1377,6 +1396,9 @@ the null-vs-absent rule.
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
 engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
+
 ### PUT /collections/:id
 
 Update an existing collection. **Update only** - a `404` when the id does not
@@ -1406,6 +1428,9 @@ on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
 engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 **Cycle validation (both verbs):** `parentId` is validated to keep the
 collection tree acyclic, since a
@@ -1798,6 +1823,9 @@ names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
 the engine's field cap (issue #1485, [see below](#a-stored-json-field-has-a-write-time-cap)).
 
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
+
 Unlike a collection's `parentId` (which may name a collection not written yet,
 though not one in the trash), a request's `collectionId` **must** resolve to
 a stored collection. A request under no collection is unreachable: no
@@ -1870,6 +1898,9 @@ non-empty string or `null`, a malformed protocol setting (see
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
 `auth` is over the engine's field cap (issue #1485,
 [see below](#a-stored-json-field-has-a-write-time-cap)).
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ### DELETE /requests/:id
 
@@ -2199,6 +2230,9 @@ negative or not a number, and on a `savedFrom` beside a non-null `postmanRespons
 one column). `409` when the request
 already holds the maximum number of examples.
 
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
+
 ### PUT /requests/:id/examples/:exampleId
 
 Update one example. **Update only** - a `404` when the example does not exist,
@@ -2209,6 +2243,9 @@ value is a `400` - it records what a file said, and the export already
 regenerates each part of it an edit to `status` or `headers` makes stale.
 
 **Response:** the updated example object.
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ### DELETE /requests/:id/examples/:exampleId
 
@@ -2396,6 +2433,9 @@ helper; the document is never stored truncated. **A `content` the engine cannot
 read as JSON or YAML is a `400`** naming the line - storing it would leave a row
 that coverage, a sync and an export can each do nothing with, and none of those
 is a good place to find out.
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ### GET /specs/:id
 
@@ -4568,6 +4608,9 @@ the null-vs-absent rule.
 `variables` is over the engine's
 [field cap](#a-stored-json-field-has-a-write-time-cap).
 
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
+
 ### PUT /environments/:id
 
 Update an existing environment. **Update only** - a `404` when the id does not
@@ -4603,6 +4646,9 @@ it survives a restart and is shared by every client on the same database. See
 **Errors:** `404` if the environment does not exist; `400` on a `null` `name`;
 `413` naming the field, its size and the cap, when a serialized `variables` is
 over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ### DELETE /environments/:id
 
@@ -4681,6 +4727,9 @@ than the jar's - see [POST /execute](#post-execute) for what a redirect that
 changes origin does to them. The `Set-Cookie` lines of those intermediate hops
 are reported on the answer's `redirects` member, whether or not curl applied
 them.
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ### GET /cookies
 
@@ -4894,6 +4943,9 @@ is answered with the `409` below rather than landing beside the first.
 | `400` | A host that could never match (carries a scheme, a path, a port, or brackets, or a `*` outside the `*.example.com` form), a port outside `1..65535`, a non-integer `port`, a missing `host` / `certPath`, a `pem` entry with no `keyPath`, a `p12` entry that names one, a `certFormat` outside `pem` / `p12`, a `certFormat` the file's own bytes contradict, a file that is not readable, or a body `id`. |
 | `409` | Another entry already claims this `host` + `port`. Two rows for one target would make the certificate presented depend on row order, so the second is refused with the id of the first rather than silently shadowing it. |
 
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
+
 ### PUT /client-certificates/:id
 
 Update an entry. **Update only** - a missing id is a `404`, never a silent
@@ -4908,6 +4960,9 @@ Validation runs on the **merged** row, not on the body, so a `PUT` that moves
 only `keyPath` still proves the pair works together - and a `PUT` that names
 `certFormat: "p12"` without clearing `keyPath` is a `400`, because the merged
 row would be a bundle naming a key file.
+
+A storage failure answers `507`, `503` or `500`, never `400` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ### DELETE /client-certificates/:id
 
@@ -11007,9 +11062,10 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 401 | OAuth 2.0 provider rejected the token request |
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
-| 500 | Internal server error |
+| 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
-| 503 | Engine is shutting down (`POST /runs` only - see below) |
+| 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |
+| 507 | The disk holding the data is full (a resource write, `insufficient_storage`) |
 
 ## Notes
 

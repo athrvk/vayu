@@ -829,7 +829,7 @@ void handle_create_request (RouteContext& ctx, const httplib::Request& req, http
     } catch (const std::exception& e) {
         vayu::utils::log_error (
         "http", "POST /requests - Error: " + std::string (e.what ()));
-        send_error (res, 400, e.what ());
+        send_exception (res, e);
     }
 }
 
@@ -856,7 +856,7 @@ void handle_update_request (RouteContext& ctx, const httplib::Request& req, http
     } catch (const std::exception& e) {
         vayu::utils::log_error (
         "http", "PUT /requests/:id - Error: " + std::string (e.what ()));
-        send_error (res, 400, e.what ());
+        send_exception (res, e);
     }
 }
 
