@@ -10,9 +10,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "nested_json.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/oauth_client.hpp"
 
@@ -52,6 +54,19 @@ TEST_F (OAuthRouteTest, PostInvalidJsonIs400) {
     auto [status, body] = vayu::http::routes::oauth2_token_post (*db_, "not json");
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["code"], "oauth2_invalid_config");
+}
+
+// The code a body past the bound answers with is the route's own, not the
+// generic `bad_request`; the deep value rides beside a config that would
+// otherwise be tried, so a missing bound is not mistaken for a config error.
+TEST_F (OAuthRouteTest, PostBodyNestedPastTheBoundIs400WithTheRouteCode) {
+    auto [status, body] = vayu::http::routes::oauth2_token_post (*db_,
+    R"({"config":{},"extra":)" + vayu::tests::nested_array_text (100000) + "}");
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["code"], "oauth2_invalid_config");
+    EXPECT_EQ (body["error"]["message"].get<std::string> (),
+    "request body is nested deeper than " +
+    std::to_string (vayu::core::constants::request_body::MAX_JSON_DEPTH) + " levels");
 }
 
 TEST_F (OAuthRouteTest, PostInvalidConfigIs400) {

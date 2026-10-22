@@ -574,19 +574,15 @@ void register_reorder_routes (RouteContext& ctx) {
      * 400 naming the offending row, in which case nothing at all was written.
      */
     ctx.server.Post ("/reorder", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning ("http",
-            "POST /reorder - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
+        const auto body = parse_request_json (req.body);
+        if (!body) {
+            refuse_request_body (res, "POST /reorder", body.error ());
             return;
         }
         // A validation failure is the core's 400; only a write or serialization
         // failure reaches this catch, and that is a 500, not the client's fault.
         try {
-            auto [status, response] = reorder_response (ctx.db, body);
+            auto [status, response] = reorder_response (ctx.db, *body);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /reorder - " + std::to_string (status) + ": " +

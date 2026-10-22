@@ -109,12 +109,11 @@ nlohmann::json proxy_node (const TransportPolicy& policy) {
  */
 std::pair<int, nlohmann::json> connection_test (const std::string& request_body,
 const TransportPolicy& transport) {
-    nlohmann::json req;
-    try {
-        req = nlohmann::json::parse (request_body);
-    } catch (const std::exception&) {
-        return { 400, error_body (400, "Invalid JSON body") };
+    const auto parsed = parse_request_json (request_body);
+    if (!parsed) {
+        return as_response (parsed.error ());
     }
+    const nlohmann::json& req = *parsed;
 
     if (!req.is_object () || !req.contains ("url") || !req["url"].is_string ()) {
         return { 400, error_body (400, "Invalid 'url': must be an http or https URL") };

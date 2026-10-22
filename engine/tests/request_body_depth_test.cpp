@@ -7,11 +7,15 @@
 
 /**
  * @file tests/request_body_depth_test.cpp
- * @brief The body-depth bound (#2417) on the resource routes that parse their
- *        body through `parse_request_json`: `POST`/`PUT` on `/collections`
- *        and `/requests`, `POST /specs` and `POST /specs/diff`.
+ * @brief The body-depth bound (#2417, #2671) on the routes that parse their
+ *        body through `parse_request_json`: the resource routes
+ *        (`/collections`, `/requests`, `/specs`, `/specs/diff`), then
+ *        `/compose`, `/reorder`, `/specs/bind`, `/specs/sync`, `/import*`,
+ *        the `/oauth2` family, `/mock/start`, `/mock-issuer` and `/inbox`.
  *
- * `POST /runs` and `POST /execute` are held in run_config_validation_test.cpp.
+ * `POST /runs` and `POST /execute` are held in run_config_validation_test.cpp;
+ * the cores that take the body as a string (`connection_test`,
+ * `oauth2_token_post`, `import_fetch`) in their own route tests.
  * Driven through the registered handlers, because the parse lives in the
  * handler and not in the testable core it hands the tree to.
  */
@@ -31,6 +35,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -86,6 +91,15 @@ class RequestBodyDepthRouteTest : public ::testing::Test {
         vayu::http::routes::register_request_routes (*ctx_);
         vayu::http::routes::register_spec_routes (*ctx_);
         vayu::http::routes::register_spec_diff_routes (*ctx_);
+        vayu::http::routes::register_spec_bind_routes (*ctx_);
+        vayu::http::routes::register_spec_sync_routes (*ctx_);
+        vayu::http::routes::register_reorder_routes (*ctx_);
+        vayu::http::routes::register_compose_routes (*ctx_);
+        vayu::http::routes::register_import_routes (*ctx_);
+        vayu::http::routes::register_oauth_routes (*ctx_);
+        vayu::http::routes::register_mock_server_routes (*ctx_);
+        vayu::http::routes::register_mock_issuer_routes (*ctx_);
+        vayu::http::routes::register_inbox_routes (*ctx_);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -148,6 +162,54 @@ struct BodyCase {
     std::string path;
     std::string body;
 };
+
+/// A route whose refusals carry its own documented code, for both the text
+/// that is not JSON and the value that is nested too deep.
+struct CodedRoute {
+    std::string method;
+    std::string path;
+    std::string code;
+    /// A body of this route's shape with the deep value between these two, in
+    /// a member the route does not read, so only the bound can refuse it.
+    std::string before;
+    std::string after;
+
+    std::string body_with (const std::string& deep) const {
+        return before + deep + after;
+    }
+};
+
+constexpr const char* GENERIC_CODE = "bad_request";
+
+/// Every route `parse_request_json` guards that the resource routes above do
+/// not cover. A route whose handler answers a custom code for a malformed body
+/// (`/compose`, the OAuth routes, the mock issuer) names it, and the depth
+/// refusal answers the same one.
+const std::vector<CodedRoute>& other_routes () {
+    static const std::vector<CodedRoute> routes = {
+        { "POST", "/compose", "invalid_compose_request", R"({"extra":)", "}" },
+        { "POST", "/reorder", GENERIC_CODE, R"({"moves":[],"extra":)", "}" },
+        { "POST", "/specs/bind", GENERIC_CODE, R"({"spec":{"content":)", "}}" },
+        { "POST", "/specs/sync", GENERIC_CODE, R"({"extra":)", "}" },
+        { "POST", "/import", GENERIC_CODE, R"({"content":"x","extra":)", "}" },
+        { "POST", "/import/parse", GENERIC_CODE, R"({"content":"x","extra":)", "}" },
+        { "POST", "/import/document", GENERIC_CODE, R"({"content":"x","extra":)", "}" },
+        { "POST", "/import/apply", GENERIC_CODE, R"({"collections":[],"extra":)", "}" },
+        { "POST", "/import/fetch", GENERIC_CODE,
+        R"({"url":"http://127.0.0.1:1/x","extra":)", "}" },
+        { "POST", "/oauth2/token", "oauth2_invalid_config", R"({"config":{},"extra":)", "}" },
+        { "POST", "/oauth2/authorize/start", "oauth2_invalid_config",
+        R"({"config":{},"extra":)", "}" },
+        { "POST", "/oauth2/authorize/complete", "oauth2_invalid_config",
+        R"({"attemptId":"a","extra":)", "}" },
+        { "POST", "/mock/start", GENERIC_CODE, R"({"collectionId":"c","extra":)", "}" },
+        { "POST", "/mock-issuer/start", "mock_issuer_invalid_config", R"({"extra":)", "}" },
+        { "PUT", "/mock-issuer/missing", "mock_issuer_invalid_config", R"({"extra":)", "}" },
+        { "POST", "/inbox/start", GENERIC_CODE, R"({"extra":)", "}" },
+        { "PUT", "/inbox/missing", GENERIC_CODE, R"({"extra":)", "}" },
+    };
+    return routes;
+}
 
 } // namespace
 
@@ -227,4 +289,56 @@ TEST_F (RequestBodyDepthRouteTest, TextThatIsNotJsonIsA400OnEveryRouteWhateverIt
         vayu::http::routes::error_message_of (body).rfind ("Invalid JSON: ", 0), 0U)
         << method << " " << path << ": " << body.dump ();
     }
+}
+
+// Past what `dump ()` survives, in a field none of these routes reads, so that
+// only the bound can refuse it. Mutation check: put a raw
+// `nlohmann::json::parse (req.body)` back in one handler and its case answers
+// the core's own 400, or the test binary crashes on the first copy.
+TEST_F (RequestBodyDepthRouteTest, ADeepValueIsRefusedOnEveryOtherRouteWithItsOwnCode) {
+    const std::string deep = vayu::tests::nested_array_text (kCrashingDepth);
+    for (const auto& route : other_routes ()) {
+        const auto [status, answer] =
+        send_text (route.method, route.path, route.body_with (deep));
+        EXPECT_EQ (status, 400)
+        << route.method << " " << route.path << ": " << answer.dump ();
+        EXPECT_EQ (error_code_of (answer), route.code)
+        << route.method << " " << route.path;
+        EXPECT_EQ (vayu::http::routes::error_message_of (answer), body_depth_message ())
+        << route.method << " " << route.path;
+    }
+
+    EXPECT_TRUE (db_->get_collections ().empty ());
+    EXPECT_TRUE (db_->get_environments ().empty ());
+    EXPECT_TRUE (mock_server_manager_.list ().empty ());
+    EXPECT_TRUE (inbox_manager_.list ().empty ());
+    EXPECT_TRUE (mock_issuer_manager_.list ()["issuers"].empty ());
+
+    // And the engine is still answering.
+    EXPECT_FALSE (create ("/collections", { { "name", "after" } }).empty ());
+}
+
+// The custom codes are pinned for text that is not JSON as well: the depth
+// refusal and the parse failure answer the one code a client already matches.
+TEST_F (RequestBodyDepthRouteTest, TextThatIsNotJsonKeepsEachOtherRoutesCode) {
+    for (const auto& route : other_routes ()) {
+        const auto [status, body] = send_text (route.method, route.path, "{\"a\":\xff}");
+        EXPECT_EQ (status, 400)
+        << route.method << " " << route.path << ": " << body.dump ();
+        EXPECT_EQ (error_code_of (body), route.code)
+        << route.method << " " << route.path;
+        EXPECT_EQ (
+        vayu::http::routes::error_message_of (body).rfind ("Invalid JSON: ", 0), 0U)
+        << route.method << " " << route.path << ": " << body.dump ();
+    }
+}
+
+// An empty body is `{}` on `/mock/start` and not a parse failure; the helper
+// is only consulted for a body that has bytes.
+TEST_F (RequestBodyDepthRouteTest, AnEmptyMockStartBodyIsTheEmptyObjectNotAParseError) {
+    const auto [status, body] = send_text ("POST", "/mock/start", "");
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (
+    vayu::http::routes::error_message_of (body).rfind ("Invalid JSON", 0), 0U)
+    << body.dump ();
 }

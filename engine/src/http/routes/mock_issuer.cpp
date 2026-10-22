@@ -38,6 +38,9 @@ namespace mi = vayu::core::constants::mock_issuer;
 
 namespace {
 
+/// What a malformed `/mock-issuer` body or settings value answers with.
+constexpr std::string_view INVALID_CONFIG_CODE = "mock_issuer_invalid_config";
+
 int64_t now_ms () {
     return vayu::http::routes::now_ms ();
 }
@@ -672,7 +675,7 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
     auto parsed = parse_mock_issuer_settings (body);
     if (!parsed.ok) {
         out.ok            = false;
-        out.error_code    = "mock_issuer_invalid_config";
+        out.error_code    = std::string (INVALID_CONFIG_CODE);
         out.error_message = parsed.error;
         return out;
     }
@@ -807,13 +810,13 @@ void register_mock_issuer_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         nlohmann::json body = nlohmann::json::object ();
         if (!req.body.empty ()) {
-            try {
-                body = nlohmann::json::parse (req.body);
-            } catch (const nlohmann::json::exception& e) {
-                send_error (res, 400, std::string ("Invalid JSON: ") + e.what (),
-                "mock_issuer_invalid_config");
+            auto parsed = parse_request_json (
+            req.body, INVALID_CONFIG_CODE, {}, INVALID_CONFIG_CODE);
+            if (!parsed) {
+                refuse_request_body (res, "POST /mock-issuer/start", parsed.error ());
                 return;
             }
+            body = std::move (*parsed);
         }
         const auto result = ctx.mock_issuer_manager.start (body);
         if (!result.ok) {
@@ -848,21 +851,19 @@ void register_mock_issuer_routes (RouteContext& ctx) {
     ctx.server.Put (R"(/mock-issuer/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const nlohmann::json::exception& e) {
-            send_error (res, 400, std::string ("Invalid JSON: ") + e.what (),
-            "mock_issuer_invalid_config");
+        const auto body =
+        parse_request_json (req.body, INVALID_CONFIG_CODE, {}, INVALID_CONFIG_CODE);
+        if (!body) {
+            refuse_request_body (res, "PUT /mock-issuer/:id", body.error ());
             return;
         }
-        const auto result = ctx.mock_issuer_manager.update (id, body);
+        const auto result = ctx.mock_issuer_manager.update (id, *body);
         if (!result.found) {
             send_error (res, 404, "Mock issuer not found: " + id);
             return;
         }
         if (!result.ok) {
-            send_error (res, 400, result.error, "mock_issuer_invalid_config");
+            send_error (res, 400, result.error, INVALID_CONFIG_CODE);
             return;
         }
         res.status = 200;

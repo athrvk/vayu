@@ -1365,17 +1365,13 @@ void register_spec_sync_routes (RouteContext& ctx) {
      */
     ctx.server.Post (
     "/specs/sync", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning ("http",
-            "POST /specs/sync - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
+        const auto body = parse_request_json (req.body);
+        if (!body) {
+            refuse_request_body (res, "POST /specs/sync", body.error ());
             return;
         }
         try {
-            auto [status, response] = spec_sync_response (ctx.db, body);
+            auto [status, response] = spec_sync_response (ctx.db, *body);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /specs/sync - " + std::to_string (status) + ": " +
