@@ -698,18 +698,19 @@ per iteration in a way no row explains (an identity or generator token) cannot
 be checked ahead and is refused per submission.
 
 **Sending.** The check runs **once per send** and **once per run**, never per
-transfer. A binary body of at most 4 MiB is read in that pass and its bytes are
-shared by every transfer of the run; a larger one is hashed in that pass and
-streamed from disk per transfer (`Content-Length` from the planned size; a
-redirect rewinds it). A binary file that vanishes mid-run fails that transfer
-with libcurl's own read error. A **form part's** file is opened in that pass,
-on the path the check resolved and without following a final symlink, and every
-transfer of the send or run reads that open file: a link re-pointed or a file
-replaced at the path afterwards is not what is sent. A path a data row binds is
-the exception: it is checked when the run starts but opened per submission,
-through the same check again, so a large data file holds no file open per row.
-Its length is the one the
-open saw; a file truncated below it under the open handle fails the transfer.
+transfer. It opens the file it approved, on the path the check resolved and
+without following a final symlink, and everything after reads that open file,
+never the path again: a link re-pointed or a file replaced at the path after
+the check, or between a run's iterations, is not what is sent. A **binary
+body** of at most 4 MiB is read through it in that pass and its bytes are
+shared by every transfer of the run; a larger one is hashed through it in that
+pass and every transfer streams from it (`Content-Length` from the size the
+open saw; a redirect rewinds it). A **form part's** file is read from it by
+every transfer of the send or run. A path a data row binds is the exception:
+it is checked when the run starts but opened per submission, through the same
+check again, so a large data file holds no file open per row. A streamed body's
+or a part's length is the one the open saw; a file truncated below it under the
+open handle fails the transfer.
 A part with no declared Content-Type is typed by its filename's extension, then
 its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`,
 `htm`, `html`, `pdf`, `xml`), else `application/octet-stream`. A **disabled**

@@ -751,7 +751,7 @@ const std::function<DataBindResult (vayu::Request&, size_t row)>& bind) {
         return std::nullopt;
     }
     if (rows.empty () || !vayu::http::has_templated_file_path (request.body)) {
-        return files.prepare (request, vayu::http::PartFiles::KeptByPlan);
+        return files.prepare (request, vayu::http::OpenFiles::KeptByPlan);
     }
     for (size_t row = 0; row < rows.size (); ++row) {
         vayu::Request bound = request;

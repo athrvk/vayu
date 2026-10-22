@@ -335,9 +335,11 @@ enum class FormFieldType : std::uint8_t { Text, File };
  * (`file_grants`), both read by `vayu::http::FileAccessPolicy` (#2356). See
  * `vayu/http/file_ref.hpp` for the rule.
  *
- * The last three members are filled once per send or run by the plan step, never
- * stored: a file at or under `INLINE_FILE_LIMIT` is read once into
- * `inline_bytes` and shared by every transfer of a run; a larger one streams.
+ * The last four members are filled once per send or run by the plan step, never
+ * stored or serialised, all off the one file the rule approved and opened: a
+ * file at or under `INLINE_FILE_LIMIT` is read once into `inline_bytes` and
+ * shared by every transfer of a run; a larger one streams from `approved`,
+ * never from `src` again (#2678).
  */
 struct FileRef {
     std::string src;
@@ -346,10 +348,12 @@ struct FileRef {
     std::shared_ptr<const std::string> inline_bytes;
     std::string sha256;
     std::uint64_t size = 0;
+    // The open file a streamed body is read from; null for an inline one.
+    std::shared_ptr<const vayu::http::ApprovedFile> approved;
 };
 
-/// The largest file a run reads once and shares across its transfers; larger
-/// files stream from disk per transfer.
+/// The largest file a run reads once and shares across its transfers; a larger
+/// one is streamed from the open file the plan approved.
 inline constexpr std::size_t INLINE_FILE_LIMIT = std::size_t{ 4 } * 1024 * 1024;
 
 /**

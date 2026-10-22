@@ -10,7 +10,7 @@
 #include <curl/curl.h>
 
 #include <chrono>
-#include <cstdio>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <memory>
@@ -32,17 +32,30 @@ std::function<void (size_t request_id, size_t downloaded, size_t total)>;
 namespace detail {
 
 /**
+ * @brief One transfer's read position in a request body's `ApprovedFile`: a
+ * streamed binary body's, or a form-data file part's.
+ *
+ * The file is shared by every transfer of the request (or the run); the offset
+ * is this transfer's alone, so concurrent transfers never share a position.
+ * Holding the file keeps it open for as long as libcurl can read through this.
+ */
+struct FileReader {
+    std::shared_ptr<const ApprovedFile> file;
+    std::uint64_t offset = 0;
+};
+
+/**
  * @brief What a handle reads its request body from, owned for the transfer.
  *
  * libcurl keeps pointers to both - the multipart tree of a `form-data` body,
- * and the open file a large `binary` body streams from (`CURLOPT_READDATA`) -
+ * and the reader a large `binary` body streams through (`CURLOPT_READDATA`) -
  * so each has to outlive the transfer and be released once it is done with the
  * handle. One holder for both drivers: a local for the single-request client
  * and the SSE consumer, a member of `TransferData` for the event loop.
  */
 struct BodySource {
     curl_mime* mime = nullptr;
-    std::unique_ptr<std::FILE, int (*) (std::FILE*)> stream{ nullptr, &std::fclose };
+    FileReader stream;
 
     BodySource () = default;
     ~BodySource ();
@@ -102,9 +115,9 @@ struct TransferData {
     CurlErrorBuffer errors;
     struct curl_slist* headers_list = nullptr;
     struct curl_slist* resolve_list = nullptr; // DNS pre-resolution list
-    /// The body source attached to the handle (a multipart tree, or the file
-    /// a large binary body streams from), released with the rest of this
-    /// transfer's curl state.
+    /// The body source attached to the handle (a multipart tree, or the
+    /// reader a large binary body streams through), released with the rest of
+    /// this transfer's curl state.
     BodySource body;
 
     TransferData () = default;
