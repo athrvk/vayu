@@ -550,9 +550,22 @@ jobs:
 
       - name: Report what the cache now holds
         shell: bash
+        # The directory the cache step saves, by the same expression. Inside
+        # the container `github.workspace` is the host's path, not the working
+        # directory (see release.yml), so a relative `.vcpkg-archives` looked
+        # where nothing was written and failed the job before the save ran.
+        env:
+          ARCHIVES: ${{ github.workspace }}/.vcpkg-archives
         run: |
-          count=$(find .vcpkg-archives -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')
-          size=$(du -sh .vcpkg-archives 2>/dev/null | cut -f1)
+          # Windows hands over D:\a\...; Git Bash reads D:/a/... reliably.
+          archives="${ARCHIVES//\\//}"
+          # Tested first: under the step's pipefail, `find` on a missing
+          # directory ended the script on this line, before the error below.
+          count=0 size=
+          if [ -d "$archives" ]; then
+            count=$(find "$archives" -type f -name '*.zip' | wc -l | tr -d ' ')
+            size=$(du -sh "$archives" | cut -f1)
+          fi
           echo "### Warmed \`${{ runner.os }}\` vcpkg cache" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Packages archived: \`${count:-0}\`" >> "$GITHUB_STEP_SUMMARY"
@@ -603,12 +616,15 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # release.yml's step, for its reasons.
-      - name: Install git and zstd (container)
+      # release.yml's step, for its reasons, plus libatomic1: pnpm 11 is a
+      # standalone binary that links libatomic.so.1, which the bare image lacks
+      # (exit 127 at Setup pnpm). release.yml gets it as a dependency of GCC 13
+      # from the toolchain action, which this job does not run.
+      - name: Install git, zstd and libatomic1 (container)
         if: matrix.container
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd libatomic1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
