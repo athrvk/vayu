@@ -525,6 +525,88 @@ describe("MCP protocol handshake (in-memory)", () => {
 	});
 });
 
+/**
+ * `run_collection_smoke` reports a tick per row to a client that asked for
+ * progress (#2451). The ask is the request's `progressToken`, which the SDK
+ * client adds when `callTool` is given `onprogress`; a call without it must
+ * put nothing on the wire.
+ */
+describe("progress notifications", () => {
+	const SMOKE_ROWS = ["a", "b", "c"].map((id) => ({
+		id,
+		name: `req ${id}`,
+		method: "GET",
+		url: `https://api.example.com/${id}`,
+	}));
+
+	function smokeClient() {
+		return fakeClient({
+			listRequests: vi.fn().mockResolvedValue(SMOKE_ROWS),
+			composeRequest: async ({ requestId }: { requestId: string }) => ({
+				method: "GET",
+				url: `https://api.example.com/${requestId}`,
+			}),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+	}
+
+	/** Every `notifications/progress` any in-memory transport sent while @p run ran. */
+	async function progressSent(run: () => Promise<unknown>) {
+		const send = vi.spyOn(InMemoryTransport.prototype, "send");
+		try {
+			await run();
+			return send.mock.calls
+				.map(
+					([message]) => message as { method?: string; params?: Record<string, unknown> }
+				)
+				.filter((message) => message.method === "notifications/progress");
+		} finally {
+			send.mockRestore();
+		}
+	}
+
+	it("delivers a tick per row to a call that sent a progressToken, before the result", async () => {
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"] },
+			client: smokeClient(),
+		});
+		const heard: Array<{ progress: number; total?: number; message?: string }> = [];
+		const sent = await progressSent(async () => {
+			await client.callTool(
+				{ name: "run_collection_smoke", arguments: { collectionId: "c1" } },
+				{ onprogress: (p) => heard.push(p) }
+			);
+		});
+
+		// Non-empty before the loop reads it: 0/3, then one per row.
+		expect(heard).toHaveLength(SMOKE_ROWS.length + 1);
+		expect(heard.map((p) => p.progress)).toEqual([0, 1, 2, 3]);
+		expect(heard.every((p) => p.total === SMOKE_ROWS.length)).toBe(true);
+		expect(heard.slice(1).map((p) => p.message)).toEqual(["1/3 ok", "2/3 ok", "3/3 ok"]);
+		// One token for the whole call, and it is the one the client sent.
+		expect(new Set(sent.map((n) => n.params?.progressToken)).size).toBe(1);
+		await server.close();
+	});
+
+	it("sends no progress notification to a call that sent no progressToken", async () => {
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"] },
+			client: smokeClient(),
+		});
+		let res: unknown;
+		const sent = await progressSent(async () => {
+			res = await client.callTool({
+				name: "run_collection_smoke",
+				arguments: { collectionId: "c1" },
+			});
+		});
+		// The run happened, so the empty list is an absence and not a no-op call.
+		expect(res).toMatchObject({ structuredContent: { total: SMOKE_ROWS.length, passed: 3 } });
+		expect(sent).toEqual([]);
+		await server.close();
+	});
+});
+
 describe("resources", () => {
 	it("lists the static resources", async () => {
 		const { client, server } = await connectClient();

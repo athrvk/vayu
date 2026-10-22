@@ -3837,6 +3837,136 @@ describe("run_collection_smoke", () => {
 		expect(descriptionOf(tool)).toMatch(/DIRECT requests/);
 		expect(descriptionOf(tool)).toMatch(/one at a time/);
 	});
+
+	test("the tool description steers a large collection to run_collection and says it reports progress", () => {
+		const text = descriptionOf(TOOLS.find((t) => t.name === "run_collection_smoke"));
+		expect(text).toMatch(/past about 25 requests or on a slow API use run_collection/);
+		expect(text).toMatch(/get_run_report/);
+		expect(text).toMatch(/Reports progress when the client asks/);
+	});
+
+	/**
+	 * A long smoke run was silent until it finished (#2451). The client hears
+	 * of it through `ctx.progress`, which exists only when it sent a
+	 * `progressToken`; every row ticks it exactly once, however the row ended.
+	 */
+	describe("progress", () => {
+		const SECRET = "s3cr3t-token-value";
+
+		/** Five rows, one per way a row can end; each carries SECRET wherever a row could echo it. */
+		function mixedRows() {
+			const rows = ["ok", "compose", "offlist", "status", "send"].map((kind, i) => ({
+				id: `r${i + 1}`,
+				name: `${kind} ${SECRET}`,
+				method: "GET",
+				url: `https://${kind === "offlist" ? "evil.test" : "api.example.com"}/${kind}?k=${SECRET}`,
+			}));
+			const byId = new Map(rows.map((r) => [r.id, r]));
+			return fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi
+					.fn()
+					.mockImplementation(({ requestId }: { requestId: string }) => {
+						if (requestId === "r2") {
+							return Promise.reject(new Error(`compose failed for ${SECRET}`));
+						}
+						const row = byId.get(requestId)!;
+						return Promise.resolve({ method: row.method, url: row.url, requestId });
+					}),
+				executeRequest: vi
+					.fn()
+					.mockImplementation(({ requestId }: { requestId: string }) => {
+						if (requestId === "r5")
+							return Promise.reject(new Error(`send failed ${SECRET}`));
+						return Promise.resolve({
+							status: requestId === "r4" ? 500 : 200,
+							testResults: [],
+						});
+					}),
+			});
+		}
+
+		const smoke = (ctx: ToolContext) =>
+			dispatchTool("run_collection_smoke", { collectionId: "c1" }, ctx);
+		const onApi = { allowlist: ["api.example.com"] };
+
+		test("ticks 0/total, then once per row, for a collection that all passes", async () => {
+			const rows = [1, 2, 3, 4, 5].map((n) => ({
+				id: `r${n}`,
+				name: `n${n}`,
+				method: "GET",
+				url: `https://api.example.com/${n}`,
+			}));
+			const client = fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve({
+						method: "GET",
+						url: `https://api.example.com/${requestId}`,
+					})
+				),
+				executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+			});
+			const progress = vi.fn();
+			const res = await smoke({ ...ctxWith(client, onApi), progress });
+			expect(res.structuredContent).toMatchObject({ total: 5, passed: 5 });
+			expect(progress.mock.calls).toEqual([
+				[0, 5],
+				[1, 5, "1/5 ok"],
+				[2, 5, "2/5 ok"],
+				[3, 5, "3/5 ok"],
+				[4, 5, "4/5 ok"],
+				[5, 5, "5/5 ok"],
+			]);
+		});
+
+		test("a skipped row, a compose failure, a bad status and a send error each still tick", async () => {
+			const progress = vi.fn();
+			const res = await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			expect(res.structuredContent).toMatchObject({
+				total: 5,
+				passed: 1,
+				failed: 3,
+				skipped: 1,
+			});
+			expect(progress.mock.calls).toEqual([
+				[0, 5],
+				[1, 5, "1/5 ok"],
+				[2, 5, "2/5 failed"],
+				[3, 5, "3/5 skipped"],
+				[4, 5, "4/5 failed"],
+				[5, 5, "5/5 failed"],
+			]);
+		});
+
+		test("a message is an index and a status word, never a name, url or error text", async () => {
+			const progress = vi.fn();
+			await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			const messages = progress.mock.calls.map(([, , message]) => message).filter(Boolean);
+			// Non-empty, so the loop below cannot pass by reading nothing.
+			expect(messages).toHaveLength(5);
+			for (const message of messages) {
+				expect(message).toMatch(/^\d+\/5 (ok|skipped|failed)$/);
+				expect(message).not.toContain(SECRET);
+			}
+		});
+
+		test("an empty collection ticks nothing", async () => {
+			const progress = vi.fn();
+			const client = fakeClient({ listRequests: vi.fn().mockResolvedValue([]) });
+			await smoke({ ...ctxWith(client, onApi), progress });
+			expect(progress).not.toHaveBeenCalled();
+		});
+
+		test("without ctx.progress the result is the same", async () => {
+			const progress = vi.fn();
+			const plain = await smoke(ctxWith(mixedRows(), onApi));
+			const ticked = await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			expect(progress).toHaveBeenCalled();
+			expect(plain.isError).toBeFalsy();
+			expect(plain.structuredContent).toEqual(ticked.structuredContent);
+		});
+	});
 });
 
 /**

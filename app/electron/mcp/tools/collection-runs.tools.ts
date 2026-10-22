@@ -86,7 +86,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a collection takes as long as its requests added together: past about 25 requests or on a slow API use run_collection (one stored run with a run id, `recursive` available, read with get_run_report), and keep this for a bounded pass/fail matrix. Reports progress when the client asks. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic and, as the app's Send does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_POINTER +
@@ -147,6 +147,21 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			let failed = 0;
 			let skipped = 0;
 
+			// One tick per row, whatever became of it. The message is an index and a
+			// status word only: the masking that covers a row's url and error text
+			// (`runOutputShape`) can run only once the loop is over, so nothing a
+			// request resolved to may ride a mid-run string (#2451).
+			const tick = () => {
+				const row = results[results.length - 1];
+				const status = row.skipped === true ? "skipped" : row.ok === true ? "ok" : "failed";
+				ctx.progress?.(
+					results.length,
+					list.length,
+					`${results.length}/${list.length} ${status}`
+				);
+			};
+			if (list.length > 0) ctx.progress?.(0, list.length);
+
 			for (const { item, folder } of list) {
 				const req = (item ?? {}) as {
 					id?: string;
@@ -177,6 +192,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						error: err instanceof Error ? err.message : String(err),
 					});
 					failed++;
+					tick();
 					continue;
 				}
 				const method = String(outgoing.method ?? "GET");
@@ -196,6 +212,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						reason: gate.error,
 					});
 					skipped++;
+					tick();
 					continue;
 				}
 				try {
@@ -252,6 +269,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					});
 					failed++;
 				}
+				tick();
 			}
 
 			// A row's `url`, `reason`, `error` and failing test lines are what the
