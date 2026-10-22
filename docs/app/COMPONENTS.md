@@ -23,7 +23,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 │   ├── <CommandSearchBar />             // Input-shaped trigger for the ⌘K palette; never its own search
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
-├── <UpdateBanner />
+├── <UpdateBanner />                     // components/shared/UpdateBanner.tsx - a newer release: progress, "Verifying", restart-to-install, or why the installer was refused (#2372)
 ├── <KeepAwakePrompt />                  // components/shared/KeepAwakePrompt.tsx - asks once about a run long enough for the machine to sleep under it (#1357)
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
@@ -1957,6 +1957,27 @@ the engine keeps reporting the record for as long as its marker file stands - a
 relaunch against an already-running engine would otherwise re-announce a wipe
 the user had already acknowledged. A later recovery carries a later `at` and so
 is a different event.
+
+## Update Banner (`components/shared/UpdateBanner.tsx`)
+
+One line (`h-banner`) driven by `useAppUpdate`, which subscribes to the main
+process's `update:*` events. On the silent platforms (Windows, Linux AppImage)
+it walks `Vayu X is available.` (notify path only) -> `Downloading Vayu X… 42%`
+-> `Verifying Vayu X…` -> `Vayu X is ready to install.` with **Restart &
+install**. The Verifying line replaces the percentage once the download reaches
+100%: the main process sends `update:downloaded` only after the installer's
+build-provenance attestation checks out, which takes seconds, and a bar parked
+at 100% reads as a hang.
+
+When the attestation does not verify (issue #2372) the main process sends
+`update:verificationFailed` instead, and the banner reads `Couldn't verify Vayu
+X. <reason>` with **View release** in place of Restart; the whole line is also
+the `title`, since `truncate` would clip the reason. No system notification is
+posted for it - the `updateReady` kind says "ready". The failure lives in
+`stores/update-verification-store.ts` rather than in the hook, because
+Settings > Updates (`UpdatesCard`) shows the same sentence ahead of its last
+check answer and mounts long after the event; the next `update:available` or
+`update:downloaded` clears it.
 
 ## Non-Loopback Badge (`components/shared/NonLoopbackBadge.tsx`)
 

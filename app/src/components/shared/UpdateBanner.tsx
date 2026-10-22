@@ -12,21 +12,52 @@ import { LabelSwap } from "@/components/ui/label-swap";
 import { Progress } from "@/components/ui/progress";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { useCopy } from "@/hooks/useCopy";
+import type { UpdateVerificationFailure } from "@/types/electron";
 
 /**
  * Slim banner that appears when a newer Vayu release is available.
  *
  *   - silent platforms (Windows, Linux AppImage): shows a progress bar while
- *     the update downloads in the background, then a restart-to-install.
+ *     the update downloads in the background, says "Verifying" once the bytes
+ *     are in and the installer's build-provenance attestation is being checked,
+ *     then a restart-to-install. When the attestation does not verify (issue
+ *     #2372) it says why instead and offers the release page; nothing is
+ *     installed and there is no restart button.
  *   - macOS (ad-hoc signed): offer to copy the one-line installer command, and
  *     to quit so the command can replace the app it is pasted for.
  *   - other notify platforms (.deb): link to the release page.
  */
+/**
+ * The line the banner prints. The failure wins over every other state: it is
+ * the one outcome the user has to act on, and its reason is what they need.
+ */
+function bannerMessage(
+	update: { version: string },
+	state: {
+		readyToInstall: boolean;
+		downloadProgress: number | null;
+		verificationFailure: UpdateVerificationFailure | null;
+	}
+): string {
+	const { readyToInstall, downloadProgress, verificationFailure } = state;
+	if (verificationFailure) {
+		return `Couldn't verify Vayu ${verificationFailure.version}. ${verificationFailure.reason}`;
+	}
+	if (readyToInstall) return `Vayu ${update.version} is ready to install.`;
+	if (downloadProgress === null) return `Vayu ${update.version} is available.`;
+	const percent = Math.round(downloadProgress * 100);
+	// The bytes are in but `update:downloaded` waits on the attestation check,
+	// which takes seconds: a bar parked at 100% reads as a hang.
+	if (percent >= 100) return `Verifying Vayu ${update.version}…`;
+	return `Downloading Vayu ${update.version}… ${percent}%`;
+}
+
 function UpdateBanner() {
 	const {
 		update,
 		readyToInstall,
 		downloadProgress,
+		verificationFailure,
 		dismiss,
 		restartToInstall,
 		openReleasePage,
@@ -37,6 +68,11 @@ function UpdateBanner() {
 	if (!update) return null;
 
 	const downloading = !readyToInstall && downloadProgress !== null;
+	const message = bannerMessage(update, {
+		readyToInstall,
+		downloadProgress,
+		verificationFailure,
+	});
 
 	const copyInstallCommand = async () => {
 		if (!update.installCommand) return;
@@ -53,15 +89,18 @@ function UpdateBanner() {
 		// height of its own.
 		<div className="enter-fade relative flex h-banner items-center gap-3 border-b border-border bg-secondary/60 px-4 text-sm">
 			<ArrowUpCircle className="size-icon shrink-0 text-primary" />
-			<span className="flex-1 truncate text-secondary-foreground">
-				{readyToInstall
-					? `Vayu ${update.version} is ready to install.`
-					: downloading
-						? `Downloading Vayu ${update.version}… ${Math.round(downloadProgress * 100)}%`
-						: `Vayu ${update.version} is available.`}
+			{/* `title` carries the whole line: the reason is what the user needs
+			    and `truncate` would clip it on a narrow window. */}
+			<span className="flex-1 truncate text-secondary-foreground" title={message}>
+				{message}
 			</span>
 
-			{readyToInstall ? (
+			{verificationFailure ? (
+				<Button size="sm" variant="secondary" onClick={openReleasePage}>
+					<ExternalLink className="size-icon" />
+					View release
+				</Button>
+			) : readyToInstall ? (
 				<Button size="sm" onClick={restartToInstall}>
 					<RotateCw className="size-icon" />
 					Restart &amp; install
