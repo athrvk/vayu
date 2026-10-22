@@ -166,6 +166,19 @@ the write it exists to guard. Both are called out at their site, and they are
 the shape of exception to argue for - bounded, local, and load-bearing - not a
 precedent for reaching further.
 
+#### One read that takes no lock
+
+`Database::get_run_snapshot` (#2679) is the one read that does not take the
+DB mutex: it reads a run row through a second, read-only connection with a
+small mutex of its own, which WAL lets read the last commit while the main
+connection writes. A bounded writer still holds the DB mutex for longer than a
+poll should wait (a results chunk whose commit runs the automatic WAL
+checkpoint); this read waits for none of it. What it gives up is composing
+with anything: it sees only what was committed before it, never a write in
+flight, and no lock scope can include it. A read that decides a write is
+`get_run` under the DB mutex. [`runs`](db-schema.md#runs) has the connection's
+settings.
+
 ### Listeners
 
 This is the engine's whole listener inventory. The management API is the only long-lived one;
@@ -434,7 +447,9 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   The results go in chunks of `RESULTS_WRITE_CHUNK_ROWS` (250), one transaction and one DB mutex
   acquisition each, with a 1 ms pause off the mutex between chunks (#2548): the run is still
   `running` while it flushes, and a 10,000-row flush written whole held the mutex for 240-400 ms,
-  so a live report poll waited out all of it. A result and its captured body share a chunk; a
+  so a live report poll waited out all of it. The poll now waits for no chunk: it reads only the
+  run row, through `get_run_snapshot`, which takes no DB mutex (#2679, [One read that takes no
+  lock](#one-read-that-takes-no-lock)). A result and its captured body share a chunk; a
   failure part-way keeps the chunks before it
   ([`results`](db-schema.md#results))
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only

@@ -15,18 +15,22 @@
  * under contention - the concurrency the recursive_mutex is there to tame.
  *
  * The add_results_batch tests at the end guard its chunked write (#2548): one
- * transaction per chunk, the mutex released between them.
+ * transaction per chunk, the mutex released between them. The get_run_snapshot
+ * tests after them guard the run-row read that takes no DB mutex (#2679).
  */
 
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <map>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -242,6 +246,56 @@ TEST_F (DatabaseConcurrencyTest, ChunkedBatchLetsAReaderInBetweenChunks) {
     EXPECT_LT (observed, count)
     << "the reader saw only the finished batch, never one between chunks";
     EXPECT_EQ (db_->get_results_without_traces ("run_1").size (), count);
+}
+
+// get_run_snapshot reads the run row through its own connection (#2679), so it
+// answers while another thread holds the DB mutex - here for as long as the
+// test wants, standing in for a results chunk and the WAL checkpoint inside its
+// commit - and it sees the status flip committed under that same hold.
+// Mutation check: make get_run_snapshot call get_run and the read never
+// finishes while the mutex is held.
+TEST_F (DatabaseConcurrencyTest, RunSnapshotAnswersWhileTheMutexIsHeld) {
+    std::promise<void> holding;
+    std::promise<void> release;
+    std::thread holder ([this, &holding, released = release.get_future ()] {
+        db_->with_lock ([&] {
+            db_->update_run_status ("run_1", vayu::RunStatus::Completed);
+            holding.set_value ();
+            released.wait ();
+        });
+    });
+    holding.get_future ().wait ();
+
+    auto read = std::async (
+    std::launch::async, [this] { return db_->get_run_snapshot ("run_1"); });
+    const bool answered = vayu::tests::wait_until ([&] {
+        return read.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    });
+    release.set_value ();
+    holder.join ();
+
+    ASSERT_TRUE (answered) << "the snapshot read waited on the held DB mutex";
+    const auto run = read.get ();
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Completed);
+}
+
+// The reader keeps up with every commit, not just the one before it opened.
+TEST_F (DatabaseConcurrencyTest, RunSnapshotSeesEachCommitAndAMissingRun) {
+    const auto before = db_->get_run_snapshot ("run_1");
+    ASSERT_HAS_VALUE (before);
+    EXPECT_EQ (before->status, vayu::RunStatus::Running);
+
+    db_->update_run_summary ("run_1", R"({"totalRequests":1})");
+    db_->update_run_status ("run_1", vayu::RunStatus::Failed);
+    const auto after = db_->get_run_snapshot ("run_1");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->status, vayu::RunStatus::Failed);
+    EXPECT_EQ (after->summary, R"({"totalRequests":1})");
+
+    db_->delete_run ("run_1");
+    EXPECT_FALSE (db_->get_run_snapshot ("run_1").has_value ());
+    EXPECT_FALSE (db_->get_run_snapshot ("run_never").has_value ());
 }
 
 } // namespace

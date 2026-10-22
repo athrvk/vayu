@@ -38,6 +38,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -558,6 +559,22 @@ struct Database::Impl {
     Storage storage;
     std::recursive_mutex mutex;
 
+    /// A second, read-only connection to the same file, for the one read that
+    /// must not wait on `mutex` (`Database::get_run_snapshot`, #2679). WAL lets
+    /// it read the last commit while a write holds `mutex`. Declared after
+    /// `storage` so it closes first: the last connection to close a WAL
+    /// database is the one that checkpoints it and deletes the `-wal`, and that
+    /// stays the main one. Opened on first use, never by the constructor or
+    /// `init`, whose migration, reclamation and checkpoint must meet no second
+    /// connection. Guarded by `snapshot_reader_mutex`, never by `mutex`.
+    std::optional<Storage> snapshot_reader;
+    std::mutex snapshot_reader_mutex;
+
+    /// The busy timeout `storage` is on, in ms, for `snapshot_reader` to copy
+    /// without taking `mutex`: the constructor's `busy_timeout` until `init`
+    /// applies `dbBusyTimeout`.
+    std::atomic<int> busy_timeout_ms;
+
     /// Page cache the open callback gives every connection, in bytes. Seeded
     /// with the compile-time default and overwritten once, from `dbCacheSize`,
     /// while `init` runs - which is exactly why that entry is restart-required:
@@ -638,11 +655,46 @@ struct Database::Impl {
         }
     }
 
+    /// `snapshot_reader`, opened on the first call. The caller holds
+    /// `snapshot_reader_mutex`. An open that fails leaves it unopened and
+    /// throws, so the next call tries again.
+    Storage& snapshot_storage () {
+        if (snapshot_reader) {
+            return *snapshot_reader;
+        }
+        try {
+            Storage& reader = snapshot_reader.emplace (make_vayu_storage (opened_file));
+            // No journal_mode, synchronous or wal_autocheckpoint: the file is
+            // already WAL, and this connection never writes, so never
+            // checkpoints either.
+            reader.on_open = [timeout = busy_timeout_ms.load ()] (sqlite3* db) {
+                sqlite3_busy_timeout (db, timeout);
+                // Unmapped: Windows refuses to truncate a file any connection
+                // has mapped, and a checkpoint on `storage` can need to
+                // (`reclaim_freed_pages`).
+                for (const char* sql : { "PRAGMA mmap_size = 0;", "PRAGMA query_only = ON;" }) {
+                    if (sqlite3_exec (db, sql, nullptr, nullptr, nullptr) != SQLITE_OK) {
+                        sqlite_orm::throw_translated_sqlite_error (db);
+                    }
+                }
+            };
+            // Held open for the reason `storage` is (see `open_forever` in the
+            // constructor); `snapshot_reader_mutex` is what makes sharing it
+            // across threads safe.
+            reader.open_forever ();
+            return reader;
+        } catch (...) {
+            snapshot_reader.reset ();
+            throw;
+        }
+    }
+
     /// @param busy_timeout how long a statement on this connection waits for
     ///        another connection's lock before failing with `SQLITE_BUSY`,
     ///        until `Database::init` applies `dbBusyTimeout` (issue #2420).
     Impl (const std::string& path, std::chrono::milliseconds busy_timeout)
-    : storage (make_vayu_storage (path)), opened_file (path) {
+    : storage (make_vayu_storage (path)),
+      busy_timeout_ms (static_cast<int> (busy_timeout.count ())), opened_file (path) {
         std::filesystem::path db_path (path);
         if (db_path.has_parent_path ()) {
             std::filesystem::create_directories (db_path.parent_path ());

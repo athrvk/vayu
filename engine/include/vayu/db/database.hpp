@@ -745,6 +745,16 @@ class Database {
     // db_runs.cpp.
     void create_run (const Run& run);
     std::optional<Run> get_run (const std::string& id);
+    /**
+     * @brief The run row as last committed, read without waiting on the DB
+     * mutex (#2679).
+     *
+     * Through a second, read-only connection, so a write in flight on the
+     * main one (a results chunk, the WAL checkpoint inside its commit) is
+     * neither waited for nor seen. For a read that must stay prompt while a
+     * run writes; `get_run` stays the read a read-then-write composes with.
+     */
+    std::optional<Run> get_run_snapshot (const std::string& id);
     void update_run_status (const std::string& id, RunStatus status);
     void update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries = 3);
     void update_run_end_time (const std::string& id); // Update end_time without changing status
