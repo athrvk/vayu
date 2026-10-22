@@ -121,11 +121,11 @@ std::optional<LocalPeerRule> local_peer_rule_for_source (const std::string& sour
 bool is_refused_local_peer (std::string_view peer_ip, int peer_port, const LocalPeerRule& rule);
 
 /// Whether a connection to @p peer_ip on @p peer_port reached what a URL
-/// naming @p host on @p port names, by the rule `LocalPeerRule` matches its
+/// naming @p named_host on @p named_port names, by the rule `LocalPeerRule` matches its
 /// source with: the same address, or loopback for a loopback name or address.
 /// How the reference rule recognises the proxy a transfer was configured with
 /// (#2605), which it does not refuse.
-bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view host, int port);
+bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view named_host, int named_port);
 
 /**
  * @brief Whether @p rule refuses @p url by its text alone (#2605): its host

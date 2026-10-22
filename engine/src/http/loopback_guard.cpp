@@ -228,9 +228,9 @@ bool is_refused_local_peer (std::string_view peer_ip, int peer_port, const Local
     return !is_source_host (*peer, peer_port, rule);
 }
 
-bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view host, int port) {
+bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view named_host, int named_port) {
     const auto peer = canonical_host (peer_ip);
-    return peer && is_named_by (*peer, peer_port, host, port);
+    return peer && is_named_by (*peer, peer_port, named_host, named_port);
 }
 
 bool is_refused_reference_url (const std::string& url, const LocalPeerRule& rule) {
