@@ -563,12 +563,15 @@ constexpr uint64_t SCRIPT_TIMEOUT_MAX_MS = 60000;
 /// Stack size for the script engine in bytes (256KB)
 constexpr size_t STACK_SIZE = size_t{ 256 } * 1024;
 /// The bounds of `scriptStackSize`, shared by the seeded entry and the clamp.
-/// The maximum is the smallest secondary-thread stack the engine can run on:
-/// macOS gives a secondary thread 512 KB, Windows 1 MiB, and no engine thread
-/// sets a stack size of its own, so a script stack above 512 KB overflows the
-/// native thread before QuickJS's own check can refuse the recursion.
+/// QuickJS measures its ceiling from the stack pointer where the runtime is
+/// created, already some frames into the worker thread, so the ceiling must
+/// leave room for those frames on the smallest thread the engine runs on:
+/// macOS gives a secondary thread 512 KB (Windows 1 MiB) and no engine thread
+/// sets a stack size of its own. A 512 KB ceiling overflows that thread before
+/// QuickJS refuses the recursion; 256 KB, the default, is the size proven on
+/// it, so the setting can only be lowered.
 constexpr size_t STACK_SIZE_MIN = size_t{ 64 } * 1024;
-constexpr size_t STACK_SIZE_MAX = size_t{ 512 } * 1024;
+constexpr size_t STACK_SIZE_MAX = STACK_SIZE;
 /// Whether to enable console output from scripts
 constexpr bool ENABLE_CONSOLE = true;
 /**
@@ -602,8 +605,8 @@ constexpr size_t MAX_ASYNC_JOBS_WITHOUT_TIMEOUT = 100000;
  *
  * The queue lives outside the QuickJS heap, so the script's memory limit does
  * not bound it: a loop that only queues timers would grow the engine process
- * until the deadline, or without end when the engine runs with no deadline. A script that
- * waits on a few sends holds a handful.
+ * until the deadline, or without end when the engine runs with no
+ * deadline. A script that waits on a few sends holds a handful.
  */
 constexpr size_t MAX_PENDING_TIMERS = 10000;
 } // namespace script_engine

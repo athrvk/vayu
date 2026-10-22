@@ -3249,11 +3249,13 @@ The **language** is current; what is missing is the **host environment**:
   runs.
 - **Memory limit**: 64MB per script execution
 - **Stack size**: 256KB per script execution (default), configurable through
-  `scriptStackSize` from 64KB to 512KB. The ceiling is what a secondary thread
-  has on macOS (512KB; Windows gives 1MB) - no engine thread sets its own stack
-  size - so a larger script stack would overflow the native thread before
-  QuickJS could refuse the recursion. A value an older engine stored above it
-  is read as 512KB.
+  `scriptStackSize` from 64KB to 256KB, so it can only be lowered. QuickJS
+  measures its ceiling from where the runtime is created, already some frames
+  into the worker thread, and a secondary thread has 512KB on macOS (Windows
+  gives 1MB) - no engine thread sets its own stack size - so a 512KB ceiling
+  would overflow the native thread before QuickJS could refuse the recursion;
+  256KB is the size proven on it. A value an older engine stored above it is
+  read as 256KB.
 - **Timeout**: 5 seconds per script (default), enforced by a wall-clock deadline - an
   infinite-loop script is aborted and reported as an error rather than hanging the
   engine. Configurable via the `scriptTimeout` setting (milliseconds, 1 to 60000);

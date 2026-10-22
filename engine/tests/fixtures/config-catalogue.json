@@ -621,7 +621,7 @@
     "default_value": "262144",
     "depends_on": "",
     "key": "scriptStackSize",
-    "max_value": "524288",
+    "max_value": "262144",
     "min_value": "65536",
     "requires_restart": false,
     "type": "integer"

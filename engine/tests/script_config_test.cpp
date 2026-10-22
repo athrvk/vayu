@@ -10,8 +10,9 @@
  * @brief The bounds of `scriptTimeout` and `scriptStackSize` (#2359).
  *
  * `scriptTimeout` used to accept 0, which the engine took as "no deadline", and
- * `scriptStackSize` accepted up to 1 MiB, past the 512 KB a macOS secondary
- * thread has. Three layers hold the new bounds, each tested here: the seeded
+ * `scriptStackSize` accepted up to 1 MiB, past what a 512 KB macOS secondary
+ * thread can hold once QuickJS has measured its ceiling from the frames already
+ * on it. Three layers hold the new bounds, each tested here: the seeded
  * entry (so `POST /config` refuses a value outside them), the resolvers (so a
  * value an older engine stored is brought inside them), and a real call site
  * (so the resolvers are actually read where a script runs).
@@ -116,11 +117,12 @@ StackCase{ "NegativeClampsToTheMinimum", -1, 65536 },
 StackCase{ "ZeroClampsToTheMinimum", 0, 65536 },
 StackCase{ "BelowTheMinimumClampsToIt", 65535, 65536 },
 StackCase{ "TheMinimumIsKept", 65536, 65536 },
-StackCase{ "InRangeIsUntouched", 262144, 262144 },
-StackCase{ "TheMaximumIsKept", 524288, 524288 },
-StackCase{ "AboveTheMaximumClampsToIt", 524289, 524288 },
-// The old maximum: a value `POST /config` used to accept.
-StackCase{ "AnOldMegabyteClampsToTheMaximum", 1048576, 524288 }),
+StackCase{ "InRangeIsUntouched", 131072, 131072 },
+StackCase{ "TheMaximumIsKept", 262144, 262144 },
+StackCase{ "AboveTheMaximumClampsToIt", 262145, 262144 },
+// The first maximum, then the one before it: values `POST /config` accepted.
+StackCase{ "AnOldHalfMegabyteClampsToTheMaximum", 524288, 262144 },
+StackCase{ "AnOldMegabyteClampsToTheMaximum", 1048576, 262144 }),
 [] (const ::testing::TestParamInfo<StackCase>& info) {
     return std::string (info.param.name);
 });
@@ -179,7 +181,7 @@ TEST_F (ScriptConfigDbTest, SeedsTheBoundsTheResolversClampTo) {
     const auto stack = db_->get_config_entry ("scriptStackSize");
     ASSERT_HAS_VALUE (stack);
     EXPECT_EQ (stack->min_value, std::optional<std::string> ("65536"));
-    EXPECT_EQ (stack->max_value, std::optional<std::string> ("524288"));
+    EXPECT_EQ (stack->max_value, std::optional<std::string> ("262144"));
 }
 
 // Mutation check: put the seeded minimum back to "0" and the first assertion
@@ -205,14 +207,14 @@ TEST_F (ScriptConfigDbTest, TheRouteRefusesAScriptTimeoutAboveTheMaximum) {
 }
 
 TEST_F (ScriptConfigDbTest, TheRouteRefusesAScriptStackSizeAboveTheMaximum) {
-    const auto [status, body] = post_config ("scriptStackSize", "524289");
+    const auto [status, body] = post_config ("scriptStackSize", "262145");
     EXPECT_EQ (status, 400) << body.dump ();
     EXPECT_EQ (db_->get_config_int ("scriptStackSize", -1),
     static_cast<int> (limits::STACK_SIZE));
 }
 
 TEST_F (ScriptConfigDbTest, TheRouteAcceptsAScriptStackSizeAtTheMaximum) {
-    const auto [status, body] = post_config ("scriptStackSize", "524288");
+    const auto [status, body] = post_config ("scriptStackSize", "262144");
     EXPECT_EQ (status, 200) << body.dump ();
 }
 
@@ -331,13 +333,13 @@ class ScriptConfigExecuteTest : public ScriptConfigDbTest {
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
 };
 
-// A workspace holding the old maximum (1 MiB) and the old "no limit" runs its
+// A workspace holding an old maximum (1 MiB) and the old "no limit" runs its
 // script on the clamped stack: as deep as the maximum allows, not as deep as the
 // stored value would have. Mutation check: build `send.script_config` in
 // `execution.cpp` from the raw `get_config_int` reads again and the depth
 // doubles, so the comparison reds (the script also runs with no deadline).
 TEST_F (ScriptConfigExecuteTest, AStoredOldMaximumRunsOnTheClampedStack) {
-    store ("scriptStackSize", "524288");
+    store ("scriptStackSize", "262144");
     const size_t at_the_maximum = recursion_depth_reached ();
     ASSERT_GT (at_the_maximum, 0U);
 
@@ -345,8 +347,8 @@ TEST_F (ScriptConfigExecuteTest, AStoredOldMaximumRunsOnTheClampedStack) {
     store ("scriptStackSize", "1048576");
     const size_t from_the_old_value = recursion_depth_reached ();
 
-    // Twice the stack reaches about twice as deep; the margin is wide of
-    // run-to-run frame differences and well short of that doubling.
+    // The raw 1 MiB would reach about four times as deep as the maximum; the
+    // margin is wide of run-to-run frame differences and well short of that.
     EXPECT_GT (from_the_old_value * 4, at_the_maximum * 3);
     EXPECT_LT (from_the_old_value * 3, at_the_maximum * 4);
 }
