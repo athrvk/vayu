@@ -191,6 +191,22 @@ Settings,
 General's **Open logs folder** button (`app:openLogsFolder`) opens
 `<data-dir>/logs/` in the OS file manager.
 
+The renderer chooses nothing about a line's size or ownership, so `log-ipc.ts`
+bounds what it sends. `msg` is cut at 2000 characters; `err` is kept only as an
+object with a string `name` and `message` (and an optional string `stack`), cut
+at 200, 2000 and 8000; `fields` is kept only as a plain object (an array or a
+string is dropped), at most 20 keys, each string value cut at 500, and a
+`fields` that still serialises past 4000 characters becomes `{"truncated":
+true}`. Every cut appends `...[truncated]`. The renderer's `ts`, `level`,
+`src`, `cat`, `msg` and `tid` fields are discarded so they cannot overwrite
+the record's own, and control characters in `msg` become spaces so a newline
+cannot forge a second console line. Unlike the engine, which never scans text,
+the URLs inside `msg`, `err.message`, `err.stack` and each string field value
+go through the same URL rule as a `url` field (userinfo, query and fragment
+dropped) before they are cut - the renderer is where a page's own errors quote
+the URL they failed on. This applies at that boundary only; a record the main
+process logs itself is redacted by field name alone, as above.
+
 ## Reading the files
 
 ```bash

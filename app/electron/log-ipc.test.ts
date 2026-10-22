@@ -139,6 +139,190 @@ describe("registerLogIpc - log:record validation", () => {
 	});
 });
 
+/** Registers the handler, sends one record, and returns what the renderer logger received. */
+function forward(record: unknown) {
+	const rendererLog = fakeLogger();
+	const { ipc, send } = fakeIpc();
+	registerLogIpc(ipc, { rendererLog, appLog: fakeLogger(), logsPath: () => "/logs" });
+	send(sender(1), record);
+	const [call] = rendererLog.calls as [string, string, Record<string, unknown>][];
+	return call ? { cat: call[0], msg: call[1], fields: call[2] } : null;
+}
+
+const TRUNCATION_MARKER = "...[truncated]";
+
+describe("registerLogIpc - bounding what a renderer sends", () => {
+	// Mutation check: delete the `truncate` call in `boundedText` and the msg
+	// keeps all 1 MB.
+	it("stores a 1 MB msg cut at 2000 characters with the marker", () => {
+		const sent = forward({ level: "info", cat: "renderer", msg: "x".repeat(1024 * 1024) });
+
+		expect(sent?.msg).toBe("x".repeat(2000) + TRUNCATION_MARKER);
+	});
+
+	it("stores a msg at the cap untouched", () => {
+		const sent = forward({ level: "info", cat: "renderer", msg: "x".repeat(2000) });
+
+		expect(sent?.msg).toBe("x".repeat(2000));
+	});
+
+	it("cuts err name, message and stack at 200, 2000 and 8000 characters", () => {
+		const sent = forward({
+			level: "error",
+			cat: "boundary",
+			msg: "threw",
+			err: { name: "n".repeat(500), message: "m".repeat(5000), stack: "s".repeat(20000) },
+		});
+
+		expect(sent?.fields.err).toEqual({
+			name: "n".repeat(200) + TRUNCATION_MARKER,
+			message: "m".repeat(2000) + TRUNCATION_MARKER,
+			stack: "s".repeat(8000) + TRUNCATION_MARKER,
+		});
+	});
+
+	it.each([
+		["a string", "boom"],
+		["an array", ["Error", "boom"]],
+		["a name that is not a string", { name: 1, message: "boom" }],
+		["a message that is not a string", { name: "Error", message: {} }],
+	])("drops err when it is %s", (_label, err) => {
+		const sent = forward({ level: "error", cat: "renderer", msg: "x", err });
+
+		expect(sent).not.toBeNull();
+		expect(sent?.fields).not.toHaveProperty("err");
+	});
+
+	it.each([
+		["a string", "just text"],
+		["an array", [{ a: 1 }]],
+	])("drops fields when it is %s", (_label, fields) => {
+		const sent = forward({ level: "info", cat: "renderer", msg: "x", fields });
+
+		expect(Object.keys(sent?.fields ?? {})).toEqual(["pid"]);
+	});
+
+	it("cuts a string field value at 500 characters", () => {
+		const sent = forward({
+			level: "info",
+			cat: "renderer",
+			msg: "x",
+			fields: { note: "v".repeat(900), count: 3 },
+		});
+
+		expect(sent?.fields.note).toBe("v".repeat(500) + TRUNCATION_MARKER);
+		expect(sent?.fields.count).toBe(3);
+	});
+
+	it("keeps at most 20 field keys", () => {
+		const fields = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`, i]));
+		const sent = forward({ level: "info", cat: "renderer", msg: "x", fields });
+
+		expect(Object.keys(sent?.fields ?? {}).filter((key) => key.startsWith("k"))).toHaveLength(
+			20
+		);
+	});
+
+	it("replaces fields serialising past 4000 characters with a truncated marker", () => {
+		const fields = Object.fromEntries(
+			Array.from({ length: 10 }, (_, i) => [`k${i}`, ["y".repeat(450)]])
+		);
+		const sent = forward({ level: "info", cat: "renderer", msg: "x", fields });
+
+		expect(sent?.fields).toEqual({ truncated: true, pid: 1 });
+	});
+
+	it("replaces fields JSON cannot serialise rather than throwing", () => {
+		const cyclic: Record<string, unknown> = {};
+		cyclic.self = cyclic;
+
+		const sent = forward({ level: "info", cat: "renderer", msg: "x", fields: { cyclic } });
+
+		expect(sent?.fields).toEqual({ truncated: true, pid: 1 });
+	});
+});
+
+describe("registerLogIpc - URL secrets in renderer text", () => {
+	const url = "https://u:p@h/p?code=abc&state=1";
+
+	// Mutation check: replace `boundedText`'s `stripUrlSecretsInText(text)` with
+	// `text` and the stack, msg and field assertions below all keep the secret.
+	it("strips credentials from an err stack, msg and string field", () => {
+		const sent = forward({
+			level: "error",
+			cat: "renderer",
+			msg: `fetch failed for ${url}`,
+			err: {
+				name: "Error",
+				message: `bad ${url}`,
+				stack: `Error: bad\n    at ${url} (app.js:1)`,
+			},
+			fields: { target: url },
+		});
+
+		expect(sent?.msg).toBe("fetch failed for https://h/p");
+		expect(sent?.fields.err).toEqual({
+			name: "Error",
+			message: "bad https://h/p",
+			stack: "Error: bad\n    at https://h/p (app.js:1)",
+		});
+		expect(sent?.fields.target).toBe("https://h/p");
+	});
+});
+
+describe("registerLogIpc - keys the logger owns", () => {
+	// Mutation check: delete the RESERVED_FIELD_KEYS loop in the handler and
+	// the renderer's `src`, `msg` and `cat` overwrite the record's own.
+	it("drops reserved renderer fields, so the record keeps its real values", () => {
+		const rendererLog = fakeLogger();
+		const { ipc, send } = fakeIpc();
+		registerLogIpc(ipc, { rendererLog, appLog: fakeLogger(), logsPath: () => "/logs" });
+
+		send(sender(1), {
+			level: "info",
+			cat: "renderer",
+			msg: "real",
+			fields: {
+				ts: "1970",
+				level: "debug",
+				src: "engine",
+				cat: "y",
+				msg: "x",
+				tid: 5,
+				component: "kept",
+			},
+		});
+
+		const [cat, msg, fields] = rendererLog.calls[0] as [
+			string,
+			string,
+			Record<string, unknown>,
+		];
+		expect([cat, msg]).toEqual(["renderer", "real"]);
+		expect(fields).toEqual({ component: "kept", pid: 1 });
+	});
+
+	it("still overrides a renderer-supplied pid with the sender's", () => {
+		const sent = forward({ level: "info", cat: "renderer", msg: "x", fields: { pid: 999 } });
+		expect(sent?.fields.pid).toBe(1);
+	});
+});
+
+describe("registerLogIpc - console safety", () => {
+	// Mutation check: delete the CONTROL_CHARACTERS replace and the msg keeps
+	// its newlines, which the console prints as separate lines.
+	it("turns control characters in msg into spaces so it stays on one console line", () => {
+		const sent = forward({
+			level: "info",
+			cat: "renderer",
+			msg: "one\n12:00:00.000 ERROR   main     forged\r\ttab\u0000",
+		});
+
+		expect(sent?.msg).toBe("one 12:00:00.000 ERROR   main     forged  tab ");
+		expect([...(sent?.msg ?? "")].some((char) => char.charCodeAt(0) < 0x20)).toBe(false);
+	});
+});
+
 describe("registerLogIpc - the per-second cap", () => {
 	// Mutation check: revert the RateLimiter's `warned` latch (warn on every
 	// over-limit call again) and this test's second assertion reds - the app

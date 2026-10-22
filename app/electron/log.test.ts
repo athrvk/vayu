@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { createLogger, applyFloorFromEngine, type LogLevel } from "./log";
+import { createLogger, applyFloorFromEngine, stripUrlSecretsInText, type LogLevel } from "./log";
 
 const schema = JSON.parse(
 	readFileSync(fromRepoRoot("docs/engine/log-record.schema.json"), "utf8")
@@ -182,6 +182,37 @@ describe("log.ts - owner-only files", () => {
 		const entries = readdirSync(logsDir);
 		expect(entries).toHaveLength(1);
 		expect(statSync(path.join(logsDir, entries[0])).size).toBeGreaterThan(0);
+	});
+});
+
+describe("log.ts - stripUrlSecretsInText", () => {
+	it("strips every URL in a sentence and leaves the words around them", () => {
+		expect(
+			stripUrlSecretsInText(
+				"from https://u:p@a.example/x?code=1 to http://b.example:8080/y#frag done"
+			)
+		).toBe("from https://a.example/x to http://b.example:8080/y done");
+	});
+
+	it("strips a URL that ends at a closing parenthesis", () => {
+		expect(stripUrlSecretsInText("failed (https://u:p@h/p?state=1) twice")).toBe(
+			"failed (https://h/p) twice"
+		);
+	});
+
+	it("returns text without a URL unchanged", () => {
+		const text = "plain sentence, key=value & a:b";
+		expect(stripUrlSecretsInText(text)).toBe(text);
+	});
+
+	it("leaves a bare path-and-query alone", () => {
+		const text = "GET /items?token=abc failed";
+		expect(stripUrlSecretsInText(text)).toBe(text);
+	});
+
+	it("scans a long run of letters in linear time", () => {
+		const text = "a".repeat(1_000_000);
+		expect(stripUrlSecretsInText(text)).toBe(text);
 	});
 });
 
