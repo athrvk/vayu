@@ -366,6 +366,11 @@ tracking issue.
   dereferences a null cache. A crash inside the sanitizer runtime, which is why
   no suppression could reach it. **Fixed** by undefining that macro for the TSan
   build only, so httplib compiles its plain synchronous `getaddrinfo` branch.
+  Since #2667 no build defines it: the same branch left a client's resolve
+  running against a returned stack frame on every glibc build, a failed request
+  and then a SIGSEGV that ASan cannot see because glibc is not instrumented.
+  `engine/CMakeLists.txt` removes it from `httplib::httplib`'s interface, and
+  `httplib_resolver_test.cpp` fails if it comes back.
 - **#959** - `windows-asan` failed one test, and it was not an MSVC quirk.
   `js_class_tag` reads an object's class through a `JS_Call`, which checks
   QuickJS's 256 KB interpreter stack; when 64 nested `js_deep_equal` frames

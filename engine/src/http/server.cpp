@@ -205,34 +205,36 @@ bool Server::start () {
 }
 
 void Server::stop () {
-    if (is_running_) {
-        server_.stop ();
+    // Not guarded by `is_running_`: an accept loop that ended on its own (an
+    // accept error the loop does not retry) has already cleared it, and its
+    // thread is still joinable - destroying that would terminate the process,
+    // and the daemon's wait treats exactly that listener as a reason to shut
+    // down. `httplib::Server::stop` is idempotent.
+    server_.stop ();
 
-        // Give the server thread a chance to exit gracefully. Waited on rather
-        // than polled: the 100 ms re-check this replaces was the whole of
-        // "Server stopped in 100ms" on every shutdown, since the accept loop
-        // is gone within a keep-alive check interval of `stop()`.
-        if (server_thread_.joinable ()) {
-            if (server_thread_exited_.wait_for (std::chrono::seconds (3)) ==
-            std::future_status::ready) {
-                server_thread_.join ();
-            } else {
-                vayu::utils::log_warning ("shutdown",
-                "Server thread did not exit after 3 seconds, detaching...");
-                server_thread_.detach ();
-            }
+    // Waited on rather than polled: the 100 ms re-check this replaces was the
+    // whole of "Server stopped in 100ms" on every shutdown, since the accept
+    // loop is gone within a keep-alive check interval of `stop()`.
+    if (server_thread_.joinable ()) {
+        if (server_thread_exited_.wait_for (std::chrono::seconds (3)) ==
+        std::future_status::ready) {
+            server_thread_.join ();
+        } else {
+            vayu::utils::log_warning ("shutdown",
+            "Server thread did not exit after 3 seconds, detaching...");
+            server_thread_.detach ();
         }
-        is_running_ = false;
     }
+    is_running_ = false;
 
-    // Outside the `is_running_` guard and after the listener is down, because
-    // "the server has stopped" must mean no engine work is still in flight
-    // (#646). A stream consumer is a worker like a run worker: it holds `db_`,
-    // reads `cookie_jar_` and is inside a curl transfer. `daemon.cpp` runs
-    // `curl_global_cleanup` between this call and `~Server`, so a stream joined
-    // only by the member destructor would still be transferring while curl's
-    // global state was torn down underneath it - the #125 defect, in the one
-    // worker RunManager does not own. Draining an idle manager is immediate.
+    // After the listener is down, because "the server has stopped" must mean
+    // no engine work is still in flight (#646). A stream consumer is a worker
+    // like a run worker: it holds `db_`, reads `cookie_jar_` and is inside a
+    // curl transfer. `daemon.cpp` runs `curl_global_cleanup` between this call
+    // and `~Server`, so a stream joined only by the member destructor would
+    // still be transferring while curl's global state was torn down underneath
+    // it - the #125 defect, in the one worker RunManager does not own.
+    // Draining an idle manager is immediate.
     sse_manager_.shutdown ();
 }
 
@@ -285,7 +287,6 @@ void Server::setup_routes () {
     // ==========================================
     // Register Modular Routes
     // ==========================================
-    // Note: route_ctx_ is a class member, ensuring it outlives the lambdas
     route_ctx_ = std::make_unique<routes::RouteContext> (
     routes::RouteContext{ server_, db_, run_manager_, shutdown_callback_,
     oauth_authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
