@@ -3209,8 +3209,8 @@ beside a plain textarea.
    whatever site it landed on. Descriptions arrive from imported Postman /
    Insomnia / OpenAPI files, which are third-party documents. Links therefore
    render as `<button>`, with no `href` in the DOM, and open via the
-   scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs, so
-   that override covers those too. Guarded by `markdown-view.test.tsx`.
+   `openExternalUrl` IPC (http(s) only, window must be focused, one open per
+   second). `remark-gfm` autolinks bare URLs, so that override covers those too. Guarded by `markdown-view.test.tsx`.
 
    This is no longer a single layer: #822 landed the refusal underneath it, so
    `electron/window-navigation.ts` makes the main window refuse a navigation that

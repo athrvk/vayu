@@ -149,9 +149,18 @@ const SANITIZE_SCHEMA: SanitizeSchema = {
 	strip: ["script", "style"],
 };
 
-/** Open in the system browser, never in this window. */
-function openExternal(url: string) {
-	void window.electronAPI?.openExternalUrl?.(url);
+/**
+ * Open in the system browser, never in this window. The main process refuses a
+ * window that is not focused and a second open within a second (#2378); a click
+ * has nothing more to say about that, so the rejection ends here rather than
+ * surfacing as an unhandled one.
+ */
+async function openExternal(url: string): Promise<void> {
+	try {
+		await window.electronAPI?.openExternalUrl?.(url);
+	} catch {
+		// Refused by the main process; the link simply does not open.
+	}
 }
 
 export default function MarkdownRenderer({ children }: { children: string }) {
@@ -176,7 +185,7 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 						 * caught it.
 						 */
 						e.stopPropagation();
-						if (href) openExternal(href);
+						if (href) void openExternal(href);
 					}}
 					className="text-primary-text underline underline-offset-2 transition-opacity hover:opacity-80 font-[inherit] text-[inherit]"
 				>
