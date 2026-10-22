@@ -28,6 +28,7 @@ import {
 import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
 import { presentCollection } from "../collection-shape.js";
 import { engineDownRemedy, settingRemedy } from "../remedy.js";
+import { targetPolicyRefusalOfErrorBody } from "../safety.js";
 import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 
@@ -97,6 +98,9 @@ function retryHint(err: EngineRequestError): string {
 
 export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
 	if (err instanceof EngineRequestError) {
+		// A streaming send refuses its final URL before the stream opens (#2521).
+		const refused = targetPolicyRefusalOfErrorBody(err.body, ctx.host);
+		if (refused) return errorResult(refused);
 		return errorResult(
 			`Engine error (${err.status}): ${err.body || err.message}${retryHint(err)}`
 		);
@@ -215,6 +219,11 @@ export async function callEngineForRunText(
 
 interface RunOutputOptions {
 	bound?: (value: unknown) => unknown;
+	/**
+	 * The tool error an answer stands for, or undefined to render it: an
+	 * engine refusal this server has a remedy for (`targetPolicyRefusal`).
+	 */
+	refusal?: (answer: unknown) => string | undefined;
 	/** The tool declares an `outputSchema`: answer as {@link callEngineStructured} does. */
 	structured?: boolean;
 	signal?: AbortSignal;
@@ -225,7 +234,7 @@ interface RunOutputOptions {
 async function withheldRunAnswer(
 	ctx: ToolContext,
 	fn: () => Promise<unknown>,
-	options: Pick<RunOutputOptions, "signal" | "auth">,
+	options: Pick<RunOutputOptions, "signal" | "auth" | "refusal">,
 	render: (withheld: unknown) => ToolResult
 ): Promise<ToolResult> {
 	let answer: unknown;
@@ -234,6 +243,8 @@ async function withheldRunAnswer(
 	} catch (err) {
 		return engineErrorResult(err, ctx);
 	}
+	const refused = options.refusal?.(answer);
+	if (refused) return errorResult(refused);
 	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
 	return render(withhold(answer));
 }

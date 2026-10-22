@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { checkAllowlist } from "../safety.js";
+import { checkComposedTarget, targetPolicyRefusal } from "../safety.js";
 import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
 import { withheldPointer } from "../withhold.js";
@@ -36,9 +36,9 @@ import {
 	readValidationScript,
 	refuseAgentScripts,
 	resolveEnvironmentId,
+	asMcpSend,
 	runStreamingRequest,
 	scriptElement,
-	withMcpOrigin,
 } from "./compose.js";
 import {
 	authInput,
@@ -234,12 +234,12 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			if (target === undefined) return errorResult(NO_TARGET_ERROR);
 			const sendsSaved = url === undefined;
 
-			// Compose engine-side (pure), gate on the *resolved* URL, then execute
-			// the composed payload. The gate is a host rule: a pre-request script
-			// this call forwards can still edit `pm.request`, and since #1008 a
-			// name compose could not answer is resolved before the send - neither
-			// of which can reach a host the allowlist did not see, because an
-			// unresolved authority is refused rather than checked (safety.ts).
+			// Compose engine-side (pure), gate on the composed URL, then execute
+			// the composed payload. The gate here is the early refusal: a
+			// pre-request script can still edit `pm.request` or set the variable
+			// a deferred `{{host}}` resolves from, so the engine holds the URL it
+			// is about to send to the same allowlist (`targetPolicy`, #2521) and
+			// its refusal is answered below with this gate's remedy.
 			let payload: Record<string, unknown>;
 			try {
 				payload = await composeViaEngine(
@@ -256,7 +256,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			if (sendsSaved) appendAdHocElements(payload, args);
-			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config, ctx.host);
+			const gate = checkComposedTarget(payload, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 			// By id the engine stamped it already; ad hoc it is only the History link.
 			if (linkId !== undefined) payload.requestId = linkId;
@@ -287,8 +287,13 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				? await runStreamingRequest(args, payload, ctx, signal)
 				: await callEngineForRunOutput(
 						ctx,
-						() => ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal),
-						{ bound: boundExecuteResponse, signal, auth: payload.auth }
+						() => ctx.client.executeRequest(asMcpSend(payload, ctx), signal),
+						{
+							bound: boundExecuteResponse,
+							signal,
+							auth: payload.auth,
+							refusal: (answer) => targetPolicyRefusal(answer, ctx.host),
+						}
 					);
 			return url !== undefined && linkId !== undefined
 				? withCaveat(result, LINK_ONLY_CAVEAT)
