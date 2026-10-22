@@ -13,6 +13,7 @@ import {
 	hasPercentileSignal,
 	hasWindowLatency,
 	hasStatusCodes,
+	hasStatusSeries,
 	hasCustomMetrics,
 	latestThroughputMbps,
 	spansMultipleBuckets,
@@ -430,6 +431,49 @@ describe("buildStatusOverTime", () => {
 	it("returns [] when no tick carries a status map", () => {
 		expect(buildStatusOverTime([tick({ elapsed_seconds: 1 })])).toEqual([]);
 	});
+
+	describe("a live window whose head is not at load start", () => {
+		// 500 responses a second, 150000 by the first retained tick.
+		const lateWindow = [
+			tick({ live: true, elapsed_seconds: 300, status_codes: { "200": 150000 } }),
+			tick({ live: true, elapsed_seconds: 300.5, status_codes: { "200": 150250 } }),
+			tick({ live: true, elapsed_seconds: 301, status_codes: { "200": 150500, "503": 10 } }),
+		];
+
+		it("diffs from its head instead of drawing the run's lifetime average", () => {
+			const out = buildStatusOverTime(lateWindow);
+			expect(out).toHaveLength(lateWindow.length - 1);
+			expect(out.map((p) => p.time)).toEqual([300.5, 301]);
+			expect(out[0].c2xx).toBe(500);
+			expect(out[1]).toMatchObject({ c2xx: 500, c5xx: 20 });
+		});
+
+		it("keeps a live head within one tick of load start as its first point", () => {
+			const out = buildStatusOverTime([
+				tick({ live: true, elapsed_seconds: 1.5, status_codes: { "200": 300 } }),
+				tick({ live: true, elapsed_seconds: 2, status_codes: { "200": 450 } }),
+			]);
+			expect(out.map((p) => p.c2xx)).toEqual([200, 300]);
+		});
+
+		it("leaves a stored series' first tick alone whatever its elapsed time", () => {
+			const out = buildStatusOverTime([
+				tick({ elapsed_seconds: 300, status_codes: { "200": 150000 } }),
+				tick({ elapsed_seconds: 301, status_codes: { "200": 150500 } }),
+			]);
+			expect(out.map((p) => p.c2xx)).toEqual([150000 / 301, 500]);
+		});
+
+		it("gates the status card on the points left once the head is dropped", () => {
+			expect(hasStatusSeries(lateWindow.slice(0, 2))).toBe(false);
+			expect(buildStatusOverTime(lateWindow.slice(0, 2))).toHaveLength(1);
+			expect(hasStatusSeries(lateWindow)).toBe(true);
+			// Stored, the same two buckets are two points.
+			const stored = lateWindow.slice(0, 2).map(({ live: _live, ...rest }) => rest);
+			expect(hasStatusSeries(stored)).toBe(true);
+			expect(buildStatusOverTime(stored)).toHaveLength(2);
+		});
+	});
 });
 
 describe("stackStatusPoints", () => {
@@ -511,9 +555,7 @@ describe("spansMultipleBuckets", () => {
 				buildLatencyChartData(history).length > 1
 			);
 			expect(spans).toBe(buildPercentileChartData(history).length > 1);
-			expect(spansMultipleBuckets(history, hasStatusCodes)).toBe(
-				buildStatusOverTime(history).length > 1
-			);
+			expect(hasStatusSeries(history)).toBe(buildStatusOverTime(history).length > 1);
 			if (spans) sawTrue++;
 			else sawFalse++;
 		}
