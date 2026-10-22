@@ -174,7 +174,7 @@ describe("describeCarried", () => {
 			requestName: "Orders",
 		});
 		expect(text).toBe(
-			"Budgets prefilled: p99 latency at most 200 ms (from Settings > Dashboard > SLO threshold). They will judge this run."
+			"Budgets prefilled: p99 latency at most 200 ms (from Settings › Dashboard › SLO threshold). They will judge this run."
 		);
 	});
 
@@ -182,7 +182,7 @@ describe("describeCarried", () => {
 		const mixed = draft({ latencyP50Ms: "80", latencyP99Ms: "200" });
 		const carried = findCarriedBudgets({ latencyP50Ms: "80" }, []);
 		expect(describeCarried(carried, mixed, [], undefined)).toBe(
-			"Budgets carried over from your last load test: p50 latency at most 80 ms, p99 latency at most 200 ms (from Settings > Dashboard > SLO threshold). They will judge this run."
+			"Budgets carried over from your last load test: p50 latency at most 80 ms, p99 latency at most 200 ms (from Settings › Dashboard › SLO threshold). They will judge this run."
 		);
 	});
 

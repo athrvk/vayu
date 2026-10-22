@@ -991,7 +991,7 @@ export function ImportModal() {
 									setPasteText(e.target.value);
 									setPastedCommand(null);
 								}}
-								placeholder="Paste collection JSON or YAML, or a curl command"
+								placeholder="Paste collection JSON or YAML, or a cURL command"
 								className="h-40 w-full font-mono text-xs"
 							/>
 							<Button
@@ -1014,7 +1014,7 @@ export function ImportModal() {
 										</Button>
 									}
 								>
-									This is a curl command. Open it as a new request.
+									This is a cURL command. Open it as a new request.
 								</Callout>
 							)}
 						</div>

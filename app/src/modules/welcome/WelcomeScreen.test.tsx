@@ -111,7 +111,7 @@ describe("WelcomeScreen", () => {
 	it("says on the New request tile that a curl command can be pasted", () => {
 		renderScreen();
 		const tile = screen.getByRole("button", { name: /New request/i });
-		expect(tile).toHaveTextContent(/paste a curl command/i);
+		expect(tile).toHaveTextContent(/paste a cURL command/i);
 	});
 
 	describe("connecting a coding agent (issue #2122)", () => {

@@ -232,15 +232,15 @@ export default function BinaryBodyPanel() {
 										onClick={() => void chooseAndAllow(folder || undefined)}
 										disabled={allowing}
 									>
-										Allow folder...
+										Allow folder…
 									</Button>
 								)}
 							</div>
 						}
 					>
 						{notChosen
-							? "A typed, imported or pasted path is sent only after you pick the file here or allow its folder in Settings > Files."
-							: "A path built from a variable is sent only from a folder allowed in Settings > Files."}
+							? "A typed, imported or pasted path is sent only after you pick the file here or allow its folder in Settings › Files."
+							: "A path built from a variable is sent only from a folder allowed in Settings › Files."}
 					</Callout>
 				))}
 

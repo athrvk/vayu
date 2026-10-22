@@ -200,7 +200,7 @@ describe("the unresolved banner", () => {
 
 		expect(screen.getByText("Not chosen on this machine")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Relink" })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Allow folder..." })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Allow folder…" })).toBeInTheDocument();
 	});
 
 	it("is absent for a path the engine says it would send", () => {
@@ -259,7 +259,7 @@ describe("the unresolved banner", () => {
 		});
 		renderPanel({ src: "/imported/data/a.bin", unresolved: true });
 
-		fireEvent.click(screen.getByRole("button", { name: "Allow folder..." }));
+		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
 		await waitFor(() =>
 			expect(allowRoot).toHaveBeenCalledWith({
@@ -275,7 +275,7 @@ describe("the unresolved banner", () => {
 		vi.stubGlobal("electronAPI", undefined);
 		renderPanel({ src: "/imported/data/a.bin", unresolved: true });
 
-		expect(screen.queryByRole("button", { name: "Allow folder..." })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Allow folder…" })).toBeNull();
 		expect(screen.getByRole("button", { name: "Relink" })).toBeInTheDocument();
 		expect(allowRoot).not.toHaveBeenCalled();
 	});

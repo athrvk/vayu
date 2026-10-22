@@ -10,7 +10,7 @@
  *
  * - `file:allowFolder` opens the system folder picker and, when the user
  *   chooses a folder, allows it: `POST /file-roots` with the grant secret
- *   (#2356). Settings > Files, the body editor's "Allow folder..." and the
+ *   (#2356). Settings > Files, the body editor's "Allow folder…" and the
  *   import preview use it. The renderer cannot name the folder - only the
  *   dialog's starting point - because an allowed folder widens what every
  *   request may read from disk, and the engine refuses that write from anyone

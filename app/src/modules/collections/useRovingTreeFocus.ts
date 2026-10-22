@@ -86,7 +86,7 @@ import {
  *
  * Alt is the modifier because the tree owns the bare arrows for navigation and
  * the app owns Ctrl/Cmd; a chord is also why the row menu carries a
- * "Move to..." action that needs no keyboard at all.
+ * "Move to…" action that needs no keyboard at all.
  */
 const MOVE_CONTROL: Record<string, string> = {
 	ArrowUp: "[data-tree-move-up]",

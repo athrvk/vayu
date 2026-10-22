@@ -91,7 +91,7 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		minInclusive: false,
 		max: MAX_LATENCY_MS,
 		seededHint:
-			"Starts from Settings > Dashboard > SLO threshold. Clear it to run without a latency budget.",
+			"Starts from Settings › Dashboard › SLO threshold. Clear it to run without a latency budget.",
 	},
 	{
 		key: "maxErrorRatePct",

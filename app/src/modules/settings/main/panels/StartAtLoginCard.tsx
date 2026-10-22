@@ -105,7 +105,7 @@ export function StartAtLoginCard() {
 				)}
 				{state?.needsApproval && (
 					<p className="text-xs text-muted-foreground">
-						Approve Vayu under System Settings &gt; General &gt; Login Items
+						Approve Vayu under System Settings › General › Login Items
 					</p>
 				)}
 			</CardContent>

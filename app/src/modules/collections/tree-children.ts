@@ -10,7 +10,7 @@
  *
  * A collection's sub-folders and its requests share one `order` space (#2535),
  * so a request can sit between two folders and every consumer that asks "what
- * comes next under this parent" - the render, a drop, Alt+Arrow, "Move to...",
+ * comes next under this parent" - the render, a drop, Alt+Arrow, "Move to…",
  * the menu's Move up / Move down gating - has to read the same merged list. This
  * is that list, built once; a consumer that merged the two itself would be the
  * second copy of the sibling rule that #360 and #431 removed.

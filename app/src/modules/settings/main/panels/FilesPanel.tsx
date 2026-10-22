@@ -66,7 +66,7 @@ export default function FilesPanel() {
 				</div>
 				<CardDescription>
 					Vayu sends a file you chose in the editor, or any file under a folder you allow
-					here. Files from an import, a pasted curl command, an AI agent, a data file or a
+					here. Files from an import, a pasted cURL command, an AI agent, a data file or a
 					path with a variable in it are sent only from these folders.
 				</CardDescription>
 			</CardHeader>
@@ -120,7 +120,7 @@ export default function FilesPanel() {
 						) : (
 							<FolderOpen className="size-icon mr-1.5" />
 						)}
-						Choose folder...
+						Choose folder…
 					</Button>
 				)}
 			</CardContent>

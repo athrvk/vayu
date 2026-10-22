@@ -88,7 +88,7 @@ export interface CollectionTreeDnd {
 	isDropBlocked: (dragged: TreeEntity, entity: TreeEntity) => boolean;
 	moveByKeyboard: (entity: TreeEntity, direction: TreeMoveDirection) => void;
 	/**
-	 * The row menu's move entries - Move up, Move down, "Move to..." - the
+	 * The row menu's move entries - Move up, Move down, "Move to…" - the
 	 * discoverable path that needs no chords (#1690). A factory rather than
 	 * handlers so both row types get one list, worded, iconed and gated once,
 	 * instead of two copies that drift.
