@@ -14,6 +14,7 @@
 #include "vayu/core/schema_validation.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/json_depth.hpp"
 #include "vayu/core/schema_error_text.hpp"
 #include "vayu/core/schema_format.hpp"
 #include "vayu/core/spec_coverage.hpp"
@@ -787,6 +788,13 @@ const std::string& body) const {
         // JSON. That is a finding, but it is not one a JSON Schema can state,
         // so it is reported as unchecked with the reason rather than as a
         // schema failure invented here.
+        verdict.reason = UncheckedReason::BodyNotJson;
+        return verdict;
+    }
+    // nlohmann parses a body of any depth iteratively, but valijson validates
+    // it recursively: a deep enough body overflows the worker's stack (#2413).
+    // Past the bound it is treated as not JSON, as the element pipeline does.
+    if (!json_within_depth (parsed_body, constants::elements::MAX_BODY_DEPTH)) {
         verdict.reason = UncheckedReason::BodyNotJson;
         return verdict;
     }

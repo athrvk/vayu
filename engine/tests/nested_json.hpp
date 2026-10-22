@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace vayu::tests {
@@ -39,6 +40,18 @@ inline nlohmann::json nested_array (std::size_t depth) {
 /// through `dump ()` on its way to the server.
 inline std::string nested_array_text (std::size_t depth) {
     return std::string (depth, '[') + "1" + std::string (depth, ']');
+}
+
+/// @p levels objects `{"a": ...}` around @p innermost, as JSON text: the
+/// innermost value sits @p levels containers below the root.
+inline std::string nested_object_text (std::size_t levels, std::string_view innermost) {
+    std::string text;
+    for (std::size_t level = 0; level < levels; ++level) {
+        text += R"({"a":)";
+    }
+    text += innermost;
+    text.append (levels, '}');
+    return text;
 }
 
 } // namespace vayu::tests

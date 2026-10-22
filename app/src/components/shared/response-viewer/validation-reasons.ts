@@ -29,7 +29,8 @@ export const UNCHECKED_REASONS: Record<ValidationUncheckedReason, string> = {
 	no_schema_for_status: "The spec declares no response for this status.",
 	no_schema_for_content_type: "The spec declares no schema for this response's content type.",
 	no_response: "There was no response to check.",
-	body_not_json: "The response body is not JSON, and a JSON Schema can't describe it.",
+	body_not_json:
+		"The response body is not JSON or nests too deeply to read, and a JSON Schema can't describe it.",
 };
 
 /**

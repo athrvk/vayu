@@ -5693,6 +5693,8 @@ a `{{data.*}}` token in one is refused like one anywhere else in the config.
 `expiresAt` is `null` for a non-expiring token; `scope` is omitted when empty.
 Errors carry an `oauth2_*` code: `400` invalid config, `401` provider rejected
 the request, `409` interactive authorization required, `502` network error.
+A token response nested past 100 levels is treated as unparseable (`401`
+`oauth2_provider_error`, "unparseable response"), never cached (issue #2413).
 
 #### GET /oauth2/token?key=&lt;cacheKey&gt;
 
@@ -6887,6 +6889,8 @@ setting to read more. Two consequences worth stating, since both follow from
 reading less: a cut JSON body no longer parses, so `body` is `null` and a test
 script's `pm.response.json()` throws, and `validation` below reports
 `checked: false` with `body_not_json` rather than inventing a schema failure.
+A body nested past 100 levels counts as not JSON for the same check, so a deep
+body is never walked by the schema validator (issue #2413).
 
 The cap falls on a byte count, so it can land inside a UTF-8 character. For a
 capped body only, `bodyEncoding` is decided with that incomplete last character
@@ -6971,7 +6975,7 @@ narrower than it looks rather than wrong.
 | `no_schema_for_status` | Nothing the operation declares covers this status |
 | `no_schema_for_content_type` | The status matched; none of its media types did |
 | `no_response` | A transport error - there was no response to check |
-| `body_not_json` | The body is not JSON, and a JSON Schema cannot describe it |
+| `body_not_json` | The body is not JSON (or nests past 100 levels, which counts as not JSON), and a JSON Schema cannot describe it |
 
 **`headers` is keyed by the lower-cased header name, and a name the response
 sent more than once holds every value folded with `", "`** - the RFC 7230 §3.2.2

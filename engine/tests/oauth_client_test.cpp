@@ -573,6 +573,29 @@ TEST_F (OAuthClientTest, ProviderErrorIsStructured) {
     EXPECT_EQ (err.provider_error_description, "bad secret");
 }
 
+// The bound is inclusive: a token body nested exactly to it still parses.
+TEST_F (OAuthClientTest, ATokenBodyAtTheDepthBoundIsAccepted) {
+    MockTokenServer idp;
+    auto r = oauth::acquire_token (
+    *db_, cc_config (idp, "/token-at-depth-bound"), false, std::nullopt);
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
+    EXPECT_EQ (std::get<vayu::db::OAuthToken> (r).access_token, "AT-DEEP");
+}
+
+// A body deeper than the bound is not handed on: the token parse treats it as
+// unparseable, so the exchange fails instead of caching a tree every later
+// copy or dump would recurse through.
+TEST_F (OAuthClientTest, ATokenBodyPastTheDepthBoundFailsCleanly) {
+    MockTokenServer idp;
+    const auto config = cc_config (idp, "/token-past-depth-bound");
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
+    const auto& err = std::get<oauth::TokenError> (r);
+    EXPECT_EQ (err.code, "oauth2_provider_error");
+    EXPECT_NE (err.message.find ("unparseable response"), std::string::npos);
+    EXPECT_FALSE (db_->get_oauth_token (oauth::cache_key (config)).has_value ());
+}
+
 TEST_F (OAuthClientTest, ConnectionFailureIsNetworkError) {
     json config = { { "grantType", "client_credentials" },
         { "accessTokenUrl", "http://127.0.0.1:1/token" }, { "clientId", "cid" } };
