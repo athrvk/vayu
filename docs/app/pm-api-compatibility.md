@@ -1536,8 +1536,9 @@ pm.request.body = JSON.stringify({ n: 2 });
   `variables` is the **JSON value** the envelope carries rather than the text of
   Postman's variables editor, which Vayu never stored - so a lifted
   `JSON.parse(pm.request.body.graphql.variables)` becomes a plain read - and a
-  body that is envelope-shaped but does not parse answers `undefined` rather
-  than a guessed pair, matching what the send does with it. `.raw` stays defined
+  body that is envelope-shaped but does not parse, or is nested deeper than 128
+  levels, answers `undefined` rather than a guessed pair, matching what the send
+  does with it. `.raw` stays defined
   here as it is for the form modes.
 
     A `binary` body - one file sent as the whole body - reads `mode === 'file'`,
