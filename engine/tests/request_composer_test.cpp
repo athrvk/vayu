@@ -820,10 +820,11 @@ TEST_F (RequestComposerTest, NamesTheBindOwnsAreNotDeferredByAScript) {
     EXPECT_EQ (payload["deferredVariables"], json::array ({ "token" }));
 }
 
-// Two things a script must not reach through a deferral: a file path (the
-// residual pass never resolves one, so a script cannot choose the file sent)
-// and an OAuth 2.0 config, whose token is acquired before the script runs.
-TEST_F (RequestComposerTest, AFilePathAndAnOAuth2ConfigResolveHereEvenUnderAScript) {
+// A file path resolves here even under a script: the residual pass never
+// resolves one, so a script cannot choose the file sent. An OAuth 2.0 config
+// waits for the script like any other credential (#2521), its token acquired
+// after it - unless the composition is for a run, which acquires once.
+TEST_F (RequestComposerTest, AFilePathResolvesHereUnderAScriptAndAnOAuth2ConfigWaits) {
     seed_collection ("col", "", R"({"fixtures":{"value":"/data/fx","enabled":true},
                                     "idp":{"value":"https://idp.test","enabled":true},
                                     "name":{"value":"photo","enabled":true}})");
@@ -845,8 +846,15 @@ TEST_F (RequestComposerTest, AFilePathAndAnOAuth2ConfigResolveHereEvenUnderAScri
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (payload["body"]["fields"][0]["src"], "/data/fx/p.png");
     EXPECT_EQ (payload["body"]["fields"][0]["fileName"], "{{name}}.png");
-    EXPECT_EQ (payload["auth"]["config"]["accessTokenUrl"], "https://idp.test/token");
-    EXPECT_EQ (payload["deferredVariables"], json::array ({ "name" }));
+    EXPECT_EQ (payload["auth"]["config"]["accessTokenUrl"], "{{idp}}/token");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "idp", "name" }));
+
+    auto [run_status, for_a_run] = vayu::http::compose_request_core (*db_,
+    json{ { "request", request }, { "collectionId", "col" },
+    { "deferDynamicVariables", true } });
+    ASSERT_EQ (run_status, 200) << for_a_run.dump ();
+    EXPECT_EQ (for_a_run["auth"]["config"]["accessTokenUrl"], "https://idp.test/token");
+    EXPECT_EQ (for_a_run["deferredVariables"], json::array ({ "name" }));
 }
 
 // A header variable carrying a line break is refused where it resolves: here
@@ -1288,6 +1296,34 @@ TEST_F (RequestComposerTest, OAuth2ConfigIsResolvedBeforeAnyCacheKeyCanBe) {
     // different concrete configs, so their token cache keys cannot collide.
     EXPECT_EQ (pa["auth"]["config"]["accessTokenUrl"], "https://a.idp.test/token");
     EXPECT_EQ (pb["auth"]["config"]["accessTokenUrl"], "https://b.idp.test/token");
+}
+
+// Under a pre-request script (#2521) no concrete config exists at composition
+// for a key to be computed from: the template stays whole, for the send to
+// resolve after the script and only then key and acquire
+// (`deferred_composition_test.cpp`). A caller that acquires before any script
+// (`AtComposition`, a load plan) gets the concrete config, as unscripted.
+TEST_F (RequestComposerTest, AScriptedOAuth2ConfigIsLeftWholeForTheSendToKey) {
+    seed_collection ("col", "", "");
+    seed_environment ("env_a", R"({"idp":{"value":"https://a.idp.test","enabled":true}})");
+    auto r = make_request ("req_1", "col");
+    r.url  = "https://example.test";
+    r.auth = R"({"mode":"oauth2","config":{"grantType":"client_credentials","accessTokenUrl":"{{idp}}/token","clientId":"cid"}})";
+    r.elements =
+    json::array ({ pre_script_element ("el_pre", "console.log(1);") }).dump ();
+    db_->save_request (r);
+    const json body = { { "requestId", "req_1" }, { "environmentId", "env_a" } };
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (payload["auth"]["config"]["accessTokenUrl"], "{{idp}}/token");
+    EXPECT_EQ (payload["deferredVariables"], json::array ({ "idp" }));
+
+    auto [planned, at_plan] = vayu::http::compose_request_core (
+    *db_, body, vayu::http::OAuth2Resolution::AtComposition);
+    ASSERT_EQ (planned, 200);
+    EXPECT_EQ (at_plan["auth"]["config"]["accessTokenUrl"], "https://a.idp.test/token");
+    EXPECT_FALSE (at_plan.contains ("deferredVariables")) << at_plan.dump ();
 }
 
 // The extra parameter lists are resolved with the rest of the config (issue

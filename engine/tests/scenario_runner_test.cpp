@@ -41,6 +41,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "log_capture.hpp"
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -391,6 +392,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         options.limits.max_steps     = 200;
         options.limits.max_data_rows = 1000;
         options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        // This fixture runs the sequential runner, as `POST /runs` resolves
+        // its plan.
+        options.oauth2_after_scripts = true;
 
         auto resolved = vayu::core::resolve_scenario (*db_, scenario, options);
         EXPECT_TRUE (resolved.ok) << resolved.error;
@@ -3064,6 +3068,32 @@ TEST_F (ScenarioRunnerTest, APasswordThePreRequestScriptSetsReachesTheWireThroug
     auto seen = server_->requests ();
     ASSERT_EQ (seen.size (), 1u);
     EXPECT_EQ (vayu::tests::basic_pair_of (seen[0].authorization), "user:s3cret");
+}
+
+// Issue #2521: a client secret the step's script sets reaches the token
+// endpoint, and the token acquired with it reaches the step's wire - the plan
+// no longer acquires before any script. Mutation check: set
+// `oauth2_after_scripts` false in `start_scenario` and the endpoint receives
+// the stored secret.
+TEST_F (ScenarioRunnerTest, AnOAuth2SecretTheStepsScriptSetsReachesTheTokenEndpoint) {
+    const vayu::tests::MockTokenServer tokens;
+    seed_collection ("col_1");
+    seed_environment ("env_1", R"({"secret":{"value":"stored","enabled":true}})");
+    const json auth = { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" },
+        { "accessTokenUrl", tokens.url ("/token") }, { "clientId", "cid" },
+        { "clientSecret", "{{secret}}" }, { "credentialsPlacement", "body" } } } };
+    seed_request ("req_a", 0, "/ok", "pm.environment.set('secret', 'from-script');",
+    "", "", "", "", "", auth.dump ());
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (vayu::tests::parse_form (tokens.last_body ())["client_secret"], "from-script");
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 1u);
+    EXPECT_EQ (seen[0].authorization, "Bearer AT1");
 }
 
 // Issue #2521: a value a pre-request script replaces reaches a later step even

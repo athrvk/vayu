@@ -991,6 +991,20 @@ TEST (LateAuth, ANameNothingAnswersIsEncodedAsWritten) {
     EXPECT_EQ (basic_pair_of (request.headers["Authorization"]), "user:{{password}}");
 }
 
+/// An OAuth 2.0 config held for the script (#2521) with no token cache to
+/// acquire through is refused, never sent without its token.
+TEST (LateAuth, AnOAuth2ConfigWithNoTokenCacheIsRefused) {
+    vayu::Request request;
+    const auto refusal = apply_late_auth (request,
+    vayu::http::OAuth2Auth{
+    { { "accessTokenUrl", "https://idp.test/token" }, { "clientId", "{{client}}" } } },
+    environment_with ("client", "cid"));
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->code, "oauth2_no_database");
+    EXPECT_EQ (request.headers.count ("Authorization"), 0u);
+}
+
 /// The exchange applies it after the pre-request script, on the wire.
 TEST_F (ResidualTokenExchangeTest, ABasicPasswordThePreRequestScriptSetsReachesTheWire) {
     vayu::Request request;

@@ -659,11 +659,24 @@ bool is_scenario) {
     // a credential spelling `{{$vu}}` defers without a set behind it, and it is
     // this call that finds out. A run whose credentials spell no token parses
     // nothing here and resolves its auth in the build, as it always did.
-    auto row_auth = plan_send_row_auth (
-    json, set ? set->bound_columns : vayu::http::BoundColumnNames{});
+    const auto bound_columns = set ? set->bound_columns : vayu::http::BoundColumnNames{};
+    auto row_auth = plan_send_row_auth (json, bound_columns);
     if (!row_auth.ok) {
         out.ok    = false;
         out.error = std::move (row_auth.error);
+        return out;
+    }
+    // The token is acquired once, at the preflight below and before any script,
+    // so nothing could answer the name and it would reach the token endpoint
+    // as written (#2521).
+    if (auto token = vayu::core::first_oauth2_scope_token (row_auth.auth, bound_columns)) {
+        out.ok    = false;
+        out.error = "Auth credentials carry " + *token +
+        " in an OAuth 2.0 configuration, still a template when the run "
+        "starts. A load run acquires its token once, before any script runs, "
+        "so define the variable and compose the request for a run "
+        "('deferDynamicVariables': true), which resolves it, or write the "
+        "value into the configuration.";
         return out;
     }
     out.auth.auth        = std::move (row_auth.auth);
@@ -1957,7 +1970,9 @@ const ScriptVariableScopes& scopes) {
         return refusal;
     }
     if (late_auth) {
-        if (auto refusal = apply_late_auth (request, std::move (*late_auth), scopes)) {
+        LateTokenAcquisition acquisition{ &db };
+        if (auto refusal =
+            apply_late_auth (request, std::move (*late_auth), scopes, &acquisition)) {
             return refusal;
         }
     }
@@ -2305,6 +2320,7 @@ std::chrono::steady_clock::time_point handler_start) {
     ExchangeInputs inputs;
     inputs.request      = std::move (send.request);
     inputs.late_auth    = std::move (send.late_auth);
+    inputs.token_cache  = &ctx.db;
     inputs.elements     = send.elements;
     inputs.request_id   = send.run.request_id;
     inputs.request_name = send.script_request_name;
@@ -2354,8 +2370,9 @@ std::chrono::steady_clock::time_point handler_start) {
     // Taken before the write below and stored *and* returned, so the live
     // body and the restored trace carry one value. Persistence and the final
     // serialisation therefore fall outside it, by construction.
-    const double engine_ms = engine_cost_ms (
-    handler_start, exchange.response, exchange.script_ms, send.auth_fetch_ms);
+    // The build's acquisition or the late one's (#2521): a send has one.
+    const double engine_ms = engine_cost_ms (handler_start, exchange.response,
+    exchange.script_ms, send.auth_fetch_ms + exchange.auth_fetch_ms);
 
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
@@ -2381,6 +2398,13 @@ std::chrono::steady_clock::time_point handler_start) {
     // answers its 400 with, beside the status-0 response carrying its words.
     if (!exchange.refusal_code.empty ()) {
         body["refusalCode"] = exchange.refusal_code;
+        // Auth applied after the script that failed (an OAuth 2.0 token not
+        // acquired, #2521) also carries the hint a build-time failure has.
+        const auto error_code = exchange.response.error_code;
+        if (error_code == vayu::ErrorCode::AuthRequired ||
+        error_code == vayu::ErrorCode::AuthFailed) {
+            body["authErrorCode"] = exchange.refusal_code;
+        }
     }
     // `replace`: the body is UTF-8 or base64 by now, but a header value off
     // the wire can still carry a byte that is not (#2458).
@@ -2713,9 +2737,12 @@ RunOrigin& origin) {
  */
 std::optional<RouteError> resolve_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
+bool is_scenario_load,
 std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
 nlohmann::json& scenario_manifest) {
     vayu::core::ScenarioResolveOptions options;
+    // Only the sequential runner's steps acquire their token at the send.
+    options.oauth2_after_scripts = !is_scenario_load;
     if (auto it = json.find ("environmentId"); it != json.end () && it->is_string ()) {
         options.environment_id = it->get<std::string> ();
     }
@@ -2776,8 +2803,8 @@ const nlohmann::json& json,
 bool is_scenario_load,
 std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
 nlohmann::json& scenario_manifest) {
-    if (auto rejection =
-        resolve_run_scenario (ctx, json, scenario_execution, scenario_manifest)) {
+    if (auto rejection = resolve_run_scenario (
+        ctx, json, is_scenario_load, scenario_execution, scenario_manifest)) {
         return rejection;
     }
     if (!is_scenario_load) {

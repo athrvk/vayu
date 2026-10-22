@@ -1659,12 +1659,14 @@ void resolve_compose_body (const ComposeLookup& lookup, nlohmann::json& payload)
  *
  * A credential name @p lookup defers waits for the auth applied after the
  * pre-request script (`apply_late_auth`, #2473), which the send plans from the
- * token it finds. An OAuth 2.0 config never defers: its token is acquired
- * before the script runs, so it resolves here as it always has, and the cache
- * key with it (#2521 slice B moves the acquisition after the script).
+ * token it finds. An OAuth 2.0 config defers the same way unless @p oauth2
+ * says its token is acquired before any script (`AtComposition`), when it
+ * resolves here. Deferred, it is resolved by `apply_late_auth` before
+ * `apply_auth` acquires, so D10 holds on both paths.
  */
 void resolve_compose_auth (const std::vector<vayu::db::Collection>& chain,
 const ComposeLookup& lookup,
+OAuth2Resolution oauth2,
 nlohmann::json& payload) {
     auto it = payload.find ("auth");
     if (it == payload.end ()) {
@@ -1678,8 +1680,9 @@ nlohmann::json& payload) {
         payload.erase ("auth");
         return;
     }
-    *it = resolve_json_strings_through (
-    auth, auth_mode (auth) == "oauth2" ? lookup.now () : lookup);
+    const bool resolves_now =
+    auth_mode (auth) == "oauth2" && oauth2 == OAuth2Resolution::AtComposition;
+    *it = resolve_json_strings_through (auth, resolves_now ? lookup.now () : lookup);
 }
 
 /**
@@ -1721,8 +1724,10 @@ read_bound_columns (const nlohmann::json& body, BoundColumnNames& out) {
  *
  * A boolean rather than a run kind, because that is the whole of what
  * composition needs to know - "somebody else sends this many times, so a value
- * generated here would be that many identical values". The run paths set it;
- * a Send, a preview and every client that omits it compose as they always did.
+ * generated here would be that many identical values", and an OAuth 2.0 token
+ * acquired once for all of them (`OAuth2Resolution::AtComposition`). The run
+ * paths set it; a Send, a preview and every client that omits it compose as
+ * they always did.
  *
  * @return the refusal, or nothing (with @p out filled).
  */
@@ -1744,8 +1749,9 @@ read_dynamic_resolution (const nlohmann::json& body, DynamicResolution& out) {
 
 } // namespace
 
-std::pair<int, nlohmann::json>
-compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
+std::pair<int, nlohmann::json> compose_request_core (vayu::db::Database& db,
+const nlohmann::json& body,
+std::optional<OAuth2Resolution> oauth2) {
     if (!body.is_object ()) {
         return compose_error (
         400, "invalid_compose_request", "Request body must be a JSON object");
@@ -1830,8 +1836,14 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     // the auth applied after that script (issue #2473). Until that is decided
     // by what the credentials carry rather than by whether the run has rows, a
     // generator in a credential is generated here, once, exactly as it was.
+    // A run composition's OAuth 2.0 config resolves here: no HTTP client
+    // composes for a sequential collection run, so a run here is a load run.
+    const OAuth2Resolution oauth2_resolution = oauth2.value_or (
+    dynamic == DynamicResolution::Defer ? OAuth2Resolution::AtComposition :
+                                          OAuth2Resolution::AfterTheScript);
     resolve_compose_auth (chain,
-    ComposeLookup{ vars, bound_columns, DynamicResolution::Generate, defer_into }, payload);
+    ComposeLookup{ vars, bound_columns, DynamicResolution::Generate, defer_into },
+    oauth2_resolution, payload);
 
     // Scripts are never interpolated (D16): a `{{...}}` inside script text is
     // user JavaScript, and rewriting it cannot tell a string literal from

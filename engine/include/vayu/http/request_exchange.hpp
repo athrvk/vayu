@@ -475,13 +475,13 @@ struct ExchangeInputs {
     const nlohmann::json* iteration_data = nullptr;
     /// How this exchange's send - and any `pm.sendRequest` its scripts make -
     /// reaches the network (issue #705). Carried on the inputs rather than
-    /// resolved here because `execute_exchange` holds no `Database`; the two
-    /// callers that do (the design route and the scenario runner) resolve it
-    /// once and hand it down.
+    /// resolved here because `execute_exchange` reads no setting (its one
+    /// `Database` is @ref token_cache); the two callers that do (the design
+    /// route and the scenario runner) resolve it once and hand it down.
     vayu::http::TransportPolicy transport;
     /// What the engine adds to this exchange's send that the request itself
     /// does not name (issue #1229). Carried here for the reason @ref transport
-    /// is: `execute_exchange` holds no `Database`, and the two callers that do
+    /// is: `execute_exchange` reads no setting, and the two callers that do
     /// resolve the policy once and hand it down, so a design send and a
     /// collection run cannot add different sets.
     vayu::http::DefaultHeaderPolicy default_headers;
@@ -490,8 +490,8 @@ struct ExchangeInputs {
      *        0 = unbounded (issue #1157).
      *
      * Carried here for the reason @ref transport is: the bound is
-     * `maxDesignResponseBodyBytes`, `execute_exchange` holds no `Database` to
-     * read it from, and both callers that do - `POST /execute` and the
+     * `maxDesignResponseBodyBytes`, `execute_exchange` reads no setting, and
+     * both callers that do - `POST /execute` and the
      * scenario runner, whose steps are design-mode sends too - resolve it once
      * per run and hand it down. The default is the constant rather than 0 so
      * that a caller which resolves nothing is still bounded; a test that wants
@@ -506,7 +506,7 @@ struct ExchangeInputs {
      * @brief `ElementContext::max_body_bytes` (issue #1514's reopen): the
      *        `maxElementBodyBytes` config entry, resolved once per run for
      *        the same reason @ref max_response_bytes is - `execute_exchange`
-     *        holds no `Database` to read it from itself.
+     *        reads no setting itself.
      */
     size_t max_element_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
 
@@ -543,6 +543,12 @@ struct ExchangeInputs {
     /// and the residual pass. Empty when the build or the bind applied the
     /// auth, which is every request whose credentials hold no such name.
     std::optional<vayu::http::Auth> late_auth;
+
+    /// The OAuth 2.0 token cache a @ref late_auth config acquires through
+    /// (#2521). The one `Database` this exchange touches, and only for that;
+    /// null refuses such a config (`oauth2_no_database`) rather than sending
+    /// the request without its token.
+    vayu::db::Database* token_cache = nullptr;
 };
 
 /** What one exchange produced. */
@@ -565,6 +571,10 @@ struct ExchangeOutcome {
     /// subtracts it from the handler's elapsed time to report `timing.engineMs`
     /// as Vayu's own cost; a collection run does not read it.
     double script_ms = 0.0;
+    /// What @ref ExchangeInputs::late_auth waited on an OAuth 2.0 token
+    /// endpoint for (`AuthApplyResult::token_fetch_ms`), zero for a cached
+    /// token and every other mode. Subtracted beside @ref script_ms.
+    double auth_fetch_ms = 0.0;
     /// The rule's code when the residual pass or the late auth refused the
     /// send (@ref ResidualRefusal::code), beside the status-0 `response`
     /// carrying its sentence; empty otherwise. `POST /execute` answers it as
@@ -601,6 +611,17 @@ struct ResidualRefusal {
     /// (`http/header_names.hpp`), so composition and this pass cannot name one
     /// refusal two ways.
     std::string code;
+};
+
+/**
+ * Where @ref apply_late_auth acquires a deferred OAuth 2.0 token (#2521), and
+ * what that acquisition waited on the provider for.
+ */
+struct LateTokenAcquisition {
+    /// The token cache `apply_auth` reads and writes; null refuses OAuth 2.0.
+    vayu::db::Database* token_cache = nullptr;
+    /// Added to by every acquisition (`AuthApplyResult::token_fetch_ms`).
+    double fetch_ms = 0.0;
 };
 
 /**
@@ -674,17 +695,26 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * the script set still wins, by `apply_auth`'s own rule (#2475). A name
  * nothing answers is encoded as written, as it was before.
  *
+ * An OAuth 2.0 config (#2521) has every string resolved the same way, and only
+ * then is its token acquired through @p acquisition's cache, so the cache key
+ * is the resolved config's and a script that changed a client secret or scope
+ * reaches the token endpoint.
+ *
  * @return why the send must not go out, in the residual pass's shape, when
- *         `apply_auth` fails; only OAuth 2.0 can, and it is never deferred.
+ *         `apply_auth` fails: an api key name that is not a header name, or an
+ *         OAuth 2.0 token not acquired (`oauth2_no_database` with no
+ *         @p acquisition).
  */
 [[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const vayu::http::VariableValues& vars);
+const vayu::http::VariableValues& vars,
+LateTokenAcquisition* acquisition = nullptr);
 
 /** @ref apply_late_auth over the scopes, flattened as the residual pass reads them. */
 [[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const ScriptVariableScopes& scopes);
+const ScriptVariableScopes& scopes,
+LateTokenAcquisition* acquisition = nullptr);
 
 /**
  * Every `{{name}}` still on @p request, without attempting to resolve any of

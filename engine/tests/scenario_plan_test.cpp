@@ -48,6 +48,7 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -1479,9 +1480,9 @@ TEST_F (ScenarioPlanTest, ADataTokenInTheCredentialsWithNoDataSetIsRefused) {
 }
 
 TEST_F (ScenarioPlanTest, ADataTokenInAnOAuth2ConfigIsRefusedWithOrWithoutData) {
-    // The one mode deferral cannot serve: the token is acquired here, once, so
-    // no iteration exists for a row to reach. Refused by name rather than sent
-    // to the token endpoint as the literal text.
+    // The one mode the row bind cannot serve: the token is acquired against
+    // the endpoint, never bound per iteration. Refused by name rather than
+    // sent to the token endpoint as the literal text.
     const auto refused = [&] (const json& scenario) {
         const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
         EXPECT_FALSE (resolved.ok);
@@ -1503,6 +1504,71 @@ TEST_F (ScenarioPlanTest, ADataTokenInAnOAuth2ConfigIsRefusedWithOrWithoutData) 
     json with_rows    = block ("col");
     with_rows["data"] = json::array ({ json{ { "secret", "s" } } });
     refused (with_rows);
+}
+
+// #2521: a scripted step's OAuth 2.0 config waits for its script on a
+// sequential plan, whose executor acquires after it; a load plan acquires
+// once, here, from the stored values, keyed by the resolved config. Mutation
+// check: make `resolve_step` compose with `AtComposition` whatever
+// `oauth2_after_scripts` says, and the sequential plan carries the token.
+TEST_F (ScenarioPlanTest, AScriptedOAuth2StepWaitsForItsScriptOnASequentialPlanOnly) {
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"",
+    /*pre_script=*/"pm.environment.set('client', 'new');");
+    seed_request ("oauth_req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"oauth2","config":{"grantType":"client_credentials","autoFetchToken":false,
+        "accessTokenUrl":"https://auth.test/token","clientId":"{{client}}"}})");
+    seed_environment ("env", R"({"client":{"value":"stored","enabled":true}})");
+    // Cached under the stored config's key, so the load plan's acquisition
+    // reads it with no endpoint behind it; non-expiring.
+    vayu::db::OAuthToken token;
+    token.cache_key    = vayu::http::oauth::cache_key (json{
+       { "accessTokenUrl", "https://auth.test/token" }, { "clientId", "stored" } });
+    token.access_token = "AT-stored";
+    token.created_at   = 1;
+    db_->save_oauth_token (token);
+
+    auto sequential                 = options ();
+    sequential.environment_id       = "env";
+    sequential.oauth2_after_scripts = true;
+    const auto waits = vayu::core::resolve_scenario (*db_, block ("col"), sequential);
+    ASSERT_TRUE (waits.ok) << waits.error;
+    const auto& late = waits.plan.steps.at (0);
+    EXPECT_TRUE (late.auth_after_scripts);
+    EXPECT_EQ (late.request.headers.count ("Authorization"), 0u);
+    const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&late.auth);
+    ASSERT_NE (oauth2, nullptr);
+    EXPECT_EQ (oauth2->config.value ("clientId", ""), "{{client}}");
+
+    auto load           = options ();
+    load.environment_id = "env";
+    const auto planned = vayu::core::resolve_scenario (*db_, block ("col"), load);
+    ASSERT_TRUE (planned.ok) << planned.error;
+    const auto& now = planned.plan.steps.at (0);
+    EXPECT_FALSE (now.auth_after_scripts);
+    ASSERT_EQ (now.request.headers.count ("Authorization"), 1u);
+    EXPECT_EQ (now.request.headers.at ("Authorization"), "Bearer AT-stored");
+}
+
+// A name nothing answers: a load plan, which acquires before any script, has
+// no moment left to resolve it and refuses it by name rather than asking the
+// endpoint with the literal token; a sequential plan leaves it to the send.
+TEST_F (ScenarioPlanTest, ALoadPlanRefusesAnOAuth2NameNothingAnswers) {
+    seed_collection ("col", "");
+    seed_request ("oauth_req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"oauth2","config":{"grantType":"client_credentials",
+        "accessTokenUrl":"https://auth.test/token","clientId":"{{client}}"}})");
+
+    const auto refused = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    EXPECT_FALSE (refused.ok);
+    EXPECT_NE (refused.error.find ("{{client}}"), std::string::npos) << refused.error;
+    EXPECT_NE (refused.error.find ("Request oauth_req"), std::string::npos)
+    << refused.error;
+
+    auto sequential                 = options ();
+    sequential.oauth2_after_scripts = true;
+    const auto waits = vayu::core::resolve_scenario (*db_, block ("col"), sequential);
+    ASSERT_TRUE (waits.ok) << waits.error;
+    EXPECT_TRUE (waits.plan.steps.at (0).auth_after_scripts);
 }
 
 TEST_F (ScenarioPlanTest, CredentialsWithoutADataTokenAreStillResolvedIntoThePlan) {

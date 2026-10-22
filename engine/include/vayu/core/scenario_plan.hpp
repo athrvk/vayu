@@ -129,6 +129,9 @@ struct ScenarioStep {
     /// executor applies it with `http::routes::apply_late_auth` after
     /// `step.before` and the residual pass. Decided here, once per step, so a
     /// step whose credentials hold no such name pays nothing per iteration.
+    /// An OAuth 2.0 config only reaches this on a sequential plan
+    /// (`ScenarioResolveOptions::oauth2_after_scripts`), whose executor hands
+    /// `apply_late_auth` the token cache.
     bool auth_after_scripts = false;
 };
 
@@ -375,6 +378,13 @@ struct ScenarioResolveOptions {
     /// Applied to every composed step, exactly as `POST /execute` applies it.
     int timeout_ms = 0;
     ScenarioLimits limits;
+    /// Whether a step's OAuth 2.0 token is acquired at its send, after its
+    /// pre-request script, so a scripted step's config waits for that script
+    /// (#2521): the sequential runner, whose `execute_exchange` holds the
+    /// token cache. False for a load run, which acquires each step's token
+    /// once, here, before any script, and refuses a config name nothing
+    /// answers by then.
+    bool oauth2_after_scripts = false;
 };
 
 /**

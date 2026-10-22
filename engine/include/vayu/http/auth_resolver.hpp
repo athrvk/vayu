@@ -93,10 +93,9 @@ enum class CredentialDestination : std::uint8_t {
  * for, so a caller whose rule depends on that reads it rather than deducing it.
  *
  * **OAuth 2.0 is deliberately absent.** Its config is not a credential the
- * request carries but the input to a token acquisition that happens once, when
- * a plan is resolved; there is no per-iteration acquisition for a row to reach,
- * so a data token in it is refused rather than walked
- * (`core::resolve_scenario`, issue #591).
+ * request carries but the input to a token acquisition, which no row bind
+ * reaches, so a data token in it is refused rather than walked
+ * (`core::first_oauth2_deferrable_token`, issue #591).
  */
 template <typename AuthRef, typename Visit>
 void walk_auth_credentials (AuthRef& auth, Visit&& visit) {

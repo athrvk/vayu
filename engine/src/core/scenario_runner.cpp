@@ -637,6 +637,9 @@ struct StepContext {
     /// `StepContext` shares the one map a controller must keep counting
     /// into across iterations, not a fresh one each time.
     std::unordered_map<std::string, int64_t>& controller_state;
+    /// The token cache a step's OAuth 2.0 config acquires through after its
+    /// pre-request script (`ExchangeInputs::token_cache`, #2521).
+    vayu::db::Database* token_cache = nullptr;
 };
 
 /**
@@ -676,6 +679,7 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.iteration_count        = ctx.iteration_count;
     inputs.transport              = ctx.transport;
     inputs.default_headers        = ctx.default_headers;
+    inputs.token_cache            = ctx.token_cache;
     inputs.max_response_bytes     = ctx.max_response_bytes;
     inputs.max_element_body_bytes = ctx.max_element_body_bytes;
     // The files the plan already checked (`ScenarioExecution::files`); a step
@@ -1431,7 +1435,7 @@ RunManager& manager) {
                 transport, default_headers, cookie_scope, data_rows,
                 data_row_index, iteration, asked.iterations, fail_on_schema_error,
                 stop_on_error, max_trace_body_bytes, max_response_bytes,
-                max_element_body_bytes, element_spans, controller_state };
+                max_element_body_bytes, element_spans, controller_state, &db };
             summary.steps_not_run += run_iteration (script_engine, cookie_jar,
             cookie_scope, scopes, step_ctx, plan, step_index,
             max_steps_per_iteration, coverage, summary, store, transactions);

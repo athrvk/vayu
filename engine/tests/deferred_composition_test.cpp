@@ -25,6 +25,12 @@
  * Mutation check for the file: make `runs_a_pre_request_script`
  * (request_composer.cpp) answer false, and every case sending a stored name
  * the script replaced goes out with the stored value.
+ *
+ * An OAuth 2.0 config waits for the script too, and its token is acquired
+ * after it (the `OAuth2` cases below, against `MockTokenServer`). Mutation
+ * check for those: make `resolve_compose_auth` resolve an oauth2 block with
+ * `lookup.now ()` whatever its `OAuth2Resolution`, and the token endpoint
+ * receives the stored values.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
@@ -45,11 +51,14 @@
 
 #include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
@@ -62,9 +71,39 @@ namespace {
 
 using nlohmann::json;
 using vayu::tests::basic_pair_of;
+using vayu::tests::MockTokenServer;
 
 constexpr const char* ENV_ID     = "env_1";
 constexpr const char* REQUEST_ID = "req_1";
+
+/// A client-credentials auth block against @p tokens at @p path, every field
+/// that reaches the endpoint a variable. The client id and secret go in the
+/// body, so the server's last body shows both.
+json client_credentials (const MockTokenServer& tokens, const std::string& path = "/token") {
+    return { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" }, { "accessTokenUrl", tokens.url (path) },
+        { "clientId", "{{client}}" }, { "clientSecret", "{{secret}}" },
+        { "scope", "{{scope}}" }, { "credentialsPlacement", "body" } } } };
+}
+
+/// The form field @p name of the last token request, "" when it had none.
+std::string token_form_field (const MockTokenServer& tokens, const std::string& name) {
+    const auto form  = vayu::tests::parse_form (tokens.last_body ());
+    const auto found = form.find (name);
+    return found == form.end () ? std::string () : found->second;
+}
+
+/// A composed payload as `POST /runs` takes it for a single-request run of one
+/// iteration: the request's elements under `requestElements`, its `elements`
+/// being the run override.
+json as_single_iteration_run (json payload) {
+    payload["requestElements"] = payload.at ("elements");
+    payload.erase ("elements");
+    payload.update (
+    { { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } });
+    return payload;
+}
 
 class DeferredCompositionTest : public ::testing::Test {
     protected:
@@ -155,6 +194,24 @@ class DeferredCompositionTest : public ::testing::Test {
         *db_, json{ { "requestId", REQUEST_ID }, { "environmentId", ENV_ID } });
         EXPECT_EQ (status, 200) << payload.dump ();
         return payload;
+    }
+
+    /// `POST /compose` of `req_1` in `env_1` for a run, as the load dialog asks.
+    json compose_for_a_run () const {
+        auto [status, payload] = vayu::http::compose_request_core (*db_,
+        json{ { "requestId", REQUEST_ID }, { "environmentId", ENV_ID },
+        { "deferDynamicVariables", true } });
+        EXPECT_EQ (status, 200) << payload.dump ();
+        return payload;
+    }
+
+    /// Wait for @p run_id to leave pending and running.
+    void await_run (const std::string& run_id) const {
+        EXPECT_TRUE (vayu::tests::wait_until ([&] {
+            const auto run = db_->get_run (run_id);
+            return run && run->status != vayu::RunStatus::Pending &&
+            run->status != vayu::RunStatus::Running;
+        }));
     }
 
     /// The status and body @p path answered @p payload with.
@@ -350,22 +407,173 @@ TEST_F (DeferredCompositionTest, ALoadRunOfADeferredPayloadSendsTheStoredValueNo
     seed_request (echo.url (), { { "Authorization", "Bearer {{token}}" } },
     "pm.environment.set('token', 'new');");
 
-    json payload = compose ();
+    const json payload = compose ();
     ASSERT_TRUE (payload.contains ("deferredVariables")) << payload.dump ();
-    // The move every client makes: a single-target run reads the request's own
-    // elements under `requestElements`, its `elements` being the run override.
-    payload["requestElements"] = payload.at ("elements");
-    payload.erase ("elements");
-    payload.update (
-    { { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } });
 
-    const auto [status, body] = post ("/runs", payload);
+    const auto [status, body] = post ("/runs", as_single_iteration_run (payload));
     ASSERT_EQ (status, 202) << body.dump ();
-    const std::string run_id = body.value ("runId", std::string ());
-    ASSERT_TRUE (vayu::tests::wait_until ([&] {
-        const auto run = db_->get_run (run_id);
-        return run && run->status != vayu::RunStatus::Pending &&
-        run->status != vayu::RunStatus::Running;
-    }));
+    await_run (body.value ("runId", std::string ()));
     EXPECT_EQ (echo.header ("Authorization"), "Bearer old");
+}
+
+// --- OAuth 2.0 (#2521): resolved after the script, then acquired --------------
+
+// The headline: the client secret and the scope the script sets are what the
+// token endpoint receives, and the token it answers is what goes out.
+TEST_F (DeferredCompositionTest, OAuth2TheSecretAndScopeTheScriptSetsReachTheTokenEndpoint) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment (
+    { { "client", "cid" }, { "secret", "old-secret" }, { "scope", "read" } });
+    seed_request (echo.url (),
+    json::object (), "pm.environment.set('secret', 'new-secret'); pm.environment.set('scope', 'write');",
+    client_credentials (tokens));
+
+    const json composed = compose ();
+    EXPECT_EQ (composed["auth"]["config"]["clientSecret"], "{{secret}}")
+    << composed.dump ();
+    EXPECT_EQ (composed.value ("deferredVariables", json ()),
+    json::array ({ "client", "scope", "secret" }));
+
+    const json answer = compose_and_execute ();
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (token_form_field (tokens, "client_secret"), "new-secret");
+    EXPECT_EQ (token_form_field (tokens, "scope"), "write");
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+// The cache key is the resolved config's: the token is stored under the client
+// id the script set, and nothing under the one composition would have used.
+TEST_F (DeferredCompositionTest, OAuth2TheCacheKeyIsTheScriptsConfigNotTheComposedOne) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment (
+    { { "client", "old-client" }, { "secret", "s" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (),
+    "pm.environment.set('client', 'new-client');", client_credentials (tokens));
+
+    compose_and_execute ();
+
+    json config                    = client_credentials (tokens)["config"];
+    config["clientSecret"]         = "s";
+    config["scope"]                = "read";
+    config["clientId"]             = "new-client";
+    const std::string sent_key     = vayu::http::oauth::cache_key (config);
+    config["clientId"]             = "old-client";
+    const std::string composed_key = vayu::http::oauth::cache_key (config);
+    ASSERT_NE (sent_key, composed_key);
+    EXPECT_EQ (token_form_field (tokens, "client_id"), "new-client");
+    EXPECT_TRUE (db_->get_oauth_token (sent_key).has_value ());
+    EXPECT_FALSE (db_->get_oauth_token (composed_key).has_value ());
+}
+
+// Nothing deferred without a script: the config composes resolved, exactly as
+// before #2521, and the token is acquired with the stored values.
+TEST_F (DeferredCompositionTest, OAuth2WithNoScriptResolvesAtCompositionAsBefore) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment (
+    { { "client", "cid" }, { "secret", "stored-secret" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (), "", client_credentials (tokens));
+
+    const json composed = compose ();
+    EXPECT_EQ (composed["auth"]["config"]["clientSecret"], "stored-secret");
+    EXPECT_FALSE (composed.contains ("deferredVariables")) << composed.dump ();
+
+    compose_and_execute ();
+    EXPECT_EQ (token_form_field (tokens, "client_secret"), "stored-secret");
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+// A script that leaves the config as it was reaches the same key, so the
+// second send reads the cached token instead of asking the endpoint again.
+TEST_F (DeferredCompositionTest, OAuth2ASecondSendOfTheSameResolvedConfigUsesTheCache) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "old" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (),
+    "pm.environment.set('secret', 'same');", client_credentials (tokens));
+
+    compose_and_execute ();
+    compose_and_execute ();
+
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+// A token the endpoint refuses fails the send the way a refused build does:
+// status 0, the hint as `authErrorCode`, and nothing reaches the server.
+TEST_F (DeferredCompositionTest, OAuth2ATokenTheEndpointRefusesAfterTheScriptFailsTheSend) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "old" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (), "pm.environment.set('secret', 'new');",
+    client_credentials (tokens, "/token-fail"));
+
+    const json answer = compose_and_execute ();
+
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (echo.requests_seen (), 0);
+    EXPECT_EQ (answer.value ("status", -1), 0) << answer.dump ();
+    const std::string hint = answer.value ("authErrorCode", "");
+    EXPECT_FALSE (hint.empty ()) << answer.dump ();
+    EXPECT_EQ (answer.value ("refusalCode", ""), hint);
+}
+
+// What the acquisition waited on the endpoint for is reported beside the
+// script time, so `engineMs` leaves it out; a cached token waits on nothing.
+TEST_F (DeferredCompositionTest, OAuth2ALateFetchIsTimedAndACachedTokenIsNot) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    json config         = client_credentials (tokens)["config"];
+    const auto exchange = [&] {
+        vayu::runtime::ScriptEngine engine;
+        vayu::http::routes::ScriptVariableScopes scopes;
+        for (const char* name : { "client", "secret", "scope" }) {
+            scopes.environment[name] =
+            vayu::Variable{ .value = std::string ("v-") + name };
+        }
+        vayu::http::routes::ExchangeInputs inputs;
+        inputs.request.method = vayu::HttpMethod::GET;
+        inputs.request.url    = echo.url ();
+        inputs.late_auth      = vayu::http::OAuth2Auth{ config };
+        inputs.token_cache    = db_.get ();
+        return vayu::http::routes::execute_exchange (
+        engine, cookie_jar_, "", scopes, std::move (inputs));
+    };
+
+    const auto fetched = exchange ();
+    EXPECT_EQ (fetched.response.status_code, 200);
+    EXPECT_GT (fetched.auth_fetch_ms, 0.0);
+    const auto cached = exchange ();
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (cached.auth_fetch_ms, 0.0);
+}
+
+// A load run acquires once, before any script: composed for a run, the config
+// carries the stored values and the run sends their token; composed for a
+// Send, it is still a template and the run is refused rather than asking the
+// endpoint with `{{client}}`.
+TEST_F (DeferredCompositionTest, OAuth2ALoadRunAcquiresFromTheStoredValuesOrIsRefused) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "stored" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (),
+    "pm.environment.set('secret', 'new');", client_credentials (tokens));
+
+    const auto [refused, refusal] =
+    post ("/runs", as_single_iteration_run (compose ()));
+    EXPECT_EQ (refused, 400) << refusal.dump ();
+    EXPECT_NE (refusal.dump ().find ("{{client}}"), std::string::npos)
+    << refusal.dump ();
+    EXPECT_EQ (tokens.hits (), 0);
+
+    const json payload = compose_for_a_run ();
+    EXPECT_EQ (payload["auth"]["config"]["clientSecret"], "stored") << payload.dump ();
+    const auto [status, body] = post ("/runs", as_single_iteration_run (payload));
+    ASSERT_EQ (status, 202) << body.dump ();
+    await_run (body.value ("runId", std::string ()));
+    EXPECT_EQ (token_form_field (tokens, "client_secret"), "stored");
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
 }

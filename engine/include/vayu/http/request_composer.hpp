@@ -317,6 +317,22 @@ enum class DynamicResolution : std::uint8_t {
 };
 
 /**
+ * When an OAuth 2.0 config's `{{names}}` resolve for a request a pre-request
+ * script runs before (#2521). Its cache key (`oauth::cache_key`) is computed
+ * from the resolved config either way, never from a template.
+ */
+enum class OAuth2Resolution : std::uint8_t {
+    /// Left written with the request's other names, for the send to resolve
+    /// after the script and then acquire (`routes::apply_late_auth`), so a
+    /// script that sets a client secret or scope reaches the token endpoint.
+    /// What a Send and a sequential collection run compose with.
+    AfterTheScript,
+    /// Resolved here, before any script: a load run acquires its token once,
+    /// when it is planned, and every virtual user sends that one.
+    AtComposition,
+};
+
+/**
  * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
  * (kept verbatim) and @p bound_columns beside it (kept verbatim too, issue
  * #1007), then scopes, then the dynamic-variable table; a name nothing answers
@@ -537,11 +553,17 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
  * answers them and the script may change that answer. Absent when none was.
  * It describes this answer only; `POST /execute` and `POST /runs` ignore it.
  *
+ * An OAuth 2.0 config's names are deferred with the rest when @p oauth2 is
+ * `AfterTheScript`; see @ref OAuth2Resolution. Absent, the body decides: a
+ * composition for a run (`deferDynamicVariables`) resolves the config here,
+ * any other leaves it to the send.
+ *
  * Extracted from the route (routes/compose.cpp) so request_composer_test.cpp
  * can drive it against a real database without an in-process HTTP server,
  * matching the suite's other route tests.
  */
-std::pair<int, nlohmann::json>
-compose_request_core (vayu::db::Database& db, const nlohmann::json& body);
+std::pair<int, nlohmann::json> compose_request_core (vayu::db::Database& db,
+const nlohmann::json& body,
+std::optional<OAuth2Resolution> oauth2 = std::nullopt);
 
 } // namespace vayu::http

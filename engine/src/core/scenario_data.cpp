@@ -610,6 +610,14 @@ bool keeps_deferrable_credential_namespace (const std::string& name) {
     vayu::http::is_identity_variable_name (name);
 }
 
+/// A name neither the row nor the iteration identity answers: one only the
+/// variable scopes can, as the pre-request script leaves them (issue #2473).
+bool answered_by_the_scopes_alone (const std::string& name,
+const vayu::http::BoundColumnNames& bound_columns) {
+    return !keeps_deferrable_credential_namespace (name) &&
+    !vayu::http::is_bound_column_name (name, bound_columns);
+}
+
 /// The first token @p keep accepts in any string of @p value, recursively,
 /// written back with its braces. Object keys are not scanned.
 template <typename Keep>
@@ -1081,12 +1089,27 @@ std::optional<std::string> first_token_in (const nlohmann::json& value) {
     return first_kept_token_in (value, [] (const std::string&) { return true; });
 }
 
+std::optional<std::string> first_oauth2_scope_token (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns) {
+    const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth);
+    if (oauth2 == nullptr) {
+        return std::nullopt;
+    }
+    return first_kept_token_in (oauth2->config, [&bound_columns] (const std::string& name) {
+        return answered_by_the_scopes_alone (name, bound_columns);
+    });
+}
+
 bool credentials_await_scripts (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns) {
     const auto only_the_scopes_answer = [&bound_columns] (const std::string& name) {
-        return !keeps_deferrable_credential_namespace (name) &&
-        !vayu::http::is_bound_column_name (name, bound_columns);
+        return answered_by_the_scopes_alone (name, bound_columns);
     };
+    // Not a credential `walk_auth_credentials` visits, so scanned as the config
+    // it is (#2521).
+    if (first_oauth2_scope_token (auth, bound_columns)) {
+        return true;
+    }
     bool awaits = false;
     vayu::http::walk_auth_credentials (
     auth, [&] (const std::string& field, vayu::http::CredentialDestination) {

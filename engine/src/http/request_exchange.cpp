@@ -771,15 +771,23 @@ const ScriptVariableScopes& scopes) {
 
 std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const vayu::http::VariableValues& vars) {
+const vayu::http::VariableValues& vars,
+LateTokenAcquisition* acquisition) {
     // Resolved raw: `apply_auth` encodes what each destination needs (base64
     // for a basic pair, the query rule for an api key in the query).
     vayu::http::walk_auth_credentials (
     auth, [&vars] (std::string& field, vayu::http::CredentialDestination) {
         field = vayu::http::resolve_template (field, vars);
     });
-    // No database: only OAuth 2.0 needs one, and it is never deferred.
-    auto applied = vayu::http::apply_auth (request, auth, nullptr);
+    // Before `apply_auth`, which computes the cache key from it (D10).
+    if (auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth)) {
+        oauth2->config = vayu::http::resolve_json_strings (oauth2->config, vars);
+    }
+    auto applied = vayu::http::apply_auth (
+    request, auth, acquisition != nullptr ? acquisition->token_cache : nullptr);
+    if (acquisition != nullptr) {
+        acquisition->fetch_ms += applied.token_fetch_ms;
+    }
     if (applied.ok) {
         return std::nullopt;
     }
@@ -789,8 +797,9 @@ const vayu::http::VariableValues& vars) {
 
 std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const ScriptVariableScopes& scopes) {
-    return apply_late_auth (request, std::move (auth), values_from_scopes (scopes));
+const ScriptVariableScopes& scopes,
+LateTokenAcquisition* acquisition) {
+    return apply_late_auth (request, std::move (auth), values_from_scopes (scopes), acquisition);
 }
 
 std::vector<std::string> resolve_load_residuals (vayu::Request& request,
@@ -1053,7 +1062,10 @@ ExchangeInputs inputs) {
     // credential it writes is resolved a second time.
     auto refusal = resolve_residual_tokens (outcome.request, scopes);
     if (!refusal && inputs.late_auth) {
-        refusal = apply_late_auth (outcome.request, std::move (*inputs.late_auth), scopes);
+        LateTokenAcquisition acquisition{ inputs.token_cache };
+        refusal = apply_late_auth (
+        outcome.request, std::move (*inputs.late_auth), scopes, &acquisition);
+        outcome.auth_fetch_ms = acquisition.fetch_ms;
     }
     if (refusal) {
         // Answered exactly as the pre-send gate answers its own refusals, which

@@ -358,7 +358,9 @@ nlohmann::json& raw_elements_out) {
     // their head. A step spelling no generator is unaffected: nothing survives
     // composition, so nothing is split and nothing is joined.
     compose_body["deferDynamicVariables"] = true;
-    auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
+    auto [status, payload] = vayu::http::compose_request_core (db, compose_body,
+    options.oauth2_after_scripts ? vayu::http::OAuth2Resolution::AfterTheScript :
+                                   vayu::http::OAuth2Resolution::AtComposition);
     if (status != 200) {
         return ("Cannot compose " + describe_step (index, row) + ": " +
         compose_error_message (payload));
@@ -379,24 +381,37 @@ nlohmann::json& raw_elements_out) {
     vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
     StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth, bound_columns);
 
-    // OAuth 2.0 is the one mode deferral cannot serve: its token is
-    // acquired right here, once, against the token endpoint, so there is no
-    // per-iteration acquisition for a row to reach - and adding one would
-    // mean a network round trip per virtual user per iteration. Refused by
-    // name in both directions, with or without a data set, rather than sent
+    // OAuth 2.0 is the one mode the row bind cannot serve: its token is
+    // acquired against the token endpoint - here, once, for a load run, or at
+    // each sequential step's send - never bound per iteration, and a bind per
+    // virtual user per iteration would be a network round trip each. Refused
+    // by name in both directions, with or without a data set, rather than sent
     // to the token endpoint as the literal token text.
     if (auto token = first_oauth2_deferrable_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
-        " in its OAuth 2.0 configuration. That token is acquired once, "
-        "when the run is planned, so neither a data column nor the "
-        "iteration identity can ever reach it - use a static credential "
-        "there, or move the token into the request itself.");
+        " in its OAuth 2.0 configuration. That token is acquired against "
+        "the token endpoint, never bound per iteration, so neither a data "
+        "column nor the iteration identity can ever reach it - use a static "
+        "credential there, or move the token into the request itself.");
+    }
+    // A load run acquires right here, before any script, so a name nothing
+    // answered at composition would reach the token endpoint as written.
+    if (!options.oauth2_after_scripts) {
+        if (auto token = first_oauth2_scope_token (parsed_auth, bound_columns)) {
+            return (describe_step (index, row) + " carries " + *token +
+            " in its OAuth 2.0 configuration, and no variable answers it. A "
+            "load run acquires the token once, when the run is planned and "
+            "before any script runs - define the variable in the "
+            "environment, the collection or the globals, or write the value "
+            "into the configuration.");
+        }
     }
 
     // A name composition found no scope for is one a pre-request script, an
     // inline element or a setup script may define before the send, and none
-    // of them can reach it once `apply_auth` has encoded it (issue #2473).
-    // Never true for OAuth 2.0, which is acquired right here.
+    // of them can reach it once `apply_auth` has encoded it (issue #2473). So
+    // is any name of a scripted step on a sequential plan, OAuth 2.0 config
+    // included (#2521).
     const bool auth_after_scripts =
     vayu::core::credentials_await_scripts (parsed_auth, bound_columns);
 
