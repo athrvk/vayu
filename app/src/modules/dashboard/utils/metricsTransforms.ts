@@ -75,11 +75,27 @@ function elapsedOrigin(first: LoadTestMetrics | undefined): number {
 }
 
 /**
+ * The latest a live head may land and still be the run's first frame. Past one
+ * tick interval (with slack for a slow flush) the head has no predecessor in
+ * the window - the live buffer was trimmed, or the stream attached late - so
+ * its cumulative count is the run to date, not what one interval produced.
+ */
+const LIVE_HEAD_MAX_SECONDS = 1.5;
+
+function isOrphanLiveHead(first: LoadTestMetrics | undefined): boolean {
+	return Boolean(first?.live) && (first?.elapsed_seconds ?? 0) > LIVE_HEAD_MAX_SECONDS;
+}
+
+/**
  * Build per-second status-class rates from the cumulative `status_codes` map
  * each tick carries. Buckets to 0.5s, diffs consecutive buckets so a 5xx burst
  * shows up as a band, not a slope change, and divides each diff by the
  * elapsed time between the two buckets' ticks. Diffs are clamped >= 0 (the
  * source is monotonic). Returns [] when no tick carries a status map.
+ *
+ * A live head past `LIVE_HEAD_MAX_SECONDS` has nothing to diff against, so it
+ * seeds the baseline and draws no point of its own; the series starts at the
+ * next bucket.
  *
  * The division is what keeps one unit across sources (#2547): live frames
  * close half a second per bucket, a stored series a second per tick, and a
@@ -109,6 +125,8 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 		cErr: 0,
 		elapsed: elapsedOrigin(first),
 	};
+	const orphanHead = isOrphanLiveHead(first) ? cum.shift() : undefined;
+	if (orphanHead) prev = orphanHead;
 	for (const c of cum) {
 		const seconds = c.elapsed - prev.elapsed;
 		// Only a live frame stamped at load start closes no time, and nothing has
@@ -443,6 +461,23 @@ export function spansMultipleBuckets(
 		const t = halfSecondBucket(m.elapsed_seconds);
 		if (first === null) first = t;
 		else if (t !== first) return true;
+	}
+	return false;
+}
+
+/**
+ * Whether `buildStatusOverTime` would return more than one point, answered
+ * without building it: the status card's gate. Distinct 0.5s buckets among the
+ * ticks carrying a status map, one more of them when the head is dropped.
+ */
+export function hasStatusSeries(history: LoadTestMetrics[]): boolean {
+	const first = history.find(hasStatusCodes);
+	const needed = isOrphanLiveHead(first) ? 3 : 2;
+	const buckets = new Set<number>();
+	for (const m of history) {
+		if (!hasStatusCodes(m)) continue;
+		buckets.add(halfSecondBucket(m.elapsed_seconds));
+		if (buckets.size >= needed) return true;
 	}
 	return false;
 }

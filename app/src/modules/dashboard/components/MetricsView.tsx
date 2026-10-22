@@ -41,7 +41,7 @@ import {
 	isRateLimitedRun,
 	buildRampOverlay,
 	hasPercentileSignal,
-	hasStatusCodes,
+	hasStatusSeries,
 	hasCustomMetrics,
 	latestThroughputMbps,
 	spansMultipleBuckets,
@@ -120,10 +120,7 @@ function MetricsView({
 		() => spansMultipleBuckets(chartWindow, hasSecondPercentiles),
 		[chartWindow]
 	);
-	const hasStatusData = useMemo(
-		() => spansMultipleBuckets(chartWindow, hasStatusCodes),
-		[chartWindow]
-	);
+	const hasStatusData = useMemo(() => hasStatusSeries(chartWindow), [chartWindow]);
 	// Presence, not "spans multiple buckets" - mirrors `ServerVitalsChart`'s own
 	// gate below (`monitorSamples.length > 0 && chartWindow.length > 1`) rather
 	// than `hasStatusData`'s bucket-count question, since a custom metric's tick
