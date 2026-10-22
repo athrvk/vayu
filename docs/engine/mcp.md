@@ -270,6 +270,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
 | `get_app_focus`        | read     | The renderer's last snapshot over `app:focus` (app window only; no engine call) | - (names and ids only: the open tab's type, entity id and label, and the active environment's id and name; an error saying the window is not connected from the stdio CLI or before a window has published) |
+| `get_safety_config`    | read     | The session's `McpSafetyConfig` (no engine call, answers on HTTP and stdio alike) | - (`allowlist: { allowAll, hosts }` with the hosts in full, `caps: { maxRps, maxConcurrency, maxDurationSeconds, maxIterations }`, `gates: { allowWrites, allowNetworkSettings, revealSecretsToAgents }` as booleans, and `disabledToolCount`; a count, never the names; no secret value, since none is part of the config; #2444) |
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
@@ -2451,6 +2452,15 @@ secrets; see the write toggle.
 | `revealSecretsToAgents` | `false` | -        | Lift every withholding in [Secret values](#secret-values): reads, write answers and run output. |
 | `disabledTools`      | `[]`    | -           | Tool names to hide/reject.                                 |
 
+**An agent reads these through `get_safety_config`** (#2444), in one call, so it
+sizes a profile or picks a target inside the limits instead of meeting each cap
+as a separate refusal. The allowlist is listed in full: it is user configuration,
+not a secret, and `checkAllowlist` already prints the whole list on any refusal.
+The three gates (`allowWrites`, `allowNetworkSettings`, `revealSecretsToAgents`)
+are on/off only, and `disabledTools` is reported as a count, because the server
+instructions name no tool and `tools/list` is already the authority on which
+exist. `maxResponseSamples` is not in the answer; the other four caps are.
+
 The renderer never sets these directly: `main.ts` sanitizes every change
 (`sanitizeSafetyInput` - normalizes/de-dupes hosts, holds each cap to a whole
 number between 1 and its ceiling, trims and de-dupes `disabledTools`) before
@@ -2515,7 +2525,7 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 79 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 80 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
@@ -2761,7 +2771,10 @@ added about 2.9 KB to each pair: 127,059 / 124,333 bytes with writes off and
 194,425 / 190,028 with writes on (reveal off / on). The loose schemas on the 23
 other object-rooted reads added 7,866 bytes more to every row, about 340 bytes
 a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
-under caps of 136,300 / 133,600 and 204,400 / 199,900.
+under caps of 136,300 / 133,600 and 204,400 / 199,900. `get_safety_config`
+(#2444) added about 370 bytes a row: 136,673 / 133,947 with writes off and
+204,039 / 199,642 with writes on, and the writes-off caps went to 137,100 /
+134,400.
 The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the
