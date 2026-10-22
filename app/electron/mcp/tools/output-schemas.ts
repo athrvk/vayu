@@ -291,19 +291,24 @@ export async function childCollectionNames(
 	return names;
 }
 
+/** The two ways past a direct-only smoke run, as the caveat names them. */
+const SMOKE_RECURSIVE_PATHS =
+	"Pass `recursive: true` to run the whole tree in this tool, or use `run_collection` with " +
+	"`recursive: true` for one stored run with a run id (preferred for a large tree).";
+
 /** The disclosure `run_collection_smoke` attaches about folders it did not run. */
 export function smokeScopeCaveat(children: string[] | null): string {
 	if (children === null) {
 		return (
 			"\n\nNote: could not read the collection list, so any sub-collections could not be " +
 			"checked. This tool runs a collection's direct requests only - requests in nested " +
-			"folders are never included."
+			`folders are never included. ${SMOKE_RECURSIVE_PATHS}`
 		);
 	}
 	if (children.length === 0) return "";
 	return (
 		`\n\nNote: ${children.length} sub-collection(s) were NOT run - this tool runs a ` +
 		`collection's direct requests only, and the counts above exclude every request nested ` +
-		`inside: ${children.join(", ")}. Call run_collection_smoke on each to cover them.`
+		`inside: ${children.join(", ")}. ${SMOKE_RECURSIVE_PATHS}`
 	);
 }

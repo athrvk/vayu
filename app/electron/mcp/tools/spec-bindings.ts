@@ -295,6 +295,14 @@ export function describeImport(answer: unknown): string {
 			.join(", ");
 		text += ` Not everything imported: ${named}.`;
 	}
+	// The engine's own count, not a guess from the tree: an importer decides
+	// whether it filed anything under folders, and by what (`meta.folderStrategy`).
+	const folders = num(meta.folderCount);
+	if (folders > 0) {
+		text +=
+			` Requests are filed under ${folders} sub-collection(s); to run them all pass ` +
+			`recursive: true to run_collection or run_collection_smoke.`;
+	}
 	return text;
 }
 
