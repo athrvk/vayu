@@ -50,6 +50,7 @@ import { useCopy } from "@/hooks";
 import { mockForCollection } from "./mock-server-selection";
 import { StartMockServerDialog } from "./StartMockServerDialog";
 import type { MockServerOptions } from "./mock-server-options";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export default function MockServerControl({ collectionId }: { collectionId: string }) {
 	const showToast = useToastStore((s) => s.showToast);
@@ -74,9 +75,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				onSuccess: (mock) => {
 					setOptionsOpen(false);
 					showToast(
-						`Mock server on port ${mock.port} - ${mock.routeCount} route${
-							mock.routeCount === 1 ? "" : "s"
-						}`,
+						`Mock server on port ${mock.port} - ${mock.routeCount} ${pluralize(mock.routeCount, "route")}`,
 						"success"
 					);
 				},
@@ -180,7 +179,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				/>
 				<TruncatedText className="font-mono text-xs">{running.url}</TruncatedText>
 				<span className="shrink-0 text-xs text-muted-foreground">
-					{running.routeCount} route{running.routeCount === 1 ? "" : "s"}
+					{running.routeCount} {pluralize(running.routeCount, "route")}
 					{running.routesWithoutExample > 0 &&
 						`, ${running.routesWithoutExample} without an example`}
 				</span>

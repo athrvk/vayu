@@ -453,8 +453,8 @@ export default function SendWithRowDialog({
 					{parsed && (
 						<span className="ml-auto shrink-0 text-muted-foreground">
 							{parsed.format.toUpperCase()} · {total.toLocaleString()}{" "}
-							{total === 1 ? "row" : "rows"} · {columns.length}{" "}
-							{columns.length === 1 ? "column" : "columns"}
+							{pluralize(total, "row")} · {columns.length}{" "}
+							{pluralize(columns.length, "column")}
 						</span>
 					)}
 				</div>
@@ -522,8 +522,8 @@ export default function SendWithRowDialog({
 						{selectedMissing && (
 							<FieldError>
 								Row {(selected + 1).toLocaleString()} no longer exists - the file
-								has {total.toLocaleString()} {total === 1 ? "row" : "rows"}. Pick
-								one below.
+								has {total.toLocaleString()} {pluralize(total, "row")}. Pick one
+								below.
 							</FieldError>
 						)}
 
@@ -613,9 +613,10 @@ export default function SendWithRowDialog({
 								    the rest - said because the grid can clip without
 								    looking clipped on an overlay-scrollbar platform. */}
 								{filter.trim() !== ""
-									? `${visibleRows.length.toLocaleString()} of ${total.toLocaleString()} ${
-											total === 1 ? "row" : "rows"
-										} match.`
+									? `${visibleRows.length.toLocaleString()} of ${total.toLocaleString()} ${pluralize(
+											total,
+											"row"
+										)} match.`
 									: hasMore
 										? `Showing ${rendered.length.toLocaleString()} of ${total.toLocaleString()} rows - scroll for more.`
 										: `All ${total.toLocaleString()} ${pluralize(total, "row")}.`}

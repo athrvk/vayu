@@ -30,6 +30,7 @@ import { CheckCircle2, HelpCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ResponseValidation } from "@/types";
 import { uncheckedReasonText } from "./validation-reasons";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface ValidationChipProps {
 	validation: ResponseValidation;
@@ -64,7 +65,7 @@ export function ValidationChip({ validation, className }: ValidationChipProps) {
 				<XCircle aria-hidden="true" className="size-icon-sm" />
 				<span className="tabular-nums">
 					Schema failed{total > 0 ? ` - ${total.toLocaleString()}` : ""}
-					{total > 0 ? (total === 1 ? " problem" : " problems") : ""}
+					{total > 0 ? ` ${pluralize(total, "problem")}` : ""}
 				</span>
 			</div>
 		);

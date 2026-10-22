@@ -97,6 +97,7 @@ import { hasSpecBinding, type Collection } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
 import { InfoBanner, RelativeTime, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 interface SpecTabProps {
 	collection: Collection;
@@ -667,8 +668,8 @@ function BoundSpec({
 								/>
 							) : (
 								<>
-									{mappedCount} of {requestCount} request
-									{requestCount === 1 ? "" : "s"}
+									{mappedCount} of {requestCount}{" "}
+									{pluralize(requestCount, "request")}
 								</>
 							)}
 						</dd>
@@ -752,10 +753,9 @@ function MatchSummary({
 			 * and the two leftovers are what sync (#627) will later offer to act on.
 			 */}
 			<p className="text-label text-muted-foreground">
-				Matched {matched} request{matched === 1 ? "" : "s"} · {unmatchedRequests} request
-				{unmatchedRequests === 1 ? "" : "s"} with no operation · {unmatchedOperations}{" "}
-				operation
-				{unmatchedOperations === 1 ? "" : "s"} with no request
+				Matched {matched} {pluralize(matched, "request")} · {unmatchedRequests}{" "}
+				{pluralize(unmatchedRequests, "request")} with no operation · {unmatchedOperations}{" "}
+				{pluralize(unmatchedOperations, "operation")} with no request
 			</p>
 			{/*
 			 * The one line here that describes a *write* to something that already
@@ -765,9 +765,9 @@ function MatchSummary({
 			 */}
 			{staleStamps > 0 && (
 				<p className="text-label text-muted-foreground">
-					{staleStamps} request{staleStamps === 1 ? "" : "s"} record
-					{staleStamps === 1 ? "s" : ""} an operation this document does not have - that
-					identity is cleared, because it names another document.
+					{staleStamps} {pluralize(staleStamps, "request")}{" "}
+					{pluralize(staleStamps, "records", "record")} an operation this document does
+					not have - that identity is cleared, because it names another document.
 				</p>
 			)}
 		</div>

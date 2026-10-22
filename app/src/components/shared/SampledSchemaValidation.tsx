@@ -92,12 +92,14 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 			<CardContent>
 				<p className="mb-3 text-xs text-muted-foreground tabular-nums">
 					{validation.checked} of {validation.sampled}
-					{exact ? "" : " sampled"} {validation.sampled === 1 ? "response" : "responses"}{" "}
-					checked against the spec.
+					{exact ? "" : " sampled"} {pluralize(validation.sampled, "response")} checked
+					against the spec.
 					{validation.failed > 0 &&
-						` ${validation.failed} did not match ${
-							validation.failed === 1 ? "its" : "their"
-						} declared schema.`}
+						` ${validation.failed} did not match ${pluralize(
+							validation.failed,
+							"its",
+							"their"
+						)} declared schema.`}
 				</p>
 				{/*
 				 * The counterpart of the coverage block's "counted on every send",
@@ -132,7 +134,7 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 						{unchecked.map(([reason, count]) => (
 							<li key={reason} className="text-xs text-muted-foreground tabular-nums">
 								<span className="font-medium">{count}</span>{" "}
-								{count === 1 ? "response" : "responses"} not checked:{" "}
+								{pluralize(count, "response")} not checked:{" "}
 								{uncheckedReasonText(reason)}
 							</li>
 						))}

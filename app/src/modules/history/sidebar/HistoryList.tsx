@@ -50,6 +50,7 @@ import { groupRunsByDay } from "./group-runs-by-day";
 import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
  * The origin Select carries one value for two store fields: a kind, or one
@@ -295,7 +296,7 @@ export default function HistoryList() {
 			actions={
 				total > 0 ? (
 					<span className="text-xs text-muted-foreground shrink-0">
-						{formatNumber(total)} {total === 1 ? "run" : "runs"}
+						{formatNumber(total)} {pluralize(total, "run")}
 					</span>
 				) : undefined
 			}

@@ -27,6 +27,7 @@
 
 import { Callout } from "./Callout";
 import type { RunReport } from "@/types/domain";
+import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 
 export interface CapturedDataWarningProps {
 	sampling: RunReport["sampling"];
@@ -41,17 +42,16 @@ export function CapturedDataWarning({ sampling, className }: CapturedDataWarning
 
 	return (
 		<Callout severity="warning" title="Captured response data" className={className}>
-			This run stored {captured.toLocaleString()} response
-			{captured === 1 ? "" : "s"} exactly as received, headers included, so anything
-			credential-shaped the server sent - a <code>Set-Cookie</code>, a token in a body - is
-			stored with them. It is deleted when the run is, so the <code>maxRunsRetained</code>{" "}
-			setting is its expiry.
+			This run stored {captured.toLocaleString()} {pluralize(captured, "response")} exactly as
+			received, headers included, so anything credential-shaped the server sent - a{" "}
+			<code>Set-Cookie</code>, a token in a body - is stored with them. It is deleted when the
+			run is, so the <code>maxRunsRetained</code> setting is its expiry.
 			{droppedForBudget > 0 && (
 				<>
 					{" "}
 					{droppedForBudget.toLocaleString()} further{" "}
-					{droppedForBudget === 1 ? "body was" : "bodies were"} not captured once the
-					run&apos;s budget was spent.
+					{pickByCount(droppedForBudget, { one: "body was", other: "bodies were" })} not
+					captured once the run&apos;s budget was spent.
 				</>
 			)}
 		</Callout>

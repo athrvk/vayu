@@ -125,8 +125,8 @@ export function CookiesCard() {
 					<>
 						<div className="flex items-center justify-between gap-4">
 							<p className="text-sm text-muted-foreground">
-								{total} cookie{total === 1 ? "" : "s"} across {scopes.length}{" "}
-								{scopes.length === 1 ? "environment" : "environments"}.
+								{total} {pluralize(total, "cookie")} across {scopes.length}{" "}
+								{pluralize(scopes.length, "environment")}.
 							</p>
 							<Button
 								variant="outline"

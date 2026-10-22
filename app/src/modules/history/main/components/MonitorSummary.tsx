@@ -21,6 +21,7 @@ import { fmtVitals } from "@/modules/dashboard/components/charts/uplot";
 import type { RunReport } from "@/types";
 import { formatNumber } from "@/lib/format-number";
 import { Callout } from "@/components/shared";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 type MonitorSection = NonNullable<RunReport["monitor"]>;
 
@@ -94,7 +95,7 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 
 			{monitor.samples > 0 && series.length === 0 && (
 				<Callout severity="warning" title="Scrapes carried no metrics">
-					{formatNumber(monitor.samples)} scrape{monitor.samples === 1 ? "" : "s"}{" "}
+					{formatNumber(monitor.samples)} {pluralize(monitor.samples, "scrape")}{" "}
 					succeeded, but none carried the metrics this run asked for - check the metric
 					names against the endpoint&apos;s output.
 				</Callout>
@@ -120,8 +121,7 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 						))}
 					</div>
 					<p className="text-xs text-muted-foreground">
-						Over {formatNumber(monitor.samples)} scrape
-						{monitor.samples === 1 ? "" : "s"}.
+						Over {formatNumber(monitor.samples)} {pluralize(monitor.samples, "scrape")}.
 					</p>
 				</>
 			)}

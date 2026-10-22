@@ -60,6 +60,7 @@ import { appEditorFor } from "../engine-settings-edited-in-app";
 import { useRevealedSetting } from "../useRevealedSetting";
 import { isByteUnit, formatBytes, formatSizeRange } from "../utils/format-size";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
+import { pickByCount } from "@/modules/dashboard/utils/format";
 
 /** Stated beside the Save bar, so the engine view's save model is on screen too. */
 const ENGINE_SAVE_NOTE = "Changes are staged here and written when you save.";
@@ -319,7 +320,10 @@ export default function SettingsMain() {
 			}
 			if (discarded > 0) {
 				showToast(
-					`${discarded} invalid change${discarded === 1 ? " was" : "s were"} discarded.`,
+					pickByCount(discarded, {
+						one: "1 invalid change was discarded.",
+						other: `${discarded} invalid changes were discarded.`,
+					}),
 					"warning"
 				);
 			}

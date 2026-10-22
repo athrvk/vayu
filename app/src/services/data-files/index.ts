@@ -288,7 +288,7 @@ function warnAboutUnevenColumns(columns: string[], rows: DataFileRow[], warnings
 	const rest = uneven.length - UNEVEN_COLUMNS_NAMED;
 	if (rest > 0) {
 		warnings.push(
-			`${rest} more ${pluralize(rest, "column")} ${rest === 1 ? "is" : "are"} missing from some rows.`
+			`${rest} more ${pluralize(rest, "column")} ${pluralize(rest, "is", "are")} missing from some rows.`
 		);
 	}
 }

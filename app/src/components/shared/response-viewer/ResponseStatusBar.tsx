@@ -29,6 +29,7 @@ import type { TimeRow } from "@/lib/time-value";
 import { ENGINE_COST_TIP, formatResponseTime, formatSize, isReportedMs } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface ResponseStatusBarProps {
 	status: number;
@@ -189,7 +190,7 @@ export function ResponseStatusBar({
 					/>
 					<span className="tabular-nums">
 						Streaming - {streaming.events.toLocaleString()}{" "}
-						{streaming.events === 1 ? "event" : "events"}
+						{pluralize(streaming.events, "event")}
 					</span>
 				</div>
 			)}

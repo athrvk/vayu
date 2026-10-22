@@ -73,6 +73,7 @@ import {
 	displayHeaderName,
 	unappliedStoredHeaders,
 } from "../../../utils/automatic-headers";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 const FOLLOW_LABEL = "Follow redirects";
 const MAX_LABEL = "Maximum redirects";
@@ -343,7 +344,7 @@ export default function SettingsPanel() {
 							{unapplied.neverSent.length > 0 &&
 								`Vayu never sends ${listNames(unapplied.neverSent)}. `}
 							{unapplied.cannotOmit.length > 0 &&
-								`Vayu can't leave out ${listNames(unapplied.cannotOmit)}: HTTP/1.1 needs ${unapplied.cannotOmit.length === 1 ? "it" : "them"}.`}
+								`Vayu can't leave out ${listNames(unapplied.cannotOmit)}: HTTP/1.1 needs ${pluralize(unapplied.cannotOmit.length, "it", "them")}.`}
 						</p>
 					</div>
 				)}
