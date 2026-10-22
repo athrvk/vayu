@@ -8348,6 +8348,20 @@ std::string shelf_answer (ScriptEngine& engine, Request& request, const std::str
     return result.success ? env["out"].value : "threw: " + result.error_message;
 }
 
+/// Stack budget for a test that calls into a bundled library and asserts what
+/// it answers. MSVC at /Od under ASan overflowed the default 256 KB inside
+/// lodash and moment calls (`_.isEqual`, `.format`), so those answers would
+/// depend on a frame size, not on the library. The stack-budget behaviour
+/// itself is pinned by RequireShelfLibrariesLoadUnderAShallowInterpreterStack
+/// and the restore test after it. Half of the 1 MB stack a Windows thread has.
+constexpr std::size_t LIBRARY_CALL_STACK_BYTES = std::size_t{ 512 } * 1024;
+
+ScriptConfig library_call_config () {
+    ScriptConfig config;
+    config.stack_size = LIBRARY_CALL_STACK_BYTES;
+    return config;
+}
+
 } // namespace
 
 // The acceptance case: Postman's signing call, through require.
@@ -8619,6 +8633,7 @@ TEST_F (ScriptEngineTest, RequireShelfUuidEvaluatesOnlyOnFirstUse) {
 // require('lodash') and the `_` global are npm's lodash 4.17.21, vendored (#2651).
 
 TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
+    ScriptEngine roomy{ library_call_config () };
     constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
     { "_.get({ a: [{ b: 3 }] }, 'a[0].b')", "3" },
     { "require('lodash').get({ a: [{ b: 3 }] }, ['a', '0', 'b'])", "3" },
@@ -8636,7 +8651,7 @@ TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
     { "_.VERSION", "4.17.21" },
     });
     for (const auto& answer : ANSWERS) {
-        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
         << answer.expression;
     }
 }
@@ -8658,18 +8673,19 @@ TEST_F (ScriptEngineTest, RequireShelfLodashIsOneModuleForRequireAndTheGlobal) {
 // of its own, and the sandbox gives it no Node to find: no `module`, `exports`,
 // `process` or `global` is in a built context, before or after it loads.
 TEST_F (ScriptEngineTest, RequireShelfLodashLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
     const std::string probe =
     "[typeof module, typeof exports, typeof process, typeof global, typeof "
     "define].join(' ')";
-    EXPECT_EQ (shelf_answer (engine, request, probe),
+    EXPECT_EQ (shelf_answer (roomy, request, probe),
     "undefined undefined undefined undefined undefined");
     EXPECT_EQ (
-    shelf_answer (engine, request,
+    shelf_answer (roomy, request,
     "(function () { var before = Object.getOwnPropertyNames(globalThis)"
     ".sort().join(); require('lodash').get({}, 'a'); _.noop(); return "
     "Object.getOwnPropertyNames(globalThis).sort().join() === before; })()"),
     "true");
-    EXPECT_EQ (shelf_answer (engine, request, "(require('lodash'), " + probe + ")"),
+    EXPECT_EQ (shelf_answer (roomy, request, "(require('lodash'), " + probe + ")"),
     "undefined undefined undefined undefined undefined");
 }
 
@@ -8692,18 +8708,18 @@ TEST_F (ScriptEngineTest, RequireShelfLodashGlobalCanBeReassigned) {
 // the in-progress entry in `load_library` and that read recurses until the
 // stack runs out, so every lodash case throws.
 TEST_F (ScriptEngineTest, RequireShelfLodashEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
     const size_t before = ScriptEngine::shelf_library_loads ();
-    EXPECT_EQ (shelf_answer (engine, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm"), "functionobject");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
     << "a script that touches no library evaluated one";
 
-    EXPECT_EQ (shelf_answer (engine, request,
+    EXPECT_EQ (shelf_answer (roomy, request,
                "_.get({ a: 1 }, 'a') + require('lodash').get({ a: 1 }, 'a')"),
     "2");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 
-    EXPECT_EQ (shelf_answer (engine, request,
-               "(require('lodash'), typeof _ + (_ === require('lodash')))"),
+    EXPECT_EQ (shelf_answer (roomy, request, "(require('lodash'), typeof _ + (_ === require('lodash')))"),
     "functiontrue");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
 }
@@ -8714,6 +8730,7 @@ TEST_F (ScriptEngineTest, RequireShelfLodashEvaluatesOnlyOnFirstUse) {
 // not move with the host's zone; the rest read moment.utc and fixed instants,
 // never the clock.
 TEST_F (ScriptEngineTest, RequireShelfMomentAnswersKnownCalls) {
+    ScriptEngine roomy{ library_call_config () };
     constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
     { "require('moment')('2026-10-21').add(1, 'day').format('YYYY-MM-DD')", "2026-10-22" },
     { "require('moment').utc(0).toISOString()", "1970-01-01T00:00:00.000Z" },
@@ -8739,7 +8756,7 @@ TEST_F (ScriptEngineTest, RequireShelfMomentAnswersKnownCalls) {
     { "require('moment').version", "2.31.0" },
     });
     for (const auto& answer : ANSWERS) {
-        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
         << answer.expression;
     }
 }
@@ -8747,8 +8764,9 @@ TEST_F (ScriptEngineTest, RequireShelfMomentAnswersKnownCalls) {
 // A destructured member is the one the module holds, and every require answers
 // one module.
 TEST_F (ScriptEngineTest, RequireShelfMomentDestructuredAndDirectAgree) {
+    ScriptEngine roomy{ library_call_config () };
     EXPECT_EQ (
-    shelf_answer (engine, request,
+    shelf_answer (roomy, request,
     "(function () { const { utc, duration } = require('moment'); "
     "return [utc(0).toISOString() === require('moment').utc(0).toISOString(), "
     "duration(1, 'day').asHours(), "
@@ -8760,13 +8778,14 @@ TEST_F (ScriptEngineTest, RequireShelfMomentDestructuredAndDirectAgree) {
 // global: Postman has none either, so `moment` stays undeclared before and
 // after a require, and nothing else is added to the global object.
 TEST_F (ScriptEngineTest, RequireShelfMomentLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
     const std::string probe =
     "[typeof moment, typeof module, typeof exports, typeof define].join(' ')";
-    EXPECT_EQ (shelf_answer (engine, request, probe), "undefined undefined undefined undefined");
-    EXPECT_EQ (shelf_answer (engine, request, "(require('moment'), " + probe + ")"),
+    EXPECT_EQ (shelf_answer (roomy, request, probe), "undefined undefined undefined undefined");
+    EXPECT_EQ (shelf_answer (roomy, request, "(require('moment'), " + probe + ")"),
     "undefined undefined undefined undefined");
     EXPECT_EQ (
-    shelf_answer (engine, request,
+    shelf_answer (roomy, request,
     "(function () { var before = Object.getOwnPropertyNames(globalThis)"
     ".sort().join(); require('moment').utc(0).format(); return "
     "Object.getOwnPropertyNames(globalThis).sort().join() === before; })()"),
@@ -8777,9 +8796,10 @@ TEST_F (ScriptEngineTest, RequireShelfMomentLeavesNoGlobalBehind) {
 // sandbox's require for './locale/fr', which refuses, and moment keeps
 // English: the call answers 'en' and throws nothing a script would see.
 TEST_F (ScriptEngineTest, RequireShelfMomentFallsBackToEnglishForAnotherLocale) {
-    EXPECT_EQ (shelf_answer (engine, request, "require('moment').locale('fr') + ' ' + require('moment').locale()"),
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (shelf_answer (roomy, request, "require('moment').locale('fr') + ' ' + require('moment').locale()"),
     "en en");
-    EXPECT_EQ (shelf_answer (engine, request, "require('moment').utc('2026-10-21').locale('fr').format('MMMM')"),
+    EXPECT_EQ (shelf_answer (roomy, request, "require('moment').utc('2026-10-21').locale('fr').format('MMMM')"),
     "October");
 }
 
@@ -8787,12 +8807,13 @@ TEST_F (ScriptEngineTest, RequireShelfMomentFallsBackToEnglishForAnotherLocale) 
 // fails; let the glue assign a `moment` global and the leaves-no-global case
 // fails.
 TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
     const size_t before = ScriptEngine::shelf_library_loads ();
-    EXPECT_EQ (shelf_answer (engine, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm"), "functionobject");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
     << "a script that touches no library evaluated one";
 
-    EXPECT_EQ (shelf_answer (engine, request, "require('moment').utc(0).year() + require('moment').utc(0).month()"),
+    EXPECT_EQ (shelf_answer (roomy, request, "require('moment').utc(0).year() + require('moment').utc(0).month()"),
     "1970");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
