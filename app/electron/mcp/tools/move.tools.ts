@@ -41,7 +41,7 @@ export const MOVE_TOOLS: McpTool[] = [
 		 */
 		invalidates: ["collection", "request"],
 		description: (config) =>
-			"Move a collection or a saved request into another collection - the row menu's 'Move to...', over MCP. " +
+			"Move a collection or a saved request into another collection - the row menu's 'Move to…', over MCP. " +
 			GUARDED_WRITE_SENTENCE +
 			". It lands at the end of its new parent by default, after the sub-collections and requests there alike (the two share one order, so a request can sit between folders), or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree." +
 			withheldPointer(config),

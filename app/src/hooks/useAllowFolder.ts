@@ -9,7 +9,7 @@
  * Adding an allowed folder, the one way every surface does it.
  *
  * Three surfaces offer it - Settings > Files, the binary body editor's
- * "Allow folder...", and the import preview's per-folder action - and each
+ * "Allow folder…", and the import preview's per-folder action - and each
  * would otherwise grow its own copy of the same outcomes: the folder is
  * allowed now; it already was (the engine's 409, which is the result the user
  * wanted, so it is not an error); or the engine refused it (400: a folder it

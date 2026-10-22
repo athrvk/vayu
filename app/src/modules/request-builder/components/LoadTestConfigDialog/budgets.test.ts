@@ -356,7 +356,7 @@ describe("the budgets explainer", () => {
 
 	it("tells the user where the p99 value comes from and what clearing it does", () => {
 		const p99 = BUDGET_FIELDS.find((field) => field.key === "latencyP99Ms");
-		expect(p99?.seededHint).toContain("Settings > Dashboard > SLO threshold");
+		expect(p99?.seededHint).toContain("Settings › Dashboard › SLO threshold");
 		expect(p99?.seededHint).toMatch(/clear it to run without a latency budget/i);
 	});
 });

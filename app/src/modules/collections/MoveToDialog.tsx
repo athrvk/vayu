@@ -6,7 +6,7 @@
  */
 
 /**
- * "Move to...": the row menu's answer to a drag, for anyone not making one.
+ * "Move to…": the row menu's answer to a drag, for anyone not making one.
  *
  * Alt+Arrow already gives the keyboard full parity with the pointer, but it is
  * a chord and it moves one step at a time. This is the discoverable version -

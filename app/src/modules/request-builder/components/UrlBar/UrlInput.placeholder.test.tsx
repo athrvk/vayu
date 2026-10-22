@@ -52,10 +52,10 @@ function renderUrlInput() {
 afterEach(cleanup);
 
 describe("the URL bar's placeholder", () => {
-	it("tells the user a curl command can be pasted", () => {
+	it("tells the user a cURL command can be pasted", () => {
 		renderUrlInput();
 		// Found by its accessible name: the placeholder must not have displaced it.
 		const input = screen.getByLabelText("Request URL");
-		expect(input.getAttribute("placeholder") ?? "").toMatch(/curl command/i);
+		expect(input.getAttribute("placeholder") ?? "").toMatch(/cURL command/);
 	});
 });

@@ -135,7 +135,7 @@ interface TabsState {
 	 *
 	 * The same shape of navigation as `specTabTarget`: `openTab` can only name
 	 * the run, and whether its report opens on the compare view is state
-	 * `LoadTestDetail` holds. The History row's "Compare with..." is the caller.
+	 * `LoadTestDetail` holds. The History row's "Compare with…" is the caller.
 	 * `LoadTestDetail` acts on it when that run is on screen and clears it.
 	 *
 	 * Session-scoped (absent from `partialize`): one navigation in flight, and

@@ -14,7 +14,7 @@
  * Settings > Files. A collection exported on this same machine names files
  * that are right here, and relinking them one request at a time is the chore
  * this exists to remove - so the preview lists each distinct folder the paths
- * sit in, with an "Allow folder..." beside it. It opens the system picker at
+ * sit in, with an "Allow folder…" beside it. It opens the system picker at
  * that folder for the user to confirm, because a folder is allowed only when a
  * person chose it there (#2356, `useAllowFolder`); outside Electron there is no
  * picker and no action. A folder that does not exist here cannot be chosen,
@@ -109,7 +109,7 @@ export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds })
 												onClick={() => void chooseAndAllow(folder)}
 												aria-label={`Allow folder ${folder}`}
 											>
-												Allow folder...
+												Allow folder…
 											</Button>
 										)
 									)}

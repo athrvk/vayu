@@ -436,7 +436,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					{(describeQuery.isFetching || matchQuery.isFetching) && (
 						<p className="flex items-center gap-2 text-xs text-muted-foreground">
 							<Loader2 className="size-icon-sm animate-spin" />
-							Reading this document and matching it against the requests here...
+							Reading this document and matching it against the requests here…
 						</p>
 					)}
 

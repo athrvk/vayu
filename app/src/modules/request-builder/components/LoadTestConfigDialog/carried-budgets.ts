@@ -149,7 +149,7 @@ export function budgetsChanged(
 /** Where the memo's budgets came from when the memo does not say. */
 export const UNNAMED_ORIGIN = "your last load test";
 
-export const SLO_SOURCE_NOTE = "(from Settings > Dashboard > SLO threshold)";
+export const SLO_SOURCE_NOTE = "(from Settings › Dashboard › SLO threshold)";
 
 /**
  * The notice's sentence, or null when nothing carried is left. A memo value is

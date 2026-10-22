@@ -108,7 +108,7 @@ describe("FilesPanel", () => {
 		});
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
 
 		await waitFor(() => expect(allowRoot).toHaveBeenCalledWith({ title: "Allow a folder" }));
 		// The row the engine kept, canonical, not the folder as picked.
@@ -136,7 +136,7 @@ describe("FilesPanel", () => {
 		});
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith("/data is already an allowed folder.", "info")
@@ -153,7 +153,7 @@ describe("FilesPanel", () => {
 		});
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
@@ -167,7 +167,7 @@ describe("FilesPanel", () => {
 		allowRoot.mockResolvedValue({ outcome: "unreachable", path: "/data", message: "x" });
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
@@ -181,7 +181,7 @@ describe("FilesPanel", () => {
 		allowRoot.mockResolvedValue({ outcome: "cancelled" });
 		renderPanel();
 
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
 
 		await waitFor(() => expect(allowRoot).toHaveBeenCalled());
 		expect(showToast).not.toHaveBeenCalled();
@@ -200,7 +200,7 @@ describe("FilesPanel", () => {
 	it("offers no picker outside Electron, where nothing may allow a folder", () => {
 		vi.stubGlobal("electronAPI", undefined);
 		renderPanel();
-		expect(screen.queryByRole("button", { name: "Choose folder..." })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Choose folder…" })).toBeNull();
 	});
 
 	it("declares the surface its folder dividers read", () => {

@@ -798,7 +798,7 @@ Notes:
   still cannot do is refuse the pair together - the first move is committed by
   the time the second is rejected - or renumber the destination's siblings in the
   same write. What the
-  tool offers is the row menu's "Move to...": a destination, and `first` or
+  tool offers is the row menu's "Move to…": a destination, and `first` or
   `last` among its new siblings. Positions in between stay a UI gesture on
   purpose - naming one means reproducing the app's ordering arithmetic
   (`modules/collections/reorder-math.ts`) from outside it, and getting it wrong
@@ -815,7 +815,7 @@ Notes:
   changes get an entry. A collection may move to the top
   level (`parentId: null`) and a request always belongs to a collection. Moving a
   collection into itself or into its own subtree is refused here, walking the
-  same tree the app's "Move to..." dialog walks, so the answer names the problem -
+  same tree the app's "Move to…" dialog walks, so the answer names the problem -
   the engine refuses the same batch under its lock, and that check stays the
   authority.
 - **`update_environment`** fetches the environment and merges the supplied

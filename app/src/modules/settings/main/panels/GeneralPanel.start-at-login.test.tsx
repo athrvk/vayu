@@ -185,7 +185,7 @@ describe("GeneralPanel - Start at login", () => {
 		render(<GeneralPanel />);
 
 		expect(
-			await screen.findByText("Approve Vayu under System Settings > General > Login Items")
+			await screen.findByText("Approve Vayu under System Settings › General › Login Items")
 		).toBeInTheDocument();
 	});
 

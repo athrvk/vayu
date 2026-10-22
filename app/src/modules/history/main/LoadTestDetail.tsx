@@ -193,7 +193,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const compareRequestId = run?.requestId ?? null;
 
 	/*
-	 * A "Compare with..." chosen on this run's History row (#2164) lands here as
+	 * A "Compare with…" chosen on this run's History row (#2164) lands here as
 	 * a store target, because `openTab` can only name the run. Handed over once
 	 * and cleared, so reopening the tab later opens on the report. The tab may
 	 * already be open, so this cannot be a mount-time initial state.
