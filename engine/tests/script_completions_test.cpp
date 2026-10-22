@@ -796,6 +796,40 @@ TEST (ScriptCompletions, CsvParseIsOfferedThroughItsSyncPathAndHasNoGlobal) {
     EXPECT_TRUE (result.success) << result.error_message;
 }
 
+// xml2js (#2654) is offered through require and its `xml2Json` global as a
+// function: the global's entry names the options Postman passes, and what the
+// runtime binds under it is that call over the shelf's xml2js.
+TEST (ScriptCompletions, Xml2jsIsOfferedThroughRequireAndXml2JsonAsItsParse) {
+    const auto completions = get_script_completions ();
+    const auto* require    = find_by_label (completions, "require");
+    ASSERT_NE (require, nullptr);
+    const std::string documentation = require->value ("documentation", std::string{});
+    EXPECT_NE (documentation.find ("xml2js is npm's xml2js 0.6.2"), std::string::npos)
+    << documentation;
+    EXPECT_NE (require->value ("insertText", std::string{}).find ("xml2js"),
+    std::string::npos);
+    EXPECT_EQ (find_by_label (completions, "xml2js"), nullptr)
+    << "xml2js is not a global in Postman";
+
+    const auto* item = find_by_label (completions, "xml2Json");
+    ASSERT_NE (item, nullptr) << "the xml2Json global is not offered";
+    EXPECT_EQ (item->value ("detail", std::string{}), "xml2Json(xml: string): any");
+    EXPECT_NE (item->value ("documentation", std::string{}).find ("explicitArray: false"),
+    std::string::npos);
+
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    const auto result    = engine.execute_test (
+    "if (typeof xml2js !== 'undefined' || typeof xml2Json !== 'function' || "
+       "xml2Json('<a><b> 1 </b></a>').a.b !== '1') throw new Error('not the "
+       "shelf xml2Json');",
+    request, response, env);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no

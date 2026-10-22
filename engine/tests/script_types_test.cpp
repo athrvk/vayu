@@ -585,8 +585,9 @@ std::string documentation_above (const std::string& dts, const std::string& decl
 // imported from Postman reaches for these by habit, and the editor says what
 // to write instead on hover. Postman's pre-`pm.*` globals left this list when
 // they started running (#2577), `CryptoJS` when the require() shelf did
-// (#2578), `_` when lodash joined it (#2651) and `moment` when it did (#2652;
-// Postman binds no global of that name, only require('moment')).
+// (#2578), `_` when lodash joined it (#2651), `moment` when it did (#2652;
+// Postman binds no global of that name, only require('moment')) and
+// `xml2Json` when xml2js did (#2654).
 //
 // The pairs are pinned here rather than read from the table, so a name dropped
 // from it, or reworded until it no longer names the replacement, fails. A name
@@ -600,7 +601,6 @@ TEST (ScriptTypesTest, EveryPostmanBundledLibraryIsAbsentAndNamesItsReplacement)
     };
     constexpr auto globals = std::to_array<Legacy> ({
     { "tv4", "require('ajv')" },
-    { "xml2Json", "require('xml2js')" },
     { "cheerio", "require('cheerio')" },
     { "Backbone", "Backbone" },
     });
@@ -705,7 +705,8 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     "\t'uuid': typeof import('uuid');\n"
     "\t'lodash': typeof import('lodash');\n"
     "\t'moment': typeof import('moment');\n"
-    "\t'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');\n}\n"));
+    "\t'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');\n"
+    "\t'xml2js': typeof import('xml2js');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -759,6 +760,75 @@ TEST (ScriptTypesTest, CsvParseIsDeclaredAsItsSyncPathOnly) {
     "options?: { [option: string]: unknown }) => any;\n\texport = "
     "parse;\n}\n"));
     EXPECT_FALSE (contains (dts, "declare module 'csv-parse' {"));
+}
+
+// xml2js runs (#2654) as `require('xml2js')` and as Postman's `xml2Json`
+// global, which is a function over the module rather than the module: so the
+// global is declared from its own entry as the call it is, and the module
+// carries its own declaration. Each declared member is pinned to the kind the
+// runtime gives it, so a member the module lacks fails here rather than in a
+// script.
+TEST (ScriptTypesTest, Xml2jsIsDeclaredAsTheModuleAndXml2JsonAsItsParse) {
+    const std::string dts = generate_script_typedefs ();
+
+    const std::string xml2json =
+    "declare function xml2Json(xml: string): any;\n";
+    EXPECT_TRUE (contains (dts, xml2json));
+    const std::string doc = documentation_above (dts, xml2json);
+    EXPECT_TRUE (contains (doc, "xml2js 0.6.2")) << doc;
+    EXPECT_FALSE (contains (doc, "Not available in the Vayu script sandbox."));
+    EXPECT_FALSE (contains (dts, "declare const xml2Json"));
+
+    const size_t open = dts.find ("declare module 'xml2js' {\n");
+    ASSERT_NE (open, std::string::npos);
+    const std::string body = dts.substr (open, dts.find ("\n}\n", open) - open);
+    EXPECT_TRUE (contains (body, "\texport = xml2js;"));
+
+    struct Member {
+        const char* declaration;
+        const char* path;
+        const char* runtime_type;
+    };
+    constexpr auto members = std::to_array<Member> ({
+    { "\t\tparseString(xml: string, callback?: Callback): unknown;", "parseString", "function" },
+    { "\t\tparseStringPromise(xml: string, options?: Options): Promise<any>;",
+    "parseStringPromise", "function" },
+    { "\t\tParser: new (options?: Options) => any;", "Parser", "function" },
+    { "\t\tBuilder: new (options?: Options) => {", "Builder", "function" },
+    { "\t\tValidationError: new (message: string) => Error;", "ValidationError", "function" },
+    { "\t\tdefaults: { '0.1': Options; '0.2': Options };", "defaults['0.2']", "object" },
+    { "\t\t\tnormalize: Processor;", "processors.normalize", "function" },
+    { "\t\t\tfirstCharLowerCase: Processor;", "processors.firstCharLowerCase", "function" },
+    { "\t\t\tstripPrefix: Processor;", "processors.stripPrefix", "function" },
+    { "\t\t\tparseNumbers: Processor;", "processors.parseNumbers", "function" },
+    { "\t\t\tparseBooleans: Processor;", "processors.parseBooleans", "function" },
+    });
+#ifdef VAYU_HAS_QUICKJS
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment   = &env;
+    const auto builds = engine.execute (
+    "if (typeof new (require('xml2js').Builder)().buildObject !== 'function' "
+    "|| "
+    "typeof new (require('xml2js').Builder)().options !== 'object') throw new "
+    "Error('wrong kind');",
+    ctx);
+    EXPECT_TRUE (builds.success) << builds.error_message;
+#endif
+    for (const auto& member : members) {
+        EXPECT_TRUE (contains (body, member.declaration))
+        << member.declaration << " is not declared";
+#ifdef VAYU_HAS_QUICKJS
+        const auto result =
+        engine.execute (std::string ("if (typeof require('xml2js').") + member.path +
+        " !== '" + member.runtime_type + "') throw new Error('wrong kind');",
+        ctx);
+        EXPECT_TRUE (result.success)
+        << "xml2js." << member.path << " is not a " << member.runtime_type
+        << " at run time (" << result.error_message << ")";
+#endif
+    }
 }
 
 // uuid has no global to point at (#2650), so its module carries the whole

@@ -368,6 +368,21 @@ TEST (ScriptApiScan, CsvParseIsNotNamedAsTheSyncPathOnly) {
     }
 }
 
+// xml2js runs (#2654), as require('xml2js') and as Postman's `xml2Json`
+// global over it: neither is named, and its members are not read as
+// crypto-js's. A sub-path of the package is not the shelf's module.
+TEST (ScriptApiScan, Xml2jsIsNotNamedAsTheGlobalOrTheModule) {
+    for (const char* script : { "const o = xml2Json(xml);", "xml2Json(pm.response.text()).order;",
+         "require('xml2js');", "require('xml2js').parseString(t, function (e, r) {});",
+         "const { parseString } = require('xml2js');",
+         "const x = require('xml2js'); new x.Builder().buildObject(o);",
+         "require('xml2js').AES;" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+    EXPECT_EQ (names_in ("require('xml2js/lib/parser');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("xml2Json(t); tv4.validate(x);"), Names{ "tv4" });
+}
+
 TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
     // Off the shelf, or a name that only starts like one.
     EXPECT_EQ (names_in ("require('ajv');"), Names{ "require()" });
@@ -402,7 +417,6 @@ TEST (ScriptApiScan, ARequireInACommentOrStringIsReadFromTheOriginalText) {
 
 TEST (ScriptApiScan, NamesEachBundledLibrary) {
     EXPECT_EQ (names_in ("tv4.validate(a, s);"), Names{ "tv4" });
-    EXPECT_EQ (names_in ("const o = xml2Json(xml);"), Names{ "xml2Json" });
     EXPECT_EQ (names_in ("const $ = cheerio.load(html);"), Names{ "cheerio" });
     EXPECT_EQ (names_in ("new Backbone.Model();"), Names{ "Backbone" });
 }
@@ -412,7 +426,7 @@ TEST (ScriptApiScan, ALibraryNameInACommentStringOrPropertyIsNotUse) {
         // Buffer.from(x)
         /* _.each(a) and cheerio() */
         const label = "uses Buffer and _ and tv4";
-        const t = `${label} xml2Json`;
+        const t = `${label} cheerio`;
         const o = pm.environment.get("cheerio");
         x.cheerio = 1; y.Backbone;
         const k = _under + underscore_ + $_;
@@ -602,10 +616,10 @@ TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
         tv4.validate(b);
         tv4.validate(a);
         const c = require("x");
-        xml2Json(text);
+        cheerio.load(text);
         Buffer.from(again);
     )"),
-    (Names{ "require()", "tv4", "xml2Json", "Buffer" }));
+    (Names{ "require()", "tv4", "cheerio", "Buffer" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
