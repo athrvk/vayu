@@ -48,6 +48,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
@@ -306,6 +307,27 @@ TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
     EXPECT_NE (response["error"]["message"].get<std::string> ().find ("method"),
     std::string::npos);
     EXPECT_EQ (stored_rows (), 0u); // the valid items must not have landed either
+}
+
+// `postmanProtocolBehavior` as a string is the importer's own spelling, and the
+// payload's depth bound never looks inside it (#2672). A string nested past the
+// bound is the item's 400 and the whole import is lost with it, like any other
+// refused item.
+TEST_F (ImportApplyRouteTest, WritesNothingWhenAProtocolBehaviorStringIsNestedTooDeep) {
+    json deep_request = request_item ("r2", "c1", "deep");
+    deep_request["postmanProtocolBehavior"] =
+    vayu::tests::nested_object_text (100'000, "1");
+
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+    { "requests", json::array ({ request_item ("r1", "c1", "fine"), deep_request }) } });
+
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (response["error"]["item"], "r2");
+    EXPECT_NE (response["error"]["message"].get<std::string> ().find (
+               "nested deeper than"),
+    std::string::npos);
+    EXPECT_EQ (stored_rows (), 0u);
 }
 
 TEST_F (ImportApplyRouteTest, RejectsANullNameThatHasNoDefault) {

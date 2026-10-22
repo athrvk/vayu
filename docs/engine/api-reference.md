@@ -145,11 +145,13 @@ JSON: <parser message>` (code `bad_request`) (issue
 `POST /runs` hold the same bound; see their sections.
 
 The bound reads the body's own tree, so JSON carried inside a string field is
-not covered by it. The engine parses a few such fields again and holds each to
+not covered by it. The engine parses three such fields again and holds each to
 the same 128 levels itself (issue
-[#2672](https://github.com/athrvk/vayu/issues/2672)): a `graphql` or `jsonrpc`
-body's `content` ([the `graphql` envelope](#the-graphql-envelope), [the
-`jsonrpc` envelope](#the-jsonrpc-envelope)).
+[#2672](https://github.com/athrvk/vayu/issues/2672)): a request's
+`postmanProtocolBehavior` string ([POST /requests](#post-requests)), and a
+`graphql` or `jsonrpc` body's `content` ([the `graphql`
+envelope](#the-graphql-envelope), [the `jsonrpc`
+envelope](#the-jsonrpc-envelope)).
 
 ## Removed route aliases
 
@@ -1786,12 +1788,19 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   (an object crossing the engine's reader does not). `GET` answers it as that
   stored text, a string (or `null`), the way it is written: a client that
   sends the record back, as the app's Duplicate does, stores the same bytes,
-  and the copy exports the same `protocolProfileBehavior`.
+  and the copy exports the same `protocolProfileBehavior`. The string is read
+  again by the engine, so it is held to the request-body depth bound too (see
+  [Request bodies](#request-bodies)): a string nested deeper than 128 levels
+  is a `400`.
 
 A non-boolean `disableCookies` / `disableUrlEncoding`, a
 `disabledSystemHeaders` that is not an array of header-name tokens, or a
 `postmanProtocolBehavior` that is not an object, such a string or `null` is a
-`400` naming the field; the last two are `413` over the field cap.
+`400` naming the field, as is a `postmanProtocolBehavior` string nested deeper
+than 128 levels (`Invalid 'postmanProtocolBehavior': nested deeper than 128
+levels`); the last two are `413` over the field cap. `POST /import/apply` answers
+the same `400`, with the item's `tempId` under `error.item`, and writes
+nothing.
 
 **Response:** The created request object, carrying the engine-generated `id`.
 
