@@ -1364,8 +1364,11 @@ double-clicked - and the second would race the first's retention pass. Anything
 else that goes wrong is a `500` naming what SQLite or the filesystem refused;
 there is no success response with an empty path.
 
-**Retention only removes files this endpoint wrote** (`vayu-<stamp>.db`), so a
-copy you put in that directory yourself is left where it is. `0` keeps every
+**Retention only removes files Vayu wrote**: this endpoint's `vayu-<stamp>.db`,
+and the `vayu-<stamp>-pre-v<N>.db` an update saves before it migrates the
+workspace, which counts toward the same `maxBackupsRetained`
+([db-schema.md](db-schema.md#the-copy-before-a-migration-issue-2426)). A copy
+you put in that directory yourself is left where it is. `0` keeps every
 snapshot.
 
 **There is deliberately no restore endpoint.** A running engine overwriting the

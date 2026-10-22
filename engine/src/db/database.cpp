@@ -40,6 +40,7 @@ Database::Database (const std::string& db_path)
 }
 
 Database::Database (const std::string& db_path, std::chrono::milliseconds startup_busy_timeout) {
+    const auto opened_at = fs::file_time_type::clock::now ();
     // Refused outright, before anything else - a database written by a newer
     // engine is not corrupt, and letting it fall into the recovery branch
     // below would quarantine a perfectly good (newer) file and silently start
@@ -47,8 +48,10 @@ Database::Database (const std::string& db_path, std::chrono::milliseconds startu
     // version gate exists to prevent. This call is deliberately not inside
     // `probe_database`'s try/catch: the exception must reach the daemon's own
     // startup failure path, naming both versions, rather than being read here
-    // as corruption and handed to recovery.
-    migrate_before_sync (db_path, startup_busy_timeout);
+    // as corruption and handed to recovery. It is the one call that copies
+    // the workspace into `backups/` before migrating it (issue #2426).
+    const bool opened_at_current_schema =
+    migrate_before_sync (db_path, startup_busy_timeout, PreMigrationSnapshot::Take);
 
     fs::path db_file (db_path);
     fs::path backup_file = db_file;
@@ -88,12 +91,16 @@ Database::Database (const std::string& db_path, std::chrono::milliseconds startu
     // At this point, we either have a valid original, a restored backup, or a fresh/corrupted file we must attempt to use.
     // Idempotent by this point in every reachable case (the branch above
     // already migrated whichever file `db_path` now holds), kept here too as
-    // the same defence in depth every `sync_schema ()` call gets.
-    migrate_before_sync (db_path, startup_busy_timeout);
+    // the same defence in depth every `sync_schema ()` call gets. No copy:
+    // the one file this can still stamp is the empty schema a first start's
+    // probe just created.
+    migrate_before_sync (db_path, startup_busy_timeout, PreMigrationSnapshot::Skip);
     impl_ = std::make_unique<Impl> (db_path, startup_busy_timeout);
     // sync_schema might throw if restore failed or backup was also bad
     impl_->storage.sync_schema ();
-    impl_->recovery_backup_due = validated;
+    impl_->recovery_backup_due      = validated;
+    impl_->opened_at_current_schema = opened_at_current_schema;
+    impl_->opened_at                = opened_at;
 
     // 4. The recovery record this process reports. Read from the file rather
     // than kept from the branch above, so a marker written by an *earlier*

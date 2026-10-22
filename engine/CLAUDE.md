@@ -250,10 +250,13 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   returns, so a pass that loads every row is a startup hang on a large
   workspace: select candidates with a SQL predicate, rewrite them inside one
   `transaction_guard` (the `seed_default_config` shape), record a done marker
-  so the next start skips the scan, and write `<db>.pre-upgrade.bak`
-  immediately before the first rewrite. `<db>.bak` is not that copy: the same
-  start refreshes it, once it listens, from a file the repair has already
-  rewritten, and a clean shutdown refreshes it again
+  so the next start skips the scan, and save a `backups/` snapshot through
+  `snapshot_before_rewrite` immediately before the first rewrite, skipping the
+  pass with its marker unset when the copy cannot be written (#2426). A schema
+  bump takes the same copy (`backups/vayu-<stamp>-pre-v<N>.db`) in
+  `migrate_before_sync` and refuses to migrate without it. `<db>.bak` is not
+  that copy: the same start refreshes it, once it listens, from a file the
+  repair has already rewritten, and a clean shutdown refreshes it again
   (`refresh_recovery_backup_on_shutdown`, #2421).
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or

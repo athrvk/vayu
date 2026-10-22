@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "vayu/db/recovery.hpp"
 
@@ -132,14 +133,10 @@ inline void remove_database_files (const std::string& path) {
     // trio twice over - `path` and `path.bak`. The hand-copied lists this
     // replaced all stopped at a bare `.bak`, which leaves `.bak-wal` /
     // `.bak-shm` behind whenever a WAL exists at open time. `path.pre-upgrade.bak`
-    // is a third copy of the trio, written once by `strip_stored_managed_headers`
-    // the first time it finds a row to rewrite (issue #1487) - most fixtures
-    // never provoke it, but one that does must not leak it into the next test's
-    // scratch directory. `path.pre-migration.bak` is the same for
-    // `migrate_before_sync`, which writes it before the first row a schema
-    // step rewrites. `path.bak.tmp` is the recovery-backup refresh's
-    // snapshot before it is renamed over `path.bak`; only a refresh that
-    // failed or was interrupted leaves one.
+    // and `path.pre-migration.bak` are the trio again, as engines before #2426
+    // wrote them; the tests of their removal put them back. `path.bak.tmp` is
+    // the recovery-backup refresh's snapshot before it is renamed over
+    // `path.bak`; only a refresh that failed or was interrupted leaves one.
     for (const std::string& base : { path, path + ".bak", path + ".bak.tmp",
          path + ".pre-upgrade.bak", path + ".pre-migration.bak" }) {
         for (const char* suffix : { "", "-wal", "-shm" }) {
@@ -147,6 +144,25 @@ inline void remove_database_files (const std::string& path) {
             std::filesystem::remove (base + suffix, ec);
         }
     }
+    // The copies a start takes before it migrates or repairs the workspace
+    // (#2426): `backups/vayu-<stamp>-pre-<...>.db` beside it. A snapshot a test
+    // asked for itself carries no label and is that test's to remove, so the
+    // directory goes only once it is empty.
+    const auto backups = std::filesystem::path (path).parent_path () / "backups";
+    std::vector<std::filesystem::path> taken;
+    std::error_code backups_ec;
+    for (std::filesystem::directory_iterator it (backups, backups_ec), end;
+    !backups_ec && it != end; it.increment (backups_ec)) {
+        const std::string name = it->path ().filename ().string ();
+        if (name.starts_with ("vayu-") && name.find ("-pre-") != std::string::npos) {
+            taken.push_back (it->path ());
+        }
+    }
+    for (const auto& snapshot : taken) {
+        std::error_code ec;
+        std::filesystem::remove (snapshot, ec);
+    }
+    std::filesystem::remove (backups, backups_ec);
     // The startup recovery marker (issue #922). Only a recovering start writes
     // one, but it is listed here rather than in the one fixture that provokes
     // one: a leaked marker is read by the *next* `Database` opened at this
