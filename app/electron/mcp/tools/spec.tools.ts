@@ -175,7 +175,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			collectionId: z
 				.string()
 				.describe(
-					"Collection to compare. It must already be bound to a document - the comparison is three-way and the bound document is the middle term. Its whole subtree is read, since an imported spec files its requests under one sub-collection per tag."
+					"Collection to compare. It must already be bound to a document - the comparison is three-way and the bound document is the middle term. Its whole subtree is read, since an imported spec files its requests under sub-collections."
 				),
 			content: z
 				.string()
@@ -279,7 +279,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			collectionId: z
 				.string()
 				.describe(
-					"Collection to sync. It must already be bound to a document - a sync moves a binding forward and binding is `bind_spec`. Its whole subtree is written, since an imported spec files its requests under one sub-collection per tag."
+					"Collection to sync. It must already be bound to a document - a sync moves a binding forward and binding is `bind_spec`. Its whole subtree is written, since an imported spec files its requests under sub-collections."
 				),
 			content: z
 				.string()
@@ -361,7 +361,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		description:
 			"Import a collection, environment or API spec from its document text. " +
 			GUARDED_WRITE_SENTENCE +
-			". Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 or v5 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under one sub-collection per tag. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. For a Postman collection, `meta.unsupportedScriptApis` (present only when non-empty) names each request, folder or collection whose imported scripts use an API Vayu does not run; they are stored as written and throw when they run. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything. Call preview_import first with the same arguments to see what would be created and what would be left out, without storing anything.",
+			". Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 or v5 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under sub-collections; run them all with recursive: true on run_collection or run_collection_smoke. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. For a Postman collection, `meta.unsupportedScriptApis` (present only when non-empty) names each request, folder or collection whose imported scripts use an API Vayu does not run; they are stored as written and throw when they run. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything. Call preview_import first with the same arguments to see what would be created and what would be left out, without storing anything.",
 		annotations: {
 			title: "Import a document",
 			readOnlyHint: false,
@@ -460,7 +460,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			collectionId: z
 				.string()
 				.describe(
-					"Collection to bind. Its whole subtree is matched - an imported spec files its requests under one sub-collection per tag."
+					"Collection to bind. Its whole subtree is matched - an imported spec files its requests under sub-collections."
 				),
 			content: z
 				.string()
@@ -513,7 +513,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			collectionId: z
 				.string()
 				.describe(
-					"Collection to export. Its whole subtree is read - an OpenAPI import files requests under one sub-collection per tag - stopping at any collection bound to a different document."
+					"Collection to export. Its whole subtree is read - an OpenAPI import files requests under sub-collections - stopping at any collection bound to a different document."
 				),
 			format: z
 				.enum(["json", "yaml"])

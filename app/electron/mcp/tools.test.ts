@@ -56,6 +56,7 @@ import {
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
+import { describeImportPreview } from "./tools/spec-bindings.js";
 import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
@@ -3222,8 +3223,171 @@ describe("run_collection_smoke", () => {
 		// Only descendants of *this* collection are named.
 		expect(text).not.toContain("Unrelated");
 		expect(text).not.toContain("Root");
+		// Both ways out are named: the smoke option, and the stored run.
+		expect(text).toContain("`recursive: true` to run the whole tree in this tool");
+		expect(text).toMatch(/`run_collection` with `recursive: true`/);
 		// The matrix itself is untouched: it counts the direct requests it ran.
 		expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
+		// Direct-only rows name no folder.
+		expect(
+			(res.structuredContent as { results: Array<{ folder?: string }> }).results[0].folder
+		).toBeUndefined();
+	});
+
+	test("names the recursive paths when the collection list could not be read", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "ok" }]),
+			listCollections: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("engine hiccup"))
+				// The masking read after the sends asks for the list again.
+				.mockResolvedValue([]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+			executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toContain("could not read the collection list");
+		expect(text).toMatch(/`run_collection` with `recursive: true`/);
+	});
+
+	describe("recursive", () => {
+		/**
+		 * Root `c1` ("API") files, in sibling order: folder Users (order 0), its
+		 * own request (order 1), folder Billing (order 2) - the shape an OpenAPI
+		 * import gives, plus a direct request between two subtrees.
+		 */
+		function treeClient(overrides: Parameters<typeof fakeClient>[0] = {}) {
+			const requestsByCollection: Record<string, object[]> = {
+				c1: [{ id: "r_direct", name: "direct", order: 1 }],
+				c2: [{ id: "r_user", name: "user", order: 0 }],
+				c3: [
+					{ id: "r_invoice", name: "invoice", order: 0 },
+					{ id: "r_refund", name: "refund", order: 1 },
+				],
+			};
+			return fakeClient({
+				listCollections: vi.fn().mockResolvedValue([
+					{ id: "c1", name: "API" },
+					{ id: "c3", name: "Billing", parentId: "c1", order: 2 },
+					{ id: "c2", name: "Users", parentId: "c1", order: 0 },
+					{ id: "c9", name: "Elsewhere" },
+				]),
+				listRequests: vi
+					.fn()
+					.mockImplementation((id: string) =>
+						Promise.resolve(requestsByCollection[id] ?? [])
+					),
+				composeRequest: vi
+					.fn()
+					.mockResolvedValue({ method: "GET", url: "https://api.example.com/ok" }),
+				executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+				...overrides,
+			});
+		}
+
+		test("runs the whole tree in the sidebar's order and names each row's folder", async () => {
+			const client = treeClient();
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", recursive: true },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			const summary = res.structuredContent as {
+				total: number;
+				passed: number;
+				results: Array<{ name: string; folder?: string }>;
+			};
+			// Non-empty on purpose: a walk that found nothing would also be "in order".
+			expect(summary.total).toBe(4);
+			expect(summary.passed).toBe(4);
+			expect(summary.results.map((row) => [row.name, row.folder])).toEqual([
+				["user", "API / Users"],
+				["direct", "API"],
+				["invoice", "API / Billing"],
+				["refund", "API / Billing"],
+			]);
+			expect(
+				(client.composeRequest as ReturnType<typeof vi.fn>).mock.calls.map(
+					(call) => (call[0] as { requestId: string }).requestId
+				)
+			).toEqual(["r_user", "r_direct", "r_invoice", "r_refund"]);
+			// The SDK client checks structuredContent against the advertised JSON
+			// schema, where an undeclared row field is refused; zod's own parse
+			// strips it silently, so compare the keys against the emitted schema.
+			const advertised = z.toJSONSchema(
+				TOOLS.find((t) => t.name === "run_collection_smoke")!.outputSchema!,
+				{ io: "output" }
+			) as unknown as {
+				properties: { results: { items: { properties: Record<string, unknown> } } };
+			};
+			const declared = Object.keys(advertised.properties.results.items.properties);
+			expect(declared).toContain("folder");
+			for (const row of summary.results) {
+				expect(declared).toEqual(expect.arrayContaining(Object.keys(row)));
+			}
+			// A collection outside the subtree is never read, and the run left
+			// nothing out, so it carries no scope caveat.
+			expect(client.listRequests).not.toHaveBeenCalledWith("c9", undefined);
+			expect(res.content.map((c) => c.text).join("\n")).not.toContain("NOT run");
+		});
+
+		test("without recursive the same tree runs the direct request alone", async () => {
+			const client = treeClient();
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1" },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.structuredContent).toMatchObject({ total: 1, passed: 1 });
+			expect(res.content.map((c) => c.text).join("\n")).toContain(
+				"2 sub-collection(s) were NOT run"
+			);
+		});
+
+		test("a parent cycle terminates and runs each request once", async () => {
+			const client = treeClient({
+				listCollections: vi.fn().mockResolvedValue([
+					{ id: "c1", name: "A", parentId: "c2" },
+					{ id: "c2", name: "B", parentId: "c1" },
+				]),
+				listRequests: vi
+					.fn()
+					.mockImplementation((id: string) =>
+						Promise.resolve([{ id: `r_${id}`, name: `req ${id}` }])
+					),
+			});
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", recursive: true },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(res.structuredContent).toMatchObject({ total: 2, passed: 2 });
+		});
+
+		test("a collection list that cannot be read is the engine error, and nothing is sent", async () => {
+			const client = treeClient({
+				listCollections: vi
+					.fn()
+					.mockRejectedValue(new EngineRequestError("Engine responded 500", 500, "boom")),
+			});
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", recursive: true },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBe(true);
+			expect(client.composeRequest).not.toHaveBeenCalled();
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		});
 	});
 
 	/**
@@ -11394,6 +11558,73 @@ describe("OpenAPI spec binding tools", () => {
 			// The half a caller cannot see from the counts: an import that dropped a
 			// WebSocket request looks exactly like one that had none.
 			expect(allText(res)).toMatch(/Not everything imported: 1 websocket/);
+		});
+
+		test("names the sub-collections the requests went into and the one-call way to run them", async () => {
+			const res = await dispatchTool(
+				"import_document",
+				{ content: "{}" },
+				ctxWith(
+					fakeClient({
+						importDocument: vi.fn().mockResolvedValue({
+							meta: {
+								format: "OpenAPI 3.1.0",
+								requestCount: 9,
+								folderCount: 3,
+								skipped: [],
+							},
+							collections: 4,
+							requests: 9,
+							environments: 0,
+							globals: 0,
+						}),
+					}),
+					WRITES
+				)
+			);
+			expect(allText(res)).toContain("filed under 3 sub-collection(s)");
+			expect(allText(res)).toContain(
+				"recursive: true to run_collection or run_collection_smoke"
+			);
+		});
+
+		test("a preview names the one-call way to run the folders it would create", () => {
+			const meta = { format: "OpenAPI 3.1.0", requestCount: 9, skipped: [] };
+			expect(describeImportPreview({ meta: { ...meta, folderCount: 3 } })).toContain(
+				"recursive: true to run_collection or run_collection_smoke"
+			);
+			expect(describeImportPreview({ meta: { ...meta, folderCount: 0 } })).not.toContain(
+				"recursive"
+			);
+		});
+
+		test("adds nothing about sub-collections when the document made none", async () => {
+			const res = await dispatchTool(
+				"import_document",
+				{ content: "{}" },
+				ctxWith(
+					fakeClient({
+						importDocument: vi.fn().mockResolvedValue({
+							meta: {
+								format: "OpenAPI 3.1.0",
+								requestCount: 2,
+								folderCount: 0,
+								skipped: [],
+							},
+							collections: 1,
+							requests: 2,
+							environments: 0,
+							globals: 0,
+						}),
+					}),
+					WRITES
+				)
+			);
+			expect(allText(res)).toContain(
+				"Imported OpenAPI 3.1.0: 1 collection(s), 2 request(s)."
+			);
+			expect(allText(res)).not.toContain("sub-collection");
+			expect(allText(res)).not.toContain("recursive");
 		});
 
 		test("passes the engine's refusal through rather than inventing one", async () => {

@@ -277,7 +277,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
+| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
@@ -292,7 +292,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `export_postman`       | read     | `POST /export/postman`                       | - (credentials always written empty - auth, secret variables, and by name header, parameter, URL and cookie values - counted in `notes.secretsOmitted`; bodies and scripts are not judged; including them is a choice the app's dialog asks a person for; `notes.notCarried` names what Postman has no place for; document text capped at 32 KB, with `contentBytes` for the true size) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept; the returned row is withheld as `list_collections` answers it |
 | `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
-| `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
+| `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent; the caveat reads `meta.folderCount` and, when above 0, says the requests are filed under sub-collections and that `recursive: true` on `run_collection` or `run_collection_smoke` runs them all |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
@@ -902,13 +902,25 @@ Notes:
   collection bound to nothing carries no `schema` field at all.
   Requests whose host still can't be verified after resolution (e.g. a variable
   did not resolve and allow-all is off) are skipped, not sent.
-  It **does not recurse**: `GET /requests?collectionId=` serves a collection's
-  direct requests, while collections nest via `parentId`, so a run on a parent
-  folder tests none of its descendants. The result appends a note naming the
-  sub-collections it left out (and says so explicitly if the collection list
-  could not be read), because a matrix whose `total` silently excludes nested
-  folders reads as a whole-collection pass. Requests run serially, so a large
-  collection takes as long as its requests do added together.
+  It runs a collection's **direct requests** unless `recursive: true`:
+  `GET /requests?collectionId=` serves direct requests only, while collections
+  nest via `parentId`, so a run on a parent folder tests none of its
+  descendants. The result appends a note naming the sub-collections it left out
+  (and says so explicitly if the collection list could not be read), because a
+  matrix whose `total` silently excludes nested folders reads as a
+  whole-collection pass. The note names both ways out: `recursive: true` here,
+  and `run_collection` with `recursive: true` (preferred for a large tree: one
+  stored run with a run id). `recursive: true` walks the tree through the same
+  function `run_collection`'s pre-flight does (`walkCollectionRequests`,
+  `scenario-runs.ts`), so the rows come in the sidebar's order (#2535) and each
+  names its `folder`, the collection names from the root down joined by ` / `;
+  a recursive run has nothing left out, so it carries no note, and a failed
+  `GET /collections` is the engine error, with nothing sent. An OpenAPI import
+  files its operations under sub-collections (grouped by tag or by path, per
+  `meta.folderStrategy`), so a direct-only smoke of its root answers `total: 0`;
+  `import_document`'s caveat says how many sub-collections hold the requests and
+  names the recursive path. Requests run serially, so a large collection takes as
+  long as its requests do added together.
 - **The OAuth 2.0 token tools** (issue #760) are how an agent gets a token
   problem named instead of discovering it as a wall of 401s inside a run:
   `fetch_oauth2_token` acquires (or force-refreshes) a token for a config and
