@@ -487,8 +487,10 @@ class ScriptEngine {
     /**
      * @brief Execute a pre-request script
      *
-     * The script sees the fully composed request - auth is already resolved
-     * into its headers and URL by the time it runs - and whatever it leaves in
+     * The script sees the composed request - auth is already resolved into its
+     * headers and URL by the time it runs, unless a credential waits on this
+     * script (`apply_late_auth`), and every `{{name}}` composition deferred
+     * past it (#2521) is still written - and whatever it leaves in
      * `pm.request` when it returns is written back into @p request before the
      * send. A script-set header therefore overrides an engine-applied one of
      * the same name.

@@ -5659,15 +5659,34 @@ hits the wire:
 runs - so the script's `pm.request` holds the header - unless a credential
 (a `bearer` token, a `basic` username or password, an `apikey` key or value)
 still holds a `{{name}}` that is not a data column or the iteration identity.
-Such a name is one composition found no variable for, and that auth is applied
+Such a name is one composition found no variable for, or any name a scope
+answers in a request a pre-request script runs before (it is listed in
+[`deferredVariables`](#deferredvariables)), and that auth is applied
 **after** the pre-request script and the residual-token pass instead, each
-credential resolved against the scopes as the script left them (#2473), so
-`pm.environment.set("password", …)` reaches a basic pair before it is
+credential resolved against the scopes as the script left them (#2473, #2521),
+so `pm.environment.set("password", …)` reaches a basic pair before it is
 base64-encoded. That is Postman's order; the script then does not see the header
 in `pm.request.headers`, and an `Authorization` it sets wins by the rule below.
 A data column or the identity in the same credential is bound first. A name
-nothing answers is encoded as written. `oauth2` is never deferred this way. The
-same order holds wherever a script can run between the build and the send:
+nothing answers is encoded as written.
+
+**`oauth2` follows the same order on a single send and a collection run's step
+(#2521).** A config in a request that a pre-request script runs before, or holding a
+`{{name}}` that nothing defines, is left as written by
+[`POST /compose`](#post-compose), resolved in every string after the
+pre-request script, and only then is its token acquired; the [token cache](#oauth-20-token-cache) key is computed from
+that resolved config, so a script that sets a `clientId` or an `accessTokenUrl`
+selects its own cached token, and a client secret or scope it sets reaches the
+token endpoint when a token is fetched (neither is part of the key, so a token
+already cached under the same key is reused). The wait on the identity
+provider is left out of `engineMs`, as a fetch at the build is, and a token that
+cannot be acquired answers `authErrorCode` as it does at the build. A
+**load** run acquires its token once, when it is planned and before any script
+runs: its composition (`deferDynamicVariables`) resolves the config, and a
+name nothing defines is refused with a `400` that names it
+(`invalid_run_config` for a single request, `invalid_scenario` for a
+collection). The same order holds wherever a script can run between the build
+and the send:
 
 | Send | Applied after |
 |------|---------------|
@@ -5782,7 +5801,8 @@ a body or url row naming a form parameter already written (an `audience` the
 config sends) and a header row naming a header already set (`Authorization`,
 `Content-Type`, `Accept`, case-insensitively) are skipped too, so the engine's
 value wins and no name is sent twice. A malformed list or row is skipped, never
-refused. Values are resolved with the rest of the config by `POST /compose`, and
+refused. Values are resolved with the rest of the config, by `POST /compose` or
+after the pre-request script (see [When it is applied](#authentication)), and
 a `{{data.*}}` token in one is refused like one anywhere else in the config.
 
 **Response (`200`):**
@@ -5943,8 +5963,12 @@ issue #1008 the execution endpoints are not silent past that point either: a
 name composition could not answer keeps its braces (issue #1009) instead of
 resolving to `""`, and both `POST /execute` and a scenario step resolve it once
 more, after the pre-request script and before the send, against whatever the
-script just wrote. A value composition already substituted is finished text
-and is never re-resolved - see [POST /execute](#post-execute) and
+script just wrote. Since issue #2521 the same is true of every name a variable
+scope *does* answer, in a request that a pre-request script (its own, a
+folder's or the collection's) runs before: composition leaves it written and
+lists it in [`deferredVariables`](#deferredvariables), because the script may
+change the value. A value composition did substitute is finished text and is
+never re-resolved - see [POST /execute](#post-execute) and
 [Scenario runs](#scenario-runs) for what that changes.
 
 **Request** - at least one of `requestId` / `request` is required:
@@ -5991,7 +6015,11 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   makes collisions matter - so with the field true every name the dynamic table
   generates is left written as it stands, the way `{{data.*}}` and the identity
   names already are, and the run's executor generates a fresh value per
-  occurrence immediately before each send. **Absent, `null` or `false` composes
+  occurrence immediately before each send. It also resolves an OAuth 2.0
+  config **now**, cache key included: a run acquires its token once, when it is
+  planned, and every virtual user sends that one, so without the field (a Send)
+  the config is left for the send to resolve after the pre-request script (see
+  [Authentication](#authentication)). **Absent, `null` or `false` composes
   exactly as it did before this field existed**, which is what a Send, a preview
   and a script's `replaceIn` want: composed once, sent once. Refused with `400`
   `invalid_compose_request` when present and not a boolean. Two limits worth
@@ -6005,7 +6033,9 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   name no scope answered defers it until after the pre-request script (#2473,
   see [Authentication](#authentication)), where a generator has nothing to wait for. A
   scenario plan's steps are composed with it internally, so a collection run
-  needs no field at all.
+  needs no field at all (a sequential run's steps keep their OAuth 2.0 config
+  for after the script, as a Send does; a collection load run's resolve it at
+  planning).
 
 - **`requestId`** composes the stored request wholesale: URL, headers (every
   enabled row with a key, in row order, as `{name, value}` lines - a repeated
@@ -6028,6 +6058,51 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   rule is for the app and direct callers: the MCP server checks an
   `environmentId` against `GET /environments` before composing and refuses one
   that names no environment ([MCP](mcp.md)).
+
+#### deferredVariables
+
+Composition decides from the composed `elements` (never from a flag the caller
+sends) whether a pre-request script runs before the send: an **enabled,
+non-blank `script.pre`** on the request, on a folder above it or on the
+collection, after an `inherit.disable` entry and a disabled-by-id entry have
+been applied and an inline `elements` array has been laid over the stored one.
+A `script.setup` does not count - it runs once, before a collection run's first
+step. When a pre-request script does run, every `{{name}}` that a variable
+scope answers is **left written** in the URL, the `:name` path rows, header
+names and values, body `content` and form-field strings, and the credentials of
+an `auth` block that is not OAuth 2.0 (an OAuth 2.0 config defers too on a
+Send and a sequential run, as [Authentication](#authentication) describes), and the response lists the names
+in `deferredVariables`: a sorted array of the names as written, **omitted when
+nothing was deferred**. `POST /execute` and `POST /runs` resolve them after the
+script, against the variable scopes as the script left them, and ignore the
+member itself - it describes this answer, not the request, so a client that
+posts the composed payload onward may leave it or drop it (the app and the MCP
+server drop it). A request no pre-request script runs before is composed
+exactly as it was before issue #2521: no `deferredVariables`.
+
+Four kinds of name resolve at composition whatever a script does, each exactly
+once:
+
+- the `{{data.*}}` namespace and the names listed in `dataColumns`, which the
+  per-iteration bind answers;
+- a `$` name - a dynamic variable (generated once here, or by the run's executor
+  under `deferDynamicVariables`) or the iteration identity (`{{$vu}}`,
+  `{{$iteration}}`);
+- a name whose value, followed through the scopes, reaches a token the bind
+  owns (`{{user}}` holding `{{data.user}}`), so the bind finds the token it
+  needs;
+- a file path: the `src` of a form-data file part or a binary body file, which
+  the later pass never resolves, so a script cannot choose which file is sent.
+
+A name nothing defines stays written as it always did, and is not listed.
+
+Deferral also moves refusals to the send. A header value or name that depends on
+a deferred variable cannot be checked here, so the refusals described under
+[Errors](#post-compose) below (`unsendable_header`, `empty_header_name`,
+`invalid_header_name`, `colliding_header_names`) are made by the residual pass
+at send time instead, in the same words and under the same codes: a buffered
+`POST /execute` answers `statusCode: 0` with the code as `refusalCode`, and a
+streaming send answers a `400` carrying it.
 
 #### Query encoding
 
@@ -6302,7 +6377,11 @@ writing.
 **What gets resolved:** the URL, header keys and values, body `content` and
 `fields`, and every string inside the winning auth block - after `inherit` is
 walked (leaf→root; an explicit `noauth` terminates the walk, `none` is stepped
-over) and strictly before any OAuth 2.0 cache key is derived from the config.
+over) and before any OAuth 2.0 cache key is derived from the config: the key is
+always computed from the resolved config, here for a run, after the
+pre-request script for a Send (below). A request no pre-request script runs
+before is resolved here, once. One that has one keeps what the script may
+change as `{{name}}`, as [`deferredVariables`](#deferredvariables) describes.
 Script text is **never** interpolated - a `{{...}}` in a script is user
 JavaScript. Resolution semantics (precedence, unknown names, dynamic
 variables, the D17 malformed-data rules) are specified in
@@ -6311,7 +6390,8 @@ conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json
 
 **Response:** `200` with the composed payload - the `POST /execute` body shape,
 with `requestId` / `environmentId` echoed so the result can be POSTed onward
-unchanged. An auth that resolves to "send nothing" is an absent `auth` field.
+unchanged, and `deferredVariables` when a pre-request script defers names
+(above). An auth that resolves to "send nothing" is an absent `auth` field.
 `headers` always comes back as the line array (issue #2466), whichever shape an
 inline request used, so a repeated header survives compose to execute; it is
 absent when there are no lines.
@@ -6333,7 +6413,12 @@ with specific codes:
   it: the engine spells a header `key + ": " + value` for `curl_slist_append`,
   which reads to the first NUL, so the rest of the line would go out missing
   rather than refused. The same bytes remain ordinary text in a URL, a body and
-  a form field's value, which compose unchanged.
+  a form field's value, which compose unchanged. For a request a pre-request
+  script runs before, a variable written into a header is not substituted here
+  (see [`deferredVariables`](#deferredvariables)), so the same refusal, naming
+  the variable, is made after the script: `statusCode: 0` and `refusalCode:
+  "unsendable_header"` on a buffered send, a `400` with that code on a streaming
+  one, and nothing is rewritten first.
 
   A header carrying either byte from any *other* origin - a script's assignment
   to `pm.request.headers`, an auth credential, an import, a payload posted
@@ -6361,7 +6446,8 @@ with specific codes:
   draws (see [Scenario runs](#scenario-runs)). The execute-time residual pass
   refuses the same collision in the same words, since it resolves names the same way:
   a buffered send answers `statusCode: 0` with an `errorCode` of
-  `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
+  `INTERNAL_ERROR` carrying the message and this code as `refusalCode`, exactly
+  as the pre-send gate answers its own refusals,
   while a streaming send - which has not answered yet - is a `400` with this
   same code and fails its run row. A script's own `pm.sendRequest` refuses it
   as well, with the call named in front of the same wording, because it too
@@ -6437,22 +6523,32 @@ own bound of 100 below.
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
 the pre-request script runs, so `pm.request` reflects the real outgoing headers -
-unless a credential still holds a name compose could not answer, when it is
-applied after that script instead (#2473).
+unless a credential still holds a name that waits for that script (one compose
+could not answer, or any name of a request a pre-request script runs before),
+when it is applied after that script instead (#2473, #2521).
 If a non-interactive OAuth 2.0 token cannot be obtained, the engine still returns
 `200` but the body carries `statusCode: 0`, an `errorCode` of `AUTH_REQUIRED`
-(interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint.
+(interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint. The
+hint is the same whether the token was sought at the build or, for a config that
+waited for the script, after it.
 
-**A name compose could not answer is resolved once more, after the
-pre-request script and before the send** (issue #1008). Composition still runs
-first and is still the only place a payload is *composed* - what changed is
-that an unknown ordinary `{{name}}` keeps its braces at compose time instead of
-becoming `""` (issue #1009), so it survives to be resolved here against the
-variable scopes as the pre-request script left them. This is what makes the
-canonical imported auth pattern work: a pre-request script does
+**A name still written after compose is resolved after the pre-request script
+and before the send** (issues #1008 and #2521). Composition still runs first and
+is still the only place a payload is *composed*. Two kinds of name reach this
+pass: an unknown ordinary `{{name}}`, which keeps its braces at compose time
+instead of becoming `""` (issue #1009), and, in a request that a pre-request
+script (its own, a folder's or the collection's) runs before, every name a
+scope answers, which compose leaves written and lists in
+[`deferredVariables`](#deferredvariables). Either is resolved here against the
+variable scopes as the pre-request script left them, and there is no flag for
+the caller to set: the braces in the payload are the whole signal. This is what
+makes the canonical imported auth pattern work: a pre-request script does
 `pm.environment.set("token", …)` and the same send's `Authorization: Bearer
-{{token}}` carries the fresh value, rather than the previous run's token or
-`""` on the first run. A credential that waited (above) is applied once this
+{{token}}` carries the fresh value - on every run, not only the first, which is
+Postman's order - rather than the previous run's token or `""`. In a
+pre-request script, `pm.request.url` and `pm.request.headers` therefore still
+hold the `{{token}}` as written, and resolve after the script ends. A
+credential that waited (above) is applied once this
 pass has answered, against the same scopes, so a basic pair carries the value a
 script set rather than base64 of its token. It resolves the same fields
 composition does - the URL,
@@ -6464,12 +6560,20 @@ resolution, cycles, the 8-level bound); a value composition already
 substituted is finished text and is not touched again. `{{data.column}}` is
 left alone here too - the data namespace is bound per iteration by whoever owns
 the row. A request skipped by `pm.execution.skipRequest()` resolves nothing,
-having nothing left to send. **`POST /compose`'s own output is unchanged** -
-a preview, a tab title, the unresolved-token painting and "Copy as cURL" still
-show compose-time resolution, so a preview can show `{{token}}` where the wire
-will actually carry the resolved value. **The LOAD path does not do this
-pass** - a load run never runs a pre-request script, so there is nothing for it
-to resolve against; see [Scenario load runs](#scenario-load-runs).
+having nothing left to send. A header value or name this pass resolves is
+checked by the rules compose applies, before anything is rewritten, and a
+refusal is answered with `statusCode: 0`, the sentence in `errorMessage` and the
+rule's code in **`refusalCode`** (`unsendable_header`, `empty_header_name`,
+`invalid_header_name`, `colliding_header_names`, and the two codes of
+[`targetPolicy`](#post-execute) below); a streaming send answers a `400` under
+the same code. The member is absent on any other answer. A preview, a tab title,
+the unresolved-token painting and "Copy as cURL" show what compose
+returned, so for a scripted request a preview shows `{{token}}` where the wire
+will carry the value the script set (the Code section says so). **A load run
+runs this pass per submission only where it has one** (a collection load run's
+steps, a single-request run that declares `requestElements`), and under load it
+never refuses: see [Authentication](#authentication) and
+[Scenario load runs](#scenario-load-runs).
 
 **Request:**
 ```json
@@ -6503,6 +6607,9 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "persistVariables": true,            // Optional, default true - see below
   "includeParsedBody": true,           // Optional, default true - see below
   "origin": { "kind": "app" },         // Optional, who started the run - see below
+  "targetPolicy": {                    // Optional, the hosts this send may reach - see below
+    "allowAll": false, "allowedHosts": ["api.example.com"]
+  },
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
   "maxStreamEvents": 100000,           // Optional, streaming only - see below
@@ -6711,6 +6818,49 @@ client gave in the initialize handshake.
 
 [`POST /runs`](#post-runs) takes the same field under the same rules.
 
+**`targetPolicy` holds the send to the hosts its caller allows** (#2521):
+`{"allowAll": boolean, "allowedHosts": string[]}`, both members optional. The
+MCP server checks its allowlist against the *composed* URL, but a pre-request
+script can assign `pm.request.url` or set the variable a deferred `{{host}}`
+resolves from, so the caller also hands the engine the rule and the engine
+applies it to what it is about to send. It is the caller's session rule,
+changing per request, and rides on the payload rather than in config.
+
+- **What is judged.** The host of the URL as it will be dialled (the wire URL,
+  after the pre-request script, the residual pass and the URL encoding), and,
+  before any token is read from the cache or fetched, the host of an OAuth 2.0
+  config's `accessTokenUrl` and `refreshTokenUrl` (whichever are set, both
+  whether or not this send would reach the refresh one, so the answer does not
+  depend on what the cache holds). A script can set an `accessTokenUrl` as
+  easily as the request's URL, and the token request carries the client secret;
+  a refused target fetches no token.
+- **The match** is the MCP server's: the hostname as a WHATWG URL parser
+  reports it (no port; an IP literal in its canonical spelling, an
+  internationalised name by its punycode form), compared exactly with each
+  `allowedHosts` entry once that is trimmed and lower-cased. There is no
+  wildcard. `allowAll: true` passes any host that can be determined. A host
+  that cannot be - an empty one, or one still holding a `{{template}}` nothing
+  answered - is refused whatever the policy says. `{}` allows no host.
+- **A refusal** never reaches the network. A buffered send answers
+  `statusCode: 0`, an `errorCode` of `INVALID_URL`, the sentence naming the host
+  in `errorMessage`, and `refusalCode` `target_not_allowed` (a host the policy
+  does not list) or `target_host_unknown` (no determinable host); an OAuth 2.0
+  token endpoint it refuses at the build is answered the same way, and not as an
+  auth failure. A streaming send answers a `400` carrying the same code before
+  its stream opens.
+- **A malformed policy** - not an object, an `allowAll` that is not a boolean,
+  an `allowedHosts` that is not an array of strings, or any other member (so a
+  misspelt `allowedHost` cannot quietly allow nothing) - is a `400` with code
+  `invalid_target_policy`, before anything is recorded or sent. Absent or
+  `null`, a send reaches whatever its request names.
+- **It is never stored.** The top-level member is dropped from a run's
+  `config_snapshot` (as `origin` is), and a run holds it in memory only.
+- **What it does not cover:** the hops of a redirect a server answers with, and
+  the requests a script makes with `pm.sendRequest`.
+
+[`POST /runs`](#post-runs) takes the same field; see there for how a collection
+or load run is held to it.
+
 **`data` binds one row to this send** (issue #601). It is the single-send half
 of a run's `scenario.data`: every `{{data.column}}` in the URL, the header names
 and values, the body and both halves of every form field is substituted against
@@ -6773,8 +6923,10 @@ an id is enough. An empty string is treated as absent - a script reads
 **`allowScriptRequests` lets this payload's scripts use `pm.sendRequest`.**
 Absent, `null` or non-boolean all mean `false`, and that default is a security
 control rather than a convenience (issue #302): Vayu's MCP target allowlist is
-checked in the MCP server, before it calls this endpoint, so a request issued
-from inside a script never passes that gate. Denying unless a caller asks means
+checked in the MCP server, before it calls this endpoint, and held by the
+engine to the URL a send is about to dial ([`targetPolicy`](#post-execute)), so
+a request issued from inside a script with `pm.sendRequest` never passes
+either. Denying unless a caller asks means
 a client that forgets gets a script that cannot send rather than unchecked
 egress. The app's Send and load runs send `true`; the MCP server never does.
 `POST /runs` reads the same field for a `script.post` element's deferred
@@ -7324,6 +7476,19 @@ rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
 without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
 
+**`refusalCode` and `authErrorCode` say why a send never went out.** Both are
+**absent** from an answer that was sent. A buffered send refused after the
+build and before the transfer (the residual pass of a name or header, the
+auth applied after the pre-request script, a [`targetPolicy`](#post-execute)
+verdict) answers `statusCode: 0` with the sentence in `errorMessage` and the
+rule's code in `refusalCode`: `unsendable_header`, `empty_header_name`,
+`invalid_header_name`, `colliding_header_names`, `target_not_allowed`,
+`target_host_unknown`, or an auth code. `authErrorCode` is the hint of an auth
+failure (`errorCode` `AUTH_REQUIRED` or `AUTH_FAILED`), whether the token was
+sought at the build or, for a config that waited for the script, after it
+(where it repeats `refusalCode`, #2521). A streaming send answers the same
+codes as a `400` before its stream opens.
+
 **`timing.engineMs` is Vayu's own cost for the exchange** ([#2132](https://github.com/athrvk/vayu/issues/2132)),
 the ninth key and the only one a buffered `/execute` alone carries. It is the
 time from the handler receiving the request to the answer being assembled,
@@ -7421,6 +7586,7 @@ Start a load test run (Vayu Mode).
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
   "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
+  "targetPolicy": { "allowAll": false, "allowedHosts": ["api.example.com"] },  // Optional, the hosts this run may reach - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
   "data": [],                // Optional data rows, one object per row - see below
   "dataFileName": "users.csv",  // Optional, only beside data: the file's display name - see below
@@ -7467,6 +7633,30 @@ the run, client-asserted metadata rather than identity, `other` when absent,
 `client` kept for `mcp` only, and a malformed one a `400` naming the field
 before the run row exists. It applies to every run shape this endpoint starts,
 a scenario's included.
+
+**`targetPolicy` on `POST /runs`** is the object [`POST /execute`](#post-execute)
+documents (#2521), read by the same reader: a malformed one, an unknown member
+included, is a `400` with code `invalid_target_policy` before the run row exists,
+and it is never stored in the run's `config_snapshot`. What differs is where the
+verdict is made:
+
+- **A single-request run** has its OAuth 2.0 `accessTokenUrl` and
+  `refreshTokenUrl` hosts judged in the pre-flight, before any token is fetched
+  and before the run row exists: a refusal is a `400` whose code is
+  `target_not_allowed` or `target_host_unknown`. The request's own URL is judged
+  at each submission, in the event loop after the transferability checks: a
+  host the policy refuses fails that submission as an `INVALID_URL` error whose
+  message names the host, counted like any other error, and nothing is sent.
+- **A collection run** (`scenario`) has the token endpoints of each step's
+  OAuth 2.0 config judged when the plan is resolved wherever the token is
+  acquired then, a `400` under the same codes with no run row. A sequential run
+  then judges each step's final URL after that step's pre-request script, as a
+  buffered send does (and a config that waited for the script, at its step),
+  and a collection load run judges each submission as a single-request load run
+  does.
+
+An omitted `targetPolicy` restricts nothing. Redirect hops and `pm.sendRequest`
+are outside it.
 
 #### Streaming under load (`stream`)
 
@@ -7861,7 +8051,8 @@ flattened base scopes, and the residual-token pass
 (`resolve_residual_tokens`, [Request composition](#post-compose)) runs
 against that view before the transfer - so a `pm.environment.set` (or a
 `pm.request` edit) an inline `script.pre` makes is visible to any
-`{{token}}` compose could not already resolve on that same request, the
+`{{token}}` compose left written on that same request (one it could not
+answer, or one it deferred past the script, #2521), the
 same guarantee a scenario load run's per-VU overlay gives its own steps.
 Nothing shares this overlay across submissions - each one gets its own,
 discarded after - which is what keeps many concurrent submissions from
@@ -8067,7 +8258,9 @@ as a smaller one:
 | A `data` cell nested deeper than 100 levels (`constants::spec_document::MAX_READ_DEPTH`) | Refused before the row is measured or kept, because both recurse and a cell nested far enough overflows the stack (issue #2362). The message names the row and the column: `'scenario.data' row 1 column 'tag' is nested deeper than 100 levels`. The check runs right after the body is parsed and whatever shape `data` has: a row that is not an object but is itself nested that deep answers `'scenario.data' row 1 is nested deeper than 100 levels`, and a `data` that is not an array, nested that deep, answers `'scenario.data' is nested deeper than 100 levels`. A wrong shape within the bound keeps the refusals above. A cell nested exactly 100 levels is accepted. |
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
-| A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
+| A step with a `{{data.*}}` token (or the iteration identity) in its `oauth2` config | The token is acquired against the token endpoint (once, when a load plan is resolved; at the step's send in a sequential run), never bound per iteration, so no iteration exists for a row to reach it. Refused with or without a data set. |
+| A step of a collection **load** run with a `{{name}}` in its `oauth2` config that no variable answers | A load run acquires each step's token once, when the plan is resolved and before any script runs, so the name would reach the token endpoint as written. The message names the step and the token (#2521). A sequential run defers such a name to its step's send instead. |
+| A step whose OAuth 2.0 token endpoint host the run's [`targetPolicy`](#post-execute) refuses | Judged before the endpoint is posted to. The code is the policy's, `target_not_allowed` or `target_host_unknown`, not `invalid_scenario` (#2521). |
 | `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
 | `dataFileName` holding a `/` or `\` | A display name, never a path (issue #2051): a path would be stored and listed back to every reader of the run. Send the file's name alone. |
@@ -8117,23 +8310,34 @@ the same request does, and the two cannot drift apart.
   a session the next step sends.
 
 > **`{{variables}}` composition could answer are resolved once, before the
-> first send, not per step.** The plan is composed once, so a name that already
-> had a value when the run started is fixed for the whole run: a value a script
-> sets mid-run does **not** change what a *composed* `{{name}}` becomes in a
-> later step's URL, headers or body. This is the price of resolving once, and
-> resolving once is what keeps a collection edited mid-run from changing the
-> sequence underneath it.
+> first send, for a step no pre-request script runs before.** The plan is
+> composed once, so a name that already had a value when the run started is
+> fixed for the whole run in such a step: a value a script sets mid-run does
+> **not** change what a *composed* `{{name}}` becomes in a later step's URL,
+> headers or body. This is the price of resolving once, and resolving once is
+> what keeps a collection edited mid-run from changing the sequence underneath
+> it.
 >
-> **A name composition could not answer is a different story** (issue #1008).
-> Since #1009 that name keeps its braces instead of resolving to `""`, so each
-> step resolves it again, immediately before that step's own send, against the
-> scopes as every script up to and including that step's own pre-request script
-> left them - not just through `pm.environment.get(...)` and a `pm.request`
-> edit, though a script can still reach it that way too. That is what lets a
-> step early in the plan fetch a token and a later step's `Bearer {{token}}`
-> carry it with no script of its own. A step's own request holds one search per
-> field, and a plan where every name was already defined at run start pays that
-> and nothing else.
+> **A step with a pre-request script above or on it is different** (issue
+> #2521). Its own `script.pre`, a folder's or the collection's is composed into
+> the step, so the plan keeps every name a scope answers written in that step,
+> and each iteration resolves them immediately before the step's send, against
+> the scopes as every script up to and including the step's own pre-request
+> script left them. That is Postman's order: a script that replaces a stored
+> token is sent, on every iteration, and not only on the second. Only the
+> *names* are re-read per iteration; the sequence itself is still the plan
+> composed at run start.
+>
+> **A name composition could not answer** (issue #1008) is resolved the same
+> way. Since #1009 that name keeps its braces instead of resolving to `""`, so
+> each step resolves it again, immediately before that step's own send, against
+> the scopes as every script up to and including that step's own pre-request
+> script left them - not just through `pm.environment.get(...)` and a
+> `pm.request` edit, though a script can still reach it that way too. That is
+> what lets a step early in the plan fetch a token and a later step's `Bearer
+> {{token}}` carry it with no script of its own. A step's own request holds one
+> search per field, and a plan where every name was already defined at run start
+> and no step is scripted pays that and nothing else.
 >
 > The exceptions are the two reserved namespaces below, which neither pass
 > touches: `{{data.*}}` and the `{{$vu}}` / `{{$iteration}}` identity (issue
@@ -8256,9 +8460,13 @@ them.
 > when the plan is composed.
 >
 > **OAuth 2.0 is the exception, and it is refused rather than ignored.** Its
-> token is acquired once, when the run is planned, so no iteration exists for a
-> row to reach - a `{{data.*}}` anywhere in an `oauth2` config is a `400` at
-> `POST /runs` naming the token, with or without a data set.
+> token is acquired against the token endpoint, never bound per iteration, so no
+> iteration exists for a row to reach - a `{{data.*}}` anywhere in an `oauth2`
+> config is a `400` at `POST /runs` naming the token, with or without a data
+> set. A sequential run acquires a step's token at its send, after the step's
+> pre-request script, so an `oauth2` config naming a variable the script sets
+> resolves then; a collection load run acquires once at planning and refuses a
+> name nothing answers.
 
 Which columns a collection *expects* is a separate, declared thing - see
 `dataSchema` under [Collections](#collections) and
@@ -8916,7 +9124,11 @@ longer reads as a refused request (#2319).
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
 required) or `400`, carrying the `/oauth2` error codes, so a bad token never
-surfaces as a silently-failed run.
+surfaces as a silently-failed run. A load run acquires once, before any script,
+so an `oauth2` config still holding a `{{name}}` when the run starts (one that
+nothing defines, or one posted without being composed for a run with
+`deferDynamicVariables`) is a `400` `invalid_run_config` naming it; and a [`targetPolicy`](#post-execute) that refuses the config's
+token endpoint is a `400` under the policy's code, before anything is posted.
 
 **Concurrency model.** `constant_concurrency`, `ramp_up`, and `iterations` are
 **closed-loop**: the engine holds in-flight requests at a target (`concurrency`,

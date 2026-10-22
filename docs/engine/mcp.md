@@ -273,7 +273,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
-| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
+| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host, and held by the engine to the URL it sends (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
@@ -286,9 +286,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
-| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
-| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
+| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path and held by the engine to the URL it sends after any pre-request script (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
+| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host, and again by the engine on each sent URL (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
+| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run - and held by the engine to each step's sent URL and OAuth 2.0 token endpoint (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
@@ -326,7 +326,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist (also held by the engine, `targetPolicy`) + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -1227,7 +1227,8 @@ resolves `{{variables}}` and walks the collection ancestor chain to resolve
 `POST /runs` accept unchanged. Composition is pure - nothing is sent - which
 is exactly what MCP's safety model needs: every execute/load tool composes
 first, checks the **allowlist against the composed (resolved) URL**, and only
-then executes the composed payload.
+then executes the composed payload - which carries the same allowlist to the
+engine as `targetPolicy`, for the URL it is about to send (below).
 
 Four tools compose a stored request by id: `run_collection_smoke` and
 `run_collection` for every request of a collection, `start_load_run` with a
@@ -1247,15 +1248,47 @@ neither is refused. The by-id branch keeps the ad-hoc gates of the other: the
 `verifySSL: false` refusal and the agent-script refusal run first, and the
 allowlist is checked on the composed URL, not the stored one.
 
-Two things the engine may still do to that payload after the gate has run, both
-of them reasons the gate refuses a URL whose *authority* still carries a
-`{{template}}` rather than trying to check one (`safety.ts`): a pre-request
-script can assign `pm.request.url`, and since #1008 a name composition could
-not answer is resolved once more before the send. Neither can move the request
-to a host the allowlist did not see - an unresolved authority is denied
-outright, and a resolved one is the one that was checked - but a tool call that
-forwards a `preRequestScript` is not sending the composed bytes untouched, and
-the allowlist is a host rule rather than a payload one for exactly that reason.
+A pre-request script can still change where the request goes after that gate
+has run: it can assign `pm.request.url`, and since #2521 a request a
+pre-request script runs before is composed with its `{{names}}` written
+(`deferredVariables`), so a deferred `{{host}}` resolves from whatever the
+script set. The gate on the composed URL cannot see either, so the allowlist
+also travels with the send:
+
+- **`targetPolicy` on every send.** `asMcpSend` stamps the session's `allowAll`
+  and allowlist, as `{allowAll, allowedHosts}`, beside `origin` on every
+  `POST /execute` and `POST /runs` this server makes (`run_request`, streaming
+  or not, each `run_collection_smoke` row, `run_collection`, `start_load_run` in
+  both shapes and `get_graphql_schema`). The engine judges the URL it is about
+  to send, after the pre-request scripts and the residual pass, by the same
+  rule `safety.ts` applies (exact host, case-insensitive; an empty or
+  still-templated host is refused even under allow-all), and the host of every
+  OAuth 2.0 `accessTokenUrl` / `refreshTokenUrl` the request's auth would post
+  to, before any token is fetched. See
+  [`targetPolicy`](api-reference.md#post-execute). A test drives every sending
+  tool by name, and a scan fails on an `executeRequest` or `startRun` call that
+  does not go through the helper.
+- **The early gate stays, for the unscripted case.** `checkComposedTarget`
+  refuses off-list hosts before any traffic, exactly as before. The one
+  difference: a URL whose authority holds
+  templates that are *all* listed in the composed payload's `deferredVariables`
+  has no host yet - the script chooses it - so it is passed to the engine
+  instead of denied, and is refused here only when the allowlist is empty and
+  allow-all is off. A template composition could not answer is still an unknown
+  host, denied as before.
+- **The engine's refusal reads as the early one.** A buffered answer's
+  `refusalCode` (or a stream's `400` body, or the smoke row's skip reason) of
+  `target_not_allowed` becomes the allowlist remedy `settingRemedy` gives the
+  early refusal; `target_host_unknown` asks for a resolved URL. The text says
+  the allowlist is applied after the pre-request script and to an OAuth 2.0
+  token endpoint.
+- `deferredVariables` describes the composition and is stripped from the payload
+  before it is sent.
+
+What `targetPolicy` does not cover: a redirect hop a server answers with, and a
+script's `pm.sendRequest`, which is refused for MCP-started runs instead (below).
+A tool call that forwards a `preRequestScript` is still not sending the composed
+bytes untouched, but it can no longer reach a host the allowlist did not list.
 
 Scripts: the by-id compose path attaches the collection chain's, then the
 request's own, `script.pre` / `script.post` elements under `elements`
@@ -1327,7 +1360,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   precedence (environment > collection chain, leaf→root > globals; enabled
   only; an unknown name keeps its braces, issue #1009; dynamic variables like
   `{{$guid}}` generated per occurrence). MCP hands it raw strings and checks
-  the allowlist against the **composed** host. `start_load_run` composes for a
+  the allowlist against the **composed** host (and the engine again against the
+  sent one, #2521). `start_load_run` composes for a
   *run*, like the app, so the `{{$guid}}` family is deferred and the engine
   generates a fresh value per iteration rather than repeating one across them
   (issue #995); see
@@ -1703,7 +1737,9 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     secret variable's value or a literal credential in its query or userinfo
     (#1892). A step that will not compose
     refuses it too - the engine resolves the same plan before creating the run
-    row and would refuse it for the same reason.
+    row and would refuse it for the same reason. The engine holds the run to the
+    same list as well (`targetPolicy`): a step's OAuth 2.0 token endpoint is
+    judged when the plan is resolved, a `400` with no run row.
   - Every argument that describes a *single* target (`url`, `requestId`,
     `method`, `headers`, `body`, `auth`, `httpVersion`, `postRequestScript`,
     `collectionId`) is **refused by name** beside a `scenario`, as are
@@ -1970,19 +2006,22 @@ longer exists.
 The sandbox can send an auxiliary request (issue #302). That would be a hole in
 the allowlist if it applied here, and the reason is structural rather than an
 oversight: **the allowlist is checked in this server, against the composed URL,
-before it calls the engine.** A request issued from inside a script never goes
-through the MCP server at all, so it could never be checked - an agent that can
-write a script would otherwise reach any host, defeating a control the user set
-in Settings.
+before it calls the engine, and handed to the engine as `targetPolicy` for the
+URL a send is about to dial** (#2521). A request issued from inside a script
+with `pm.sendRequest` goes through neither - it is not the send's URL - so it
+could never be checked: an agent that can write a script would otherwise reach
+any host, defeating a control the user set in Settings.
 
 Three ways to close that were available, and this is which one and why:
 
-- *Move the allowlist engine-side for script-issued requests.* Rejected. The
-  allowlist lives in the app's config, and the engine has no channel to it; the
-  engine would need a second implementation of host matching alongside
-  `safety.ts`'s - two copies of a security check, which drift. It would also
-  leave the engine enforcing an allowlist for one kind of request and not the
-  others, which is harder to reason about than either extreme.
+- *Move the allowlist engine-side for script-issued requests.* Rejected when
+  this was decided (#302): the allowlist lives in the app's config, and the
+  engine had no channel to it, so it would have needed a second implementation
+  of host matching alongside `safety.ts`'s - two copies of a security check,
+  which drift. #2521 has since added that channel and a second matcher for the
+  send's own URL and OAuth 2.0 token endpoints (`targetPolicy`), because a
+  pre-request script can retarget those. It still does not reach a
+  `pm.sendRequest`, and the choice below stays the control for those.
 - *Gate the feature off by default behind a setting.* Rejected. It adds a knob
   whose safe position is the only correct one for MCP, and the hole reopens the
   moment anyone flips it for an unrelated reason.
@@ -2054,9 +2093,12 @@ no error (issue #2136); the sentence says so in a clause of its own and names
 
 ## Safety model
 
-Enforced in the MCP layer (`safety.ts`, `config.ts`), with one exception noted
-below: script-issued requests are refused engine-side, because this layer cannot
-see them. Nothing here changes engine *behaviour* for other clients. All
+Enforced in the MCP layer (`safety.ts`, `config.ts`), with two exceptions noted
+below: the engine applies the allowlist again to the URL a send is about to
+dial and to OAuth 2.0 token endpoints (`targetPolicy`, #2521), and
+script-issued requests are refused engine-side, because this layer cannot see
+them. Nothing here changes engine *behaviour* for other clients: a payload
+without a `targetPolicy` is unrestricted. All
 configurable in **Settings → MCP** and persisted (in the stdio CLI, through the
 `VAYU_MCP_*` variables, and a refusal there names the variable - see
 [Configuration](#configuration)).
@@ -2090,9 +2132,12 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   target from a remote one (`isLocalHost` in `src/lib/host-locality.ts`, a mirror
   of `isPrivateHost` that the main process cannot share);
   `host-locality.conformance.test.ts` fails on any divergence.
-  Because the check happens here, before the engine is called, a request sent
-  from inside a script could not be checked at all - so `pm.sendRequest` is
-  refused outright for runs this server starts. See
+  Because the check happens here, before the engine is called, the URL a
+  pre-request script rewrites is not seen by it - the engine applies the same
+  list to it (`targetPolicy`, see
+  [Request composition](#request-composition)) - and a request sent from inside
+  a script could not be checked at all, so `pm.sendRequest` is refused outright
+  for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
 - **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations /
   response samples (`maxResponseSamples`) on `start_load_run`; over-cap requests are rejected. With the allowlist, these are

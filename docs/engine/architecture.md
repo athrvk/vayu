@@ -662,11 +662,17 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   (`{{$guid}}`, …) generated per occurrence - unless the caller asked for them
   to be deferred (`deferDynamicVariables`), which a composition made for a
   *run* does, so the run generates a fresh value per iteration instead of
-  repeating one (issue #995);
+  repeating one (issue #995). When a pre-request script runs before the send
+  (an enabled, non-blank `script.pre` on the request, a folder or the
+  collection), composition leaves every name a scope answers written and lists
+  the names in the response's `deferredVariables` (issue #2521), for the send
+  to resolve after that script;
 - resolves `inherit` auth by walking the collection ancestor chain leaf→root
   (an explicit `noauth` terminates the walk, `none` is stepped over), and
   resolves variables inside the winning block **before** any OAuth 2.0 cache
-  key can be derived from it;
+  key can be derived from it - at composition for a run, after the
+  pre-request script for a Send or a sequential run's step, where the key is
+  computed from the resolved config either way;
 - for a `requestId`, assembles the whole payload from the stored row: flattened
   enabled headers, body, execution options, and the ordered script-part lists
   from the chain plus the request's own. An inline `request` given alongside a
@@ -676,21 +682,31 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
 Composition is **pure** - nothing is sent, no run row is created - and it is
 still the only place a payload is *composed*: an execution endpoint never
 composes one, so a payload that skipped composition is sent as supplied.
-Interpolation still happens strictly *before* the pre-request script runs
-(#226's decision D1 stands - composition was not moved to after the script the
-way Postman orders it).
+Decision D1 of #226 is now: a name resolves at compose, **except where a
+pre-request script can change its value** (issue #2521), when it resolves after
+that script - Postman's order. Whether one runs is read from the composed
+`elements` (no caller flag), so a request nothing scripts is interpolated once,
+before the send, as it always was.
 
-What #1008 added is narrower than a second composition: a name composition
-could **not** answer keeps its braces (#1009) rather than becoming `""`, and
-`resolve_residual_tokens` resolves those - and only those - once more, after
-the pre-request script and before the send, so `pm.environment.set("token", …)`
-does reach `{{token}}` in the same send. A value composition substituted is
-finished text and is never revisited, which is what keeps "resolved once" true
-of every value that had an answer. The one thing this costs: an ad-hoc payload
-posted straight to `/execute` with a literal `{{...}}` in it is no longer
-inert - if the run's scopes define that name, the send now carries its value.
-A name nothing defines still goes out written as it stands, and the load path
-does not run this pass at all. What the pass can *refuse* is what resolving a
+The second resolution is narrower than a second composition:
+`resolve_residual_tokens` resolves the names composition left written - a name
+it could **not** answer, which keeps its braces (#1009) rather than becoming
+`""` (#1008), and every name a scope answers in a request a pre-request script
+runs before (#2521) - once, after that script and before the send, so
+`pm.environment.set("token", …)` does reach `{{token}}` in the same send, on
+every run. A value composition substituted is finished text and is never
+revisited, which is what keeps "resolved once" true of every value that had an
+answer. What composition resolves whatever a script does: `{{data.*}}` and the
+bound row's names, `$` names, a name whose value reaches one of those, and a
+file path (the pass never resolves a path). The one thing this costs: an ad-hoc
+payload posted straight to `/execute` with a literal `{{...}}` in it is no
+longer inert - if the run's scopes define that name, the send now carries its
+value. A name nothing defines still goes out written as it stands, and a load
+run runs the pass per submission only where it has scopes to read, and counts
+rather than refuses. An OAuth 2.0 config defers like the rest on a Send and a
+sequential run's step: it is resolved after the script and its token acquired
+then (`apply_late_auth`, with the token cache), so a script reaches the token
+request. A load run acquires once, before any script. What the pass can *refuse* is what resolving a
 header **name** can produce, both rules held in
 `engine/include/vayu/http/header_names.hpp`: a name landing on one the request
 already carries (#1051), where the rows show two different names and the
@@ -709,14 +725,23 @@ equal being already one key. The same pass also trims the spaces and tabs
 around every name and refuses one that is not an RFC 9110 token once trimmed
 (#2467, `invalid_header_name`), which is how a name a script defined is judged;
 it reads every name for that rule as it does for the empty one, and a token
-nothing answered is left written while the text around it is judged. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+nothing answered is left written while the text around it is judged. A header
+*value* a variable would end or cut is refused here too for a scripted request,
+whose variables composition no longer substitutes (`unsendable_header`, #738's
+rule, #2521); the buffered answer carries each refusal's code as
+`refusalCode`. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
 Clients: the renderer sends its editor state through the inline shape (Send,
 load test, and History's replay - editor state can be unsaved or a detached
 copy, which is why compose-by-id alone would not do); MCP composes saved
-requests by id and gates its allowlist on the *composed* URL. The renderer
+requests by id and checks its allowlist early against the *composed* URL, then
+attaches the same rule to every send as `targetPolicy` (issue #2521), which the
+engine applies to the URL it is about to send - after the pre-request script
+and the residual pass - and to the host of an OAuth 2.0 token endpoint, before
+the token is requested. It does not cover a redirect hop or a script's
+`pm.sendRequest`. The renderer
 keeps a preview-only copy of the substitution rules
 (`app/src/lib/variable-resolution.ts`) for tab titles, previews and the
 unresolved-token painting; the shared conformance fixture
@@ -1598,7 +1623,9 @@ record shape, the category list, the redaction rule and the file layout
 - **Where the redaction line falls, and why it is not one line.** Two columns of
   a run row answer two different questions, and the split is deliberate:
   `runs.config_snapshot` records the request **composed, with its credentials
-  withheld**: the payload arrives with every `{{variable}}` already resolved,
+  withheld**: the payload arrives with every `{{variable}}` composition could
+  answer already resolved (a scripted request's names stay written, #2521), and
+  the caller's `targetPolicy` is dropped, never stored,
   so `sanitize_config_snapshot` keeps `auth` down to `{mode}`, writes
   `<redacted>` for the value of every header named in the shared secret set
   (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's own
