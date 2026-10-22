@@ -10240,8 +10240,8 @@ named it.
     "totalRequests": 6000,
     "successfulRequests": 5970,
     "failedRequests": 30,
-    "httpErrorRequests": 30,
-    "noResponseRequests": 0,
+    "httpErrorRequests": 20,
+    "noResponseRequests": 10,
     "cancelledRequests": 0,
     "errorRate": 0.5,
     "totalDurationSeconds": 60.4,
@@ -10263,14 +10263,14 @@ named it.
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
     "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
   },
-  "statusCodes": [[200, 5970], [500, 30]],
+  "statusCodes": [[0, 10], [200, 5970], [500, 20]],
   "rateControl": { "targetRps": 100, "actualRps": 100.0, "achievement": 100.0,
                    "requestsSent": 6000, "requestsExpected": 6000 },
   "errors": {
     "total": 30,
-    "withDetails": 30,
-    "types": { "timeout": 20, "connection_failed": 10 },
-    "byStatusCode": [[500, 30]]
+    "withDetails": 10,
+    "types": { "timeout": 6, "connection_failed": 4 },
+    "byStatusCode": [[0, 10], [500, 20]]
   },
   "timingBreakdown": {
     "avgDnsMs": 5.2, "avgConnectMs": 12.3, "avgTlsMs": 45.1,
@@ -10387,6 +10387,19 @@ size_t>`, which nlohmann serialises that way. The app folds the pairs
 (`statusCodeEntries`). The stored summary, a live `metrics` frame and the
 document [`POST /export/run-report`](#post-exportrun-report) writes all spell
 the distribution as an object.
+
+**`errors`** is the run's failures three ways. `total` is the
+[one error definition](#what-counts-as-an-error) and `byStatusCode` its
+distribution, code `0` being the requests that got no response. `types` counts
+those no-response requests by what went wrong (`timeout`, `connection_failed`,
+`dns_failed`, ...), so its counts sum to `byStatusCode`'s code `0`. For a load
+run, a collection load run included, they are counted as the run happened and
+stored in its summary (issue #2400), exact past the error store's cap. `withDetails` is how many error
+records the run kept, at most `maxStoredErrors`, so past the cap it is smaller
+than `types` adds up to. Load runs stored before issue #2400, and
+design-mode collection runs, have no stored per-type counts: their `types`
+counts the kept records, and past the cap covers only the first
+`maxStoredErrors` errors.
 
 **`slowRequests`** is present when the run set a `slow_threshold_ms` above `0`.
 `count` is every successful completion at or past `thresholdMs`, counted as it

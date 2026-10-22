@@ -1328,6 +1328,7 @@ default, so `sync_schema()` can
   "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
+  "error_types": { "timeout": 2, "connection_failed": 1 },
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
                "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
   "phases": {
@@ -1369,6 +1370,14 @@ run over reused connections genuinely has a TLS p50 of 0.
 are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
+
+`error_types` (issue #2400) is every error the run recorded, by the type name its stored
+error traces carry (`timeout`, `connection_failed`, ...), counted by the collector as it
+happened; a type with no error is left out. It is exact where the error records in `results`
+stop at `maxStoredErrors`, and the report's `errors.types` reads it while `errors.withDetails`
+counts the stored records. Written by the completed and the failed run alike, `{}` included. A
+summary stored before the issue has no key, and the report then counts the stored records by
+type as it always did. A design-mode collection run's summary does not write it.
 
 `slow_requests` (issue #2399) is every successful completion at or past the run's
 `slow_threshold_ms`, counted by the collector as it happened, and the threshold it was counted

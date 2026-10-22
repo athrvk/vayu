@@ -281,6 +281,7 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.bytes_sent              = mc.total_bytes_sent ();
     inputs.bytes_received          = mc.total_bytes_received ();
     inputs.status_codes            = mc.status_code_distribution ();
+    inputs.error_types             = mc.error_type_counts ();
     inputs.latency                 = mc.calculate_percentiles ();
     inputs.latency_avg_ms          = mc.average_latency ();
     inputs.phases                  = mc.phase_percentiles ();
@@ -1615,6 +1616,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.bytes_sent     = context->metrics_collector->total_bytes_sent ();
     inputs.bytes_received = context->metrics_collector->total_bytes_received ();
     inputs.status_codes = context->metrics_collector->status_code_distribution ();
+    inputs.error_types    = context->metrics_collector->error_type_counts ();
     inputs.latency        = totals.latency;
     inputs.latency_avg_ms = totals.latency_avg_ms;
     inputs.phases         = context->metrics_collector->phase_percentiles ();
@@ -2394,6 +2396,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
                         { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
                         { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
                         { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
+    // Always written, `{}` included: an absent key is a run stored before
+    // #2400, whose report still counts the stored error records by type.
+    summary["error_types"] = nlohmann::json (inputs.error_types);
     // What each bounded store thinned away. Always written: a reader that sees
     // the section and all zeros knows the stored set is complete, which a
     // missing section cannot say.
