@@ -1042,8 +1042,8 @@ TEST_F (HttpClientTest, WithoutAStallTimeoutTheTotalBoundStillApplies) {
 
 // The upstream holds the transfer until the fixture releases it, so only the
 // cancel can end it. Mutation check: drop the progress callback `Client::send`
-// installs for `ClientConfig::cancel`, and the send runs on to `/hang`'s own
-// 30s cap and answers 200.
+// installs for `ClientConfig::cancel`, and the send runs on to its own 30s
+// timeout and reports `Timeout`.
 TEST_F (HttpClientTest, ACancelEndsATransferTheUpstreamIsStillHolding) {
     vayu::tests::SlowMockServer upstream;
     std::atomic<bool> cancel{ false };

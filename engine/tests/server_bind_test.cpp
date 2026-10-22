@@ -465,8 +465,8 @@ TEST_F (ServerBindTest, StopAnswersTheRequestInFlightBeforeReturning) {
 // and records its row because `stop()` joins it. Healthy: the transfer sees the
 // cancel at its next libcurl progress tick, about a second. Mutation checks:
 // drop `inputs.cancel` from the buffered `/execute`, and `stop()` waits out
-// `/hang`'s own 30s cap and the answer is the upstream's 200; detach the
-// listener thread in `stop()` again, and the row is missing when it returns.
+// the send's own 30s timeout and the answer is `TIMEOUT`; restore the timed
+// wait and detach in `stop()`, and the row is missing when it returns.
 TEST_F (ServerBindTest, StopCancelsTheUpstreamTransferAHandlerIsHeldIn) {
     vayu::tests::SlowMockServer upstream;
     int port = 0;
@@ -505,8 +505,9 @@ TEST_F (ServerBindTest, StopCancelsTheUpstreamTransferAHandlerIsHeldIn) {
 }
 
 /// Calls `server.stop()` while a client is still reading @p path's event
-/// stream and answers whether `stop()` returned inside the wait deadline.
-/// @p end_stream is what lets a broken `stop()` return at all, from the
+/// stream, and answers whether `stop()` returned inside the wait deadline with
+/// the stream closed under the reader - ended, not left running on a detached
+/// thread. @p end_stream is what lets a broken `stop()` return at all, from the
 /// producing side, so a regression fails the test rather than hanging it;
 /// the reader also hangs up on its next frame once that has been called.
 bool stop_returns_while_a_relay_is_read (vayu::http::Server& server,
@@ -529,22 +530,27 @@ const std::function<void ()>& end_stream) {
 
     auto stopped =
     std::async (std::launch::async, [&server] () { server.stop (); });
-    const bool returned = vayu::tests::wait_until ([&stopped] () {
-        return stopped.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
-    });
+    const auto ready = [] (const auto& future) {
+        return future.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    };
+    const bool returned =
+    vayu::tests::wait_until ([&] () { return ready (stopped); });
+    const bool closed =
+    returned && vayu::tests::wait_until ([&] () { return ready (reader); });
     hang_up.store (true);
     end_stream ();
     stopped.get ();
     reader.get ();
-    return relaying && returned;
+    return relaying && returned && closed;
 }
 
 // A live relay ends when the server stops instead of holding the join open for
 // as long as its client reads (#2683). An inbox outlives `Server::stop()`, so
 // without the stop flag `/inbox/:id/live` keeps polling it. Healthy: the relay
-// ends within one poll interval (250ms by default). Mutation check: drop
+// ends within one poll interval (250ms by default). Mutation checks: drop
 // `server_stopping` from `stream_inbox_live`'s loop, and `stop()` returns only
-// once the reader hangs up after the 20s wait.
+// once the reader hangs up after the 20s wait; restore the timed wait and
+// detach in `stop()`, and it returns with the relay still writing.
 TEST_F (ServerBindTest, StopEndsAnInboxRelayItsClientIsStillReading) {
     int port = 0;
     {
@@ -565,15 +571,16 @@ TEST_F (ServerBindTest, StopEndsAnInboxRelayItsClientIsStillReading) {
     // keep-alive every poll, which is where it learns of it.
     EXPECT_TRUE (stop_returns_while_a_relay_is_read (
     server, port, "/inbox/" + inbox_id + "/live", [] () {}))
-    << "stop() waited on an inbox relay whose client was still reading";
+    << "stop() did not end an inbox relay whose client was still reading";
 }
 
 // The same for a load run's `/runs/:id/live`, which the daemon stops only after
 // `Server::stop()`. The run here has no worker: it is a registered context
 // with one tick published, so the relay writes that tick and then waits on a
-// run that never ends. Mutation check: drop `stopping` from
+// run that never ends. Mutation checks: drop `stopping` from
 // `stream_live_metrics`'s loop, and `stop()` returns only once the run is
-// ended after the 20s wait.
+// ended after the 20s wait; restore the timed wait and detach in `stop()`, and
+// it returns with the relay still running.
 TEST_F (ServerBindTest, StopEndsALiveMetricsRelayOfARunStillGoing) {
     int port = 0;
     {
@@ -595,7 +602,7 @@ TEST_F (ServerBindTest, StopEndsALiveMetricsRelayOfARunStillGoing) {
         context->settled.store (true, std::memory_order_release);
         context->closed.store (true, std::memory_order_release);
     }))
-    << "stop() waited on a live relay whose run had not ended";
+    << "stop() did not end a live relay whose run had not ended";
     run_manager_.unregister_run (run_id);
 }
 
