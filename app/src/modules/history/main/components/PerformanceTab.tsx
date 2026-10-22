@@ -23,6 +23,11 @@ import {
 	HdrPercentileChart,
 	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
+import { ChartLegend } from "@/modules/dashboard/components/charts/ChartLegend";
+import {
+	PERCENTILE_ENTRIES,
+	SCATTER_ENTRIES,
+} from "@/modules/dashboard/components/charts/uplot/legend";
 import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePercentiles";
 import { StreamMetrics } from "@/modules/dashboard/components/charts/StreamMetrics";
 import { LatencyStat } from "@/modules/dashboard/components/stats/LatencyStat";
@@ -100,7 +105,10 @@ export default function PerformanceTab({
 				(isRampUp ? (
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
-							<CardTitle>Response time vs {CONCURRENCY_UNIT}</CardTitle>
+							<div className="flex items-baseline justify-between">
+								<CardTitle>Response time vs {CONCURRENCY_UNIT}</CardTitle>
+								<ChartLegend entries={SCATTER_ENTRIES} />
+							</div>
 						</CardHeader>
 						<CardContent>
 							<ResponseTimeVsConcurrencyChart
@@ -113,7 +121,10 @@ export default function PerformanceTab({
 				) : (
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
-							<CardTitle>Response time percentiles over time</CardTitle>
+							<div className="flex items-baseline justify-between">
+								<CardTitle>Response time percentiles over time</CardTitle>
+								<ChartLegend entries={PERCENTILE_ENTRIES} />
+							</div>
 						</CardHeader>
 						<CardContent>
 							<LatencyPercentilesChart

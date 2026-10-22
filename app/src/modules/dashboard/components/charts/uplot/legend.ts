@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatRate } from "@/lib/format-number";
 import type { ColorRole } from "./uplotTheme";
 
 /** How a legend swatch is drawn: a stroke, a scatter point, or a translucent band fill. */
@@ -23,8 +24,8 @@ export interface LegendEntry {
 
 /**
  * What each time-series chart draws, by role. The series and the markers are built
- * from these entries and `MetricsView` renders the same ones as its legend
- * (`ChartLegend`), so the two cannot disagree (#2311).
+ * from these entries and `MetricsView` and History render the same ones as their
+ * legend (`ChartLegend`), so the two cannot disagree (#2311).
  */
 export const THROUGHPUT_LEGEND = {
 	// `categorical`, not `primary`: `--primary` tracks the user's accent theme,
@@ -69,3 +70,29 @@ export const SCATTER_LEGEND = {
 	p99: { label: "p99", role: "categorical", shape: "dot" },
 	slo: SLO_LINE,
 } as const satisfies Record<string, LegendEntry>;
+
+// The key each card renders. Live (`MetricsView`) and History read these same
+// lists, so a card cannot name a line its twin does not (#2697).
+export const LATENCY_ENTRIES: readonly LegendEntry[] = Object.values(LATENCY_LEGEND);
+export const PERCENTILE_ENTRIES: readonly LegendEntry[] = Object.values(PERCENTILE_LEGEND);
+export const SCATTER_ENTRIES: readonly LegendEntry[] = Object.values(SCATTER_LEGEND);
+
+/**
+ * The throughput card's key: the send-rate entry only when the chart draws that
+ * line, the target line only when it draws one, the ramp pair only on a ramp.
+ */
+export function throughputLegend(
+	targetRps: number | undefined,
+	hasRamp: boolean,
+	hasSend: boolean
+): LegendEntry[] {
+	const { throughput, sendRate, target, configured, achieved } = THROUGHPUT_LEGEND;
+	return [
+		throughput,
+		...(hasSend ? [sendRate] : []),
+		...(targetRps && targetRps > 0
+			? [{ ...target, label: `target ${formatRate(targetRps)} req/s` }]
+			: []),
+		...(hasRamp ? [configured, achieved] : []),
+	];
+}
