@@ -691,10 +691,14 @@ void register_request_example_routes (RouteContext& ctx) {
     ctx.server.Post (R"(/requests/([^/]+)/examples)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string request_id = req.matches[1];
+        const auto json              = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /requests/:id/examples", json.error ());
+            return;
+        }
         try {
-            auto json = nlohmann::json::parse (req.body);
             auto [status, body] =
-            create_request_example_response (ctx.db, request_id, json);
+            create_request_example_response (ctx.db, request_id, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /requests/:id/examples - " + std::to_string (status) +
@@ -723,10 +727,15 @@ void register_request_example_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string request_id = req.matches[1];
         const std::string example_id = req.matches[2];
+        const auto json              = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (
+            res, "PUT /requests/:id/examples/:exampleId", json.error ());
+            return;
+        }
         try {
-            auto json = nlohmann::json::parse (req.body);
             auto [status, body] =
-            update_request_example_response (ctx.db, request_id, example_id, json);
+            update_request_example_response (ctx.db, request_id, example_id, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /requests/:id/examples/:exampleId failed",
                 { { "status", status }, { "id", example_id },

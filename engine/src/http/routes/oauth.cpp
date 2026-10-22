@@ -51,6 +51,9 @@ nlohmann::json token_error_body (const oauth::TokenError& err) {
     return body;
 }
 
+/// The code a malformed body answers with, on every OAuth route that reads one.
+constexpr std::string_view OAUTH2_INVALID_CONFIG = "oauth2_invalid_config";
+
 int64_t now_ms_epoch () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
@@ -65,12 +68,12 @@ int64_t now_ms_epoch () {
  */
 std::pair<int, nlohmann::json>
 oauth2_token_post (vayu::db::Database& db, const std::string& request_body) {
-    nlohmann::json req;
-    try {
-        req = nlohmann::json::parse (request_body);
-    } catch (const nlohmann::json::exception& e) {
-        return { 400, error_body (400, "Invalid JSON: " + std::string (e.what ()), "oauth2_invalid_config") };
+    const auto parsed = parse_request_json (
+    request_body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
+    if (!parsed) {
+        return as_response (parsed.error ());
     }
+    const nlohmann::json& req = *parsed;
 
     const auto config = req.value ("config", nlohmann::json ());
     const bool force  = req.value ("force", false);
@@ -143,22 +146,22 @@ void register_oauth_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         auto [status, body] = oauth2_token_post (ctx.db, req.body);
         res.status          = status;
-        res.set_content (body.dump (), "application/json");
+        // A parse refusal quotes the bytes it stopped at, and so does a
+        // provider's reply, so a strict dump could throw on either.
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 
     ctx.server.Post ("/oauth2/authorize/start",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const nlohmann::json::exception& e) {
-            res.status = 400;
-            send_error (res, 400, std::string ("Invalid JSON: ") + e.what (),
-            "oauth2_invalid_config");
+        const auto body = parse_request_json (
+        req.body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
+        if (!body) {
+            refuse_request_body (res, "POST /oauth2/authorize/start", body.error ());
             return;
         }
-        const auto config = body.value ("config", nlohmann::json ());
-        const auto mode   = body.value ("mode", std::string{ "loopback" });
+        const auto config = body->value ("config", nlohmann::json ());
+        const auto mode   = body->value ("mode", std::string{ "loopback" });
         auto result       = ctx.authorize_manager.start (ctx.db, config, mode);
         if (!result.ok) {
             res.status = result.http_status;
@@ -177,18 +180,15 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Post ("/oauth2/authorize/complete",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const nlohmann::json::exception&) {
-            res.status = 400;
-            res.set_content (R"({"error":{"code":"oauth2_invalid_config","message":"Invalid JSON"}})",
-            "application/json");
+        const auto body = parse_request_json (
+        req.body, OAUTH2_INVALID_CONFIG, {}, OAUTH2_INVALID_CONFIG);
+        if (!body) {
+            refuse_request_body (res, "POST /oauth2/authorize/complete", body.error ());
             return;
         }
         const auto st = ctx.authorize_manager.complete (ctx.db,
-        body.value ("attemptId", std::string{}),
-        body.value ("callbackUrl", std::string{}));
+        body->value ("attemptId", std::string{}),
+        body->value ("callbackUrl", std::string{}));
         res.status    = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (), "application/json");
     });

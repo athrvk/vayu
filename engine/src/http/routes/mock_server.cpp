@@ -930,13 +930,14 @@ namespace vayu::http::routes {
 namespace {
 
 void handle_start_mock (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    nlohmann::json body;
-    try {
-        body = req.body.empty () ? nlohmann::json::object () :
-                                   nlohmann::json::parse (req.body);
-    } catch (const std::exception& e) {
-        send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
-        return;
+    nlohmann::json body = nlohmann::json::object ();
+    if (!req.body.empty ()) {
+        auto parsed = parse_request_json (req.body);
+        if (!parsed) {
+            refuse_request_body (res, "POST /mock/start", parsed.error ());
+            return;
+        }
+        body = std::move (*parsed);
     }
     const auto start = parse_mock_start (body);
     if (!start) {

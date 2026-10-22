@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
@@ -142,6 +143,22 @@ TEST (ImportFetch, RejectsInvalidJson) {
     vayu::http::routes::import_fetch ("not json", vayu::http::TransportPolicy{});
     EXPECT_EQ (status, 400);
     EXPECT_TRUE (body.contains ("error"));
+}
+
+// The deep value rides beside a url that would otherwise be fetched, so a
+// missing bound shows as an attempted fetch and a crash on the first copy.
+TEST (ImportFetch, RefusesABodyNestedPastTheBound) {
+    const std::string body = R"({"url":"http://127.0.0.1:1/x","extra":)" +
+    vayu::tests::nested_array_text (100000) + "}";
+    const auto answer =
+    vayu::http::routes::import_fetch (body, vayu::http::TransportPolicy{});
+    EXPECT_EQ (answer.first, 400);
+    EXPECT_EQ (answer.second["error"]["message"].get<std::string> (),
+    "request body is nested deeper than " +
+    std::to_string (vayu::core::constants::request_body::MAX_JSON_DEPTH) + " levels");
+    EXPECT_FALSE (vayu::http::routes::import_fetch_client_config (
+    body, vayu::http::TransportPolicy{})
+    .has_value ());
 }
 
 TEST (ImportFetch, RejectsNonHttpUrl) {

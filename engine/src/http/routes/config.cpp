@@ -151,8 +151,10 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
 // A /config validation failure, which names its own code rather than taking the
 // per-status default. Thin wrapper over the shared builder so the shape stays in
 // one place (routes.hpp).
+constexpr std::string_view INVALID_CONFIG_CODE = "invalid_config";
+
 nlohmann::json config_error (const std::string& message) {
-    return error_body (400, message, "invalid_config");
+    return error_body (400, message, INVALID_CONFIG_CODE);
 }
 
 // Every stored config row this engine's own catalogue declares (issue #1492) -
@@ -412,14 +414,14 @@ const std::unordered_map<std::string, std::string>& updates) {
 static std::pair<int, nlohmann::json> apply_config_update_locked (vayu::db::Database& db,
 const std::string& body,
 const std::function<void ()>& before_write) {
-    nlohmann::json json;
-    try {
-        json = nlohmann::json::parse (body);
-    } catch (const nlohmann::json::parse_error& e) {
+    const auto parsed =
+    parse_request_json (body, INVALID_CONFIG_CODE, {}, INVALID_CONFIG_CODE);
+    if (!parsed) {
         vayu::utils::log_error (
-        "config", "POST /config - JSON parse error: " + std::string (e.what ()));
-        return { 400, config_error ("Invalid JSON: " + std::string (e.what ())) };
+        "config", "POST /config - " + error_message_of (parsed.error ().body));
+        return as_response (parsed.error ());
     }
+    const nlohmann::json& json = *parsed;
 
     std::unordered_map<std::string, std::string> updates;
     if (const auto rejection = read_config_updates (json, updates)) {
@@ -659,7 +661,10 @@ void register_config_routes (RouteContext& ctx) {
         try {
             auto [status, response_body] = apply_config_update (ctx.db, req.body);
             res.status = status;
-            res.set_content (response_body.dump (2), "application/json");
+            // `replace`: a parse refusal quotes the bytes it stopped at (#2671).
+            res.set_content (response_body.dump (2, ' ', false,
+                             nlohmann::json::error_handler_t::replace),
+            "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "config", "POST /config - Error: " + std::string (e.what ()));

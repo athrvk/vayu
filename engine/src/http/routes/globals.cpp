@@ -115,10 +115,13 @@ void register_globals_routes (RouteContext& ctx) {
      * Returns: The saved globals object.
      */
     ctx.server.Post ("/globals", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /globals", json.error ());
+            return;
+        }
         try {
-            auto json = nlohmann::json::parse (req.body);
-
-            auto [status, body] = save_globals_response (ctx.db, json);
+            auto [status, body] = save_globals_response (ctx.db, *json);
             res.status          = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {

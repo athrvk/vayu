@@ -328,17 +328,13 @@ void register_spec_bind_routes (RouteContext& ctx) {
      */
     ctx.server.Post (
     "/specs/bind", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const std::exception& e) {
-            vayu::utils::log_warning ("http",
-            "POST /specs/bind - invalid JSON body: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON body");
+        const auto body = parse_request_json (req.body);
+        if (!body) {
+            refuse_request_body (res, "POST /specs/bind", body.error ());
             return;
         }
         try {
-            auto [status, response] = bind_spec_response (ctx.db, body);
+            auto [status, response] = bind_spec_response (ctx.db, *body);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /specs/bind - " + std::to_string (status) + ": " +

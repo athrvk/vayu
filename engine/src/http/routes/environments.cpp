@@ -178,9 +178,13 @@ void register_environment_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/environments",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /environments", json.error ());
+            return;
+        }
         try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = create_environment_response (ctx.db, json);
+            auto [status, body] = create_environment_response (ctx.db, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /environments - " + std::to_string (status) + ": " +
@@ -210,10 +214,14 @@ void register_environment_routes (RouteContext& ctx) {
     ctx.server.Put (R"(/environments/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string environment_id = req.matches[1];
+        const auto json            = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "PUT /environments/:id", json.error ());
+            return;
+        }
         try {
-            auto json = nlohmann::json::parse (req.body);
             auto [status, body] =
-            update_environment_response (ctx.db, environment_id, json);
+            update_environment_response (ctx.db, environment_id, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /environments/:id failed",
                 { { "status", status }, { "id", environment_id },

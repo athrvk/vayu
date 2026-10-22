@@ -136,14 +136,23 @@ is not read, the engine answers and closes the connection: a client that is
 still writing a large body may see the connection reset rather than the
 response.
 
-Once read, a JSON body is held to a depth bound on `POST /collections`,
-`PUT /collections/:id`, `POST /requests`, `PUT /requests/:id`, `POST /specs`
-and `POST /specs/diff`: one nested deeper than 128 levels answers `400`
-`request body is nested deeper than 128 levels` (code `bad_request`) before
-the route reads a field, and text that does not parse answers `400` `Invalid
-JSON: <parser message>` (code `bad_request`) (issue
-[#2417](https://github.com/athrvk/vayu/issues/2417)). `POST /execute` and
-`POST /runs` hold the same bound; see their sections.
+Once read, every route that reads a JSON body holds it to a depth bound: one
+nested deeper than 128 levels answers `400` `request body is nested deeper
+than 128 levels` before the route reads a field, and text that does not parse
+answers `400` `Invalid JSON: <parser message>` (issues
+[#2417](https://github.com/athrvk/vayu/issues/2417),
+[#2671](https://github.com/athrvk/vayu/issues/2671)). Both carry code
+`bad_request` unless the route has one of its own for a malformed body, which
+the depth refusal then shares: `invalid_compose_request` on `POST /compose`,
+`oauth2_invalid_config` on the `/oauth2/*` routes, `mock_issuer_invalid_config`
+on `/mock-issuer`, `invalid_config` on `POST /config`. `POST /execute` and
+`POST /runs` hold the same bound; see their sections. A route that accepts an
+empty body (`POST /mock/start`, `POST /mock-issuer/start`, the `/inbox` writes)
+reads it as no body at all rather than as a parse failure. The import routes
+are held to the same 128 levels: their documents travel as a string
+(`content`) or as flat lists linked by temp ids, so a legitimate body is far
+shallower. A document's own nesting is
+bounded separately, where the engine reads it.
 
 The bound reads the body's own tree, so JSON carried inside a string field is
 not covered by it. The engine parses three such fields again and holds each to
@@ -1303,6 +1312,9 @@ with the specific reason(s):
 ```json
 { "error": { "code": "invalid_config", "message": "'workers' must be at most 128 (got 9999)" } }
 ```
+
+A body that does not parse, or nests deeper than 128 levels (see
+[Request bodies](#request-bodies)), is a `400` with the same code.
 
 **Success response:** `200` - the full updated entries array (same shape as
 `GET /config`) plus `"success": true`.
@@ -3516,7 +3528,7 @@ invalid UTF-8 replaced rather than throwing, so binary or malformed content can
 never turn into a `500`.
 
 **Errors:**
-- `400` `Invalid JSON body` - the request body did not parse.
+- `400` `Invalid JSON: <parser message>` - the request body did not parse; `request body is nested deeper than 128 levels` when it nests past the bound.
 - `400` `Invalid URL` - `url` is missing, not a string, or names no scheme.
 - `400` `Invalid URL: scheme '<scheme>' is not supported - only http and
   https URLs can be sent` - `url` names any other scheme (`ftp`, `file`, ...).
@@ -4007,7 +4019,7 @@ what broke:
 ```
 
 Messages, by case:
-- `400` `Invalid JSON body` - the body did not parse.
+- `400` `Invalid JSON: <parser message>` - the body did not parse; `request body is nested deeper than 128 levels` when it nests past the bound.
 - `400` `Body must be a JSON object`.
 - `400` `Invalid 'collections': must be an array` - a section was
   present but not an array (same for `requests` / `environments` / `specs`).

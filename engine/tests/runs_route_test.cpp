@@ -27,8 +27,10 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/core/spec_coverage.hpp"
@@ -3028,6 +3030,33 @@ TEST_F (RunsRouteTest, BaselinePutRejectsABodyWithoutABoolean) {
     const auto stored_run = db_->get_run ("run_a");
     ASSERT_HAS_VALUE (stored_run);
     EXPECT_FALSE (stored_run->baseline) << "a rejected body still wrote";
+}
+
+// A body nested past what `dump ()` survives is refused before the run is
+// looked up (#2671), and the same run still takes a real body afterwards.
+// Mutation check: put a raw `nlohmann::json::parse` back in
+// `set_run_baseline_response` and this answers the missing-`baseline` 400 with
+// another message, or the binary crashes on the first copy.
+TEST_F (RunsRouteTest, BaselinePutRefusesABodyNestedPastTheBound) {
+    seed ({ .id = "run_a", .start_time = 100 });
+
+    const std::string body =
+    R"({"baseline":true,"extra":)" + vayu::tests::nested_array_text (100000) + "}";
+    const auto [status, response] =
+    vayu::http::routes::set_run_baseline_response (*db_, "run_a", body);
+
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (response["error"]["code"], "bad_request");
+    EXPECT_EQ (response["error"]["message"].get<std::string> (),
+    "request body is nested deeper than " +
+    std::to_string (vayu::core::constants::request_body::MAX_JSON_DEPTH) + " levels");
+    const auto stored_run = db_->get_run ("run_a");
+    ASSERT_HAS_VALUE (stored_run);
+    EXPECT_FALSE (stored_run->baseline) << "a refused body still wrote";
+
+    const auto [ok_status, ok_body] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_a", R"({"baseline":true})");
+    EXPECT_EQ (ok_status, 200) << ok_body.dump ();
 }
 
 TEST_F (RunsRouteTest, ListRowsCarryTheBaselineFlag) {

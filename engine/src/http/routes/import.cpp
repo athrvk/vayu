@@ -193,12 +193,11 @@ std::variant<ReferenceRule, FetchRefusal> read_reference (const nlohmann::json& 
  * been fetched, and on the streaming path nothing has been written.
  */
 std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& request_body) {
-    nlohmann::json req;
-    try {
-        req = nlohmann::json::parse (request_body);
-    } catch (const std::exception&) {
-        return FetchRefusal{ 400, error_body (400, "Invalid JSON body") };
+    const auto parsed = parse_request_json (request_body);
+    if (!parsed) {
+        return as_response (parsed.error ());
     }
+    const nlohmann::json& req = *parsed;
 
     if (!req.contains ("url") || !req["url"].is_string ()) {
         return FetchRefusal{ 400, error_body (400, "Invalid URL") };
@@ -1588,19 +1587,15 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
 }
 
 void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    nlohmann::json body;
-    try {
-        body = nlohmann::json::parse (req.body);
-    } catch (const std::exception& e) {
-        vayu::utils::log_warning ("http",
-        "POST /import/apply - invalid JSON body: " + std::string (e.what ()));
-        send_error (res, 400, "Invalid JSON body");
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import/apply", body.error ());
         return;
     }
     // A validation failure is the core's 400; only a write or serialization
     // failure reaches this catch, and that is a 500, not the client's fault.
     try {
-        auto [status, response] = import_apply_response (ctx.db, body);
+        auto [status, response] = import_apply_response (ctx.db, *body);
         if (status != 200) {
             vayu::utils::log_warning ("http",
             "POST /import/apply - " + std::to_string (status) + ": " +
@@ -1619,17 +1614,13 @@ void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httpli
 }
 
 void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    nlohmann::json body;
-    try {
-        body = nlohmann::json::parse (req.body);
-    } catch (const std::exception& e) {
-        vayu::utils::log_warning ("http",
-        "POST /import/parse - invalid JSON body: " + std::string (e.what ()));
-        send_error (res, 400, "Invalid JSON body");
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import/parse", body.error ());
         return;
     }
     try {
-        auto [status, response] = import_parse_response (ctx.db, body);
+        auto [status, response] = import_parse_response (ctx.db, *body);
         if (status != 200) {
             vayu::utils::log_warning ("http",
             "POST /import/parse - " + std::to_string (status) + ": " +
@@ -1653,17 +1644,13 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
 void handle_import_document (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
-    nlohmann::json body;
-    try {
-        body = nlohmann::json::parse (req.body);
-    } catch (const std::exception& e) {
-        vayu::utils::log_warning ("http",
-        "POST /import/document - invalid JSON body: " + std::string (e.what ()));
-        send_error (res, 400, "Invalid JSON body");
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import/document", body.error ());
         return;
     }
     try {
-        auto [status, response] = import_document_response (ctx.db, body);
+        auto [status, response] = import_document_response (ctx.db, *body);
         if (status != 200) {
             vayu::utils::log_warning ("http",
             "POST /import/document - " + std::to_string (status) + ": " +
@@ -1681,17 +1668,13 @@ httplib::Response& res) {
 }
 
 void handle_import_preview (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
-    nlohmann::json body;
-    try {
-        body = nlohmann::json::parse (req.body);
-    } catch (const std::exception& e) {
-        vayu::utils::log_warning (
-        "http", "POST /import - invalid JSON body: " + std::string (e.what ()));
-        send_error (res, 400, "Invalid JSON body");
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import", body.error ());
         return;
     }
     try {
-        auto [status, response] = import_response (ctx.db, body);
+        auto [status, response] = import_response (ctx.db, *body);
         if (status != 200) {
             vayu::utils::log_warning ("http",
             "POST /import - " + std::to_string (status) + ": " + error_message_of (response));

@@ -193,8 +193,10 @@ error_response (int status, const std::string& message, std::string_view code = 
 
 /**
  * A request body as JSON, or the 400 to answer instead: text that does not
- * parse (`Invalid JSON: ...`, the default code), or a value nested deeper than
+ * parse (`Invalid JSON: ...`, @p parse_code) or a value nested deeper than
  * `constants::request_body::MAX_JSON_DEPTH` levels (@p depth_code, #2417).
+ * A route whose documented error code covers its whole body passes the same
+ * code for both; both default to the generic `bad_request`.
  *
  * nlohmann parses iteratively but `dump ()` and the copy constructor recurse,
  * so a tree this returns is one that both are safe on, and a refused one has
@@ -208,12 +210,13 @@ error_response (int status, const std::string& message, std::string_view code = 
 [[nodiscard]] inline std::expected<nlohmann::json, RouteError>
 parse_request_json (const std::string& body,
 std::string_view depth_code                                            = {},
-const std::function<RouteResult (const nlohmann::json&)>& field_bounds = {}) {
+const std::function<RouteResult (const nlohmann::json&)>& field_bounds = {},
+std::string_view parse_code                                            = {}) {
     nlohmann::json parsed;
     try {
         parsed = nlohmann::json::parse (body);
     } catch (const nlohmann::json::exception& e) {
-        return route_error (400, "Invalid JSON: " + std::string (e.what ()));
+        return route_error (400, "Invalid JSON: " + std::string (e.what ()), parse_code);
     }
     if (field_bounds) {
         if (auto refused = field_bounds (parsed); !refused) {

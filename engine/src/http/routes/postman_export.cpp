@@ -246,9 +246,13 @@ const httplib::Request& req,
 httplib::Response& res,
 std::pair<int, nlohmann::json> (*core) (vayu::db::Database&, const nlohmann::json&),
 vayu::db::Database& db) {
+    const auto json = parse_request_json (req.body);
+    if (!json) {
+        refuse_request_body (res, std::string ("POST ") + path, json.error ());
+        return;
+    }
     try {
-        auto json           = nlohmann::json::parse (req.body);
-        auto [status, body] = core (db, json);
+        auto [status, body] = core (db, *json);
         if (status != 200) {
             vayu::utils::log_warning ("http",
             std::string ("POST ") + path + " - " + std::to_string (status) +

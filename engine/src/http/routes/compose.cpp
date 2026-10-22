@@ -28,18 +28,14 @@ namespace vayu::http::routes {
 
 void register_compose_routes (RouteContext& ctx) {
     ctx.server.Post ("/compose", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        nlohmann::json body;
-        try {
-            body = nlohmann::json::parse (req.body);
-        } catch (const nlohmann::json::exception& e) {
-            vayu::utils::log_warning (
-            "http", "POST /compose - Invalid JSON: " + std::string (e.what ()));
-            send_error (res, 400, "Invalid JSON: " + std::string (e.what ()),
-            "invalid_compose_request");
+        auto body = parse_request_json (
+        req.body, "invalid_compose_request", {}, "invalid_compose_request");
+        if (!body) {
+            refuse_request_body (res, "POST /compose", body.error ());
             return;
         }
 
-        auto [status, payload] = compose_request_core (ctx.db, body);
+        auto [status, payload] = compose_request_core (ctx.db, *body);
         if (status != 200) {
             vayu::utils::log_warning ("http",
             "POST /compose - " + std::to_string (status) + ": " + error_message_of (payload));

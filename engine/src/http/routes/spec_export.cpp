@@ -566,9 +566,13 @@ void register_spec_export_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/specs/export",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /specs/export", json.error ());
+            return;
+        }
         try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = export_spec_response (ctx.db, json);
+            auto [status, body] = export_spec_response (ctx.db, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /specs/export - " + std::to_string (status) + ": " +

@@ -19,7 +19,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "nested_json.hpp"
 #include "proxy_server.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http::routes {
@@ -74,6 +76,18 @@ TEST (ConnectionTest, RejectsInvalidJson) {
     auto [status, body] = connection_test ("not json", TransportPolicy{});
     EXPECT_EQ (status, 400);
     EXPECT_TRUE (body.contains ("error"));
+}
+
+// The deep value rides beside a url that would otherwise be probed, so a
+// missing bound shows as a 200 outcome and a crash on the first copy.
+TEST (ConnectionTest, RefusesABodyNestedPastTheBound) {
+    constexpr std::size_t bound = vayu::core::constants::request_body::MAX_JSON_DEPTH;
+    const std::string deep = vayu::tests::nested_array_text (100000);
+    auto [status, body]    = connection_test (
+    R"({"url":"http://127.0.0.1:1/x","extra":)" + deep + "}", TransportPolicy{});
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["message"].get<std::string> (),
+    "request body is nested deeper than " + std::to_string (bound) + " levels");
 }
 
 TEST (ConnectionTest, RejectsANonHttpUrl) {

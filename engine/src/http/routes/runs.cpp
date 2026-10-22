@@ -1141,12 +1141,11 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
 std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
 const std::string& run_id,
 const std::string& body) {
-    nlohmann::json parsed;
-    try {
-        parsed = nlohmann::json::parse (body);
-    } catch (const std::exception&) {
-        return { 400, error_body (400, "Invalid JSON body") };
+    const auto parsed_body = parse_request_json (body);
+    if (!parsed_body) {
+        return as_response (parsed_body.error ());
     }
+    const nlohmann::json& parsed = *parsed_body;
     if (!parsed.is_object () || !parsed.contains ("baseline")) {
         return { 400, error_body (400, "Missing 'baseline': expected {\"baseline\": true|false}") };
     }
@@ -2011,7 +2010,9 @@ void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httpli
     try {
         auto [status, body] = set_run_baseline_response (ctx.db, run_id, req.body);
         res.status = status;
-        res.set_content (body.dump (), "application/json");
+        // `replace`: a parse refusal quotes the bytes it stopped at (#2671).
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
         if (status == 404) {
             vayu::utils::log_warning (
             "run", "PUT /runs/:id/baseline - Run not found: " + run_id);

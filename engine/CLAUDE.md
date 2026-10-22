@@ -34,6 +34,22 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 - **An error-or-nothing API is `RouteResult`** (`std::expected<void, RouteError>`),
   never an `std::optional` whose empty state means success. `route_error` builds
   the refusal; `as_response` converts one to the pair a testable core answers.
+- **A request body becomes JSON through `parse_request_json`** (#2417, #2671;
+  `http/routes.hpp`), never `nlohmann::json::parse (req.body)`: nlohmann parses
+  iteratively but `dump ()` and the copy constructor recurse, so a body nested
+  100,000 levels takes the engine down at the first copy. The helper answers
+  the 400 for text that does not parse and for a value past
+  `constants::request_body::MAX_JSON_DEPTH` (128); `refuse_request_body`
+  sends it under the route's label, and a core that takes the body as a string
+  returns `as_response (refusal)`. A route with a documented code for a
+  malformed body passes it as both `depth_code` and `parse_code`. An empty body
+  that means `{}` or `null` is the route's own `if (req.body.empty ())` before
+  the call. Parse before the handler's `try`, so its `catch` keeps meaning "the
+  core threw". Tests: `tests/request_body_depth_test.cpp` drives a 100,000-level
+  body through every adopted route; `tests/request_body_parse_scan_test.cpp`
+  fails on a `json::parse (req.body)` (or `request_body`, `body`) anywhere
+  under `src/http/routes`, so a new handler cannot skip the helper. It has no
+  exemption list because no route needs one; `routes.hpp` holds the one parse.
 - **An optional a guard has already proved is read through one binding**, not
   re-derived: `const auto& shape = shapes[i]; if (!shape) { continue; }
   use (*shape);`. `shapes[i]` written twice is two expressions, so

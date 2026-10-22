@@ -832,18 +832,22 @@ namespace vayu::http::routes {
 
 namespace {
 
-/// Parse the request body, or answer 400 - the shape every write route takes.
-bool read_json_body (const httplib::Request& req, httplib::Response& res, nlohmann::json& out) {
+/// Parse the request body (an empty one is `null`), or answer 400 under
+/// @p route - the shape every write route takes.
+bool read_json_body (const httplib::Request& req,
+httplib::Response& res,
+std::string_view route,
+nlohmann::json& out) {
     if (req.body.empty ()) {
         out = nlohmann::json (nullptr);
         return true;
     }
-    try {
-        out = nlohmann::json::parse (req.body);
-    } catch (const std::exception& e) {
-        send_error (res, 400, std::string ("Invalid JSON body: ") + e.what ());
+    auto parsed = parse_request_json (req.body);
+    if (!parsed) {
+        refuse_request_body (res, route, parsed.error ());
         return false;
     }
+    out = std::move (*parsed);
     return true;
 }
 
@@ -985,7 +989,7 @@ namespace {
 
 void handle_start_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     nlohmann::json body;
-    if (!read_json_body (req, res, body)) {
+    if (!read_json_body (req, res, "POST /inbox/start", body)) {
         return;
     }
     const auto start = parse_inbox_start (body);
@@ -1052,7 +1056,7 @@ void handle_list_inboxes (RouteContext& ctx, const httplib::Request&, httplib::R
 void handle_update_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     const std::string inbox_id = req.matches[1];
     nlohmann::json body;
-    if (!read_json_body (req, res, body)) {
+    if (!read_json_body (req, res, "PUT /inbox/:id", body)) {
         return;
     }
     if (body.is_null ()) {
