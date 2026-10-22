@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "library_call_config.hpp"
 #include "nested_json.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/graphql_body.hpp"
@@ -133,7 +134,9 @@ std::string js_literal (const std::string& text) {
 
 class ScriptRequestBodyTest : public ::testing::Test {
     protected:
-    ScriptEngine engine;
+    /// The library stack budget: a script that stringifies an object nested to
+    /// the body bound overflowed the default 256 KB under MSVC /Od with ASan.
+    ScriptEngine engine{ vayu::tests::library_call_config () };
     Request request;
     Response response;
     Environment env;
