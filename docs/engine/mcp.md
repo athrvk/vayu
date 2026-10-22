@@ -2756,7 +2756,8 @@ added about 2.9 KB to each pair: 127,059 / 124,333 bytes with writes off and
 194,425 / 190,028 with writes on (reveal off / on). The loose schemas on the 23
 other object-rooted reads added 7,866 bytes more to every row, about 340 bytes
 a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
-under caps of 136,300 / 133,600 and 204,400 / 199,900. The same file fails on a sentence of 150 or more
+under caps of 136,300 / 133,600 and 204,400 / 199,900.
+The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the
 withholding rules and the error definition moved that way, and
