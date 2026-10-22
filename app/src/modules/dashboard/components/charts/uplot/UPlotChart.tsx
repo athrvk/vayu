@@ -362,6 +362,7 @@ export function UPlotChart({
 						caption: tooltipCaption,
 						tipValues: () => tipValuesRef.current,
 						annotations: () => annotationsRef.current,
+						markers: () => markersRef.current,
 					}),
 				],
 			};
