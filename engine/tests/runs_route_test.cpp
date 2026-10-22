@@ -2210,6 +2210,61 @@ TEST_F (RunsRouteTest, ReportSlowCountFallsBackToTracesOnlyWhenTheSummaryHasNone
     EXPECT_EQ (legacy["slowRequests"]["thresholdMs"].get<size_t> (), 500u);
 }
 
+namespace {
+constexpr std::string_view TIMEOUT_TRACE = R"({"error_type":"timeout"})";
+}
+
+// #2400: the error store keeps the first `maxStoredErrors` records, so counting
+// them by type reported a 300,000-timeout run as 10,000 beside an exact
+// 300,000 no-response count. The summary's counts are the run's; `withDetails`
+// stays the stored-record count. Mutation check: drop
+// `apply_summary_error_types` from apply_run_summary and `timeout` reds at
+// 10,000.
+TEST_F (RunsRouteTest, ReportErrorTypesAreTheSummarysNotTheStoredRecords) {
+    seed ({ .id = "run_types_exact", .start_time = 1000 });
+    std::vector<vayu::db::Result> stored (10000);
+    for (auto& result : stored) {
+        result.run_id      = "run_types_exact";
+        result.timestamp   = 1000;
+        result.status_code = 0;
+        result.error       = "timed out";
+        result.trace_data  = std::string (TIMEOUT_TRACE);
+    }
+    db_->add_results_batch (stored);
+    auto inputs           = summary_inputs ();
+    inputs.total_requests = 300000;
+    inputs.status_codes   = { { 0, 300000 } };
+    inputs.error_types    = { { "timeout", 300000 } };
+    db_->update_run_summary (
+    "run_types_exact", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_types_exact");
+    ASSERT_EQ (status, 200);
+    const auto& errors = body["errors"];
+    EXPECT_EQ (errors["types"], (nlohmann::json{ { "timeout", 300000 } }))
+    << errors.dump ();
+    EXPECT_EQ (errors["withDetails"].get<size_t> (), 10000u);
+    EXPECT_EQ (errors["total"].get<size_t> (), 300000u);
+}
+
+// A summary stored before #2400 has no `error_types` key, and the report counts
+// the stored records by type as it always did.
+TEST_F (RunsRouteTest, ReportErrorTypesFallBackToStoredRecordsOnlyWhenTheSummaryHasNone) {
+    seed ({ .id = "run_types_legacy", .start_time = 1000 });
+    for (int i = 0; i < 2; ++i) {
+        seed_traced_result ("run_types_legacy", 0, 0.0, std::string (TIMEOUT_TRACE));
+    }
+    auto legacy_summary = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_EQ (legacy_summary.erase ("error_types"), 1u);
+    db_->update_run_summary ("run_types_legacy", legacy_summary.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_types_legacy");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["errors"]["types"], (nlohmann::json{ { "timeout", 2 } }))
+    << body["errors"].dump ();
+    EXPECT_EQ (body["errors"]["withDetails"].get<size_t> (), 2u);
+}
+
 // #2659: only a load run's live report skips its rows. A design or scenario run stores
 // its rows just before the status flips, and a one-shot reader (response
 // restore, the step list) fetching in that gap needs `trace`.

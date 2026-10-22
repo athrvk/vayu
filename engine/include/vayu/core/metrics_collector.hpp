@@ -544,6 +544,15 @@ class MetricsCollector {
     }
 
     /**
+     * @brief Every error record_error saw, by `vayu::error_type_name` (#2400).
+     *
+     * Exact past the error store's cap, where counting the stored records gives
+     * only the first max_errors. A name no error carried is absent; codes that
+     * share a name (`"unknown"`) are summed under it.
+     */
+    [[nodiscard]] std::map<std::string, size_t> error_type_counts () const;
+
+    /**
      * @brief Sampled success records dropped or displaced by the reservoir.
      * Non-zero means the run produced more sampled traces than
      * max_success_results retains; the retained ones are still drawn from the
@@ -1213,6 +1222,9 @@ class MetricsCollector {
     mutable std::mutex errors_mutex_;
     std::vector<ResultRecord> errors_;
     std::atomic<size_t> errors_dropped_{ 0 };
+    // Indexed by ErrorCode and bumped before the store's cap is checked, so
+    // the per-type breakdown stays exact when errors_ is a prefix.
+    std::array<std::atomic<size_t>, ERROR_CODE_COUNT> error_type_counts_{};
 
     // Sampled successes and slow-request outliers. One mutex for both: each is
     // written at most once per retained record (the 1-in-N gate and the

@@ -26,12 +26,12 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
     "integer", "Stored Error Records Per Run",
     "How many individual error records a run keeps for its report. The error "
-    "total, the failed-request count, the error rate and the status-code "
-    "breakdown are always exact - this bounds only the per-error detail behind "
-    "the report's 'By Error Type' breakdown, which on a run with more errors "
-    "than this covers the first N and will not sum to the total beside it. 0 "
-    "means unlimited, which against a fully refusing target grows for the life "
-    "of the run.",
+    "total, the failed-request count, the error rate, the status-code "
+    "breakdown and the 'By Error Type' breakdown are always exact - this "
+    "bounds only the per-error detail kept beside them. Runs recorded by "
+    "older versions counted their error types from these records, so past "
+    "the cap their breakdown covers the first N. 0 means unlimited, which "
+    "against a fully refusing target grows for the life of the run.",
     "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
     "0", "10000000", std::nullopt, now });
 

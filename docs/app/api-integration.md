@@ -1825,6 +1825,12 @@ the array was cut, and the history Samples tab reads the pair as "N of M
 stored". Both are absent from an older engine, which is read as "say nothing",
 not "nothing was cut". The traces note therefore never calls `results` uniform;
 only the tested-response buffer's sentence does.
+`sampling.errorsDropped` has a reader of its own: the shared `ErrorSummary` card
+(history Overview) says under By error type that "N errors beyond the first M are
+not broken down by type" (issue #2400). It reads `errorsDropped` only when
+`errors.types` sums to less than the no-response count, which is a run stored
+before the engine kept exact per-type counts or a design-mode run; on any other
+run the types are exact past the error store's cap and the note stays silent.
 The Test validation card also states the arithmetic from `summary.totalRequests`
 ("Tested N of M requests"), worded so it holds for requests that never got a
 response as well as for displaced ones; `samplesTested` counts responses and

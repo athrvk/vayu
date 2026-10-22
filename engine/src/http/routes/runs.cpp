@@ -582,6 +582,25 @@ void apply_summary_slow_requests (const nlohmann::json& summary, vayu::DetailedR
     read_number (slow, "thresholdMs", report.slow_threshold_ms);
 }
 
+/**
+ * The run's exact per-type error counts (#2400), over the ones counted from its
+ * stored error records, which stop at `maxStoredErrors`. Key-absent is a run
+ * stored before the counts existed, or a design-mode collection run, which
+ * writes none; either keeps the record count. `errors.withDetails` stays the
+ * stored-record count either way.
+ */
+void apply_summary_error_types (const nlohmann::json& summary, vayu::DetailedReport& report) {
+    if (!summary.contains ("error_types") || !summary["error_types"].is_object ()) {
+        return;
+    }
+    report.error_types.clear ();
+    for (const auto& [type, count] : summary["error_types"].items ()) {
+        if (count.is_number_unsigned () && count.get<size_t> () > 0) {
+            report.error_types[type] = count.get<size_t> ();
+        }
+    }
+}
+
 /** A stored summary's `status_codes` object as the distribution it records. */
 std::map<int, size_t> read_status_codes (const nlohmann::json& codes) {
     std::map<int, size_t> distribution;
@@ -802,6 +821,7 @@ ReportExtras& extras) {
 
     apply_summary_totals (summary, report, extras);
     apply_summary_slow_requests (summary, report);
+    apply_summary_error_types (summary, report);
     apply_summary_status_codes (summary, report, extras);
     apply_summary_sampling (summary, extras);
     apply_summary_scenario (summary, extras);

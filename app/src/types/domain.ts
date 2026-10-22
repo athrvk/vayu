@@ -3068,6 +3068,15 @@ export interface RunReport {
 	 * UI stays silent rather than asserting completeness it cannot verify.
 	 */
 	sampling?: {
+		/**
+		 * Errors past the error store's cap (`maxStoredErrors`): counted in every
+		 * total, but with no stored record. On a run stored before the engine
+		 * kept exact per-type counts, and on a design-mode collection run,
+		 * `errors.types` is built from the stored records, so this is how many
+		 * errors it did not see. On any other run `errors.types` is exact and a
+		 * non-zero figure costs it nothing - compare its sum with the no-response
+		 * count before calling the breakdown partial (`ErrorSummary`).
+		 */
 		errorsDropped: number;
 		/** Sampled timing traces displaced or dropped (`max_success_results`). */
 		successTracesDropped: number;

@@ -138,6 +138,10 @@ struct ReportView {
     ReportText footer;
 };
 
+/// What every report calls a request recorded under status code 0: it got no
+/// HTTP response, so `HTTP 0` would name a status no server sent (#2400).
+inline constexpr std::string_view NO_RESPONSE_LABEL = "No response";
+
 /// @p document, a schema-v1 run-report document, as a @ref ReportView. Total:
 /// a member the document lacks reads as "-", never as an error.
 [[nodiscard]] ReportView build_run_report_view (const nlohmann::ordered_json& document);
