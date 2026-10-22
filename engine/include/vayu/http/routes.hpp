@@ -1593,9 +1593,15 @@ std::chrono::steady_clock::time_point now);
 /**
  * Testable core of `GET /runs/:id/report`: `{http_status, json_body}`, 404 for
  * a missing run. Defined in runs.cpp; `POST /export/run-report` reads it too.
+ *
+ * A load run that is not terminal reads none of its `results` rows (#2659):
+ * until its summary is stored, its counts come from the context @p live_runs
+ * holds for it (active or retained), and are zero when there is none - null
+ * @p live_runs included. A terminal run's report never reads the context.
  */
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id);
+std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
+const std::string& run_id,
+vayu::core::RunManager* live_runs = nullptr);
 
 /**
  * Testable core of `GET /runs/:id/metrics`: one `{data, pagination}` page of

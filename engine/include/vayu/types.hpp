@@ -1978,8 +1978,8 @@ struct Result {
     // JSON. Design mode stores the whole exchange here (request + response,
     // nested). A load run stores only the timing breakdown - never a body -
     // because `calculate_detailed_report` parses every row of this column on
-    // every report fetch of a finished run (a live run's report skips the
-    // column, #2548). Load-run bodies live in `result_bodies`/`body_blobs`
+    // every report fetch of a finished run (a live load run's report reads no
+    // row, #2659). Load-run bodies live in `result_bodies`/`body_blobs`
     // instead, read only by GET /runs/:id/samples.
     std::string trace_data;
 };

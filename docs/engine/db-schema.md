@@ -1789,18 +1789,17 @@ A load run's captured response headers and bodies are **not** here - they live i
 `Database::get_results` loads every row for a run with no limit and
 `calculate_detailed_report` JSON-parses each `trace_data` on every report fetch of a finished
 run. At ~200 bytes per trace that is free; with bodies inline it would be megabytes read and
-parsed per fetch, to compute aggregates that never look at a body. A load run that is not terminal
-yet is read through `Database::get_results_without_traces` instead (#2548), which selects every
-column but `trace_data`, so a report polled while the run is in flight copies and parses no
-trace at all.
+parsed per fetch, to compute aggregates that never look at a body. The report of a load run that
+is not terminal yet reads none of these rows (#2659): it is polled while the run is in flight, and
+takes its counts from the run's in-memory collector until the status turns terminal.
 
 **Written in chunks.** A load run's results, with their [`result_bodies`](#result_bodies) rows and
 the [`body_blobs`](#body_blobs) those introduce, are written by `Database::add_results_batch` in
 chunks of `RESULTS_WRITE_CHUNK_ROWS` (250) results, one transaction each, staying off the DB
 mutex for 1 ms between chunks (#2548): the mutex is not fair, and a writer that re-locks at once
-wins it back from the reader it just woke. A report poll that lands during the flush waits for
-one chunk (about 7 ms in a Release build) rather than the whole write, and may count a run's
-results part-written. A body row always commits with its result; a failure part-way keeps the
+wins it back from the reader it just woke. A reader that lands during the flush (a report poll's
+run-row read among them) waits for one chunk (about 7 ms in a Release build) rather than the whole
+write, and one that reads this table may see the run's results part-written. A body row always commits with its result; a failure part-way keeps the
 chunks already committed. Blob dedup spans the whole flush, not one chunk.
 
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,

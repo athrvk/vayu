@@ -475,8 +475,10 @@ Notes:
   alone reads as "applied the drift".
 - **A report read mid-run says so, and `get_run` is the status read** (#2436).
   The engine answers `GET /runs/:id/report` for a run that has not finished with
-  the numbers accumulated so far: zeros, no budget verdict, nothing that tells
-  that apart from a run that measured zero. `get_run_report` therefore adds
+  the numbers accumulated so far: a load run's live counts (no `latency` block
+  and no `results[]` rows until it ends, #2659), zeros elsewhere, no budget
+  verdict, nothing in the report itself that tells it apart from a finished
+  run that measured the same. `get_run_report` therefore adds
   top-level `partial: true` and a `note` when `metadata.status` is `pending` or
   `running` (after the withhold and the trace bounds, so a report that took the
   bounds' early return is marked too) and leaves both keys out for a terminal
