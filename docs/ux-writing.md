@@ -77,7 +77,7 @@ already consistent in the codebase, plus fixing the one real overload.
 | Assertions on a response | **Tests** (tab), **Test validation** (results) | The one real overload - "Test" means two different things across the load-test feature and response assertions. Not renaming either (both are established, product-defined terms), but never let both appear in the same sentence or dialog without a qualifier ("load test" / "response tests") to disambiguate. |
 | A pre-request/post-request script | **Script**, living under the **Elements** tab | Keep "Elements" as the tab name (the consolidation from separate Pre-request/Tests tabs was deliberate), but individual script errors/labels keep saying "Pre-request script" / "Post-request script" (sentence case, matching the engine's own labels in `script_kinds.cpp`) - renaming those to "Elements" would lose information the label carries. Discoverability for someone looking for "Pre-request Script" or "Tests" is carried by two lines instead: the empty Elements panel's gloss (with a Post-request script chip), and the response Tests tab's empty state, which points at the Elements tab. An inline empty state is one line (`title` only), so the pointer is folded into it. |
 | A failed request in a load test's numbers | **Error**; the two kinds are **HTTP errors** and **No response** | A request is an error when its response status is outside 2xx/3xx, or it got no response at all (timeout, refused connection, DNS or TLS failure). A 3xx is a success. One definition for every error count and rate (the live card, the report, History, the budget verdict, the Steps table's Errors column), so never "failed" in one place and "error" in another. This reconciles with the first source under "Errors have three sources": a target API's 404 or 500 is still *data* in the Send pane and gets no error chrome there, but in a load test it is counted as an HTTP error because the run's rate is the question being asked. Never "transport error" in user copy. A request a user's **Stop** cancelled before it was answered is none of **error** or **failed**: it got no outcome from the target, so it is counted apart as **cancelled** and is never an error. Say "N requests cancelled by Stop" (a fragment, muted, never destructive); it is in no error count, rate or total. |
-| The number of simulated users in a closed-loop load test | **Virtual users** | Never "VUs", "Connections", "Concurrency" or "concurrent users" in UI copy; prose pluralises it ("1 virtual user", "64 virtual users"). Written once in `constants/load-test-modes.ts` (`CONCURRENCY_LABEL`, `CONCURRENCY_UNIT`, `formatConcurrency`), and the mode is **Constant virtual users**. The open-loop measurement keeps **In-flight requests**: a Constant RPS run's stat, chart title and series say that, every other mode says virtual users (`isClosedLoopMode`, `concurrencyMeasureLabel`). API and MCP field names keep `concurrency`, and genuine TCP/TLS "connection" copy (Settings > Network, the connection-reuse charts) is not this quantity. |
+| The number of simulated users in a closed-loop load test | **Virtual users** | Never "VUs", "Connections", "Concurrency" or "concurrent users" in UI copy; prose pluralises it ("1 virtual user", "64 virtual users"). Written once in `constants/load-test-modes.ts` (`CONCURRENCY_LABEL`, `CONCURRENCY_UNIT`, `formatConcurrency`), and the mode is **Constant virtual users**. The open-loop measurement keeps **In-flight requests**: a Constant RPS run's stat, chart title and series say that, every other mode says virtual users (`isClosedLoopMode`, `concurrencyMeasureLabel`). API and MCP field names keep `concurrency`, and genuine TCP/TLS "connection" copy (Settings › Network, the connection-reuse charts) is not this quantity. |
 | The five load-test modes | **Constant RPS**, **Constant virtual users**, **Fixed request count**, **Ramp-up**, **Capacity discovery** | Sentence case like every other label; only the acronym (RPS) keeps its casing. Written once in `constants/load-test-modes.ts` (`loadTestModeLabel`). |
 | The mock-server feature | **Mock server** | Sentence case in a heading as in a sentence; there is no Title Case variant. |
 | Vayu's own backend process (the daemon on port 9876) | **Vayu's engine** | Bare "the engine" isn't wrong grammatically, but avoid it as a sentence's opening word or its subject noun with nothing attached - "Vayu's engine" is what tells the reader whose process failed rather than leaving "engine" to mean the request's own target server. |
@@ -113,7 +113,12 @@ scattered strings land the same way.
     page.
 - **Punctuation.** A full sentence ends with a period, including in a
   tooltip; a fragment does not. Oxford comma. No exclamation marks. " - " for
-  a dash (the repo bans em-dashes everywhere), "…" for an ellipsis.
+  a dash (the repo bans em-dashes everywhere), "…" for an ellipsis (one
+  character, never three full stops after a word).
+- **Names of things.** A settings path is written `Settings › Network &
+  connectivity`, with `›` between the names and never `>`. The tool is "cURL" in
+  a sentence ("a cURL command"); the command a user types, and the code-generator
+  id, stay `curl`.
 - **Numbers and units.** Always state the unit (ms or s, never a bare
   number). One format via `Intl`, not hand-built string concatenation. Real
   plural handling via `Intl.PluralRules`, never "request(s)". The digits come
@@ -244,11 +249,16 @@ from creeping back in afterward. These hold it:
   opening "Could not" or "Failed to" (#2295), and `config_seed_test.cpp`
   `EveryEngineSettingLabelIsSentenceCase` over the setting labels the Settings
   page renders verbatim (#2293).
+- **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
+  fails on `Settings >` (write `Settings ›`), on lowercase "curl command" or
+  "curl request" (write "cURL"), and on three full stops straight after a
+  letter (write `…`). It has no allowlist: a spread, a regex, a `"..."` code
+  sample and a GraphQL `... on` fragment put something other than a letter
+  before the dots.
 - **Narrow scanners**, one rule each, are filed by their own issues and not yet
   written; each adds its rule to the scan above when it lands: bare
-  "the engine" (`voice-bare-engine.test.ts`, #2298), hand-built plurals and
-  "(s)" (`plural-rule.test.ts`, #2307), and the ASCII ellipsis, `Settings >`
-  and "curl" (`user-text-spelling.test.ts`, #2299).
+  "the engine" (`voice-bare-engine.test.ts`, #2298) and hand-built plurals and
+  "(s)" (`plural-rule.test.ts`, #2307).
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
 `file :: literal`, each entry naming the open issue that retires it. The commit

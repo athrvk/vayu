@@ -272,7 +272,10 @@ is the settings pane's) and scroll it directly with `scrollWithin`
   every label surface. The scan reads every string through
   `lib/ui-strings.testkit.ts` (logs, comments, tests and `electron/mcp/**` left
   out); a breach an open issue owns goes in its `KNOWN_BREACHES` with that
-  number, and the fix deletes the entry. → `voice-casing.test.ts`
+  number, and the fix deletes the entry. → `voice-casing.test.ts`. The same
+  scan holds the spellings: `Settings ›` not `Settings >`, "cURL" not "curl
+  command", `…` not three full stops after a word.
+  → `user-text-spelling.test.ts`
 
 ## Borders: what a rule sits _on_, never what it is
 
