@@ -133,7 +133,7 @@ is a manual copy with the engine stopped, described in
 
 **Load Test Modes:**
 
-- **constant_rps**: Open-loop - dispatch at `targetRps` for `duration` (use `maxInFlight` to cap outstanding requests)
+- **constant_rps**: Open-loop - dispatch at `targetRps` for `duration` (use `maxInFlight` to cap outstanding requests); a positive `targetRps` on any other mode is a `400`
 - **constant_concurrency**: Closed-loop - hold `concurrency` in-flight requests for `duration`
 - **ramp_up**: Closed-loop - ramp concurrency `startConcurrency` → `concurrency` over `rampUpDuration`, then hold to `duration` (total)
 - **iterations**: Closed-loop, bounded - issue `iterations` total requests at `concurrency`

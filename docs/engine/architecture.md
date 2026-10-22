@@ -290,7 +290,8 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: Token bucket algorithm for precise RPS control. `targetRps` is an
+- **Rate limiting**: Token bucket algorithm for precise RPS control, on a `constant_rps`
+  run only (every other mode's loop is built with no bucket). `targetRps` is an
   **aggregate** budget: each worker owns a private bucket and submissions are sharded
   round-robin, so the rate and burst are split N ways when the loop is built (with a
   one-token burst floor, since a sub-token bucket could never start a transfer). A
@@ -1035,6 +1036,13 @@ Five load test modes are supported (`LoadTestType` in `types.hpp`). Four are **c
 the engine holds in-flight requests at a target and issues a new request as each completes, so
 throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open-loop**.
 
+The mode chooses the loop, never the rate (#2396). `rps` / `targetRps` is `constant_rps`'s field
+alone: `POST /runs` refuses a positive one on any other mode, and `open_loop_rate`
+(`load_strategy.hpp`) answers 0 for every other mode, so a rate in a stored config neither opens
+`constant_concurrency`'s loop nor gives a closed-loop run's event-loop workers a token bucket
+(`apply_open_loop_rate`, the one source of `EventLoopConfig::target_rps`). A body with no `mode`
+is `constant_rps`, the way `LoadStrategy::create` reads it.
+
 ### 1. `constant_rps` (open-loop)
 
 Dispatches at a fixed `targetRps` regardless of how fast responses return. `maxInFlight` caps how
@@ -1214,7 +1222,9 @@ row exists - and the executor is the only thing that differs.
   iteration is a new user, not the same one logging in twice.
 - **Closed-loop only.** `constant_rps` with a `scenario` is a `400`, as is a
   non-zero `rps`/`targetRps` on any mode - an open-loop arrival rate over a
-  multi-step sequence is an arrival-rate executor, a named non-goal. `maxInFlight`
+  multi-step sequence is an arrival-rate executor, a named non-goal. The
+  single-request path refuses a rate on every mode but `constant_rps` for the
+  same reason (see [Load Test Strategies](#load-test-strategies)). `maxInFlight`
   is *moot*: in-flight is bounded by the VU count by construction, so setting it
   logs a warning and does nothing.
 - **A step that got no response ends its iteration**, and the VU starts the

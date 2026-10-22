@@ -7382,7 +7382,7 @@ Start a load test run (Vayu Mode).
   "sloMs": 200,              // p99 budget the search looks for the edge of (capacity mode)
   "stepDuration": "5s",      // How long each level is held before it is judged (capacity mode)
   "iterations": 1000,        // Number of iterations (iterations mode)
-  "targetRps": 1000,         // Target requests per second (constant_rps mode)
+  "targetRps": 1000,         // Target requests per second (constant_rps only; a 400 on any other mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
@@ -8498,7 +8498,7 @@ row exists:
 |-------|------------------|
 | `mode: "constant_rps"` with a `scenario` | An open-loop arrival rate over a multi-step sequence is an arrival-rate executor, which Vayu does not implement. Refused rather than silently run closed-loop. |
 | `mode: "capacity"` with a `scenario` | The search judges one p99 per level and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
-| `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
+| `rps` / `targetRps` above zero, on any mode | It is an open-loop arrival rate, and a scenario run is closed-loop by design: no scenario mode reads it, so it is refused rather than ignored. |
 | An unknown `mode` | |
 
 `maxInFlight` is **moot** and is ignored with a warning: in-flight requests are
@@ -8741,7 +8741,7 @@ default, and whose message names the offending field and why the bound exists:
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
 | `iterations` | `1`-`2147483647` | An `iterations` run stops on its request count alone, read as a `size_t`, so `-1` was ~1.8e19 requests and a run that never ended until stopped. The ceiling is the one `scenario.iterations` has. |
-| `rps` / `targetRps` | `0`-`1000000`, fractions allowed | The open-loop arrival rate per second; `0` asks for none. The ceiling is the highest RPS cap the app and MCP settings can be raised to. `constant_rps` needs one of the two positive - see below. |
+| `rps` / `targetRps` | `0`-`1000000`, fractions allowed | The open-loop arrival rate per second; `0` asks for none. The ceiling is the highest RPS cap the app and MCP settings can be raised to. `constant_rps` needs one of the two positive, and every other mode refuses a positive one - see below. |
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
@@ -8760,19 +8760,33 @@ user-settable cap in Settings).
 
 **The defaults** an absent field takes are the `run_config::DEFAULT_*`
 constants in `engine/include/vayu/core/constants.hpp`: `duration` 60 s for a
-constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run
-(closed loop when no `rps`/`targetRps` paces it) and 10 for an `iterations`
-run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1. A
+constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run and
+10 for an `iterations` run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1. A
 `capacity` run's `duration` defaults to its own 300 s search deadline instead.
 None of them is written to the stored snapshot; only what the body carried is.
 
-**`constant_rps` needs a rate.** A `mode` of `constant_rps` with neither `rps`
-nor `targetRps` positive (`rps` is read first, and `targetRps` when `rps` is
-absent or `0`) is a `400` with `error.code` `invalid_run_config`. It used to run
-the closed-loop path at the default concurrency while the stored config and the
-report still said `constant_rps`. Only the literal mode is held to this: an
-absent or unrecognised `mode` reaches the same strategy without claiming a
-rate.
+**A rate belongs to `constant_rps`, in both directions.** Both checks sit in
+`validate_run_config` (`check_constant_rps_rate` and
+`check_rate_only_on_constant_rps`, `routes/execution.cpp`) and answer a `400`
+with `error.code` `invalid_run_config`; `rps` is read first, and `targetRps`
+when `rps` is absent or `0`.
+
+- A `mode` of `constant_rps` with neither field positive is refused. It used to
+  run the closed-loop path at the default concurrency while the stored config
+  and the report still said `constant_rps` (#1893).
+- Any other `mode` with either field positive is refused, naming the field and
+  the mode (#2396). A rate used to switch `constant_concurrency` to open loop
+  and to give every other mode's event-loop workers a token bucket of
+  `rate ÷ workers`, so a ramp reported its own throttle as latency, while the
+  config and the report still named the declared mode. An unrecognised `mode`
+  is held to this too. `0` asks for no rate and is accepted on every mode.
+- A body with **no `mode`** is `constant_rps`, as the executor reads it: it may
+  carry a rate, which paces it open-loop, and without one it holds
+  `concurrency` in flight closed-loop, as it always has.
+
+The executor chooses by mode as well (`open_loop_rate` in `load_strategy.hpp`):
+a rate that reaches a closed-loop mode without passing this route, in a stored
+config, neither opens the loop nor reaches the event loop's token bucket.
 
 One field is rejected by **presence**, not by range: **`transient`**. It is
 `POST /execute`'s no-run-row flag (issue #382) and has no meaning here, because
@@ -8863,7 +8877,8 @@ surfaces as a silently-failed run.
 or the ramp curve from `startConcurrency` to `concurrency`) - when a request
 completes, another is issued. Throughput is a *result* (`concurrency ÷ latency`),
 not an input. `constant_rps` is **open-loop**: it dispatches at `targetRps`
-regardless of how fast responses return.
+regardless of how fast responses return. The mode chooses the loop; a rate is
+`constant_rps`'s field alone (see above).
 
 **`maxInFlight`.** A hard cap on concurrent in-flight requests. It applies
 **only to `constant_rps`** (the open-loop rate mode), where it bounds how many

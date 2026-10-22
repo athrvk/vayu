@@ -247,12 +247,31 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
  * @brief The arrival rate a run config asks for: `rps`, or `targetRps` when
  *        `rps` is absent, null or 0; 0 when neither names one.
  *
- * A positive answer is what puts `ConstantLoadStrategy` on its open-loop path,
- * so the route's `constant_rps` refusal and the scenario validator read
- * through here too, and none of the three can disagree about what "asked for
- * a rate" means. A non-numeric value throws, as `json::value` would.
+ * Every reader of the two fields goes through here (the route's refusals, the
+ * scenario validator, the report), so none can disagree about what "asked for
+ * a rate" means. Whether the run *paces* at it is `open_loop_rate`'s answer.
+ * A non-numeric value throws, as `json::value` would.
  */
 [[nodiscard]] double requested_rps (const nlohmann::json& config);
+
+/**
+ * @brief Whether @p config's `mode` is `constant_rps`, the one mode a rate
+ *        paces (#2396). An absent or null `mode` is, because
+ *        `LoadStrategy::create` reads it so.
+ */
+[[nodiscard]] bool is_constant_rps_mode (const nlohmann::json& config);
+
+/**
+ * @brief The rate a run paces at: `requested_rps` on a `constant_rps` run, 0 on
+ *        every other mode whatever the config carries (#2396).
+ *
+ * The one switch for both halves of open loop: `ConstantLoadStrategy`'s
+ * rate-limited path and the event loop's per-worker token bucket. The route
+ * refuses a rate on another mode, so a non-zero rate reaching a closed-loop
+ * mode here is a stored or hand-built config, and it must not change the load
+ * model the run is labelled with.
+ */
+[[nodiscard]] double open_loop_rate (const nlohmann::json& config);
 
 /**
  * @brief Whether the executor a run config selects returns at a submission

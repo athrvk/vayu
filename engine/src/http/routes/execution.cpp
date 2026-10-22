@@ -997,6 +997,27 @@ std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config
            "'constant_concurrency' with 'concurrency'.";
 }
 
+// The converse (#2396): a rate on any other mode switched `constant_concurrency`
+// to open loop and throttled every other mode's workers, while the config and
+// report still named the declared mode. An absent mode is `constant_rps`, as
+// `LoadStrategy::create` reads it, so it may carry a rate; an unrecognised one
+// may not.
+std::optional<std::string> check_rate_only_on_constant_rps (const nlohmann::json& config) {
+    if (!(vayu::core::requested_rps (config) > 0.0) ||
+    vayu::core::is_constant_rps_mode (config)) {
+        return std::nullopt;
+    }
+    const auto rps = config.find ("rps");
+    const bool rps_carries = rps != config.end () && rps->is_number () && *rps != 0;
+    const auto& mode = config.at ("mode");
+    const std::string mode_name =
+    mode.is_string () ? mode.get<std::string> () : mode.dump ();
+    return std::string ("'") + (rps_carries ? "rps" : "targetRps") +
+    "' selects an open-loop arrival rate and is only available for mode "
+    "'constant_rps'; for '" +
+    mode_name + "' set 'concurrency' instead, or send a rate of 0.";
+}
+
 // `carriedBudgets` (#2195) is a label list the engine stores and echoes and
 // never interprets, so the bounds only keep a client from parking an unbounded
 // payload in the snapshot and every report: the app names one metric key per
@@ -1347,6 +1368,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
         }
     }
     if (auto reason = check_constant_rps_rate (config)) {
+        return reason;
+    }
+    if (auto reason = check_rate_only_on_constant_rps (config)) {
         return reason;
     }
 
@@ -2773,7 +2797,7 @@ const vayu::core::ScenarioExecution* scenario_execution) {
         { "method", json.value ("method", "UNKNOWN") },
         { "url", json.value ("url", "UNKNOWN") }, { "duration", duration_str },
         { "iterations", json.value ("iterations", 0) },
-        { "rps", json.value ("rps", json.value ("targetRps", 0)) },
+        { "rps", vayu::core::requested_rps (json) },
         { "concurrency", json.value ("concurrency", 1) },
         { "requestId", run.request_id.value_or ("none") },
         { "environmentId", run.environment_id.value_or ("none") } });

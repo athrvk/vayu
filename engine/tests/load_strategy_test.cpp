@@ -229,6 +229,108 @@ TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
     << "duration<ramp submitted nothing; partial-ramp behavior not implemented";
 }
 
+// --- A rate selects nothing outside `constant_rps` (#2396) -----------------
+//
+// The route refuses a rate on any other mode; these hold the executors for a
+// config that reaches them anyway (a stored or hand-built one).
+
+// Mutation check: set `loop.target_rps` from `requested_rps` in
+// `apply_open_loop_rate` and every closed-loop mode reads 100.
+TEST (OpenLoopRate, OnlyConstantRpsFeedsTheEventLoopTokenBucket) {
+    for (const char* mode :
+    { "constant_concurrency", "ramp_up", "iterations", "capacity", "unknown" }) {
+        const nlohmann::json config = { { "mode", mode }, { "targetRps", 100.0 } };
+        vayu::http::EventLoopConfig loop;
+        vayu::core::apply_open_loop_rate (loop, config);
+        EXPECT_EQ (loop.target_rps, 0.0) << mode;
+        EXPECT_EQ (loop.burst_size, 0.0) << mode;
+    }
+    for (const nlohmann::json& config :
+    { nlohmann::json{ { "mode", "constant_rps" }, { "targetRps", 100.0 } },
+    nlohmann::json{ { "rps", 100.0 } } }) {
+        vayu::http::EventLoopConfig loop;
+        vayu::core::apply_open_loop_rate (loop, config);
+        EXPECT_EQ (loop.target_rps, 100.0) << config.dump ();
+        EXPECT_EQ (loop.burst_size, 200.0) << config.dump ();
+    }
+}
+
+// The rate-limited path never sets `closed_loop` and sets `requests_expected`
+// to rate x duration. Mutation check: switch `ConstantLoadStrategy` on
+// `requested_rps` again and both expectations fail.
+TEST_F (LoadStrategyTest, ConstantConcurrencyCarryingARateStaysClosedLoop) {
+    const nlohmann::json config = { { "mode", "constant_concurrency" },
+        { "duration", "300ms" }, { "concurrency", 2 }, { "targetRps", 100.0 } };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-cc-rate", config);
+    vayu::http::EventLoopConfig loop_config;
+    vayu::core::apply_open_loop_rate (loop_config, config);
+    EXPECT_EQ (loop_config.target_rps, 0.0);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_TRUE (context->closed_loop.load ()) << "ran the open-loop path";
+    EXPECT_EQ (context->requests_expected.load (), 0u)
+    << "ran the open-loop path";
+    EXPECT_GT (context->requests_sent.load (), 0u);
+}
+
+// Through `start_run`, so `configure_event_loop` builds the loop. One worker,
+// so a token bucket at 1 req/s with a burst of 2 lets about 6 complete,
+// drain included; unthrottled, 4 in flight against the local fast endpoint
+// complete about 9000 in the second on a Debug build. 20 sits between.
+// Mutation check: set `loop.target_rps` from `requested_rps` in
+// `apply_open_loop_rate` and the debug assertion in `configure_event_loop`
+// aborts; with it removed too, this reads 6.
+TEST_F (LoadStrategyTest, ARampUpRunCarryingARateIsNotThrottledByTheEventLoop) {
+    vayu::db::Database db (TEST_DB_PATH);
+    db.init ();
+    auto workers = db.get_config_entry ("workers");
+    ASSERT_HAS_VALUE (workers) << "seed_default_config did not seed workers";
+    workers->value = "1";
+    db.save_config_entry (*workers);
+
+    vayu::db::Run row;
+    row.id              = "run-ramp-rate";
+    row.type            = vayu::RunType::Load;
+    row.status          = vayu::RunStatus::Pending;
+    row.config_snapshot = "{}";
+    row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    db.create_run (row);
+
+    const nlohmann::json config = { { "mode", "ramp_up" }, { "duration", "1s" },
+        { "rampUpDuration", "0" }, { "startConcurrency", 4 }, { "concurrency", 4 },
+        { "targetRps", 1.0 }, { "url", mock_server->fast_url () },
+        { "method", "GET" }, { "timeout", 5000 } };
+
+    vayu::core::RunManager run_manager;
+    ASSERT_TRUE (run_manager.start_run (row.id, config, db));
+    EXPECT_TRUE (vayu::tests::wait_until ([&] () {
+        const auto stored = db.get_run (row.id);
+        return stored && stored->status != vayu::RunStatus::Running &&
+        stored->status != vayu::RunStatus::Pending;
+    }))
+    << "the run never finished";
+    run_manager.shutdown (std::chrono::milliseconds (15000));
+
+    const auto stored = db.get_run (row.id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_FALSE (stored->summary.empty ()) << "the run produced no summary";
+    const auto summary = nlohmann::json::parse (stored->summary);
+    EXPECT_GT (summary.value ("total_requests", size_t{ 0 }), 20u) << summary.dump ();
+}
+
 // A single-request load run's token-free fast path (issue #1540) never
 // copies the request per submission (issue #992), so it cannot re-scan for
 // an unresolved `{{token}}` the way the copying branch does at line ~445 of

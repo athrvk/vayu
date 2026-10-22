@@ -554,11 +554,13 @@ TEST_F (LoadIdentityTest, EveryPacingModeBindsTheIdentity) {
     // rate-limited tick loop rather than the closed-loop controller.
     for (const char* mode : { "constant_concurrency", "constant_rps", "ramp_up", "capacity" }) {
         RecordingServer server;
-        const json payload = { { "method", "GET" },
-            { "url", server.url ("/i/{{$vu}}-{{$iteration}}") },
-            { "mode", mode }, { "duration", "300ms" }, { "concurrency", 2 },
-            { "targetRps", 50.0 }, { "startConcurrency", 1 },
+        json payload = { { "method", "GET" },
+            { "url", server.url ("/i/{{$vu}}-{{$iteration}}") }, { "mode", mode },
+            { "duration", "300ms" }, { "concurrency", 2 }, { "startConcurrency", 1 },
             { "stepDuration", "100ms" }, { "rampUpDuration", "100ms" } };
+        if (std::string (mode) == "constant_rps") { // its rate alone (#2396)
+            payload["targetRps"] = 50.0;
+        }
 
         run (payload);
 
