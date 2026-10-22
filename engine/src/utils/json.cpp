@@ -91,7 +91,7 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
 }
 
 // A binary body's file reference. The plan-time members (`inline_bytes`,
-// `sha256`, `size`) are engine-internal and never leave it.
+// `sha256`, `size`, `approved`) are engine-internal and never leave it.
 Json serialize_file_ref (const FileRef& file) {
     Json out{ { "src", file.src } };
     if (!file.file_name.empty ()) {

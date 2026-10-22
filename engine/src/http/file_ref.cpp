@@ -98,16 +98,12 @@ constexpr auto MEDIA_TYPES = std::to_array<MediaType> ({
 { "otf", "font/otf" },
 });
 
+/// The label a binary body's refusal names it by.
+constexpr std::string_view BODY_FILE_LABEL = "Body file";
+
 std::atomic<std::uint64_t>& open_counter () {
     static std::atomic<std::uint64_t> opens{ 0 };
     return opens;
-}
-
-using FileHandle = std::unique_ptr<std::FILE, int (*) (std::FILE*)>;
-
-FileHandle open_counted (const std::string& path) {
-    open_counter ().fetch_add (1, std::memory_order_relaxed);
-    return { std::fopen (path.c_str (), "rb"), &std::fclose };
 }
 
 std::string basename_of (const std::string& path) {
@@ -157,45 +153,52 @@ std::string unplanned_message (const std::string& src, std::string_view label) {
     "' was not checked before the send - this driver skipped the file rule";
 }
 
-/// The bytes of an inline-sized file, or its hash and size streamed, off one
-/// open handle. `false` when a read failed; `errno` then says why.
-bool read_contents (std::FILE* handle,
-std::shared_ptr<const std::string>& bytes_out,
-std::string& sha_out,
-std::uint64_t& size_out) {
+/// What the plan takes from a binary body's file: its bytes when they fit
+/// inline, and their digest either way.
+struct Contents {
+    std::shared_ptr<const std::string> inline_bytes;
+    std::string sha256;
+};
+
+/// The whole of @p file as its open saw it, read through that one handle, or
+/// why it could not be read.
+std::expected<Contents, std::string> read_contents (const ApprovedFile& file) {
     constexpr std::size_t CHUNK = std::size_t{ 64 } * 1024;
+    const bool keeps_bytes      = file.size () <= INLINE_FILE_LIMIT;
     std::string chunk (CHUNK, '\0');
     std::string whole;
     vayu::utils::Sha256Stream hash;
-    std::uint64_t total = 0;
-    bool inline_ok      = true;
-    while (std::feof (handle) == 0) {
-        const std::size_t got = std::fread (chunk.data (), 1, chunk.size (), handle);
-        if (std::ferror (handle) != 0) {
-            return false;
+    for (std::uint64_t offset = 0; offset < file.size ();) {
+        const auto wanted = static_cast<std::size_t> (
+        std::min<std::uint64_t> (CHUNK, file.size () - offset));
+        const auto got = file.read_at (offset, std::span<char> (chunk.data (), wanted));
+        if (!got) {
+            return std::unexpected (got.error ().message ());
         }
-        const std::string_view piece (chunk.data (), got);
+        // Shorter than its open measured: whatever is read now is not the
+        // file the size describes.
+        if (*got == 0) {
+            return std::unexpected (
+            std::string ("it was truncated while being read"));
+        }
+        const std::string_view piece (chunk.data (), *got);
         hash.update (piece);
-        total += got;
-        if (inline_ok && whole.size () + got <= INLINE_FILE_LIMIT) {
+        if (keeps_bytes) {
             whole.append (piece);
-        } else if (inline_ok) {
-            inline_ok = false;
-            whole.clear ();
-            whole.shrink_to_fit ();
         }
+        offset += *got;
     }
     const auto digest = hash.finish ();
+    Contents out;
     // Assigned in place rather than move-assigned from a temporary: GCC 13 at
     // -O3 reports the inlined small-string move as an out-of-bounds memcpy
     // (-Warray-bounds), a false positive that fails the -Werror release build.
     const std::string hex = vayu::utils::hex_encode (vayu::utils::byte_view (digest));
-    sha_out.assign (hex);
-    size_out = total;
-    if (inline_ok) {
-        bytes_out = std::make_shared<const std::string> (std::move (whole));
+    out.sha256.assign (hex);
+    if (keeps_bytes) {
+        out.inline_bytes = std::make_shared<const std::string> (std::move (whole));
     }
-    return true;
+    return out;
 }
 
 } // namespace
@@ -243,7 +246,7 @@ bool has_templated_file_path (const Body& body) {
 }
 
 bool is_prepared (const FileRef& file) {
-    return file.inline_bytes != nullptr || !file.sha256.empty ();
+    return file.inline_bytes != nullptr || file.approved != nullptr;
 }
 
 std::optional<std::string> unplanned_file_ref (const Body& body) {
@@ -251,7 +254,7 @@ std::optional<std::string> unplanned_file_ref (const Body& body) {
         if (is_prepared (body.file)) {
             return std::nullopt;
         }
-        return unplanned_message (body.file.src, "Body file");
+        return unplanned_message (body.file.src, BODY_FILE_LABEL);
     }
     if (!has_file_parts (body)) {
         return std::nullopt;
@@ -288,10 +291,6 @@ const FileAccessPolicy& policy) {
     return plan.check (file, label, false);
 }
 
-FileHandle open_body_file (const FileRef& file) {
-    return open_counted (file.src);
-}
-
 std::uint64_t body_file_opens () {
     return open_counter ().load (std::memory_order_relaxed);
 }
@@ -314,13 +313,9 @@ ApprovedFile::~ApprovedFile () {
     platform::close_file (file_);
 }
 
-std::optional<std::size_t>
+std::expected<std::size_t, std::error_code>
 ApprovedFile::read_at (std::uint64_t offset, std::span<char> buffer) const {
-    const auto got = platform::read_file_at (file_, offset, buffer);
-    if (!got) {
-        return std::nullopt;
-    }
-    return *got;
+    return platform::read_file_at (file_, offset, buffer);
 }
 
 FilePlan::FilePlan (FileAccessPolicy policy) : policy_ (std::move (policy)) {
@@ -373,46 +368,19 @@ FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_
     if (checked (file.src, needs_bytes) != nullptr) {
         return std::nullopt;
     }
-    if (needs_bytes) {
-        return read_body_file (file, label);
-    }
-    auto opened = open_part_file (file, label, PartFiles::PerRequest);
+    auto opened = needs_bytes ? read_body_file (file, label) : open_approved (file, label);
     if (!opened) {
         return std::move (opened.error ());
     }
     return std::nullopt;
 }
 
-std::optional<std::string>
-FilePlan::read_body_file (const FileRef& file, std::string_view label) {
-    if (auto approved = approve (file, label); !approved) {
-        return std::move (approved.error ());
-    }
-    const FileHandle handle = open_counted (file.src);
-    if (!handle) {
-        return unreadable_message (file, label, errno);
-    }
-    std::shared_ptr<const std::string> bytes;
-    std::string sha256;
-    std::uint64_t size = 0;
-    if (!read_contents (handle.get (), bytes, sha256, size)) {
-        return unreadable_message (file, label, errno);
-    }
-    Checked& entry     = by_src_[file.src];
-    entry.inline_bytes = std::move (bytes);
-    entry.sha256       = std::move (sha256);
-    entry.size         = size;
-    entry.read         = true;
-    return std::nullopt;
-}
-
-std::expected<std::shared_ptr<const ApprovedFile>, std::string>
-FilePlan::open_part_file (const FileRef& file, std::string_view label, PartFiles part_files) {
+FilePlan::Opened FilePlan::open_approved (const FileRef& file, std::string_view label) {
     auto canonical = approve (file, label);
     if (!canonical) {
         return std::unexpected (std::move (canonical.error ()));
     }
-    const std::string key = canonical->string ();
+    std::string key = canonical->string ();
     std::shared_ptr<const ApprovedFile> opened;
     if (const auto kept = kept_.find (key); kept != kept_.end ()) {
         opened = kept->second;
@@ -423,14 +391,78 @@ FilePlan::open_part_file (const FileRef& file, std::string_view label, PartFiles
         }
         opened = std::move (*fresh);
     }
-    if (part_files == PartFiles::KeptByPlan) {
-        kept_.emplace (key, opened);
-    }
-    by_src_[file.src].canonical = key;
+    by_src_[file.src].canonical = std::move (key);
     return opened;
 }
 
-std::optional<std::string> FilePlan::prepare_part (FormField& field, PartFiles part_files) {
+FilePlan::Opened
+FilePlan::reopen (const FileRef& file, std::string_view label, const Checked& planned) const {
+    if (const auto kept = kept_.find (planned.canonical); kept != kept_.end ()) {
+        return kept->second;
+    }
+    // Approved, not kept: a path a data row bound. Opened for this request
+    // alone, through the rule again, so the run holds nothing per row.
+    auto canonical = approve (file, label);
+    if (!canonical) {
+        return std::unexpected (std::move (canonical.error ()));
+    }
+    auto opened = ApprovedFile::open (*canonical);
+    if (!opened) {
+        return std::unexpected (unreadable_message (file, label, opened.error ()));
+    }
+    return opened;
+}
+
+void FilePlan::keep (const Checked& planned,
+const std::shared_ptr<const ApprovedFile>& opened) {
+    kept_.emplace (planned.canonical, opened);
+}
+
+FilePlan::Opened FilePlan::read_body_file (const FileRef& file, std::string_view label) {
+    auto opened = open_approved (file, label);
+    if (!opened) {
+        return opened;
+    }
+    auto contents = read_contents (**opened);
+    if (!contents) {
+        return std::unexpected (unreadable_message (file, label, contents.error ()));
+    }
+    Checked& entry     = by_src_[file.src];
+    entry.inline_bytes = std::move (contents->inline_bytes);
+    entry.sha256       = std::move (contents->sha256);
+    entry.size         = (*opened)->size ();
+    entry.read         = true;
+    return opened;
+}
+
+std::optional<std::string> FilePlan::prepare_body_file (FileRef& file, OpenFiles open_files) {
+    if (auto refusal = refuse_shape (file, BODY_FILE_LABEL)) {
+        return refusal;
+    }
+    const Checked* planned = checked (file.src, true);
+    if (planned != nullptr &&
+    (planned->inline_bytes || open_files == OpenFiles::PerRequest ||
+    kept_.contains (planned->canonical))) {
+        return fill_body_file (file);
+    }
+    auto opened = read_body_file (file, BODY_FILE_LABEL);
+    if (!opened) {
+        return std::move (opened.error ());
+    }
+    const Checked& entry = by_src_.at (file.src);
+    file.inline_bytes    = entry.inline_bytes;
+    file.sha256          = entry.sha256;
+    file.size            = entry.size;
+    // Read inline, the bytes are what every transfer sends and the file is
+    // done with; streamed, every transfer reads the file this read approved.
+    file.approved = entry.inline_bytes ? nullptr : std::move (*opened);
+    if (file.approved && open_files == OpenFiles::KeptByPlan) {
+        keep (entry, file.approved);
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> FilePlan::prepare_part (FormField& field, OpenFiles open_files) {
     const FileRef ref       = file_ref_of (field);
     const std::string label = form_part_label (field);
     if (auto refusal = refuse_shape (ref, label)) {
@@ -438,28 +470,40 @@ std::optional<std::string> FilePlan::prepare_part (FormField& field, PartFiles p
     }
     const Checked* planned = checked (field.src, false);
     if (planned != nullptr &&
-    (part_files == PartFiles::PerRequest || kept_.contains (planned->canonical))) {
+    (open_files == OpenFiles::PerRequest || kept_.contains (planned->canonical))) {
         return fill_part (field);
     }
-    auto opened = open_part_file (ref, label, part_files);
+    auto opened = open_approved (ref, label);
     if (!opened) {
         return std::move (opened.error ());
+    }
+    if (open_files == OpenFiles::KeptByPlan) {
+        keep (by_src_.at (field.src), *opened);
     }
     field.approved = std::move (*opened);
     return std::nullopt;
 }
 
 std::optional<std::string> FilePlan::fill_body_file (FileRef& file) const {
-    if (auto refusal = refuse_shape (file, "Body file")) {
+    if (auto refusal = refuse_shape (file, BODY_FILE_LABEL)) {
         return refusal;
     }
     const Checked* planned = checked (file.src, true);
     if (planned == nullptr) {
-        return not_planned_message (file.src, "Body file");
+        return not_planned_message (file.src, BODY_FILE_LABEL);
+    }
+    std::shared_ptr<const ApprovedFile> approved;
+    if (!planned->inline_bytes) {
+        auto opened = reopen (file, BODY_FILE_LABEL, *planned);
+        if (!opened) {
+            return std::move (opened.error ());
+        }
+        approved = std::move (*opened);
     }
     file.inline_bytes = planned->inline_bytes;
     file.sha256       = planned->sha256;
     file.size         = planned->size;
+    file.approved     = std::move (approved);
     return std::nullopt;
 }
 
@@ -473,32 +517,19 @@ std::optional<std::string> FilePlan::fill_part (FormField& field) const {
     if (planned == nullptr) {
         return not_planned_message (field.src, label);
     }
-    if (const auto kept = kept_.find (planned->canonical); kept != kept_.end ()) {
-        field.approved = kept->second;
-        return std::nullopt;
-    }
-    // Approved, not kept: a path a data row bound. Opened for this request
-    // alone, through the rule again, so the run holds nothing per row.
-    auto canonical = approve (ref, label);
-    if (!canonical) {
-        return std::move (canonical.error ());
-    }
-    auto opened = ApprovedFile::open (*canonical);
+    auto opened = reopen (ref, label, *planned);
     if (!opened) {
-        return unreadable_message (ref, label, opened.error ());
+        return std::move (opened.error ());
     }
     field.approved = std::move (*opened);
     return std::nullopt;
 }
 
-std::optional<std::string> FilePlan::prepare (Request& request, PartFiles part_files) {
+std::optional<std::string> FilePlan::prepare (Request& request, OpenFiles open_files) {
     const std::unique_lock lock (mutex_);
     Body& body = request.body;
     if (body.mode == BodyMode::Binary) {
-        if (auto refusal = check_locked (body.file, "Body file", true)) {
-            return refusal;
-        }
-        return fill_body_file (body.file);
+        return prepare_body_file (body.file, open_files);
     }
     if (!has_file_parts (body)) {
         return std::nullopt;
@@ -507,7 +538,7 @@ std::optional<std::string> FilePlan::prepare (Request& request, PartFiles part_f
         if (!field.enabled || field.type != FormFieldType::File) {
             continue;
         }
-        if (auto refusal = prepare_part (field, part_files)) {
+        if (auto refusal = prepare_part (field, open_files)) {
             return refusal;
         }
     }

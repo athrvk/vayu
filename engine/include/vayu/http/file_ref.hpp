@@ -30,16 +30,16 @@
  * path, and says what to do.
  *
  * The check runs **once per send** on the design path and **once per run** on
- * the load and collection paths (`FilePlan`), never per transfer. For a binary
- * body, a file at or under `INLINE_FILE_LIMIT` is read in the same pass, and
- * the bytes are shared by every transfer of the run; a larger one is hashed in
- * that pass and streamed from disk per transfer. A form-data file part is
- * opened in that pass (`ApprovedFile`) and every transfer reads that open file.
+ * the load and collection paths (`FilePlan`), never per transfer. The file it
+ * approves is opened in the same pass (`ApprovedFile`), and nothing reads `src`
+ * again (#2416, #2678). For a binary body, a file at or under
+ * `INLINE_FILE_LIMIT` is read through that open file, and the bytes are shared
+ * by every transfer of the run; a larger one is hashed through it and every
+ * transfer streams from it. A form-data file part is read from it per transfer.
  */
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <expected>
 #include <filesystem>
 #include <memory>
@@ -48,6 +48,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 
 #include "vayu/http/file_access_policy.hpp"
@@ -78,15 +79,16 @@ namespace vayu::http {
 /// binds, or one nothing will.
 [[nodiscard]] bool has_templated_file_path (const Body& body);
 
-/// True once `FilePlan` has filled the plan-time members of @p file.
+/// True once `FilePlan` has filled the plan-time members of @p file: the bytes
+/// it sends, or the open file it streams from.
 [[nodiscard]] bool is_prepared (const FileRef& file);
 
 /**
  * @brief Why @p body cannot reach a transfer because no plan checked a file it
  * names, or nothing.
  *
- * A binary body without its plan-time members, or an enabled file part without
- * `approved`, never went through the rule, so the send gate
+ * A binary body with neither `inline_bytes` nor `approved`, or an enabled file
+ * part without `approved`, never went through the rule, so the send gate
  * (`validate_transferable`) refuses it rather than read the path on its behalf.
  */
 [[nodiscard]] std::optional<std::string> unplanned_file_ref (const Body& body);
@@ -108,28 +110,23 @@ std::string_view label,
 const FileAccessPolicy& policy);
 
 /**
- * @brief Open @p file for a streamed transfer. Null when it cannot be opened,
- * which the read callback then reports to libcurl as an aborted read.
- */
-[[nodiscard]] std::unique_ptr<std::FILE, int (*) (std::FILE*)> open_body_file (
-const FileRef& file);
-
-/**
- * @brief How many times this process has opened a request-body file - for a
- * plan's check-and-read, a part's `ApprovedFile`, or a streamed transfer.
- * Monotonic; tests read the difference across a send or a run.
+ * @brief How many times this process has opened a request-body file: every
+ * `ApprovedFile`, whether a plan's check opened it or a `fill` did for a path
+ * a data row bound. Monotonic; tests read the difference across a send or a
+ * run.
  */
 [[nodiscard]] std::uint64_t body_file_opens ();
 
 /**
- * @brief A form-data file part's file, opened when the rule approved it (#2416).
+ * @brief A request body's file, opened when the rule approved it: a form-data
+ * file part's (#2416) or a binary body's (#2678).
  *
  * Opened on the canonical path the policy approved
  * (`FileAccessPolicy::approved_path`), never on `src` again, and without
  * following a final symlink (`platform::open_regular_file`), so a link swapped
  * in at the path after the check, or between a run's iterations, is not what a
  * transfer reads. Shared by every copy of the request it was opened for (and
- * kept by the plan when `PartFiles::KeptByPlan` says so); reads are
+ * kept by the plan when `OpenFiles::KeptByPlan` says so); reads are
  * positional, so concurrent transfers share no position.
  * The size is the one the open saw, and a transfer sends exactly that many
  * bytes.
@@ -153,8 +150,8 @@ class ApprovedFile {
     }
 
     /// Up to @p buffer's size at @p offset: the count read, 0 at the end, or
-    /// nothing on a read error.
-    [[nodiscard]] std::optional<std::size_t>
+    /// the OS's error.
+    [[nodiscard]] std::expected<std::size_t, std::error_code>
     read_at (std::uint64_t offset, std::span<char> buffer) const;
 
     private:
@@ -162,9 +159,9 @@ class ApprovedFile {
     std::uint64_t size_;
 };
 
-/// Who holds a file part's open file after `FilePlan::prepare`.
-enum class PartFiles : std::uint8_t {
-    /// The prepared request only: the file closes with the last copy of it.
+/// Who holds a request's open files after `FilePlan::prepare`.
+enum class OpenFiles : std::uint8_t {
+    /// The prepared request only: a file closes with the last copy of it.
     PerRequest,
     /// The plan too, for the run: `fill` shares it with every request.
     KeptByPlan,
@@ -174,17 +171,19 @@ enum class PartFiles : std::uint8_t {
  * @brief The file references of a send or a run, checked once.
  *
  * `prepare` applies the rule to every enabled reference of a request and fills
- * its plan-time members (a binary body's `inline_bytes`, `sha256`, `size`; a
- * file part's `approved`), reading each distinct binary path once for the life
- * of the plan. `fill` is the hot-path half: it answers only from paths
- * `prepare` already checked, so a load run's transfers never re-check a file
- * and never open a small binary body.
+ * its plan-time members (a binary body's `inline_bytes` or `approved`, its
+ * `sha256` and `size`; a file part's `approved`), reading each distinct binary
+ * path once for the life of the plan, through the file the rule approved.
+ * `fill` is the hot-path half: it answers only from paths `prepare` already
+ * checked, so a load run's transfers never re-check a file and never open a
+ * small binary body.
  *
- * A file part's open file is kept by the plan only for a path the run's own
- * request names (`PartFiles::KeptByPlan`), so every transfer of the run shares
- * one; a path a data row binds is approved without being kept, and `fill`
- * opens it again for that request alone, through the policy again (#2416). A
- * plan over a data file of many rows therefore holds no file open per row.
+ * An open file (a file part's, or a binary body's too large to read inline) is
+ * kept by the plan only for a path the run's own request names
+ * (`OpenFiles::KeptByPlan`), so every transfer of the run shares one; a path a
+ * data row binds is approved without being kept, and `fill` opens it again for
+ * that request alone, through the policy again (#2416, #2678). A plan over a
+ * data file of many rows therefore holds no file open per row.
  *
  * Thread-safe: a run prepares on one thread and fills from many.
  */
@@ -193,13 +192,13 @@ class FilePlan {
     explicit FilePlan (FileAccessPolicy policy = {});
 
     /**
-     * Check and read every file @p request names, and open its file parts.
+     * Check and open every file @p request names, and read its binary body.
      * Nothing on success; the first refusal otherwise, with @p request's
-     * binary members untouched. @p part_files says whether the plan keeps
-     * the parts' open files for later `fill`s.
+     * binary members untouched. @p open_files says whether the plan keeps
+     * the open files for later `fill`s.
      */
     [[nodiscard]] std::optional<std::string>
-    prepare (Request& request, PartFiles part_files = PartFiles::PerRequest);
+    prepare (Request& request, OpenFiles open_files = OpenFiles::PerRequest);
 
     /**
      * Fill @p request's file references from what `prepare` already checked.
@@ -220,7 +219,7 @@ class FilePlan {
         return policy_;
     }
 
-    /// How many file parts' open files the plan itself keeps.
+    /// How many open files the plan itself keeps.
     [[nodiscard]] std::size_t kept_files () const;
 
     private:
@@ -232,29 +231,34 @@ class FilePlan {
         std::shared_ptr<const std::string> inline_bytes;
         std::string sha256;
         std::uint64_t size = 0;
-        std::string canonical; // a file part's approval: what it resolved to
+        std::string canonical; // what the approved path resolved to
 
         [[nodiscard]] bool serves (bool needs_bytes) const {
             return needs_bytes ? read : !canonical.empty ();
         }
     };
 
+    using Opened = std::expected<std::shared_ptr<const ApprovedFile>, std::string>;
+
     [[nodiscard]] std::expected<std::filesystem::path, std::string>
     approve (const FileRef& file, std::string_view label) const;
     std::optional<std::string>
     check_locked (const FileRef& file, std::string_view label, bool needs_bytes);
     [[nodiscard]] const Checked* checked (const std::string& src, bool needs_bytes) const;
-    std::optional<std::string> read_body_file (const FileRef& file, std::string_view label);
-    std::expected<std::shared_ptr<const ApprovedFile>, std::string>
-    open_part_file (const FileRef& file, std::string_view label, PartFiles part_files);
-    std::optional<std::string> prepare_part (FormField& field, PartFiles part_files);
+    Opened open_approved (const FileRef& file, std::string_view label);
+    [[nodiscard]] Opened
+    reopen (const FileRef& file, std::string_view label, const Checked& planned) const;
+    void keep (const Checked& planned, const std::shared_ptr<const ApprovedFile>& opened);
+    Opened read_body_file (const FileRef& file, std::string_view label);
+    std::optional<std::string> prepare_body_file (FileRef& file, OpenFiles open_files);
+    std::optional<std::string> prepare_part (FormField& field, OpenFiles open_files);
     std::optional<std::string> fill_body_file (FileRef& file) const;
     std::optional<std::string> fill_part (FormField& field) const;
 
     FileAccessPolicy policy_;
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, Checked> by_src_;
-    /// The open files `PartFiles::KeptByPlan` keeps, by canonical path, so
+    /// The open files `OpenFiles::KeptByPlan` keeps, by canonical path, so
     /// two spellings of one file share one.
     std::unordered_map<std::string, std::shared_ptr<const ApprovedFile>> kept_;
 };
