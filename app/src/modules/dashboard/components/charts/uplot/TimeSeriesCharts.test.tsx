@@ -228,6 +228,7 @@ describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
 					timeSeconds: 2,
 					p99Ms: 227,
 					sloMs: 200,
+					atRunStart: false,
 				}}
 			/>
 		);

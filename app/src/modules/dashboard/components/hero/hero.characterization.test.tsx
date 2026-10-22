@@ -49,6 +49,7 @@ const crossed: Breakpoint = {
 	timeSeconds: 6,
 	p99Ms: 227,
 	sloMs: 200,
+	atRunStart: false,
 };
 const notCrossed: Breakpoint = {
 	crossed: false,
@@ -56,6 +57,7 @@ const notCrossed: Breakpoint = {
 	timeSeconds: null,
 	p99Ms: null,
 	sloMs: 200,
+	atRunStart: false,
 };
 
 const snap = (ui: React.ReactElement) => {
@@ -176,6 +178,7 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 			timeSeconds: null,
 			p99Ms: null,
 			sloMs: 200,
+			atRunStart: false,
 		},
 	};
 }

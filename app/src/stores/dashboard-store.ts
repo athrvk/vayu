@@ -14,6 +14,7 @@ import {
 	notCrossed,
 	type Breakpoint,
 } from "@/modules/dashboard/utils/computeBreakpoint";
+import { hasSecondPercentiles } from "@/modules/dashboard/utils/tickPercentiles";
 import { useClientSettingsStore } from "./client-settings-store";
 import {
 	DEFAULT_LIVE_WINDOW,
@@ -270,9 +271,13 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 				state.breakpoint.crossed || state.breakpoint.sloMs === sloMs
 					? state.breakpoint
 					: notCrossed(sloMs);
+			// Stops at the first whole-second reading, which an uncrossed run reaches
+			// within its opening ticks - this is not a scan of the retained buffer.
+			let seenReading = !bp.crossed && state.historicalMetrics.some(hasSecondPercentiles);
 			for (const m of batch) {
 				if (m.current_concurrency > peak) peak = m.current_concurrency;
-				if (!bp.crossed) bp = breakpointAt(m, sloMs) ?? bp;
+				if (!bp.crossed) bp = breakpointAt(m, sloMs, !seenReading) ?? bp;
+				seenReading ||= hasSecondPercentiles(m);
 			}
 
 			return {
