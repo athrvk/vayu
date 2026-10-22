@@ -33,6 +33,7 @@
 #include <curl/curl.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -141,6 +142,25 @@ struct BodySink {
     std::optional<uint64_t> declared_total;
     bool total_resolved = false;
 };
+
+/// The flag a cancellable transfer watches (`ClientConfig::cancel`, issue
+/// #2683), and whether the progress callback acted on it.
+struct CancelWatch {
+    const std::atomic<bool>* flag = nullptr;
+    /// Set when the callback aborted, so the completion reports a cancel rather
+    /// than libcurl's generic `CURLE_ABORTED_BY_CALLBACK`, which the
+    /// reserved-port refusal also raises.
+    bool fired = false;
+};
+
+int cancel_progress_callback (void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    auto* watch = static_cast<CancelWatch*> (clientp);
+    if (!watch->flag->load (std::memory_order_acquire)) {
+        return 0;
+    }
+    watch->fired = true;
+    return 1; // Non-zero aborts with CURLE_ABORTED_BY_CALLBACK.
+}
 
 /// Forward declaration: the write callback below resolves the declared length,
 /// which is defined after it because it belongs beside the message that names
@@ -663,6 +683,13 @@ Result<Response> Client::send (const Request& request) {
         set_opt<CURLOPT_TIMEOUT_MS> (curl, static_cast<long> (request.timeout_ms));
     }
 
+    CancelWatch cancel_watch{ impl_->config.cancel };
+    if (cancel_watch.flag != nullptr) {
+        set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
+        set_opt<CURLOPT_XFERINFOFUNCTION> (curl, cancel_progress_callback);
+        set_opt<CURLOPT_XFERINFODATA> (curl, &cancel_watch);
+    }
+
     // Set redirect options
     if (request.follow_redirects) {
         set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
@@ -803,11 +830,16 @@ Result<Response> Client::send (const Request& request) {
         // says nothing a caller can act on: the write callback's short count
         // surfaces as a generic CURLE_WRITE_ERROR. So it is recognized here and
         // reported as the condition it is, which `/import/fetch` answers with a
-        // 413 rather than a 502.
-        Error error = sink.limit_exceeded ?
-        Error{ ErrorCode::ResponseTooLarge,
-            too_large_message (response.headers, sink.max_bytes) } :
-        detail::curl_to_error (curl, res, impl_->errors, &request, &peer_check);
+        // 413 rather than a 502. A cancel is this engine's own abort too.
+        Error error;
+        if (cancel_watch.fired) {
+            error = Error{ ErrorCode::Cancelled, "Request cancelled" };
+        } else if (sink.limit_exceeded) {
+            error = Error{ ErrorCode::ResponseTooLarge,
+                too_large_message (response.headers, sink.max_bytes) };
+        } else {
+            error = detail::curl_to_error (curl, res, impl_->errors, &request, &peer_check);
+        }
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)

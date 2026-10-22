@@ -11,17 +11,21 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <optional>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "mock_server.hpp"
 #include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::http {
 namespace {
@@ -1030,6 +1034,53 @@ TEST_F (HttpClientTest, WithoutAStallTimeoutTheTotalBoundStillApplies) {
     ASSERT_TRUE (result.is_ok ());
     EXPECT_TRUE (result.value ().has_error ());
     EXPECT_EQ (result.value ().error_code, ErrorCode::Timeout);
+}
+
+// ---------------------------------------------------------------------------
+// Cancellation (issue #2683)
+// ---------------------------------------------------------------------------
+
+// The upstream holds the transfer until the fixture releases it, so only the
+// cancel can end it. Mutation check: drop the progress callback `Client::send`
+// installs for `ClientConfig::cancel`, and the send runs on to `/hang`'s own
+// 30s cap and answers 200.
+TEST_F (HttpClientTest, ACancelEndsATransferTheUpstreamIsStillHolding) {
+    vayu::tests::SlowMockServer upstream;
+    std::atomic<bool> cancel{ false };
+    ClientConfig config;
+    config.cancel = &cancel;
+    Client client (std::move (config));
+
+    // `std::async` futures wait for their task on destruction, so a failed
+    // assertion below cannot leave the send running past `client`.
+    auto sent = std::async (std::launch::async,
+    [&client, url = upstream.hang_url ()] () { return client.get (url); });
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&upstream] () { return upstream.live_connection_count () > 0; }))
+    << "the transfer never reached the upstream";
+
+    cancel.store (true);
+    const auto result = sent.get ();
+
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 0);
+    EXPECT_EQ (result.value ().error_code, ErrorCode::Cancelled)
+    << result.value ().error_message;
+}
+
+// A flag that never flips must not end anything: the progress callback runs for
+// every cancellable transfer, so a wrong answer there fails every send.
+TEST_F (HttpClientTest, ACancelFlagThatStaysClearLeavesTheTransferAlone) {
+    std::atomic<bool> cancel{ false };
+    ClientConfig config;
+    config.cancel = &cancel;
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/get"));
+
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 200) << result.value ().error_message;
+    EXPECT_EQ (result.value ().error_code, ErrorCode::None);
 }
 
 } // namespace vayu::http
