@@ -73,6 +73,9 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    on every cpp-httplib move, not carried forward - 10 runs of
    `TransportPolicyPaths.LoadRunTraversesManualProxy` with the line and 10
    without, recorded in that file and in `docs/engine/building.md`.
+   Also check for an open Dependabot Electron pull request (`build: bump
+   electron`, #2373): Electron patch releases carry Chromium security backports,
+   and merging it before tagging is what keeps a release off a stale runtime.
 4. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
 5. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes

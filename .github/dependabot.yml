@@ -1,6 +1,6 @@
-# GitHub Actions and the docs toolchain. Both are CI-side and small enough that
-# a bump is a five-minute read; neither can produce the pull-request volume an
-# application dependency tree does.
+# GitHub Actions, the docs toolchain and Electron. The first two are CI-side and
+# small enough that a bump is a five-minute read; neither can produce the
+# pull-request volume an application dependency tree does.
 #
 # Every action is pinned to a full commit SHA with its tag in a trailing
 # comment (pr-tests.yml's Script lint job fails on any other form), so a moved
@@ -14,12 +14,15 @@
 # a label here that does not exist yet is a config error, so listing them would
 # only add a way to break the file.
 #
-# npm is absent from *this file*, which governs version updates only. An
+# npm is present for `electron` only (see the entry below). The rest of an
 # Electron dependency tree produces a steady stream of pull requests, and with
-# a single code owner every one of them lands on the same reviewer. Dependabot
-# security updates are a separate repository-level setting and are switched on,
-# so npm advisories still arrive on their own (#217, #218) - the omission buys
-# quiet, not blindness. Worth revisiting when there is more review capacity.
+# a single code owner every one of them lands on the same reviewer, so the
+# `allow` list keeps that stream out. Electron itself is the exception because
+# its patch releases mostly carry Chromium security backports, and the channel
+# that would otherwise propose them does not fire: Dependabot security updates
+# (a separate repository-level setting, switched on) arrive only on a GitHub
+# advisory against a package, and Electron does not publish one per routine
+# backport (#2373).
 #
 # vcpkg is absent because it cannot be present. Dependabot supports no vcpkg
 # ecosystem and no C/C++ package manager at all, so engine/vcpkg.json and its
@@ -82,3 +85,27 @@ updates:
       interval: monthly
     commit-message:
       prefix: ci
+
+  # Electron only, and only within the 44 line. A major Electron bump is a
+  # planned migration, not a routine pull request, so it is ignored; the
+  # `allow` list keeps the rest of app/'s tree out.
+  #
+  # `cooldown` equals `minimumReleaseAge` in app/pnpm-workspace.yaml (seven
+  # days) so Dependabot does not open a pull request for a version
+  # `pnpm install` would refuse to resolve. If a Dependabot pull request fails
+  # at install on that age gate, raise `default-days`; do not add `electron` to
+  # `minimumReleaseAgeExclude`.
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-name: electron
+    ignore:
+      - dependency-name: electron
+        update-types: ['version-update:semver-major']
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: build
