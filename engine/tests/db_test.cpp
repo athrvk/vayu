@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -39,8 +40,10 @@ namespace vayu::db {
 // Defined in src/db/db_maintenance.cpp and declared in the internal
 // `database_impl.hpp`, which `db_layout_test.cpp` keeps out of tests; the
 // `on_connection` seam is the reason this one is called directly.
-void migrate_before_sync (const std::string& path,
+enum class PreMigrationSnapshot : std::uint8_t { Take, Skip };
+bool migrate_before_sync (const std::string& path,
 std::chrono::milliseconds busy_timeout,
+PreMigrationSnapshot snapshot,
 const std::function<void (sqlite3*)>& on_connection);
 
 namespace {
@@ -2305,8 +2308,8 @@ TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
 
     auto leftovers = [&] {
         std::set<std::string> names;
-        for (const auto& entry : fs::directory_iterator (dir))
-            names.insert (entry.path ().filename ().string ());
+        for (const auto& entry : fs::recursive_directory_iterator (dir))
+            names.insert (fs::relative (entry.path (), dir).generic_string ());
         return names;
     };
 
@@ -2317,6 +2320,17 @@ TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
         db.init ();
         ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
     }
+    // Stamped one version back and reopened, so the copy a migrating start
+    // takes into `backups/` (#2426) is among it too.
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (stem.string ().c_str (), &handle), SQLITE_OK);
+        const std::string sql =
+        "PRAGMA user_version = " + std::to_string (vayu::db::SCHEMA_VERSION - 1);
+        EXPECT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, nullptr), SQLITE_OK);
+        sqlite3_close (handle);
+        Database db (stem.string ());
+    }
 
     // The scan must have seen something, or "nothing left over" below is
     // vacuously true - the failure mode CLAUDE.md calls out for source guards.
@@ -2325,6 +2339,10 @@ TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
     << "the database wrote nothing; the test proves nothing";
     EXPECT_TRUE (written.count ("test_scratch.db.bak"))
     << "no backup was written, so this run would not catch a missing `.bak`";
+    EXPECT_TRUE (std::ranges::any_of (written,
+    [] (const std::string& name) { return name.starts_with ("backups/vayu-"); }))
+    << "no pre-migration copy was written, so this run would not catch one "
+       "left behind";
 
     vayu::tests::remove_database_files (stem.string ());
 
@@ -2458,6 +2476,23 @@ void set_user_version (const std::string& path, int64_t version) {
     sqlite3_close (handle);
 }
 
+/// The copies a start took before migrating `TEST_DB_PATH`
+/// (`backups/vayu-<stamp>-pre-v<N>.db`), oldest first.
+std::vector<std::string> pre_migration_snapshots () {
+    namespace fs = std::filesystem;
+    std::vector<std::string> found;
+    std::error_code ec;
+    const fs::path backups = fs::path (TEST_DB_PATH).parent_path () / "backups";
+    for (fs::directory_iterator it (backups, ec), end; !ec && it != end; it.increment (ec)) {
+        const std::string name = it->path ().filename ().string ();
+        if (name.starts_with ("vayu-") && name.find ("-pre-v") != std::string::npos) {
+            found.push_back (it->path ().string ());
+        }
+    }
+    std::sort (found.begin (), found.end ());
+    return found;
+}
+
 } // namespace
 
 TEST_F (DatabaseTest, MigratesPreCutoverScriptColumnsIntoElements) {
@@ -2503,11 +2538,6 @@ TEST_F (DatabaseTest, MigratesPreCutoverScriptColumnsIntoElements) {
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
-    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
-    << "no pre-migration backup was written";
-    EXPECT_TRUE (table_has_column (std::string (TEST_DB_PATH) + ".pre-migration.bak",
-    "requests", "pre_request_script"))
-    << "the backup must still carry the pre-cutover columns";
 
     Database reopened (TEST_DB_PATH);
     reopened.init ();
@@ -2592,11 +2622,11 @@ std::string read_legacy_pre_script () {
 TEST_F (DatabaseTest, AFailedCommitDuringTheScriptFoldRefusesAndKeepsTheScripts) {
     seed_unmigrated_script_row ();
 
-    EXPECT_THROW (
-    vayu::db::migrate_before_sync (TEST_DB_PATH, std::chrono::milliseconds (50),
-    [] (sqlite3* connection) {
-        sqlite3_commit_hook (connection, refuse_every_commit, nullptr);
-    }),
+    EXPECT_THROW (vayu::db::migrate_before_sync (TEST_DB_PATH,
+                  std::chrono::milliseconds (50), PreMigrationSnapshot::Take,
+                  [] (sqlite3* connection) {
+                      sqlite3_commit_hook (connection, refuse_every_commit, nullptr);
+                  }),
     std::runtime_error);
 
     EXPECT_EQ (read_user_version (TEST_DB_PATH), 0);
@@ -2627,11 +2657,12 @@ TEST_F (DatabaseTest, AFailedBeginRefusesBeforeTouchingRows) {
     ASSERT_EQ (sqlite3_exec (holder, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr), SQLITE_OK);
 
     std::vector<std::string> statements;
-    EXPECT_THROW (
-    vayu::db::migrate_before_sync (TEST_DB_PATH, std::chrono::milliseconds (50),
-    [&statements] (sqlite3* connection) {
-        sqlite3_trace_v2 (connection, SQLITE_TRACE_STMT, record_statement, &statements);
-    }),
+    EXPECT_THROW (vayu::db::migrate_before_sync (TEST_DB_PATH,
+                  std::chrono::milliseconds (50), PreMigrationSnapshot::Take,
+                  [&statements] (sqlite3* connection) {
+                      sqlite3_trace_v2 (connection, SQLITE_TRACE_STMT,
+                      record_statement, &statements);
+                  }),
     std::runtime_error);
     sqlite3_exec (holder, "ROLLBACK;", nullptr, nullptr, nullptr);
     sqlite3_close (holder);
@@ -2658,11 +2689,11 @@ TEST_F (DatabaseTest, AFailedStampOnTheStampOnlyBranchThrows) {
     }
     set_user_version (TEST_DB_PATH, 2);
 
-    EXPECT_THROW (
-    vayu::db::migrate_before_sync (TEST_DB_PATH, std::chrono::milliseconds (50),
-    [] (sqlite3* connection) {
-        sqlite3_commit_hook (connection, refuse_every_commit, nullptr);
-    }),
+    EXPECT_THROW (vayu::db::migrate_before_sync (TEST_DB_PATH,
+                  std::chrono::milliseconds (50), PreMigrationSnapshot::Take,
+                  [] (sqlite3* connection) {
+                      sqlite3_commit_hook (connection, refuse_every_commit, nullptr);
+                  }),
     std::runtime_error);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), 2);
 
@@ -2733,13 +2764,12 @@ TEST_F (DatabaseTest, MigrationDoesNothingOnASecondOpen) {
         db.init ();
     }
     ASSERT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
-    std::filesystem::remove (std::string (TEST_DB_PATH) + ".pre-migration.bak");
 
-    // A second open at the current `user_version` must be a fast no-op: no backup
-    // rewritten (there is nothing left to migrate).
+    // A second open at the current `user_version` must be a fast no-op: no
+    // copy taken (there is nothing left to migrate).
     Database again (TEST_DB_PATH);
     again.init ();
-    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    EXPECT_TRUE (pre_migration_snapshots ().empty ())
     << "an already-migrated database must not be re-migrated";
 }
 
@@ -2833,8 +2863,6 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
     EXPECT_EQ (vayu::db::SCHEMA_VERSION, 7);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
-    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
-    << "a version-1 database has no script to fold and needs no fold backup";
 
     Database reopened (TEST_DB_PATH);
     reopened.init ();
@@ -2889,8 +2917,6 @@ TEST_F (DatabaseTest, AVersionFourDatabaseLosesTheStoredOAuthRawResponseButKeeps
 
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "oauth_tokens", "raw_response"));
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
-    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
-    << "a version-4 database has no script to fold and needs no fold backup";
 
     Database reopened (TEST_DB_PATH);
     reopened.init ();
@@ -3340,7 +3366,7 @@ TEST_F (DatabaseTest, AVersionThreeDatabaseGrantsItsEditorPathsAndDropsRefusedRo
     }
     EXPECT_EQ (ids, std::vector<std::string>{ "froot_inside" })
     << "a filesystem root, home and its parent are no longer allowed";
-    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+    EXPECT_EQ (pre_migration_snapshots ().size (), 1u);
     std::filesystem::remove_all ("trust-migration");
 }
 
@@ -3542,9 +3568,11 @@ TEST_F (DatabaseTest, AChosenFileThatIsGoneIsReportedWhenTheStepOnlyStamps) {
         save_body (db, "req_gone", binary_body ("/abs/gone.bin"));
     });
 
+    const std::string body = read_stored (TEST_DB_PATH, "requests", "body", "req_gone");
     const auto report = open_and_report_ungranted (TEST_DB_PATH);
-    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    EXPECT_EQ (read_stored (TEST_DB_PATH, "requests", "body", "req_gone"), body)
     << "the step rewrote something, so this did not take the stamp-only path";
+    EXPECT_TRUE (granted_paths (TEST_DB_PATH).empty ());
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_EQ (report.entries, std::vector<std::string>{ "requests|req_gone|/abs/gone.bin" });
     EXPECT_EQ (report.count, 1);
@@ -3815,8 +3843,8 @@ TEST_F (DatabaseTest, AVersionSixDatabaseListsTheSameInOneSiblingOrder) {
     }
 
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
-    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
-    << "no pre-migration backup was written before the shift";
+    EXPECT_EQ (pre_migration_snapshots ().size (), 1u)
+    << "no copy was saved before the shift";
     for (const char* parent : SIBLING_PARENTS) {
         EXPECT_EQ (listed_in_one_space (read_siblings (TEST_DB_PATH, parent)),
         displayed[parent])
@@ -3841,14 +3869,14 @@ TEST_F (DatabaseTest, TheSiblingOrderShiftRunsOnce) {
         Database db (TEST_DB_PATH);
         db.init ();
     }
-    const auto migrated = request_orders (TEST_DB_PATH);
-    std::filesystem::remove (std::string (TEST_DB_PATH) + ".pre-migration.bak");
+    const auto migrated  = request_orders (TEST_DB_PATH);
+    const auto snapshots = pre_migration_snapshots ();
     {
         Database db (TEST_DB_PATH);
         db.init ();
     }
     EXPECT_EQ (request_orders (TEST_DB_PATH), migrated) << "shifted twice";
-    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+    EXPECT_EQ (pre_migration_snapshots (), snapshots);
 
     vayu::tests::remove_database_files (TEST_DB_PATH);
     seed_sibling_workspace (TEST_DB_PATH, vayu::db::SCHEMA_VERSION);
@@ -3859,7 +3887,7 @@ TEST_F (DatabaseTest, TheSiblingOrderShiftRunsOnce) {
     }
     EXPECT_EQ (request_orders (TEST_DB_PATH), numbered)
     << "a version-7 workspace is already in one space";
-    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+    EXPECT_TRUE (pre_migration_snapshots ().empty ());
 }
 
 // A shift SQLite refuses rolls the whole step back: the file stays at version
@@ -3988,8 +4016,8 @@ TEST_F (DatabaseTest, MigratesADatabaseThatPredatesTheElementsColumn) {
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
     EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
-    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
-    << "no pre-migration backup was written";
+    EXPECT_EQ (pre_migration_snapshots ().size (), 1u)
+    << "no copy was saved first";
 
     Database reopened (TEST_DB_PATH);
     reopened.init ();
@@ -4060,6 +4088,190 @@ TEST_F (DatabaseTest, MigratesWhenOnlyOneScriptColumnSurvives) {
     ASSERT_EQ (elements.size (), 1u);
     EXPECT_EQ (elements[0]["kind"], "script.post");
     EXPECT_EQ (elements[0]["config"]["script"], "pm.test('ok', () => {});");
+}
+
+// ==================== The copy before a migration (#2426) ====================
+//
+// `<db>.bak` is refreshed from the migrated file once the engine listens, so a
+// bump with nothing to rewrite used to leave no copy an older engine could
+// open. Every bump now writes `backups/vayu-<stamp>-pre-v<N>.db` first.
+
+namespace {
+
+/// A workspace with `col_1` and two requests in it, closed.
+void seed_two_requests () {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    Collection col;
+    col.id    = "col_1";
+    col.name  = "C";
+    col.order = 0;
+    db.create_collection (col);
+    for (const char* id : { "req_1", "req_2" }) {
+        Request r;
+        r.id            = id;
+        r.collection_id = "col_1";
+        r.name          = id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+}
+
+int64_t count_rows (const std::string& path, const std::string& table) {
+    sqlite3* handle = nullptr;
+    int64_t count   = -1;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        sqlite3_close (handle);
+        return count;
+    }
+    const std::string sql = "SELECT count(*) FROM " + table;
+    sqlite3_stmt* stmt    = nullptr;
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) == SQLITE_OK &&
+    sqlite3_step (stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int64 (stmt, 0);
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return count;
+}
+
+/// The whole of @p path, through `rdbuf ()` for the reason
+/// `db_recovery_test.cpp`'s `read_file` gives.
+std::string file_bytes (const std::string& path) {
+    std::ifstream in (path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << in.rdbuf ();
+    return buffer.str ();
+}
+
+} // namespace
+
+// Mutation check: drop the `snapshot_before_migration` call in
+// `migrate_before_sync` and no snapshot exists.
+TEST_F (DatabaseTest, AStampOnlyBumpLeavesASnapshotAtThePreviousVersion) {
+    // No sub-folder and no file reference, so the step from the previous
+    // version has nothing to rewrite and only stamps.
+    constexpr int64_t previous = vayu::db::SCHEMA_VERSION - 1;
+    seed_two_requests ();
+    set_user_version (TEST_DB_PATH, previous);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    const auto snapshots = pre_migration_snapshots ();
+    ASSERT_EQ (snapshots.size (), 1u);
+    const std::string& snapshot = snapshots.front ();
+    EXPECT_TRUE (snapshot.ends_with ("-pre-v" + std::to_string (previous) + ".db"))
+    << snapshot;
+    EXPECT_EQ (read_user_version (snapshot), previous);
+    EXPECT_EQ (count_rows (snapshot, "requests"), 2);
+    EXPECT_EQ (count_rows (snapshot, "collections"), 1);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+}
+
+TEST_F (DatabaseTest, TheFoldBranchSnapshotKeepsTheLegacyScriptColumns) {
+    seed_unmigrated_script_row ();
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    const auto snapshots = pre_migration_snapshots ();
+    ASSERT_EQ (snapshots.size (), 1u);
+    const std::string& snapshot = snapshots.front ();
+    EXPECT_TRUE (snapshot.ends_with ("-pre-v0.db")) << snapshot;
+    EXPECT_EQ (read_user_version (snapshot), 0);
+    EXPECT_TRUE (table_has_column (snapshot, "requests", "pre_request_script"));
+    EXPECT_EQ (read_stored (snapshot, "requests", "pre_request_script", "req_1"),
+    "pm.environment.set('x', 1);");
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"))
+    << "the live file was not migrated";
+}
+
+// Mutation check: ignore what `snapshot_before_rewrite` answers in
+// `snapshot_before_migration` and the fold runs with no copy.
+TEST_F (DatabaseTest, AFailedSnapshotRefusesToMigrate) {
+    seed_unmigrated_script_row ();
+    const std::string backups =
+    (std::filesystem::path (TEST_DB_PATH).parent_path () / "backups").string ();
+    // A file where the folder goes, so the folder cannot be created.
+    std::ofstream (backups) << "not a directory";
+    const std::string before = file_bytes (TEST_DB_PATH);
+
+    std::string refusal;
+    try {
+        Database db (TEST_DB_PATH);
+        ADD_FAILURE () << "the database was migrated with no copy";
+    } catch (const std::runtime_error& e) {
+        refusal = e.what ();
+    }
+
+    EXPECT_NE (refusal.find (TEST_DB_PATH), std::string::npos) << refusal;
+    EXPECT_NE (refusal.find ("backup directory"), std::string::npos) << refusal;
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 0);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+    EXPECT_EQ (read_legacy_pre_script (), "pm.environment.set('x', 1);");
+    EXPECT_EQ (file_bytes (TEST_DB_PATH), before)
+    << "the database was written to";
+
+    // Once the folder can be created the same file migrates, copy first.
+    std::filesystem::remove (backups);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_EQ (pre_migration_snapshots ().size (), 1u);
+}
+
+// The copy shares `maxBackupsRetained` with the snapshots a user takes, read
+// from the workspace before any `Database` exists. Mutation check: drop the
+// `prune_backup_files` call in `snapshot_before_rewrite` and four remain;
+// answer the default from `configured_backup_retention` and four remain.
+TEST_F (DatabaseTest, ASnapshotIsPrunedToMaxBackupsRetained) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        auto entry = db.get_config_entry ("maxBackupsRetained");
+        ASSERT_HAS_VALUE (entry);
+        entry->value = "3";
+        db.save_config_entry (*entry);
+    }
+    set_user_version (TEST_DB_PATH, vayu::db::SCHEMA_VERSION - 1);
+    const std::filesystem::path backups =
+    std::filesystem::path (TEST_DB_PATH).parent_path () / "backups";
+    std::filesystem::create_directories (backups);
+    const std::vector<std::string> older = { "vayu-20200101-000000-001.db",
+        "vayu-20200101-000000-002.db", "vayu-20200101-000000-003.db" };
+    for (const auto& name : older) {
+        std::ofstream (backups / name) << "an older snapshot";
+    }
+    std::ofstream (backups / "kept-by-hand.db") << "not a name Vayu writes";
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    std::vector<std::string> names;
+    for (const auto& entry : std::filesystem::directory_iterator (backups)) {
+        names.push_back (entry.path ().filename ().string ());
+    }
+    std::sort (names.begin (), names.end ());
+    ASSERT_EQ (names.size (), 4u);
+    EXPECT_EQ (names[0], "kept-by-hand.db");
+    EXPECT_EQ (names[1], older[1]);
+    EXPECT_EQ (names[2], older[2]);
+    EXPECT_TRUE (names[3].ends_with (
+    "-pre-v" + std::to_string (vayu::db::SCHEMA_VERSION - 1) + ".db"))
+    << names[3];
+    std::filesystem::remove_all (backups);
 }
 
 } // namespace

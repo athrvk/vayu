@@ -72,7 +72,8 @@ SNAPSHOT=$(vayu-cli backup)
 
 Exit code 1 with the engine's message on stderr if the daemon is unreachable or
 refuses - including while another backup is still running, which answers `409`.
-How many snapshots are kept is the `maxBackupsRetained` setting; restoring one
+How many snapshots are kept is the `maxBackupsRetained` setting, which also
+counts the copy an update saves before it migrates the workspace; restoring one
 is a manual copy with the engine stopped, described in
 [Architecture](architecture.md#workspace-backups).
 

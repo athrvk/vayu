@@ -35,6 +35,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -601,6 +602,16 @@ struct Database::Impl {
     /// Written once by the constructor, before any thread can read it.
     bool recovery_backup_due = false;
 
+    /// Whether `migrate_before_sync` found the file already at
+    /// `SCHEMA_VERSION`, before this process wrote to it: the start on which
+    /// the safety copies earlier engines left beside it may go (issue #2426).
+    /// Written once by the constructor, before any thread can read it.
+    bool opened_at_current_schema = false;
+
+    /// When the constructor began, so a copy written since is never mistaken
+    /// for one an earlier process left.
+    std::filesystem::file_time_type opened_at;
+
     /// The background refresh of `<db>.bak` (`Database::start_recovery_backup_refresh`).
     /// The connection is published for as long as its `VACUUM INTO` runs so a
     /// shutdown can `sqlite3_interrupt` it; the mutex orders that interrupt
@@ -808,8 +819,12 @@ void recover_database (const std::filesystem::path& db_file,
 const std::filesystem::path& backup_file,
 const std::string& db_path,
 const std::function<ProbeResult (const std::string&)>& probe);
-void migrate_before_sync (const std::string& path,
+/// Whether `migrate_before_sync` copies the workspace into `backups/` before
+/// it raises `user_version` (issue #2426).
+enum class PreMigrationSnapshot : std::uint8_t { Take, Skip };
+bool migrate_before_sync (const std::string& path,
 std::chrono::milliseconds busy_timeout,
+PreMigrationSnapshot snapshot,
 const std::function<void (sqlite3*)>& on_connection = {});
 
 } // namespace vayu::db
