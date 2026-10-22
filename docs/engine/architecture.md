@@ -458,9 +458,12 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
   completion rate, each carrying a message and a trace blob, so an unlimited store grows for the
   whole run and then flushes as an enormous write. Success results are sampled.
-  Because the final report's per-type error breakdown is built by walking those stored
-  records, a run with more errors than the cap gets a breakdown that does not sum to its
-  (exact) total - raise `maxStoredErrors` to keep it complete, or set `0` for unlimited.
+  The per-type error breakdown is exact too: the collector counts each error by type
+  (`error_type_counts`) before the store's cap is checked, and the run summary stores those
+  counts as `error_types` (#2400). Only the per-error detail is a prefix, which the report
+  says as `errors.withDetails`. A run stored before #2400 has no `error_types`, and its
+  breakdown still counts the stored records, so past the cap it covers the first
+  `maxStoredErrors`.
 - **Response sampling**: Stores samples for deferred script validation
 
 ### Script Engine (`QuickJS`)

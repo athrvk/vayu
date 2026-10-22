@@ -37,26 +37,6 @@
 namespace vayu::core {
 
 namespace {
-const char* error_type_name (vayu::ErrorCode code) {
-    switch (code) {
-    case vayu::ErrorCode::Timeout: return "timeout";
-    case vayu::ErrorCode::ConnectionFailed: return "connection_failed";
-    case vayu::ErrorCode::DnsError: return "dns_failed";
-    case vayu::ErrorCode::SslError: return "ssl_error";
-    case vayu::ErrorCode::InvalidUrl: return "invalid_url";
-    case vayu::ErrorCode::InvalidMethod: return "invalid_method";
-    case vayu::ErrorCode::ScriptError: return "script_error";
-    case vayu::ErrorCode::DataBindingFailed: return "data_binding_failed";
-    case vayu::ErrorCode::ProxyError: return "proxy_error";
-    case vayu::ErrorCode::InternalError: return "internal_error";
-    // Only a natural-end drain cancellation reaches a stored trace; a Stop's
-    // is never recorded as an error (`is_stop_cancellation`).
-    case vayu::ErrorCode::Cancelled: return "cancelled";
-    case vayu::ErrorCode::TooManyRedirects: return "too_many_redirects";
-    case vayu::ErrorCode::BadContentEncoding: return "bad_content_encoding";
-    default: return "unknown";
-    }
-}
 /// Stamp the executor's per-completion facts onto the record being built. One
 /// helper for all three branches, so a record kind cannot quietly lose them.
 void annotate (nlohmann::json& record, const ResultAnnotations& annotations) {
@@ -75,7 +55,7 @@ const ResultAnnotations& annotations) {
 
     // Build detailed error trace data
     nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
-        { "error_type", error_type_name (response.error_code) },
+        { "error_type", vayu::error_type_name (response.error_code) },
         { "message", response.error_message },
         { "request_number", context->total_requests () } };
 
@@ -226,7 +206,7 @@ void record_error_result (const std::shared_ptr<RunContext>& context,
 const vayu::Error& error,
 const ResultAnnotations& annotations) {
     nlohmann::json error_json = { { "error_code", static_cast<int> (error.code) },
-        { "error_type", error_type_name (error.code) }, { "message", error.message },
+        { "error_type", vayu::error_type_name (error.code) }, { "message", error.message },
         { "request_number", context->total_requests () } };
     annotate (error_json, annotations);
     context->metrics_collector->record_error (
