@@ -2142,7 +2142,7 @@ struct ConfigEntry {
     std::string key;   // Unique identifier (e.g., "defaultTimeout")
     std::string value; // Current value as string (will be parsed based on type)
     std::string type;  // "integer", "string", "boolean", "number", "enum"
-    std::string label; // Display label (e.g., "Default Request Timeout")
+    std::string label; // Display label (e.g., "Default request timeout")
     std::string description; // Help text for UI
     std::string category; // Grouping (e.g., "server", "scripting", "performance")
     std::string default_value;            // Default value as string

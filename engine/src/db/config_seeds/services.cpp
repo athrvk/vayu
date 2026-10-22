@@ -28,7 +28,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     // stream - no restart - and one run's events are all bounded by a single
     // rule rather than by whatever the setting happened to be at each arrival.
     seed (keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseMaxRetainedEvents",
-    std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer", "Stream Events Retained",
+    std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer", "Stream events retained",
     "How many of a streaming request's events are held in memory for the "
     "Events "
     "timeline. Older ones are dropped as new ones arrive, so this is how far "
@@ -42,7 +42,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (
     keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseMaxEventBytes",
-    std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES), "integer", "Stream Event Size Limit",
+    std::to_string (vayu::core::constants::sse::MAX_EVENT_BYTES), "integer", "Stream event size limit",
     "How much of a single streamed event is kept. A larger event is held as a "
     "prefix and flagged as truncated, never silently cut - the event reports "
     "the size as received either way. This is also what bounds the parser "
@@ -54,7 +54,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("ms") (keywords ({ "eventsource", "server-sent", "event stream" }) (
     ConfigEntry{ "sseMaxStreamDurationMs",
-    std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS), "integer", "Stream Duration Limit",
+    std::to_string (vayu::core::constants::sse::MAX_STREAM_DURATION_MS), "integer", "Stream duration limit",
     "How long a streaming request may run before the engine ends it and says "
     "so. A stream has no content length and no promise to end, so this is the "
     "backstop that keeps one from holding a worker forever. A request may ask "
@@ -65,7 +65,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now })));
 
     seed (keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseMaxStreamEvents",
-    std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS), "integer", "Stream Event Limit",
+    std::to_string (vayu::core::constants::sse::MAX_STREAM_EVENTS), "integer", "Stream event limit",
     "How many events a streaming request may receive before the engine ends it "
     "and says so. The count backstop beside the time one, for a stream that "
     "talks fast rather than long. A request may ask for a lower limit of its "
@@ -76,7 +76,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (unit ("ms") (
     keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseIdleTimeoutMs",
-    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS), "integer", "Stream Idle Timeout",
+    std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS), "integer", "Stream idle timeout",
     "How long a stream may deliver nothing before the engine ends it. This is "
     "the one deadline a stream gets - a whole-transfer timeout would kill a "
     "healthy stream mid-flight - so it must be longer than the quietest gap "
@@ -92,7 +92,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     // truncated and retained by a single rule rather than by whatever the
     // setting happened to be at each arrival.
     seed (unit ("bytes") (ConfigEntry{ "inboxMaxBodyBytes",
-    std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer", "Inbox Capture Body Limit",
+    std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer", "Inbox capture body limit",
     "How much of an inbound webhook body an inbox stores. A larger "
     "payload is kept as a prefix and flagged as truncated, never silently cut "
     "- "
@@ -104,7 +104,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::inbox::MAX_PAYLOAD_BYTES), std::nullopt, now }));
 
     seed (ConfigEntry{ "inboxMaxCaptures",
-    std::to_string (vayu::core::constants::inbox::MAX_CAPTURES), "integer", "Inbox Captures Retained",
+    std::to_string (vayu::core::constants::inbox::MAX_CAPTURES), "integer", "Inbox captures retained",
     "How many requests one inbox keeps before the oldest are dropped. Also the "
     "most a single page of the capture list may ask for. Raise it to keep a "
     "long webhook session whole; every capture is a stored row, so this and "
@@ -114,7 +114,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::inbox::CAPTURES_CEILING), std::nullopt, now });
 
     seed (advanced (unit ("ms") (ConfigEntry{ "inboxLivePollIntervalMs",
-    std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer", "Inbox Live Poll Interval",
+    std::to_string (vayu::core::constants::inbox::LIVE_POLL_INTERVAL_MS), "integer", "Inbox live poll interval",
     "How often a watched inbox checks for newly arrived "
     "captures. This is the delay between a webhook landing and its row "
     "appearing. Lower costs a few more wakeups per second on the one thread "
@@ -133,7 +133,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     // files the OAuth issuer itself.
     seed (unit ("ms") (ConfigEntry{ "oauth2RefreshLeadMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),
-    "integer", "OAuth 2.0 Refresh Lead Time",
+    "integer", "OAuth 2.0 refresh lead time",
     "How far ahead of an access token's expiry a running load "
     "test renews it. Wider than the 45-second skew the token cache already "
     "applies, so the new credential is published while the old one is still "
@@ -146,7 +146,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshMinIntervalMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_MIN_INTERVAL_MS),
-    "integer", "Min OAuth 2.0 Refresh Interval",
+    "integer", "Min OAuth 2.0 refresh interval",
     "Floor on the wait between two mid-run renewals. A token "
     "whose whole lifetime is shorter than the lead time above is always inside "
     "its refresh window, so without this floor a run would re-acquire in a "
@@ -159,7 +159,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now })));
 
     seed (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshRetryMs",
-    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS), "integer", "OAuth 2.0 Refresh Retry Delay",
+    std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MS), "integer", "OAuth 2.0 refresh retry delay",
     "First wait after a mid-run renewal is refused, doubled "
     "per consecutive failure up to the ceiling below. The run keeps sending "
     "the "
@@ -171,7 +171,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshRetryMaxMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_RETRY_MAX_MS),
-    "integer", "Max OAuth 2.0 Refresh Retry Delay",
+    "integer", "Max OAuth 2.0 refresh retry delay",
     "Ceiling on that backoff, so a token endpoint that is "
     "down for an hour costs the run a bounded number of attempts rather than "
     "one every few seconds.",
@@ -180,7 +180,7 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (unit ("ms") (ConfigEntry{ "oauth2RefreshPollIntervalMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_POLL_INTERVAL_MS),
-    "integer", "OAuth 2.0 Refresh Poll Interval",
+    "integer", "OAuth 2.0 refresh poll interval",
     "How often the renewal watchdog wakes while it waits, to "
     "notice that the run has ended. A finished run joins that thread before it "
     "writes its report, so this bounds how long the run's last moments take. "

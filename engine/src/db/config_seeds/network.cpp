@@ -55,7 +55,7 @@ std::string proxy_mode_options_json () {
 // =============================================================================
 void seed_network (ConfigSeeder& seed, int64_t now) {
     seed (unit ("ms") (keywords ({ "deadline", "give up", "hang" }) (ConfigEntry{ "defaultTimeout",
-    std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default Request Timeout",
+    std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default request timeout",
     "How long an HTTP request may run before it is abandoned, "
     "when the request does not set a timeout of its own. Raise it for slow "
     "endpoints; lower it to fail faster.",
@@ -65,7 +65,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now })));
 
     seed (keywords ({ "h2", "alpn" }) (ConfigEntry{ "defaultHttpVersion",
-    vayu::to_string (vayu::DEFAULT_HTTP_VERSION), "enum", "Default HTTP Version",
+    vayu::to_string (vayu::DEFAULT_HTTP_VERSION), "enum", "Default HTTP version",
     "Protocol a newly created request starts with. Auto lets the server and "
     "client negotiate (HTTP/2 where available, falling back to HTTP/1.1). "
     "Changing this does not alter requests that already exist.",
@@ -74,7 +74,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
 
     seed (keywords ({ "concurrency", "parallel" }) (ConfigEntry{
     "eventLoopMaxConcurrent", std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
-    "integer", "Max Concurrent Requests (Per Worker)",
+    "integer", "Max concurrent requests (per worker)",
     "How many requests one worker keeps in flight at once. Higher values use "
     "more file descriptors and push the target harder. Read when a load test "
     "starts, so a change applies to the next run.",
@@ -82,7 +82,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "1", "10000", std::nullopt, now }));
 
     seed (keywords ({ "socket", "pool" }) (ConfigEntry{ "eventLoopMaxPerHost",
-    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max Connections Per Host (Per Worker)",
+    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max connections per host (per worker)",
     "Concurrency limit for a specific target API host. Critical for respecting "
     "target rate limits. "
     "Lower values are gentler on the target; higher values maximize "
@@ -91,7 +91,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "1", "1000", std::nullopt, now }));
 
     seed (unit ("sec") (keywords ({ "ttl" }) (ConfigEntry{ "dnsCacheTimeout",
-    std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS), "integer", "DNS Cache Timeout",
+    std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS), "integer", "DNS cache timeout",
     "How long a resolved hostname is reused before it is looked up "
     "again. 0 forces a fresh lookup on every request; 60 to 300 seconds suits "
     "a "
@@ -125,7 +125,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "kind - http, https, socks4, socks4a, socks5, socks5h - and credentials in "
     "the URL are sent as basic proxy authentication. An https proxy is "
     "verified against the same trust as the target - this computer's "
-    "certificates plus Custom CA Certificates - and the same Verify TLS "
+    "certificates plus Custom CA certificates - and the same Verify TLS "
     "certificate switch.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
@@ -141,7 +141,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     // it - said in the description rather than enforced, because a read-only
     // entry type would be a new concept in the config table for one row.
     seed (keywords ({ "wpad", "autoconfig", "automatic" }) (
-    ConfigEntry{ "proxySystemUrl", "", "string", "System Proxy (resolved)",
+    ConfigEntry{ "proxySystemUrl", "", "string", "System proxy (resolved)",
     "The proxy this computer is configured with, as the app resolved it when "
     "it started and whenever the network changed. Read only when Proxy is set "
     "to From system; empty means nothing resolved - a direct configuration, or "
@@ -154,7 +154,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     seed (keywords ({ "exclude", "whitelist", "intranet" }) (
-    ConfigEntry{ "proxyBypass", "", "string", "Proxy Bypass List",
+    ConfigEntry{ "proxyBypass", "", "string", "Proxy bypass list",
     "Hosts that skip the proxy, comma-separated. A leading dot matches a "
     "domain and everything under it (.internal.example.com), and a single * "
     "bypasses the proxy for every host. Under Manual this list is the whole "
@@ -171,7 +171,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     // same reason. What each of them adds is shown in the Headers tab as a row
     // the request can switch off; none of it is stored in the request.
     seed (keywords ({ "gzip", "brotli", "deflate", "zstd" }) (ConfigEntry{
-    "negotiateCompression", "true", "boolean", "Negotiate Compressed Responses",
+    "negotiateCompression", "true", "boolean", "Negotiate compressed responses",
     "Asks servers for a compressed response - the Accept-Encoding header a "
     "browser, Postman and curl --compressed all send - and decodes it before "
     "you see it. Response sizes and times then describe what production does. "
@@ -183,7 +183,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "network_performance", "true", std::nullopt, std::nullopt, std::nullopt, now }));
 
     seed (keywords ({ "gzip", "brotli", "zstd", "throughput" }) (ConfigEntry{
-    "loadNegotiateCompression", "true", "boolean", "Negotiate Compressed Responses (Load Tests)",
+    "loadNegotiateCompression", "true", "boolean", "Negotiate compressed responses (load tests)",
     "The same decision for a load run, kept separate because compression is "
     "part of what a load test measures: with it on, the bytes counted are what "
     "the server sent and the sizes reported are what Vayu decoded; with it "
@@ -203,7 +203,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "network_performance", "false", std::nullopt, std::nullopt, std::nullopt, now }));
 
     seed (keywords ({ "tracing", "x-request-id", "debugging" }) (
-    ConfigEntry{ "correlationIdEnabled", "false", "boolean", "Correlation Id",
+    ConfigEntry{ "correlationIdEnabled", "false", "boolean", "Correlation ID",
     "Adds a header carrying a fresh identifier to every request, so one send "
     "or one iteration of a load run can be found in a server's logs. Off by "
     "default: it is a header your server did not ask for, and a gateway that "
@@ -231,7 +231,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     // database, extending the platform's own anchors rather than replacing
     // them; see `resolve_transport_policy`.
     seed (keywords ({ "firewall", "mitm", "zscaler", "ssl" }) (
-    ConfigEntry{ "customCaCertificates", "", "text", "Custom CA Certificates",
+    ConfigEntry{ "customCaCertificates", "", "text", "Custom CA certificates",
     "Certificate authorities to trust in addition to the ones this platform "
     "already trusts, pasted as PEM text (one or more -----BEGIN "
     "CERTIFICATE----- blocks). This is what makes a corporate TLS-inspecting "

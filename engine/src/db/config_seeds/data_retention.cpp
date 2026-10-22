@@ -24,7 +24,7 @@ namespace vayu::db::config_seeds {
 void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     seed (ConfigEntry{ "maxStoredErrors",
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
-    "integer", "Stored Error Records Per Run",
+    "integer", "Stored error records per run",
     "How many individual error records a run keeps for its report. The error "
     "total, the failed-request count, the error rate, the status-code "
     "breakdown and the 'By Error Type' breakdown are always exact - this "
@@ -36,8 +36,8 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     "0", "10000000", std::nullopt, now });
 
     seed (unit ("bytes") (ConfigEntry{ "maxTraceBodyBytes",
-    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer", "Max Stored Trace Body Size",
-    "Largest request or response body kept in a design run's stored "
+    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer", "Max stored trace body size",
+    "Largest request or response body kept in a Send's stored "
     "trace. A larger body is truncated in the database - the response viewer "
     "says so, and re-sending fetches the full body - so one huge response does "
     "not bloat storage forever.",
@@ -48,9 +48,9 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (ConfigEntry{ "maxSampleBodyBytes",
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
-    "integer", "Max Captured Sample Body",
+    "integer", "Max captured sample body",
     "Largest response body kept for a single captured load-run "
-    "sample. Deliberately far smaller than the design-run trace limit, because "
+    "sample. Deliberately far smaller than the Send trace limit, because "
     "a load run captures tens of exchanges nobody asked for individually. A "
     "larger body is stored truncated and marked as such.",
     "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES),
@@ -60,7 +60,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (ConfigEntry{ "maxSampleBytes",
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES),
-    "integer", "Load-Run Capture Budget",
+    "integer", "Load-run capture budget",
     "How much captured response-body data one load run may store. Once spent, "
     "samples keep their headers and metadata and only their bodies are "
     "dropped, and the report says how many. Captured data is stored verbatim, "
@@ -72,7 +72,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (ConfigEntry{ "maxResponseSampleBytes",
     std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES),
-    "integer", "Load-Run Validation Sample Budget",
+    "integer", "Load-run validation sample budget",
     "How much response-body data one load run may hold for its post-run test "
     "scripts and schema checks. These bodies are kept whole - a truncated one "
     "would fail a check the target passed - so past the budget whole samples "
@@ -85,7 +85,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (ConfigEntry{ "maxScenarioStoredSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
-    "integer", "Max Stored Scenario Steps",
+    "integer", "Max stored scenario steps",
     "How many per-step results one collection run keeps, which bounds what a "
     "long run costs the dashboard to load. Steps that failed, errored or were "
     "skipped are kept first and successes fill the rest, so raising this buys "
@@ -95,7 +95,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     "0", "1000000", std::nullopt, now });
 
     seed (keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseMaxStoredEvents",
-    std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS), "integer", "Stream Events Stored Per Run",
+    std::to_string (vayu::core::constants::sse::MAX_STORED_EVENTS), "integer", "Stream events stored per run",
     "How many events a finished streaming run keeps on disk, so reopening it "
     "from History shows the timeline again. A run that received more says so - "
     "the stored list is marked truncated and carries the true total. 0 keeps "
@@ -105,7 +105,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now }));
 
     seed (keywords ({ "cleanup" }) (ConfigEntry{ "maxRunsRetained",
-    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer", "Max Runs Retained",
+    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer", "Max runs retained",
     "Keep at most this many most-recent load tests and collection runs; older "
     "ones, with their metrics and results, are pruned at startup and after "
     "each run finishes. Single-request Sends are counted separately and never "
@@ -118,7 +118,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     seed (keywords ({ "cleanup", "request history" }) (
     ConfigEntry{ "maxDesignRunsRetained",
     std::to_string (vayu::core::constants::database::MAX_DESIGN_RUNS_RETAINED),
-    "integer", "Max Sends Retained",
+    "integer", "Max Sends retained",
     "Keep at most this many most-recent single-request Sends in History; "
     "older ones, with their responses, are pruned at startup and after each "
     "Send. Load tests and collection runs are counted separately. A higher "
@@ -129,7 +129,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (
     unit ("days") (keywords ({ "cleanup" }) (ConfigEntry{ "runRetentionDays",
-    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer", "Run Retention",
+    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer", "Run retention",
     "Delete runs older than this age, with their metrics and results, at "
     "startup and after each run finishes. A higher value - or 0 to keep runs "
     "forever - retains more history at the cost of a larger database file on "
@@ -138,7 +138,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     "0", "3650", std::nullopt, now })));
 
     seed (unit ("days") (keywords ({ "recycle bin", "recover", "cleanup" }) (ConfigEntry{ "trashRetentionDays",
-    std::to_string (vayu::core::constants::database::TRASH_RETENTION_DAYS), "integer", "Trash Retention",
+    std::to_string (vayu::core::constants::database::TRASH_RETENTION_DAYS), "integer", "Trash retention",
     "Deleted collections and requests are kept in the Trash this long before "
     "they are destroyed for good; the sweep runs when Vayu starts. Until then "
     "they can be restored exactly as they were. A higher value - or 0 to keep "
@@ -149,7 +149,7 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (
     keywords ({ "restore", "cleanup" }) (ConfigEntry{ "maxBackupsRetained",
-    std::to_string (vayu::core::constants::database::MAX_BACKUPS_RETAINED), "integer", "Max Backups Retained",
+    std::to_string (vayu::core::constants::database::MAX_BACKUPS_RETAINED), "integer", "Max backups retained",
     "Keep at most this many workspace snapshots in the backups folder beside "
     "the database; older ones are removed after each new backup. Each snapshot "
     "is a compacted copy of the whole workspace - collections, environments, "
