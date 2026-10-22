@@ -53,8 +53,11 @@ interface DraftSaveContextOptions {
 	/**
 	 * Persist the draft. Rejecting is how a failure is reported; rejecting with
 	 * `SaveBlockedError` says the edit was deliberately not sent and is still unsaved.
+	 * A save that reports its own failure through `failSave` and resolves (the
+	 * canned reply, whose Apply button shares this function) returns the verdict
+	 * instead, or the resolution reads as `saved`.
 	 */
-	save: () => Promise<void>;
+	save: () => Promise<SaveOutcome | void>;
 	/**
 	 * Asked on every dirty-to-clean edge: true when the draft was thrown away
 	 * (`useEntityDraft`'s `consumeDiscard`), so the Dock goes idle rather than
@@ -89,8 +92,7 @@ export function useDraftSaveContext({
 
 	const runSave = useCallback(async (): Promise<SaveOutcome> => {
 		try {
-			await saveRef.current();
-			return "saved";
+			return (await saveRef.current()) ?? "saved";
 		} catch (error) {
 			// The editor chose not to send (an incomplete element): not a failure, so
 			// no toast and no "Not saved" - the edit is still unsaved, which is what

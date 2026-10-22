@@ -798,11 +798,18 @@ A context that resolves with nothing (`SettingsMain`, `VariableTableEditor`,
 `variable-commit`) is judged by the status it published, as before: `error` is
 `failed`, and `pending` (#1381) is `pending`, because a context that saw an edit
 land mid-write publishes it for the payload that went out not holding that edit.
-A context that resolves having published through `failSave` - `SettingsMain`,
-`VariableTableEditor`, `variable-commit` and the inbox's `CannedResponseControls`
-(whose `persist` catches its own rejection) - cannot report `"disk-full"`: `failSave` takes the message, not the error, so such a context
-reads `failed` even when its write met a 507, and the quit prompt keeps its
-generic wording for it. Otherwise `runSave` fills in the silence. The `pending` that
+A context that resolves having published through `failSave` - `SettingsMain` and
+`variable-commit` - names a 507 by handing `failSave` the error:
+`failSave(message, error)`. The store records whether that error was a 507
+(`lastErrorDiskFull`, written and cleared with `lastErrorMessage`), and the
+published `error` then reads `"disk-full"` rather than `"failed"` (#2685). A
+`failSave` call with no cause, or a later one with a different cause, replaces
+it, so the flag always describes the failure now on the Dock. `VariableTableEditor`
+passes the error too, but its save also rejects, so `runSave`'s catch reaches the
+same verdict. The inbox's `CannedResponseControls` (whose `persist` catches its
+own rejection, so it must not rethrow: the wrapper would toast a second time)
+returns the verdict from `persist` instead, which `useDraftSaveContext` forwards;
+a bare resolution there would read `saved`. Otherwise `runSave` fills in the silence. The `pending` that
 `completeSaveThenIdle` itself publishes while a sibling is dirty is not read back
 as the next void context's own.
 

@@ -35,6 +35,8 @@ import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import type { InboxCannedResponse, KeyValueItem } from "@/types";
 import { useDraftSaveContext } from "@/hooks";
 import { useSaveStore, useToastStore } from "@/stores";
+import type { SaveOutcome } from "@/stores/save-store";
+import { isDiskFullError } from "@/lib/disk-full";
 import { cn } from "@/lib/utils";
 import { STANDARD_HEADERS } from "@/constants/http";
 
@@ -199,9 +201,10 @@ export function CannedResponseControls({
 	 * does. Registered below as this reply's save, so this same function is
 	 * what a quit flush or Ctrl/Cmd+S runs - `useDraftSaveContext` wraps it in
 	 * its own `failSave` catch, which never fires here since this already
-	 * resolves instead of throwing.
+	 * resolves instead of throwing. It resolves with the verdict for that
+	 * reason: a bare resolution counts as saved, which a refused apply is not.
 	 */
-	const persist = async () => {
+	const persist = async (): Promise<SaveOutcome | void> => {
 		const next = collect();
 		if (!next) return;
 		startSaving();
@@ -212,8 +215,10 @@ export function CannedResponseControls({
 			failSave(
 				error instanceof Error
 					? `Couldn't update the response - ${error.message}`
-					: "Couldn't update the response"
+					: "Couldn't update the response",
+				error
 			);
+			return isDiskFullError(error) ? "disk-full" : "failed";
 		}
 	};
 

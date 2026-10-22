@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSaveStore, useToastStore } from "@/stores";
+import { ApiError } from "@/services/http-client";
 import type { InboxCannedResponse } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
 
@@ -393,5 +394,46 @@ describe("the hint stacks under the controls, never sharing their row", () => {
 		const hint = screen.getByText(/stopped, so nothing is being served/);
 		const row = screen.getByLabelText("Reply status").closest(".flex-wrap");
 		expect(row?.contains(hint)).toBe(false);
+	});
+});
+
+describe("a reply apply refused at quit (#2685)", () => {
+	/** Edit the status and run the quit-time flush against an `onApply` that rejects. */
+	async function flushRefusedApply(error: Error) {
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn().mockRejectedValue(error)}
+			/>
+		);
+		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "503" } });
+		await waitFor(() =>
+			expect(useSaveStore.getState().contexts.get("inbox-reply")?.hasPendingChanges).toBe(
+				true
+			)
+		);
+		return useSaveStore.getState().flushAll();
+	}
+
+	it("reaches the quit prompt as disk-full when the engine answered 507", async () => {
+		const result = await flushRefusedApply(
+			new ApiError(507, "insufficient_storage", "The disk holding Vayu's data is full")
+		);
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0, reason: "disk-full" });
+		// The verdict above is `persist`'s own return; this is the cause it handed
+		// `failSave`, which is what a silent sibling would be judged by.
+		expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
+		// `persist` resolves with its verdict rather than rethrowing, so the
+		// failure is toasted once, not once by `persist` and again by the wrapper.
+		expect(useToastStore.getState().toasts).toHaveLength(1);
+	});
+
+	it("is a failure with no cause for any other rejection", async () => {
+		const result = await flushRefusedApply(new ApiError(503, "unavailable", "busy"));
+
+		expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
 	});
 });
