@@ -224,10 +224,9 @@ namespace vayu::http {
  *
  * `file_name` when the part declares one, else the basename of `src`, with
  * separators for both platforms because the path is whatever the client on this
- * machine wrote. It mirrors what the transfer setup hands libcurl
- * (`curl_mime_filedata` declares the basename, an explicit `curl_mime_filename`
- * overrides it), so nothing that shows a part can name one thing while the send
- * names another.
+ * machine wrote. The transfer setup hands libcurl exactly this
+ * (`curl_mime_filename`), so nothing that shows a part can name one thing while
+ * the send names another.
  *
  * The path itself is deliberately not part of any answer built from this: it
  * discloses this machine's layout to anything a script logs and adds nothing the
@@ -235,5 +234,17 @@ namespace vayu::http {
  * #1003) are the two surfaces that show a part, and they show this.
  */
 [[nodiscard]] std::string declared_file_name (const FormField& field);
+
+/**
+ * @brief The Content-Type a file part is sent with.
+ *
+ * `content_type` when the part declares one. Otherwise the type its declared
+ * filename's extension names, then the type `src`'s names, then
+ * `application/octet-stream`, from libcurl's own ten-entry table
+ * (`Curl_mime_contenttype`, case-insensitive): what `curl_mime_filedata` sent
+ * when libcurl read the part by path, kept when the part moved onto the plan's
+ * open file (#2416), which libcurl types by filename alone.
+ */
+[[nodiscard]] std::string file_part_content_type (const FormField& field);
 
 } // namespace vayu::http

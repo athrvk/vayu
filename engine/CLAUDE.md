@@ -1023,11 +1023,29 @@ logged as a warning: it means a client skipped composition.
   database older than version 4, left unmarked) and removed the key.
   `FilePlan` applies the rule once per design send (`execute_exchange`, the
   stream branch) and once per run at plan time (`plan_load_files`,
-  `plan_step_files`), reading a file of at most `INLINE_FILE_LIMIT` once and
-  sharing its bytes; executors only `fill` from it, and
-  `validate_transferable` refuses a binary body no plan checked. A new driver
-  that sends a request body goes through a `FilePlan`, never straight to the
-  client.
+  `plan_step_files`), reading a binary body of at most `INLINE_FILE_LIMIT`
+  once and sharing its bytes; executors only `fill` from it, and
+  `validate_transferable` refuses a binary body or file part no plan checked
+  (`unplanned_file_ref`). **A form-data file part is read from what the check
+  approved, never from `src` again** (#2416): the plan opens the canonical
+  path `FileAccessPolicy::approved_path` answered through
+  `platform::open_regular_file` (`O_NOFOLLOW`, then `fstat` for a regular
+  file), and every copy of the request carries that `ApprovedFile`
+  (`FormField::approved`, never serialised). The plan itself keeps one only
+  for a path the run's own request names (`PartFiles::KeptByPlan`, keyed by
+  canonical path), so a run shares one open file; a path a data row binds is
+  approved at plan time and kept by no one, and `fill` opens it for that
+  request alone, through the rule again, because a data file of thousands of
+  rows would otherwise hold a descriptor per row. `attach_multipart` reads it with
+  `curl_mime_data_cb` at the transfer's own offset (`pread`) and sets the
+  filename and `file_part_content_type` itself. What remains: `O_NOFOLLOW`
+  covers the last component only, so a parent directory swapped for a link
+  between the canonicalisation and the open is followed; Windows opens the
+  canonical path following a final reparse point, because a cloud placeholder
+  is one; and the approved file's content can still change under the handle
+  (the size is the open's, and a file truncated below it fails the transfer).
+  A new driver that sends a request body goes through a `FilePlan`, never
+  straight to the client.
 
 ## Request composition (engine-owned - POST /compose)
 
