@@ -2087,11 +2087,13 @@ nlohmann::json get_script_completions () {
     ". crypto-js answers the same object as the CryptoJS global. uuid is npm's "
     "uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and "
     "the module is itself callable, so uuid() is a v4. lodash is npm's lodash "
-    "4.17.21 and answers the same object as the _ global. Any other name "
-    "throws \"Cannot find module\" and lists the shelf: nothing is read from "
-    "disk or fetched.\n\nExample:\nconst CryptoJS = require('crypto-js');\n"
+    "4.17.21 and answers the same object as the _ global. moment is npm's "
+    "moment 2.31.0, English only, with no moment-timezone, and has no global. "
+    "Any other name throws \"Cannot find module\" and lists the shelf: nothing "
+    "is read from disk or fetched.\n\nExample:\n"
+    "const CryptoJS = require('crypto-js');\n"
     "const uuid = require('uuid');\nconst id = uuid();\n"
-    "const _ = require('lodash');" },
+    "const _ = require('lodash');\nconst moment = require('moment');" },
     { "sortText", "2_require" } });
 
     // `any`: lodash's few hundred members are not restated here, and a partial

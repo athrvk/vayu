@@ -429,7 +429,7 @@ Notes:
   an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. A Postman script that
   calls an API Vayu does not run (`require()` of anything but `crypto-js`,
-  `uuid` and `lodash`, a bundled library such as `moment`) imports
+  `uuid`, `lodash` and `moment`, a bundled library such as `tv4`) imports
   and throws at first run, so `meta.unsupportedScriptApis` (issue
   [#2576](https://github.com/athrvk/vayu/issues/2576); `[{request, names}]`, absent
   when empty) names those requests in both tools' result, `meta` riding whole.

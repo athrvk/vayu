@@ -14,10 +14,11 @@
  * there is no loader behind it, so nothing reads a file or the network. A
  * library is Vayu's own source (the crypto-js shim) or a vendored npm build
  * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
- * around it (`uuid`, #2650; `lodash`, #2651). A library global (`CryptoJS`,
- * `_`) is an accessor that loads its library on first read and then replaces
- * itself with the value, as `responseCookies` does; a library with no global
- * is reached only through `require`, as in Postman.
+ * around it (`uuid`, #2650; `lodash`, #2651; `moment`, #2652). A library
+ * global (`CryptoJS`, `_`) is an accessor that loads its library on first read
+ * and then replaces itself with the value, as `responseCookies` does; a library
+ * with no global (`uuid`, `moment`) is reached only through `require`, as in
+ * Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
  * context is built: every script gets a freshly built context
@@ -29,6 +30,7 @@
 
 #include "pm/pm_internal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -43,8 +45,11 @@
 
 #include "crypto_js_shim.hpp"
 #include "lodash_glue.hpp"
+#include "moment_glue.hpp"
 #include "uuid_glue.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/embedded/lodash_js.hpp"
+#include "vayu/embedded/moment_js.hpp"
 #include "vayu/embedded/uuid_js.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/digest.hpp"
@@ -169,6 +174,7 @@ constexpr auto SHELF = std::to_array<ShelfLibrary> ({
 { CRYPTO_JS_MODULE, {}, CRYPTO_JS_SHIM, {}, crypto_js_natives },
 { UUID_MODULE, UUID_GLUE_OPEN, vayu::runtime::embedded::UUID_JS, UUID_GLUE_CLOSE, uuid_natives },
 { LODASH_MODULE, LODASH_GLUE_OPEN, vayu::runtime::embedded::LODASH_JS, LODASH_GLUE_CLOSE, nullptr },
+{ MOMENT_MODULE, MOMENT_GLUE_OPEN, vayu::runtime::embedded::MOMENT_JS, MOMENT_GLUE_CLOSE, nullptr },
 });
 
 // The import scan reads SHELF_MODULE_NAMES; a library here that is not there
@@ -227,8 +233,46 @@ std::string shelf_names () {
     return names;
 }
 
+/// Holds the runtime's stack budget at SHELF_LIBRARY_STACK_SIZE (or the
+/// script's own, when that is larger) for as long as it lives, and puts the
+/// script's budget back on every exit. A library is Vayu's own source, so how
+/// deep its parse goes is not the script's to budget; the script's recursion
+/// after the library is loaded still is.
+class LibraryStackBudget {
+    public:
+    explicit LibraryStackBudget (JSContext* ctx)
+    : runtime_ (JS_GetRuntime (ctx)),
+      state_ (static_cast<RuntimeState*> (JS_GetRuntimeOpaque (runtime_))) {
+        // 0 is "no limit": there is nothing to raise.
+        if (state_ == nullptr || state_->stack_size == 0) {
+            state_ = nullptr;
+            return;
+        }
+        JS_SetMaxStackSize (runtime_,
+        std::max (state_->stack_size,
+        vayu::core::constants::script_engine::SHELF_LIBRARY_STACK_SIZE));
+    }
+
+    ~LibraryStackBudget () {
+        if (state_ != nullptr) {
+            JS_SetMaxStackSize (runtime_, state_->stack_size);
+        }
+    }
+
+    LibraryStackBudget (const LibraryStackBudget&)            = delete;
+    LibraryStackBudget& operator= (const LibraryStackBudget&) = delete;
+    LibraryStackBudget (LibraryStackBudget&&)                 = delete;
+    LibraryStackBudget& operator= (LibraryStackBudget&&)      = delete;
+
+    private:
+    JSRuntime* runtime_;
+    /// Null when the budget was left alone.
+    RuntimeState* state_;
+};
+
 /// Evaluates @p library's source and builds its module.
 JSValue evaluate_library (JSContext* ctx, const ShelfLibrary& library) {
+    const LibraryStackBudget stack_budget (ctx);
     // A std::string carries the terminator JS_Eval reads past the length.
     std::string source;
     source.reserve (

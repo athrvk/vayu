@@ -557,6 +557,20 @@ constexpr size_t MEMORY_LIMIT = size_t{ 64 } * 1024 * 1024;
 constexpr uint64_t TIMEOUT_MS = 5000;
 /// Stack size for the script engine in bytes (256KB)
 constexpr size_t STACK_SIZE = size_t{ 256 } * 1024;
+/**
+ * @brief Stack budget while a bundled `require()` library (lodash, moment) is
+ *        evaluated, in bytes (768KB).
+ *
+ * That source is Vayu's own vendored code, so its parse depth is not the
+ * user's to budget, and a frame is a different size on every toolchain: MSVC
+ * at /Od under ASan overflowed `STACK_SIZE` inside QuickJS's own parser on
+ * lodash (73KB) and moment (61KB). A library evaluates under the larger of
+ * this and the script's own budget, then the script's budget is restored.
+ * It must fit the thread that runs the script with room to spare: 1MB is the
+ * smallest stack an engine thread has (Windows), and the limit is measured
+ * from where the runtime was built, a little way down it.
+ */
+constexpr size_t SHELF_LIBRARY_STACK_SIZE = size_t{ 768 } * 1024;
 /// Whether to enable console output from scripts
 constexpr bool ENABLE_CONSOLE = true;
 /**
