@@ -32,6 +32,7 @@ import {
 	SpecBundleTooLargeError,
 	type ExternalRefIntake,
 } from "./ref-bundler";
+import { ApiError, EngineUnreachableError } from "@/services/http-client";
 
 /**
  * A JSON Pointer walk, here rather than imported: the importer's own resolver
@@ -511,6 +512,51 @@ describe("bundleExternalRefs - what a spec may make Vayu fetch or read (#1782)",
 		});
 		expect(missing.refused).toEqual([]);
 		expect(missing.unresolvedRefs).toBe(1);
+	});
+
+	describe("names what the engine answered for a ref it did not fetch (issue #2605)", () => {
+		const REFUSED_PEER =
+			"Couldn't fetch the document: Cannot send this request: Vayu does not fetch a reference from a loopback or link-local address other than its source document's own host and port - not when the URL names one and not when a host name resolves to one";
+
+		it.each([
+			["a redirect", new ApiError(502, "BAD_GATEWAY", "The server answered HTTP 302")],
+			["a refused local peer", new ApiError(502, "BAD_GATEWAY", REFUSED_PEER)],
+			["a missing route", new ApiError(404, "NOT_FOUND", "HTTP 404: Not Found")],
+		])("%s", async (_name, error) => {
+			const fetchUrl = vi.fn(async () => {
+				throw error;
+			});
+			const result = await bundleExternalRefs(
+				specReferencing("https://cdn.acme.dev/c.json"),
+				{
+					maxBytes: ROOMY,
+					parseDocument,
+					fetchUrl,
+				}
+			);
+			expect(result.refused).toEqual([
+				{ target: "https://cdn.acme.dev/c.json", reason: error.message },
+			]);
+			expect(result.unresolvedRefs).toBe(1);
+			expect(result.fetched).toEqual([]);
+		});
+
+		it("leaves an engine that could not be reached, and any other failure, unnamed", async () => {
+			for (const error of [new EngineUnreachableError("down"), new Error("boom")]) {
+				const result = await bundleExternalRefs(
+					specReferencing("https://cdn.acme.dev/c.json"),
+					{
+						maxBytes: ROOMY,
+						parseDocument,
+						fetchUrl: vi.fn(async () => {
+							throw error;
+						}),
+					}
+				);
+				expect(result.refused).toEqual([]);
+				expect(result.unresolvedRefs).toBe(1);
+			}
+		});
 	});
 
 	// The engine holds a $ref fetch to a stricter rule than a typed URL (issue #2364),
