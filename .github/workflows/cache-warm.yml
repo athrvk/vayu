@@ -286,6 +286,25 @@ jobs:
           done
           echo "All ${#files[@]} workflows agree."
 
+      - name: Assert every container leg re-points vcpkg's binary cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Without that step a container leg's vcpkg archives land where its
+          # cache step never looks, and actions/cache only warns about it. The
+          # whole trimmed line is compared, so this step's own text cannot
+          # match.
+          want='run: echo "VCPKG_BINARY_SOURCES=clear;files,$GITHUB_WORKSPACE/.vcpkg-archives,readwrite" >> "$GITHUB_ENV"'
+          for f in release.yml pr-tests.yml cache-warm.yml; do
+            p=".github/workflows/$f"
+            n=$(awk -v want="$want" '{ line = $0; sub(/^[[:space:]]+/, "", line) } line == want { n++ } END { print n + 0 }' "$p")
+            if [ "$n" -ne 1 ]; then
+              echo "::error::$p carries the VCPKG_BINARY_SOURCES re-point $n times, not once - its container leg would save an empty vcpkg cache." >&2
+              exit 1
+            fi
+            echo "  $f  re-points vcpkg's binary cache"
+          done
+
       - name: Assert engine/vcpkg.json carries no version field
         shell: bash
         run: |
