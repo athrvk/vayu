@@ -144,6 +144,7 @@ add_executable(vayu_tests
     run_origin_test.cpp
     request_body_depth_test.cpp
     request_body_parse_scan_test.cpp
+    user_error_wording_scan_test.cpp
     execute_auth_provenance_test.cpp
     execute_binary_body_test.cpp
     execute_transport_failure_test.cpp
