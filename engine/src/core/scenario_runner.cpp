@@ -99,6 +99,8 @@ bool script_errored (const vayu::ScriptResult& result) {
  * its scripts reported, and a script that threw is `Errored` rather than
  * `Failed`, because "the assertion did not hold" and "the assertion never ran"
  * are different facts and only the first one means the run learned something.
+ * Each slot holds every level's scripts folded together (#2522), so a throw or
+ * a failed test at the collection or a folder counts as the request's would.
  */
 void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRecord& record) {
     if (exchange.response.has_error ()) {
@@ -108,8 +110,8 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
     }
     if (script_errored (exchange.pre_script_result)) {
         record.outcome = StepOutcome::Errored;
-        record.error =
-        "Pre-request script failed - " + exchange.pre_script_result.error_message;
+        record.error   = vayu::http::routes::script_failure_text (
+        exchange.pre_script_result, "pre-request");
         return;
     }
     // After the script check and before everything that reads a response: a
@@ -122,7 +124,8 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
     }
     if (script_errored (exchange.post_script_result)) {
         record.outcome = StepOutcome::Errored;
-        record.error = "Test script failed - " + exchange.post_script_result.error_message;
+        record.error =
+        vayu::http::routes::script_failure_text (exchange.post_script_result, "test");
         return;
     }
     if (auto failed = describe_failed_tests (

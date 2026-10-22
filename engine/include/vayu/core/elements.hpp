@@ -288,10 +288,11 @@ struct ElementContext {
     /// always bind this).
     std::function<vayu::ScriptResult (const std::string& script)> run_pre_script;
     std::function<vayu::ScriptResult (const std::string& script)> run_post_script;
-    /// Where `script.pre` / `script.post` write the result of the callbacks
-    /// above, so the caller's `ExchangeOutcome`-shaped result carries it under
-    /// the same two fields it always has - nothing the response view or the
-    /// step trace's `scripts` node reads changes shape.
+    /// Where `script.pre` / `script.post` fold the result of the callbacks
+    /// above, one level after another (#2522: appended and stamped with
+    /// `element_scope`, never assigned, so a collection-level test survives
+    /// the request's own script and an `assert.*` result or a controller's
+    /// `control` written earlier survives a later script).
     vayu::ScriptResult& pre_script_result;
     vayu::ScriptResult& post_script_result;
 
@@ -324,6 +325,10 @@ struct ElementContext {
     /// `Element::apply` keeps one signature for every kind.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string element_id{};
+    /// This element's `CompiledElement::scope`, set beside `element_id`:
+    /// the level a script or assertion result is attributed to (#2522).
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string element_scope{};
     /// 0-based, as `pm.info.iteration` reports it - unset (0) for a design
     /// send, which has no iteration to report. Read only by a kind whose
     /// state must reset every iteration (`control.transaction`'s
@@ -735,6 +740,11 @@ struct CompiledElement {
     std::string id;
     std::string kind;
     nlohmann::json origin;
+    /// `"collection"`, `"folder"` or `"request"` (#2522): `origin.scope`, or
+    /// for an origin stamped without one, `origin.kind`; empty when neither
+    /// names a level. Read once here so the pipeline does not parse `origin`
+    /// per apply.
+    std::string scope;
     nlohmann::json config;
     bool enabled = true;
     /// Null for a kind with no `compile` (`inherit.disable` never reaches

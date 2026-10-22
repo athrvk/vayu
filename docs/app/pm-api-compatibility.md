@@ -631,6 +631,15 @@ list showed the test script's alone - the step was failed by an assertion
 nothing named. A result restored from a run stored before that carries no
 `source` and reads as the test script's.
 
+**Collection and folder scripts assert too, and every level is reported**
+(#2522), as Postman runs every event at every level. The collection's script,
+each folder's, then the request's own all run, and each entry carries
+`scope: "collection" | "folder" | "request"` beside its `source`. A failing
+collection-level test fails the step even when the request's own tests pass,
+and a throwing collection or folder script errors the step with the level
+named ("Collection pre-request script failed - ..."). An entry stored before
+the field carries no `scope` and reads as the request's.
+
 **A load test runs no pre-request script** (only the `tests` one), so there is
 nothing to assert there before the request.
 

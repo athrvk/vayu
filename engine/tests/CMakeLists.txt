@@ -170,6 +170,7 @@ add_executable(vayu_tests
     scenario_load_test.cpp
     scenario_plan_test.cpp
     scenario_runner_test.cpp
+    script_levels_test.cpp
     tree_order_test.cpp
     reorder_route_test.cpp
     spec_sync_route_test.cpp
@@ -447,6 +448,7 @@ set(vayu_scratch_database_suites
     ScenarioPlanTest
     ScenarioRunnerTest
     ScratchDatabaseCleanup
+    ScriptLevelSend
     ScriptLifecycleTest
     ScriptRequestNameTest
     ScriptSendRequestCapLoadTest

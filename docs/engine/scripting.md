@@ -43,7 +43,11 @@ assertion is reported with the script that made it: each entry in the response
 body's and the stored trace's `testResults` carries a `source` of `"pre"` or
 `"test"`, the same two spellings `consoleLogs` uses, and the app's Tests pane
 groups the list under the script's name (issue #810). A failing assertion fails
-its collection-run step from either script.
+its collection-run step from either script. **Every level asserts too**: the
+collection's and each folder's scripts run before the request's own, and every
+level's assertions are listed, each naming its level in `scope`
+(`"collection"`, `"folder"` or `"request"`, #2522), so a collection-level
+`pm.test` that fails fails the step even when the request's own tests pass.
 
 **`pm.test` returns `pm`, so calls chain** - Postman's contract, and what an
 imported script written as one `pm.test(...).test(...)` expression relies on:
@@ -2534,14 +2538,16 @@ rather than `[object Object]`; a value that cannot be serialized (a circular
 reference, say) becomes `[Object: unserializable]`.
 
 **The level travels with the line.** Each entry on the wire is
-`{ "source": "pre" | "test", "level": "log" | "info" | "warn" | "error",
-"message": "..." }` - see
+`{ "source": "pre" | "test", "scope"?: "collection" | "folder" | "request",
+"level": "log" | "info" | "warn" | "error", "message": "..." }` - see
 [`consoleLogs` in the API reference](api-reference.md#post-execute). The four
 methods are bound to one C function distinguished by QuickJS's `magic`
 argument (`setup_console`), so the level is captured at the call; it cannot be
 recovered from the text afterwards, which is why it used to be lost. The app's
 Console tab draws `warn` and `error` in their status tokens and labels every
-non-`log` line in a gutter.
+non-`log` line in a gutter. `level` is the console method; which collection,
+folder or request script wrote the line is `scope` (#2522), absent on a line
+stored before the field.
 
 ## Examples
 
@@ -3672,6 +3678,21 @@ visible to a later `script.pre` element (and to the send itself) because
 every element at a step shares the one `Request` object being sent - only the
 JavaScript variable scope is per-element. The same holds for `script.post`
 elements and `pm.response`.
+
+**Every level is run and every level is reported (#2522).** The elements run
+collection first, then each folder from the outermost in, then the request,
+and each script's result is added to the step's rather than replacing the
+level before it. Every `testResults` and `consoleLogs` entry carries `scope`
+(`"collection"`, `"folder"` or `"request"`); a failing `pm.test` at any level
+fails the step; an `assert.*` element's result survives a later level's script;
+and a script that asked for no flow control does not cancel a skip or jump an
+earlier level set (a later instruction does replace it). **A throw names its
+level**: when the collection's or a folder's script throws, the collection-run
+step error and the send's `preScriptError` / `postScriptError` read
+"Collection pre-request script failed - <message>" or "Folder test script
+failed - <message>"; the request's own throw reads as it always did. When
+several levels throw, the first one is the step's error, and every level's own
+message stays on its element's `elements[]` outcome.
 
 **A single-request `POST /runs` runs the element pipeline too now (issue
 #1594), and no longer joins.** It calls `refuse_legacy_script_fields` the

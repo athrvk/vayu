@@ -35,7 +35,7 @@ namespace {
 
 void mark_required_miss (ElementContext& ctx, const std::string& variable, const std::string& why) {
     ctx.post_script_result.tests.push_back (
-    vayu::TestResult{ "extract " + variable, false, why });
+    vayu::TestResult{ "extract " + variable, false, why, ctx.element_scope });
 }
 
 /// Writes @p matches under @p variable per the shared `matchNo` convention

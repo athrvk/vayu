@@ -956,11 +956,14 @@ const std::vector<nlohmann::json>& levels) {
 }
 
 // One level's enabled, non-disabled, non-`inherit.disable`, non-blank-script
-// elements, each stamped with where it came from.
+// elements, each stamped with where it came from. `origin_scope` adds the
+// folder level `origin_kind` does not distinguish (#2522); `kind` keeps its two
+// values because its readers branch on them.
 void emit_level (nlohmann::json& out,
 const nlohmann::json& elements,
 const std::unordered_set<std::string>& disabled,
 const char* origin_kind,
+const char* origin_scope,
 const std::string& origin_id,
 const std::string& origin_name) {
     for (const auto& element : elements) {
@@ -982,7 +985,8 @@ const std::string& origin_name) {
             continue;
         }
         nlohmann::json stamped = element;
-        nlohmann::json origin = { { "kind", origin_kind }, { "id", origin_id } };
+        nlohmann::json origin  = { { "kind", origin_kind },
+             { "scope", origin_scope }, { "id", origin_id } };
         if (!origin_name.empty ()) {
             origin["name"] = origin_name;
         }
@@ -1012,10 +1016,11 @@ const vayu::db::Request& request) {
 
     nlohmann::json out = nlohmann::json::array ();
     for (size_t i = 0; i < chain.size (); ++i) {
-        emit_level (
-        out, levels[i], disabled, "collection", chain[i].id, chain[i].name);
+        // The chain runs root first, so every collection after it is a folder.
+        emit_level (out, levels[i], disabled, "collection",
+        i == 0 ? "collection" : "folder", chain[i].id, chain[i].name);
     }
-    emit_level (out, levels.back (), disabled, "request", request.id, "");
+    emit_level (out, levels.back (), disabled, "request", "request", request.id, "");
     return out;
 }
 

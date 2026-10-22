@@ -33,8 +33,8 @@ void record_assertion (ElementContext& ctx,
 const std::string& name,
 bool passed,
 const std::string& failure_message) {
-    ctx.post_script_result.tests.push_back (
-    vayu::TestResult{ name, passed, passed ? std::string () : failure_message });
+    ctx.post_script_result.tests.push_back (vayu::TestResult{ name, passed,
+    passed ? std::string () : failure_message, ctx.element_scope });
     ctx.outcome_status = passed ? "ok" : "failed";
     if (!passed) {
         ctx.outcome_message = failure_message;

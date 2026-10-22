@@ -1209,11 +1209,19 @@ struct DetailedReport {
 
 /**
  * @brief Test assertion result
+ *
+ * `scope` is the level whose element produced it (#2522): `"collection"`,
+ * `"folder"` or `"request"`, stamped when the step's elements fold their
+ * results together. Empty means not known, which every reader treats as the
+ * request's own (a trace stored before the field, a script run outside the
+ * element pipeline).
  */
 struct TestResult {
     std::string name;
     bool passed = false;
     std::string error_message;
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string scope{};
 };
 
 /**
@@ -1242,11 +1250,14 @@ enum class ConsoleLevel : std::uint8_t { Log, Info, Warn, Error };
  *
  * No `source` field: a `ScriptEngine` run does not know whether it is the
  * pre-request or the post-request script. Whoever merges the two knows, and
- * fills it in on the wire (`execution.cpp`).
+ * fills it in on the wire (`execution.cpp`). `scope` is `TestResult::scope`'s
+ * level, set the same way; it is not `level`, which is the console method.
  */
 struct ConsoleEntry {
     ConsoleLevel level = ConsoleLevel::Log;
     std::string message;
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string scope{};
 };
 
 /**
@@ -1279,6 +1290,11 @@ struct ScriptControl {
 
 /**
  * @brief Script execution result
+ *
+ * One script's, or a step phase's several scripts folded into one (#2522,
+ * `script.pre` / `script.post` in `core/elements/script_kinds.cpp`): tests and
+ * console lines in run order, `success` false if any level's was, and
+ * `error_message` the first level that threw, named by `error_scope`.
  */
 struct ScriptResult {
     bool success = true;
@@ -1288,6 +1304,10 @@ struct ScriptResult {
     /// Flow control the script asked for - read by the scenario runner, and
     /// `Kind::None` for every other caller (see ScriptControl).
     ScriptControl control;
+    /// The `TestResult::scope` of the level `error_message` came from; empty
+    /// where no fold stamped one, read as the request's own.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string error_scope{};
 };
 
 // ============================================================================

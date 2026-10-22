@@ -47,6 +47,7 @@
 #include "vayu/http/status.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
@@ -1061,6 +1062,42 @@ std::optional<std::string> check_carried_budgets (const nlohmann::json& config) 
 
 } // namespace
 
+namespace {
+
+/// The word `script_failure_text` puts before an inherited level's phase, or
+/// empty for the request's own script.
+std::string_view inherited_level_word (const std::string& scope) {
+    if (scope == "collection") {
+        return "Collection";
+    }
+    if (scope == "folder") {
+        return "Folder";
+    }
+    return {};
+}
+
+/// `preScriptError` / `postScriptError`: the request's own script's message
+/// is stored as it always was, an inherited level's names that level.
+std::string script_error_field (const vayu::ScriptResult& result, std::string_view phase) {
+    if (inherited_level_word (result.error_scope).empty ()) {
+        return result.error_message;
+    }
+    return script_failure_text (result, phase);
+}
+
+} // namespace
+
+std::string script_failure_text (const vayu::ScriptResult& result, std::string_view phase) {
+    std::string text;
+    if (const auto level = inherited_level_word (result.error_scope); !level.empty ()) {
+        text.append (level).append (" ").append (phase);
+    } else if (!phase.empty ()) {
+        text.push_back (vayu::utils::ascii_upper (phase.front ()));
+        text.append (phase.substr (1));
+    }
+    return text + " script failed - " + result.error_message;
+}
+
 /**
  * @brief Build the four script-result keys - see routes.hpp for why one builder
  *        serves both the live response body and the stored trace.
@@ -1096,6 +1133,9 @@ const vayu::ScriptResult& post_script_result) {
             test_json["name"]   = test.name;
             test_json["passed"] = test.passed;
             test_json["source"] = source;
+            if (!test.scope.empty ()) {
+                test_json["scope"] = test.scope;
+            }
             if (!test.error_message.empty ()) {
                 test_json["error"] = test.error_message;
             }
@@ -1120,8 +1160,12 @@ const vayu::ScriptResult& post_script_result) {
     const auto append = [&all_console_output] (const char* source,
                         const std::vector<vayu::ConsoleEntry>& entries) {
         for (const auto& entry : entries) {
-            all_console_output.push_back ({ { "source", source },
-            { "level", vayu::to_string (entry.level) }, { "message", entry.message } });
+            nlohmann::json line = { { "source", source },
+                { "level", vayu::to_string (entry.level) }, { "message", entry.message } };
+            if (!entry.scope.empty ()) {
+                line["scope"] = entry.scope;
+            }
+            all_console_output.push_back (std::move (line));
         }
     };
     append ("pre", pre_script_result.console_output);
@@ -1132,10 +1176,10 @@ const vayu::ScriptResult& post_script_result) {
 
     // Add script errors if any
     if (!pre_script_result.success && !pre_script_result.error_message.empty ()) {
-        node["preScriptError"] = pre_script_result.error_message;
+        node["preScriptError"] = script_error_field (pre_script_result, "pre-request");
     }
     if (!post_script_result.success && !post_script_result.error_message.empty ()) {
-        node["postScriptError"] = post_script_result.error_message;
+        node["postScriptError"] = script_error_field (post_script_result, "test");
     }
 
     return node;

@@ -618,6 +618,12 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     EXPECT_EQ (payload["elements"][2]["origin"]["id"], "leaf");
     EXPECT_EQ (payload["elements"][3]["kind"], "script.pre");
     EXPECT_EQ (payload["elements"][3]["origin"]["kind"], "request");
+    // `kind` keeps its two values; `scope` tells the leaf folder from the
+    // root collection (#2522).
+    EXPECT_EQ (payload["elements"][0]["origin"]["scope"], "collection");
+    EXPECT_EQ (payload["elements"][2]["origin"]["kind"], "collection");
+    EXPECT_EQ (payload["elements"][2]["origin"]["scope"], "folder");
+    EXPECT_EQ (payload["elements"][3]["origin"]["scope"], "request");
     EXPECT_EQ (payload["elements"][3]["config"]["script"], "console.log('own pre');");
 
     // Execution options always emitted from the stored row.
