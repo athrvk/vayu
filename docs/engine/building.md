@@ -1690,7 +1690,7 @@ call so the pin lives in one place:
 | Leg | Source | Pinned by |
 |-----|--------|-----------|
 | Linux | `clang-tidy-22` from [apt.llvm.org](https://apt.llvm.org/), the LLVM project's apt repository | The major; apt.llvm.org carries only the newest 22.x patch. Its signing key is checked against the published fingerprint before apt trusts it |
-| Windows | `LLVM-22.1.8-win64.exe` from the LLVM GitHub release; only `clang-tidy.exe` and clang's builtin headers are extracted | The installer's SHA-256, which is the digest LLVM's release workflow attests for the tag. The extracted 73 MB is cached under the script's hash |
+| Windows | `LLVM-22.1.8-win64.exe` from the LLVM GitHub release; only `clang-tidy.exe` and clang's builtin headers are extracted | The installer's SHA-256, which is the digest LLVM's release workflow attests for the tag. The extracted 73 MB is cached under the script's hash, and `cache-warm.yml` saves it on `master` so every pull request reads it |
 
 The runner images' own LLVM is not used: it was 20.1.8 on Windows against
 apt's 19 on Linux, so a finding on one leg alone could be a version difference
