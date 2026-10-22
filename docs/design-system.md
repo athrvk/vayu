@@ -1358,6 +1358,13 @@ Appearance → Interface → Density, owned by `appearance-store`
 | Drawer row height | `h-8` | 24px | 32px |
 | Icon (panel heading) | `w-5 h-5` | 15px | 20px |
 
+The space between an icon and its label inside a `Button` is that same row: the
+primitive sets `gap-2` itself (`button-variants.ts`), so the icon carries no
+`mr-*` and the label no `ml-*`; a margin stacks on the gap and the pair sits
+further apart than in every other button. A button that needs a different gap
+says `gap-*` on the `Button`. `button-icon-gap.test.ts` fails on a margin on a
+leading icon (conditional ones included) or on the label that follows it.
+
 Menu and toolbar icons are not a density row: they sit on a fixed floor, `size-icon-sm`
 (12px) or `size-icon` (16px), in the
 [Chrome, Target and Icon Floors](#chrome-target-and-icon-floors) table below.

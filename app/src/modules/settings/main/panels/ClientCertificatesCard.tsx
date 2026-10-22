@@ -517,7 +517,6 @@ export function ClientCertificatesCard() {
 								{/* Swapped, not mounted: a spinner that mounts widens
 								    the button and slides Cancel beside it. */}
 								<IconSwap
-									className="mr-1.5"
 									state={createCertificate.isPending ? "adding" : "idle"}
 									icons={{
 										idle: <Plus className="size-icon" />,
@@ -530,7 +529,7 @@ export function ClientCertificatesCard() {
 					</div>
 				) : listIsEmpty ? null : (
 					<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-						<Plus className="size-icon mr-1.5" />
+						<Plus className="size-icon" />
 						Add certificate
 					</Button>
 				)}

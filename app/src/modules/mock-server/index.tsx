@@ -183,7 +183,7 @@ export default function MockServerView() {
 							}
 							disabled={stopMock.isPending}
 						>
-							<Square className="mr-2 size-icon-sm" aria-hidden="true" />
+							<Square className="size-icon-sm" aria-hidden="true" />
 							Stop
 						</Button>
 					</div>

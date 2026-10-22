@@ -251,16 +251,16 @@ export default function DataTab({ collection }: DataTabProps) {
 				{file && (!declaredContract || diff.length > 0) && (
 					<Button onClick={handleRedeclare} disabled={writer.isPending}>
 						{writer.isPending ? (
-							<Loader2 className="mr-2 size-icon animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
-							<Check className="mr-2 size-icon" />
+							<Check className="size-icon" />
 						)}
 						{declaredContract ? "Re-declare from this file" : "Declare columns"}
 					</Button>
 				)}
 				{declaredContract && (
 					<Button variant="outline" onClick={writer.clear} disabled={writer.isPending}>
-						<Trash2 className="mr-2 size-icon" />
+						<Trash2 className="size-icon" />
 						Clear
 					</Button>
 				)}

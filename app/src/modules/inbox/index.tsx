@@ -198,7 +198,7 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 				onClick={deletion.requestDelete}
 				disabled={deletion.isDeleting}
 			>
-				<Trash2 className="mr-2 size-icon-sm" aria-hidden="true" />
+				<Trash2 className="size-icon-sm" aria-hidden="true" />
 				Delete
 			</Button>
 			<DeleteInboxDialog deletion={deletion} />
@@ -333,7 +333,7 @@ export default function InboxView() {
 					<div className="flex items-center gap-1">
 						<Button onClick={start} disabled={startInbox.isPending}>
 							<Play
-								className="mr-2 size-icon"
+								className="size-icon"
 								aria-hidden="true"
 								data-icon-motion={ICON_MOTION.scale}
 							/>
@@ -446,7 +446,7 @@ export default function InboxView() {
 								clearCaptures.isPending || capturesLoading || clearableCount === 0
 							}
 						>
-							<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
+							<Eraser className="size-icon-sm" aria-hidden="true" />
 							Clear
 						</Button>
 					</DisabledHint>
@@ -461,14 +461,14 @@ export default function InboxView() {
 							}
 							disabled={stopInbox.isPending}
 						>
-							<Square className="mr-2 size-icon-sm" aria-hidden="true" />
+							<Square className="size-icon-sm" aria-hidden="true" />
 							Stop
 						</Button>
 					) : (
 						<>
 							<Button size="sm" onClick={start} disabled={startInbox.isPending}>
 								<Play
-									className="mr-2 size-icon-sm"
+									className="size-icon-sm"
 									aria-hidden="true"
 									data-icon-motion={ICON_MOTION.scale}
 								/>
@@ -528,7 +528,7 @@ export default function InboxView() {
 						title="Live updates stopped"
 						action={
 							<Button variant="outline" size="sm" onClick={live.resume}>
-								<RotateCw className="mr-2 size-icon-sm" aria-hidden="true" />
+								<RotateCw className="size-icon-sm" aria-hidden="true" />
 								Resume
 							</Button>
 						}

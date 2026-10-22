@@ -58,7 +58,7 @@ export default function NewFolderForm({
 				onClick={() => onCreateSubfolder(parentId)}
 				disabled={isCreatingSubfolder}
 			>
-				{isCreatingSubfolder && <Loader2 className="size-icon-sm animate-spin mr-1" />}
+				{isCreatingSubfolder && <Loader2 className="size-icon-sm animate-spin" />}
 				Add
 			</Button>
 			<DialogCancelButton

@@ -897,9 +897,9 @@ export default function RunCollectionDialog({
 					/>
 					<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
 						{startRun.isPending ? (
-							<Loader2 className="size-icon mr-2 animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
-							<Play className="size-icon mr-2" data-icon-motion={ICON_MOTION.scale} />
+							<Play className="size-icon" data-icon-motion={ICON_MOTION.scale} />
 						)}
 						Run
 					</Button>

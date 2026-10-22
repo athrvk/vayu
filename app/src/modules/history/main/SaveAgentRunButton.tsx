@@ -42,7 +42,7 @@ export default function SaveAgentRunButton({ run, seed }: SaveAgentRunButtonProp
 	return (
 		<>
 			<Button size="sm" onClick={() => newRequest(presetFromRun(run, seed))}>
-				<Save className="size-icon-sm mr-1.5" data-icon-motion={ICON_MOTION.press} />
+				<Save className="size-icon-sm" data-icon-motion={ICON_MOTION.press} />
 				Save to request
 			</Button>
 			<CollectionPicker {...pickerProps} />
