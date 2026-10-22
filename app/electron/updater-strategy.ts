@@ -8,8 +8,10 @@
 /**
  * How the auto-updater should behave on the current platform.
  *
- * - "silent":   download in the background, prompt to restart-and-install
- *               (electron-updater can cryptographically verify the artifact)
+ * - "silent":   download in the background, and install only after the
+ *               installer's build-provenance attestation verifies (#2372);
+ *               electron-updater alone checks only a sha512 from the same
+ *               release
  * - "notify":   only check for a newer version and surface it in the UI; the
  *               user updates out-of-band (macOS re-runs install.sh, deb users
  *               use their package manager)
