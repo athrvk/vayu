@@ -10,6 +10,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -934,6 +935,41 @@ TEST (MetricsCollectorConfigTest, DefaultErrorStoreIsBounded) {
     // Neither the counters nor the status-code distribution lose anything.
     EXPECT_EQ (collector.total_errors (), 10u);
     EXPECT_EQ (collector.status_code_distribution ().at (0), 10u);
+}
+
+// #2400: the per-type counts cover every error, not the stored prefix of 10,
+// which holds no connection failure at all. Mutation check: drop the
+// `error_type_counts_` fetch_add in record_error and the counts read empty.
+TEST (MetricsCollectorConfigTest, ErrorTypeCountsStayExactPastTheStoreCap) {
+    MetricsCollectorConfig config;
+    config.max_errors = 10;
+    MetricsCollector collector ("test", config);
+
+    for (int i = 0; i < 50; ++i) {
+        collector.record_error (vayu::ErrorCode::Timeout, "slow");
+    }
+    for (int i = 0; i < 20; ++i) {
+        collector.record_error (vayu::ErrorCode::ConnectionFailed, "refused");
+    }
+
+    EXPECT_EQ (collector.errors ().size (), 10u);
+    EXPECT_EQ (collector.errors_dropped (), 60u);
+    const std::map<std::string, size_t> expected{ { "connection_failed", 20 },
+        { "timeout", 50 } };
+    EXPECT_EQ (collector.error_type_counts (), expected);
+}
+
+// Codes with no name of their own share "unknown", and their counts add up
+// there rather than the last one overwriting the rest.
+TEST (MetricsCollectorConfigTest, CodesWithoutANameAreSummedUnderUnknown) {
+    MetricsCollector collector ("test");
+    collector.record_error (vayu::ErrorCode::AuthFailed, "a");
+    collector.record_error (vayu::ErrorCode::ResponseTooLarge, "b");
+    collector.record_error (vayu::ErrorCode::ResponseTooLarge, "c");
+
+    const std::map<std::string, size_t> expected{ { "unknown", 3 } };
+    EXPECT_EQ (collector.error_type_counts (), expected);
+    EXPECT_TRUE (MetricsCollector ("empty").error_type_counts ().empty ());
 }
 
 // max_errors == 0 remains an explicit opt-in to unlimited storage.

@@ -732,6 +732,39 @@ enum class ErrorCode : std::uint8_t {
     InvalidHeaderName
 };
 
+/// How many `ErrorCode` values there are, for a table indexed by one. Names the
+/// last enumerator, so an appended code moves it.
+inline constexpr std::size_t ERROR_CODE_COUNT =
+static_cast<std::size_t> (ErrorCode::InvalidHeaderName) + 1;
+
+/**
+ * @brief The name a load run reports an error under: a stored error trace's
+ *        `error_type` and the run summary's `error_types` key (#2400).
+ *
+ * The one spelling of these names, so the per-type counts and the traces
+ * cannot drift apart. A code with no name of its own reads `"unknown"`.
+ */
+[[nodiscard]] constexpr const char* error_type_name (ErrorCode code) noexcept {
+    switch (code) {
+    case ErrorCode::Timeout: return "timeout";
+    case ErrorCode::ConnectionFailed: return "connection_failed";
+    case ErrorCode::DnsError: return "dns_failed";
+    case ErrorCode::SslError: return "ssl_error";
+    case ErrorCode::InvalidUrl: return "invalid_url";
+    case ErrorCode::InvalidMethod: return "invalid_method";
+    case ErrorCode::ScriptError: return "script_error";
+    case ErrorCode::DataBindingFailed: return "data_binding_failed";
+    case ErrorCode::ProxyError: return "proxy_error";
+    case ErrorCode::InternalError: return "internal_error";
+    // Only a natural-end drain cancellation reaches a stored trace; a Stop's
+    // is never recorded as an error (`is_stop_cancellation`).
+    case ErrorCode::Cancelled: return "cancelled";
+    case ErrorCode::TooManyRedirects: return "too_many_redirects";
+    case ErrorCode::BadContentEncoding: return "bad_content_encoding";
+    default: return "unknown";
+    }
+}
+
 /**
  * @brief Convert ErrorCode to string
  */
