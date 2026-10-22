@@ -66,9 +66,26 @@ export function withCaveat(result: ToolResult, caveat: string): ToolResult {
 	};
 }
 
+/**
+ * What an agent should do about the two statuses the engine answers a storage
+ * failure with (#2423). Neither is a verdict on the arguments, which a 400
+ * would be, so the call is worth repeating unchanged once the cause clears.
+ */
+function retryHint(status: number): string {
+	if (status === 507) {
+		return " The disk holding Vayu's data is full. Retry the call after space is freed.";
+	}
+	if (status === 503) {
+		return " The engine's database was busy. The call is retryable.";
+	}
+	return "";
+}
+
 export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
 	if (err instanceof EngineRequestError) {
-		return errorResult(`Engine error (${err.status}): ${err.body || err.message}`);
+		return errorResult(
+			`Engine error (${err.status}): ${err.body || err.message}${retryHint(err.status)}`
+		);
 	}
 	const msg = err instanceof Error ? err.message : String(err);
 	// An abort means the engine was reachable and working - the opposite of the
