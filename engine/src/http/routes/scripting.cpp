@@ -2095,15 +2095,20 @@ nlohmann::json get_script_completions () {
     "shelf. xml2js is npm's xml2js 0.6.2 with sax 1.2.4, the versions Postman "
     "bundles: parseString, parseStringPromise, Parser and Builder, a string "
     "input; its global, xml2Json, is a synchronous parse over it rather than "
-    "the module. Any other name throws \"Cannot find module\" and lists the "
-    "shelf: nothing is read from disk or fetched.\n\nExample:\n"
+    "the module. chai is npm's chai 4.4.1, the version Postman bundles: "
+    "expect, assert, should and use, the library itself and a separate object "
+    "from pm.expect, which loading it leaves unchanged; it has no global. Any "
+    "other name throws \"Cannot find module\" and lists the shelf: nothing is "
+    "read from disk or fetched.\n\nExample:\n"
     "const CryptoJS = require('crypto-js');\n"
     "const uuid = require('uuid');\nconst id = uuid();\n"
     "const _ = require('lodash');\nconst moment = require('moment');\n"
     "const parse = require('csv-parse/lib/sync');\n"
     "const rows = parse(pm.response.text(), { columns: true });\n"
     "const xml2js = require('xml2js');\n"
-    "xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));" },
+    "xml2js.parseString(pm.response.text(), (err, doc) => console.log(doc));\n"
+    "const { expect } = require('chai');\n"
+    "expect(pm.response.json().id).to.equal(7);" },
     { "sortText", "2_require" } });
 
     completions.push_back ({ { "label", "xml2Json" }, { "kind", KIND_FUNCTION },

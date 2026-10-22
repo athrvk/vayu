@@ -383,6 +383,21 @@ TEST (ScriptApiScan, Xml2jsIsNotNamedAsTheGlobalOrTheModule) {
     EXPECT_EQ (names_in ("xml2Json(t); tv4.validate(x);"), Names{ "tv4" });
 }
 
+// chai runs (#2655) as require('chai'): it is not named, and its members are
+// not read as crypto-js's. A sub-path of the package is not the shelf's module,
+// and a chai-postman member on pm.expect is still named by its own row.
+TEST (ScriptApiScan, ChaiIsNotNamedAsTheModule) {
+    for (const char* script : { "require('chai');", "const chai = require('chai'); chai.should();",
+         "const { expect, assert } = require('chai'); expect(1).to.equal(1);",
+         "require('chai').assert.deepEqual(a, b);", "require('chai').AES;" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+    EXPECT_EQ (names_in ("require('chai/lib/chai');"), Names{ "require()" });
+    EXPECT_EQ (
+    names_in ("require('chai'); pm.expect(x).to.be.postmanResponse;"),
+    Names{ ".postmanRequest / .postmanResponse / .postmanRequestOrResponse" });
+}
+
 TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
     // Off the shelf, or a name that only starts like one.
     EXPECT_EQ (names_in ("require('ajv');"), Names{ "require()" });

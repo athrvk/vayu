@@ -8457,8 +8457,8 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (refusal.find (
-               "(crypto-js, uuid, lodash, moment, csv-parse/lib/sync, xml2js)"),
+    EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash, moment, "
+                             "csv-parse/lib/sync, xml2js, chai)"),
     std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
@@ -9190,6 +9190,219 @@ TEST_F (ScriptEngineTest, RequireShelfXml2jsEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
 }
 
+// require('chai') is npm's chai 4.4.1 with the dependency versions Postman's
+// sandbox bundles (#2655): the library itself, a separate object from the
+// native pm.expect. Every answer was checked against the unbundled packages on
+// Node.
+TEST_F (ScriptEngineTest, RequireShelfChaiExpectAnswersAsChaiDoes) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "(require('chai').expect(1).to.equal(1), 'held')", "held" },
+    { "(require('chai').expect({ a: [1] }).to.deep.equal({ a: [1] }), 'held')", "held" },
+    // chai 4.4.1's source still says 4.3.8; Node answers the same.
+    { "require('chai').version", "4.3.8" },
+    { "Object.keys(require('chai')).join()",
+    "version,AssertionError,use,util,config,Assertion,expect,should,Should,"
+    "assert" },
+    { "(function () { var chai = require('chai'); try { "
+      "chai.expect(1).to.equal(2); } catch (e) { return [e.name, e instanceof "
+      "chai.AssertionError, e instanceof Error, e.actual, e.expected, "
+      "e.showDiff, e.message].join(); } })()",
+    "AssertionError,true,true,1,2,true,expected 1 to equal 2" },
+    { "(function () { try { require('chai').expect(1).to.equal(2, 'custom'); "
+      "} catch (e) { return e.message; } })()",
+    "custom: expected 1 to equal 2" },
+    { "(function () { try { require('chai').expect({}).to.be.tru; } catch (e) "
+      "{ return e.message; } })()",
+    "Invalid Chai property: tru. Did you mean \"true\"?" },
+    // loupe finds no process to read a promise's state from.
+    { "(function () { try { require('chai').expect(Promise.resolve(1))"
+      ".to.equal(1); } catch (e) { return e.message; } })()",
+    "expected Promise{…} to equal 1" },
+    // type-detect's global object is the sandbox's own.
+    { "require('chai').util.type(globalThis)", "global" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+    // Outside a pm.test the failure ends the script with chai's message.
+    EXPECT_EQ (shelf_answer (roomy, request, "require('chai').expect(1).to.equal(2)"),
+    "threw: AssertionError: expected 1 to equal 2");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfChaiAssertDeepEqual) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "(require('chai').assert.deepEqual({ a: [1, { b: 2 }] }, { a: [1, { b: "
+      "2 }] }), 'held')",
+    "held" },
+    { "(require('chai').assert.deepEqual(new Map([[1, { x: 2 }]]), new "
+      "Map([[1, { x: 2 }]])), 'held')",
+    "held" },
+    { "(function () { try { require('chai').assert.deepEqual({ a: [1, { b: 2 "
+      "}] }, { a: [1, { b: 3 }] }); } catch (e) { return e.name + ': ' + "
+      "e.message; } })()",
+    "AssertionError: expected { a: [ 1, { b: 2 } ] } to deeply equal { a: [ "
+    "1, { b: 3 } ] }" },
+    { "(function () { try { require('chai').assert.deepEqual(1, 2, 'custom'); "
+      "} catch (e) { return e.message; } })()",
+    "custom: expected 1 to deeply equal 2" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// should() is chai's to install, on its call: loading the module adds nothing
+// to Object.prototype, and the next execution's fresh context starts without
+// it.
+TEST_F (ScriptEngineTest, RequireShelfChaiShouldExtendsObjectPrototypeOnlyAfterTheCall) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var chai = require('chai'); var before = 'should' "
+    "in Object.prototype; chai.should(); var after = 'should' in "
+    "Object.prototype; (5).should.equal(5); var message; try { "
+    "(5).should.equal(6); } catch (e) { message = e.message; } "
+    "return [before, after, message].join(); })()"),
+    "false,true,expected 5 to equal 6");
+    EXPECT_EQ (shelf_answer (roomy, request, "'should' in Object.prototype"), "false")
+    << "should() reached the next execution";
+}
+
+// A chai AssertionError inside pm.test is an ordinary failed test carrying
+// chai's message, and the tests beside it are unaffected.
+TEST_F (ScriptEngineTest, RequireShelfChaiFailureInsidePmTestIsAFailedTest) {
+    ScriptEngine roomy{ library_call_config () };
+    response.status_code = 200;
+    response.body        = R"({"id":7})";
+    const auto result    = roomy.execute_test (R"JS(
+        const { expect, assert } = require('chai');
+        pm.test('chai fails', function () { expect(1).to.equal(2); });
+        pm.test('chai holds', function () {
+            expect(pm.response.json().id).to.equal(7);
+            assert.deepEqual(pm.response.json(), { id: 7 });
+        });
+        pm.test('assert fails', function () { assert.strictEqual('a', 'b'); });
+    )JS",
+       request, response, env);
+
+    // A failed test fails the run, but the script did not error.
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "");
+    ASSERT_EQ (result.tests.size (), 3u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message, "AssertionError: expected 1 to equal 2");
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_FALSE (result.tests[2].passed);
+    EXPECT_EQ (result.tests[2].error_message, "AssertionError: expected 'a' to equal 'b'");
+}
+
+// pm.expect is native and loading chai, use()-ing a plugin on it or calling
+// its should() leaves pm.expect as it was: the same function, the same
+// verdicts and messages, none of the plugin's members. Mutation: let the chai
+// glue assign `pm.expect = module.exports.expect` and this fails.
+TEST_F (ScriptEngineTest, RequireShelfChaiLeavesPmExpectUnchanged) {
+    ScriptEngine roomy{ library_call_config () };
+    const auto result = roomy.execute_test (R"JS(
+        function failure(run) {
+            try { run(); return 'held'; } catch (e) { return e.name + ': ' + e.message; }
+        }
+        var expect = pm.expect;
+        var before = failure(function () { pm.expect(1).to.equal(2); });
+        var chai = require('chai');
+        chai.use(function (lib) {
+            lib.Assertion.addProperty('vayuProbe', function () {});
+        });
+        chai.should();
+        pm.environment.set('same function', String(pm.expect === expect));
+        pm.environment.set('not chai', String(pm.expect !== chai.expect));
+        pm.environment.set('same failure',
+            String(failure(function () { pm.expect(1).to.equal(2); }) === before));
+        pm.environment.set('before', before);
+        pm.environment.set('held', failure(function () { pm.expect(1).to.equal(1); }));
+        pm.environment.set('plugin', failure(function () { return pm.expect(1).vayuProbe; }));
+        pm.environment.set('chai plugin', failure(function () { return chai.expect(1).vayuProbe; }));
+        try { pm.expect(1).to.equal(2); } catch (e) {
+            pm.environment.set('instance', String(e instanceof chai.AssertionError));
+        }
+        pm.environment.set('status',
+            failure(function () { chai.expect(pm.response).to.have.status(200); }));
+        pm.test('pm.expect still records', function () { pm.expect(2).to.be.above(1); });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["same function"].value, "true");
+    EXPECT_EQ (env["not chai"].value, "true");
+    EXPECT_EQ (env["same failure"].value, "true") << env["before"].value;
+    EXPECT_EQ (env["held"].value, "held");
+    EXPECT_NE (env["plugin"].value.find ("TypeError"), std::string::npos)
+    << "a chai plugin reached pm.expect: " << env["plugin"].value;
+    EXPECT_EQ (env["chai plugin"].value, "held");
+    EXPECT_EQ (env["instance"].value, "false");
+    // Postman's chai carries chai-postman; this module is chai's own.
+    EXPECT_EQ (env["status"].value, "Error: Invalid Chai property: status");
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The glue's `module` is the factory's and the bundle defines nothing outside
+// itself, so the global object gains nothing and there is no `chai` global.
+TEST_F (ScriptEngineTest, RequireShelfChaiLeavesNoGlobalBehind) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('chai').expect(1).to.equal(1); return "
+    "Object.getOwnPropertyNames(globalThis).sort().join() === before; "
+    "})()"),
+    "true");
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(require('chai'), [typeof chai, typeof module, typeof exports, "
+    "typeof process, typeof window, typeof AssertionError].join(' '))"),
+    "undefined undefined undefined undefined undefined undefined");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfChaiRefusesEveryOtherPath) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    for (const char* name : { "chai/lib/chai", "chai/register-should", "chai/",
+         "Chai", "chai-postman", "deep-eql", "loupe" }) {
+        const std::string refusal =
+        shelf_answer (engine, request, "require('" + std::string (name) + "')");
+        EXPECT_NE (refusal.find ("Cannot find module '" + std::string (name) + "'"),
+        std::string::npos)
+        << refusal;
+    }
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a refused name evaluated a library";
+}
+
+// chai is evaluated on an execution's first require('chai'), once however
+// often it is required, and never by a script that does not ask for it.
+// Mutation: evaluate the shelf in `setup_require_shelf` and the first count
+// fails.
+TEST_F (ScriptEngineTest, RequireShelfChaiEvaluatesOnlyOnFirstUse) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require + typeof pm.expect"),
+    "functionfunction");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (roomy, request,
+               "require('chai') === require('chai') && typeof "
+               "require('chai').expect"),
+    "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
+
+    EXPECT_EQ (shelf_answer (roomy, request, "typeof require('chai').assert"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
 // A library's parse depth is Vayu's own, not the script's to budget (#2652):
 // MSVC at /Od under ASan has frames large enough that lodash and moment
 // overflowed the default 256 KB budget inside QuickJS's parser. A fixed small
@@ -9268,6 +9481,8 @@ TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack
     EXPECT_EQ (shelf_answer (shallow, request, "typeof require('xml2js').parseString"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof xml2Json"), "function")
+    << "at " << budget << " bytes";
+    EXPECT_EQ (shelf_answer (shallow, request, "typeof require('chai').expect"), "function")
     << "at " << budget << " bytes";
     EXPECT_EQ (shelf_answer (shallow, request, "typeof _.get"), "function")
     << "at " << budget << " bytes";

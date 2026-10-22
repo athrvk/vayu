@@ -706,7 +706,8 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     "\t'lodash': typeof import('lodash');\n"
     "\t'moment': typeof import('moment');\n"
     "\t'csv-parse/lib/sync': typeof import('csv-parse/lib/sync');\n"
-    "\t'xml2js': typeof import('xml2js');\n}\n"));
+    "\t'xml2js': typeof import('xml2js');\n"
+    "\t'chai': typeof import('chai');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -826,6 +827,71 @@ TEST (ScriptTypesTest, Xml2jsIsDeclaredAsTheModuleAndXml2JsonAsItsParse) {
         ctx);
         EXPECT_TRUE (result.success)
         << "xml2js." << member.path << " is not a " << member.runtime_type
+        << " at run time (" << result.error_message << ")";
+#endif
+    }
+}
+
+// chai runs (#2655) as require('chai') only, with no global, so the module
+// carries its own declaration: chai's top-level members, an assertion chain
+// as `any`. Each declared member is pinned to the kind the runtime gives it,
+// so a member the module lacks fails here rather than in a script.
+TEST (ScriptTypesTest, ChaiIsDeclaredAsTheLibrarysTopLevelMembers) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_FALSE (contains (dts, "declare const chai"));
+
+    const size_t open = dts.find ("declare module 'chai' {\n");
+    ASSERT_NE (open, std::string::npos);
+    const std::string body = dts.substr (open, dts.find ("\n}\n", open) - open);
+    EXPECT_TRUE (contains (body, "\texport = chai;"));
+
+    struct Member {
+        const char* declaration;
+        const char* path;
+        const char* runtime_type;
+    };
+    constexpr auto members = std::to_array<Member> ({
+    { "\t\texpect: ExpectStatic;", "expect", "function" },
+    { "\t\tfail(message?: string): never;", "expect.fail", "function" },
+    { "\t\tassert: AssertStatic;", "assert", "function" },
+    { "\t\tshould(): any;", "should", "function" },
+    { "\t\tShould(): any;", "Should", "function" },
+    { "\t\tuse(plugin: (chai: any, utils: any) => void): Chai;", "use", "function" },
+    { "\t\t\tincludeStack: boolean;", "config.includeStack", "boolean" },
+    { "\t\t\tshowDiff: boolean;", "config.showDiff", "boolean" },
+    { "\t\t\ttruncateThreshold: number;", "config.truncateThreshold", "number" },
+    { "\t\t\tuseProxy: boolean;", "config.useProxy", "boolean" },
+    { "\t\t\tproxyExcludedKeys: string[];", "config.proxyExcludedKeys", "object" },
+    { "\t\t\tdeepEqual: ((expected: unknown, actual: unknown) => boolean) | "
+      "null;",
+    "config.deepEqual", "object" },
+    { "\t\tAssertionError: new (", "AssertionError", "function" },
+    { "\t\tAssertion: any;", "Assertion", "function" },
+    { "\t\tutil: any;", "util", "object" },
+    { "\t\tversion: string;", "version", "string" },
+    });
+#ifdef VAYU_HAS_QUICKJS
+    vayu::runtime::ScriptEngine engine{ vayu::tests::library_call_config () };
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment   = &env;
+    const auto errors = engine.execute (
+    "var e = new (require('chai').AssertionError)('m', { actual: 1 }); if "
+    "(typeof e.showDiff !== 'boolean' || e.actual !== 1 || !(e instanceof "
+    "Error)) throw new Error('wrong kind');",
+    ctx);
+    EXPECT_TRUE (errors.success) << errors.error_message;
+#endif
+    for (const auto& member : members) {
+        EXPECT_TRUE (contains (body, member.declaration))
+        << member.declaration << " is not declared";
+#ifdef VAYU_HAS_QUICKJS
+        const auto result =
+        engine.execute (std::string ("if (typeof require('chai').") + member.path +
+        " !== '" + member.runtime_type + "') throw new Error('wrong kind');",
+        ctx);
+        EXPECT_TRUE (result.success)
+        << "chai." << member.path << " is not a " << member.runtime_type
         << " at run time (" << result.error_message << ")";
 #endif
     }
