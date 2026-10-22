@@ -889,11 +889,14 @@ same request cannot drift apart.
   environment scope already holds for the run's lifetime.
 
 Because the plan is composed once, a `{{variable}}` a script sets mid-run does
-**not** appear in a later step's URL - it reaches later steps through
-`pm.environment.get` in a script. Resolving once is what keeps a collection
-edited mid-run from changing the sequence underneath itself, and it is what will
-make the load-mode executor (a per-VU state machine) possible without SQLite on
-its hot path.
+**not** appear in a later step's URL when that step has no pre-request script
+above or on it - it reaches such a step through `pm.environment.get` in a
+script. A step that does run a pre-request script is different (issue #2521):
+its names stay written in the plan and are resolved after its own script, so a
+value an earlier step set reaches it. Fixing the structure once is what keeps a
+collection edited mid-run from changing the sequence underneath itself, and it
+is what will make the load-mode executor (a per-VU state machine) possible
+without SQLite on its hot path.
 
 **Data rows bind per iteration.** A `scenario.data` array - rows the app parsed
 from a CSV, TSV, JSON or JSONL file, sent inline, because the sandbox has no

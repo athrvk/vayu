@@ -10,12 +10,9 @@
  * @brief A request a pre-request script runs before sends the script's values
  *        (#2521), through `POST /compose` and then the real `POST /execute`.
  *
- * Postman resolves `{{name}}` after the pre-request script. Vayu used to
- * resolve every name a scope already answered at composition, before the
- * script, so a script that replaced a stored token sent the stored one - on
- * every run after the first. Composition now leaves such a request's names
- * written and lists them as `deferredVariables`; the residual pass answers
- * them after the script.
+ * Postman resolves `{{name}}` after the pre-request script. Composition leaves
+ * such a request's names written and lists them as `deferredVariables`; the
+ * residual pass answers them after the script.
  *
  * Driven the way the app drives it: compose by id, spread the answer into the
  * `/execute` body (so `deferredVariables` rides back in, and must be ignored),

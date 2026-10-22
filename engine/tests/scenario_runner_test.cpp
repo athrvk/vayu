@@ -3097,10 +3097,9 @@ TEST_F (ScenarioRunnerTest, AnOAuth2SecretTheStepsScriptSetsReachesTheTokenEndpo
 }
 
 // Issue #2521: a value a pre-request script replaces reaches a later step even
-// though the environment already held one - the stored value used to be
-// substituted when the plan was composed, before any script ran. One
-// collection-level script runs before both steps; its run for the first sets
-// the token and the second sends it. Mutation check: make
+// though the environment already held one. One collection-level script runs
+// before both steps; its run for the first sets the token and the second sends
+// it. Mutation check: make
 // `runs_a_pre_request_script` (request_composer.cpp) answer false and the
 // second step sends `Bearer old`.
 TEST_F (ScenarioRunnerTest, AValueAnEarlierStepsScriptReplacesReachesALaterStep) {
