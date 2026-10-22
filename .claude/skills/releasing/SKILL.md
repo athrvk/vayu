@@ -305,7 +305,11 @@ Things about it that the code cannot tell you:
   rather than dead code outside macOS. `install.sh` refuses a missing sidecar for
   any version from `FIRST_CHECKSUMMED_VERSION` (0.33.0) on and warns only for
   older pinned ones; bump `FIRST_ATTESTED_VERSION` to the first release cut with
-  the attestation step (it gates the `gh attestation verify` call). The `latest*.yml` feeds and the Windows
+  the attestation step (it gates the `gh attestation verify` call, which is
+  pinned to `release.yml` and to `refs/tags/v<version>`; a `gh` too old to know
+  `--source-ref` fails closed). Every `curl` carries `CURL_SAFE` (https-only);
+  `VAYU_CURL_PROTO` is the test seam that lets `install_e2e.sh` use `file://`.
+  The `latest*.yml` feeds and the Windows
   `.exe.blockmap` are excluded: they are electron-updater's own metadata, and
   what it assembles from them is verified against the sha512 the feed carries,
   not against a sidecar nothing would fetch.
