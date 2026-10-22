@@ -24,6 +24,7 @@ import {
 } from "@/components/ui";
 import { EmptyState, SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
 import { formatNumber } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { useRunSamplesQuery } from "@/queries/runs";
 import SampleRequestCard from "./SampleRequestCard";
 import { sampleResultsWithoutValidationRow } from "../test-validation";
@@ -126,7 +127,8 @@ export default function SamplesTab({
 					<CardTitle>Sampled request details</CardTitle>
 					<div className="flex items-center gap-2">
 						<Badge variant="secondary" className="text-xs">
-							{formatNumber(visibleRows.length)} samples shown
+							{formatNumber(visibleRows.length)}{" "}
+							{pluralize(visibleRows.length, "sample")} shown
 						</Badge>
 						{storedTotal !== null && (
 							<Badge variant="outline" className="text-xs">

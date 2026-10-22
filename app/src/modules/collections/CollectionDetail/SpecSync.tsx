@@ -75,6 +75,7 @@ import type {
 	SpecOperation,
 } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
+import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 
 interface SpecSyncProps {
 	/** The bound collection - what a sync is allowed to write, and where it writes. */
@@ -268,7 +269,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 							</>
 						) : (
 							<>
-								Applied - {state.created} request{state.created === 1 ? "" : "s"}{" "}
+								Applied - {state.created} {pluralize(state.created, "request")}{" "}
 								created, {state.updated} updated, {state.deleted} deleted. This
 								collection is now bound to the document you just synced.
 							</>
@@ -325,9 +326,9 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 				title="Delete requests this document no longer declares?"
 				description={
 					<>
-						{pendingDeletes} request{pendingDeletes === 1 ? "" : "s"} and everything
-						saved on {pendingDeletes === 1 ? "it" : "them"} are removed. The rest of
-						this sync is applied in the same step.
+						{pendingDeletes} {pluralize(pendingDeletes, "request")} and everything saved
+						on {pluralize(pendingDeletes, "it", "them")} are removed. The rest of this
+						sync is applied in the same step.
 					</>
 				}
 				onConfirm={handleApply}
@@ -409,8 +410,8 @@ function DiffReport({
 			<div className="rounded-md border border-rule surface-sunken p-3 space-y-1">
 				<p className="text-xs font-semibold">The document has changed</p>
 				<p className="text-label text-muted-foreground">
-					{diff.added.length} new operation{diff.added.length === 1 ? "" : "s"} ·{" "}
-					{diff.removed.length} request{diff.removed.length === 1 ? "" : "s"} whose
+					{diff.added.length} new {pluralize(diff.added.length, "operation")} ·{" "}
+					{diff.removed.length} {pluralize(diff.removed.length, "request")} whose
 					operation is gone · {diff.changed.length} changed · {diff.unchanged} unchanged
 				</p>
 				{documentLevelOnly(diff) && (
@@ -423,15 +424,18 @@ function DiffReport({
 				)}
 				{diff.unmapped > 0 && (
 					<p className="text-label text-muted-foreground">
-						{diff.unmapped} request{diff.unmapped === 1 ? "" : "s"} carry no operation
-						and {diff.unmapped === 1 ? "is" : "are"} not part of this comparison.
+						{diff.unmapped}{" "}
+						{pickByCount(diff.unmapped, {
+							one: "request carries no operation and is not part of this comparison.",
+							other: "requests carry no operation and are not part of this comparison.",
+						})}
 					</p>
 				)}
 			</div>
 
 			{unresolvedRefs > 0 && (
 				<Callout severity="warning" title="Couldn't read some references">
-					{unresolvedRefs} reference{unresolvedRefs === 1 ? "" : "s"} to another file
+					{unresolvedRefs} {pluralize(unresolvedRefs, "reference")} to another file
 					couldn&apos;t be followed, so whatever they describe is missing from this
 					comparison.
 					{refReport.refused.map(({ target, reason }) => (

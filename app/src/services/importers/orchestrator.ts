@@ -17,6 +17,8 @@ import type {
 	ImportApplySpec,
 } from "@/types";
 import type { CollectionDraft, ImportApplyOptions, ImportResult } from "./types";
+import { logError } from "@/errors/error-logger";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import { selectedCertificates } from "./client-certificate-selection";
 import { requestFieldsFromDraft } from "./request-payload";
 import { siblingPositions } from "./draft-siblings";
@@ -110,10 +112,14 @@ export class ImportOrchestrator {
 			.map((item) => item.tempId)
 			.filter((tempId) => !idMap[tempId]);
 		if (missing.length > 0) {
+			// The temp ids mean nothing to the user; the log keeps them for whoever reads it.
+			logError(new Error(`Import apply returned no id for: ${missing.join(", ")}`), "high", {
+				component: "renderer",
+				action: "import-apply",
+				metadata: { uncreatedTempIds: missing },
+			});
 			throw new Error(
-				`Import incomplete: Vayu's engine returned no id for ${missing.length} item(s) (${missing
-					.slice(0, 5)
-					.join(", ")})`
+				`Import incomplete: ${missing.length} ${pluralize(missing.length, "item wasn't", "items weren't")} created.`
 			);
 		}
 

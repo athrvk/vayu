@@ -134,6 +134,16 @@ describe("tab strip width", () => {
 		expect(screen.getByLabelText(`${TABS.length - shown} more tabs`)).toBeInTheDocument();
 	});
 
+	it("names a single overflowed tab in the singular", () => {
+		// Two tabs of the 90px floor are 180px; 150px cannot hold them with the
+		// New-tab button, so the inactive one overflows and nothing else does.
+		useTabsStore.setState({ openTabs: TABS.slice(0, 2), activeTabId: "t0" });
+		stubStripWidth(150);
+		renderStrip();
+		expect(screen.getAllByRole("tab")).toHaveLength(1);
+		expect(screen.getByLabelText("1 more tab")).toBeInTheDocument();
+	});
+
 	it("keeps the overflow trigger outside the tab set", () => {
 		stubStripWidth(320);
 		renderStrip();

@@ -95,6 +95,6 @@ export function describeDataSchemaDiff(declared: string[], actual: string[]): st
 export function describeUnboundReferences(missing: readonly string[]): string[] {
 	if (missing.length === 0) return [];
 	return [
-		`The requests reference ${missing.length} ${pluralize(missing.length, "column")} this file does not carry: ${list(missing)}. Every iteration that binds ${missing.length === 1 ? "it" : "them"} fails before anything is sent.`,
+		`The requests reference ${missing.length} ${pluralize(missing.length, "column")} this file does not carry: ${list(missing)}. Every iteration that binds ${pluralize(missing.length, "it", "them")} fails before anything is sent.`,
 	];
 }

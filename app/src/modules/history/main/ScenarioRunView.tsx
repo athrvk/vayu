@@ -83,6 +83,7 @@ import {
 import { useFilteredSteps } from "./useFilteredSteps";
 import type { Run, StepOutcome } from "@/types";
 import { STEP_OUTCOMES } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 interface ScenarioRunViewProps {
 	run: Run;
@@ -292,10 +293,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				{scenario && (
 					<span className="text-xs text-muted-foreground">
 						{formatNumber(scenario.iterationsCompleted)} of{" "}
-						{formatNumber(scenario.iterations)} iteration
-						{scenario.iterations === 1 ? "" : "s"} -{" "}
-						{formatNumber(scenario.stepsExecuted)} step
-						{scenario.stepsExecuted === 1 ? "" : "s"}
+						{formatNumber(scenario.iterations)}{" "}
+						{pluralize(scenario.iterations, "iteration")} -{" "}
+						{formatNumber(scenario.stepsExecuted)}{" "}
+						{pluralize(scenario.stepsExecuted, "step")}
 					</span>
 				)}
 

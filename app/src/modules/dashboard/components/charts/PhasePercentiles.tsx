@@ -14,6 +14,7 @@ import {
 	tailRatio,
 	type ResolvedPhasePercentiles,
 } from "@/components/shared/response-viewer/timing-phases";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
  * Per-phase percentiles - from `report.timingBreakdown.phases`.
@@ -81,8 +82,8 @@ export function PhasePercentiles({ report }: { report: RunReport | null }) {
 			{flagged.length > 0 && (
 				<p className="text-label text-warning-text">
 					{flagged.map((phase) => phase.label).join(" and ")}{" "}
-					{flagged.length === 1 ? "has" : "have"} a p99 far above the p50 - a minority of
-					requests paid this phase while most skipped it. For TLS or Connect that is
+					{pluralize(flagged.length, "has", "have")} a p99 far above the p50 - a minority
+					of requests paid this phase while most skipped it. For TLS or Connect that is
 					connection churn under load rather than a slow server.
 				</p>
 			)}

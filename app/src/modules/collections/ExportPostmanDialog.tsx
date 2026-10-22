@@ -56,6 +56,7 @@ import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { downloadTextFile } from "@/lib/download-text-file";
 import { usePostmanExportQuery } from "@/queries/exports";
 import type { Collection, PostmanExportNotes } from "@/types";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface ExportPostmanDialogProps {
 	/**
@@ -285,8 +286,7 @@ function Line({
 	if (count === 0 && !always) return null;
 	return (
 		<li>
-			<span className="text-foreground">{count}</span> {count === 1 ? label : `${label}s`}{" "}
-			{suffix}
+			<span className="text-foreground">{count}</span> {pluralize(count, label)} {suffix}
 		</li>
 	);
 }

@@ -25,6 +25,7 @@ import {
 	DropdownMenuTrigger,
 	TabErrorDot,
 } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface OverflowedTab<Id extends string> {
 	id: Id;
@@ -46,7 +47,7 @@ export interface OverflowedTab<Id extends string> {
 /** The trigger's accessible name: the count, then which hidden tabs need a look. */
 function triggerName<Id extends string>(tabs: readonly OverflowedTab<Id>[]): string {
 	const flagged = tabs.filter((tab) => tab.attention).map((tab) => `, ${tab.label} has an error`);
-	return `${tabs.length} more tabs${flagged.join("")}`;
+	return `${tabs.length} more ${pluralize(tabs.length, "tab")}${flagged.join("")}`;
 }
 
 export function TabOverflowMenu<Id extends string>({
