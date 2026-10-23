@@ -3,7 +3,7 @@
 **Vayu is a free, open source API client with a native C++ load engine - build requests like Postman, load test the same endpoint at 50k+ req/s, and let your coding agent drive all of it over MCP. One app, fully local, no account.**
 
 - **50k+ req/s from the app's own UI** - 56,880 standalone, matching `wrk` and edging past `vegeta` on the same machine
-- **Most Postman scripts run unmodified** - a QuickJS runtime implementing the `pm.*` API
+- **Most Postman scripts run unmodified** - a QuickJS runtime implementing the `pm.*` API, the older `tests["..."]` / `postman.*` style and the bundled `require()` libraries (not `cheerio`, Backbone or Node built-ins)
 - **MCP server built in** - Claude Code, Cursor, VS Code, Codex and Zed (via the stdio CLI) drive the same engine the UI does
 
 MCP ([Model Context Protocol](https://athrvk.github.io/vayu/engine/mcp/)) is the open standard that lets coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine as one, so an agent can send the request it just wrote, load test it and read the report without leaving your editor.
@@ -108,7 +108,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **MCP server for coding agents** - 80 typed tools over inspection, execution, load runs and writes, behind a host allowlist, load caps, and a write toggle that ships off (and withholds the write tools until it is on)
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
 - **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
-- **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified
+- **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified (not `cheerio`, Backbone or Node built-ins)
 - **Composable scripting** - pre/post-request scripts compose down the hierarchy (root → folder → request)
 - **Command palette + deep search** - one shortcut to jump to any collection, request, environment or setting, searching inside them rather than just their names
 - **Private by default** - 100% offline execution; no telemetry, no account, no cloud sync
@@ -229,7 +229,7 @@ Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collecti
 Yes. Drop in an OpenAPI 3.1, OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.
 
 **What scripting syntax does Vayu support?**
-QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*`), so most Postman test scripts run without modification.
+QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*`), so most Postman test scripts run without modification (`cheerio`, Backbone and Node built-ins are the exceptions).
 
 **Which platforms does Vayu support?**
 Windows (x64), macOS 13.3 (Ventura) or later (Apple Silicon + Intel universal), and Linux
