@@ -45,7 +45,7 @@ consumes it.
   name (#2392), so `tooltips.tsx` is where wording is decided, and editing an
   entry there updates every card that shows it.
 - **No chart geometry constants in component files.** `utils/chartGeometry.ts`
-  owns `TIME_SERIES_DIMS` and `HDR_DIMS`. The full-width time-series charts must
+  owns `TIME_SERIES_DIMS`. The full-width time-series charts must
   stay dimensionally identical or the dashboard rows stop lining up.
 - **The mode mapping lives in exactly one place.** `hooks/useMode.ts` is the only
   interpreter of the freeform engine `mode` string. Mode-adaptive components take
