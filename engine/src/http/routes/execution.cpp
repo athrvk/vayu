@@ -1982,13 +1982,15 @@ bool jar_off) {
  * buffered send meets them: the residual pass (issue #1008), the caller's
  * target policy (#2521), the auth that waited on the pre-request script
  * (issue #2473), then the file rule (`file_ref.hpp`) over the allowed folders
- * as they stand, code `unsendable_file`.
+ * as they stand, code `unsendable_file`. A late OAuth 2.0 token request
+ * carries @p cancel, the handler's `server_stopping` (#2683).
  */
 std::optional<ResidualRefusal> refuse_before_stream (vayu::db::Database& db,
 vayu::Request& request,
 std::optional<vayu::http::Auth> late_auth,
 const ScriptVariableScopes& scopes,
-const vayu::http::TargetPolicy* target_policy) {
+const vayu::http::TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     if (auto refusal = resolve_residual_tokens (request, scopes)) {
         return refusal;
     }
@@ -1996,7 +1998,7 @@ const vayu::http::TargetPolicy* target_policy) {
         return refusal;
     }
     if (late_auth) {
-        LateTokenAcquisition acquisition{ &db, target_policy };
+        LateTokenAcquisition acquisition{ &db, target_policy, cancel };
         if (auto refusal =
             apply_late_auth (request, std::move (*late_auth), scopes, &acquisition)) {
             return refusal;
@@ -2140,8 +2142,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // (issue #1008), here because this path runs the pre-request script itself
     // rather than through `execute_exchange`: a `{{token}}` the script has just
     // defined resolves before the stream opens.
-    if (auto refusal = refuse_before_stream (ctx.db, send.request,
-        std::move (send.late_auth), scopes, send.target_policy_or_null ())) {
+    if (auto refusal =
+        refuse_before_stream (ctx.db, send.request, std::move (send.late_auth),
+        scopes, send.target_policy_or_null (), &ctx.server_stopping)) {
         // What that pass can refuse (issues #1051 and #1084), in the same words
         // the buffered send refuses it with and under the code composition
         // refuses it under; what differs is where the caller reads it, this

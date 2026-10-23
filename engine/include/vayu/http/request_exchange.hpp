@@ -471,10 +471,11 @@ struct ExchangeInputs {
     /// has nothing to interrupt) and for anything that predates this field,
     /// which is exactly the old, uninterruptible behaviour.
     std::function<bool ()> should_stop;
-    /// `ClientConfig::cancel` for this exchange's send and every
-    /// `pm.sendRequest` its scripts make (issue #2683): `POST /execute` passes
+    /// `ClientConfig::cancel` for this exchange's send, every
+    /// `pm.sendRequest` its scripts make and the OAuth 2.0 token @ref late_auth
+    /// acquires (issue #2683): `POST /execute` passes
     /// `RouteContext::server_stopping`, so `Server::stop()` ends the transfer
-    /// rather than waiting on it. Null leaves both uncancellable, as the
+    /// rather than waiting on it. Null leaves all three uncancellable, as the
     /// scenario runner's are.
     const std::atomic<bool>* cancel = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
@@ -639,6 +640,9 @@ struct LateTokenAcquisition {
     /// before the cache is read (`refuse_token_endpoints`): a script can set
     /// the `accessTokenUrl` as easily as the request's URL. Null for none.
     const vayu::http::TargetPolicy* target_policy = nullptr;
+    /// `ClientConfig::cancel` for the token request (#2683), the exchange's own
+    /// (`ExchangeInputs::cancel`). Null for none.
+    const std::atomic<bool>* cancel = nullptr;
     /// Added to by every acquisition (`AuthApplyResult::token_fetch_ms`).
     double fetch_ms = 0.0;
 };

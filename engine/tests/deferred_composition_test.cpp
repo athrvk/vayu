@@ -39,6 +39,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
@@ -113,9 +114,9 @@ class DeferredCompositionTest : public ::testing::Test {
         db_->init ();
         manager_ = std::make_unique<vayu::http::SseStreamManager> ();
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
-        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
-        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
-        mock_server_manager_, *manager_, run_summary_cache_ });
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr, authorize_manager_,
+        cookie_jar_, mock_issuer_manager_, inbox_manager_, mock_server_manager_, *manager_,
+        run_summary_cache_, vayu::http::no_grant_secret (), server_stopping_ });
         vayu::http::routes::register_execution_routes (*ctx_);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -258,6 +259,8 @@ class DeferredCompositionTest : public ::testing::Test {
     vayu::http::MockServerManager mock_server_manager_;
     vayu::http::RunSummaryCache run_summary_cache_;
     std::unique_ptr<vayu::http::SseStreamManager> manager_;
+    /// What `Server::stop()` sets (#2683); this fixture has no `Server`.
+    std::atomic<bool> server_stopping_{ false };
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
 };
 
@@ -569,6 +572,44 @@ TEST_F (DeferredCompositionTest, OAuth2ALateFetchIsTimedAndACachedTokenIsNot) {
     const auto cached = exchange ();
     EXPECT_EQ (tokens.hits (), 1);
     EXPECT_EQ (cached.auth_fetch_ms, 0.0);
+}
+
+// The token a scripted send acquires after its script carries the handler's
+// stop flag (#2683), on both transports, so `Server::stop()` ends that request
+// as it ends the send's own. A flag already set aborts the token request at
+// libcurl's first progress tick, so the send is refused with the token's
+// error, no token is cached, and nothing reaches the target. Mutation check:
+// drop `cancel` from the `LateTokenAcquisition` in `execute_exchange` (the
+// buffered send) or in `refuse_before_stream` (the stream), and the token is
+// acquired and cached; the buffered send is then cancelled with no
+// `refusalCode`, and the stream opens with a 202.
+TEST_F (DeferredCompositionTest, OAuth2ALateTokenRequestEndsWithTheServer) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "old" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (),
+    "pm.environment.set('secret', 'new');", client_credentials (tokens));
+    server_stopping_.store (true);
+
+    const json buffered = compose_and_execute ();
+    EXPECT_EQ (buffered.value ("status", -1), 0) << buffered.dump ();
+    EXPECT_EQ (buffered.value ("refusalCode", ""), "oauth2_network_error")
+    << buffered.dump ();
+
+    json streamed               = compose ();
+    streamed["stream"]          = true;
+    const auto [status, answer] = post ("/execute", streamed);
+    EXPECT_EQ (status, 400) << answer.dump ();
+    EXPECT_EQ (answer.value (json::json_pointer ("/error/code"), std::string ()), "oauth2_network_error")
+    << answer.dump ();
+
+    json config            = client_credentials (tokens)["config"];
+    config["clientId"]     = "cid";
+    config["clientSecret"] = "new";
+    config["scope"]        = "read";
+    EXPECT_FALSE (db_->get_oauth_token (vayu::http::oauth::cache_key (config)).has_value ())
+    << "a token request the stop flag should have ended completed";
+    EXPECT_EQ (echo.requests_seen (), 0);
 }
 
 // A load run acquires once, before any script: composed for a run, the config
