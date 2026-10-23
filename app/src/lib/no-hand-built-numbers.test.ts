@@ -39,7 +39,7 @@ const ALLOWED: Record<string, string> = {
 	"lib/run-compare.ts":
 		"run-compare's duration text is pinned by the MCP conformance contract, shared with electron/mcp/compare.ts",
 	"components/shared/response-viewer/utils.ts":
-		"the response viewer's own phase and size formatters (formatPhaseDuration, formatSize), spaced units by design",
+		"the response viewer's own phase and size formatters (formatPhaseMs, formatPhaseDuration, formatSize), spaced units by design",
 	"components/shared/CustomMetricsSummary.tsx":
 		"a user-defined metric has no unit, so its digits are not a latency, rate or percent",
 	"components/shared/ThresholdVerdict.tsx":

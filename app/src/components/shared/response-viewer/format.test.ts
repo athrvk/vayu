@@ -18,16 +18,24 @@ import { describe, it, expect } from "vitest";
 import { formatResponseTime, formatSize } from "./utils";
 
 describe("formatResponseTime", () => {
-	it("rounds to whole milliseconds in the common range", () => {
+	it("rounds to whole milliseconds from 10 ms up", () => {
 		expect(formatResponseTime(340.1235)).toBe("340 ms");
-		expect(formatResponseTime(1.4)).toBe("1 ms");
-		expect(formatResponseTime(999.6)).toBe("1000 ms");
+		expect(formatResponseTime(12.4)).toBe("12 ms");
 	});
 
-	it("keeps decimals below a millisecond, where they carry information", () => {
-		// A local mock or a cache hit. "0 ms" would lose the only signal there is.
+	it("keeps two decimals below 10 ms, as the load surfaces do", () => {
+		expect(formatResponseTime(1.4)).toBe("1.4 ms");
+		expect(formatResponseTime(2.2749)).toBe("2.27 ms");
 		expect(formatResponseTime(0.4321)).toBe("0.43 ms");
-		expect(formatResponseTime(0)).toBe("0.00 ms");
+	});
+
+	it("floors a measured time under 0.01 ms rather than printing it as zero", () => {
+		expect(formatResponseTime(0.004)).toBe("<0.01 ms");
+		expect(formatResponseTime(0)).toBe("0 ms");
+	});
+
+	it("moves to seconds once the time rounds to 1000 ms", () => {
+		expect(formatResponseTime(999.6)).toBe("1.00 s");
 	});
 
 	it("switches to seconds past a thousand", () => {

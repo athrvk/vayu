@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { formatMs } from "@/lib/format-number";
 import { formatPhaseMs, formatResponseTime, formatPhaseDuration, formatDuration } from "./utils";
 
 describe("formatPhaseMs", () => {
@@ -84,6 +85,27 @@ describe("formatDuration", () => {
 		expect(formatDuration(340)).toEqual({ value: "340", unit: "ms" });
 		expect(formatDuration(29_494)).toEqual({ value: "29.49", unit: "s" });
 		expect(formatDuration(0.22)).toEqual({ value: "0.22", unit: "ms" });
+	});
+
+	// The viewer's total and queue wait follow the load surfaces' rule (#2793):
+	// a 2.27 ms send reads "2.27" here exactly as a load p50 does.
+	it.each([
+		[2.27, "2.27", "ms"],
+		[0.22, "0.22", "ms"],
+		[0.004, "<0.01", "ms"],
+		[47.83, "48", "ms"],
+		[120, "120", "ms"],
+		[999.6, "1.00", "s"],
+		[1500, "1.50", "s"],
+		[65_432, "65.43", "s"],
+	])("formatDuration(%s) reads %s %s", (ms, value, unit) => {
+		expect(formatDuration(ms)).toEqual({ value, unit });
+	});
+
+	it("prints the digits formatMs prints for any millisecond value", () => {
+		for (const ms of [0.004, 0.22, 2.27, 9.99, 10, 120, 999]) {
+			expect(formatDuration(ms).value, String(ms)).toBe(formatMs(ms));
+		}
 	});
 
 	it("is what formatResponseTime is built from, so they cannot drift", () => {
