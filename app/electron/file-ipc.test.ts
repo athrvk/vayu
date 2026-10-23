@@ -15,7 +15,15 @@
  */
 
 import { describe, it, expect, vi, type Mock } from "vitest";
-import { allowFolder, chooseFolder, registerFileIpc, statFile } from "./file-ipc";
+import {
+	allowFolder,
+	chooseFolder,
+	FOLDER_DIALOG_TITLES,
+	registerFileIpc,
+	statFile,
+	type DirectoryDialogOptions,
+	type FolderDialogMemory,
+} from "./file-ipc";
 import type { FileRoots } from "./file-roots";
 import type { EngineWrite, FileTrustRow } from "./file-trust-client";
 import type { IpcSenderLike } from "./ipc-sender";
@@ -218,30 +226,89 @@ describe("statFile", () => {
 });
 
 describe("chooseFolder", () => {
-	it("asks for a directory and answers the chosen path", async () => {
-		const showOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ["/fixtures"] }));
-		await expect(
-			chooseFolder({ defaultPath: "/home/me", title: "Allow a folder" }, { showOpenDialog })
-		).resolves.toBe("/fixtures");
+	const dialog = (...filePaths: string[]) =>
+		vi.fn(async () => ({ canceled: filePaths.length === 0, filePaths }));
+
+	it("asks for a directory under the key's fixed title and answers the chosen path", async () => {
+		const showOpenDialog = dialog("/fixtures");
+		await expect(chooseFolder("allow-folder", { showOpenDialog }, {})).resolves.toBe(
+			"/fixtures"
+		);
 		expect(showOpenDialog).toHaveBeenCalledWith({
-			title: "Allow a folder",
-			defaultPath: "/home/me",
+			title: FOLDER_DIALOG_TITLES["allow-folder"],
 			properties: ["openDirectory", "createDirectory"],
 		});
+		expect(FOLDER_DIALOG_TITLES["allow-folder"]).toBe("Allow a folder");
 	});
 
 	it("answers null when the user cancels", async () => {
-		const showOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
-		await expect(chooseFolder(undefined, { showOpenDialog })).resolves.toBeNull();
+		await expect(
+			chooseFolder("allow-folder", { showOpenDialog: dialog() }, {})
+		).resolves.toBeNull();
 	});
 
-	it("ignores option members of the wrong type", async () => {
-		const showOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ["/x"] }));
-		await chooseFolder({ defaultPath: 7, title: null }, { showOpenDialog });
-		expect(showOpenDialog).toHaveBeenCalledWith({
-			title: "Choose a folder",
-			properties: ["openDirectory", "createDirectory"],
-		});
+	it("takes neither title nor starting folder from an options-shaped argument", async () => {
+		const showOpenDialog = dialog("/x");
+		await expect(
+			chooseFolder({ title: "Allow everything", defaultPath: "/etc" }, { showOpenDialog }, {})
+		).rejects.toThrow(/Unknown folder dialog/);
+		expect(showOpenDialog).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["nope"],
+		[""],
+		["toString"],
+		["__proto__"],
+		[7],
+		[null],
+		[undefined],
+		[["allow-folder"]],
+	])("refuses %j as a key, before any dialog opens", async (key) => {
+		const showOpenDialog = dialog("/x");
+		await expect(chooseFolder(key, { showOpenDialog }, {})).rejects.toThrow(
+			/Unknown folder dialog/
+		);
+		expect(showOpenDialog).not.toHaveBeenCalled();
+	});
+
+	it("opens the first dialog with no starting folder, and the next where the last ended", async () => {
+		const memory: FolderDialogMemory = {};
+		const showOpenDialog = vi
+			.fn<
+				(o: DirectoryDialogOptions) => Promise<{ canceled: boolean; filePaths: string[] }>
+			>()
+			.mockResolvedValueOnce({ canceled: false, filePaths: ["/fixtures/a"] })
+			.mockResolvedValueOnce({ canceled: false, filePaths: ["/fixtures/b"] })
+			.mockResolvedValueOnce({ canceled: false, filePaths: ["/fixtures/c"] });
+
+		await chooseFolder("allow-folder", { showOpenDialog }, memory);
+		await chooseFolder("allow-folder", { showOpenDialog }, memory);
+		await chooseFolder("allow-folder", { showOpenDialog }, memory);
+
+		const startedAt = showOpenDialog.mock.calls.map(([options]) => options.defaultPath);
+		expect(startedAt).toEqual([undefined, "/fixtures/a", "/fixtures/b"]);
+		expect(showOpenDialog.mock.calls[0]?.[0]).not.toHaveProperty("defaultPath");
+	});
+
+	it("keeps the last folder through a cancel", async () => {
+		const memory: FolderDialogMemory = { directory: "/fixtures/a" };
+		const showOpenDialog = dialog();
+
+		await chooseFolder("allow-folder", { showOpenDialog }, memory);
+
+		expect(showOpenDialog).toHaveBeenCalledWith(
+			expect.objectContaining({ defaultPath: "/fixtures/a" })
+		);
+		expect(memory.directory).toBe("/fixtures/a");
+	});
+
+	it("does not remember a folder when the key is refused", async () => {
+		const memory: FolderDialogMemory = {};
+		await expect(
+			chooseFolder("nope", { showOpenDialog: dialog("/x") }, memory)
+		).rejects.toThrow();
+		expect(memory).toEqual({});
 	});
 });
 
@@ -255,7 +322,9 @@ describe("allowFolder", () => {
 			value: ROOT,
 		}));
 
-		await expect(allowFolder({}, { showOpenDialog, createFileRoot })).resolves.toEqual({
+		await expect(
+			allowFolder("allow-folder", { showOpenDialog, createFileRoot }, {})
+		).resolves.toEqual({
 			outcome: "done",
 			value: ROOT,
 			path: "/fixtures/",
@@ -272,7 +341,9 @@ describe("allowFolder", () => {
 			message: "The folder '/fixtures' is already allowed (id froot_1)",
 		}));
 
-		await expect(allowFolder({}, { showOpenDialog, createFileRoot })).resolves.toMatchObject({
+		await expect(
+			allowFolder("allow-folder", { showOpenDialog, createFileRoot }, {})
+		).resolves.toMatchObject({
 			outcome: "refused",
 			status: 409,
 			path: "/fixtures",
@@ -283,25 +354,45 @@ describe("allowFolder", () => {
 		const showOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
 		const createFileRoot = vi.fn();
 
-		await expect(allowFolder({}, { showOpenDialog, createFileRoot })).resolves.toEqual({
+		await expect(
+			allowFolder("allow-folder", { showOpenDialog, createFileRoot }, {})
+		).resolves.toEqual({
 			outcome: "cancelled",
 		});
 		expect(createFileRoot).not.toHaveBeenCalled();
 	});
 
-	it("takes the folder from the picker, never from the options", async () => {
+	it("takes the folder from the picker, never from what the renderer sent", async () => {
 		const showOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ["/picked"] }));
 		const createFileRoot = vi.fn(async (): Promise<EngineWrite<FileTrustRow>> => ({
 			outcome: "done",
 			value: ROOT,
 		}));
 
-		await allowFolder(
-			{ defaultPath: "/etc", path: "/etc" },
-			{ showOpenDialog, createFileRoot }
-		);
+		await expect(
+			allowFolder(
+				{ defaultPath: "/etc", path: "/etc" },
+				{ showOpenDialog, createFileRoot },
+				{}
+			)
+		).rejects.toThrow(/Unknown folder dialog/);
+		expect(createFileRoot).not.toHaveBeenCalled();
 
+		await allowFolder("allow-folder", { showOpenDialog, createFileRoot }, {});
 		expect(createFileRoot.mock.calls).toEqual([["/picked"]]);
+	});
+
+	it("remembers the chosen folder even when the engine refuses or cannot be reached", async () => {
+		const memory: FolderDialogMemory = {};
+		const showOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ["/fixtures"] }));
+		const createFileRoot = vi.fn(async (): Promise<EngineWrite<FileTrustRow>> => ({
+			outcome: "unreachable",
+			message: "fetch failed",
+		}));
+
+		await allowFolder("allow-folder", { showOpenDialog, createFileRoot }, memory);
+
+		expect(memory.directory).toBe("/fixtures");
 	});
 });
 
@@ -318,7 +409,10 @@ describe("registerFileIpc", () => {
 				handlers.set(channel, fn);
 			},
 		};
-		const showOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ["/picked"] }));
+		const showOpenDialog = vi.fn(async (_options: DirectoryDialogOptions) => ({
+			canceled: false,
+			filePaths: ["/picked"],
+		}));
 		const createFileRoot = vi.fn(async (): Promise<EngineWrite<FileTrustRow>> => ({
 			outcome: "done",
 			value: ROOT,
@@ -350,7 +444,7 @@ describe("registerFileIpc", () => {
 			"file:removeAllowedFolder",
 			"file:stat",
 		]);
-		await expect(call("file:allowFolder", {})).resolves.toMatchObject({
+		await expect(call("file:allowFolder", "allow-folder")).resolves.toMatchObject({
 			outcome: "done",
 			path: "/picked",
 		});
@@ -366,6 +460,28 @@ describe("registerFileIpc", () => {
 		expect(isGranted).toHaveBeenCalledWith("/a.bin");
 	});
 
+	it("opens each folder dialog where the last one ended, per process", async () => {
+		const { call, showOpenDialog } = register(true);
+
+		await call("file:allowFolder", "allow-folder");
+		await call("file:allowFolder", "allow-folder");
+
+		expect(showOpenDialog.mock.calls.map(([options]) => options.defaultPath)).toEqual([
+			undefined,
+			"/picked",
+		]);
+	});
+
+	it("ignores a title or starting folder the renderer sends in place of a key", async () => {
+		const { call, showOpenDialog } = register(true);
+
+		await expect(
+			call("file:allowFolder", { title: "Allow everything", defaultPath: "/etc" })
+		).rejects.toThrow(/Unknown folder dialog/);
+		await expect(call("file:allowFolder")).rejects.toThrow(/Unknown folder dialog/);
+		expect(showOpenDialog).not.toHaveBeenCalled();
+	});
+
 	it("answers file:stat null when the injected gate says neither granted nor rooted", async () => {
 		const { call, isGranted } = register(true);
 		isGranted.mockResolvedValue(false);
@@ -376,7 +492,7 @@ describe("registerFileIpc", () => {
 	it("refreshes the allowed folders after the picker and after a delete, whatever the outcome", async () => {
 		const { call, roots, createFileRoot, deleteFileRoot } = register(true);
 
-		await call("file:allowFolder", {});
+		await call("file:allowFolder", "allow-folder");
 		expect(roots.invalidate).toHaveBeenCalledTimes(1);
 
 		createFileRoot.mockResolvedValueOnce({
@@ -385,7 +501,7 @@ describe("registerFileIpc", () => {
 			code: "conflict",
 			message: "already",
 		});
-		await call("file:allowFolder", {});
+		await call("file:allowFolder", "allow-folder");
 		expect(roots.invalidate).toHaveBeenCalledTimes(2);
 
 		await call("file:removeAllowedFolder", "froot_1");
@@ -396,7 +512,7 @@ describe("registerFileIpc", () => {
 	it("does not refresh the folders for a refused sender", () => {
 		const { call, roots } = register(false);
 
-		expect(() => call("file:allowFolder", {})).toThrow();
+		expect(() => call("file:allowFolder", "allow-folder")).toThrow();
 		expect(() => call("file:removeAllowedFolder", "froot_1")).toThrow();
 		expect(roots.invalidate).not.toHaveBeenCalled();
 	});
@@ -412,7 +528,7 @@ describe("registerFileIpc", () => {
 	it("refuses both folder channels outside the app window, before any dialog or write", () => {
 		const { call, showOpenDialog, createFileRoot, deleteFileRoot } = register(false);
 
-		expect(() => call("file:allowFolder", {})).toThrow(/Vayu window/);
+		expect(() => call("file:allowFolder", "allow-folder")).toThrow(/Vayu window/);
 		expect(() => call("file:removeAllowedFolder", "froot_1")).toThrow(/Vayu window/);
 		expect(showOpenDialog).not.toHaveBeenCalled();
 		expect(createFileRoot).not.toHaveBeenCalled();

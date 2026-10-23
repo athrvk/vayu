@@ -24,7 +24,7 @@ import {
 	type AuthWindowResult,
 	type OpenAuthWindowParams,
 } from "./oauth-window.js";
-import { isBrowsableUrl, urlProtocol } from "./external-url.js";
+import { createExternalUrlOpener } from "./external-url.js";
 import { denyDevicePermissions } from "./permissions.js";
 
 export type OpenAuthWindowResult = AuthWindowResult;
@@ -95,22 +95,24 @@ function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowRes
 	return flow.result;
 }
 
-export function setupOAuthIpcHandlers(): void {
+export interface OAuthIpcDeps {
+	/** Is the main window the one the user is looking at? */
+	isFocused: () => boolean;
+}
+
+export function setupOAuthIpcHandlers(deps: OAuthIpcDeps): void {
 	// Loopback mode: open the system browser (engine hosts the callback listener).
-	// Only http(s) is ever a valid authorize URL - reject anything else so a
-	// compromised renderer can't hand arbitrary protocol handlers to the OS. The
-	// rule itself lives in external-url.ts, shared with the context menu's "Open
-	// in Browser", which asks the same question of an arbitrary `href`.
-	ipcMain.handle("shell:openExternalUrl", async (_e, url: string) => {
-		const scheme = urlProtocol(url);
-		if (scheme === null) {
-			throw new Error("Invalid authorize URL");
-		}
-		if (!isBrowsableUrl(url)) {
-			throw new Error(`Refusing to open non-HTTP(S) URL: ${scheme}`);
-		}
-		await shell.openExternal(url);
+	// Only http(s) is ever a valid authorize URL, and only from a focused window
+	// at one open per second - a compromised renderer must not be able to hand
+	// arbitrary protocol handlers to the OS, or spray tabs at an unattended
+	// machine. The rules live in external-url.ts, shared with the context menu's
+	// "Open in Browser", which asks the scheme question of an arbitrary `href`.
+	const openExternalUrl = createExternalUrlOpener({
+		isFocused: deps.isFocused,
+		now: () => performance.now(),
+		openExternal: (url) => shell.openExternal(url),
 	});
+	ipcMain.handle("shell:openExternalUrl", (_e, url: unknown) => openExternalUrl(url));
 
 	// Embedded mode: capture the redirect URL and return it to the renderer.
 	ipcMain.handle("oauth:openWindow", async (_e, params: unknown): Promise<OpenAuthWindowResult> =>

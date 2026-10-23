@@ -391,14 +391,16 @@ interface ElectronAPI {
 	getFilePath: (file: File) => string;
 
 	/**
-	 * Open the system folder picker, starting at `defaultPath`, and allow the
-	 * folder the user chooses (#2356): the main process makes the engine write,
-	 * because only it holds the secret the engine requires for one, and the
-	 * renderer names only where the picker opens. Resolves with the engine's
-	 * answer rather than rejecting on a refusal. Renderer callers go through
+	 * Open the system folder picker and allow the folder the user chooses
+	 * (#2356): the main process makes the engine write, because only it holds
+	 * the secret the engine requires for one. The renderer names the dialog by
+	 * key and nothing else - the title is main's, and the picker opens where the
+	 * last one ended (#2378). The key mirrors `FolderDialogKey` in
+	 * `electron/file-ipc.ts`. Resolves with the engine's answer rather than
+	 * rejecting on a refusal. Renderer callers go through
 	 * `apiService.allowChosenFolder`. Absent outside Electron.
 	 */
-	allowFolder: (options?: { defaultPath?: string; title?: string }) => Promise<AllowFolderReply>;
+	allowFolder: (key: "allow-folder") => Promise<AllowFolderReply>;
 
 	/** Stop allowing a folder, by its row's id. Same reply family; absent outside Electron. */
 	removeAllowedFolder: (id: string) => Promise<RemoveFolderReply>;

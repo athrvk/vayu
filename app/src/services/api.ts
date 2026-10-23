@@ -665,11 +665,8 @@ export const apiService = {
 	 * on a refusal, so a caller can tell cancelled, allowed, already allowed (a
 	 * `refused` 409) and refused apart and still name the folder chosen.
 	 */
-	async allowChosenFolder(options?: {
-		defaultPath?: string;
-		title?: string;
-	}): Promise<AllowFolderReply> {
-		return await fileTrustBridge().allowFolder(options);
+	async allowChosenFolder(): Promise<AllowFolderReply> {
+		return await fileTrustBridge().allowFolder("allow-folder");
 	},
 
 	/** Rejects with the engine's refusal as an `ApiError`, or `EngineUnreachableError`. */
