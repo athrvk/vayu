@@ -41,13 +41,17 @@ const REQUESTS: Record<string, RequestSummary[]> = {
 };
 const getRequestsByCollection = (id: string) => REQUESTS[id] ?? [];
 
-function renderRows(deletingCollectionId: string | null = null) {
+function renderRows(
+	deletingCollectionId: string | null = null,
+	selectedRequestId: string | null = null
+) {
 	const expandedCollectionIds = new Set(["acme", "billing"]);
 	const rows = flattenVisibleRows({
 		collections: COLLECTIONS,
 		getRequestsByCollection,
 		expandedCollectionIds,
 		creatingSubfolder: null,
+		selectedRequestId,
 	});
 	const { container } = render(
 		withCollectionTreeContext(<CollectionTreeRows rows={rows} />, {
@@ -113,5 +117,43 @@ describe("the flat tree's rows", () => {
 
 		expect(wrappers.some((wrapper) => wrapper.classList.contains("opacity-50"))).toBe(false);
 		expect(wrappers[0].firstElementChild?.className).not.toContain("opacity-50");
+	});
+});
+
+describe("the flat tree's indent guides (#2773)", () => {
+	/** How many guide layers a wrapper's row paints, accent layer included. */
+	function guideLayers(wrapper: HTMLElement): number {
+		const image = (wrapper.firstElementChild as HTMLElement).style.backgroundImage;
+		return image ? image.split("linear-gradient").length - 1 : 0;
+	}
+	const accentLayers = (wrapper: HTMLElement) =>
+		(
+			(wrapper.firstElementChild as HTMLElement).style.backgroundImage.match(
+				/linear-gradient\(hsl\(var\(--primary\)/g
+			) ?? []
+		).length;
+
+	it("draw one layer per ancestor on folder, request, placeholder and form rows", () => {
+		const wrappers = renderRows();
+
+		expect(wrappers.map((wrapper) => [rowName(wrapper), guideLayers(wrapper)])).toEqual([
+			["acme", 0],
+			["billing", 1],
+			["Empty collection", 2],
+			["r1", 1],
+			["beta", 0],
+		]);
+	});
+
+	it("draw the accent layer on the selected request's folder subtree only", () => {
+		const wrappers = renderRows(null, "r1");
+
+		expect(wrappers.map((wrapper) => [rowName(wrapper), accentLayers(wrapper)])).toEqual([
+			["acme", 0],
+			["billing", 1],
+			["Empty collection", 1],
+			["r1", 1],
+			["beta", 0],
+		]);
 	});
 });

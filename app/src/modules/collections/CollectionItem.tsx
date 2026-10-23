@@ -11,6 +11,7 @@ import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/Col
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import { collectionEntity } from "./tree-rows";
+import { treeGuideStyle } from "./tree-guide-style";
 import { collectionRowMenu } from "./tree-row-menu";
 import { countSubtreeRequests } from "./tree-utils";
 import type { Collection } from "@/types";
@@ -49,6 +50,8 @@ export interface CollectionItemProps {
 	 * it is said the moment the row is focused.
 	 */
 	emptyPlaceholderId?: string | null;
+	/** The row's `activeGuideLevel`: which indent guide is drawn in the accent. */
+	activeGuideLevel?: number | null;
 }
 
 function CollectionItemRow({
@@ -57,6 +60,7 @@ function CollectionItemRow({
 	posInSet,
 	setSize,
 	emptyPlaceholderId,
+	activeGuideLevel = null,
 }: CollectionItemProps) {
 	const {
 		allCollections,
@@ -215,7 +219,7 @@ function CollectionItemRow({
 				// same colour, and the drop is the transient one.
 				rowDndClasses(dnd)
 			)}
-			style={{ paddingLeft: indentPx }}
+			style={{ paddingLeft: indentPx, ...treeGuideStyle(depth, activeGuideLevel) }}
 		>
 			<RowDropIndicator edge={dnd.dropEdge} indentPx={indentPx} />
 			<button

@@ -36,6 +36,7 @@ function flatten(
 		requests?: Record<string, Request[]>;
 		expanded?: string[];
 		creatingSubfolder?: string | null;
+		selectedRequestId?: string | null;
 	} = {}
 ): TreeRow[] {
 	const input: VisibleRowsInput = {
@@ -43,6 +44,7 @@ function flatten(
 		getRequestsByCollection: (id) => options.requests?.[id] ?? [],
 		expandedCollectionIds: new Set(options.expanded ?? []),
 		creatingSubfolder: options.creatingSubfolder ?? null,
+		selectedRequestId: options.selectedRequestId ?? null,
 	};
 	return flattenVisibleRows(input);
 }
@@ -371,5 +373,68 @@ describe("rowsAroundFocus", () => {
 
 	it("is empty for an index outside the rows", () => {
 		expect(rowsAroundFocus(windowFixture(), -1)).toEqual([]);
+	});
+});
+
+describe("activeGuideLevel", () => {
+	/**
+	 * acme > [billing > [deep, sibling], r1], beta > [rb]: a request two folders
+	 * deep, a request one level up beside its folder, and a second root.
+	 */
+	const collections = [folder("acme", 0), folder("billing", 0, "acme"), folder("beta", 1)];
+	const requests = {
+		billing: [request("deep", "billing", 0), request("sibling", "billing", 1)],
+		acme: [request("r1", "acme", 1)],
+		beta: [request("rb", "beta", 0)],
+	};
+	const expanded = ["acme", "billing", "beta"];
+
+	/** The keys of the rows carrying a level, with that level. */
+	const marked = (rows: TreeRow[]) =>
+		rows
+			.filter((row) => row.activeGuideLevel !== null)
+			.map((row) => `${row.key}=${row.activeGuideLevel}`);
+
+	it("marks exactly the visible subtree of the selected request's parent folder", () => {
+		const rows = flatten(collections, { requests, expanded, selectedRequestId: "deep" });
+
+		expect(marked(rows)).toEqual(["request:deep=1", "request:sibling=1"]);
+	});
+
+	it("marks a request directly under a root at level 0, the whole root subtree", () => {
+		const rows = flatten(collections, {
+			requests,
+			expanded,
+			creatingSubfolder: "acme",
+			selectedRequestId: "r1",
+		});
+
+		expect(marked(rows)).toEqual([
+			"new-folder:acme=0",
+			"folder:billing=0",
+			"request:deep=0",
+			"request:sibling=0",
+			"request:r1=0",
+		]);
+	});
+
+	it("marks nothing without a selected request", () => {
+		expect(marked(flatten(collections, { requests, expanded }))).toEqual([]);
+	});
+
+	it("marks nothing when the selected request is hidden in a collapsed folder", () => {
+		const rows = flatten(collections, {
+			requests,
+			expanded: ["acme", "beta"],
+			selectedRequestId: "deep",
+		});
+
+		expect(marked(rows)).toEqual([]);
+	});
+
+	it("marks nothing for a request the tree does not list", () => {
+		const rows = flatten(collections, { requests, expanded, selectedRequestId: "gone" });
+
+		expect(marked(rows)).toEqual([]);
 	});
 });

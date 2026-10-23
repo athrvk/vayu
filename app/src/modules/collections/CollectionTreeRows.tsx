@@ -19,6 +19,7 @@ import {
 import CollectionItem from "./CollectionItem";
 import RequestItem from "./RequestItem";
 import NewFolderForm from "./NewFolderForm";
+import { treeGuideStyle } from "./tree-guide-style";
 import { useCollectionTreeState } from "./context/CollectionTreeContext";
 import {
 	folderRowKey,
@@ -79,6 +80,7 @@ function RowContent({ row }: { row: TreeRow }) {
 					posInSet={row.posInSet}
 					setSize={row.setSize}
 					emptyPlaceholderId={row.emptyPlaceholderId}
+					activeGuideLevel={row.activeGuideLevel}
 				/>
 			);
 		case "request":
@@ -89,10 +91,17 @@ function RowContent({ row }: { row: TreeRow }) {
 					depth={row.depth}
 					posInSet={row.posInSet}
 					setSize={row.setSize}
+					activeGuideLevel={row.activeGuideLevel}
 				/>
 			);
 		case "new-folder-form":
-			return <NewFolderForm parentId={row.parentId} indentPx={rowInsetPx(row.depth)} />;
+			return (
+				<NewFolderForm
+					parentId={row.parentId}
+					depth={row.depth}
+					activeGuideLevel={row.activeGuideLevel}
+				/>
+			);
 		case "empty-placeholder":
 			// No role: it is not a treeitem, and the folder row above names it
 			// through `aria-describedby` instead.
@@ -100,7 +109,10 @@ function RowContent({ row }: { row: TreeRow }) {
 				<div
 					id={row.id}
 					className="flex h-full items-center pr-3 text-xs text-muted-foreground"
-					style={{ paddingLeft: rowInsetPx(row.depth) }}
+					style={{
+						paddingLeft: rowInsetPx(row.depth),
+						...treeGuideStyle(row.depth, row.activeGuideLevel),
+					}}
 				>
 					Empty collection
 				</div>

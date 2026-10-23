@@ -1503,6 +1503,30 @@ field takes the focus colour on its border in place of the ring. The tree-row
 controls are 24px at Default inside 24px rows, so they carry `size-target`
 rather than an exemption.
 
+### Tree indent guides
+
+The collections tree draws depth twice: by the row's `paddingLeft`
+(`rowInsetPx(depth)`, a 16px `INDENT_STEP`) and by a 1px vertical guide for
+each ancestor level `k` of a row, `0 <= k < depth`, at
+`x = rowInsetPx(k) + var(--spacing-target) / 2`: the centre of level `k`'s
+chevron, so it follows the density setting with the chevron. The guide is the
+divider token `--rule` (it reads on whichever surface the panel sits on, in
+both themes), painted as one background layer per level on the row itself
+(`treeGuideStyle`, `modules/collections/tree-guide-style.ts`), so a level adds
+no DOM node. Each row paints its own segment over its full height and the
+segments join into one line from below an open folder to its last visible
+descendant. The "Empty collection" line and the new-folder form draw guides like
+any other row at their depth; a root row draws none.
+
+The selected request's folder gets the accent: the guide at that folder's level
+is drawn again in `--primary` at 50% alpha, on every row inside the folder's
+visible subtree (`activeGuideLevel` on the row, set by `flattenVisibleRows`).
+No request tab active, or the request hidden in a collapsed folder, highlights
+nothing. Guides are the collections tree's alone; Move to and the schema
+explorer take the step and draw none. Row height, the selected fill and ring,
+hover, focus and the drop indicator are unchanged: a background image paints
+over the row's fill and under its content.
+
 ---
 
 ## Geometry

@@ -12,7 +12,9 @@ import {
 	useCollectionTreeState,
 } from "./context/CollectionTreeContext";
 import { Button, DialogCancelButton, Input } from "@/components/ui";
+import { treeGuideStyle } from "./tree-guide-style";
 import { isCommitEnter } from "@/lib/keyboard";
+import { rowInsetPx } from "@/constants/layout";
 
 /**
  * The inline "new collection" form a folder row opens, as the first row under it.
@@ -24,10 +26,12 @@ import { isCommitEnter } from "@/lib/keyboard";
  */
 export default function NewFolderForm({
 	parentId,
-	indentPx,
+	depth,
+	activeGuideLevel,
 }: {
 	parentId: string;
-	indentPx: number;
+	depth: number;
+	activeGuideLevel: number | null;
 }) {
 	const { newFolderName } = useCollectionTreeFolderDraft();
 	const { isCreatingSubfolder } = useCollectionTreeState();
@@ -35,7 +39,10 @@ export default function NewFolderForm({
 		useCollectionTreeHandlers();
 
 	return (
-		<div className="flex gap-2 py-1 pr-2" style={{ paddingLeft: indentPx }}>
+		<div
+			className="flex gap-2 py-1 pr-2"
+			style={{ paddingLeft: rowInsetPx(depth), ...treeGuideStyle(depth, activeGuideLevel) }}
+		>
 			<Input
 				size="sm"
 				type="text"

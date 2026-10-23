@@ -41,6 +41,13 @@ interface RowBase {
 	 * loaded.
 	 */
 	parentId: string | null;
+	/**
+	 * The indent guide level drawn in the accent on this row: the depth of the
+	 * folder holding the selected request, on every row of that folder's visible
+	 * subtree (#2773). `null` on every other row, and on all of them when no
+	 * request is selected or the selected one sits in a collapsed folder.
+	 */
+	activeGuideLevel: number | null;
 }
 
 /**
@@ -93,6 +100,8 @@ export interface VisibleRowsInput {
 	expandedCollectionIds: ReadonlySet<string>;
 	/** The folder whose new-subfolder form is open, if any. */
 	creatingSubfolder: string | null;
+	/** The request open in the active tab, whose folder's indent guide is drawn in the accent. */
+	selectedRequestId?: string | null;
 }
 
 const FOLDER_KEY_PREFIX = "folder:";
@@ -207,6 +216,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 			key: folderRowKey(collection.id),
 			depth,
 			parentId,
+			activeGuideLevel: null,
 			...position,
 			collection,
 			emptyPlaceholderId: isEmpty ? emptyPlaceholderId(collection.id) : null,
@@ -222,6 +232,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 				key: newFolderFormRowKey(owner),
 				depth: childDepth,
 				parentId: owner,
+				activeGuideLevel: null,
 			});
 		}
 		if (isEmpty) {
@@ -230,6 +241,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 				key: `empty:${owner}`,
 				depth: childDepth,
 				parentId: owner,
+				activeGuideLevel: null,
 				id: emptyPlaceholderId(owner),
 			});
 		}
@@ -246,6 +258,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 				key: requestRowKey(child.id),
 				depth: childDepth,
 				parentId: owner,
+				activeGuideLevel: null,
 				...position,
 				request: child.request,
 			});
@@ -256,7 +269,32 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 	roots.forEach((root, index) =>
 		appendFolder(root, 0, null, { posInSet: index + 1, setSize: roots.length })
 	);
+	markActiveGuide(rows, input.selectedRequestId ?? null);
 	return rows;
+}
+
+/**
+ * Sets `activeGuideLevel` on the rows of the selected request's parent
+ * folder's subtree: the rows after the folder, up to the next row at its depth
+ * or shallower. A request that is not in `rows` (no selection, or hidden in a
+ * collapsed folder) leaves every row `null`.
+ */
+function markActiveGuide(rows: TreeRow[], selectedRequestId: string | null): void {
+	if (selectedRequestId === null) return;
+	const key = requestRowKey(selectedRequestId);
+	const selected = rows.findIndex((row) => row.key === key);
+	if (selected === -1) return;
+
+	// The parent is the nearest row above that is shallower: the form and
+	// placeholder rows stand at the children's depth, never above them.
+	let folder = selected - 1;
+	while (folder >= 0 && rows[folder].depth >= rows[selected].depth) folder--;
+	if (folder < 0) return;
+
+	const level = rows[folder].depth;
+	for (let index = folder + 1; index < rows.length && rows[index].depth > level; index++) {
+		rows[index].activeGuideLevel = level;
+	}
 }
 
 /**
