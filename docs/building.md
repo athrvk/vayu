@@ -411,6 +411,12 @@ The project uses GitHub Actions for automated builds:
     ubuntu and macOS, three on Windows, the slowest leg. The `CI gate` job
     proves each platform's shards covered every test file between them, none
     twice
+  - A later push to a pull request skips the app or engine matrix when an
+    earlier run of the same pull request already passed it on identical
+    inputs. `scripts/suite-fingerprint.py` hashes every file the suite's
+    routing filters name, in the merge commit CI tests, and the `CI gate`
+    saves a passing suite under that hash; its summary names the run a
+    skipped suite passed in. A re-run attempt always runs everything
 
 - **Release Build**: `.github/workflows/release.yml`
   - Triggers on version tags (`v*`)
@@ -484,7 +490,10 @@ flag - so an entry serves only a build that compiles exactly the same way.
   served them: the first push of a one-file pull request read 28 hits against
   371 misses on three legs. Building the same job definition on `master` keeps
   writer and reader identical by construction. That run builds only - tests,
-  lint and the `CI gate` ran on the pull request.
+  lint and the `CI gate` ran on the pull request. It also saves master's vcpkg
+  archives, which `actions/cache` does only when the job finishes, so a newer
+  push to `master` queues behind a running one instead of cancelling it
+  (pull requests still cancel a superseded run).
 
 A pull request still writes its own scope as well, which only its own later
 pushes can read. That keeps a pull request that edits a widely included header
