@@ -27,6 +27,7 @@ import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { LoadTestMetrics } from "@/types";
 import type { DisplayMetrics, MetricsViewProps } from "../types";
+import { LATENCY, PHASES } from "../utils/liveDistributions.testkit";
 import MetricsView from "./MetricsView";
 
 const SURFACE = ".surface-card, .surface-sunken";
@@ -70,7 +71,10 @@ const props: MetricsViewProps = {
 		bytes_sent: 5000,
 		bytes_received: 25000,
 	} as DisplayMetrics,
-	historicalMetrics: Array.from({ length: 6 }, (_, i) => tick(i)),
+	// The last tick is a gate frame, so Row 3 draws its footers (HDR and timing).
+	historicalMetrics: Array.from({ length: 6 }, (_, i) =>
+		i === 5 ? { ...tick(i), cumulative_latency: LATENCY, cumulative_phases: PHASES } : tick(i)
+	),
 	mode: "ramp_up",
 	rampConfig: { rampUpDurationSeconds: 10, startConcurrency: 1, targetConcurrency: 100 },
 };

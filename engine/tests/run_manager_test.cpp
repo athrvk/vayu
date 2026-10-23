@@ -1045,6 +1045,122 @@ TEST (LoadClock, AStalledSecondStoresNoPercentiles) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #2782: only a gate frame carries the run-so-far distributions, and the final
+// one, read after the drain, is what the report says. A 100 ms frame carries
+// neither key; every gate frame carries `cumulativeLatency` and, with the
+// phase bank on by default, `cumulativePhases`; the last frame's latency
+// distribution is the report's `latency` and its phase means are the
+// report's `avg*Ms`.
+// Mutation checks: drop `cumulativePhases` from `put_gate_distributions` and
+// the gate assertions fail; drop `maxMs` from a phase entry and the percentile
+// comparison throws on the missing key; have the report ignore the stored
+// phase means and the average comparison fails (the trace sample is a
+// different population);
+// feed the interval recorder a value 1 ms off the one record_latency_sample
+// gives the report's histogram and every latency comparison fails.
+TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
+    const std::string db_path = "test_load_clock_gate_distributions.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "2s" },
+            { "targetRps", 20.0 }, { "timeout", 5000 }, { "workers", 1 } };
+        const std::string run_id = "run_load_gate_distributions";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto run = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (run);
+        ASSERT_EQ (run->status, vayu::RunStatus::Completed) << run->summary;
+
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+        const auto frames = live_frames (*context);
+        ASSERT_FALSE (frames.empty ());
+
+        size_t gate_frames = 0;
+        for (const auto& frame : frames) {
+            if (!frame.contains ("secondSamples")) {
+                EXPECT_FALSE (frame.contains ("cumulativeLatency")) << frame.dump ();
+                EXPECT_FALSE (frame.contains ("cumulativePhases")) << frame.dump ();
+                continue;
+            }
+            ++gate_frames;
+            ASSERT_TRUE (frame.contains ("cumulativeLatency")) << frame.dump ();
+            ASSERT_TRUE (frame.contains ("cumulativePhases")) << frame.dump ();
+            EXPECT_TRUE (frame.at ("cumulativeLatency").is_null () ||
+            frame.at ("cumulativeLatency").is_object ())
+            << frame.dump ();
+        }
+        EXPECT_GE (gate_frames, 2u) << "no gate frame before the final one";
+
+        const auto& last     = frames.back ();
+        const auto completed = last.at ("totalRequests").get<size_t> ();
+        ASSERT_GT (completed, 0u);
+        ASSERT_TRUE (last.at ("cumulativeLatency").is_object ()) << last.dump ();
+        EXPECT_EQ (last.at ("cumulativeLatency").at ("count").get<size_t> (), completed);
+        const auto& phases = last.at ("cumulativePhases");
+        ASSERT_TRUE (phases.is_object ()) << last.dump ();
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& breakdown       = report.at ("timingBreakdown");
+        constexpr auto AVERAGE_KEYS = std::to_array<std::string_view> (
+        { "avgDnsMs", "avgConnectMs", "avgTlsMs", "avgFirstByteMs", "avgDownloadMs" });
+        for (size_t i = 0; i < vayu::core::TIMING_PHASE_COUNT; ++i) {
+            const auto* phase = vayu::core::TIMING_PHASE_KEYS.at (i);
+            const std::string average (AVERAGE_KEYS.at (i));
+            EXPECT_EQ (phases.at (phase).at ("count").get<size_t> (), completed) << phase;
+            // Both are hdr_mean over the bank after the drain, so they agree
+            // to the double; the tolerance only absorbs the JSON round trip.
+            EXPECT_NEAR (phases.at (phase).at ("meanMs").get<double> (),
+            breakdown.at (average).get<double> (), 1e-9)
+            << phase << " against " << average;
+
+            // The live table's percentiles and max are the report's, read
+            // from the same bank after the same drain.
+            const auto& stored = breakdown.at ("phases").at (phase);
+            for (const auto& [live_key, report_key] :
+            std::to_array<std::pair<std::string_view, std::string_view>> ({ { "p50Ms", "p50" },
+            { "p95Ms", "p95" }, { "p99Ms", "p99" }, { "maxMs", "max" } })) {
+                EXPECT_NEAR (phases.at (phase).at (live_key).get<double> (),
+                stored.at (report_key).get<double> (), 1e-9)
+                << phase << " " << live_key << " against " << report_key;
+            }
+        }
+
+        // The live view's last HDR points are History's. One
+        // record_latency_sample feeds the report's histogram and the window
+        // the run-so-far one is merged from, with one value, and the final
+        // frame merges the last window after the drain, so the two hold the
+        // same buckets and read the same to the double.
+        const auto& live_latency   = last.at ("cumulativeLatency");
+        const auto& report_latency = report.at ("latency");
+        EXPECT_EQ (live_latency.at ("count").get<size_t> (),
+        report.at ("summary").at ("totalRequests").get<size_t> ());
+        constexpr auto LATENCY_KEYS =
+        std::to_array<std::pair<std::string_view, std::string_view>> (
+        { { "minMs", "min" }, { "p50Ms", "p50" }, { "p75Ms", "p75" },
+        { "p90Ms", "p90" }, { "p95Ms", "p95" }, { "p99Ms", "p99" },
+        { "p999Ms", "p999" }, { "maxMs", "max" } });
+        for (const auto& [live_key, report_key] : LATENCY_KEYS) {
+            EXPECT_NEAR (live_latency.at (live_key).get<double> (),
+            report_latency.at (report_key).get<double> (), 1e-9)
+            << live_key << " against latency." << report_key;
+        }
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #2393: every frame carries the trailing window, and a gate frame and its
 // stored row carry one reading of it. A hundred 50 ms completions land before
 // tick 0, so they are in the run's mean and in no window; the 5 ms ones fed

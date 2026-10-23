@@ -111,7 +111,8 @@ export function HdrPercentileChart({
 	height,
 	sloMs,
 }: {
-	report: RunReport | null;
+	/** A stored report, or the live view's adapter from the latest gate frame. */
+	report: Pick<RunReport, "latency"> | null;
 	height?: number;
 	/** The SLO in ms. A p95/p99 marker takes a status colour only past it; omit it and none does. */
 	sloMs?: number;

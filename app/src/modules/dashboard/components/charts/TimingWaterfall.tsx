@@ -16,9 +16,10 @@ import {
 } from "@/components/shared/response-viewer/timing-phases";
 
 /**
- * Timing waterfall - from report.timingBreakdown. Always renders 5 rows so the
- * card height stays constant; during live (no report yet) values show "-" and
- * bars are empty.
+ * Timing waterfall - from report.timingBreakdown, which the live view fills from
+ * the latest gate frame's phase means (`utils/liveDistributions.ts`). Always
+ * renders 5 rows so the card height stays constant; with no report values show
+ * "-" and bars are empty.
  *
  * The rows come from the shared `TIMING_PHASES` descriptor. They used to be a
  * local list, and being local is what let two defects sit here unseen:
@@ -42,7 +43,7 @@ import {
  * stored no traces at all - testing the object would paint five empty bars and
  * a confident "0 ms" total for exactly those runs.
  */
-export function TimingWaterfall({ report }: { report: RunReport | null }) {
+export function TimingWaterfall({ report }: { report: Pick<RunReport, "timingBreakdown"> | null }) {
 	const hasData = hasPhaseAverages(report?.timingBreakdown);
 	const stages = phasesFromAverages(report?.timingBreakdown);
 

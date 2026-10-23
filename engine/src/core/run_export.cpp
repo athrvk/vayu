@@ -171,7 +171,7 @@ constexpr auto ERRORS_KEYS = std::to_array<std::string_view> ({ "total", "withDe
 constexpr auto TIMING_AVERAGE_KEYS = std::to_array<std::string_view> (
 { "avgDnsMs", "avgConnectMs", "avgTlsMs", "avgFirstByteMs", "avgDownloadMs" });
 constexpr auto PHASE_KEYS =
-std::to_array<std::string_view> ({ "p50", "p95", "p99", "max", "count" });
+std::to_array<std::string_view> ({ "p50", "p95", "p99", "max", "count", "mean" });
 constexpr auto STREAM_KEYS = std::to_array<std::string_view> (
 { "completions", "totalEvents", "capped", "eventsPerSecond" });
 constexpr auto STREAM_EVENTS_KEYS = std::to_array<std::string_view> (
