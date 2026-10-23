@@ -1452,11 +1452,12 @@ nlohmann::ordered_json ImportTally::items () const {
     // enumerating every JMeter plugin class in advance) is appended after,
     // in `counts_`'s own insertion order, rather than the `nothing dropped
     // quietly` rule silently losing it to a list it was never going to fit.
-    static constexpr auto ORDER = std::to_array<const char*> ({ "websocket", "grpc",
-    "api_spec", "unit_test", "file_body", "malformed_item", "unsupported_method",
-    "malformed_spec", "example_no_status", "default_response", "external_ref",
-    "duplicate_operation_id", "webhook_operations", "deprecated_operation", "cookie_param",
-    "unmapped_body", "unresolved_base_url", "servers_dropped", "unsupported_auth",
+    static constexpr auto ORDER =
+    std::to_array<const char*> ({ "websocket", "grpc", "api_spec", "unit_test",
+    "file_body", "malformed_item", "unsupported_method", "malformed_spec",
+    "example_no_status", "default_response", "external_ref", "duplicate_operation_id",
+    "webhook_operations", "deprecated_operation", "cookie_param", "unmapped_body",
+    "unresolved_base_url", "no_server_url", "servers_dropped", "unsupported_auth",
     "security_unmapped_or", "security_unmapped_and", "security_unmapped_scheme",
     "security_unmapped_mutualtls", "security_unmapped_openidconnect",
     "security_unmapped_type", "security_unmapped_apikey_cookie", "oauth2_dropped_field",

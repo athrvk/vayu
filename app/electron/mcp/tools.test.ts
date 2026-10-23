@@ -59,7 +59,7 @@ import {
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
-import { describeImportPreview } from "./tools/spec-bindings.js";
+import { describeImport, describeImportPreview } from "./tools/spec-bindings.js";
 import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
@@ -3108,6 +3108,32 @@ describe("run_collection_smoke", () => {
 		// *composed* URL, which is why composition (pure, sends nothing) may run
 		// for it while execution must not.
 		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+	});
+
+	test("skips a request whose host is left as {{baseUrl}} with the gate's remedy as its reason (#2450)", async () => {
+		const client = fakeClient({
+			listRequests: vi
+				.fn()
+				.mockResolvedValue([
+					{ id: "r1", name: "one", method: "GET", url: "{{baseUrl}}/x" },
+				]),
+			composeRequest: vi.fn().mockResolvedValue({ method: "GET", url: "{{baseUrl}}/x" }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const matrix = res.structuredContent as {
+			skipped: number;
+			results: Array<{ reason?: string }>;
+		};
+		expect(matrix.skipped).toBe(1);
+		const reason = matrix.results[0].reason ?? "";
+		expect(reason).toMatch(/^Could not determine the target host/);
+		expect(reason).toContain("{{baseUrl}}");
+		expect(reason).toContain("update_collection");
+		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
 	test("does not skip a scheme-less host:port request whose host is allowlisted", async () => {
@@ -7656,6 +7682,26 @@ describe("dispatchTool", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
+		expect(client.executeRequest).not.toHaveBeenCalled();
+	});
+
+	test("run_request answers a host left as {{baseUrl}} with the gate's own remedy (#2450)", async () => {
+		// Compose leaves an undefined variable's token in place. The tool must
+		// hand the agent the gate's sentence, not a generic one that drops the
+		// variable's name and the tool that defines it.
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({ method: "GET", url: "{{baseUrl}}/x" }),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "{{baseUrl}}/x" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		const text = firstText(res);
+		expect(text).toMatch(/^Could not determine the target host/);
+		expect(text).toContain("{{baseUrl}}");
+		expect(text).toContain("update_collection");
 		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
@@ -12540,6 +12586,31 @@ describe("OpenAPI spec binding tools", () => {
 			);
 			expect(describeImportPreview({ meta: { ...meta, folderCount: 0 } })).not.toContain(
 				"recursive"
+			);
+		});
+
+		test("tells the caller how to define {{baseUrl}} when the document named no server (#2450)", () => {
+			const base = { format: "OpenAPI 3.1.0", requestCount: 2, folderCount: 0 };
+			const noServer = { ...base, skipped: [{ kind: "no_server_url", count: 1 }] };
+			const other = { ...base, skipped: [{ kind: "websocket", count: 1 }] };
+			expect(noServer.skipped.map((s) => s.kind)).toContain("no_server_url");
+			const remedy = "{{baseUrl}} is undefined";
+			const imported = { collections: 1, requests: 2, environments: 0, globals: 0 };
+
+			const preview = describeImportPreview({ meta: noServer });
+			expect(preview).toContain(remedy);
+			expect(preview).toContain("update_collection");
+			expect(preview).toContain("update_environment");
+			expect(describeImportPreview({ meta: other })).not.toContain(remedy);
+			expect(describeImportPreview({ meta: { ...base, skipped: [] } })).not.toContain(remedy);
+
+			const done = describeImport({ ...imported, meta: noServer });
+			expect(done).toContain(remedy);
+			expect(done).toContain("update_collection");
+			expect(done).toContain("update_environment");
+			expect(describeImport({ ...imported, meta: other })).not.toContain(remedy);
+			expect(describeImport({ ...imported, meta: { ...base, skipped: [] } })).not.toContain(
+				remedy
 			);
 		});
 

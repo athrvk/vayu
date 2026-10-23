@@ -122,6 +122,31 @@ describe("checkAllowlist", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
 		expect(checkAllowlist("{{baseUrl}}/x", config, "app").ok).toBe(false);
 	});
+	test("names the unresolved variable and the tools that define it (#2450)", () => {
+		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
+		const res = checkAllowlist("{{baseUrl}}/pets", config, "app");
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/^Could not determine the target host/);
+		expect(res.error).toContain("{{baseUrl}}");
+		expect(res.error).toContain("update_collection");
+		expect(res.error).toContain("resolve_variables");
+		// The first of several, trimmed of the spaces the engine's token rule allows.
+		expect(checkAllowlist("https://{{ host }}.{{zone}}/x", config, "app").error).toContain(
+			"{{host}}"
+		);
+		// Repeated calls: the module-level /g regex must not carry state between them.
+		expect(checkAllowlist("{{baseUrl}}/pets", config, "app").error).toContain("{{baseUrl}}");
+	});
+	test("keeps the generic sentence for an empty URL and for a stray brace", () => {
+		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
+		const generic =
+			"Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.";
+		expect(checkAllowlist("", config, "app").error).toBe(generic);
+		expect(checkAllowlist("{{baseUrl/pets", config, "app").error).toBe(generic);
+		expect(checkAllowlist("https://host}}/x", config, "app").error).toBe(generic);
+		// A template in the path leaves the host resolvable, so it is no refusal here.
+		expect(checkAllowlist("https://api.example.com/{{id}}", config, "app").ok).toBe(true);
+	});
 	test("allowAll bypasses the allowlist for any resolvable host", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
 		expect(checkAllowlist("https://anything.example.org/x", config, "app").ok).toBe(true);

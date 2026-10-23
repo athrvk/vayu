@@ -134,6 +134,16 @@ export interface SkippedItem {
 		 */
 		| "unresolved_base_url"
 		/**
+		 * A document that names no server URL at all (issue #2450): no `servers`
+		 * (OpenAPI's implicit default server `/` names no host either), an empty
+		 * array, a first entry with no `url`, or a Swagger 2.0 document with no
+		 * `host`. No `baseUrl` variable is created - Vayu does not invent a host -
+		 * so every request URL starts with `{{baseUrl}}` unresolved until the user
+		 * defines it. Distinct from `unresolved_base_url`, where the document
+		 * wrote a URL that could not be completed.
+		 */
+		| "no_server_url"
+		/**
 		 * A Postman `auth.type` naming a scheme Vayu has no mode for - a type
 		 * the schema does not define, or a non-string `type` (issue #1443) -
 		 * unlike the schema's own types Vayu cannot sign (`awsv4`, `digest`,
