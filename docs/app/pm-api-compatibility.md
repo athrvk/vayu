@@ -617,7 +617,6 @@ are the answers recorded as different, and the reason for each:
 | `{"format": "time"}`, `"25:00:00Z"` | passes | fails | `fast` takes any two digits for an hour |
 | `{"format": "time"}`, `"03:04:05"` | passes | fails | ajv leaves the offset optional; `jsonSchema` follows RFC 3339, which requires it |
 | `{"multipleOf": 0.01}`, `0.07` or `19.99` | fails | passes | ajv divides in binary floating point unless `multipleOfPrecision` is set |
-| `{"propertyNames": {"pattern": "^[a-z]+$"}}`, `{"aB": 1}` | fails | passes | a bug in `jsonSchema`, tracked as [#2719](https://github.com/athrvk/vayu/issues/2719) |
 
 A keyword `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) is one ajv 6 ignores, so the same schema passes

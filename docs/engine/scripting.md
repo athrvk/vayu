@@ -359,7 +359,9 @@ Notes on the edges:
   it, so `.an('array').that.includes(1)` does too.
 - **`jsonSchema(schema[, options])` is draft-07** and runs on the engine's
   validator rather than ajv. A failure names the first path that broke the
-  schema. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
+  schema; a constraint that records no detail (`propertyNames`, a `false`
+  schema) yields one failure at the body root that names the schema path
+  instead. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
   such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
   in **both** polarities and is named, because ignoring it would make the schema
   looser (or, under `not`, stricter) and neither verdict could be trusted.
@@ -3292,9 +3294,6 @@ moves into the agreed cases:
 - `multipleOf` with a decimal: ajv divides in binary floating point, so
   `{"multipleOf": 0.01}` rejects `0.07` and `19.99` unless `multipleOfPrecision`
   is set. `jsonSchema` answers the decimal question and passes both.
-- `propertyNames`: `jsonSchema` passes `{"aB": 1}` against
-  `{"propertyNames": {"pattern": "^[a-z]+$"}}` and ajv rejects it. The native
-  verdict is the wrong one (a bug, [#2719](https://github.com/athrvk/vayu/issues/2719)).
 
 The keywords `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) are the ones ajv 6 ignores, so a schema that
