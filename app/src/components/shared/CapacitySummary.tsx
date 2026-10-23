@@ -7,8 +7,8 @@
 
 /**
  * What a capacity-discovery run found: the most virtual users the target held
- * inside its latency budget, the level it gave out at, and the per-level trail
- * the search left behind.
+ * inside its latency budget and error limit, the level it gave out at, and the
+ * per-level trail the search left behind.
  *
  * The headline is a sentence rather than a stat grid because the mode exists to
  * answer one question in words - "what can my service take" - and four numbers
@@ -23,14 +23,15 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { formatLatency, formatRate } from "@/lib/format-number";
+import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_LABEL, concurrencyUnit } from "@/constants/load-test-modes";
 import type { RunReport } from "@/types/domain";
 
 /**
  * Why the search stopped, in words, and whether that reading is bad news.
  *
- * `slo_exceeded` is the only stop that observed the target give out - the rest
+ * `slo_exceeded` and `errors_exceeded` observed the target give out, on latency
+ * and on failed requests; `plateau` observed throughput stop climbing. The rest
  * ended on a bound the *caller* set, which is not a fault. Unknown reasons
  * render under their raw key rather than vanishing: a newer sidecar may stop
  * for a reason this build has no words for, and the levels below still say what
@@ -40,6 +41,11 @@ const STOP_REASONS: Record<string, { label: string; detail: string; degraded: bo
 	slo_exceeded: {
 		label: "Latency budget exceeded",
 		detail: "p99 stayed above the budget across two consecutive windows.",
+		degraded: true,
+	},
+	errors_exceeded: {
+		label: "Errors exceeded the limit",
+		detail: "More requests failed than the limit allows across two consecutive windows.",
 		degraded: true,
 	},
 	plateau: {
@@ -64,6 +70,44 @@ const STOP_REASONS: Record<string, { label: string; detail: string; degraded: bo
 	},
 };
 
+type Capacity = NonNullable<RunReport["capacity"]>;
+
+/** The engine's limit when the report carries it, the generic wording for a run stored without. */
+function stopDetail(capacity: Capacity, fallback: string): string {
+	if (capacity.stopReason !== "errors_exceeded" || capacity.maxErrorPct === undefined) {
+		return fallback;
+	}
+	return `More than ${formatNumber(capacity.maxErrorPct)}% of requests failed across two consecutive windows.`;
+}
+
+/**
+ * The reading at the knee: the error share when errors ended the search, the p99
+ * otherwise. Each is printed only when the engine sent it, so an absent figure
+ * never renders as "0ms" or "0.0%".
+ */
+function KneeEvidence({ capacity }: { capacity: Capacity }) {
+	if (capacity.stopReason === "errors_exceeded" && capacity.kneeErrorPct !== undefined) {
+		return (
+			<>
+				, where{" "}
+				<span className="font-mono font-medium text-warning-text">
+					{formatPercent(capacity.kneeErrorPct)}%
+				</span>{" "}
+				of requests failed
+			</>
+		);
+	}
+	if (capacity.kneeP99Ms === undefined) return null;
+	return (
+		<>
+			, where p99 reached{" "}
+			<span className="font-mono font-medium text-warning-text">
+				{formatLatency(capacity.kneeP99Ms)}
+			</span>
+		</>
+	);
+}
+
 export interface CapacitySummaryProps {
 	capacity: RunReport["capacity"];
 	className?: string;
@@ -83,6 +127,10 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 	// below claims a measurement at the lowest level that was never taken,
 	// directly contradicting the "Ran out of time" badge beside it.
 	const judgedNothing = capacity.levels.length === 0;
+	const stoppedOnErrors = capacity.stopReason === "errors_exceeded";
+	// A run stored before errors were judged has no `errorPct` on any level; its
+	// column would be empty cells, so the table keeps its three columns for it.
+	const showErrors = capacity.levels.some((level) => level.errorPct !== undefined);
 
 	return (
 		<Card className={className}>
@@ -136,6 +184,11 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 							</span>{" "}
 							against a {formatLatency(capacity.sloMs)} budget.
 						</>
+					) : stoppedOnErrors ? (
+						<>
+							No level stayed under the error limit - the target was already over it
+							at the fewest virtual users the search tried.
+						</>
 					) : (
 						<>
 							No level met the {formatLatency(capacity.sloMs)} budget - the target was
@@ -149,14 +202,15 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 						<span className="font-mono font-medium text-foreground">
 							{capacity.kneeConcurrency}
 						</span>{" "}
-						{concurrencyUnit(capacity.kneeConcurrency)}, where p99 reached{" "}
-						<span className="font-mono font-medium text-warning-text">
-							{formatLatency(capacity.kneeP99Ms ?? 0)}
-						</span>
-						.
+						{concurrencyUnit(capacity.kneeConcurrency)}
+						<KneeEvidence capacity={capacity} />.
 					</p>
 				)}
-				{stop && <p className="mt-1.5 text-xs text-muted-foreground">{stop.detail}</p>}
+				{stop && (
+					<p className="mt-1.5 text-xs text-muted-foreground">
+						{stopDetail(capacity, stop.detail)}
+					</p>
+				)}
 
 				{capacity.levels.length > 0 && (
 					<div className="mt-3 overflow-x-auto">
@@ -169,12 +223,26 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 									<th className="py-1.5 pr-3 text-right font-medium">
 										Throughput
 									</th>
-									<th className="py-1.5 text-right font-medium">p99</th>
+									<th
+										className={cn(
+											"py-1.5 text-right font-medium",
+											showErrors && "pr-3"
+										)}
+									>
+										p99
+									</th>
+									{showErrors && (
+										<th className="py-1.5 text-right font-medium">Errors</th>
+									)}
 								</tr>
 							</thead>
 							<tbody>
 								{capacity.levels.map((level, index) => {
 									const overBudget = level.p99Ms > capacity.sloMs;
+									const overErrorLimit =
+										level.errorPct !== undefined &&
+										capacity.maxErrorPct !== undefined &&
+										level.errorPct > capacity.maxErrorPct;
 									return (
 										// Index, not concurrency: a level the search
 										// re-measured after one bad window appears
@@ -193,6 +261,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 											<td
 												className={cn(
 													"py-1.5 text-right font-mono",
+													showErrors && "pr-3",
 													overBudget
 														? "text-warning-text"
 														: "text-muted-foreground"
@@ -200,6 +269,20 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 											>
 												{formatLatency(level.p99Ms)}
 											</td>
+											{showErrors && (
+												<td
+													className={cn(
+														"py-1.5 text-right font-mono",
+														overErrorLimit
+															? "text-warning-text"
+															: "text-muted-foreground"
+													)}
+												>
+													{level.errorPct === undefined
+														? ""
+														: `${formatPercent(level.errorPct)}%`}
+												</td>
+											)}
 										</tr>
 									);
 								})}

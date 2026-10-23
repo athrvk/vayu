@@ -188,6 +188,103 @@ describe("CapacitySummary", () => {
 		cleanup();
 	});
 
+	describe("a search that stopped on errors", () => {
+		const errorsStop = (over: Partial<Capacity> = {}): Capacity =>
+			capacity({
+				stopReason: "errors_exceeded",
+				maxErrorPct: 1,
+				kneeConcurrency: 33,
+				kneeP99Ms: 80,
+				kneeErrorPct: 94,
+				levels: [
+					{ concurrency: 16, rps: 9000, p99Ms: 40, errorPct: 0 },
+					{ concurrency: 33, rps: 4000, p99Ms: 80, errorPct: 94 },
+				],
+				...over,
+			});
+
+		it("names the stop, the limit and the share of requests that failed", () => {
+			render(<CapacitySummary capacity={errorsStop()} />);
+			expect(screen.getByText("Errors exceeded the limit")).toBeTruthy();
+			expect(
+				screen.getByText("More than 1% of requests failed across two consecutive windows.")
+			).toBeTruthy();
+
+			const knee = screen.getByText(/It gave out at/).textContent ?? "";
+			expect(knee).toContain("33 virtual users");
+			expect(knee).toContain("94.0% of requests failed");
+			// The latency was fine at the knee; quoting it would blame the wrong thing.
+			expect(knee).not.toContain("p99");
+			cleanup();
+		});
+
+		it("falls back to generic wording when the report carries no limit", () => {
+			render(<CapacitySummary capacity={errorsStop({ maxErrorPct: undefined })} />);
+			expect(screen.getByText(/More requests failed than the limit allows/)).toBeTruthy();
+			cleanup();
+		});
+
+		it("says the error limit, not the latency budget, when no level held", () => {
+			render(
+				<CapacitySummary
+					capacity={errorsStop({
+						maxHealthyConcurrency: undefined,
+						maxHealthyRps: undefined,
+						p99AtMaxHealthyMs: undefined,
+					})}
+				/>
+			);
+			expect(screen.getByText(/No level stayed under the error limit/)).toBeTruthy();
+			expect(screen.queryByText(/budget - the target/)).toBeNull();
+			expect(screen.queryByText(/Sustained/)).toBeNull();
+			cleanup();
+		});
+
+		it("adds an Errors column and tints only the level over the limit", () => {
+			const { container } = render(<CapacitySummary capacity={errorsStop()} />);
+			expect(screen.getByRole("columnheader", { name: "Errors" })).toBeTruthy();
+
+			const errorCells = Array.from(container.querySelectorAll("tbody tr")).map(
+				(row) => row.querySelectorAll("td")[3]
+			);
+			expect(errorCells.map((cell) => cell.textContent)).toEqual(["0.0%", "94.0%"]);
+			expect(errorCells[0].className).not.toContain("text-warning-text");
+			expect(errorCells[1].className).toContain("text-warning-text");
+			cleanup();
+		});
+
+		it("tints nothing when the report carries no limit to compare against", () => {
+			const { container } = render(
+				<CapacitySummary capacity={errorsStop({ maxErrorPct: undefined })} />
+			);
+			const cells = Array.from(container.querySelectorAll("tbody tr")).map(
+				(row) => row.querySelectorAll("td")[3]
+			);
+			expect(cells.map((cell) => cell.textContent)).toEqual(["0.0%", "94.0%"]);
+			for (const cell of cells) expect(cell.className).not.toContain("text-warning-text");
+			cleanup();
+		});
+	});
+
+	it("keeps three columns for a run stored before errors were judged", () => {
+		// The default fixture is that shape: no `errorPct`, no `maxErrorPct`.
+		const { container } = render(<CapacitySummary capacity={capacity()} />);
+		expect(screen.queryByRole("columnheader", { name: "Errors" })).toBeNull();
+		for (const row of container.querySelectorAll("tbody tr")) {
+			expect(row.querySelectorAll("td")).toHaveLength(3);
+		}
+		cleanup();
+	});
+
+	it("never prints 0ms for a knee that carries no p99", () => {
+		render(<CapacitySummary capacity={capacity({ kneeP99Ms: undefined })} />);
+		const knee = screen.getByText(/It gave out at/).textContent ?? "";
+		expect(knee).toContain("64 virtual users");
+		expect(knee).not.toContain("0ms");
+		expect(knee).not.toContain("p99");
+		cleanup();
+	});
+
 	it("declares the surface its table dividers read", () => {
 		const { container } = render(<CapacitySummary capacity={capacity()} />);
 		const rules = Array.from(container.querySelectorAll(".border-rule"));

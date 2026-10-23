@@ -1711,8 +1711,8 @@ elapsed time says only "Run stopped early."
 ## Capacity Summary (`components/shared/CapacitySummary.tsx`)
 
 What a `mode: "capacity"` run's adaptive search found (`RunReport.capacity`):
-the most virtual users the target held inside its latency budget, the level it
-gave out at, and the per-level table both were read off. Shown in the history
+the most virtual users the target held inside its latency budget and error
+limit, the level it gave out at, and the per-level table both were read off. Shown in the history
 detail's Overview, beside `ThresholdVerdict`.
 
 The headline is a **sentence**, not a stat grid, because the mode exists to
@@ -1721,14 +1721,20 @@ side by side make the reader assemble that answer themselves. The table below
 is the evidence, for a reader who wants to see the shape of the curve rather
 than trust the summary of it.
 
-Three states, not two, and the distinction is the whole point of the component
+Four states, not two, and the distinction is the whole point of the component
 (same absent-vs-zero discipline as `ThresholdVerdict`, one level deeper):
 
 - **Sustained a level** - the usual reading, with the knee beside it when
-  latency is what ended the search.
+  latency or errors is what ended the search. The knee sentence quotes the
+  reading that broke: p99 for `slo_exceeded`, the share of requests that
+  failed for `errors_exceeded` ("where 94.0% of requests failed"). A figure
+  the engine did not send is left out rather than printed as `0ms`.
 - **No level held the budget** - the first level already breached. The search
   found no sustainable capacity, which is *not* the claim "this service
   sustains zero".
+- **No level stayed under the error limit** - the same finding when
+  `errors_exceeded` ended the search at its first level, worded for the limit
+  rather than the latency budget.
 - **Judged nothing at all** - the run ended before its first level closed
   (`stepDuration` longer than `duration`, or a hand stop seconds in). The
   engine still reports the section, because "the search measured nothing" is
@@ -1741,6 +1747,15 @@ table, at the same number of virtual users; that repeat is the audit trail doing
 so the rows are keyed by index rather than by level. A `stopReason` this build
 has no words for renders under its raw key, as `ThresholdVerdict` does with an
 unknown metric.
+
+The levels table gains an **Errors** column (`levels[].errorPct`, percent) when
+at least one level carries it; a level over `maxErrorPct` is tinted
+`text-warning-text`, as a p99 over budget is. A run stored by an engine that
+did not judge errors has none of `errorPct`, `kneeErrorPct` or `maxErrorPct`:
+it keeps three columns, tints nothing and says nothing about errors, because an
+absent share is not the claim "every level was clean". The `errors_exceeded`
+detail names the limit from `maxErrorPct` when present and reads generically
+when not.
 
 Every latency in the card (headline, knee, budget, table) is `formatLatency`, so
 a level at 1234 ms reads `1.23s` like the rest of the app; the same holds for
