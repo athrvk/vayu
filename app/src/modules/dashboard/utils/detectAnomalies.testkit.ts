@@ -21,6 +21,9 @@
  * It is a deliberate copy and it is meant to stay one. A rule change has to be
  * made here as well, on purpose, with the equivalence tests failing in between -
  * that failure is the point. Do not import it from anything that ships.
+ *
+ * `countedTicks` beside it builds the series the burst tests need, so they do
+ * not hand-build cumulative counters.
  */
 
 import { formatPercent, formatSeconds } from "@/lib/format-number";
@@ -31,11 +34,48 @@ import {
 	LATENCY_SPIKE_FACTOR,
 	LATENCY_RECOVERY_FACTOR,
 	ERROR_BURST_RATE,
+	MIN_BURST_COMPLETIONS,
 	THROUGHPUT_DROP_FACTOR,
 	MIN_CONSECUTIVE_TICKS,
 	MAX_ANOMALIES,
 } from "./detectAnomalies";
 import { secondPercentiles } from "./tickPercentiles";
+
+/** What one second of {@link countedTicks} completes and how much of that fails. */
+export interface SecondCounts {
+	completed: number;
+	failed: number;
+}
+
+/**
+ * One stored tick a second whose own completions and failures are `perSecond`'s,
+ * accumulated into the counters as the engine does. Everything else is flat -
+ * p99, throughput and concurrency never move - so the burst rule is the only one
+ * the series can trip. The first tick has no predecessor, so its counts only
+ * seed the counters.
+ */
+export function countedTicks(perSecond: SecondCounts[]): LoadTestMetrics[] {
+	let completed = 0;
+	let failed = 0;
+	return perSecond.map((own, i) => {
+		completed += own.completed;
+		failed += own.failed;
+		return {
+			timestamp: i * 1000,
+			elapsed_seconds: i,
+			requests_completed: completed,
+			requests_failed: failed,
+			current_rps: 500,
+			current_concurrency: 50,
+			latency_p50_ms: 100,
+			latency_p95_ms: 100,
+			latency_p99_ms: 100,
+			avg_latency_ms: 100,
+			bytes_sent: 0,
+			bytes_received: 0,
+		};
+	});
+}
 
 function median(values: Array<number | null>): number | null {
 	const present = values.filter((v): v is number => v != null);
@@ -132,25 +172,39 @@ function detectErrorBursts(history: LoadTestMetrics[]): Anomaly[] {
 	 * rate that matters is the per-tick delta. Reading them undiffed would report
 	 * a run that failed early and recovered as failing for the rest of its life.
 	 */
-	const rate = history.map((m, i) => {
-		if (i === 0) return 0;
+	const counts = history.map((m, i) => {
+		if (i === 0) return { failed: 0, completed: 0 };
 		const failed = Math.max(
 			0,
 			(m.requests_failed ?? 0) - (history[i - 1].requests_failed ?? 0)
 		);
 		const completed = Math.max(0, m.requests_completed - history[i - 1].requests_completed);
-		return completed > 0 ? failed / completed : 0;
+		return { failed, completed };
 	});
+	// A tick under the completions floor is no burst tick, whatever its ratio.
+	const isHot = (i: number) =>
+		counts[i].completed >= MIN_BURST_COMPLETIONS &&
+		counts[i].failed / counts[i].completed > ERROR_BURST_RATE;
 
-	return findRuns(history.length, (i) => rate[i] > ERROR_BURST_RATE).map(([start, end]) => {
+	return findRuns(history.length, isHot).map(([start, end]) => {
+		let failed = 0;
+		let completed = 0;
 		let peak = 0;
-		for (let i = start; i <= end; i++) peak = Math.max(peak, rate[i]);
+		for (let i = start; i <= end; i++) {
+			failed += counts[i].failed;
+			completed += counts[i].completed;
+			peak = Math.max(peak, counts[i].failed / counts[i].completed);
+		}
+		const rate = formatPercent((failed / completed) * 100);
+		const worst = formatPercent(peak * 100);
 		return {
 			kind: "error_burst" as const,
 			startSeconds: history[start].elapsed_seconds,
 			endSeconds: history[end].elapsed_seconds,
 			magnitude: peak / ERROR_BURST_RATE,
-			label: `errors ${formatPercent(peak * 100)}% of requests for ${span(history, start, end)}`,
+			label: `errors ${rate}% of requests over ${span(history, start, end)}${
+				worst === rate ? "" : ` (worst second ${worst}%)`
+			}`,
 		};
 	});
 }

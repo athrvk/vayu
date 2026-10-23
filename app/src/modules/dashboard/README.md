@@ -159,6 +159,15 @@ engine's HTML export draws, #2393), with fixed factors over a trailing median an
 one detection: the charts shade the windows, and the history Overview's
 `RunEvents` card states them in words. Both are absent for a clean run.
 
+An error burst's label states the **window's own rate** - its failures over its
+completions, summed across the window's ticks - with the worst second beside it
+only when that differs: `errors 7.8% of requests over 9.00s (worst second
+10.0%)`. Printing the peak tick as the window's rate overstated a long burst, so
+the peak survives only as the secondary figure and as the `magnitude` the cap
+ranks by. A second needs `MIN_BURST_COMPLETIONS` (20) completions to start or
+extend a burst: one failure among the last few requests of a drain is 100% of
+almost nothing, and it would have opened a window out of a run that was ending.
+
 It has two entry points, and which one a view wants depends on how its series
 arrives:
 
@@ -211,7 +220,9 @@ the breakpoint and the first 5xx land on the bucket holding them, at most one
 bucket late. The tick counts then count buckets, so the baseline is 15 buckets
 and a window needs 2 hot ones: a slowdown shorter than two buckets goes unnamed
 while the breakpoint still marks it, and an error burst is a share of its
-bucket's completions, diluted by the rest of the bucket. The Performance tab
+bucket's completions, diluted by the rest of the bucket (the completions floor
+is per bucket too, so it only matters on a run quiet enough to complete under
+20 requests a bucket). The Performance tab
 says so in a note above the charts. The scraped server vitals are folded the
 same way when a run scraped more than 2,000 (#2611, each series the bucket's
 max); `joinMonitorToTimeline` needs nothing for it, because its staleness window
