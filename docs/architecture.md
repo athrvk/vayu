@@ -678,6 +678,20 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   the updater offered. Electron fuses turn off `ELECTRON_RUN_AS_NODE`,
   `NODE_OPTIONS`, `--inspect` and non-ASAR loads in a packaged build, and
   `isDevelopmentBuild()` (`electron/dev-mode.ts`) requires `!app.isPackaged`.
+- **The updater installs only a verified installer (#2372)**: on the silent
+  platforms (Windows, Linux AppImage) `electron/updater.ts` holds the
+  downloaded file back until `electron/update-attestation.ts` has looked up its
+  SHA-256 in GitHub's attestations API, verified each Sigstore bundle against
+  the public-good trusted root (refreshed through `@sigstore/tuf`), and found
+  the signer to be `release.yml` in `athrvk/vayu` at the tag `v<version>` with a
+  SLSA v1 subject naming that digest. `update:downloaded`, restart-to-install
+  and the quit-time install all wait for it; a failure sends
+  `update:verificationFailed` instead and the file is never installed. Any
+  failure, including a network one, refuses: there is no path that accepts after
+  an error. The check proves the file came out of that workflow run, not that
+  the run was honest, and the trusted-root refresh uses Node's `fetch`, so it
+  does not follow the system proxy; both limits are stated in
+  [SECURITY.md](https://github.com/athrvk/vayu/blob/master/SECURITY.md#releases).
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth
   sign-in window - is created with `spellcheck: false`, so Chromium checks

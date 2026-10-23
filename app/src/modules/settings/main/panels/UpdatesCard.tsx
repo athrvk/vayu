@@ -24,6 +24,12 @@
  *   - unavailable - a development or unpackaged build has no release feed. Not
  *                   an error; saying "check failed" here would be a lie.
  *   - error       - the network, or the feed. Shows the reason.
+ *
+ * Beside those, a downloaded installer whose build-provenance attestation did
+ * not verify (issue #2372) is shown ahead of whatever the last check said: it
+ * is the standing answer to "will this update install", and the event that
+ * reports it arrives when the app is running, not when this panel is open, so
+ * it is read from `useUpdateVerificationStore`.
  */
 
 import { useState } from "react";
@@ -42,6 +48,7 @@ import { useCopy } from "@/hooks/useCopy";
 import type { UpdateCheckResult } from "@/types/electron";
 import { appSetting } from "../app-settings";
 import { FieldError } from "@/components/shared";
+import { useUpdateVerificationStore } from "@/stores/update-verification-store";
 
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
@@ -53,6 +60,7 @@ export function UpdatesCard() {
 	const [checking, setChecking] = useState(false);
 	const [result, setResult] = useState<UpdateCheckResult | null>(null);
 	const { copy, copied } = useCopy({ feedback: "icon" });
+	const verificationFailure = useUpdateVerificationStore((s) => s.failure);
 
 	const api = window.electronAPI;
 
@@ -92,6 +100,20 @@ export function UpdatesCard() {
 		// leaves "You're up to date" on screen while a new check is running,
 		// which looks like the answer to the click that just happened.
 		if (checking) return <p className="text-sm text-muted-foreground">Checking…</p>;
+		if (verificationFailure) {
+			return (
+				<div className="space-y-2">
+					<FieldError>
+						Couldn&apos;t verify Vayu {verificationFailure.version}.{" "}
+						{verificationFailure.reason}
+					</FieldError>
+					<Button variant="outline" size="sm" onClick={() => void api.openReleasePage()}>
+						<ExternalLink className="size-icon" />
+						Release notes
+					</Button>
+				</div>
+			);
+		}
 		if (!result) return null;
 
 		switch (result.status) {

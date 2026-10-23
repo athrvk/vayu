@@ -247,6 +247,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("update:downloaded", handler);
 		return () => ipcRenderer.removeListener("update:downloaded", handler);
 	},
+	// Sent instead of `update:downloaded` when the installer's attestation does
+	// not verify; shape mirrors `UpdateVerificationFailure` in updater.ts.
+	onUpdateVerificationFailed: (callback: (info: { version: string; reason: string }) => void) => {
+		const handler = (_event: unknown, info: { version: string; reason: string }) =>
+			callback(info);
+		ipcRenderer.on("update:verificationFailed", handler);
+		return () => ipcRenderer.removeListener("update:verificationFailed", handler);
+	},
 	// Silent strategies only (Windows, Linux AppImage) - see updater.ts.
 	onDownloadProgress: (
 		callback: (progress: {

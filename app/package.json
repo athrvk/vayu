@@ -33,6 +33,9 @@
 	"dependencies": {
 		"@modelcontextprotocol/node": "^2.1.1",
 		"@modelcontextprotocol/server": "^2.3.1",
+		"@sigstore/bundle": "^5.0.0",
+		"@sigstore/tuf": "^5.0.0",
+		"@sigstore/verify": "^4.1.2",
 		"electron-updater": "^6.8.9",
 		"graphql": "^17.0.2",
 		"koffi": "3.3.2",
