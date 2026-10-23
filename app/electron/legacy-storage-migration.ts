@@ -21,7 +21,7 @@
  * Retirement: this module, its two channels, the preload's
  * `adoptLegacyStorage` and the wiring in main.ts go together, in the first
  * release cut six months after the one that ships them (0.46.0 is expected).
- * It is the one place the app loads a `file:` URL. Tracked under #2380.
+ * It is the one place the app loads a `file:` URL. Retired by #2763.
  *
  * Kept free of Electron so the decisions are tested directly; main.ts hands in
  * the hidden view, the record and the logger.
@@ -170,8 +170,11 @@ export async function readFileOriginStorage(
 			.then(() => webContents.executeJavaScript(READ_ALL_LOCAL_STORAGE));
 		return await withTimeout(read, timeoutMs);
 	} finally {
-		view?.webContents.close();
-		await fs.rm(stubFile, { force: true });
+		try {
+			view?.webContents.close();
+		} finally {
+			await fs.rm(stubFile, { force: true });
+		}
 	}
 }
 

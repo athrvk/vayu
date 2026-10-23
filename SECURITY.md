@@ -58,11 +58,10 @@ the policy's `self` means that origin and no file on disk. The one exception is
 the first launch after upgrading from a version that served it from a file:
 saved settings are read from the old local-file origin once, by a hidden page
 that runs no script of its own, has no preload and may load nothing, and copied
-into the new one.
-The channels that
-read a file by a path the window names read only files you picked, dropped or
-opened through the app, and the one that reports a file's size answers only for
-those or for files under a folder you allowed.
+into the new one. The channels that read a file by a path the window names read
+only files you picked, dropped or opened through the app, and the one that
+reports a file's size answers only for those or for files under a folder you
+allowed.
 
 ## Data at rest
 

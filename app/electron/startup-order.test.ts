@@ -212,8 +212,8 @@ describe("startup ordering", () => {
 
 		expect(fixedAt).toBeGreaterThan(-1);
 		expect(fixedAt).toBeLessThan(windowAt);
-		expect(main).toContain(
-			"additionalArguments: [\n\t\t\t\t`--vayu-engine-port=${enginePort()}`,"
+		expect(main).toMatch(
+			/additionalArguments: \[\s*`--vayu-engine-port=\$\{enginePort\(\)\}`,/
 		);
 		// The sidecar's choice is what fixes it.
 		expect(main).toMatch(
