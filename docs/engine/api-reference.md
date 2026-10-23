@@ -9109,7 +9109,7 @@ default, and whose message names the offending field and why the bound exists:
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
-| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
@@ -9136,7 +9136,11 @@ constants in `engine/include/vayu/core/constants.hpp`: `duration` 60 s for a
 constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run and
 10 for an `iterations` run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1. A
 `capacity` run's `duration` defaults to its own 300 s search deadline instead.
-None of them is written to the stored snapshot; only what the body carried is.
+`timeout` is the exception: it defaults to the `defaultTimeout` setting (30 s
+unless changed in Settings), read when the run starts, for a single-request
+and a scenario run alike. None of them is written to the stored snapshot; only
+what the body carried is, so a replayed snapshot that carried no `timeout`
+takes the setting in force at its own start.
 
 **A rate belongs to `constant_rps`, in both directions.** Both checks sit in
 `validate_run_config` (`check_constant_rps_rate` and
@@ -9406,7 +9410,8 @@ So `totalRequests` is the requests that got an outcome,
 `successfulRequests + failedRequests`, and every request the run sent is in
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
 cancellation is exempt. When a run reaches its natural end, a request still in
-flight after its own timeout plus a 2s grace is cancelled too, and that one
+flight after its effective timeout (the run's `timeout`, else the
+`defaultTimeout` setting) plus a 2s grace is cancelled too, and that one
 never answered: it stays an error, under status code `0`, and its stored error
 record carries `error_type` `cancelled` (`errors.types` in the report).
 
@@ -9430,7 +9435,7 @@ with the percentiles and the max. It is not divided by `totalRequests`.
 Left out, because they have no duration to report:
 
 - a request a Stop cancelled (`cancelled`), and a request cancelled at a run's
-  natural end after its timeout plus the grace, which is an error with no
+  natural end after its effective timeout plus the grace, which is an error with no
   duration;
 - a request refused before the wire: one dropped at the `maxInFlight` cap
   (`droppedRequests`), an invalid URL or an unsendable header, a residual
@@ -10381,7 +10386,8 @@ cancelled request was submitted, so it is counted, but **not as an error**
 request the run sent is in exactly one of `totalRequests` and `cancelled`.
 
 A run that ends **naturally** still lets its in-flight requests finish, but only
-up to its own `timeout` plus a 2s grace; anything still outstanding then is
+up to its effective timeout (its own `timeout`, else the `defaultTimeout`
+setting) plus a 2s grace; anything still outstanding then is
 cancelled the same way - and, because nobody asked for that one to stop, it is
 an error with no response, not a cancellation. Without that bound an upstream
 that never answers would hold the run in `running` indefinitely.
@@ -10740,7 +10746,8 @@ named it.
 `totalDurationSeconds`, the same figure) is the wall time from load start - the
 instant of the first submission - to the last request settling, so it includes
 the end-of-run drain, in which requests still in flight at the deadline are let
-answer (up to their `timeout` plus a grace). `avgRps` and `throughput` are
+answer (up to the run's effective timeout, its `timeout` or else the
+`defaultTimeout` setting, plus a grace). `avgRps` and `throughput` are
 completed requests over that wall time: they describe what the target served,
 and a run whose requests outlive its deadline reads below its target there by
 design. `sendRate` and `rateControl` describe what the generator sent, and
