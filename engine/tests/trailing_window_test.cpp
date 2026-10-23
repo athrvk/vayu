@@ -163,6 +163,59 @@ TEST (TrailingWindow, TheMeansCoverOnlyTheSamplesTheWindowGained) {
     EXPECT_DOUBLE_EQ (*reading.avg_queue_wait_ms, 2.0);
 }
 
+// Little's law (#2821): 2,000 ms of latency completed over a 1,000 ms window is
+// two requests in flight on average. Mutation check: divide by the window's
+// completion count instead of its span and this reads 200.
+TEST (TrailingWindow, MeanInFlightIsTheWindowsLatencyOverItsSpan) {
+    TrailingWindow window (WINDOW_MS);
+    (void)window.push (counters_at (0, 0));
+    CumulativeCounters later = counters_at (WINDOW_MS, 10);
+    later.latency_samples    = 10;
+    later.latency_sum_ms     = 2000.0;
+    EXPECT_DOUBLE_EQ (window.push (later).avg_in_flight, 2.0);
+}
+
+// The run's latency so far must not leak into a window that completed nothing.
+TEST (TrailingWindow, AWindowWithNoCompletionReadsZeroInFlight) {
+    TrailingWindow window (WINDOW_MS);
+    auto busy            = counters_at (0, 100);
+    busy.latency_samples = 100;
+    busy.latency_sum_ms  = 5000.0;
+    (void)window.push (busy);
+    auto busier            = counters_at (WINDOW_MS, 200);
+    busier.latency_samples = 200;
+    busier.latency_sum_ms  = 10000.0;
+    ASSERT_DOUBLE_EQ (window.push (busier).avg_in_flight, 5.0);
+
+    WindowReading reading;
+    for (int64_t ms = WINDOW_MS + TICK_MS; ms <= 3 * WINDOW_MS; ms += TICK_MS) {
+        auto idle      = busier;
+        idle.steady_ms = ms;
+        reading        = window.push (idle);
+    }
+    EXPECT_DOUBLE_EQ (reading.avg_in_flight, 0.0);
+}
+
+// Ten users with no think time each hold one request at every instant: every
+// 21 ms batch completes ten requests of 21 ms. The window reads 10 within the
+// batch quantisation (a window holds 47 or 48 batches of a 47.6 average).
+TEST (TrailingWindow, AClosedLoopWithNoThinkTimeReadsItsUserCount) {
+    constexpr size_t USERS     = 10;
+    constexpr int64_t BATCH_MS = 21;
+    TrailingWindow window (WINDOW_MS);
+    for (int64_t ms = 0; ms <= 5000; ms += TICK_MS) {
+        const auto batches    = static_cast<size_t> (ms / BATCH_MS);
+        CumulativeCounters at = counters_at (ms, batches * USERS);
+        at.latency_samples    = batches * USERS;
+        at.latency_sum_ms = static_cast<double> (at.latency_samples * BATCH_MS);
+        const auto reading = window.push (at);
+        if (ms >= WINDOW_MS) {
+            EXPECT_NEAR (reading.avg_in_flight, static_cast<double> (USERS), 0.25)
+            << "at " << ms << " ms";
+        }
+    }
+}
+
 // The ring holds the last window plus its base, not the run.
 TEST (TrailingWindow, HoldsOneWindowOfSamplesNotTheRun) {
     TrailingWindow window (WINDOW_MS);

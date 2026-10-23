@@ -94,6 +94,7 @@ class StatsRouteTest : public ::testing::Test {
         sample.requests_failed          = 0;
         sample.current_rps              = 100.0;
         sample.current_send_rate        = 101.0;
+        sample.window_avg_in_flight     = 3.5;
         sample.window_avg_latency_ms    = 7.5;
         sample.window_avg_queue_wait_ms = 0.25;
         sample.current_concurrency      = 4;
@@ -180,6 +181,7 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "cancelled", nlohmann::json::value_t::number_unsigned },
         { "current_rps", nlohmann::json::value_t::number_float },
         { "current_send_rate", nlohmann::json::value_t::number_float },
+        { "window_avg_in_flight", nlohmann::json::value_t::number_float },
         { "window_avg_latency_ms", nlohmann::json::value_t::number_float },
         { "window_avg_queue_wait_ms", nlohmann::json::value_t::number_float },
         { "current_concurrency", nlohmann::json::value_t::number_unsigned },
@@ -209,6 +211,7 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
     EXPECT_DOUBLE_EQ (entry["current_rps"].get<double> (), 100.0);
     EXPECT_DOUBLE_EQ (entry["current_send_rate"].get<double> (), 101.0);
+    EXPECT_DOUBLE_EQ (entry["window_avg_in_flight"].get<double> (), 3.5);
     EXPECT_DOUBLE_EQ (entry["window_avg_latency_ms"].get<double> (), 7.5);
     EXPECT_DOUBLE_EQ (entry["window_avg_queue_wait_ms"].get<double> (), 0.25);
     EXPECT_DOUBLE_EQ (entry["latency_p50_ms"].get<double> (), 5.0);
@@ -233,16 +236,18 @@ TEST_F (StatsRouteTest, StoredTickOfAnEmptySecondHasNoPercentileKeys) {
     for (const auto* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
         EXPECT_FALSE (entry.contains (key)) << key << ": " << entry.dump ();
     }
-    EXPECT_EQ (entry.size (), 20u)
+    EXPECT_EQ (entry.size (), 21u)
     << "only the three percentiles leave: " << entry.dump ();
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
 }
 
 // #2393: a window that completed nothing has no mean. The keys stay, as null,
 // so a reader tells an idle window from a row stored before the keys existed.
+// Its mean in flight (#2821) is a measured 0, not a missing mean.
 TEST_F (StatsRouteTest, AnIdleWindowStoresItsMeansAsNull) {
-    const std::string id = seed_run ();
-    auto sample          = sample_at (1000, 0.0);
+    const std::string id        = seed_run ();
+    auto sample                 = sample_at (1000, 0.0);
+    sample.window_avg_in_flight = 0.0;
     sample.window_avg_latency_ms.reset ();
     sample.window_avg_queue_wait_ms.reset ();
     add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
@@ -256,6 +261,9 @@ TEST_F (StatsRouteTest, AnIdleWindowStoresItsMeansAsNull) {
         ASSERT_TRUE (entry.contains (key)) << key << ": " << entry.dump ();
         EXPECT_TRUE (entry[key].is_null ()) << key << ": " << entry.dump ();
     }
+    ASSERT_TRUE (entry.contains ("window_avg_in_flight")) << entry.dump ();
+    EXPECT_TRUE (entry["window_avg_in_flight"].is_number ()) << entry.dump ();
+    EXPECT_DOUBLE_EQ (entry["window_avg_in_flight"].get<double> (), 0.0);
 }
 
 // Pagination is by tick, so a page boundary can never hand back a bucket with
@@ -450,6 +458,20 @@ TEST (MetricTickBucket, WindowKeysAreMeansAndIdleSecondsAreSkipped) {
     EXPECT_DOUBLE_EQ (folded["current_send_rate"].get<double> (), 100.0);
     EXPECT_DOUBLE_EQ (folded["window_avg_latency_ms"].get<double> (), 20.0);
     EXPECT_TRUE (folded["window_avg_queue_wait_ms"].is_null ());
+}
+
+// #2821: each row's mean in flight covers its own second, so a bucket holds the
+// mean of them. Mutation check: drop "window_avg_in_flight" from
+// BUCKET_MEAN_KEYS and the bucket reads the last second's 8.
+TEST (MetricTickBucket, WindowAvgInFlightIsTheBucketsMean) {
+    vayu::http::routes::MetricTickBucket bucket;
+    const std::vector<double> in_flight = { 4.0, 0.0, 8.0 };
+    for (size_t i = 0; i < in_flight.size (); ++i) {
+        auto tick                    = cumulative_tick (static_cast<int> (i));
+        tick["window_avg_in_flight"] = in_flight[i];
+        bucket.add (std::move (tick));
+    }
+    EXPECT_DOUBLE_EQ (bucket.take ()["window_avg_in_flight"].get<double> (), 4.0);
 }
 
 // A row an older engine stored lacks keys a newer one writes; folding must not

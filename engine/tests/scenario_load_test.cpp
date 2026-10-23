@@ -41,7 +41,9 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -57,6 +59,8 @@ using nlohmann::json;
  */
 class ScenarioMockServer {
     public:
+    static constexpr int64_t SLOW_MS = 20;
+
     struct Hit {
         std::string path;
         std::string cookie; // The `Cookie` header as received; "" when absent.
@@ -97,6 +101,14 @@ class ScenarioMockServer {
                 res.set_content ("{}", "application/json");
             });
         }
+
+        // A target that takes a known time per request, so a run's time on the
+        // wire is a measurable share of it (#2821).
+        svr.Get ("/slow", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/slow");
+            std::this_thread::sleep_for (std::chrono::milliseconds (SLOW_MS));
+            res.set_content ("{}", "application/json");
+        });
 
         // A response that arrived and is still an error (#2134): unlike the
         // refused port the transport-error tests use, it has a status.
@@ -396,6 +408,33 @@ class ScenarioLoadTest : public ::testing::Test {
         execution.request = std::move (resolved.request);
         execution.plan    = std::move (resolved.plan);
         return execution;
+    }
+
+    /// Run @p execution as a scenario load run through `RunManager`, the
+    /// production path that stores the summary, and answer its report.
+    json run_to_report (json config, const vayu::core::ScenarioExecution& execution) {
+        config["scenario"] = { { "source", "collection" }, { "collectionId", "col_test" } };
+        const std::string run_id = "run_report";
+        vayu::db::Run run;
+        run.id              = run_id;
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Pending;
+        run.config_snapshot = config.dump ();
+        // Wall-clock dated: an epoch-dated run is pruned the moment it finishes.
+        run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                         .count ();
+        run.end_time = run.start_time;
+        db_->create_run (run);
+
+        vayu::core::RunManager manager;
+        EXPECT_TRUE (manager.start_run (run_id, config, *db_,
+        std::make_shared<const vayu::core::ScenarioExecution> (execution)));
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&] () { return manager.get_run (run_id) == nullptr; }))
+        << "the run never finished";
+        manager.shutdown ();
+        return vayu::http::routes::run_report_response (*db_, run_id).second;
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -2490,6 +2529,54 @@ TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
     << "in-flight exceeded the virtual-user count, so a VU sent two steps at "
        "once";
     EXPECT_GT (state->steps_executed.load (), 0u);
+}
+
+// #2821: a virtual user in a think wait has nothing on the wire, so the run's
+// mean in flight is its share of time spent sending: two 20 ms steps around a
+// 200 ms think is about 0.17 of each user, under 2 of 10 here, and 10 if the
+// think wait were counted. Mutation check: divide the latency sum by the
+// completion count in `MetricsCollector::average_in_flight` and this reads the
+// mean latency, about 20. The 1 Hz peak sample is the instantaneous gauge this
+// mean replaces, so it is only bounded here, not pinned (#2397 item 3).
+TEST_F (ScenarioLoadTest, AThinkTimeRunsMeanInFlightIsItsShareOfTimeOnTheWire) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/slow"), server.url ("/slow") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { json{ { "id", "el_think" }, { "kind", "timer.think" },
+    { "enabled", true }, { "config", { { "ms", 200 } } } } });
+
+    const size_t VUS  = 10;
+    const json report = run_to_report (json{ { "mode", "constant_concurrency" },
+                                       { "duration", "1s" }, { "concurrency", VUS } },
+    execution);
+    const json& summary = report.at ("summary");
+    ASSERT_TRUE (summary.contains ("avgInFlight")) << summary.dump ();
+    EXPECT_EQ (report.at ("scenario").at ("virtualUsers").get<size_t> (), VUS)
+    << report.at ("scenario").dump ();
+    const double avg_in_flight = summary.at ("avgInFlight").get<double> ();
+    EXPECT_GT (avg_in_flight, 0.0);
+    EXPECT_LT (avg_in_flight, static_cast<double> (VUS) / 2.0)
+    << "the run's mean in flight counted the virtual users' think waits";
+    EXPECT_LE (summary.at ("peakConcurrency").get<size_t> (), VUS);
+}
+
+// With no think time every virtual user has a request in flight almost all the
+// time, so the mean is about the user count: the sanity check of the
+// definition. The bound is wide because the gap between one completion and the
+// next submission is the runner's, and it never exceeds the count.
+TEST_F (ScenarioLoadTest, ANoThinkTimeRunsMeanInFlightIsAboutItsUserCount) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/slow"), server.url ("/slow") });
+
+    const size_t VUS  = 10;
+    const json report = run_to_report (json{ { "mode", "constant_concurrency" },
+                                       { "duration", "1s" }, { "concurrency", VUS } },
+    execution);
+    const json& summary = report.at ("summary");
+    ASSERT_TRUE (summary.contains ("avgInFlight")) << summary.dump ();
+    const double avg_in_flight = summary.at ("avgInFlight").get<double> ();
+    EXPECT_GT (avg_in_flight, static_cast<double> (VUS) / 2.0) << summary.dump ();
+    EXPECT_LE (avg_in_flight, static_cast<double> (VUS) + 1e-6) << summary.dump ();
 }
 
 // ============================================================================

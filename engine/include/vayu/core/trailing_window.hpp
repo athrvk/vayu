@@ -38,6 +38,13 @@ struct CumulativeCounters {
 struct WindowReading {
     double completed_per_s = 0.0;
     double sent_per_s      = 0.0;
+    /// Mean requests in flight over the window (#2821), by Little's law: the
+    /// latency the window's completions carried over its span. A request is
+    /// in flight from submission to completion, its queue wait included, so a
+    /// timer wait between requests is not. 0 for a window that completed
+    /// nothing: unlike the means below, no completion does mean none on the
+    /// wire for the whole span.
+    double avg_in_flight = 0.0;
     /// Means over the latency samples the window gained; nullopt when it
     /// gained none, so an idle window never reads as an instant answer.
     std::optional<double> avg_latency_ms;
@@ -87,13 +94,15 @@ class TrailingWindow {
         reading.completed_per_s =
         static_cast<double> (now.completed - base.completed) / seconds;
         reading.sent_per_s = static_cast<double> (now.sent - base.sent) / seconds;
+        const double latency_ms = now.latency_sum_ms - base.latency_sum_ms;
+        reading.avg_in_flight   = latency_ms / static_cast<double> (span_ms);
 
         const size_t samples = now.latency_samples - base.latency_samples;
         if (samples == 0) {
             return reading;
         }
-        const auto count = static_cast<double> (samples);
-        reading.avg_latency_ms = (now.latency_sum_ms - base.latency_sum_ms) / count;
+        const auto count       = static_cast<double> (samples);
+        reading.avg_latency_ms = latency_ms / count;
         reading.avg_queue_wait_ms =
         (now.queue_wait_sum_ms - base.queue_wait_sum_ms) / count;
         return reading;

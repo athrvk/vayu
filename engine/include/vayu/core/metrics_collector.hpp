@@ -899,6 +899,18 @@ class MetricsCollector {
         return count > 0 ? total_queue_wait_sum () / static_cast<double> (count) : 0.0;
     }
 
+    /**
+     * @brief Mean requests in flight over @p duration_s, by Little's law: the
+     *        latency sum over the duration (#2821).
+     *
+     * The whole-run twin of `WindowReading::avg_in_flight`, so it counts the
+     * same thing: submission to completion, queue wait included, timer waits
+     * and requests with no attempt not. 0 for a run with no duration.
+     */
+    [[nodiscard]] double average_in_flight (double duration_s) const {
+        return duration_s > 0.0 ? total_latency_sum () / (duration_s * 1000.0) : 0.0;
+    }
+
     // ========================================================================
     // Post-test analysis
     // ========================================================================
