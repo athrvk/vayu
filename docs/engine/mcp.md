@@ -2067,7 +2067,7 @@ by the wrapper `server.ts` puts in front of its `tools/call` handler.
 | `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
 | `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
 | `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry; worded as below |
-| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
+| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed (when its cause is no engine failure, else it is worded as that failure, below), a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
 | `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
 
 **An id that names nothing** (#2778) is answered with the missing object and
@@ -2617,6 +2617,16 @@ as an error result, a resource or a prompt as a failed request
 `run_collection_smoke`) has already sent it when it answers so; the run is in
 `list_runs` once the engine answers again. With reveal on none of the reads is
 made.
+
+A tool words that error by the lookup's cause (#2780, `maskingIncompleteResult`
+in `kit.ts`). When the engine refused the connection or answered with a failure
+it classes `unreachable` or `transient`, the answer is the same one every other
+tool gives (`Could not reach the Vayu engine ...`, `Engine error (500): ...`),
+in that class, followed by a sentence that the result is withheld whole until
+the engine answers; the Reveal secrets setting is not mentioned, since it is
+not a remedy for an outage. Any other cause, including the `Unexpected error`
+fallback and an engine refusal of the lookup itself (a 4xx), keeps the masking
+message naming the lookup that failed.
 
 The stored trace stays raw on purpose: Vayu's own History shows what went over
 the wire, and the engine's rows are unchanged. Only the MCP read is masked.
