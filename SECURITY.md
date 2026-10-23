@@ -73,6 +73,8 @@ else (symlinks are skipped). The data directory is `chmod`ed `0700` whatever
 `--data-dir` names, so point it at a folder of its own, not at one you share.
 The `umask` of `077` the engine sets covers the whole process, so a file it
 creates anywhere else, including a path you chose, is `0600` too.
+The app's own log files (`app_*.log`, and `mcp_*.log` from the standalone MCP
+server) are created the same way, `0600` in a `0700` folder.
 On Windows the data directory gets a protected ACL for your account, SYSTEM and
 Administrators, which files created afterwards inherit; files that already
 existed keep their old ACL. A user who can act as you, or read your disk
