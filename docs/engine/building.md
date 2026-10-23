@@ -806,6 +806,17 @@ Four pieces hold the floor:
   archives only fit the compiler that built them and `actions/cache` never
   overwrites a key, so with one `Linux` key for both images whichever saved
   first owned it and the other rebuilt every dependency from source.
+- **It also carries the toolchain** (`scripts/vcpkg-toolchain-id.sh`): the
+  runner image name and version on a hosted runner, and the OS release plus a
+  hash of the `$CXX` binary in a job container. vcpkg's package ABI covers the
+  compiler and the tools it finds, so a runner image update retires every
+  archive while `vcpkg.json` and `VCPKG_COMMIT` stay the same. Without this
+  component the Windows image of 2026-10-21 left every Windows engine job
+  restoring an entry vcpkg could not use and rebuilding 25 dependencies
+  (about 12.5 minutes) with the result never saved. The first `restore-keys`
+  prefix still reaches an older toolchain's entry, so an image update that
+  changes no ABI costs nothing; the guard in `cache-warm.yml` requires the
+  toolchain step beside every key line.
 
 To check a local build the same way:
 
