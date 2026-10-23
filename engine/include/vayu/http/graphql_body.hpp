@@ -90,6 +90,13 @@ namespace vayu::http {
  * specification's GET transport requires; a bare document becomes `query`
  * alone.
  *
+ * Member order is the author's, at the top level and inside each encoded map,
+ * and the encoding is compact. Numbers are re-rendered from their parsed value
+ * rather than copied as text: an integer up to `UINT64_MAX` is exact, a larger
+ * one becomes a double (`18446744073709551616` -> `1.8446744073709552e+19`),
+ * and a fraction or exponent form is a double (`1e2` -> `100.0`). The POST
+ * transport sends the envelope byte for byte and has no such rule.
+ *
  * **Nothing** - meaning "send this the way it has always been sent" - for the
  * four cases where the fields cannot be recovered:
  *

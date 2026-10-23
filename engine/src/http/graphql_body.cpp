@@ -16,6 +16,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -98,8 +99,17 @@ std::optional<std::string> graphql_get_parameters (const std::string& content) {
         return std::nullopt;
     }
 
+    // The probes above read the plain `json`, whose objects sort their keys, so
+    // the author's order comes from a second parse. It cannot fail on text the
+    // first accepted; `nullopt` is answered as unreadable all the same.
+    const auto ordered =
+    vayu::utils::parse_ordered_json (content, vayu::utils::ORDERED_JSON_UNBOUNDED);
+    if (!ordered) {
+        return std::nullopt;
+    }
+
     std::vector<UrlQueryParam> params;
-    for (const auto& [key, value] : envelope.items ()) {
+    for (const auto& [key, value] : ordered->items ()) {
         if (key == "query") {
             // `graphql_body_is_enveloped` already proved this is a string.
             params.push_back ({ "query", percent_encode (value.get<std::string> ()) });
@@ -130,9 +140,9 @@ std::optional<std::string> graphql_get_parameters (const std::string& content) {
         }
     }
 
-    // `items()` walks in the object's own order, which nlohmann sorts by key,
-    // so the parameters come out in a stable order regardless of how the
-    // envelope was written. Sorted or not, a server reads them by name.
+    // Parameters follow the envelope's member order, and each `variables` /
+    // `extensions` dump follows its own, so what the author wrote is what the
+    // server receives.
     return compose_query (params);
 }
 

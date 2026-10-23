@@ -581,6 +581,15 @@ derived Content-Type**:
 | `variables` | the envelope's `variables`, JSON-encoded, when present and not `null` |
 | `extensions` | the envelope's `extensions`, JSON-encoded, when present and not `null` |
 
+The order the author wrote is the order sent: the parameters follow the
+envelope's member order, and the keys inside `variables` and `extensions` keep
+theirs (issue #2789), written compactly with no whitespace. The encoding
+re-renders numbers from their parsed value rather than copying the text: an
+integer up to 64 bits unsigned (`18446744073709551615`) is exact, a larger one
+becomes a double (`18446744073709551616` is sent as `1.8446744073709552e+19`),
+and a fraction or exponent form is a double (`1e2` is sent as `100.0`). The POST
+transport is unaffected and stays byte for byte.
+
 These parameters are merged into whatever query string the request's URL
 already has, not used to replace it - a `GET` sent to `/graphql?debug=1` keeps
 `debug=1` alongside `query=…`. The engine sends a body on a GraphQL `GET` in
