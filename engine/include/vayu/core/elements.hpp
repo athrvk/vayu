@@ -592,6 +592,14 @@ struct ElementKind {
     /// (#1512's extensibility contract, rule 1); the config key itself, not
     /// this flag alone, decides whether a given occurrence actually shares.
     bool supports_shared_state = false;
+    /// Whether this kind can write a variable scope: every `script.*` kind
+    /// (`pm.environment.set` and its kin) and every `extract.*` kind. Read by
+    /// `scenario_plan.cpp` through the registry, never a `kind ==` comparison
+    /// (#1512's extensibility contract, rule 1): a collection-run plan holding
+    /// one, at a phase before some send, composes every step with its
+    /// `{{names}}` left for the send (#2521), since an earlier step may have
+    /// changed the value by then.
+    bool writes_variables = false;
     /// A rule `config_schema` cannot express (a JSONPath that parses), checked
     /// by `Registry::validate` only after the schema accepted the config.
     /// Returns the problem in the wording a client reads after

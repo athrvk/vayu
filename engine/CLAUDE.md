@@ -460,9 +460,9 @@ Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing) |
-| POST | `/execute` | Send a single request (auth resolved engine-side) |
-| POST | `/runs` | Start a load test run |
+| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521) |
+| POST | `/execute` | Send a single request (auth resolved engine-side); optional `targetPolicy` holds the final URL and OAuth 2.0 token endpoints to the caller's hosts (#2521) |
+| POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute` (#2521) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
@@ -1154,18 +1154,54 @@ pair is not; an api-key header name that is not a token is `AUTH_FAILED` with
 generators' copy in `prepare.ts` is pinned by
 `tests/fixtures/auth-header-precedence.json`. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
-(stored request; MCP uses this and gates its allowlist on the *composed* URL)
+(stored request; MCP uses this and checks its allowlist early against the
+*composed* URL, then sends the engine the same rule as `targetPolicy`, below)
 and an inline `request` plus `collectionId` scope (the renderer, because Send
 and replay execute editor state that may be unsaved). Inline over stored is
 the overlay MCP's `start_load_run` overrides ride on.
 
-Execute is not silent past compose (#1008): a name compose could not answer
-(it kept its braces, #1009) is resolved once more after the pre-request script
-and before the send (`resolve_residual_tokens`,
-`engine/src/http/request_exchange.cpp`); a value compose already substituted is
-finished text. A credential holding such a name defers its whole auth past the
-script (#2473): `apply_late_auth` resolves and applies it after that pass, so a
-basic pair is not base64-encoded around a token. Decided once, never per send
+**A scripted request composes with its `{{names}}` intact (#2521, Postman's
+order).** Whether a pre-request script runs before the send is read from the
+composed `elements` (`runs_a_pre_request_script`): an enabled, non-blank
+`script.pre` on the request, a folder or the collection, after
+`inherit.disable` and the inline overlay; `script.pre` alone, never
+`script.setup`. When one does, every name a scope answers keeps its braces in
+the URL, path rows, headers, body and non-OAuth credentials, and the 200 body
+lists them in `deferredVariables` (sorted, omitted when empty, never an input,
+ignored by `POST /execute` and `POST /runs`). A request no pre-request script
+runs before composes exactly as before: resolved once, at compose. **A
+collection run decides for the whole plan**: `plan_variable_deferral`
+(`scenario_plan.cpp`) reads every step's composed `elements` before composing
+any, and when one holds a kind the registry marks `writes_variables` (every
+`script.*` and `extract.*` kind) at a phase other than `run.end`, every step
+composes with `VariableDeferral::Always`, an internal `compose_request_core`
+parameter, never a body field. So an unscripted step sends the token an earlier
+step's test script or extractor stored; a plan with no such element resolves at
+compose. A new kind that writes a variable sets the flag. Four things
+resolve at compose whatever a script does: `$` names (generators once, the
+iteration identity), the `data` namespace and bound columns, a name whose value
+reaches one of those, and a file path (`src`: the residual pass never resolves
+a path, so a script cannot choose which file is sent).
+
+Execute is not silent past compose (#1008): a name still written after compose
+(one it could not answer, which kept its braces, #1009, or one it deferred past
+a script) is resolved after the pre-request script and before the send
+(`resolve_residual_tokens`, `engine/src/http/request_exchange.cpp`); a value
+compose already substituted is finished text. There is no caller flag: the
+payload's own braces are the whole signal. A credential holding such a name
+defers its whole auth past the script (#2473): `apply_late_auth` resolves and
+applies it after that pass, so a basic pair is not base64-encoded around a
+token. An OAuth 2.0 config defers the same way on a Send and on a sequential
+collection run (`OAuth2Resolution::AfterTheScript`, what
+`compose_request_core` picks unless the body says `deferDynamicVariables`):
+every string of it is resolved after the script and only then is the token
+acquired, so `oauth::cache_key` is computed from the resolved config, and the
+late acquisition's wait is `auth_fetch_ms`, left out of `engineMs`. A name
+nothing defines defers there too. A load run still acquires once, before any
+script: its composition (`deferDynamicVariables`) and a scenario load plan
+resolve the config at compose (`AtComposition`), and a config name nothing
+answers is a `400` naming it (`invalid_run_config` for a single request,
+`invalid_scenario` for a collection). Decided once, never per send
 or submission: `plan_send_row_auth` for `POST /execute`,
 `ScenarioStep::auth_after_scripts` at plan time for a collection run (both its
 executors), `LoadAuthPlan::after_scripts` for a single-request load run that
@@ -1174,7 +1210,11 @@ pass can refuse** (#1051, #1084): a header name that
 resolves onto one the request already carries, or to nothing, is refused
 before the send, in the same words and with the same code compose uses for the
 `400` (`http/header_names.hpp` holds the rule; the pass answers a
-`ResidualRefusal` carrying the code). The two rules read different reaches
+`ResidualRefusal` carrying the code, which the buffered `POST /execute` answer
+carries as `refusalCode`). Since a scripted request defers its variables, the
+pass also runs compose's header-text rule (#738) on them: a variable whose
+value ends or cuts a header line is refused here as `unsendable_header`, before
+anything is rewritten. The two rules read different reaches
 (#1095): the empty-name rule reads every header name, the collision rule only
 the names that still held a token. A data row whose header-name column is
 blank is refused at bind time (`core/scenario_data.cpp`). A scenario load
@@ -1208,10 +1248,30 @@ refusal, the URL join), pinned the same way by
 dynamic-variable name set (`$guid`, `$timestamp`, …) is part of that contract (C++ table in `request_composer.cpp`,
 renderer table in `lib/dynamic-variables.ts`), as are the D17 malformed-data
 rules (absent or non-boolean `enabled` = enabled; non-string `value` = "") in
-`parse_variables` and `variable-resolution.ts`. Compose resolves strictly
-**before** the pre-request script runs (D1, a deliberate Postman divergence
-the residual pass does not reverse), and script text is never interpolated
-(D16). MCP has no composition copy; a new engine client calls `POST /compose`.
+`parse_variables` and `variable-resolution.ts`. D1 is now: a `{{name}}` is
+resolved at compose, except where a pre-request script can change the value
+(or, in a collection run, any element of the plan that writes a variable),
+when it is resolved after that script (#2521, Postman's order; the first
+paragraph above), and script text is never interpolated (D16). The renderer's
+Code section names the deferred tokens in its Resolved mode. MCP has no
+composition copy; a new engine client calls `POST /compose`.
+
+**`targetPolicy` holds a send to the caller's hosts (#2521).** `POST /execute`
+(buffered and streaming) and `POST /runs` (a single request, a sequential
+collection run, a scenario load) take an optional `{allowAll?, allowedHosts?}`
+(`http/target_policy.hpp`), the matching rule of the MCP gate (exact host,
+case-insensitive; `allowAll` passes any host that can be determined; an empty
+or still-templated host is refused). The engine judges the final URL after the
+pre-request script and the residual pass, and the host of an OAuth 2.0
+`accessTokenUrl` / `refreshTokenUrl` before the token cache is read or anything
+is posted, so a refused target fetches no token. A buffered send answers
+status 0 with `refusalCode` `target_not_allowed` / `target_host_unknown`; a
+stream and the `POST /runs` pre-flight or plan answer `400` under that code; a
+load run refuses each submission as an `invalid_url` error naming the host
+(`EventLoopConfig::target_policy`). A malformed policy, an unknown member
+included, is `400 invalid_target_policy`. It is never stored
+(`sanitize_config_snapshot` drops it), and a redirect hop and a script's
+`pm.sendRequest` are outside it. Absent, a send is unrestricted.
 
 Scripts, since issue #1514's cut-over: `compose_elements` builds the
 resolved, ordered `elements` array (collection chain root-to-leaf, then the

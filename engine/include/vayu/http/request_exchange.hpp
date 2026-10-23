@@ -45,6 +45,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -470,10 +471,11 @@ struct ExchangeInputs {
     /// has nothing to interrupt) and for anything that predates this field,
     /// which is exactly the old, uninterruptible behaviour.
     std::function<bool ()> should_stop;
-    /// `ClientConfig::cancel` for this exchange's send and every
-    /// `pm.sendRequest` its scripts make (issue #2683): `POST /execute` passes
+    /// `ClientConfig::cancel` for this exchange's send, every
+    /// `pm.sendRequest` its scripts make and the OAuth 2.0 token @ref late_auth
+    /// acquires (issue #2683): `POST /execute` passes
     /// `RouteContext::server_stopping`, so `Server::stop()` ends the transfer
-    /// rather than waiting on it. Null leaves both uncancellable, as the
+    /// rather than waiting on it. Null leaves all three uncancellable, as the
     /// scenario runner's are.
     const std::atomic<bool>* cancel = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
@@ -482,13 +484,13 @@ struct ExchangeInputs {
     const nlohmann::json* iteration_data = nullptr;
     /// How this exchange's send - and any `pm.sendRequest` its scripts make -
     /// reaches the network (issue #705). Carried on the inputs rather than
-    /// resolved here because `execute_exchange` holds no `Database`; the two
-    /// callers that do (the design route and the scenario runner) resolve it
-    /// once and hand it down.
+    /// resolved here because `execute_exchange` reads no setting (its one
+    /// `Database` is @ref token_cache); the two callers that do (the design
+    /// route and the scenario runner) resolve it once and hand it down.
     vayu::http::TransportPolicy transport;
     /// What the engine adds to this exchange's send that the request itself
     /// does not name (issue #1229). Carried here for the reason @ref transport
-    /// is: `execute_exchange` holds no `Database`, and the two callers that do
+    /// is: `execute_exchange` reads no setting, and the two callers that do
     /// resolve the policy once and hand it down, so a design send and a
     /// collection run cannot add different sets.
     vayu::http::DefaultHeaderPolicy default_headers;
@@ -497,8 +499,8 @@ struct ExchangeInputs {
      *        0 = unbounded (issue #1157).
      *
      * Carried here for the reason @ref transport is: the bound is
-     * `maxDesignResponseBodyBytes`, `execute_exchange` holds no `Database` to
-     * read it from, and both callers that do - `POST /execute` and the
+     * `maxDesignResponseBodyBytes`, `execute_exchange` reads no setting, and
+     * both callers that do - `POST /execute` and the
      * scenario runner, whose steps are design-mode sends too - resolve it once
      * per run and hand it down. The default is the constant rather than 0 so
      * that a caller which resolves nothing is still bounded; a test that wants
@@ -513,7 +515,7 @@ struct ExchangeInputs {
      * @brief `ElementContext::max_body_bytes` (issue #1514's reopen): the
      *        `maxElementBodyBytes` config entry, resolved once per run for
      *        the same reason @ref max_response_bytes is - `execute_exchange`
-     *        holds no `Database` to read it from itself.
+     *        reads no setting itself.
      */
     size_t max_element_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
 
@@ -550,6 +552,19 @@ struct ExchangeInputs {
     /// and the residual pass. Empty when the build or the bind applied the
     /// auth, which is every request whose credentials hold no such name.
     std::optional<vayu::http::Auth> late_auth;
+
+    /// The OAuth 2.0 token cache a @ref late_auth config acquires through
+    /// (#2521). The one `Database` this exchange touches, and only for that;
+    /// null refuses such a config (`oauth2_no_database`) rather than sending
+    /// the request without its token.
+    vayu::db::Database* token_cache = nullptr;
+
+    /// The hosts the caller allows this exchange to reach (`target_policy.hpp`),
+    /// judged after the pre-request script and the residual pass and before
+    /// the late auth, so a refused target fetches no token either; the late
+    /// auth then judges its OAuth 2.0 token endpoints by it too. Null for a
+    /// caller that states none, which sends wherever the request names.
+    const vayu::http::TargetPolicy* target_policy = nullptr;
 };
 
 /** What one exchange produced. */
@@ -572,6 +587,15 @@ struct ExchangeOutcome {
     /// subtracts it from the handler's elapsed time to report `timing.engineMs`
     /// as Vayu's own cost; a collection run does not read it.
     double script_ms = 0.0;
+    /// What @ref ExchangeInputs::late_auth waited on an OAuth 2.0 token
+    /// endpoint for (`AuthApplyResult::token_fetch_ms`), zero for a cached
+    /// token and every other mode. Subtracted beside @ref script_ms.
+    double auth_fetch_ms = 0.0;
+    /// The rule's code when the residual pass or the late auth refused the
+    /// send (@ref ResidualRefusal::code), beside the status-0 `response`
+    /// carrying its sentence; empty otherwise. `POST /execute` answers it as
+    /// `refusalCode`.
+    std::string refusal_code;
     /**
      * Whether the request was actually sent.
      *
@@ -606,22 +630,39 @@ struct ResidualRefusal {
 };
 
 /**
+ * Where @ref apply_late_auth acquires a deferred OAuth 2.0 token (#2521), and
+ * what that acquisition waited on the provider for.
+ */
+struct LateTokenAcquisition {
+    /// The token cache `apply_auth` reads and writes; null refuses OAuth 2.0.
+    vayu::db::Database* token_cache = nullptr;
+    /// The caller's host rule, judged on the resolved config's token endpoints
+    /// before the cache is read (`refuse_token_endpoints`): a script can set
+    /// the `accessTokenUrl` as easily as the request's URL. Null for none.
+    const vayu::http::TargetPolicy* target_policy = nullptr;
+    /// `ClientConfig::cancel` for the token request (#2683), the exchange's own
+    /// (`ExchangeInputs::cancel`). Null for none.
+    const std::atomic<bool>* cancel = nullptr;
+    /// Added to by every acquisition (`AuthApplyResult::token_fetch_ms`).
+    double fetch_ms = 0.0;
+};
+
+/**
  * Resolve the `{{tokens}}` composition left behind, against the variable state
  * a pre-request script has just written (issue #1008).
  *
  * Composition still happens first, and still exactly once: this pass only ever
- * sees names composition could not answer, because since #1009 those keep their
- * braces instead of resolving to `""`. A value composition *did* substitute is
- * finished text here - the pass reads the request, not composition's decisions -
- * so nothing is resolved twice.
+ * sees the names composition left written - one it could not answer (#1009),
+ * and every name a scope answers in a request a pre-request script runs
+ * before (#2521). A value composition *did* substitute is finished text here -
+ * the pass reads the request, not composition's decisions - so nothing is
+ * resolved twice.
  *
  * It exists because the canonical imported auth pattern is a pre-request script
  * that fetches a token, `pm.environment.set("token", …)`, and a request that
- * sends `Bearer {{token}}`. Composition ran before the script, so without this
- * the send carried the *previous* run's token, or `""` on the first - silently,
- * and against a lenient API successfully. Postman resolves after the script;
- * this is the half of that order Vayu can adopt without moving composition
- * (#226's decision D1 stands - see docs/app/variable-resolution.md).
+ * sends `Bearer {{token}}`. Resolved before the script, the send carried the
+ * *previous* run's token - silently, and against a lenient API successfully.
+ * Postman resolves after the script, and so does a scripted request here.
  *
  * The same rules composition resolves by, because it is the same resolver: a
  * name nothing answers stays literal, a value holding tokens of its own is
@@ -632,15 +673,16 @@ struct ResidualRefusal {
  * @param scopes Read as the scripts left them; the same layering
  *               `pm.variables.get` reads a name through.
  *
- * A request holding no `{{` at all - nearly all of them, composition having
- * resolved what it could - pays one search per field and nothing else.
+ * A request holding no `{{` at all - every unscripted request whose names
+ * composition answered - pays one search per field and nothing else.
  *
- * @return why this request must not be sent, if resolving a header name
- *         produced one the request already carried (`http/header_names.hpp`,
- *         issue #1051) or no name at all (issue #1084) - the two things this
- *         pass can produce that a send cannot survive, because the map holds
- *         one value per name and what is left of an empty one is a `": value"`
- *         line. `std::nullopt` is the ordinary answer, the request resolved in
+ * @return why this request must not be sent: a header variable whose value
+ *         ends or cuts the line (`UNSENDABLE_HEADER_CODE`, refused before
+ *         anything is rewritten), or a resolved header name that lands on one
+ *         the request already carries (`http/header_names.hpp`, issue #1051),
+ *         is nothing (#1084) or is not a token (#2467) - each refused in the
+ *         words and under the code `POST /compose` uses for it.
+ *         `std::nullopt` is the ordinary answer, the request resolved in
  *         place.
  */
 [[nodiscard]] std::optional<ResidualRefusal>
@@ -663,9 +705,10 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
 
 /**
  * Apply auth the build deferred because a credential holds a name only the
- * variable scopes answer (`core::credentials_await_scripts`, issue #2473):
- * each credential resolved against @p vars by the resolver the residual pass
- * uses, then `apply_auth`.
+ * variable scopes answer (`core::credentials_await_scripts`, issue #2473) -
+ * one nothing answered at composition, or any name of a request a pre-request
+ * script runs before (#2521): each credential resolved against @p vars by the
+ * resolver the residual pass uses, then `apply_auth`.
  *
  * Called after the pre-request script and the residual pass, never before:
  * the point is that `pm.environment.set("password", …)` reaches a basic pair
@@ -675,17 +718,38 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * the script set still wins, by `apply_auth`'s own rule (#2475). A name
  * nothing answers is encoded as written, as it was before.
  *
+ * An OAuth 2.0 config (#2521) has every string resolved the same way, and only
+ * then is its token acquired through @p acquisition's cache, so the cache key
+ * is the resolved config's and a script that changed a client secret or scope
+ * reaches the token endpoint. The endpoints it would post to are judged by
+ * @p acquisition's target policy first, as resolved.
+ *
  * @return why the send must not go out, in the residual pass's shape, when
- *         `apply_auth` fails; only OAuth 2.0 can, and it is never deferred.
+ *         `apply_auth` fails: an api key name that is not a header name, an
+ *         OAuth 2.0 token endpoint the target policy refuses (`InvalidUrl`,
+ *         `target_not_allowed` or `target_host_unknown`), or an OAuth 2.0
+ *         token not acquired (`oauth2_no_database` with no @p acquisition).
  */
 [[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const vayu::http::VariableValues& vars);
+const vayu::http::VariableValues& vars,
+LateTokenAcquisition* acquisition = nullptr);
+
+/**
+ * @p policy's verdict on @p request (`refuse_target`) in the residual pass's
+ * shape: an `InvalidUrl` error, the code `target_not_allowed` or
+ * `target_host_unknown`. Nothing when @p policy is null or admits the host.
+ * Both design sends call it at the same point, after the residual pass and
+ * before the late auth.
+ */
+[[nodiscard]] std::optional<ResidualRefusal>
+refuse_disallowed_target (const vayu::http::TargetPolicy* policy, const vayu::Request& request);
 
 /** @ref apply_late_auth over the scopes, flattened as the residual pass reads them. */
 [[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const ScriptVariableScopes& scopes);
+const ScriptVariableScopes& scopes,
+LateTokenAcquisition* acquisition = nullptr);
 
 /**
  * Every `{{name}}` still on @p request, without attempting to resolve any of

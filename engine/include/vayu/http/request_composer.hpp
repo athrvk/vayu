@@ -21,11 +21,14 @@
  * execute-ready payload that `POST /execute` / `POST /runs` accept unchanged.
  *
  * Composition is deliberately *pure* - it never sends, never creates a run
- * row, and never runs a script. Interpolation therefore always happens
- * strictly before the pre-request script (decision D1 of #226: today's
- * semantics, not Postman's script-first order), and a payload that skips
- * composition is never interpolated at all, so nothing can be resolved twice
- * (D12).
+ * row, and never runs a script. A request no pre-request script runs before is
+ * interpolated here, once (decision D1 of #226). One that has a pre-request
+ * script - its own `script.pre` or one a folder or the collection composes in -
+ * keeps every name a scope answers written as `{{name}}` (issue #2521,
+ * Postman's script-first order): the residual pass resolves it after the
+ * script, against what the script set, and the payload's `deferredVariables`
+ * lists it. A payload that skips composition is never interpolated here at
+ * all, so nothing is resolved twice (D12).
  *
  * The behavioural contracts (issue #226, "Behaviour that must not change"):
  *  - an unknown plain name keeps its braces, and so does an unknown `$name`
@@ -314,6 +317,38 @@ enum class DynamicResolution : std::uint8_t {
 };
 
 /**
+ * When an OAuth 2.0 config's `{{names}}` resolve for a request a pre-request
+ * script runs before (#2521). Its cache key (`oauth::cache_key`) is computed
+ * from the resolved config either way, never from a template.
+ */
+enum class OAuth2Resolution : std::uint8_t {
+    /// Left written with the request's other names, for the send to resolve
+    /// after the script and then acquire (`routes::apply_late_auth`), so a
+    /// script that sets a client secret or scope reaches the token endpoint.
+    /// What a Send and a sequential collection run compose with.
+    AfterTheScript,
+    /// Resolved here, before any script: a load run acquires its token once,
+    /// when it is planned, and every virtual user sends that one.
+    AtComposition,
+};
+
+/**
+ * Whether composition leaves a `{{name}}` a scope answers for the send to
+ * resolve after the scripts (#2521). What is never deferred is the same either
+ * way: `$` names, the `data` namespace and bound columns, a name whose value
+ * reaches one of those, and a file path.
+ */
+enum class VariableDeferral : std::uint8_t {
+    /// Deferred when the payload's own `elements` run a `script.pre` before
+    /// the send: a Send, a preview, a single-request run.
+    WhenScripted,
+    /// Deferred whatever the payload's own elements hold: a collection-run
+    /// step whose plan holds an element that writes a variable before some
+    /// send, so an earlier step may change the value this one reads.
+    Always,
+};
+
+/**
  * Substitute `{{name}}` occurrences. The reserved `data.*` namespace first
  * (kept verbatim) and @p bound_columns beside it (kept verbatim too, issue
  * #1007), then scopes, then the dynamic-variable table; a name nothing answers
@@ -356,6 +391,32 @@ const VariableValues& vars,
 bool encode,
 const BoundColumnNames& bound_columns = {},
 DynamicResolution dynamic             = DynamicResolution::Generate);
+
+/// The variable whose value cannot be written into a header line, and whether
+/// its bytes end that line or cut it short (`http/header_text.hpp`).
+struct HeaderTextRefusal {
+    std::string variable;
+    bool line_break = true;
+};
+
+/**
+ * @ref resolve_template for header text: the same lookup, recording in
+ * @p refusal the first variable whose value could not be spelled in a header
+ * line (issue #738). Checked on each substituted value rather than on the
+ * finished text, so a CR the user typed into the header is not blamed on a
+ * variable; the pre-send gate refuses that one, naming the header.
+ *
+ * The residual pass resolves a header through this too (#2521): a request a
+ * pre-request script runs before keeps its variables written through
+ * composition, so this is where such a variable is first seen.
+ */
+std::string resolve_header_template (const std::string& input,
+const VariableValues& vars,
+std::optional<HeaderTextRefusal>& refusal);
+
+/// The refusal a header-bound variable carrying an unspellable byte reads as,
+/// answered under `UNSENDABLE_HEADER_CODE` (`http/header_text.hpp`).
+[[nodiscard]] std::string describe_header_text_refusal (const HeaderTextRefusal& refusal);
 
 /**
  * Render one row value as the text a `{{data.column}}` token substitutes.
@@ -502,11 +563,35 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
  * #995, `DynamicResolution::Defer`). A client that omits both composes exactly
  * as it always did.
  *
+ * Whether the request has a pre-request script is read from the composed
+ * `elements`, never from the caller (#2521). When it has, the 200 body carries
+ * **`deferredVariables`**: the sorted names left written because a scope
+ * answers them and the script may change that answer. Absent when none was.
+ * It describes this answer only; `POST /execute` and `POST /runs` ignore it.
+ * @p deferral `Always` defers them with no script in the payload, which is
+ * what a collection-run plan asks for; it is never read from the body.
+ *
+ * An OAuth 2.0 config's names are deferred with the rest when @p oauth2 is
+ * `AfterTheScript`; see @ref OAuth2Resolution. Absent, the body decides: a
+ * composition for a run (`deferDynamicVariables`) resolves the config here,
+ * any other leaves it to the send.
+ *
  * Extracted from the route (routes/compose.cpp) so request_composer_test.cpp
  * can drive it against a real database without an in-process HTTP server,
  * matching the suite's other route tests.
  */
-std::pair<int, nlohmann::json>
-compose_request_core (vayu::db::Database& db, const nlohmann::json& body);
+std::pair<int, nlohmann::json> compose_request_core (vayu::db::Database& db,
+const nlohmann::json& body,
+std::optional<OAuth2Resolution> oauth2 = std::nullopt,
+VariableDeferral deferral              = VariableDeferral::WhenScripted);
+
+/**
+ * The resolved `elements` a by-id composition of @p request carries: its
+ * collection chain's root to leaf, then its own, without a disabled, blank or
+ * `inherit.disable`d entry (`compose_elements`). What a collection-run plan
+ * reads, before it composes any step, to decide its @ref VariableDeferral.
+ */
+[[nodiscard]] nlohmann::json stored_request_elements (vayu::db::Database& db,
+const vayu::db::Request& request);
 
 } // namespace vayu::http

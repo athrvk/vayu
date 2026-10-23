@@ -2063,6 +2063,51 @@ TEST (CookieJarWriteScope, AHostTheScriptCalledThroughSendRequestBecomesWritable
     << "only the two writes before the call should have been refused";
 }
 
+// A request a pre-request script runs before keeps its `{{name}}`s written
+// while the script runs (#2521), so the request's site is its URL as the
+// variables resolve it at the call: a stored name, or one the script set a
+// line earlier. The flat read, a jar read and a jar write all answer for that
+// site, and another site is still refused. Mutation check: return
+// `request.url` as written from `jar_request_url`, and every access to a.test
+// is refused or answers nothing.
+TEST (CookieJarWriteScope, ATemplatedRequestUrlIsTheSiteItResolvesTo) {
+    CookieJar jar;
+    store_two_sites (jar);
+    vayu::Environment env;
+    env["host"] = vayu::Variable{ .value = "a.test" };
+
+    const auto result = run_jar_write (jar, "http://{{host}}/users",
+    "const jar = pm.cookies.jar();"
+    "pm.environment.set('flat', String(pm.cookies.get('session')));"
+    "pm.environment.set('read', String(jar.get('http://a.test/', 'session')));"
+    "jar.set('http://a.test/', { name: 'stored_host', value: 'v' });"
+    "jar.set('http://b.test/', { name: 'before_set', value: 'v' });"
+    "pm.environment.set('host', 'b.test');"
+    "jar.set('http://b.test/', { name: 'after_set', value: 'v' });",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["flat"].value, "from-a");
+    EXPECT_EQ (env["read"].value, "from-a");
+    const auto names_for = [&jar] (const std::string& url) {
+        std::vector<std::string> names;
+        for (const auto& cookie : jar.matching ("env_a", url)) {
+            names.push_back (cookie.name);
+        }
+        std::ranges::sort (names);
+        return names;
+    };
+    EXPECT_EQ (names_for ("http://a.test/"),
+    (std::vector<std::string>{ "session", "stored_host" }));
+    EXPECT_EQ (names_for ("http://b.test/"),
+    (std::vector<std::string>{ "after_set", "session" }))
+    << "a write is held to the site the URL resolves to when it is made";
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 1u);
+    EXPECT_NE (warned.front ().find ("(a.test)"), std::string::npos)
+    << "the warning names the resolved site: " << warned.front ();
+}
+
 // ============================================================================
 // The staged write, as a value - the pure half, without a transfer
 // ============================================================================

@@ -27,6 +27,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
@@ -508,20 +509,17 @@ bool holds_a_token (const std::string& text) {
 
 /**
  * Every string of @p request whose `{{tokens}}` composition resolves, except
- * the header *names*, which `resolve_header_names` resolves under the collision
- * rule rather than through this list.
+ * the header lines: a name is resolved under the collision rule
+ * (`resolve_header_names`) and a value under the header-text rule
+ * (`resolve_header_values`).
  */
-std::vector<std::string*> resolvable_strings (vayu::Request& request) {
+std::vector<std::string*> resolvable_strings_off_header_lines (vayu::Request& request) {
     std::vector<std::string*> targets;
     targets.push_back (&request.url);
     // The value of a `:name` segment composition left waiting (issue #1764),
     // resolved here and then written into the URL by `settle_path_variables`.
     for (auto& variable : request.path_variables) {
         targets.push_back (&variable.value);
-    }
-    for (auto& [name, value] : request.headers) {
-        (void)name;
-        targets.push_back (&value);
     }
     targets.push_back (&request.body.content);
     for (auto& field : request.body.fields) {
@@ -537,6 +535,17 @@ std::vector<std::string*> resolvable_strings (vayu::Request& request) {
     // A binary body's file follows the same rule: `src` is composition's alone.
     targets.push_back (&request.body.file.file_name);
     targets.push_back (&request.body.file.content_type);
+    return targets;
+}
+
+/// Every string a `{{token}}` can still sit in that the pass resolves: the
+/// list above plus each header value.
+std::vector<std::string*> resolvable_strings (vayu::Request& request) {
+    auto targets = resolvable_strings_off_header_lines (request);
+    for (auto& [name, value] : request.headers) {
+        (void)name;
+        targets.push_back (&value);
+    }
     return targets;
 }
 
@@ -580,6 +589,40 @@ ResidualRefusal refusal_of (std::string reason, std::string_view code) {
         std::string (code) };
 }
 
+/// A variable whose value cannot sit in a header line, refused as composition
+/// refuses it (#738) - which is the refusal a request a pre-request script runs
+/// before gets only here, its variables having stayed written through
+/// composition (#2521).
+ResidualRefusal unsendable_header_refusal (const vayu::http::HeaderTextRefusal& refusal) {
+    return refusal_of (vayu::http::describe_header_text_refusal (refusal),
+    vayu::http::UNSENDABLE_HEADER_CODE);
+}
+
+/**
+ * Every header value holding a token resolved, into copies first, so a refusal
+ * leaves the values as it found them.
+ */
+std::optional<ResidualRefusal> resolve_header_values (vayu::HeaderList& headers,
+const vayu::http::VariableValues& vars) {
+    std::vector<std::string> resolved;
+    resolved.reserve (headers.size ());
+    std::optional<vayu::http::HeaderTextRefusal> unspellable;
+    for (const auto& line : headers) {
+        resolved.push_back (holds_a_token (line.value) ?
+        vayu::http::resolve_header_template (line.value, vars, unspellable) :
+        line.value);
+        if (unspellable) {
+            return unsendable_header_refusal (*unspellable);
+        }
+    }
+    auto next = resolved.begin ();
+    for (auto& line : headers) {
+        line.value = std::move (*next);
+        ++next;
+    }
+    return std::nullopt;
+}
+
 /**
  * Every name resolved, into lines rebuilt rather than edited in place, so a
  * refusal leaves the request as it found it.
@@ -615,9 +658,14 @@ const vayu::http::VariableValues& vars) {
     vayu::HeaderList resolved;
     // Kept beside `resolved` so a refusal can name both spellings.
     vayu::http::HeaderNameOrigins produced;
+    std::optional<vayu::http::HeaderTextRefusal> unspellable;
     for (const auto& [name, value] : headers) {
         std::string resolved_name = std::string (vayu::http::trim_optional_whitespace (
-        vayu::http::resolve_template (name, vars)));
+        vayu::http::resolve_header_template (name, vars, unspellable)));
+        // First, as composition orders it: a line break is the nearer fault.
+        if (unspellable) {
+            return unsendable_header_refusal (*unspellable);
+        }
         if (resolved_name.empty ()) {
             return refusal_of (vayu::http::describe_empty_header_name (name),
             vayu::http::EMPTY_HEADER_NAME_CODE);
@@ -671,20 +719,26 @@ vayu::http::VariableValues flatten_variable_scopes (const ScriptVariableScopes& 
 
 std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
 const vayu::http::VariableValues& vars) {
-    auto targets             = resolvable_strings (request);
+    const auto all_targets   = resolvable_strings (request);
     const bool anything_left = a_header_name_needs_reading (request.headers) ||
-    std::any_of (targets.begin (), targets.end (),
+    std::any_of (all_targets.begin (), all_targets.end (),
     [] (const std::string* text) { return holds_a_token (*text); });
     if (!anything_left) {
-        // Composition answered everything - the ordinary case. A path value
-        // still waiting holds a token, so it is not this branch; one that
-        // arrived token-free (a raw `/execute` payload's own path rows) is
-        // written in all the same.
+        // No template text anywhere, so there is nothing to resolve: a request
+        // composed with no pre-request script before it, every name answered.
+        // A path value still waiting holds a token, so it is not this branch;
+        // one that arrived token-free (a raw `/execute` payload's own path
+        // rows) is written in all the same.
         vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
         return std::nullopt;
     }
 
-    for (std::string* text : targets) {
+    // First, before anything is rewritten, so the one refusal a value can
+    // carry leaves the request as it was found.
+    if (auto refusal = resolve_header_values (request.headers, vars)) {
+        return refusal;
+    }
+    for (std::string* text : resolvable_strings_off_header_lines (request)) {
         if (!holds_a_token (*text)) {
             continue;
         }
@@ -694,9 +748,9 @@ const vayu::http::VariableValues& vars) {
         vayu::http::resolve_url_template (*text, vars, !request.disable_url_encoding) :
         vayu::http::resolve_template (*text, vars);
     }
-    // Last: it rebuilds the lines the values `targets` points at live in. The
-    // refusal already carries the pre-send gate's shape, because this is a
-    // refusal of the same send and the drivers already render that one: an
+    // Last: it rebuilds the header lines. The refusal already carries the
+    // pre-send gate's shape, because this is a refusal of the same send and
+    // the drivers already render that one: an
     // `InternalError` a buffered caller turns into a status-0 response rather
     // than a transfer (see `validate_transferable` in
     // `event_loop/curl_utils.cpp`), beside the code a streaming caller answers
@@ -717,15 +771,25 @@ const ScriptVariableScopes& scopes) {
 
 std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const vayu::http::VariableValues& vars) {
+const vayu::http::VariableValues& vars,
+LateTokenAcquisition* acquisition) {
     // Resolved raw: `apply_auth` encodes what each destination needs (base64
     // for a basic pair, the query rule for an api key in the query).
     vayu::http::walk_auth_credentials (
     auth, [&vars] (std::string& field, vayu::http::CredentialDestination) {
         field = vayu::http::resolve_template (field, vars);
     });
-    // No database: only OAuth 2.0 needs one, and it is never deferred.
-    auto applied = vayu::http::apply_auth (request, auth, nullptr);
+    // Before `apply_auth`, which computes the cache key from it (D10).
+    if (auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth)) {
+        oauth2->config = vayu::http::resolve_json_strings (oauth2->config, vars);
+    }
+    auto applied = vayu::http::apply_auth (request, auth,
+    acquisition != nullptr ? acquisition->token_cache : nullptr,
+    acquisition != nullptr ? acquisition->target_policy : nullptr,
+    acquisition != nullptr ? acquisition->cancel : nullptr);
+    if (acquisition != nullptr) {
+        acquisition->fetch_ms += applied.token_fetch_ms;
+    }
     if (applied.ok) {
         return std::nullopt;
     }
@@ -735,8 +799,23 @@ const vayu::http::VariableValues& vars) {
 
 std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
-const ScriptVariableScopes& scopes) {
-    return apply_late_auth (request, std::move (auth), values_from_scopes (scopes));
+const ScriptVariableScopes& scopes,
+LateTokenAcquisition* acquisition) {
+    return apply_late_auth (request, std::move (auth), values_from_scopes (scopes), acquisition);
+}
+
+std::optional<ResidualRefusal> refuse_disallowed_target (const vayu::http::TargetPolicy* policy,
+const vayu::Request& request) {
+    if (policy == nullptr) {
+        return std::nullopt;
+    }
+    auto refusal = vayu::http::refuse_target (*policy, request);
+    if (!refusal) {
+        return std::nullopt;
+    }
+    return ResidualRefusal{ vayu::Error{ vayu::ErrorCode::InvalidUrl,
+                            std::move (refusal->message) },
+        std::string (refusal->code) };
 }
 
 std::vector<std::string> resolve_load_residuals (vayu::Request& request,
@@ -989,16 +1068,27 @@ ExchangeInputs inputs) {
         return outcome;
     }
 
-    // The tokens composition could not answer, answered now against what the
-    // script just wrote (issue #1008). After the skip check, so a step that
-    // sends nothing resolves nothing; before the send, because the point is the
-    // wire. A step of a scenario run reaches this with the *previous* steps'
+    // The tokens composition left - the names it could not answer (issue
+    // #1008), and every name of a request a pre-request script runs before
+    // (#2521) - answered now against what the script just wrote. After the
+    // skip check, so a step that sends nothing resolves nothing; before the
+    // send, because the point is the wire. A step of a scenario run reaches
+    // this with the *previous* steps'
     // writes in `scopes` too, which is the same rule one step further on.
     // Deferred auth (issue #2473) goes on once the pass has answered, so no
-    // credential it writes is resolved a second time.
+    // credential it writes is resolved a second time. The caller's host rule
+    // (#2521) reads the URL between the two: final once the pass has run, and
+    // judged before a late OAuth 2.0 token is fetched for a send it refuses.
     auto refusal = resolve_residual_tokens (outcome.request, scopes);
+    if (!refusal) {
+        refusal = refuse_disallowed_target (inputs.target_policy, outcome.request);
+    }
     if (!refusal && inputs.late_auth) {
-        refusal = apply_late_auth (outcome.request, std::move (*inputs.late_auth), scopes);
+        LateTokenAcquisition acquisition{ inputs.token_cache,
+            inputs.target_policy, inputs.cancel };
+        refusal = apply_late_auth (
+        outcome.request, std::move (*inputs.late_auth), scopes, &acquisition);
+        outcome.auth_fetch_ms = acquisition.fetch_ms;
     }
     if (refusal) {
         // Answered exactly as the pre-send gate answers its own refusals, which
@@ -1007,9 +1097,11 @@ ExchangeInputs inputs) {
         // carrying the reason, with the staged jar writes dropped along with
         // the send that was to carry them. The test script still runs, and
         // reads a response reporting an error rather than a status - the
-        // false-pass rule issue #180 exists for.
+        // false-pass rule issue #180 exists for. The rule's code rides beside
+        // it, the one the streaming send answers its 400 with.
         outcome.response = vayu::http::detail::error_response (refusal->error);
         outcome.response.request_headers = outcome.request.headers;
+        outcome.refusal_code             = std::move (refusal->code);
     } else if (auto unsendable = check_files (inputs.files, outcome.request)) {
         // The file rule (`file_ref.hpp`), after the residual pass and before
         // the send, answered in the pre-send gate's shape for the reason the

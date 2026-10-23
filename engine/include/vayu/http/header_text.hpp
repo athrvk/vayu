@@ -32,7 +32,10 @@
  *   bind time, naming the column and the row - the only place that knows them.
  * - **A composed `{{variable}}`** (`http/request_composer.cpp`, issue #738)
  *   refuses at composition, naming the variable - the only place that knows
- *   *which* variable carried the byte. `POST /compose` is otherwise a pure
+ *   *which* variable carried the byte. A request a pre-request script runs
+ *   before keeps its variables written through composition (#2521), so for it
+ *   the residual pass after that script refuses instead, in the same words and
+ *   under the same code. `POST /compose` is otherwise a pure
  *   resolution step, and this is the one payload it rejects over a value:
  *   substituting the byte and answering 200 would hand the caller a payload
  *   whose only remaining fate is the refusal below, with the name that would
@@ -80,6 +83,13 @@ namespace vayu::http {
  * class of quiet wrong request (issue #738, item 3).
  */
 [[nodiscard]] bool truncates_a_header_line (std::string_view text);
+
+/**
+ * @brief The code a header refused over a *variable's* value answers with: the
+ *        `POST /compose` 400, and the residual pass's refusal of the same
+ *        variable when a pre-request script runs before it resolves (#2521).
+ */
+inline constexpr std::string_view UNSENDABLE_HEADER_CODE = "unsendable_header";
 
 /**
  * @brief Why this request's header text cannot go on the wire as written, if

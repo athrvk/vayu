@@ -1112,8 +1112,9 @@ Rules worth knowing before you rely on them:
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
   sees the real `Authorization` header and can replace or remove it. The one
-  exception is a credential still holding a `{{name}}` no variable defined when
-  the request was composed (#2473): that auth is applied *after* the script, so
+  exception is a credential still holding a `{{name}}` that no variable defined
+  when the request was composed, or any `{{name}}` of a request a pre-request
+  script runs before (#2473, #2521): that auth is applied *after* the script, so
   a value the script sets reaches it, and the header is not in
   `pm.request.headers` yet. A header the script sets still wins, because auth
   never replaces one the request already carries. The order is the same on a
@@ -1139,16 +1140,22 @@ Rules worth knowing before you rely on them:
   signs, hashes, measures or re-parses the body it just wrote - the
   `hmacSha256(secret, pm.request.body.raw)` shape most webhook signing needs -
   must use `pm.request.body.raw = …`, not `pm.request.body = …`.
-- **Setting a variable can re-render the URL, if composition left it
-  unresolved.** `{{placeholders}}` are still resolved at compose time
-  (`POST /compose`), strictly before any script runs (#226, D1 stands) - but a
-  name composition could not answer keeps its braces (#1009) and is resolved
-  again after the pre-request script and before the send (#1008), against the
-  scopes as the script left them. So `pm.environment.set('host', …)` reaches a
-  `{{host}}` in this send's URL as long as nothing already answered `host` at
-  compose time; a `{{host}}` composition already substituted is finished text
-  and this pass does not touch it - assign `pm.request.url` directly to change
-  that.
+- **Setting a variable re-renders the URL of a scripted request.** A request
+  a pre-request script runs before (its own, a folder's or the collection's)
+  keeps every `{{placeholder}}` a scope answers written when `POST /compose`
+  composes it (#2521, [decision D1](../app/variable-resolution.md), Postman's
+  order), and so does a name composition could not answer (#1009). All of them
+  are resolved after the pre-request script and before the send (#1008),
+  against the scopes as the script left them. So `pm.environment.set('host', …)`
+  reaches a `{{host}}` in this send's URL, on every run. Meanwhile
+  `pm.request.url` holds the `{{host}}` as written, in the script. A request no
+  pre-request script runs before is composed once, as it always was, and a
+  `{{host}}` composition substituted is finished text - assign
+  `pm.request.url` directly to change that. A collection run widens this to
+  the whole plan: when any step's script or extractor writes a variable before
+  a send (`script.teardown` aside), every step defers, so a token one step's
+  test script stores reaches a later step's `Bearer {{token}}` on every run
+  ([Scenario runs](api-reference.md#scenario-runs)).
 - **A single-request load test still does not run pre-request scripts** -
   only the `tests` (post-request) script runs there. A **scenario** load
   run's `script.pre` element does now, but only when marked `inline` or
@@ -1743,9 +1750,10 @@ pm.variables.get('nonce'); // the number as set
 - **Every read sees it first.** `get`, `has`, `toObject`, `replaceIn` and
   `pm.sendRequest` read it above the row and the named scopes, and so does the
   pass that resolves what composition left after the pre-request script, so a
-  `{{nonce}}` header goes out with the value. A name composition or the
-  data-row bind already answered before the script ran keeps that answer
-  (both run first, [decision D1](../app/variable-resolution.md)).
+  `{{nonce}}` header goes out with the value. A name composition substituted
+  for a request no pre-request script runs before, or the data-row bind
+  already answered before the script ran, keeps that answer
+  ([decision D1](../app/variable-resolution.md)).
   `{{data.column}}` is the row's own spelling and never reads the local scope.
 - **The writes are the scoped ones.** `set` keeps the value's type for the
   run and stores its string form for `{{name}}`, exactly as
@@ -1778,8 +1786,9 @@ from belongs in a named scope instead.
 an arbitrary string - runs the same resolver `POST /compose` uses
 (`request_composer.cpp::resolve_template`), over the script's scopes in
 `pm.variables`' precedence, at **call time** - so a variable the script set a
-line earlier resolves, unlike `{{}}` in the URL, which was composed before the
-script started. Dynamic variables generate per occurrence:
+line earlier resolves at once, where the request's own `{{}}` in the URL waits
+for the pre-request script to end (#2521). Dynamic variables generate per
+occurrence:
 
 ```javascript
 const id = pm.variables.replaceIn("{{$guid}}"); // fresh UUID v4
@@ -1983,8 +1992,9 @@ credential of an `auth` block are resolved
 once, against the local scope, the bound data row and the three named scopes
 exactly as `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
-token-refresh script work. It is not a second pass over the composed request:
-that payload was resolved before the script ran and nothing here revisits it.
+token-refresh script work. It is not a second pass over the request being
+sent: that request's own names resolve after the pre-request script ends
+(#2521), and nothing here revisits them.
 A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
 bound row lacks throws naming the column, the same way `replaceIn` does.
 
@@ -2259,6 +2269,14 @@ trailing dot. For a request to `www.example.com`, `www.example.com` and
 (a sibling), `example.org` and `evilexample.com` are not. An IP address is in
 scope only as itself. A non-ASCII host is compared as its punycode name, the one
 the jar keys on.
+
+**The request's site is its URL as the variables resolve it at the call.** A
+request a pre-request script runs before still holds its `{{name}}`s in that
+script (#2521), so its host is read the way `pm.variables.replaceIn` would read
+the URL at that moment: a `{{host}}` the environment stores, or one the script
+set a line earlier, names the site, and a write after the script moves
+`host` is held to the new one. `pm.cookies.get` and its siblings match the
+same resolved URL.
 
 A host the script has called with `pm.sendRequest` joins the allowed set from
 the moment of the call, whether or not the transfer succeeded, so "log in

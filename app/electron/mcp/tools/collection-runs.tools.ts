@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { checkAllowlist } from "../safety.js";
+import { checkComposedTarget, targetPolicyRefusal } from "../safety.js";
 import { ENVIRONMENT_DEFAULT_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
 import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { EngineClient } from "../engine-client.js";
@@ -29,7 +29,7 @@ import {
 	watchedRun,
 	withCaveat,
 } from "./kit.js";
-import { composeViaEngine, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
+import { asMcpSend, composeViaEngine, resolveEnvironmentId } from "./compose.js";
 import {
 	elementsTimersInput,
 	ENGINE_DEFAULT_HEADERS_POINTER,
@@ -240,7 +240,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				// Only what the row echoes is projected; the gate and the send read `url`.
 				const shownUrl = smokeRowUrl(ctx, url, outgoing.auth ?? req.auth);
 
-				const gate = checkAllowlist(url, ctx.config, ctx.host);
+				const gate = checkComposedTarget(outgoing, ctx.config, ctx.host);
 				if (!gate.ok) {
 					results.push({
 						name,
@@ -257,9 +257,25 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				}
 				try {
 					const resp = ((await ctx.client.executeRequest(
-						withMcpOrigin(outgoing, ctx),
+						asMcpSend(outgoing, ctx),
 						signal
 					)) ?? {}) as Record<string, unknown>;
+					// The engine's own allowlist refusal of where a script
+					// moved the request (#2521), reported as the gate's is.
+					const refused = targetPolicyRefusal(resp, ctx.host);
+					if (refused) {
+						results.push({
+							name,
+							...where,
+							method,
+							url: shownUrl,
+							ok: false,
+							skipped: true,
+							reason: refused,
+						});
+						skipped++;
+						continue;
+					}
 					const code =
 						typeof resp.status === "number"
 							? resp.status
@@ -474,7 +490,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 
 			let started: unknown;
 			try {
-				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
+				started = await ctx.client.startRun(asMcpSend(payload, ctx), signal);
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}

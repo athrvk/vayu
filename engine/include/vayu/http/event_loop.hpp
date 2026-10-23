@@ -26,6 +26,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -76,6 +77,12 @@ struct EventLoopConfig {
     /// reuses a cached connection only when its proxy and TLS config match, so
     /// a policy that varied per transfer would partition each worker's pool.
     TransportPolicy transport;
+
+    /// The hosts this run's caller allows it to reach (#2521): every transfer
+    /// is judged by it at submission, after `validate_transferable`, so the URL
+    /// read is the one about to be dialled. Absent sends wherever a request
+    /// names, the one comparison a run without a policy pays per transfer.
+    std::optional<TargetPolicy> target_policy;
 
     /// DNS cache timeout in seconds (0 = no caching, negative = never expires).
     /// Governs curl's own resolver cache and the pre-resolution pin cache.

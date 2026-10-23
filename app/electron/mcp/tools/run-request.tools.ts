@@ -11,16 +11,17 @@
  */
 
 import { z } from "zod";
-import { checkAllowlist } from "../safety.js";
+import { checkComposedTarget, targetPolicyRefusal } from "../safety.js";
 import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
 import { withheldPointer } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngineForRunOutput,
 	elementsArg,
 	engineErrorResult,
 	errorResult,
+	isRecord,
 	str,
 	ToolArgError,
 	withCaveat,
@@ -36,9 +37,9 @@ import {
 	readValidationScript,
 	refuseAgentScripts,
 	resolveEnvironmentId,
+	asMcpSend,
 	runStreamingRequest,
 	scriptElement,
-	withMcpOrigin,
 } from "./compose.js";
 import {
 	authInput,
@@ -100,7 +101,7 @@ function requestFields(args: Record<string, unknown>): Record<string, unknown> {
  * Without one, `requestId` is the target and the call's inline fields lay over
  * the stored request. The ad-hoc `elements` are kept out of that overlay
  * because the engine replaces the whole stored list with an inline one; they
- * are appended afterwards ({@link appendAdHocElements}).
+ * join the stored list in a second composition ({@link composeWithAdHocElements}).
  */
 function composeTarget(
 	args: Record<string, unknown>,
@@ -126,15 +127,29 @@ function composeTarget(
 }
 
 /**
- * The by-id branch's ad-hoc scripts and `elements`, added after the stored and
- * inherited ones rather than replacing them: the engine's inline overlay is
- * per key, so sending them in the compose request would drop the chain's own.
+ * The by-id branch's composition with its ad-hoc scripts and `elements` after
+ * the stored and inherited ones rather than replacing them. The engine's
+ * inline overlay replaces the whole list, so the chain's list is read off
+ * @p composed and the whole list composed again: composition decides from the
+ * elements it sees whether a pre-request script runs before the send (#2521),
+ * and a name an ad-hoc `preRequestScript` sets must be left for it.
  */
-function appendAdHocElements(payload: Record<string, unknown>, args: Record<string, unknown>) {
+async function composeWithAdHocElements(
+	client: ToolContext["client"],
+	composeBody: Record<string, unknown>,
+	composed: Record<string, unknown>,
+	args: Record<string, unknown>,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
 	const extra = adHocElements(args);
-	if (extra.length === 0) return;
-	const stored = Array.isArray(payload.elements) ? payload.elements : [];
-	payload.elements = [...stored, ...extra];
+	if (extra.length === 0) return composed;
+	const stored = Array.isArray(composed.elements) ? composed.elements : [];
+	const fields = isRecord(composeBody.request) ? composeBody.request : {};
+	return composeViaEngine(
+		client,
+		{ ...composeBody, request: { ...fields, elements: [...stored, ...extra] } },
+		signal
+	);
 }
 
 export const RUN_REQUEST_TOOLS: McpTool[] = [
@@ -234,29 +249,34 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			if (target === undefined) return errorResult(NO_TARGET_ERROR);
 			const sendsSaved = url === undefined;
 
-			// Compose engine-side (pure), gate on the *resolved* URL, then execute
-			// the composed payload. The gate is a host rule: a pre-request script
-			// this call forwards can still edit `pm.request`, and since #1008 a
-			// name compose could not answer is resolved before the send - neither
-			// of which can reach a host the allowlist did not see, because an
-			// unresolved authority is refused rather than checked (safety.ts).
+			// Compose engine-side (pure), gate on the composed URL, then execute
+			// the composed payload. The gate here is the early refusal: a
+			// pre-request script can still edit `pm.request` or set the variable
+			// a deferred `{{host}}` resolves from, so the engine holds the URL it
+			// is about to send to the same allowlist (`targetPolicy`, #2521) and
+			// its refusal is answered below with this gate's remedy.
 			let payload: Record<string, unknown>;
 			try {
-				payload = await composeViaEngine(
-					ctx.client,
-					{
-						...target,
-						collectionId: str(args, "collectionId"),
-						environmentId: await resolveEnvironmentId(args, ctx, signal),
-					},
-					signal
-				);
+				const composeBody = {
+					...target,
+					collectionId: str(args, "collectionId"),
+					environmentId: await resolveEnvironmentId(args, ctx, signal),
+				};
+				payload = await composeViaEngine(ctx.client, composeBody, signal);
+				if (sendsSaved) {
+					payload = await composeWithAdHocElements(
+						ctx.client,
+						composeBody,
+						payload,
+						args,
+						signal
+					);
+				}
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err, ctx);
 			}
-			if (sendsSaved) appendAdHocElements(payload, args);
-			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config, ctx.host);
+			const gate = checkComposedTarget(payload, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 			// By id the engine stamped it already; ad hoc it is only the History link.
 			if (linkId !== undefined) payload.requestId = linkId;
@@ -287,8 +307,13 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				? await runStreamingRequest(args, payload, ctx, signal)
 				: await callEngineForRunOutput(
 						ctx,
-						() => ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal),
-						{ bound: boundExecuteResponse, signal, auth: payload.auth }
+						() => ctx.client.executeRequest(asMcpSend(payload, ctx), signal),
+						{
+							bound: boundExecuteResponse,
+							signal,
+							auth: payload.auth,
+							refusal: (answer) => targetPolicyRefusal(answer, ctx.host),
+						}
 					);
 			return url !== undefined && linkId !== undefined
 				? withCaveat(result, LINK_ONLY_CAVEAT)
