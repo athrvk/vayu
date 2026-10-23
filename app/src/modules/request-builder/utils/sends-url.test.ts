@@ -12,10 +12,14 @@
  * that the cached form is the same answer as the plain one.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { DataFieldContext } from "@/lib/data-bind-escaping";
+import { previewRowBind } from "@/lib/variable-resolution";
 import type { KeyValueEntry } from "@/types";
+import { deferredNamesIn } from "@/lib/deferred-note";
 import {
 	deferredNamesInSends,
+	leaveDeferredField,
 	resolveSendsUrl,
 	sendsCacheInput,
 	sendsHasTokens,
@@ -243,5 +247,100 @@ describe("sendsResolver", () => {
 		const other = (text: string) => resolve(text);
 		expect(sendsResolver(resolve)).toBe(sendsResolver(resolve));
 		expect(sendsResolver(other)).not.toBe(sendsResolver(resolve));
+	});
+});
+
+describe("leaveDeferredField (#2762)", () => {
+	const lookup = (name: string) => ({ host: "api.test", token: "stored-token" })[name];
+	const stored = (input: string, context?: DataFieldContext) =>
+		previewRowBind(input, lookup, new Map(), context);
+
+	it("leaves a deferred name written and resolves the rest of the field", () => {
+		const resolve = leaveDeferredField(stored, ["token"]);
+		expect(resolve("https://{{host}}/{{token}}").text).toBe("https://api.test/{{token}}");
+	});
+
+	it("matches a name written with padding, as the resolvers read it", () => {
+		const resolve = leaveDeferredField(stored, ["token"]);
+		expect(resolve("{{ token }}|{{ host }}").text).toBe("{{ token }}|api.test");
+	});
+
+	it("is the resolver itself when nothing is deferred", () => {
+		expect(leaveDeferredField(stored, [])).toBe(stored);
+	});
+
+	it("hands the field's context to the resolver and keeps its refusals", () => {
+		const resolveField = vi.fn((input: string, _context?: DataFieldContext) => ({
+			text: input,
+			refusals: ["refused"],
+		}));
+		const bound = leaveDeferredField(resolveField, ["token"])("a {{token}}", "header");
+		expect(resolveField).toHaveBeenCalledWith(expect.any(String), "header");
+		expect(bound.refusals).toEqual(["refused"]);
+	});
+
+	it("hands a field with no deferred token to the resolver as typed", () => {
+		const resolveField = vi.fn(stored);
+		leaveDeferredField(resolveField, ["token"])("{{host}}", "json");
+		expect(resolveField).toHaveBeenCalledWith("{{host}}", "json");
+	});
+
+	it("keeps every occurrence written, each in its own place", () => {
+		const resolve = leaveDeferredField(stored, ["token", "host"]);
+		expect(resolve("{{token}} {{host}} {{token}} {{other}}").text).toBe(
+			"{{token}} {{host}} {{token}} {{other}}"
+		);
+	});
+
+	describe("with a picked data row", () => {
+		const row = new Map([["name", 'say "hi"']]);
+		const bound = (input: string, context: DataFieldContext) =>
+			leaveDeferredField((text, ctx) => previewRowBind(text, lookup, row, ctx), ["token"])(
+				input,
+				context
+			);
+
+		it("escapes a cell by what surrounds it, across a deferred token", () => {
+			// The cell after the token sits inside the string the token is in.
+			expect(bound('{"a":"{{token}} {{data.name}}"}', "json").text).toBe(
+				'{"a":"{{token}} say \\"hi\\""}'
+			);
+		});
+
+		it("escapes for XML and for a header the way the unwrapped resolver does", () => {
+			const xml = '<a t="{{token}}">{{data.name}}</a>';
+			expect(bound(xml, "xml").text).toBe('<a t="{{token}}">say "hi"</a>');
+			const lineBreak = new Map([["name", "ok\r\nX: y"]]);
+			const refused = leaveDeferredField(
+				(text, ctx) => previewRowBind(text, lookup, lineBreak, ctx),
+				["token"]
+			)("{{token}} {{data.name}}", "header");
+			expect(refused.text).toBe("{{token}} {{data.name}}");
+			expect(refused.refusals).toHaveLength(1);
+		});
+	});
+
+	it("is one wrapper per resolver and set of names", () => {
+		const other = (input: string) => stored(input);
+		expect(leaveDeferredField(stored, ["token"])).toBe(leaveDeferredField(stored, ["token"]));
+		expect(leaveDeferredField(stored, ["token"])).not.toBe(
+			leaveDeferredField(stored, ["token", "host"])
+		);
+		expect(leaveDeferredField(stored, ["token"])).not.toBe(
+			leaveDeferredField(other, ["token"])
+		);
+	});
+});
+
+describe("deferredNamesIn", () => {
+	it("keeps the names the texts use, once each, in order of first appearance", () => {
+		expect(
+			deferredNamesIn(["b", "a", "unused"], ["{{a}} {{b}}", "{{ a }}", "no token", "{{b}}"])
+		).toEqual(["a", "b"]);
+	});
+
+	it("is empty when nothing is deferred or nothing deferred is used", () => {
+		expect(deferredNamesIn([], ["{{a}}"])).toEqual([]);
+		expect(deferredNamesIn(["a"], ["{{b}}", ""])).toEqual([]);
 	});
 });

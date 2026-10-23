@@ -80,6 +80,7 @@ import { composePathParams, substitutePathVariables } from "../../../utils/path-
 import { resolveUrlTemplate } from "../../../utils/query-encoding";
 import { containsVariableToken } from "@/constants/variables";
 import { bodyFieldContext, refusalsText, type BoundField } from "@/lib/data-bind-escaping";
+import { deferredNamesIn, deferredNote } from "@/lib/deferred-note";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { graphqlOperationReference } from "@/lib/agent-reference";
@@ -129,6 +130,7 @@ function GraphQLBody(props: GraphQLBodyProps) {
 const EDITOR_BOX = "min-h-40 flex-1 overflow-hidden rounded-md border border-input";
 
 const NO_BODY: BoundField = { text: "", refusals: [] };
+const NO_NAMES: readonly string[] = [];
 
 export default function BodyPanel() {
 	const {
@@ -328,6 +330,9 @@ export default function BodyPanel() {
 		showResolved && variables.maskSecrets
 			? variables.maskSecrets(resolvedBody.text)
 			: resolvedBody.text;
+	// The names a pre-request script sets at send that the body uses: the Resolved
+	// pane leaves them written (`resolveField`) and says why (#2762).
+	const deferredInBody = deferredNamesIn(variables.deferredVariables ?? NO_NAMES, [request.body]);
 	const isCodeMode =
 		request.bodyMode === "json" ||
 		request.bodyMode === "text" ||
@@ -454,6 +459,12 @@ export default function BodyPanel() {
 						/>
 					)}
 				</div>
+			)}
+
+			{isCodeMode && showResolved && deferredInBody.length > 0 && (
+				<p className="text-label text-muted-foreground m-0 break-words">
+					{deferredNote(deferredInBody)}
+				</p>
 			)}
 
 			{request.bodyMode === "graphql" && (
