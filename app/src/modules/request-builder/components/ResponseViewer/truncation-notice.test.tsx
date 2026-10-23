@@ -133,7 +133,7 @@ describe("response body cap notice", () => {
 
 		expect(screen.getByText(/Body capped while reading/i)).toBeInTheDocument();
 		// The actionable half - and the half that differs from the notice above.
-		expect(screen.getByText(/Raise Max Design Response Body in Settings/i)).toBeInTheDocument();
+		expect(screen.getByText(/Raise Max Send response body in Settings/i)).toBeInTheDocument();
 	});
 
 	it("shows no notice for an uncapped response", () => {
@@ -167,8 +167,8 @@ describe("response body cap notice", () => {
 		// names the setting. Swapping either sentence between them would be the
 		// conflation this pair exists to prevent.
 		expect(truncatedText).toMatch(/Re-send the request/i);
-		expect(truncatedText).not.toMatch(/Max Design Response Body/i);
-		expect(cappedText).toMatch(/Max Design Response Body/i);
+		expect(truncatedText).not.toMatch(/Max Send response body/i);
+		expect(cappedText).toMatch(/Max Send response body/i);
 		expect(cappedText).toMatch(/re-sending reads the same amount/i);
 	});
 });

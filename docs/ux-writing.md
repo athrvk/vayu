@@ -246,11 +246,13 @@ from creeping back in afterward. These hold it:
   of `console.*` and logger calls dropped (logs are exempt, see above). A new
   rule from this page is added to that scan rather than to a file walk of its
   own.
-- **The engine's half** is two tests that do not exist yet, owned by the issues
-  that add them: a scan of `engine/src/http/routes/*.cpp` for response bodies
-  opening "Could not" or "Failed to" (#2295), and `config_seed_test.cpp`
-  `EveryEngineSettingLabelIsSentenceCase` over the setting labels the Settings
-  page renders verbatim (#2293).
+- **The engine's half** is two tests. `config_seed_test.cpp`
+  `EveryEngineSettingLabelIsSentenceCase` reads the setting labels the Settings
+  page renders verbatim (#2293); a later word may start with a capital only when
+  it is all capitals or one of OAuth, OpenAPI, Send, Sends,
+  Expect. The other, a scan of
+  `engine/src/http/routes/*.cpp` for response bodies opening "Could not" or
+  "Failed to", does not exist yet and is owned by #2295.
 - **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
   fails on `Settings >` (write `Settings ›`), on lowercase "curl command" or
   "curl request" (write "cURL"), and on three full stops straight after a
