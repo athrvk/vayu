@@ -76,6 +76,11 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    Also check for an open Dependabot Electron pull request (`build: Bump
    electron`, #2373): Electron patch releases carry Chromium security backports,
    and merging it before tagging is what keeps a release off a stale runtime.
+   Likewise check the two vendored C libraries in `engine/vendor/README.md`
+   (quickjs-ng and hdrhistogram) against their upstream tags for a newer
+   release or a security fix: no scanner covers them, so this line is the
+   only check. A re-vendor is its own PR before the release commit and
+   updates that README.
 4. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
 5. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
