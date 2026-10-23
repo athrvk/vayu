@@ -983,10 +983,10 @@ struct RunContext {
         /// level's first counted ticks must not average in the level before.
         double current_rps = 0.0;
         size_t in_flight   = 0;
-        /// Every window since the level histogram adopted `level.epoch`, this
-        /// tick's included. A reader judging a level it asked for with
-        /// `request_level_reset` ignores a tick carrying any other epoch: that
-        /// tick was produced before the reset was applied.
+        /// Every window and status count since the level adopted
+        /// `level.epoch`, this tick's included. A reader judging a level it
+        /// asked for with `request_level_reset` ignores a tick carrying any
+        /// other epoch: that tick was produced before the reset was applied.
         MetricsCollector::LevelLatency level;
     };
     mutable std::mutex live_tick_mtx;

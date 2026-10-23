@@ -1097,21 +1097,32 @@ MetricsCollector::Percentiles MetricsCollector::take_second_percentiles () {
     return second;
 }
 
-void MetricsCollector::adopt_level_epoch (uint64_t epoch) {
+void MetricsCollector::adopt_level_epoch (uint64_t epoch,
+const std::map<int, size_t>& status_snapshot) {
     if (epoch == level_epoch_) {
         return;
     }
     hdr_reset (level_histogram_.get ());
-    level_epoch_ = epoch;
+    level_epoch_    = epoch;
+    level_baseline_ = vayu::count_status_failures (status_snapshot);
 }
 
-MetricsCollector::LevelLatency MetricsCollector::level_latency () const {
+MetricsCollector::LevelLatency MetricsCollector::level_latency (
+const std::map<int, size_t>& status_snapshot) const {
+    LevelLatency reading;
+    reading.epoch = level_epoch_;
+    // Each slot of the distribution only grows, so a later snapshot never
+    // counts fewer than the baseline taken from an earlier one.
+    const auto now    = vayu::count_status_failures (status_snapshot);
+    reading.completed = now.total - level_baseline_.total;
+    reading.failed    = now.failed - level_baseline_.failed;
+
     const struct hdr_histogram* level = level_histogram_.get ();
-    if (level->total_count == 0) {
-        return { level_epoch_, 0, 0.0 };
+    if (level->total_count > 0) {
+        reading.samples = static_cast<size_t> (level->total_count);
+        reading.p99_ms  = us_to_ms (hdr_value_at_percentile (level, 99.0));
     }
-    return { level_epoch_, static_cast<size_t> (level->total_count),
-        us_to_ms (hdr_value_at_percentile (level, 99.0)) };
+    return reading;
 }
 
 void MetricsCollector::record_status_code (int status_code) {

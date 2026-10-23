@@ -1012,6 +1012,10 @@ class MetricsCollector {
      * A level's p99 is the percentile of its completions, which a mean of its
      * windows' p99s is not: 10 windows at 300 ms among 90 at 50 ms have a p99
      * near 300 ms and a mean window p99 of 75 ms.
+     *
+     * Its error share (#2815) is counted from the status distribution, never
+     * against `samples`: a failure with no response may record no latency, so
+     * the histogram is not the denominator.
      */
     struct LevelLatency {
         /// The epoch adopt_level_epoch() last adopted; 0 before any.
@@ -1019,21 +1023,39 @@ class MetricsCollector {
         /// Completions in the histogram. Zero means `p99_ms` measured nothing.
         size_t samples = 0;
         double p99_ms  = 0.0;
+        /// Requests the status distribution gained since the epoch's baseline.
+        /// A Stop-cancelled request is in neither count.
+        size_t completed = 0;
+        /// Of `completed`, the errors `vayu::count_status_failures` counts.
+        size_t failed = 0;
+
+        /// `failed` as a percentage of `completed`; 0 when nothing completed.
+        [[nodiscard]] double error_pct () const noexcept {
+            return completed > 0 ?
+            static_cast<double> (failed) * 100.0 / static_cast<double> (completed) :
+            0.0;
+        }
     };
 
     /**
-     * @brief Start a new level histogram when @p epoch differs from the one
-     *        it holds; otherwise do nothing.
+     * @brief Start a new level when @p epoch differs from the one it holds:
+     *        empty the histogram and take @p status_snapshot as the baseline
+     *        the level's counts start from. Otherwise do nothing.
      *
      * Call it before sample_window_percentiles() on the same tick, so the
-     * window that tick samples is the first one the new level holds.
+     * window that tick samples is the first one the new level holds, and with
+     * the snapshot the tick's get_current_stats() and level_latency() read, so
+     * all three count from one distribution.
      *
      * @note Producer thread only, like sample_window_percentiles().
      */
-    void adopt_level_epoch (uint64_t epoch);
+    void adopt_level_epoch (uint64_t epoch, const std::map<int, size_t>& status_snapshot);
 
+    /// The level as of @p status_snapshot, which must be the one this tick
+    /// passed adopt_level_epoch().
     /// @note Producer thread only: the histogram behind it has no atomics.
-    [[nodiscard]] LevelLatency level_latency () const;
+    [[nodiscard]] LevelLatency level_latency (
+    const std::map<int, size_t>& status_snapshot) const;
 
     /**
      * @brief Get status code distribution
@@ -1218,6 +1240,7 @@ class MetricsCollector {
     OwnedHistogram run_so_far_histogram_; // cumulativeP*Ms
     OwnedHistogram level_histogram_;      // level_latency
     uint64_t level_epoch_ = 0;            // adopt_level_epoch
+    StatusFailures level_baseline_;       // adopt_level_epoch
 
     // One cumulative histogram per network phase, indexed by TimingPhase. Same
     // range and precision as latency_histogram_, so a phase's p99 and the

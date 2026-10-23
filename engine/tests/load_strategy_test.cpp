@@ -1636,10 +1636,11 @@ void record_window (vayu::core::RunContext& context, std::optional<double> laten
 /// below holds the real producer to the same order.
 void produce_tick (vayu::core::RunContext& context, std::optional<double> latency_ms) {
     record_window (context, latency_ms);
-    auto& collector = *context.metrics_collector;
-    collector.adopt_level_epoch (context.requested_level_epoch ());
+    auto& collector     = *context.metrics_collector;
+    const auto statuses = collector.status_code_distribution ();
+    collector.adopt_level_epoch (context.requested_level_epoch (), statuses);
     (void)collector.sample_window_percentiles ();
-    context.publish_live_tick ({ 0, 100.0, 0, collector.level_latency () });
+    context.publish_live_tick ({ 0, 100.0, 0, collector.level_latency (statuses) });
 }
 
 /// A tick the producer sampled before it saw the latest reset request.
@@ -1647,7 +1648,8 @@ void produce_stale_tick (vayu::core::RunContext& context, std::optional<double> 
     record_window (context, latency_ms);
     auto& collector = *context.metrics_collector;
     (void)collector.sample_window_percentiles ();
-    context.publish_live_tick ({ 0, 100.0, 0, collector.level_latency () });
+    context.publish_live_tick (
+    { 0, 100.0, 0, collector.level_latency (collector.status_code_distribution ()) });
 }
 
 /// Open the first level and feed it its settle ticks, at @p settle_ms each.
@@ -1760,7 +1762,8 @@ TEST (CapacitySearchTest, ALevelWithNoCompletionsStaysOpen) {
 // samples, and publishes the level under it. Completions recorded before the
 // request belong to the previous level.
 // Mutation-check: drop the `adopt_level_epoch` call in emit_live_tick and the
-// wait for the requested epoch times out.
+// wait for the requested epoch times out; pass it an empty distribution instead
+// of the tick's and the new level counts the previous one's 10 requests.
 TEST_F (LoadStrategyTest, LiveTicksPublishTheLevelEpochTheStrategyRequested) {
     vayu::db::Database db (TEST_DB_PATH);
     auto context = std::make_shared<vayu::core::RunContext> (
@@ -1788,15 +1791,21 @@ TEST_F (LoadStrategyTest, LiveTicksPublishTheLevelEpochTheStrategyRequested) {
     vayu::tests::wait_until ([&] () { return level ().epoch == epoch; }))
     << "the producer never adopted the requested epoch";
     EXPECT_EQ (level ().samples, 0u) << "the new level kept the previous one";
+    EXPECT_EQ (level ().completed, 0u)
+    << "the new level counted the previous one";
 
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 4; ++i) {
         collector.record_success (200, 20.0, 0.0);
     }
-    EXPECT_TRUE (
-    vayu::tests::wait_until ([&] () { return level ().samples == 5; }))
+    collector.record_success (503, 20.0, 0.0);
+    EXPECT_TRUE (vayu::tests::wait_until ([&] () {
+        const auto now = level ();
+        return now.samples == 5 && now.completed == 5;
+    }))
     << "the new level never saw its completions";
     EXPECT_EQ (level ().epoch, epoch);
     EXPECT_NEAR (level ().p99_ms, 20.0, 0.02);
+    EXPECT_EQ (level ().failed, 1u);
 
     context->is_running = false;
     metrics.join ();
