@@ -40,9 +40,9 @@ let dist: string;
 let outsideSecret: string;
 let siblingPackageJson: string;
 
-/** The canonical path of a file under the fixture's `dist`. */
+/** The canonical path of a file under the fixture's `dist`. `.native` expands a Windows 8.3 temp name (RUNNER~1) the way the handler's fs.promises.realpath does. */
 function shipped(...segments: string[]): string {
-	return realpathSync(path.join(dist, ...segments));
+	return realpathSync.native(path.join(dist, ...segments));
 }
 
 function resolve(urlPath: string): Promise<string | null> {
