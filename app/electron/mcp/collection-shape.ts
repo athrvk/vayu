@@ -108,6 +108,15 @@ export function presentCollections(list: unknown, ctx?: DataFileLookup): unknown
 }
 
 /**
+ * `POST /reorder`'s answer (`{collections, requests}`, the whole rows a move
+ * renumbered) with each collection row presented as its own echo is.
+ */
+export function presentReorderCollections(answer: unknown, ctx?: DataFileLookup): unknown {
+	if (!isRecord(answer) || !("collections" in answer)) return answer;
+	return { ...answer, collections: presentCollections(answer.collections, ctx) };
+}
+
+/**
  * Presented rows with each `dataFile.hash` taken from the file as it is now,
  * when @p ctx can hash one. A file that cannot be read keeps the stored hash
  * (or none): an unreadable file is a fact about the file, never a failed list.
