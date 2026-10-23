@@ -58,9 +58,8 @@ on:
   # On a push the engine job builds and stops: no tests, no lint, no gate. Those
   # ran on the pull request; this run exists to leave master's objects behind.
   # Engine paths only, as the `engine` filter below has them, minus what only
-  # lint or verification reads. Concurrency cancels an older master run when a
-  # newer one starts, which loses nothing: sccache writes each object as it
-  # compiles, so a cancelled run keeps everything it finished.
+  # lint or verification reads. A newer master run queues behind the one in
+  # progress instead of cancelling it (see `concurrency` below).
   push:
     branches:
       - master
@@ -71,9 +70,17 @@ on:
       - '.github/workflows/pr-tests.yml'
       - '!**/*.md'
 
+# A newer push to a pull request cancels the run it supersedes. On master it
+# does not: sccache writes each object as it compiles, but actions/cache saves
+# the vcpkg archives only when the job finishes, so a master run cancelled by
+# the next merge saved nothing. After the 2026-10-21 Windows image changed
+# vcpkg's package ABIs, merges 20-40 minutes apart cancelled every master run
+# before its 40-minute cold Windows build could save the new entry. Queued,
+# the group holds one running and one pending run; a newer pending one
+# replaces the older, so master runs never pile up.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:

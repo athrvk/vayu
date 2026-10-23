@@ -490,7 +490,10 @@ flag - so an entry serves only a build that compiles exactly the same way.
   served them: the first push of a one-file pull request read 28 hits against
   371 misses on three legs. Building the same job definition on `master` keeps
   writer and reader identical by construction. That run builds only - tests,
-  lint and the `CI gate` ran on the pull request.
+  lint and the `CI gate` ran on the pull request. It also saves master's vcpkg
+  archives, which `actions/cache` does only when the job finishes, so a newer
+  push to `master` queues behind a running one instead of cancelling it
+  (pull requests still cancel a superseded run).
 
 A pull request still writes its own scope as well, which only its own later
 pushes can read. That keeps a pull request that edits a widely included header
