@@ -75,11 +75,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only for the job that builds and scans the checked-out tree. The failure
+# issue below needs the tracker-write scope, as it does in `sanitizers.yml`, for
+# the same reason and the same kind of run (nobody is watching a cron), so that
+# scope lives on the `report` job alone, which never checks out or runs
+# repository code (#2767).
 permissions:
   contents: read
-  # For the failure issue below. `sanitizers.yml` needs it for the same reason
-  # and for the same kind of run: nobody is watching a cron.
-  issues: write
 
 jobs:
   scan:
@@ -279,6 +281,14 @@ jobs:
             --label "Whole-tree clang-tidy on ${{ matrix.os }}" \
             | tee tidy-scan-report.md >> "$GITHUB_STEP_SUMMARY"
 
+      # The `report` job files only for a leg that carries this file. The
+      # upload below is `always()`, so every leg has an artifact and the
+      # artifact's presence says nothing about whether the leg failed.
+      - name: Mark the leg as failed
+        if: failure()
+        shell: bash
+        run: echo failed > tidy-scan-failed
+
       - name: Upload the scan
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -288,93 +298,144 @@ jobs:
             tidy-scan.log
             tidy-scan-report.md
             tidy-units.txt
+            tidy-scan-failed
           if-no-files-found: error
           retention-days: 14
 
-      # Where a weekly run reports, which is the question a cron has to answer
-      # before it is worth having. The step summary above and the artifact
-      # beside it are read by whoever opens the run - and on a Monday morning
-      # nobody opens the run. GitHub's own notification for a failed schedule
-      # goes to whoever last edited the cron line and to nobody else, which is
-      # an accident of git history rather than a way to reach a maintainer.
-      #
-      # So: the same auto-filing `sanitizers.yml` uses, for the same reason and
-      # by the same plain GitHub API - no model, no tokens. Keyed on the runner
-      # so a leg that stays red accumulates comments on one issue instead of
-      # filing a fresh one every Monday. Closing it is a human act after the
-      # fix; the next failure comments again, or files anew if it was closed.
-      #
-      # **Not on a pull request**, exactly as #970 decided for the sanitizers:
-      # this step exists because nobody is watching the cron, and a pull
-      # request already has a reviewer watching its checks. Filing there would
-      # write a tracker entry about a ref that is not master and code that may
-      # never reach it. The artifact and summary stay ungated - they are what
-      # that reviewer needs, and they file nothing.
-      #
-      # The body is the report itself rather than a log excerpt: unlike a
-      # sanitizer log, this scan's output is already the deduplicated finding
-      # table, which is the whole of what a reader needs.
-      - name: File or update the tidy-scan-failure issue
-        if: ${{ failure() && github.event_name != 'pull_request' }}
+  # Where a weekly run reports, which is the question a cron has to answer
+  # before it is worth having. The step summary above and the artifact
+  # beside it are read by whoever opens the run - and on a Monday morning
+  # nobody opens the run. GitHub's own notification for a failed schedule
+  # goes to whoever last edited the cron line and to nobody else, which is
+  # an accident of git history rather than a way to reach a maintainer.
+  #
+  # So: the same auto-filing `sanitizers.yml` uses, for the same reason and
+  # by the same plain GitHub API - no model, no tokens. Keyed on the runner
+  # so a leg that stays red accumulates comments on one issue instead of
+  # filing a fresh one every Monday. Closing it is a human act after the
+  # fix; the next failure comments again, or files anew if it was closed.
+  #
+  # **A job of its own, with no checkout** (#2767), as in `sanitizers.yml`: the
+  # `scan` legs build and run the checked-out tree and hold `contents: read`
+  # only. This job is the only holder of that scope, reads what the legs
+  # uploaded and executes nothing from the repository. `actions: read` is for
+  # the artifact download.
+  #
+  # **Not on a pull request**, exactly as #970 decided for the sanitizers:
+  # this job exists because nobody is watching the cron, and a pull
+  # request already has a reviewer watching its checks. Filing there would
+  # write a tracker entry about a ref that is not master and code that may
+  # never reach it. The artifact and summary stay ungated - they are what
+  # that reviewer needs, and they file nothing.
+  #
+  # **A leg that ends `cancelled` files nothing** - a superseded run, or a
+  # `timeout-minutes` expiry - because `needs.scan.result` is `failure` only
+  # where the in-job `failure()` this replaced was true, and only a failed leg
+  # writes the `tidy-scan-failed` marker the script looks for. Unchanged by the
+  # move.
+  #
+  # The body is the report itself rather than a log excerpt: unlike a
+  # sanitizer log, this scan's output is already the deduplicated finding
+  # table, which is the whole of what a reader needs.
+  report:
+    name: File or update the tidy-scan-failure issues
+    needs: scan
+    if: ${{ always() && needs.scan.result == 'failure' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      contents: read
+      actions: read
+    steps:
+      # No `merge-multiple`: each leg's artifact lands in its own directory,
+      # named for the artifact, which is how the script below tells legs apart
+      # and reads the runner off the name.
+      - name: Download the scan artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: engine-tidy-scan-*
+          path: tidy-scan-artifacts
+
+      - name: File or update the tidy-scan-failure issues
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
-          RUNNER_PICKED: ${{ matrix.os }}
         with:
           script: |
             const fs = require('fs');
-            const { RUNNER_PICKED } = process.env;
+            const path = require('path');
             const { owner, repo } = context.repo;
             const label = 'tidy-scan-failure';
-            const title = `tidy: whole-tree scan failure on ${RUNNER_PICKED}`;
+            const root = 'tidy-scan-artifacts';
+            const artifactPrefix = 'engine-tidy-scan-';
             const runUrl =
               `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            // Issue bodies cap at 65536 characters; leave room for the prose.
+            const MAX = 12000;
 
             // The report is Markdown already. Falling back to the log's tail
             // covers the job dying before the report step - a build failure, or
             // the deadline.
-            let report = '';
-            let reportKind = 'the deduplicated finding table';
-            try {
-              report = fs.readFileSync('tidy-scan-report.md', 'utf8');
-            } catch {
-              reportKind = 'the end of the clang-tidy log';
+            function readReport(dir) {
+              let report = '';
+              let reportKind = 'the deduplicated finding table';
               try {
-                report = '```\n' +
-                  fs.readFileSync('tidy-scan.log', 'utf8').split('\n').slice(-80).join('\n') +
-                  '\n```';
+                report = fs.readFileSync(path.join(dir, 'tidy-scan-report.md'), 'utf8');
               } catch {
-                reportKind = 'nothing';
-                report = '(no report and no log - the job failed before or during the build,' +
-                  ' or hit its deadline; the scan step alone runs well over an hour)';
+                reportKind = 'the end of the clang-tidy log';
+                try {
+                  report = '```\n' +
+                    fs.readFileSync(path.join(dir, 'tidy-scan.log'), 'utf8').split('\n').slice(-80).join('\n') +
+                    '\n```';
+                } catch {
+                  reportKind = 'nothing';
+                  report = '(no report and no log - the job failed before or during the build,' +
+                    ' or hit its deadline; the scan step alone runs well over an hour)';
+                }
               }
-            }
-            // Issue bodies cap at 65536 characters; leave room for the prose.
-            const MAX = 12000;
-            if (report.length > MAX) {
-              report = `${report.slice(0, MAX)}\n... truncated, full report in the run artifact`;
+              if (report.length > MAX) {
+                report = `${report.slice(0, MAX)}\n... truncated, full report in the run artifact`;
+              }
+              return { report, reportKind };
             }
 
-            const body = [
-              '**The whole-tree clang-tidy scan is not zero.**',
-              '',
-              `- run: ${runUrl}`,
-              `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
-              `- runner: \`${RUNNER_PICKED}\``,
-              '',
-              reportKind === 'nothing'
-                ? 'The job produced neither a report nor a log - read the run itself.'
-                : `Below is ${reportKind}; the full log, report and unit list are` +
-                  ` attached to the run as the \`engine-tidy-scan-${RUNNER_PICKED}\` artifact.`,
-              '',
-              report,
-              '',
-              'This scan is the denominator the per-change gate cannot give, so a',
-              'finding here is in a file no recent change touched: read it as the',
-              'ground having moved (a runner image bumping clang-tidy, or an',
-              '`engine/.clang-tidy` edit) rather than as someone having broken',
-              'something. Fix it, or decline the check in the config with a written',
-              'reason - see `docs/engine/building.md`.',
-            ].join('\n');
+            function buildBody(runner, { report, reportKind }) {
+              return [
+                '**The whole-tree clang-tidy scan is not zero.**',
+                '',
+                `- run: ${runUrl}`,
+                `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
+                `- runner: \`${runner}\``,
+                '',
+                reportKind === 'nothing'
+                  ? 'The job produced neither a report nor a log - read the run itself.'
+                  : `Below is ${reportKind}; the full log, report and unit list are` +
+                    ` attached to the run as the \`${artifactPrefix}${runner}\` artifact.`,
+                '',
+                report,
+                '',
+                'This scan is the denominator the per-change gate cannot give, so a',
+                'finding here is in a file no recent change touched: read it as the',
+                'ground having moved (a runner image bumping clang-tidy, or an',
+                '`engine/.clang-tidy` edit) rather than as someone having broken',
+                'something. Fix it, or decline the check in the config with a written',
+                'reason - see `docs/engine/building.md`.',
+              ].join('\n');
+            }
+
+            // Every leg uploads, so only a directory carrying the marker failed.
+            const failedLegDirs = fs.existsSync(root)
+              ? fs.readdirSync(root, { withFileTypes: true })
+                  .filter((d) => d.isDirectory())
+                  .map((d) => path.join(root, d.name))
+                  .filter((dir) => fs.existsSync(path.join(dir, 'tidy-scan-failed')))
+                  .sort()
+              : [];
+            if (failedLegDirs.length === 0) {
+              core.setFailed(
+                'A scan leg failed but no artifact carries its failure marker; nothing to file. Read the run.',
+              );
+              return;
+            }
 
             try {
               await github.rest.issues.getLabel({ owner, repo, name: label });
@@ -396,23 +457,43 @@ jobs:
               labels: label,
               per_page: 100,
             });
-            const existing = open.find((i) => i.title === title);
 
-            if (existing) {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: existing.number,
-                body,
-              });
-              core.notice(`Commented on #${existing.number}: ${title}`);
-            } else {
-              const created = await github.rest.issues.create({
-                owner,
-                repo,
-                title,
-                body,
-                labels: [label, 'component:engine', 'component:ci'],
-              });
-              core.notice(`Filed #${created.data.number}: ${title}`);
+            async function fileLeg(dir) {
+              const runner = path.basename(dir).slice(artifactPrefix.length);
+              const title = `tidy: whole-tree scan failure on ${runner}`;
+              const body = buildBody(runner, readReport(dir));
+              const existing = open.find((i) => i.title === title);
+
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: existing.number,
+                  body,
+                });
+                core.notice(`Commented on #${existing.number}: ${title}`);
+              } else {
+                const created = await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title,
+                  body,
+                  labels: [label, 'component:engine', 'component:ci'],
+                });
+                core.notice(`Filed #${created.data.number}: ${title}`);
+              }
+            }
+
+            // One leg's failure to file must not hide the others.
+            const unfiled = [];
+            for (const dir of failedLegDirs) {
+              try {
+                await fileLeg(dir);
+              } catch (e) {
+                core.error(`${dir}: ${e.message}`);
+                unfiled.push(dir);
+              }
+            }
+            if (unfiled.length > 0) {
+              core.setFailed(`Could not file or update the issue for: ${unfiled.join(', ')}`);
             }

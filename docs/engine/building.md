@@ -326,8 +326,11 @@ that surfaces on the order of once a release. `VAYU_WERROR` is off there - the
 workflow answers "is the engine memory- and thread-correct", not "does it
 compile warning-free", which is `pr-tests.yml`'s gate.
 
-A red leg **files a GitHub issue by itself**, from the runner, through
-`GITHUB_TOKEN` - no model and no tokens are involved. The issue is titled
+A red leg **files a GitHub issue by itself**, through `GITHUB_TOKEN` - no model
+and no tokens are involved. A separate `report` job does it: the legs that build
+and run the checked-out tree hold `contents: read` only, and `report` is the one
+job with `issues: write`, which downloads each failed leg's artifact and runs
+nothing from the repository (#2767). The issue is titled
 `sanitizer: <sanitizer> failure on <runner>` and labelled `sanitizer-failure`,
 `component:engine` and `type:bug`, and carries the run link plus the first
 sanitizer report block from the log; the full log is attached to the run as an
@@ -348,6 +351,10 @@ not `master`: #968 was filed from `refs/pull/958/merge` for a test that did not
 exist on `master` yet, and had to be verified and closed by hand once the pull
 request merged green. The log and the artifact are still uploaded on a pull
 request, because those are what the reviewer needs and they file nothing.
+
+A leg that is cancelled (a superseded run, or a `timeout-minutes` expiry) is
+not a `failure` and files nothing, as it did when the filing step ran inside
+the leg.
 
 ### What the matrix found, and where it stands
 
@@ -1472,8 +1479,9 @@ by whoever opens the run, and on a Monday morning nobody opens the run.
 GitHub's own notification for a failed schedule reaches only whoever last
 edited the cron line, which is an accident of git history rather than a way to
 reach a maintainer. So the scan does what the sanitizers do - plain GitHub
-API, no model and no tokens - filing one `tidy-scan-failure` issue keyed on
-the runner, and commenting on it rather than filing again while it stays red.
+API, no model and no tokens, from a `report` job that is the only one holding
+`issues: write` (#2767) - filing one `tidy-scan-failure` issue keyed on the
+runner, and commenting on it rather than filing again while it stays red.
 The body is the deduplicated finding table itself. It does **not** file on a
 pull request (#970's reasoning): a reviewer is already watching those checks,
 and the artifact is what they need.
