@@ -183,6 +183,22 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 	};
 }
 
+describe("HeroRow rate fidelity on a stopped run (#2805)", () => {
+	it("hands the plan share to the Rate fidelity card", () => {
+		const d: DashboardDerived = {
+			...derived("constant_rps"),
+			stoppedAt: { planSharePct: 50, plannedSeconds: 60 },
+		};
+		render(
+			<TooltipProvider>
+				<HeroRow d={d} />
+			</TooltipProvider>
+		);
+
+		expect(screen.getByText("stopped at 50% of the planned 60s")).toBeInTheDocument();
+	});
+});
+
 describe("HeroRow latency card", () => {
 	const renderRow = (mode: DashboardDerived["mode"]) =>
 		render(

@@ -37,11 +37,17 @@ function makeReport(rateControl: RunReport["rateControl"]): RunReport {
 }
 
 // `runId` is left off so the uPlot charts stay out of the tree.
-function renderTab(report: RunReport) {
+function renderTab(report: RunReport, rateAchievementPct?: number) {
 	return render(
 		<PerformanceTab
 			report={report}
-			derived={{ mode: "constant_rps", targetRps: 100 } as unknown as DashboardDerived}
+			derived={
+				{
+					mode: "constant_rps",
+					targetRps: 100,
+					rateAchievementPct,
+				} as unknown as DashboardDerived
+			}
 			timeSeries={[]}
 			monitorSamples={[]}
 		/>
@@ -101,5 +107,21 @@ describe("PerformanceTab rate control tiles", () => {
 
 		const pct = screen.getByText(SENT_LINE).previousElementSibling!;
 		expect(pct.className).toContain("text-destructive-text");
+	});
+
+	it("shows the derived figure a stopped run is judged by, not the plan share", () => {
+		// The report's plan share is 50%; the card beside it reads the pace.
+		const stopped = makeReport({
+			targetRps: 100,
+			actualRps: 100,
+			achievement: 50,
+			requestsSent: 1000,
+			requestsExpected: 2000,
+		});
+		renderTab(stopped, 99.9);
+
+		const pct = screen.getByText(SENT_LINE).previousElementSibling!;
+		expect(pct.textContent).toBe("99.9%");
+		expect(pct.className).toContain("text-success-text");
 	});
 });

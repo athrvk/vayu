@@ -152,6 +152,103 @@ describe("reportToDerived", () => {
 		});
 	});
 
+	describe("a stopped run's rate fidelity (#2805)", () => {
+		// Stopped at the halfway mark of a 60 s plan: it sent every request it owed
+		// for the 30 s it was sending, which is 50% of the plan.
+		function stoppedReport(over: {
+			status?: "stopped" | "completed";
+			duration?: string;
+			targetRps?: number;
+			rateControl?: RunReport["rateControl"];
+			sendingDurationSeconds?: number;
+		}): RunReport {
+			const base = baseReport();
+			const hasTarget = !("targetRps" in over) || over.targetRps !== undefined;
+			return baseReport({
+				metadata: {
+					runId: "r5",
+					runType: "load",
+					startTime: 0,
+					endTime: 1000,
+					status: over.status ?? "stopped",
+					configuration: {
+						mode: "constant_rps",
+						duration: "duration" in over ? over.duration : "60s",
+						...(hasTarget ? { targetRps: over.targetRps ?? 50 } : {}),
+					},
+				},
+				summary: {
+					...base.summary,
+					sendingDurationSeconds:
+						"sendingDurationSeconds" in over ? over.sendingDurationSeconds : 30.075,
+				},
+				rateControl:
+					"rateControl" in over
+						? over.rateControl
+						: {
+								targetRps: 50,
+								actualRps: 49.9,
+								achievement: 50.067,
+								requestsSent: 1502,
+								requestsExpected: 3000,
+							},
+			});
+		}
+
+		it("judges the run by pace and states the plan share beside it", () => {
+			const d = reportToDerived(stoppedReport({}));
+
+			expect(d.rateAchievementPct).toBeCloseTo(99.88, 1);
+			expect(d.stoppedAt).toEqual({ planSharePct: 50.067, plannedSeconds: 60 });
+		});
+
+		it("keeps a completed run on the plan share, with no stopped line", () => {
+			const d = reportToDerived(stoppedReport({ status: "completed" }));
+
+			expect(d.rateAchievementPct).toBe(50.067);
+			expect(d.stoppedAt).toBeUndefined();
+		});
+
+		it("keeps the stored achievement when the run has no target to pace against", () => {
+			const d = reportToDerived(
+				stoppedReport({
+					targetRps: undefined,
+					rateControl: {
+						targetRps: 0,
+						actualRps: 49.9,
+						achievement: 50.067,
+						requestsSent: 1502,
+						requestsExpected: 3000,
+					},
+				})
+			);
+
+			expect(d.rateAchievementPct).toBe(50.067);
+			expect(d.stoppedAt).toBeUndefined();
+		});
+
+		it("keeps the stored achievement for a report stored without the counts or the window", () => {
+			const noCounts = reportToDerived(
+				stoppedReport({
+					rateControl: { targetRps: 50, actualRps: 49.9, achievement: 50.067 },
+				})
+			);
+			const noWindow = reportToDerived(stoppedReport({ sendingDurationSeconds: undefined }));
+
+			for (const d of [noCounts, noWindow]) {
+				expect(d.rateAchievementPct).toBe(50.067);
+				expect(d.stoppedAt).toBeUndefined();
+			}
+		});
+
+		it("judges by pace but draws no plan line when the duration is not a plan", () => {
+			const d = reportToDerived(stoppedReport({ duration: undefined }));
+
+			expect(d.rateAchievementPct).toBeCloseTo(99.88, 1);
+			expect(d.stoppedAt).toBeUndefined();
+		});
+	});
+
 	it("shows the dropped card only when a rate-limited run actually dropped requests", () => {
 		expect(reportToDerived(baseReport()).showDropped).toBe(false); // 0 drops
 		const withDrops = baseReport({
