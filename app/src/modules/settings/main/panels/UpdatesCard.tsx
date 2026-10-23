@@ -33,7 +33,16 @@
  */
 
 import { useState } from "react";
-import { ArrowUpCircle, Check, Copy, ExternalLink, Loader2, Power, RefreshCw } from "lucide-react";
+import {
+	ArrowUpCircle,
+	Check,
+	Copy,
+	ExternalLink,
+	FileText,
+	Loader2,
+	Power,
+	RefreshCw,
+} from "lucide-react";
 import {
 	Button,
 	Card,
@@ -48,6 +57,7 @@ import { useCopy } from "@/hooks/useCopy";
 import type { UpdateCheckResult } from "@/types/electron";
 import { appSetting } from "../app-settings";
 import { FieldError } from "@/components/shared";
+import { useToastStore } from "@/stores";
 import { useUpdateVerificationStore } from "@/stores/update-verification-store";
 
 // Headings come from the catalogue so search cannot offer a name this panel
@@ -61,8 +71,15 @@ export function UpdatesCard() {
 	const [result, setResult] = useState<UpdateCheckResult | null>(null);
 	const { copy, copied } = useCopy({ feedback: "icon" });
 	const verificationFailure = useUpdateVerificationStore((s) => s.failure);
+	const showToast = useToastStore((s) => s.showToast);
 
 	const api = window.electronAPI;
+
+	/** `electronAPI.openThirdPartyNotices` resolves with a non-empty string only on failure. */
+	const openNotices = async () => {
+		const failure = await api?.openThirdPartyNotices();
+		if (failure) showToast(`Couldn't open the third-party notices - ${failure}`, "error");
+	};
 
 	const check = async () => {
 		if (!api) return;
@@ -206,14 +223,27 @@ export function UpdatesCard() {
 						You&apos;re on Vayu{" "}
 						<span className="font-mono text-foreground">{APP_VERSION}</span>.
 					</p>
-					<Button variant="outline" size="sm" onClick={check} disabled={!api || checking}>
-						{checking ? (
-							<Loader2 className="size-icon animate-spin" />
-						) : (
-							<RefreshCw className="size-icon" />
+					<div className="flex flex-wrap items-center justify-end gap-2">
+						{api && (
+							<Button variant="outline" size="sm" onClick={() => void openNotices()}>
+								<FileText className="size-icon" />
+								Third-party notices
+							</Button>
 						)}
-						Check for updates
-					</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={check}
+							disabled={!api || checking}
+						>
+							{checking ? (
+								<Loader2 className="size-icon animate-spin" />
+							) : (
+								<RefreshCw className="size-icon" />
+							)}
+							Check for updates
+						</Button>
+					</div>
 				</div>
 
 				{/*

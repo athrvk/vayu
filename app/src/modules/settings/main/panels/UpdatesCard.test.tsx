@@ -17,27 +17,32 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useToastStore } from "@/stores";
 import { useUpdateVerificationStore } from "@/stores/update-verification-store";
 import { UpdatesCard } from "./UpdatesCard";
 
 const checkForUpdates = vi.fn();
 const openReleasePage = vi.fn();
 const quitForUpdate = vi.fn();
+const openThirdPartyNotices = vi.fn();
 
 beforeEach(() => {
 	checkForUpdates.mockReset();
 	openReleasePage.mockReset();
 	quitForUpdate.mockReset();
+	openThirdPartyNotices.mockReset().mockResolvedValue("");
 	useUpdateVerificationStore.setState({ failure: null });
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		checkForUpdates,
 		openReleasePage,
 		quitForUpdate,
+		openThirdPartyNotices,
 	};
 });
 
 afterEach(() => {
 	delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+	useToastStore.setState({ toasts: [] });
 });
 
 const clickCheck = async () => {
@@ -182,6 +187,39 @@ describe("UpdatesCard", () => {
 		render(<UpdatesCard />);
 		expect(screen.getByText(/available in the desktop app/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /check for updates/i })).toBeDisabled();
+	});
+
+	describe("third-party notices (#2693)", () => {
+		const clickNotices = async () => {
+			await act(async () => {
+				fireEvent.click(screen.getByRole("button", { name: "Third-party notices" }));
+			});
+		};
+
+		it("asks the main process to open the file, and stays silent when it opens", async () => {
+			render(<UpdatesCard />);
+			await clickNotices();
+			expect(openThirdPartyNotices).toHaveBeenCalledExactlyOnceWith();
+			expect(useToastStore.getState().toasts).toEqual([]);
+		});
+
+		it("toasts the reason when the main process could not open it", async () => {
+			openThirdPartyNotices.mockResolvedValue("The notices file is missing.");
+			render(<UpdatesCard />);
+			await clickNotices();
+			await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+			const [toast] = useToastStore.getState().toasts;
+			expect(toast.message).toBe(
+				"Couldn't open the third-party notices - The notices file is missing."
+			);
+			expect(toast.variant).toBe("error");
+		});
+
+		it("is absent outside the desktop app, where there is no file to open", () => {
+			delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+			render(<UpdatesCard />);
+			expect(screen.queryByRole("button", { name: /third-party notices/i })).toBeNull();
+		});
 	});
 
 	describe("a downloaded installer that did not verify (issue #2372)", () => {
