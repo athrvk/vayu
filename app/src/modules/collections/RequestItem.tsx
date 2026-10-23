@@ -11,6 +11,7 @@ import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/Col
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import { requestEntity } from "./tree-rows";
+import { treeGuideStyle } from "./tree-guide-style";
 import { requestRowMenu, requestRowReference } from "./tree-row-menu";
 import type { RequestSummary } from "@/types";
 import { Input } from "@/components/ui";
@@ -43,9 +44,18 @@ export interface RequestItemProps {
 	 */
 	posInSet: number;
 	setSize: number;
+	/** The row's `activeGuideLevel`: which indent guide is drawn in the accent. */
+	activeGuideLevel?: number | null;
 }
 
-function RequestItemRow({ request, collectionId, depth = 1, posInSet, setSize }: RequestItemProps) {
+function RequestItemRow({
+	request,
+	collectionId,
+	depth = 1,
+	posInSet,
+	setSize,
+	activeGuideLevel = null,
+}: RequestItemProps) {
 	const { allCollections, selectedRequestId, deletingRequestId, renamingRequestId } =
 		useCollectionTreeState();
 	const handlers = useCollectionTreeHandlers();
@@ -158,7 +168,7 @@ function RequestItemRow({ request, collectionId, depth = 1, posInSet, setSize }:
 			data-drop-blocked={dnd.isBlocked || undefined}
 			// Indent inside the row (see CollectionItem) so the fill still
 			// reaches both panel edges.
-			style={{ paddingLeft: rowInsetPx(depth) }}
+			style={{ paddingLeft: rowInsetPx(depth), ...treeGuideStyle(depth, activeGuideLevel) }}
 			className={cn(
 				// focus-row: this row is the perceived target, not the narrower
 				// label button inside it - it paints the keyboard focus ring.

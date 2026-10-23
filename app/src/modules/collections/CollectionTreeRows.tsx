@@ -19,6 +19,7 @@ import {
 import CollectionItem from "./CollectionItem";
 import RequestItem from "./RequestItem";
 import NewFolderForm from "./NewFolderForm";
+import { treeGuideStyle } from "./tree-guide-style";
 import { useCollectionTreeState } from "./context/CollectionTreeContext";
 import {
 	folderRowKey,
@@ -36,10 +37,19 @@ import { useTreeWindow } from "./useTreeWindow";
 import { cn } from "@/lib/utils";
 import { rowInsetPx } from "@/constants/layout";
 
-/** `rowSpacingAbove`'s units as classes, written out whole for Tailwind's scan. */
-const SPACING_ABOVE_CLASS = { 0: "", 0.5: "mt-0.5", 1: "mt-1" } as const;
-/** `rowHeightUnits` as classes, for the same reason. */
-const HEIGHT_CLASS = { 8: "h-8", 10: "h-10" } as const;
+/**
+ * A row wrapper's classes by the gap above it (`rowSpacingAbove`) and the row's
+ * height (`rowHeightUnits`), written out whole for Tailwind's scan. The gap is
+ * top padding inside the wrapper, not a margin outside it, so the wrapper can
+ * paint the indent guides across it and consecutive rows' guides join (#2773);
+ * its height is the row's plus the gap, and the row fills what is below the
+ * padding.
+ */
+const WRAPPER_CLASS = {
+	0: { 8: "h-8", 10: "h-10" },
+	0.5: { 8: "h-8.5 pt-0.5", 10: "h-10.5 pt-0.5" },
+	1: { 8: "h-9 pt-1", 10: "h-11 pt-1" },
+} as const;
 
 /** The attribute naming the row a wrapper holds; the wrapper spells it out literally. */
 const ROW_KEY = "data-tree-row-key";
@@ -79,6 +89,7 @@ function RowContent({ row }: { row: TreeRow }) {
 					posInSet={row.posInSet}
 					setSize={row.setSize}
 					emptyPlaceholderId={row.emptyPlaceholderId}
+					activeGuideLevel={row.activeGuideLevel}
 				/>
 			);
 		case "request":
@@ -89,10 +100,17 @@ function RowContent({ row }: { row: TreeRow }) {
 					depth={row.depth}
 					posInSet={row.posInSet}
 					setSize={row.setSize}
+					activeGuideLevel={row.activeGuideLevel}
 				/>
 			);
 		case "new-folder-form":
-			return <NewFolderForm parentId={row.parentId} indentPx={rowInsetPx(row.depth)} />;
+			return (
+				<NewFolderForm
+					parentId={row.parentId}
+					depth={row.depth}
+					activeGuideLevel={row.activeGuideLevel}
+				/>
+			);
 		case "empty-placeholder":
 			// No role: it is not a treeitem, and the folder row above names it
 			// through `aria-describedby` instead.
@@ -100,7 +118,10 @@ function RowContent({ row }: { row: TreeRow }) {
 				<div
 					id={row.id}
 					className="flex h-full items-center pr-3 text-xs text-muted-foreground"
-					style={{ paddingLeft: rowInsetPx(row.depth) }}
+					style={{
+						paddingLeft: rowInsetPx(row.depth),
+						...treeGuideStyle(row.depth, row.activeGuideLevel),
+					}}
 				>
 					Empty collection
 				</div>
@@ -303,15 +324,16 @@ function CollectionTreeRowList({ rows, list = null, windowRef }: CollectionTreeR
 		// row in it - focus, rename field and pointer capture included.
 		return rows.slice(segment.start, segment.end).map((row, offset) => {
 			const index = segment.start + offset;
+			const gap = rowSpacingAbove(rows, index);
 			return (
 				<div
 					key={row.key}
 					data-tree-row-key={row.key}
 					className={cn(
-						SPACING_ABOVE_CLASS[rowSpacingAbove(rows, index)],
-						HEIGHT_CLASS[rowHeightUnits(row)],
+						WRAPPER_CLASS[gap][rowHeightUnits(row)],
 						dimmed.has(row.key) && "opacity-50"
 					)}
+					style={treeGuideStyle(row.depth, row.activeGuideLevel, gap)}
 				>
 					<RowContent row={row} />
 				</div>

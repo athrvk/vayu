@@ -58,8 +58,12 @@ export const RETIRED_CONTEXT_BAR_SECTIONS: readonly string[] = ["environment"];
 /**
  * Horizontal step per tree depth level (px). Applied as padding *inside* a row
  * so the row still spans the full panel width - see CollectionItem.
+ *
+ * 16, not the 12 it was, which put a child's edge half-way across its parent's
+ * chevron (#2773). Every tree reading `rowInsetPx` takes the step, so the app
+ * keeps one indent; only the collections tree also draws guides at it.
  */
-export const INDENT_STEP = 12;
+export const INDENT_STEP = 16;
 
 /** Left edge of a tree row at `depth` (px), the root row's padding included. */
 export function rowInsetPx(depth: number): number {
