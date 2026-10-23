@@ -42,7 +42,8 @@
 		"enableNodeCliInspectArguments": false,
 		"onlyLoadAppFromAsar": true,
 		"enableEmbeddedAsarIntegrityValidation": true,
-		"enableCookieEncryption": false
+		"enableCookieEncryption": false,
+		"grantFileProtocolExtraPrivileges": false
 	},
 	"artifactName": "${productName}-${arch}.${ext}",
 	"nsis": {

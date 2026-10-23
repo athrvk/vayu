@@ -18,16 +18,19 @@ import {
 	nativeTheme,
 	systemPreferences,
 	Menu,
+	net,
 	Notification,
 	powerMonitor,
 	powerSaveBlocker,
+	protocol,
 	session,
 	shell,
+	WebContentsView,
 } from "electron";
 import { existsSync } from "fs";
 import os from "os";
 import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 import {
 	EngineSidecar,
 	EngineNotReadyError,
@@ -69,6 +72,16 @@ import {
 	registerRunningServicesIpc,
 } from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
+import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
+import {
+	LEGACY_STORAGE_ARG,
+	STUB_VIEW_OPTIONS,
+	createLegacyStorageMigration,
+	readFileOriginStorage,
+	registerLegacyStorageIpc,
+	type MigrationRecord,
+} from "./legacy-storage-migration.js";
+import { createJsonStore } from "./json-store.js";
 import { installEngineOriginBridge } from "./engine-origin.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -143,6 +156,8 @@ import {
 	SCRIPTING_DOCS_URL,
 	ISSUES_URL,
 	DEV_SERVER_URL,
+	APP_SCHEME,
+	APP_ENTRY_URL,
 	WINDOW_DEFAULT_WIDTH,
 	WINDOW_DEFAULT_HEIGHT,
 	WINDOW_MIN_WIDTH,
@@ -204,6 +219,11 @@ app.setName(APP_NAME);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// The packaged renderer's origin (#2380). Electron accepts a privileged scheme
+// only before `ready`; the handler that answers it is installed once ready,
+// ahead of the window. See app-protocol.ts.
+protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: APP_SCHEME_PRIVILEGES }]);
+
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
 /**
@@ -257,6 +277,26 @@ const fileGrants = createFileGrants({
  */
 const fileRoots = createFileRoots(fileTrust);
 let mainWindow: BrowserWindow | null = null;
+
+// Looked for at module scope, before `ready`: Chromium creates the directory
+// as it opens the profile, so after that its presence says nothing about an
+// earlier launch. The default session's storage lives under userData.
+const hadLocalStorage = existsSync(path.join(app.getPath("userData"), "Local Storage"));
+/**
+ * What the `file:` builds persisted, handed to the app scheme's origin on the
+ * first packaged launch that finds it (#2380). Read before the window exists,
+ * written by its preload. Retired with legacy-storage-migration.ts.
+ */
+const legacyStorage = createLegacyStorageMigration({
+	record: createJsonStore<MigrationRecord>("legacy-storage-migration"),
+	hasLegacyStore: () => hadLocalStorage,
+	read: () =>
+		readFileOriginStorage(
+			() => new WebContentsView(STUB_VIEW_OPTIONS),
+			path.join(app.getPath("userData"), "legacy-storage-stub.html")
+		),
+	log: (level, msg, fields) => appLogger()[level]("main", msg, fields),
+});
 
 /** The window as it is right now, or null if there isn't a usable one. */
 function liveWindow(): BrowserWindow | null {
@@ -585,8 +625,12 @@ function createWindow() {
 			contextIsolation: true,
 			preload: path.join(__dirname, "preload.js"),
 			// The engine's port, read once by the preload (#2118). Fixed before
-			// the first window exists; see `enginePortFixed`.
-			additionalArguments: [`--vayu-engine-port=${enginePort()}`],
+			// the first window exists; see `enginePortFixed`. The legacy-storage
+			// flag asks the preload to take what `legacyStorage` holds (#2380).
+			additionalArguments: [
+				`--vayu-engine-port=${enginePort()}`,
+				...(legacyStorage.hasPending() ? [LEGACY_STORAGE_ARG] : []),
+			],
 			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
 			// header values, {{tokens}} and JSON keys all draw squiggles - and on
 			// Windows and Linux the checker fetches Hunspell dictionaries from a
@@ -622,20 +666,15 @@ function createWindow() {
 
 	// The preload re-runs on whatever this window navigates to, so a navigation
 	// off the app hands `window.electronAPI` to that origin. Installed before the
-	// load, so no navigation can land ahead of the guard. See
-	// window-navigation.ts.
-	const rendererEntry = path.join(__dirname, "../dist/index.html");
-	installWindowNavigationGuard(
-		mainWindow.webContents,
-		isDev ? DEV_SERVER_URL : pathToFileURL(rendererEntry).toString()
-	);
-
-	if (isDev) {
-		mainWindow.loadURL(DEV_SERVER_URL);
-		// mainWindow.webContents.openDevTools();
-	} else {
-		mainWindow.loadFile(rendererEntry);
-	}
+	// load, so no navigation can land ahead of the guard, and handed the URL the
+	// window loads, so the two cannot drift. See window-navigation.ts.
+	//
+	// Packaged, that is the app scheme rather than `file:` (#2380). localStorage
+	// is per origin; what a `file:` build persisted reaches this one through
+	// `legacyStorage`, read before this window and written by its preload.
+	const rendererUrl = isDev ? DEV_SERVER_URL : APP_ENTRY_URL;
+	installWindowNavigationGuard(mainWindow.webContents, rendererUrl);
+	mainWindow.loadURL(rendererUrl);
 
 	mainWindow.on("page-title-updated", (event) => {
 		event.preventDefault();
@@ -1545,7 +1584,8 @@ function setupIpcHandlers() {
 	/**
 	 * What the renderer sees under the pointer, announced as it right-clicks.
 	 *
-	 * Synchronous on purpose, and it is the only `sendSync` in the app. The
+	 * Synchronous on purpose, and the only `sendSync` a page can reach (the
+	 * other is the preload's own, once, for the legacy-storage hand-off). The
 	 * renderer's `contextmenu` listener runs before Chromium asks the browser
 	 * process for a menu, so blocking there until this returns is what makes the
 	 * announcement and the `context-menu` event a matched pair rather than two
@@ -1562,6 +1602,10 @@ function setupIpcHandlers() {
 		event.returnValue = true;
 		contextTargets.announce(target);
 	});
+
+	// The preload's half of the legacy-storage hand-off (#2380), registered
+	// ahead of the window for the same `sendSync` reason as the channel above.
+	registerLegacyStorageIpc(ipcMain, legacyStorage, isAppFrame);
 
 	// Listen for maximize/unmaximize to notify renderer
 	app.on("browser-window-created", (_event, window) => {
@@ -1776,6 +1820,19 @@ app.whenReady().then(async () => {
 	installEngineOriginBridge(session.defaultSession);
 	denyDevicePermissions(session.defaultSession);
 
+	// Answers the app scheme the window loads from, so it precedes the window.
+	// Installed in development too, where nothing loads it.
+	protocol.handle(
+		APP_SCHEME,
+		createAppProtocolHandler(path.join(__dirname, "../dist"), (fileUrl) => net.fetch(fileUrl))
+	);
+
+	// What the `file:` builds persisted, read now so it is held by the time the
+	// window is created (#2380). Packaged only: the dev server's origin never
+	// shared the `file://` store. Never rejects; a failed read leaves the window
+	// to start with what its own origin has.
+	const legacyStorageRead = isDev ? Promise.resolve() : legacyStorage.prepare();
+
 	// Populate the native About panel (used by Help → About Vayu on
 	// Windows/Linux, and the macOS app menu's About item).
 	const aboutIconPath = appIconPath();
@@ -1832,6 +1889,7 @@ app.whenReady().then(async () => {
 	// Probing is milliseconds and does not wait for the engine to be ready; a
 	// start that fails before choosing settles `engineStartup` instead.
 	await Promise.race([enginePortFixed(), engineStartup]);
+	await legacyStorageRead;
 	createWindow();
 
 	// Before the engine wait, like the window: a macOS Dock click during a slow

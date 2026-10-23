@@ -17,11 +17,10 @@
  * it can talk to the engine at all. On the session the main window uses, every
  * request to `engineOrigin()` loses its `Origin` and `Referer` (both name the
  * renderer's location) and every response from it gains the headers the
- * renderer's own CORS check asks for. In development the renderer is the Vite
- * server and needs all of it. Packaged it is a `file:` load, which Electron 44
- * exempts from CORS altogether (no `Origin`, no preflight, no response check -
- * measured, not documented); the bridge is what keeps that build working the
- * day Chromium stops exempting it, so it is installed for both.
+ * renderer's own CORS check asks for. Both builds need all of it: in
+ * development the renderer is the Vite server, and packaged it is
+ * `vayu-app://app` (#2380), a real origin that sends an `Origin` and a
+ * preflight like any other.
  *
  * **The URL filter is the whole boundary.** Chromium's filter is every
  * candidate origin, because it is registered once and the port is chosen at

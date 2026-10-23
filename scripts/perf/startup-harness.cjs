@@ -36,6 +36,12 @@
  * against a 248ms blank baseline in a sandboxed container), which is why the
  * blank baseline is reported beside it rather than the delta alone.
  *
+ * The renderer loads the way the packaged app loads it, from the privileged
+ * `vayu-app://app/` scheme (#2380) rather than `file:`, so the figure is the
+ * document the app ships. The scheme's handler here is a minimal one over the
+ * same `dist`; the app's own, with its refusals, is
+ * `app/electron/app-protocol.ts`.
+ *
  * CommonJS on purpose: Electron's main entry is loaded as CJS unless the
  * package is typed as a module, and this file is run directly by path.
  *
@@ -43,7 +49,9 @@
  *   electron scripts/perf/startup-harness.cjs --mode blank|renderer --entry <index.html>
  */
 
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, net, protocol } = require("electron");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 /** The line measure-app.mjs scans for, followed by a JSON payload. */
 const HARNESS_MARKER = "[perf] harness";
@@ -51,6 +59,24 @@ const HARNESS_MARKER = "[perf] harness";
 // A blank document rather than a file, so the baseline measures window
 // creation and first paint with nothing of ours in it.
 const BLANK_PAGE = "data:text/html,<!doctype html><title>blank</title>";
+
+// Must match APP_SCHEME, APP_HOST and APP_SCHEME_PRIVILEGES in app/electron/
+// (constants.ts, app-protocol.ts). Registered before `ready`, as Electron
+// requires.
+const APP_SCHEME = "vayu-app";
+const APP_HOST = "app";
+protocol.registerSchemesAsPrivileged([
+	{ scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
+/** Serve `distDir` on the app scheme; a path outside it is a 404. */
+function serveDist(distDir) {
+	protocol.handle(APP_SCHEME, (request) => {
+		const file = path.join(distDir, decodeURIComponent(new URL(request.url).pathname));
+		if (!file.startsWith(distDir + path.sep)) return new Response(null, { status: 404 });
+		return net.fetch(pathToFileURL(file).toString());
+	});
+}
 
 function parseArgs(argv) {
 	const args = { mode: "blank", entry: null };
@@ -108,7 +134,9 @@ function main() {
 		window.loadURL(BLANK_PAGE);
 		return;
 	}
-	window.loadFile(entry);
+	const entryPath = path.resolve(entry);
+	serveDist(path.dirname(entryPath));
+	window.loadURL(`${APP_SCHEME}://${APP_HOST}/${path.basename(entryPath)}`);
 }
 
 app.whenReady().then(main);

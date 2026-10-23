@@ -212,7 +212,9 @@ describe("startup ordering", () => {
 
 		expect(fixedAt).toBeGreaterThan(-1);
 		expect(fixedAt).toBeLessThan(windowAt);
-		expect(main).toContain("additionalArguments: [`--vayu-engine-port=${enginePort()}`]");
+		expect(main).toMatch(
+			/additionalArguments: \[\s*`--vayu-engine-port=\$\{enginePort\(\)\}`,/
+		);
 		// The sidecar's choice is what fixes it.
 		expect(main).toMatch(
 			/new EngineSidecar\(\s*ENGINE_PORT_CANDIDATES,\s*defaultSidecarSystem,\s*publishEnginePort,\s*receiveGrantSecret\s*\)/

@@ -525,9 +525,8 @@ export default function TitleBar() {
 				{isMac && <div className="shrink-0 w-[var(--traffic-light-inset)]" />}
 
 				{/* Logo - Windows only (it is the system-menu control there). The icon
-				    is imported as a module, not referenced as "/icon.png": `base: "./"`
-				    means a root-absolute path does not resolve under the packaged
-				    file:// build. */}
+				    is imported as a module, not referenced as "/icon.png": the import
+				    is what puts it into `dist/`, and no root-level icon is shipped. */}
 				<AppIcon />
 
 				{/* Leading edge, after the icon and the traffic-light inset - where

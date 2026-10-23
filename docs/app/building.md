@@ -413,11 +413,14 @@ absent.
 **The renderer-graph figure stays beside it, unchanged.** It comes from
 `scripts/perf/startup-harness.cjs`, a small Electron main script that loads
 `app/dist/index.html` into a window of its own - not the Vayu app - and times
-it against a blank window. The delta isolates the cost of the renderer's
-module graph and its render-blocking fetches from everything the main
-process does, which the packaged figure cannot separate back out; it is the
-number #1146/#1147's bundle work moves and the one this program's history is
-recorded in. That file's header states the boundary in full; read it before
+it against a blank window. It serves the document from the same privileged
+`vayu-app://app/` scheme the packaged app does (#2380), with a minimal handler
+of its own, so the figure is the document as the app loads it rather than a
+`file:` load the app no longer ships. The delta isolates the cost of the
+renderer's module graph and its render-blocking fetches from everything the
+main process does, which the packaged figure cannot separate back out; it is
+the number #1146/#1147's bundle work moves and the one this program's history
+is recorded in. That file's header states the boundary in full; read it before
 quoting the number.
 
 ## Vite Configuration
