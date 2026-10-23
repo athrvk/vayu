@@ -2232,7 +2232,9 @@ header band, body below it.
   the row's _background_ in too, so a nested row's hover and selection fill stops
   short of the panel edge while a top-level row's reaches it. Depth is shown by
   where the content sits, not where the row starts:
-  `paddingLeft: rowInsetPx(depth)` (`constants/layout`, `8 + depth * INDENT_STEP`).
+  `paddingLeft: rowInsetPx(depth)` (`constants/layout`, `8 + depth * INDENT_STEP`,
+  a 16px step; the collections tree, Move to, and the GraphQL schema explorer
+  all read it, so the app has one indent).
 - **Non-row content inside a level takes a child row's left edge.** A
   placeholder, an inline form, a loading skeleton and an inline error all stand
   in for the rows that are not there, so they start where those rows would:
