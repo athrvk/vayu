@@ -14,13 +14,6 @@
  */
 export const TIME_SERIES_DIMS = { VW: 1080, VH: 240, PL: 56, PR: 12, PT: 16, PB: 28 } as const;
 
-/**
- * Shared SVG geometry for the HDR percentile plot and its live skeleton - they
- * must stay dimensionally identical so the card doesn't shift height when the
- * final report arrives.
- */
-export const HDR_DIMS = { VW: 600, VH: 200, PL: 48, PR: 8, PT: 22, PB: 22 } as const;
-
 export interface NiceYMaxOpts {
 	/** Minimum allowed yMax before headroom is applied. Defaults to 1. */
 	floor?: number;

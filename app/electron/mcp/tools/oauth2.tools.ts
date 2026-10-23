@@ -37,6 +37,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 	{
 		name: "fetch_oauth2_token",
 		category: "execute",
+		retry: "safe",
 		invalidates: ["oauth"],
 		description:
 			"Acquire an OAuth 2.0 token for a client_credentials or password config and cache it engine-side, so the next run_request / start_load_run carrying the same config authenticates without a round trip - and so a token problem surfaces here, named, instead of as a wall of 401s inside a run. Pass `force: true` to refresh a token that is cached but stale. The interactive authorization_code grant is refused: it needs a browser and a loopback redirect the app owns, so authorize it there once and the cache this tool reads is the same one. GUARDED: the token endpoint's host must be on Vayu's MCP allowlist. The access token itself is never returned - what comes back is the cache entry's shape (key, type, scope, expiry, whether a refresh token came with it), because the engine applies the token to requests and nothing an agent does with the bearer needs its bytes.",

@@ -157,6 +157,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 	{
 		name: "run_request",
 		category: "execute",
+		retry: "never-blind",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then only links the run in History and nothing stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain, using the same precedence as the app; the environment's cookie jar is the one the send uses, and its History row names it. " +

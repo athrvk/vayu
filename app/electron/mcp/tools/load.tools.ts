@@ -100,6 +100,7 @@ export const LOAD_TOOLS: McpTool[] = [
 	{
 		name: "start_load_run",
 		category: "load",
+		retry: "never-blind",
 		invalidates: ["run"],
 		description: (config) =>
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS, `concurrency` (virtual users) and duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +

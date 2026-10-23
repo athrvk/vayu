@@ -35,6 +35,7 @@ import {
 	resolveDescription,
 	type McpTool,
 	type McpToolInfo,
+	type RetryAdvice,
 	type ToolContext,
 	type ToolResult,
 } from "./tools/contract.js";
@@ -221,7 +222,8 @@ export function toolCatalog(): McpToolInfo[] {
  */
 function failureAnswer(result: ToolResult, toolName: string, ctx: ToolContext): ToolResult {
 	const { text, error } = describeFailure(
-		FAILURES.get(result) ?? unclassified(result, toolName, ctx)
+		FAILURES.get(result) ?? unclassified(result, toolName, ctx),
+		interruptedAdviceFor(findTool(toolName))
 	);
 	const [, ...caveats] = result.content;
 	return resolveRemedyTokens(
@@ -232,6 +234,17 @@ function failureAnswer(result: ToolResult, toolName: string, ctx: ToolContext): 
 		},
 		ctx.host
 	);
+}
+
+/**
+ * What a timed-out or cancelled call to @p tool is told (#2777): the advice it
+ * declares, else `"safe"` for a tool that annotates itself idempotent, since
+ * repeating it is by definition harmless. A tool that is neither gets the
+ * generic run-history wording, which is why every such tool declares one.
+ */
+function interruptedAdviceFor(tool: McpTool | undefined): RetryAdvice | undefined {
+	if (!tool) return undefined;
+	return tool.retry ?? (tool.annotations.idempotentHint === true ? "safe" : undefined);
 }
 
 /**

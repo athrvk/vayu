@@ -18,7 +18,7 @@
  */
 
 import type { EngineRequestError } from "../engine-client.js";
-import type { ToolResult } from "./contract.js";
+import type { RetryAdvice, ToolResult } from "./contract.js";
 
 /**
  * What kind of failure an error result is, which decides what an agent does
@@ -36,10 +36,55 @@ const RETRYABLE: Readonly<Record<FailureClass, boolean>> = {
 	unreachable: true,
 };
 
+/**
+ * A call that stopped before the engine answered and may have taken effect
+ * (#2777). The sentences around the advice, which depends on the tool and so is
+ * written by {@link describeFailure}, not by the site that saw the error.
+ */
+export interface Interrupted {
+	lead: string;
+	tail?: string;
+}
+
 /** What an error result was built from: its class and the sentence the tool wrote. */
 export interface Failure {
 	failureClass: FailureClass;
+	/** Complete on its own: for a reader with no tool in hand, the generic advice. */
 	message: string;
+	interrupted?: Interrupted;
+}
+
+/** What to do about a call that may have completed, for a tool that declared nothing. */
+const GENERIC_INTERRUPTED_ADVICE =
+	"It may still have completed the call - check run history (list_runs) before retrying.";
+
+function interruptedAdvice(retry: RetryAdvice | undefined): string {
+	if (retry === "safe") return "Repeating the call is safe.";
+	if (typeof retry === "object") {
+		return (
+			`The call may have completed: call ${retry.check}, find the ${retry.noun}, ` +
+			`and do not retry blindly - a retry creates a second ${retry.noun}.`
+		);
+	}
+	return GENERIC_INTERRUPTED_ADVICE;
+}
+
+function interruptedText({ lead, tail }: Interrupted, retry: RetryAdvice | undefined): string {
+	return [lead, interruptedAdvice(retry), tail].filter(Boolean).join(" ");
+}
+
+/**
+ * A transient failure for a call that stopped before the engine answered. Its
+ * `message` carries the generic advice; {@link describeFailure} swaps in the
+ * tool's own.
+ */
+export function interruptedFailure(lead: string, tail?: string): Failure {
+	const interrupted = { lead, tail };
+	return {
+		failureClass: "transient",
+		message: interruptedText(interrupted, undefined),
+		interrupted,
+	};
 }
 
 /**
@@ -69,14 +114,18 @@ export interface FailureDescription {
 /**
  * What the client reads for @p failure. The one place a failure becomes words,
  * so wording one per class or per tool is a change to this function alone.
+ * @p retry is the tool's declared advice for an interrupted call.
  */
-export function describeFailure(failure: Failure): FailureDescription {
+export function describeFailure(failure: Failure, retry?: RetryAdvice): FailureDescription {
+	const text = failure.interrupted
+		? interruptedText(failure.interrupted, retry)
+		: failure.message;
 	return {
-		text: failure.message,
+		text,
 		error: {
 			class: failure.failureClass,
 			retryable: RETRYABLE[failure.failureClass],
-			advice: failure.message,
+			advice: text,
 		},
 	};
 }

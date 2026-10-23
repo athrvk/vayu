@@ -9242,6 +9242,133 @@ describe("engine transport failures are told apart", () => {
 });
 
 /*
+ * A call that timed out or was cancelled may have taken effect, and what to do
+ * about that is a fact about the tool (#2777): a create must be looked for in
+ * its list before it is repeated, a read can simply be repeated, a send goes
+ * through run history.
+ */
+describe("an interrupted call is told what to check, per tool", () => {
+	const TIMEOUT = () => new EngineTimeoutError("POST", "/anything", 35_000);
+	const ABORT = () => new DOMException("The operation was aborted.", "AbortError");
+	const ALLOWED = { allowWrites: true, allowlist: ["api.example.com"] };
+
+	const createRequestArgs = { collectionId: "c1", name: "Ping", url: "https://api.example.com/" };
+
+	async function interrupted(
+		name: string,
+		args: Record<string, unknown>,
+		method: keyof EngineClient,
+		err: unknown
+	) {
+		const client = fakeClient({ [method]: vi.fn().mockRejectedValue(err) });
+		return dispatchTool(name, args, ctxWith(client, ALLOWED));
+	}
+
+	describe.each([
+		["a timeout", TIMEOUT],
+		["a cancelled call", ABORT],
+	])("%s", (_label, makeErr) => {
+		test("on create_request names list_requests and warns against a blind retry", async () => {
+			const res = await interrupted(
+				"create_request",
+				createRequestArgs,
+				"createRequest",
+				makeErr()
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/list_requests/);
+			expect(firstText(res)).toMatch(/do not retry blindly/);
+			expect(firstText(res)).not.toMatch(/list_runs/);
+			const advice = (res.structuredContent as { error: { advice: string } }).error.advice;
+			expect(advice).toBe(firstText(res));
+		});
+
+		test("on import_document names list_collections", async () => {
+			const res = await interrupted(
+				"import_document",
+				{ content: "{}" },
+				"importDocument",
+				makeErr()
+			);
+			expect(firstText(res)).toMatch(/list_collections/);
+			expect(firstText(res)).not.toMatch(/list_runs/);
+		});
+
+		test("on run_request still names list_runs", async () => {
+			const res = await interrupted(
+				"run_request",
+				{ url: "https://api.example.com/slow" },
+				"executeRequest",
+				makeErr()
+			);
+			expect(firstText(res)).toMatch(/list_runs/);
+		});
+
+		test.each([
+			// Declares "safe": a read without the idempotent hint.
+			["get_live_metrics", { runId: "run_a" }, "getLiveMetricsSnapshot"],
+			// Declares nothing and is annotated idempotent, so it is told "safe".
+			["update_engine_config", { entries: {} }, "updateConfig"],
+		] as Array<[string, Record<string, unknown>, keyof EngineClient]>)(
+			"on %s says repeating it is safe",
+			async (name, args, method) => {
+				const res = await interrupted(name, args, method, makeErr());
+				expect(firstText(res)).toMatch(/Repeating the call is safe/);
+				expect(firstText(res)).not.toMatch(/list_runs/);
+			}
+		);
+	});
+
+	test("keeps the timeout's budget and the raise-the-ceiling tail beside the advice", async () => {
+		const res = await interrupted(
+			"create_request",
+			createRequestArgs,
+			"createRequest",
+			TIMEOUT()
+		);
+		expect(firstText(res)).toMatch(/35s budget/);
+		expect(firstText(res)).toMatch(/update_engine_config/);
+	});
+
+	test("a tool that declares no advice gets the generic run-history wording", async () => {
+		const bare = {
+			...TOOLS.find((t) => t.name === "run_request")!,
+			name: "bare",
+			retry: undefined,
+		};
+		TOOLS.push(bare);
+		try {
+			const res = await interrupted(
+				"bare",
+				{ url: "https://api.example.com/slow" },
+				"executeRequest",
+				TIMEOUT()
+			);
+			expect(firstText(res)).toMatch(/check run history \(list_runs\)/);
+		} finally {
+			TOOLS.pop();
+		}
+	});
+
+	test("every tool that is not idempotent declares what to check", () => {
+		const scanned = TOOLS.filter((t) => t.annotations.idempotentHint !== true);
+		expect(scanned.length).toBeGreaterThan(0);
+		const undeclared = scanned.filter((t) => t.retry === undefined).map((t) => t.name);
+		expect(undeclared).toEqual([]);
+	});
+
+	test("a check names a tool that exists and is a read", () => {
+		const checks = TOOLS.flatMap((t) => (typeof t.retry === "object" ? [t.retry.check] : []));
+		expect(checks.length).toBeGreaterThan(0);
+		for (const check of checks) {
+			const tool = TOOLS.find((t) => t.name === check);
+			expect(tool, check).toBeDefined();
+			expect(tool?.category, check).toBe("read");
+		}
+	});
+});
+
+/*
  * Every error result carries `structuredContent.error` (#2776): the class an
  * agent acts on, whether the same call can succeed again, and the advice, which
  * is the result's own text.

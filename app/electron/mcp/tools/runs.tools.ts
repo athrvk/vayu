@@ -197,6 +197,7 @@ export const RUN_TOOLS: McpTool[] = [
 	{
 		name: "get_live_metrics",
 		category: "read",
+		retry: "safe",
 		invalidates: [],
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. " +
