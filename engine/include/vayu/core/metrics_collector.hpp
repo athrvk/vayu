@@ -237,7 +237,8 @@ struct MetricsCollectorConfig {
     /// the collector byte-for-byte what it was before them: no bank is
     /// allocated, nothing is recorded, and `phase_percentiles()` answers
     /// nullopt - which is what keeps the report's `phases` section absent
-    /// rather than showing five zeroed distributions.
+    /// rather than showing five zeroed distributions, and the gate frame's
+    /// `cumulativePhases` key out.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
 
     /// Whether the per-completion event-count histogram is allocated and fed
@@ -893,7 +894,9 @@ class MetricsCollector {
      *
      * Indexed by @ref TimingPhase. Read once, after the run has drained - the
      * bank is written concurrently by every event-loop worker and only this
-     * post-run read is single-threaded, exactly like `calculate_percentiles`.
+     * post-run read is quiescent, exactly like `calculate_percentiles`. The
+     * one live reader is `put_gate_distributions`, which accepts what a read
+     * racing the writers costs.
      *
      * `nullopt` says the run has no phase distribution to report at all:
      * either `phase_histograms` was off, or nothing successful completed.
@@ -903,6 +906,34 @@ class MetricsCollector {
      */
     [[nodiscard]] std::optional<std::array<Percentiles, TIMING_PHASE_COUNT>>
     phase_percentiles () const;
+
+    /**
+     * @brief Whole-run mean of each network phase, in milliseconds (#2782).
+     *
+     * Indexed by @ref TimingPhase, over the same completions, with the same
+     * nullopt rule and the same read-after-drain contract as
+     * `phase_percentiles()`. A separate accessor because `Percentiles` is the
+     * shape of every histogram reading here and no other one has a mean.
+     */
+    [[nodiscard]] std::optional<std::array<double, TIMING_PHASE_COUNT>> phase_means () const;
+
+    /**
+     * @brief Put the gate frame's two run-so-far distributions on @p frame
+     *        (#2782).
+     *
+     * `cumulativeLatency` is `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms,
+     * p999Ms, maxMs, count}` from the reader-owned run-so-far histogram, so
+     * call this on the thread that samples the windows, after this tick's
+     * sample; `null` until a sampled window held a completion.
+     *
+     * `cumulativePhases` is `{dns, connect, tls, firstByte, download}`, each
+     * `{meanMs, p50Ms, p95Ms, p99Ms, count}`, `null` until a completion
+     * recorded its phases, and absent when the phase bank is off. The bank is
+     * read while the workers still record into it, so one reading can lag a
+     * completion or two behind the counts beside it; the reading after the
+     * drain is exact and equals the report's.
+     */
+    void put_gate_distributions (nlohmann::json& frame) const;
 
     /**
      * @brief What a streaming run's completions delivered (issue #576).
@@ -1129,7 +1160,9 @@ class MetricsCollector {
      *         `cumulativeP95Ms` / `cumulativeP99Ms` are every window sampled so
      *         far (null before any completion was sampled), read from the
      *         reader-owned run-so-far histogram, so call this on the thread that
-     *         samples the windows.
+     *         samples the windows. The gate-only keys (`second*`,
+     *         `cumulativeLatency`, `cumulativePhases`) are not built here; the
+     *         metrics thread adds them on the tick that closes a second.
      */
     [[nodiscard]] nlohmann::json get_current_stats (size_t current_active,
     double elapsed_seconds,
@@ -1194,7 +1227,7 @@ class MetricsCollector {
     };
     using OwnedHistogram = std::unique_ptr<struct hdr_histogram, CloseHistogram>;
     OwnedHistogram second_histogram_;     // take_second_percentiles
-    OwnedHistogram run_so_far_histogram_; // cumulativeP*Ms
+    OwnedHistogram run_so_far_histogram_; // cumulativeP*Ms, cumulativeLatency
     OwnedHistogram level_histogram_;      // level_latency
     uint64_t level_epoch_ = 0;            // adopt_level_epoch
 
@@ -1206,7 +1239,8 @@ class MetricsCollector {
     // record_success is then the whole cost of the feature on the completion
     // path, and phase_percentiles() answers nullopt. Written from every
     // event-loop worker, so records go through hdr_record_value_atomic for the
-    // same reason latency_histogram_'s do; read once after the drain.
+    // same reason latency_histogram_'s do; read after the drain for the
+    // report, and live once a second for the gate frame (put_gate_distributions).
     std::array<struct hdr_histogram*, TIMING_PHASE_COUNT> phase_histograms_{};
 
     // Per-completion event counts for a streaming run (issue #576). Null when

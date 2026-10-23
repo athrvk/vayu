@@ -1827,6 +1827,120 @@ TEST_F (MetricsCollectorTest, PhasePercentilesAbsentWithoutCompletions) {
     EXPECT_FALSE (collector->phase_percentiles ().has_value ());
 }
 
+// #2782: the gate frame's `cumulativeLatency` is every sampled completion, the
+// whole distribution in order, and null - never zeros - before the first. The
+// tick's own stats do not carry it: only the gate adds it.
+TEST_F (MetricsCollectorTest, GateCumulativeLatencyCoversEverySampledCompletion) {
+    nlohmann::json before;
+    collector->put_gate_distributions (before);
+    ASSERT_TRUE (before.contains ("cumulativeLatency"));
+    EXPECT_TRUE (before.at ("cumulativeLatency").is_null ());
+
+    constexpr size_t COMPLETIONS = 100;
+    for (size_t i = 1; i <= COMPLETIONS; ++i) {
+        collector->record_success (200, static_cast<double> (i), 0.0);
+        if (i == COMPLETIONS / 2) {
+            // Two windows and a closed second: the run-so-far reading spans
+            // both, and closing a second does not reset it.
+            (void)collector->sample_window_percentiles ();
+            (void)collector->take_second_percentiles ();
+        }
+    }
+    const auto window = collector->sample_window_percentiles ();
+    auto frame = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &window);
+    EXPECT_FALSE (frame.contains ("cumulativeLatency"));
+    EXPECT_FALSE (frame.contains ("cumulativePhases"));
+
+    collector->put_gate_distributions (frame);
+    const auto& latency = frame.at ("cumulativeLatency");
+    ASSERT_TRUE (latency.is_object ()) << frame.dump ();
+    EXPECT_EQ (latency.at ("count").get<size_t> (), COMPLETIONS);
+    double previous = 0.0;
+    for (const auto* key :
+    { "minMs", "p50Ms", "p75Ms", "p90Ms", "p95Ms", "p99Ms", "p999Ms", "maxMs" }) {
+        const double value = latency.at (key).get<double> ();
+        EXPECT_GE (value, previous) << key << " in " << latency.dump ();
+        previous = value;
+    }
+    EXPECT_NEAR (latency.at ("minMs").get<double> (), 1.0, 0.01);
+    EXPECT_NEAR (latency.at ("p50Ms").get<double> (), 50.0, 0.1);
+    EXPECT_NEAR (latency.at ("maxMs").get<double> (), 100.0, 0.1);
+}
+
+// #2782: `cumulativePhases` carries each phase's mean beside its tail, null
+// until a completion recorded its phases, and its means are the ones the
+// report's averages read. Ninety reused connections and ten that paid 20 ms
+// of connect and 30 ms of TLS: a mean of 2 and 3 ms with a p50 of 0.
+// Mutation check: drop the `cumulativePhases` write in put_gate_distributions
+// and this fails at the first `contains`.
+TEST_F (MetricsCollectorTest, GateCumulativePhasesCarryEachPhasesMeanAndTail) {
+    nlohmann::json before;
+    collector->put_gate_distributions (before);
+    ASSERT_TRUE (before.contains ("cumulativePhases"));
+    EXPECT_TRUE (before.at ("cumulativePhases").is_null ());
+
+    // A success without a breakdown feeds no phase.
+    collector->record_success (200, 10.0, 0.0);
+    nlohmann::json untimed;
+    collector->put_gate_distributions (untimed);
+    EXPECT_TRUE (untimed.at ("cumulativePhases").is_null ());
+
+    for (int i = 0; i < 90; ++i) {
+        const auto reused = phase_timing (1.0, 0.0, 0.0, 5.0, 2.0);
+        collector->record_success (
+        200, 8.0, 0.0, "", SuccessTraceReason::None, nullptr, &reused);
+    }
+    for (int i = 0; i < 10; ++i) {
+        const auto fresh = phase_timing (1.0, 20.0, 30.0, 5.0, 2.0);
+        collector->record_success (
+        200, 58.0, 0.0, "", SuccessTraceReason::None, nullptr, &fresh);
+    }
+
+    nlohmann::json frame;
+    collector->put_gate_distributions (frame);
+    const auto& phases = frame.at ("cumulativePhases");
+    ASSERT_TRUE (phases.is_object ()) << frame.dump ();
+    for (const auto* key : TIMING_PHASE_KEYS) {
+        ASSERT_TRUE (phases.contains (key)) << key;
+        EXPECT_EQ (phases.at (key).at ("count").get<size_t> (), 100u) << key;
+    }
+    // Within HdrHistogram's 3 significant figures.
+    EXPECT_NEAR (phases.at ("dns").at ("meanMs").get<double> (), 1.0, 0.01);
+    EXPECT_NEAR (phases.at ("connect").at ("meanMs").get<double> (), 2.0, 0.01);
+    EXPECT_NEAR (phases.at ("tls").at ("meanMs").get<double> (), 3.0, 0.01);
+    EXPECT_NEAR (phases.at ("firstByte").at ("meanMs").get<double> (), 5.0, 0.01);
+    EXPECT_DOUBLE_EQ (phases.at ("connect").at ("p50Ms").get<double> (), 0.0);
+    EXPECT_NEAR (phases.at ("connect").at ("p95Ms").get<double> (), 20.0, 0.05);
+    EXPECT_NEAR (phases.at ("tls").at ("p99Ms").get<double> (), 30.0, 0.05);
+
+    const auto means = collector->phase_means ();
+    ASSERT_HAS_VALUE (means);
+    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        EXPECT_DOUBLE_EQ (means->at (i),
+        phases.at (TIMING_PHASE_KEYS.at (i)).at ("meanMs").get<double> ())
+        << TIMING_PHASE_KEYS.at (i);
+    }
+}
+
+// #2782: with the bank off the key is absent, not null - null means "nothing
+// yet", absent means "this run does not measure it". Latency is unaffected.
+TEST_F (MetricsCollectorTest, GateCumulativePhasesAbsentWithTheBankOff) {
+    MetricsCollectorConfig config;
+    config.phase_histograms = false;
+    MetricsCollector off ("gate_phases_off", config);
+
+    const auto timing = phase_timing (1.0, 10.0, 100.0, 200.0, 4.0);
+    off.record_success (200, 315.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+    (void)off.sample_window_percentiles ();
+
+    nlohmann::json frame;
+    off.put_gate_distributions (frame);
+    EXPECT_FALSE (frame.contains ("cumulativePhases")) << frame.dump ();
+    ASSERT_TRUE (frame.at ("cumulativeLatency").is_object ()) << frame.dump ();
+    EXPECT_EQ (frame.at ("cumulativeLatency").at ("count").get<size_t> (), 1u);
+    EXPECT_FALSE (off.phase_means ().has_value ());
+}
+
 // Written from every event-loop worker, so the records must be the atomic
 // variant - the plain one is a read-modify-write on counts[] and loses
 // increments. A lost increment shows up here as a count below the total.

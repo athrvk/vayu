@@ -95,6 +95,56 @@ const struct hdr_histogram* histogram) {
     stats[name + "P99Ms"] = us_to_ms (hdr_value_at_percentile (histogram, 99.0));
 }
 
+/// @p histogram's mean in milliseconds. hdr_mean divides by the count, so the
+/// caller has already seen a non-empty histogram.
+double mean_ms (const struct hdr_histogram* histogram) {
+    return hdr_mean (histogram) / 1000.0;
+}
+
+/// The gate frame's `cumulativeLatency`: null while @p histogram is empty.
+nlohmann::json latency_distribution (const struct hdr_histogram* histogram) {
+    const MetricsCollector::Percentiles reading = percentiles_of (histogram);
+    if (reading.count == 0) {
+        return nullptr;
+    }
+    return { { "minMs", reading.min }, { "p50Ms", reading.p50 },
+        { "p75Ms", reading.p75 }, { "p90Ms", reading.p90 }, { "p95Ms", reading.p95 },
+        { "p99Ms", reading.p99 }, { "p999Ms", reading.p999 },
+        { "maxMs", reading.max }, { "count", reading.count } };
+}
+
+/**
+ * The gate frame's `cumulativePhases`, from a bank that is allocated.
+ *
+ * A live read: the workers keep recording with hdr_record_value_atomic while
+ * this walks the counts with plain loads, so a reading can miss the
+ * completions that landed during the walk. That is tolerated for a frame
+ * superseded a second later; the report reads the same bank after the drain.
+ */
+nlohmann::json phase_distributions (
+const std::array<struct hdr_histogram*, TIMING_PHASE_COUNT>& bank) {
+    // Each count read once. A completion records its five phases one after
+    // another, so a live read can find the first counted and the last not yet;
+    // waiting until every phase holds one keeps hdr_mean off a zero count.
+    std::array<int64_t, TIMING_PHASE_COUNT> counts{};
+    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        counts.at (i) = bank.at (i)->total_count;
+    }
+    if (std::ranges::min (counts) == 0) {
+        return nullptr;
+    }
+    nlohmann::json phases = nlohmann::json::object ();
+    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        const struct hdr_histogram* histogram = bank.at (i);
+        phases[TIMING_PHASE_KEYS.at (i)] = { { "meanMs", mean_ms (histogram) },
+            { "p50Ms", us_to_ms (hdr_value_at_percentile (histogram, 50.0)) },
+            { "p95Ms", us_to_ms (hdr_value_at_percentile (histogram, 95.0)) },
+            { "p99Ms", us_to_ms (hdr_value_at_percentile (histogram, 99.0)) },
+            { "count", counts.at (i) } };
+    }
+    return phases;
+}
+
 /**
  * Randomness for the reservoir decisions. Thread-local so the recorder path
  * takes no lock to draw one: the sample only needs each candidate's fate to be
@@ -217,10 +267,11 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     interval_recorder_ready_ = true;
 
     // Per-phase bank. Allocated only when enabled, so "off" is a null pointer
-    // rather than a flag consulted per completion, and phase_percentiles() has
-    // nothing to report from. A partial failure closes what it built and
-    // leaves the bank null: the run is still fully measurable without phase
-    // percentiles, which is not true of the two histograms above.
+    // rather than a flag consulted per completion, and phase_percentiles() and
+    // the gate frame have nothing to report from. A partial failure closes
+    // what it built and leaves the bank null: the run is still fully
+    // measurable without phase percentiles, which is not true of the two
+    // histograms above.
     if (config_.phase_histograms) {
         for (auto*& histogram : phase_histograms_) {
             if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
@@ -434,8 +485,11 @@ const Timing* phases) {
     // A phase that did not happen still records its 0. That is not the same
     // claim as "TLS was free" - a run over plain HTTP records five million
     // zeroes into the TLS histogram and its p99 is 0, which is the truthful
-    // reading of "this run did no handshakes". The distinction the report has
-    // to keep is present-vs-absent *section*, which phase_percentiles() owns.
+    // reading of "this run did no handshakes". The distinction a reader has to
+    // keep is present-vs-absent *section*: phase_percentiles() owns it for the
+    // report and put_gate_distributions() for the gate frame. Every recorded
+    // phase is in the report's averages too (#2782), zeros included, which
+    // is what makes `avgTlsMs` the mean over every completion.
     if (phases != nullptr && phase_histograms_[0] != nullptr) {
         const std::array<double, TIMING_PHASE_COUNT> values = { phases->dns_ms,
             phases->connect_ms, phases->tls_ms, phases->first_byte_ms, phases->download_ms };
@@ -866,6 +920,24 @@ MetricsCollector::phase_percentiles () const {
         phase.p999 = us_to_ms (hdr_value_at_percentile (histogram, 99.9));
     }
     return result;
+}
+
+std::optional<std::array<double, TIMING_PHASE_COUNT>> MetricsCollector::phase_means () const {
+    if (phase_histograms_[0] == nullptr || phase_histograms_[0]->total_count == 0) {
+        return std::nullopt;
+    }
+    std::array<double, TIMING_PHASE_COUNT> means{};
+    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        means.at (i) = mean_ms (phase_histograms_.at (i));
+    }
+    return means;
+}
+
+void MetricsCollector::put_gate_distributions (nlohmann::json& frame) const {
+    frame["cumulativeLatency"] = latency_distribution (run_so_far_histogram_.get ());
+    if (phase_histograms_[0] != nullptr) {
+        frame["cumulativePhases"] = phase_distributions (phase_histograms_);
+    }
 }
 
 MetricsCollector::CustomMetricSlot*

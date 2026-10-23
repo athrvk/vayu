@@ -20,6 +20,7 @@
 #include "vayu/utils/metrics_helper.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <map>
 #include <optional>
@@ -361,11 +362,9 @@ struct ReportExtras {
     // Per-phase latency distributions, verbatim from the summary and already in
     // the report's shape. Empty for a run that recorded none - the toggle off,
     // nothing successful completed, or an engine older than the phase bank -
-    // which leaves `timingBreakdown.phases` out. The averages beside it are
-    // computed over the retained sample and stay whatever they were; these are
-    // the whole population, so a reader comparing the two is comparing a
-    // sample's mean against every completion's distribution, not two views of
-    // the same rows.
+    // which leaves `timingBreakdown.phases` out. Each phase's `mean` is also
+    // what the averages beside it read (apply_summary_phase_means), so where
+    // it is stored the two describe the same completions.
     nlohmann::json phases = nlohmann::json::object ();
     // Which of the bound contract's operations the run exercised (issue #629),
     // passed through verbatim: the producer writes the report's own camelCase,
@@ -580,6 +579,47 @@ void apply_summary_slow_requests (const nlohmann::json& summary, vayu::DetailedR
     const auto& slow = summary["slow_requests"];
     read_number (slow, "count", report.slow_requests_count);
     read_number (slow, "thresholdMs", report.slow_threshold_ms);
+}
+
+/// One phase's stored whole-run `mean`, or nothing when the summary has none.
+std::optional<double> stored_phase_mean (const nlohmann::json& phases, const char* phase) {
+    const auto entry = phases.find (phase);
+    if (entry == phases.end () || !entry->is_object ()) {
+        return std::nullopt;
+    }
+    const auto mean = entry->find ("mean");
+    if (mean == entry->end () || !mean->is_number ()) {
+        return std::nullopt;
+    }
+    return mean->get<double> ();
+}
+
+/**
+ * The report's `timingBreakdown.avg*Ms` from each phase's whole-run `mean`
+ * (#2782), every successful completion's, over the retained trace sample's
+ * that the sampled results computed. All five or none: a summary without them
+ * (the phase bank off, or a run stored before the means) keeps the sample's.
+ */
+void apply_summary_phase_means (const nlohmann::json& summary, vayu::DetailedReport& report) {
+    if (!summary.contains ("phases") || !summary["phases"].is_object ()) {
+        return;
+    }
+    using vayu::core::TimingPhase;
+    std::array<double, vayu::core::TIMING_PHASE_COUNT> means{};
+    for (size_t i = 0; i < means.size (); ++i) {
+        const auto mean =
+        stored_phase_mean (summary["phases"], vayu::core::TIMING_PHASE_KEYS.at (i));
+        if (!mean) {
+            return;
+        }
+        means.at (i) = *mean;
+    }
+    report.has_timing_data = true;
+    report.avg_dns_ms      = means.at (static_cast<size_t> (TimingPhase::Dns));
+    report.avg_connect_ms = means.at (static_cast<size_t> (TimingPhase::Connect));
+    report.avg_tls_ms = means.at (static_cast<size_t> (TimingPhase::Tls));
+    report.avg_first_byte_ms = means.at (static_cast<size_t> (TimingPhase::FirstByte));
+    report.avg_download_ms = means.at (static_cast<size_t> (TimingPhase::Download));
 }
 
 /**
@@ -821,6 +861,7 @@ ReportExtras& extras) {
 
     apply_summary_totals (summary, report, extras);
     apply_summary_slow_requests (summary, report);
+    apply_summary_phase_means (summary, report);
     apply_summary_error_types (summary, report);
     apply_summary_status_codes (summary, report, extras);
     apply_summary_sampling (summary, extras);
@@ -1613,13 +1654,13 @@ double target_rps) {
     }
     json_report["errors"] = errors_obj;
 
-    // Two independent halves under one key, and either can be present without
-    // the other. The averages come from the retained trace sample, so they are
-    // absent for a run that stored no traces; `phases` comes from the
-    // histograms every completion fed, so it is present for a run that stored
-    // none and absent for one recorded before the bank existed. Clients read
-    // each half by its own key rather than treating the object's presence as
-    // proof of either.
+    // Two halves under one key. Where the summary stored phase means, both
+    // describe every successful completion (#2782); otherwise - the bank off,
+    // or a run stored before the means - the averages fall back to the
+    // retained trace sample and are absent for a run that stored no traces,
+    // while `phases` is absent for a run recorded before the bank existed.
+    // Clients read each half by its own key rather than treating the object's
+    // presence as proof of either.
     nlohmann::json timing_breakdown = nlohmann::json::object ();
     if (report.has_timing_data) {
         timing_breakdown["avgDnsMs"]       = report.avg_dns_ms;
@@ -1734,8 +1775,10 @@ select_report_results (const std::vector<vayu::db::Result>& results, size_t cap)
  * A load run's whole-run counters while it is not terminal (#2659), in place
  * of the rows it writes only as it finishes. Only the collector's atomic reads:
  * its percentile, phase, stream and custom-metric readers walk histograms the
- * event-loop workers are still writing and are safe only after the drain, so
- * `latency` stays out until the summary brings it. A null @p context (a run no
+ * event-loop workers are still writing and are exact only after the drain, so
+ * `latency` and the phase averages stay out until the summary brings them;
+ * the live view reads the run-so-far phases off the gate frame instead
+ * (`MetricsCollector::put_gate_distributions`). A null @p context (a run no
  * manager holds) leaves every count at zero.
  */
 void apply_live_counters (const vayu::core::RunContext* context,

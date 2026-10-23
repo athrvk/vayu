@@ -1379,11 +1379,11 @@ default, so `sync_schema()` can
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
                "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
   "phases": {
-    "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 100 },
-    "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 100 },
-    "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 100 },
-    "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 100 },
-    "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 100 }
+    "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 100, "mean": 0.15 },
+    "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 100, "mean": 0.42 },
+    "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 100, "mean": 0.31 },
+    "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 100, "mean": 3.1 },
+    "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 100, "mean": 0.14 }
   },
   "slow_requests": { "count": 6, "thresholdMs": 25 },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
@@ -1404,7 +1404,9 @@ default, so `sync_schema()` can
 
 `phases` carries the whole-run distribution of each network phase, drained from the collector's
 five per-phase HdrHistograms - which every successful completion feeds, unlike the sampled
-`results` rows the report's `timingBreakdown` averages come from. Keyed by wire name (`firstByte`,
+`results` rows. Each phase's `mean` (issue #2782) is what the report's `timingBreakdown.avg*Ms`
+read; a summary stored before it has no `mean`, and its report averages the sampled `results`
+rows' traces instead, as every report did before. Keyed by wire name (`firstByte`,
 not `ttfb`), and the only section here written in camelCase, because the report passes it through
 verbatim rather than translating it. **Omitted** when the run recorded no distribution - the
 `phaseHistograms` setting (or the run's own `phase_histograms`) off, or nothing successful
