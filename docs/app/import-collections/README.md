@@ -475,7 +475,7 @@ they already have their own segments in the count line.
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
-"unmapped_body" | "unresolved_base_url" | "unsupported_auth" | "oauth2_dropped_field" |
+"unmapped_body" | "unresolved_base_url" | "no_server_url" | "unsupported_auth" | "oauth2_dropped_field" |
 "oauth2_state_regenerated" | "oauth2_unmapped_param" |
 "url_without_raw" | "variable_metadata", count, requests?, names? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
@@ -534,7 +534,10 @@ binary body, an OpenAPI whole-file `requestBody` - imports as a `binary` body na
 `unresolved_base_url` is a `servers[0].url` that could not be made into an address a request
 could reach - a `{variable}` the document declares no default for, or a relative URL in a
 document that arrived with no URL to resolve it against (see
-[OpenAPI 3.0](./openapi-v3.md#the-base-url)).
+[OpenAPI 3.0](./openapi-v3.md#the-base-url)). `no_server_url` is the document that names no server
+URL at all (no `servers`, an empty one, a `servers[0]` with no `url`, or a Swagger 2.0 document
+with no `host`): no `baseUrl` variable is created and the preview says to add one. OpenAPI's
+implicit default server `/` counts as no server URL too.
 
 The last three are Postman kinds added by issue #1443, closing gaps in the same "dropped is
 counted" promise. `unsupported_auth` is an `auth.type` Postman defines and Vayu has no mode

@@ -3481,11 +3481,19 @@ bool has_unresolved_template (const std::string& url) {
  * resolves), then resolve what is left against the source URL when it needs
  * one. Anything still unresolvable is kept exactly as written and counted - a
  * base the user can see is unfinished beats a host Vayu invented.
+ *
+ * A document that names no server URL at all (no `servers`, an empty array, a
+ * `servers[0]` that is not an object or carries no `url`, an empty `url`) has
+ * nothing to resolve: no `{{baseUrl}}` variable is created and the loss is
+ * counted as `no_server_url`, which is not `unresolved_base_url` (that one
+ * keeps a URL the document did write). OpenAPI's implicit default server `/`
+ * is deliberately the same case when `servers` is absent: it names no host.
  */
 std::string
 resolve_server_url (const json* server, const std::string& source_url, ImportTally& tally) {
     const std::string* declared = as_str (prop (server, "url"));
     if (declared == nullptr || declared->empty ()) {
+        tally.add ("no_server_url");
         return {};
     }
     const json* variables = as_record (prop (server, "variables"));
@@ -4375,9 +4383,9 @@ document_base (const json& document, bool v3, const ImportSource& source, Import
     }
     // 2.0 states its base as three fields rather than a server URL. A
     // `basePath` of exactly `/` adds nothing, and a document with no `host`
-    // has no base at all - `{{baseUrl}}` is then simply not a variable, and
-    // every request's URL starts with the token unresolved, which is what
-    // the renderer did too.
+    // has no base at all: `{{baseUrl}}` is then not a variable, every
+    // request's URL starts with the token unresolved, and the loss is counted
+    // as `no_server_url` (the 3.x branch counts the same case).
     const std::string* wire_scheme = as_str (array_at (prop (&document, "schemes"), 0));
     const std::string* declared_base = as_str (prop (&document, "basePath"));
     const std::string base_path =
@@ -4386,6 +4394,8 @@ document_base (const json& document, bool v3, const ImportSource& source, Import
     host != nullptr && !host->empty ()) {
         base.base_url =
         (wire_scheme == nullptr ? "https" : *wire_scheme) + "://" + *host + base_path;
+    } else {
+        tally.add ("no_server_url");
     }
     base.schemes = as_record (prop (&document, "securityDefinitions"));
     return base;
