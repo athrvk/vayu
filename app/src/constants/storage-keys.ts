@@ -42,18 +42,6 @@ export const STORAGE_KEYS = {
 	/** Zustand persist name for shell layout (drawer, context bar, split ratio). */
 	LAYOUT_STORE: "vayu.layout",
 	/**
-	 * Zustand persist name for each collection's data-file **location** on this
-	 * machine. Paths and file names only - a data file's rows are persisted
-	 * nowhere (see `data-file-store.ts`).
-	 */
-	DATA_FILE_STORE: "vayu.data-files",
-	/**
-	 * Zustand persist name for each collection's bound spec document **location**
-	 * on this machine. Paths and file names only - a spec's content is engine
-	 * state and is persisted nowhere here (see `spec-file-store.ts`).
-	 */
-	SPEC_FILE_STORE: "vayu.spec-files",
-	/**
 	 * Zustand persist name for the startup-recovery notice the user has already
 	 * seen (issue #922). One timestamp - the engine keeps the record itself.
 	 */
@@ -71,4 +59,15 @@ export const STORAGE_KEYS = {
 	 * is pruned on the next list read.
 	 */
 	INBOX_NOTIFY_STORE: "vayu.inbox-notify",
+} as const;
+
+/**
+ * Keys an older Vayu wrote and this one only reads, once: each collection's
+ * spec-file and data-file binding, from before the binding rode the engine row
+ * (#2765). `useLegacyFileBindingImport` moves what they hold onto the rows and
+ * removes each key once it has; nothing writes them any more.
+ */
+export const LEGACY_FILE_BINDING_KEYS = {
+	SPEC_FILES: "vayu.spec-files",
+	DATA_FILES: "vayu.data-files",
 } as const;

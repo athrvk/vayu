@@ -477,6 +477,22 @@ read IPC *as a path*; a malformed `hash` drops only the hash, and a
 non-boolean `castNumbers` reads as off. An engine that predates the column, or
 answers `{}`, reads as unbound.
 
+**Bindings from an older Vayu.** Before #2765 both stores were zustand
+`persist` stores, under the `localStorage` keys that are now
+`LEGACY_FILE_BINDING_KEYS` (`vayu.spec-files`, `vayu.data-files`).
+`useLegacyFileBindingImport` (mounted in `App.tsx`) reads them once, after the
+first collections list arrives (`importLegacyFileBindings`,
+`queries/legacy-file-bindings.ts`): each entry goes through the row's
+normalizer and is written, binding-only, to the collection it named - but only
+to one the engine still lists and that holds no binding of that kind, so a
+binding already on the row is never overwritten. An entry for a collection
+the list does not name - one deleted, or sitting in the trash, before the
+upgrade - is dropped, so restoring such a collection later brings it back
+unbound. A key is removed once every write it asked for has landed; a launch
+that cannot reach the engine keeps it and the next one finishes the move. A
+key that is not a payload the old store could have written is logged and
+dropped.
+
 #### `spec-file-store.ts` - Where Each Collection's Spec File Lives
 
 Each collection's picked spec file, by collection id, for the specs that were
