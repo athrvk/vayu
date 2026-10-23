@@ -1826,6 +1826,41 @@ TEST (CapacitySearchTest, ALevelOfOnlyRefusedConnectionsStillCloses) {
     EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY);
 }
 
+// #2815: the producer's status snapshot can predate the window it samples, so
+// a tick can carry latency samples while the level has counted no completion.
+// That reads as a 0% error share, and a level failing every request is not
+// judged on it: it stays open until the count arrives, then breaches at 100%.
+// Mutation-check: drop the `level_completed_ == 0` condition in advance and
+// the level is judged at 0% errors and steps up.
+TEST (CapacitySearchTest, ALevelWithSamplesButNoCountedCompletionStaysOpen) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "capacity-search-lagging-count", nlohmann::json::object ());
+    vayu::core::CapacitySearch search (search_config (), context);
+    settle_first_level (search, *context, 20.0);
+
+    auto& collector           = *context->metrics_collector;
+    const auto stale_statuses = collector.status_code_distribution ();
+    record_failures (*context, SEARCH_SAMPLES_A_TICK, 20.0);
+    collector.adopt_level_epoch (context->requested_level_epoch (), stale_statuses);
+    (void)collector.sample_window_percentiles ();
+    const auto lagging = collector.level_latency (stale_statuses);
+    ASSERT_GT (lagging.samples, 0u);
+    ASSERT_EQ (lagging.completed, 0u);
+    context->publish_live_tick ({ 0, 100.0, 0, lagging });
+
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS));
+    EXPECT_TRUE (search.finish ().levels.empty ())
+    << "the level was judged before any completion was counted";
+
+    record_failures (*context, SEARCH_SAMPLES_A_TICK, 20.0);
+    produce_tick (*context, std::nullopt);
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS + 1));
+    const auto summary = search.finish ();
+    ASSERT_EQ (summary.levels.size (), 1u);
+    EXPECT_DOUBLE_EQ (summary.levels.front ().error_pct, 100.0);
+    EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY);
+}
+
 // The settle ticks measure the transition into the level, so 1000 ms there
 // must not reach a level that answers in 50 ms.
 // Mutation-check: request the level reset in open_level instead of on the
@@ -1865,6 +1900,8 @@ TEST (CapacitySearchTest, ATickProducedBeforeTheResetIsNotReadAsTheLevel) {
     EXPECT_TRUE (search.finish ().levels.empty ())
     << "the level was judged on a tick produced before its reset";
 
+    // Two ticks: the first under the new epoch has counted no completion yet.
+    produce_tick (*context, 50.0);
     produce_tick (*context, 50.0);
     ASSERT_TRUE (search.advance (SEARCH_STEP_MS + 1));
     const auto summary = search.finish ();

@@ -9375,7 +9375,10 @@ limit. A request that timed out is timed (see
 has samples, is judged, and reports a p99 near the timeout - the level fails its
 latency limit, which is the right verdict. A refused connection records no
 latency but is counted, so a level of nothing but refusals is judged too, at a
-p99 of 0 and an error share of 100%, and fails its error limit.
+p99 of 0 and an error share of 100%, and fails its error limit. A level is
+also not judged until it has counted at least one completion: the error share
+is read from status counts that can trail the latency samples by a tick, and
+judging before they arrive would read a failing level as error-free.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 p99 per level and a sequence has one per step.
 

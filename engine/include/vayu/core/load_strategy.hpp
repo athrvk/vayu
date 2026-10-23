@@ -216,6 +216,7 @@ class CapacitySearch {
     /// The newest tick's level reading under `level_epoch_`.
     size_t level_samples_    = 0;
     double level_p99_ms_     = 0.0;
+    size_t level_completed_  = 0;
     size_t level_failed_     = 0;
     double level_error_pct_  = 0.0;
     const char* stop_reason_ = nullptr;

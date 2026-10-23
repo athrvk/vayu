@@ -1277,7 +1277,10 @@ A level whose histogram holds no sample and that counted no failure is not
 judged and stays open: an empty histogram's percentiles are zeros, and reading
 those as "answered instantly" would climb straight past the limit the search
 exists to find. A counted failure is judged even with no latency behind it (a
-refused connection records none). The controller's
+refused connection records none). A level that has samples but has counted no
+completion is not judged either (#2815): the status snapshot the counts are
+taken from can lag the histogram by a tick, and a share of nothing reads as 0%
+errors, which would step a level failing every request up. The controller's
 policy itself lives in
 `core/capacity_controller.hpp` as pure functions over a level history - no clock,
 no collector, no run context - so it is unit-tested without a server.

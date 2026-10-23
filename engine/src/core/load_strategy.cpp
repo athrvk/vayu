@@ -1417,17 +1417,16 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
     if (elapsed_ms - level_started_ms_ < config_.step_duration_ms) {
         return true;
     }
-    if (level_samples_ == 0 && level_failed_ == 0) {
-        // Not one timed completion landed in the level's histogram - neither
-        // an answer nor a failure whose transfer ran, which a timeout is
-        // (#2384) - and no failure was counted either. Judging it would read a
-        // service that measured nothing as one that answered instantly, and
-        // the search would climb straight past the limit it exists to find.
-        // The level stays open instead; a search that never gets a completion
-        // ends on its deadline having reported only the levels it measured.
-        // A counted failure is judged even with no latency behind it (#2815):
-        // a refused connection records none, and a level of nothing but
-        // refusals is the clearest error breach there is.
+    const bool has_latency_or_failure = level_samples_ > 0 || level_failed_ > 0;
+    if (!has_latency_or_failure || level_completed_ == 0) {
+        // A level is judged on evidence of both kinds, and stays open until
+        // it has them. No timed completion and no counted failure (#2384: a
+        // timeout is timed) would read as a service that answered instantly;
+        // a refused connection records no latency but is counted, so a level
+        // of only refusals is still judged. No completion counted yet would
+        // read as a 0% error share: the status snapshot the count comes from
+        // can lag the histogram by a tick (#2815). A search that never gets
+        // both ends on its deadline having reported only the levels it judged.
         return true;
     }
 
@@ -1465,6 +1464,7 @@ void CapacitySearch::open_level (size_t level, int64_t now_ms) {
     level_epoch_      = 0;
     level_samples_    = 0;
     level_p99_ms_     = 0.0;
+    level_completed_  = 0;
     level_failed_     = 0;
     level_error_pct_  = 0.0;
     // Adopt the newest published sequence so the first tick this level
@@ -1505,6 +1505,7 @@ void CapacitySearch::collect_tick () {
     if (tick->level.epoch == level_epoch_) {
         level_samples_   = tick->level.samples;
         level_p99_ms_    = tick->level.p99_ms;
+        level_completed_ = tick->level.completed;
         level_failed_    = tick->level.failed;
         level_error_pct_ = tick->level.error_pct ();
     }
