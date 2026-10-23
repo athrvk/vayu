@@ -505,6 +505,7 @@ export default function ResponseViewer() {
 				statusText={shown.statusText}
 				time={shown.time}
 				size={shown.size}
+				headers={shown.headers}
 				engineMs={shown.timing?.engineMs}
 				httpVersion={shown.httpVersion}
 				httpVersionDowngraded={shown.httpVersionDowngraded}

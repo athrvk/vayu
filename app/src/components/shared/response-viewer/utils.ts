@@ -13,7 +13,11 @@ import { formatJson } from "@/lib/json-format";
 import { formatXml } from "@/lib/xml-format";
 import { resolveHeaderLines } from "@/lib/header-lines";
 import type { HeaderLine } from "@/types/domain";
-import { mediaTypeOf, type MediaType } from "@/modules/request-builder/utils/response-bytes";
+import {
+	headerValueOf,
+	mediaTypeOf,
+	type MediaType,
+} from "@/modules/request-builder/utils/response-bytes";
 import type { BodyType } from "./types";
 
 /**
@@ -256,6 +260,27 @@ export function formatSize(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * What the status bar's size counts (#2787). `size` is the decoded body, so a
+ * gzipped 12 KB reply that inflates to 80 KB reads as 80 KB; saying so stops it
+ * being compared with a DevTools or curl figure that counts something else.
+ */
+export const RESPONSE_SIZE_TIP =
+	"Decoded body size. Headers are not counted, and a compressed response counts " +
+	"the bytes after decompression.";
+
+/**
+ * The size element's hover: `RESPONSE_SIZE_TIP`, plus the compressed length when
+ * the headers show the body was encoded. Content-Length is the wire figure only
+ * beside a Content-Encoding other than `identity`; alone it is the body itself.
+ */
+export function responseSizeTip(headers: Record<string, string> | undefined): string {
+	const encoding = headerValueOf(headers, "content-encoding").trim().toLowerCase();
+	const length = headerValueOf(headers, "content-length").trim();
+	if (!encoding || encoding === "identity" || !/^\d+$/.test(length)) return RESPONSE_SIZE_TIP;
+	return `${RESPONSE_SIZE_TIP} ${formatSize(Number(length))} on the wire.`;
 }
 
 /**
