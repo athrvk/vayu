@@ -139,6 +139,7 @@ export function EditorVariableTokensProvider({
 	 */
 	const allVariables = useMemo(() => support.getAllVariables(), [support]);
 	const dataColumns = support.dataColumns;
+	const runsPreRequestScript = support.runsPreRequestScript;
 	const getVariableOrigins = support.getVariableOrigins;
 
 	const classify = useCallback(
@@ -146,9 +147,10 @@ export function EditorVariableTokensProvider({
 			classifyScriptToken(name, scriptHint, {
 				variables: allVariables,
 				dataColumns,
+				runsPreRequestScript,
 				getVariableOrigins,
 			}),
-		[allVariables, dataColumns, getVariableOrigins]
+		[allVariables, dataColumns, runsPreRequestScript, getVariableOrigins]
 	);
 
 	const openTokenEditor = useCallback((request: TokenEditRequest) => {

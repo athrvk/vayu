@@ -36,7 +36,7 @@ const contract: DataContractScope = {
  * fresh functions every render.
  */
 let variables: Record<string, { value: string; scope: string; secret?: boolean }> = {};
-const contextValue = {
+const contextValue: Record<string, unknown> = {
 	request: { collectionId: "col_leaf" },
 	resolveString: (s: string) => s,
 	getAllVariables: () => variables,
@@ -56,6 +56,25 @@ describe("useVariableSupport", () => {
 	it("carries the contract in scope, so the tokens can be painted against it", () => {
 		const { result } = renderHook(() => useVariableSupport());
 		expect(result.current.dataColumns).toBe(contract);
+	});
+
+	// Mutation check: leave `runsPreRequestScript` out of the returned object and
+	// the first case fails; out of the memo's dependencies and the second does.
+	it("carries the request's pre-request-script flag, so the tokens can be painted by it", () => {
+		contextValue.runsPreRequestScript = true;
+		const { result } = renderHook(() => useVariableSupport());
+		expect(result.current.runsPreRequestScript).toBe(true);
+		delete contextValue.runsPreRequestScript;
+	});
+
+	it("follows the flag when it changes, not a memo built before", () => {
+		contextValue.runsPreRequestScript = false;
+		const { result, rerender } = renderHook(() => useVariableSupport());
+		expect(result.current.runsPreRequestScript).toBe(false);
+		contextValue.runsPreRequestScript = true;
+		rerender();
+		expect(result.current.runsPreRequestScript).toBe(true);
+		delete contextValue.runsPreRequestScript;
 	});
 
 	it("keeps its identity across renders, since it is a prop on a memoised row", () => {

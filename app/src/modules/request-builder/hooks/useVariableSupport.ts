@@ -44,6 +44,7 @@ export function useVariableSupport(): VariableSupport {
 		updateVariable,
 		writableScopes,
 		dataColumns,
+		runsPreRequestScript,
 	} = useRequestBuilderContext();
 	return useMemo(
 		() => ({
@@ -53,6 +54,7 @@ export function useVariableSupport(): VariableSupport {
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			runsPreRequestScript,
 			maskSecrets: (text: string) =>
 				createSecretMasker(
 					collectSecrets(getAllVariables(), undefined),
@@ -68,6 +70,7 @@ export function useVariableSupport(): VariableSupport {
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			runsPreRequestScript,
 		]
 	);
 }

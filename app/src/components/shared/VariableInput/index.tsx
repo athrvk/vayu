@@ -225,12 +225,13 @@ export default function VariableInput({
 				kind: classifyVariableToken(seg.varName, {
 					variables: allVariables,
 					dataColumns: variables?.dataColumns,
+					runsPreRequestScript: variables?.runsPreRequestScript,
 				}),
 				bounds: { "data-token-start": start, "data-token-end": offset },
 			});
 		}
 		return tokens;
-	}, [segments, allVariables, variables?.dataColumns]);
+	}, [segments, allVariables, variables?.dataColumns, variables?.runsPreRequestScript]);
 
 	/**
 	 * Which token of the strip holds the Tab stop, as the strip stands now.

@@ -85,6 +85,15 @@ export interface VariableTokenContext {
 	/** The data contract in scope, if the collection chain declares one. */
 	dataColumns?: DataContractScope | null;
 	/**
+	 * Whether a send of the request this field belongs to runs a pre-request
+	 * script (`runsPreRequestScript`, #2741). The flag carries no names, so every
+	 * name a scope defines is then one the script might overwrite: it paints as
+	 * {@link SCRIPT_MAY_CHANGE_NOTE}, not as the stored value. Absent for a
+	 * surface with no single request behind it (the collection's Elements tab),
+	 * which classifies exactly as it always did.
+	 */
+	runsPreRequestScript?: boolean;
+	/**
 	 * Every definition of a name, winner and losers alike - needed only for a
 	 * script's single-scope accessor read (`ScriptTokenHint`'s `"scope"` case),
 	 * which answers from one rung of the ladder rather than the winner across
@@ -132,6 +141,24 @@ const BARE_SCRIPT_TEMPLATE_KIND: RuntimeToken = {
 	description: TEMPLATE_IN_SCRIPT_NOTE,
 	note: 'Wrap it in pm.variables.replaceIn("...") to interpolate it.',
 };
+
+/** Tooltip line for a scope-defined name in a request a pre-request script runs before. */
+const SCRIPT_MAY_CHANGE_NOTE = "A pre-request script can change this at send.";
+
+/**
+ * Muted and no-edit, like the other run-time kinds: the stored value is not
+ * what the send will use, so painting it as the resolved variable (or opening
+ * an editor over it) would state more than the preview knows. The stored value
+ * stays readable in the note.
+ */
+function scriptMayChangeKind(info: ResolvedVariable): RuntimeToken {
+	return {
+		state: "runtime",
+		tone: "muted",
+		description: SCRIPT_MAY_CHANGE_NOTE,
+		note: `Stored: ${info.secret ? "secret" : info.value || "empty"}`,
+	};
+}
 
 /**
  * A `ScopeVariableOrigin` as the value a reader gets - the same shape
@@ -192,7 +219,7 @@ export function classifyScriptToken(
  */
 export function classifyVariableToken(
 	name: string,
-	{ variables, dataColumns }: VariableTokenContext
+	{ variables, dataColumns, runsPreRequestScript }: VariableTokenContext
 ): VariableTokenKind {
 	// The reserved data namespace, read before the scopes: it is disjoint from
 	// them, so a variable named `data.email` never answers for the column.
@@ -233,6 +260,7 @@ export function classifyVariableToken(
 	}
 
 	if (!info) return { state: "undefined", info: null };
+	if (runsPreRequestScript) return scriptMayChangeKind(info);
 	// An empty value is its own state, not a resolved one: it is the reason the
 	// request carries nothing where the author expected something.
 	return { state: info.value ? "resolved" : "empty", info };

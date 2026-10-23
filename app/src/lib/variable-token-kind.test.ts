@@ -108,6 +108,79 @@ describe("classifyVariableToken", () => {
 	});
 });
 
+/*
+ * Mutation check for this block: delete the `runsPreRequestScript` rung in
+ * `classifyVariableToken` and the flagged cases fail (a scope's name paints as
+ * resolved again); read the flag before the namespaces and the "unaffected"
+ * case fails.
+ */
+describe("classifyVariableToken in a request a pre-request script runs before (#2741)", () => {
+	const WORDING = "A pre-request script can change this at send.";
+	const stored = { token: variable("abc", { sourceName: "Staging" }), empty: variable("") };
+
+	it("paints a scope-defined name as muted run-time text, not as the stored value", () => {
+		const kind = classifyVariableToken("token", {
+			variables: stored,
+			runsPreRequestScript: true,
+		});
+		expect(kind).toEqual({
+			state: "runtime",
+			tone: "muted",
+			description: WORDING,
+			note: "Stored: abc",
+		});
+	});
+
+	it("hedges an empty definition too, and never prints a secret in the note", () => {
+		const empty = classifyVariableToken("empty", {
+			variables: stored,
+			runsPreRequestScript: true,
+		});
+		expect(empty).toMatchObject({ state: "runtime", note: "Stored: empty" });
+		const secret = classifyVariableToken("token", {
+			variables: { token: variable("hunter2", { secret: true }) },
+			runsPreRequestScript: true,
+		});
+		expect(secret).toMatchObject({ state: "runtime", note: "Stored: secret" });
+	});
+
+	it.each([[false], [undefined]])("is the plain answer when the flag is %s", (flag) => {
+		const context = { variables: stored, runsPreRequestScript: flag };
+		expect(classifyVariableToken("token", context)).toEqual({
+			state: "resolved",
+			info: stored.token,
+		});
+		expect(classifyVariableToken("empty", context).state).toBe("empty");
+	});
+
+	it("leaves what no scope defines, a generator and the namespaces as they are", () => {
+		const context = { variables: stored, dataColumns: contract, runsPreRequestScript: true };
+		expect(classifyVariableToken("missing", context)).toEqual({
+			state: "undefined",
+			info: null,
+		});
+		expect(classifyVariableToken("$guid", context)).toMatchObject({
+			state: "runtime",
+			note: "generated per use",
+		});
+		expect(classifyVariableToken("data.email", context)).toMatchObject({ state: "runtime" });
+		expect(classifyVariableToken("$vu", context)).toMatchObject({ note: "not generated here" });
+		expect(classifyVariableToken("email", context)).toMatchObject({ state: "runtime" });
+	});
+
+	it("does not touch a script's own scope read", () => {
+		const origins: VariableOrigin[] = [
+			{ scope: "environment", value: "abc", enabled: true, winner: true },
+		];
+		const kind = classifyScriptToken(
+			"token",
+			{ via: "scope", scope: "environment" },
+			{ variables: stored, getVariableOrigins: () => origins, runsPreRequestScript: true }
+		);
+		expect(kind.state).toBe("resolved");
+	});
+});
+
 describe("classifyScriptToken", () => {
 	it("falls through to the merged ladder with no hint - pm.variables.get and replaceIn", () => {
 		const kind = classifyScriptToken("baseUrl", undefined, {

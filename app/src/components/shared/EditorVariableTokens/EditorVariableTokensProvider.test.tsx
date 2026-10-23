@@ -441,3 +441,43 @@ describe("EditorVariableTokensProvider", () => {
 		});
 	});
 });
+
+/*
+ * A request a pre-request script runs before (`VariableSupport.runsPreRequestScript`,
+ * #2741), as the Monaco editors see it. The collection's Elements tab builds a
+ * support without the member, so "absent" is also its case.
+ *
+ * Mutation check: stop passing `support.runsPreRequestScript` to `classifyScriptToken`
+ * and the flagged cases fail; make the flag default to true and the "absent" case fails.
+ */
+describe("a request a pre-request script runs before", () => {
+	const WORDING = "A pre-request script can change this at send.";
+
+	it("classifies a scope-defined name as muted run-time text carrying the wording", () => {
+		const tokens = mountProvider({ runsPreRequestScript: true });
+		expect(tokens.classify("baseUrl")).toMatchObject({
+			state: "runtime",
+			tone: "muted",
+			description: WORDING,
+		});
+	});
+
+	it("says it in the hover card, with the stored value as the hint, and no edit line", () => {
+		const tokens = mountProvider({ runsPreRequestScript: true });
+		act(() => tokens.setHoveredToken({ name: "baseUrl", rect }));
+		expect(cardText()).toContain(WORDING);
+		expect(cardText()).toContain("Stored: https://api.example.com");
+		expect(cardText()).not.toContain("Click to edit");
+	});
+
+	it("opens no editor over a name it paints as run-time", () => {
+		const tokens = mountProvider({ runsPreRequestScript: true });
+		act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+		expect(screen.queryByDisplayValue("https://api.example.com")).toBeNull();
+	});
+
+	it.each([[false], [undefined]])("classifies as resolved when the flag is %s", (flag) => {
+		const tokens = mountProvider({ runsPreRequestScript: flag });
+		expect(tokens.classify("baseUrl").state).toBe("resolved");
+	});
+});

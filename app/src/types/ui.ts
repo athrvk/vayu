@@ -83,6 +83,15 @@ export interface VariableSupport {
 	 */
 	dataColumns?: DataContractScope;
 	/**
+	 * Whether a send of the saved request these fields belong to runs a
+	 * pre-request script (the engine's `runsPreRequestScript`, #2741). The flag
+	 * names no variable, so a token a scope defines is painted as one the script
+	 * can change rather than as the value it stores. Absent where there is no
+	 * single request behind the scope (the collection's Elements tab, a draft
+	 * with no saved row), which paints exactly as it always did.
+	 */
+	runsPreRequestScript?: boolean;
+	/**
 	 * Hides every secret variable's value in a text a surface displays, so the
 	 * key/value Σ peek can show resolved text without printing a secret. Applied
 	 * to what is drawn, never to what is cached or sent.

@@ -388,6 +388,17 @@ that URL's path, so for a flagged request a `{{token}}` in it stays written;
 `tab-descriptors.ts` passes the request it already holds, flag included, to the
 same `sends-url.ts` seam.
 
+**A token the scopes define is painted muted, not as the stored value.** The
+flag carries no names, so every scope-defined `{{name}}` in a flagged request's
+fields (`VariableInput`, and the Monaco editors through
+`EditorVariableTokensProvider`) takes the `runtime` kind with the tooltip "A
+pre-request script can change this at send." and the stored value in its note
+(`classifyVariableToken`'s `runsPreRequestScript`, fed by
+`VariableSupport.runsPreRequestScript`, which the builder fills from the same
+flag). It opens no edit popover: there is no stored value it states. A name no
+scope defines, a generator and the `data.*` / `$vu` namespaces paint as before,
+and the collection's Elements tab, which has no single request, passes no flag.
+
 The row crosses that boundary through `bound-row-store.ts`: one slot, holding
 the row the open builder is bound to **and the id of the request it is bound
 for**. One slot rather than a map because the builder binds a row for the

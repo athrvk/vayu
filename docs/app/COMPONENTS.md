@@ -2672,6 +2672,11 @@ list's own list and does not offer brace completion in a script):
 - Every `{{name}}` inside a `pm.variables.replaceIn(...)` call's template
   argument - the one place a script really is interpolated - gets the full
   body-language treatment: the merged ladder, no accessor to narrow it.
+- In a request whose `runsPreRequestScript` flag is true (#2741), every token
+  read from the merged ladder - body, `pm.variables.get`, `replaceIn` - that a
+  scope defines paints muted with "A pre-request script can change this at
+  send." and opens no popover (`VariableSupport.runsPreRequestScript`); the
+  single-scope accessors and the collection Elements tab are unchanged.
 - A **bare** `{{name}}` anywhere else in a script is muted
   (`vayu-variable-token-runtime`) and read-only: hovering explains that the
   script never interpolates it (the same sentence the "Names mentioned" chip
