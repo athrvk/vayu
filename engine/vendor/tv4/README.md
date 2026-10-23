@@ -7,12 +7,12 @@ with its CRLF line endings made LF, as `.gitattributes` stores every file; it
 is the public-domain dedication, and the MIT text is only linked from the
 package, at <http://jsonary.com/LICENSE.txt>).
 
-- Source: <https://registry.npmjs.org/tv4/-/tv4-1.3.0.tgz>
-- Integrity (registry `dist.integrity`, checked against the tarball):
-  `sha512-afizzfpJgvPr+eDkREK4MxJ/+r8nEEHcmitwgnPUqpaP+FpwQyadnxNoSACbgc/b1LsZYtODGoPiFxQrgJgjvw==`
+- Provenance: the `tv4` entry of `engine/vendor/js-manifest.json` holds the
+  tarball URL, the registry `dist.integrity`, the build and this file's SHA-256.
+  `scripts/vendor-js/rebuild.sh tv4` fetches the tarball, checks the integrity
+  and rebuilds the file; the `VendorJsManifest` tests hash it on every test run.
 - File: `tv4.min.js` is the package's `tv4.js` (56,187 bytes) minified by
-  esbuild (28,767 bytes, 1 line, trailing newline, ASCII only; SHA-256
-  `c28d10ce8ed73805a50f32f630177c75d1a079223d17342615af255ec4fcda9a`). The
+  esbuild (28,767 bytes, 1 line, trailing newline, ASCII only). The
   package ships no minified build. It is build output: do not reformat or edit
   it, rebuild it.
 
@@ -39,19 +39,11 @@ detached from the object (`const v = tv4.validate; v(data, schema)`) throws a
 and `valid` onto the global object. Called as `tv4.validate(...)` it behaves
 the same.
 
-To reproduce, in an empty directory:
-
-```bash
-curl -O https://registry.npmjs.org/tv4/-/tv4-1.3.0.tgz
-tar -xzf tv4-1.3.0.tgz
-npm install --no-save esbuild@0.28.2
-npx esbuild package/tv4.js --minify --legal-comments=none --outfile=tv4.min.js
-```
-
-The result is byte-identical to the committed file. It was checked by
-evaluating it the way the engine does (a strict-mode function with a local
-`module` and `exports`, in a Node `vm` context with no Node globals) and
-comparing 140 verdicts and the first error's message with the unminified
+To reproduce it, run `scripts/vendor-js/rebuild.sh tv4`; the pinned esbuild and its
+exact arguments are the manifest entry's `build`. The result is byte-identical
+to the committed file. It was checked by evaluating it the way the engine does
+(a strict-mode function with a local `module` and `exports`, in a Node `vm`
+context with no Node globals) and comparing 140 verdicts and the first error's message with the unminified
 package on Node: every one matched, and the context's global object gained
 nothing.
 
@@ -68,4 +60,6 @@ The evaluated module holds about 190 KB of the script's memory until the
 execution ends.
 
 To upgrade, rebuild from the new tarball, replace `LICENSE`, and update the
-version, integrity, sizes and hash here. tv4 has had no release since 1.3.0.
+version and sizes here and the manifest entry
+(`docs/engine/building.md#upgrading-a-vendored-library`). tv4 has had no
+release since 1.3.0.

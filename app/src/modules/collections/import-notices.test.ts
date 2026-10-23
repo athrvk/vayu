@@ -429,6 +429,16 @@ describe("importNotices", () => {
 		]);
 	});
 
+	it("tells the user a document with no server URL needs a baseUrl before sending", () => {
+		const notices = importNotices(meta({ skipped: [{ kind: "no_server_url", count: 1 }] }));
+		expect(notices).toEqual([
+			{
+				tier: "action",
+				text: "No server URL in the document - add a baseUrl variable to the collection before sending",
+			},
+		]);
+	});
+
 	it("gives a JMeter class it has no words for a readable line, never a slug", () => {
 		const texts = importNotices(
 			meta({
@@ -634,6 +644,7 @@ describe("the closed set of skipped kinds", () => {
 		// both ways to read nothing).
 		expect(kinds.length).toBeGreaterThan(30);
 		expect(kinds).toContain("oauth2_unmapped_param");
+		expect(kinds).toContain("no_server_url");
 		const unworded = kinds.filter((kind) => {
 			const [notice] = importNotices(meta({ skipped: [{ kind, count: 1 }] }));
 			return notice !== undefined && notice.text === `1 ${kind} not imported`;

@@ -377,6 +377,11 @@ jobs:
             build_script:
               - 'build.py'
               - 'scripts/test/vcpkg_baseline_test.py'
+              # The notices generator walks engine/vendor, so a new library
+              # (or a removed licence) is what this job exists to catch.
+              - 'engine/vendor/**'
+              - 'scripts/generate-third-party-notices.py'
+              - 'scripts/test/third_party_notices_test.py'
               - '.github/workflows/pr-tests.yml'
             installer:
               - 'install.sh'
@@ -1345,12 +1350,13 @@ jobs:
           /bin/bash scripts/test/install_test.sh
           /bin/bash scripts/test/install_e2e.sh
 
-  # build.py's plumbing, on its own job because it needs neither a C++ toolchain
-  # nor Node: throwaway git repositories and python3. Linux only - the code under
-  # test shells out to git, which behaves the same on every runner. This and
-  # `Script lint` are the only jobs that read build.py at all: the app and
-  # engine jobs build through pnpm and the cmake presets directly, which is why
-  # the area filters above no longer route build.py edits into their matrices.
+  # build.py's plumbing and the notices generator, on their own job because
+  # they need neither a C++ toolchain nor Node: throwaway git repositories and
+  # python3. Linux only - the code under test shells out to git, which behaves
+  # the same on every runner. This and `Script lint` are the only jobs that read
+  # build.py at all: the app and engine jobs build through pnpm and the cmake
+  # presets directly, which is why the area filters above no longer route
+  # build.py edits into their matrices.
   build-script:
     name: Build script
     runs-on: ubuntu-24.04
@@ -1368,6 +1374,11 @@ jobs:
 
       - name: Test the stale-vcpkg-baseline self-heal
         run: python3 scripts/test/vcpkg_baseline_test.py
+
+      # Every engine/vendor directory carries a licence, and the installers'
+      # THIRD_PARTY_NOTICES.txt names it (#2693).
+      - name: Test the third-party notices generator
+        run: python3 scripts/test/third_party_notices_test.py
 
   # Shell and Python (#887) - the two languages nothing else in this workflow
   # reads. Both checks are seconds of work on a runner that needs neither a C++

@@ -174,7 +174,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
 - :material-code-braces: **Keep your Postman tests**
 
     A QuickJS runtime implements `pm.test()`, `pm.expect()`,
-    `pm.environment.set()` and `pm.response.*`, so most scripts run unmodified.
+    `pm.environment.set()` and `pm.response.*`, so most scripts run unmodified
+    (not `cheerio`, Backbone or Node built-ins).
 
 - :material-key-variant: **Auth that inherits**
 
@@ -442,7 +443,9 @@ persists.
 
     Most run unmodified. A QuickJS runtime implements the `pm.*` API -
     `pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*` -
-    and [Postman Script Support](app/pm-api-compatibility.md) lists exactly
+    as do the older `tests["..."]` / `postman.*` style and the bundled
+    `require()` libraries; `cheerio`, Backbone and Node built-ins are not
+    there. [Postman Script Support](app/pm-api-compatibility.md) lists exactly
     what is covered.
 
 ??? question "Can my coding agent use it?"

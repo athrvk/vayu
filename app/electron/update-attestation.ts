@@ -43,11 +43,17 @@ export interface InstallerAttestationCheck {
 	/** The release it was downloaded for, without the `v`: `"0.44.0"`. */
 	version: string;
 	/**
-	 * Where `@sigstore/tuf` keeps the TUF metadata and trusted root it refreshes
-	 * from the Sigstore CDN; a directory under the app's `userData`.
+	 * Where the TUF metadata and trusted root refreshed from the Sigstore CDN
+	 * are cached (`sigstore-trusted-root.ts`); a directory under the app's
+	 * `userData`. Laid out as `@sigstore/tuf` laid it out, so a cache an earlier
+	 * build wrote is read as it stands.
 	 */
 	sigstoreCacheDir: string;
-	/** Defaults to Electron's `net.fetch`, which follows the system proxy. */
+	/**
+	 * Defaults to Electron's `net.fetch`, which follows the system proxy. One
+	 * function serves the attestation lookup and the TUF refresh, so neither
+	 * can bypass the proxy on its own.
+	 */
 	fetch?: AttestationFetch;
 	/** Skips the TUF refresh entirely; tests inject a snapshot. */
 	trustedRoot?: SigstoreTrustedRoot;
@@ -91,13 +97,14 @@ async function verify(check: InstallerAttestationCheck): Promise<AttestationResu
 	);
 	if (!digest.ok) return digest;
 
-	const listed = await fetchBundles(digest.value, check.fetch ?? defaultFetch);
+	const fetch = check.fetch ?? defaultFetch;
+	const listed = await fetchBundles(digest.value, fetch);
 	if (!listed.ok) return listed;
 
 	const trustedRoot = check.trustedRoot
 		? { ok: true as const, value: check.trustedRoot }
 		: await attempt(
-				() => loadTrustedRoot(check.sigstoreCacheDir),
+				() => loadTrustedRoot(check.sigstoreCacheDir, fetch),
 				"Couldn't load the Sigstore trusted root"
 			);
 	if (!trustedRoot.ok) return trustedRoot;
@@ -178,9 +185,12 @@ async function fetchBundles(digest: string, fetch: AttestationFetch): Promise<At
 	};
 }
 
-async function loadTrustedRoot(cachePath: string): Promise<SigstoreTrustedRoot> {
-	const { getTrustedRoot } = await import("@sigstore/tuf");
-	return getTrustedRoot({ cachePath });
+async function loadTrustedRoot(
+	cachePath: string,
+	fetch: AttestationFetch
+): Promise<SigstoreTrustedRoot> {
+	const { loadTrustedRoot: refresh } = await import("./sigstore-trusted-root.js");
+	return refresh(cachePath, fetch);
 }
 
 type VerifiedBundle = { bundle: Bundle; signer: Signer };

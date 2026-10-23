@@ -1156,11 +1156,16 @@ Rules worth knowing before you rely on them:
   a send (`script.teardown` aside), every step defers, so a token one step's
   test script stores reaches a later step's `Bearer {{token}}` on every run
   ([Scenario runs](api-reference.md#scenario-runs)).
-- **A single-request load test still does not run pre-request scripts** -
-  only the `tests` (post-request) script runs there. A **scenario** load
-  run's `script.pre` element does now, but only when marked `inline` or
-  forced by the run's `elements.scripts` override (issue #1495) - see
-  [above](#load-test-scripts).
+- **A load run runs a pre-request script only inline.** A `script.pre`
+  element runs under load, in a single-request run's `requestElements` and in
+  a scenario step's elements, only when its `config.inline` is `true` or the
+  run's `elements.scripts` override forces it (issues #1495, #1594). An
+  unmarked one never runs there: it has no deferred pre-request replay to
+  wait for; a scenario step it is left on is reported
+  `preRequestScript: "skipped"` (see
+  [Script elements](#script-elements-design-send-and-the-sequential-run)). A
+  `script.post` that is not inline is replayed afterwards on a sample - see
+  [Load Test Scripts](#load-test-scripts).
 
 ### Header methods (`pm.request.headers`)
 
@@ -3721,8 +3726,12 @@ The **language** is current; what is missing is the **host environment**:
 - Can access `pm.environment`, `pm.collectionVariables` and `pm.globals`
 - Cannot access `pm.response` (request hasn't been sent yet)
 - `pm.info.eventName` is `"prerequest"` here
-- Run in Design Mode / Send only, not in load tests. Since issue #1503 this is
-  no longer silent: a load run reports each affected step as
+- Run in Design Mode / Send and in a collection run. Under load a pre-request
+  script runs only when it is opted in inline (`config.inline: true`, or the
+  run's `elements.scripts` override; see
+  [Script elements](#script-elements-design-send-and-the-sequential-run) and
+  [Load Test Scripts](#load-test-scripts)). A step that is not inlined is not
+  silent about it (issue #1503): a load run reports each as
   `preRequestScript: "skipped"` in its `scenario.steps` breakdown, and the
   run's `warnings` array carries one line naming how many steps did (see
   [api-reference.md](api-reference.md#the-scenario-block-collection-runs)).
@@ -3776,14 +3785,20 @@ The **language** is current; what is missing is the **host environment**:
   also reports `iteration` - the index the sampled submission claimed before it
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
-- `POST /runs`'s `tests` field carries the collection chain's test scripts as
-  well as the request's own, joined into one script the way it always has been
-  (see [Script elements](#script-elements-design-send-and-the-sequential-run)
-  below) - a collection-level assertion is now checked under load, not only in
-  design mode
-- A value a pre-request script would have set - a token fetched and written
-  with `pm.environment.set` - never reaches a later step or request under
-  load, because the script that would set it never runs. The `{{token}}` it
+- `POST /runs` no longer takes a `tests` field: it is refused with a `400`
+  naming `requestElements`, like every legacy script field. The collection chain's
+  test scripts arrive as `script.post` elements in `requestElements`, ahead of
+  the request's own, so a collection-level assertion is checked under load, not
+  only in design mode. Each element not running inline is folded into the one
+  deferred replay, their texts joined in order; an inline one runs in its own
+  context instead (see
+  [Script elements](#script-elements-design-send-and-the-sequential-run)
+  below)
+- For a pre-request script that is **not** inlined, a value it would have set -
+  a token fetched and written with `pm.environment.set` - never reaches a
+  later step or request under load, because the script that would set it never
+  runs (an inline one writes through the virtual user's own overlay, below).
+  The `{{token}}` it
   was meant to fill goes on the wire literally instead of being refused, and
   since issue #1503 the run counts it: `unresolvedTokens` per step, and one
   line in the run's `warnings` array naming a few of the affected variables
@@ -3827,7 +3842,9 @@ shape:
   crowded out by the first. A step with no script is never sampled.
 
 `pm.execution` still throws throughout - a deferred script cannot redirect a
-sequence that already happened - and no step script runs inline.
+sequence that already happened - and a deferred step script never runs inline
+(a step script marked `inline` ran during the run instead; see
+[Script elements](#script-elements-design-send-and-the-sequential-run)).
 
 ## Script elements (design send and the sequential run)
 

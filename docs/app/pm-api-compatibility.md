@@ -9,7 +9,8 @@ Vayu exposes a **Postman-compatible** `pm` scripting API for pre-request and tes
 scripts. Scripts run in the engine's QuickJS runtime
 (`engine/src/runtime/script_engine.cpp`); the global `pm` object is bound there, and most
 of its surfaces live under `engine/src/runtime/pm/`, one file per family. The intent is
-that the most common Postman scripts paste in and run unchanged.
+that the most common Postman scripts paste in and run unchanged; what is not
+supported is listed [below](#not-yet-supported).
 
 > "Postman" is a trademark of Postman, Inc. Vayu is not affiliated with or endorsed by
 > Postman. Vayu re-implements a compatible API surface (method names and behaviour);
@@ -706,8 +707,10 @@ and a throwing collection or folder script errors the step with the level
 named ("Collection pre-request script failed - ..."). An entry stored before
 the field carries no `scope` and reads as the request's.
 
-**A load test runs no pre-request script** (only the `tests` one), so there is
-nothing to assert there before the request.
+**A load test runs a pre-request script only when it is opted in inline**
+(`config.inline`, or the run's `elements.scripts` override; see
+[load-test scripts](../engine/scripting.md#load-test-scripts)), so a check
+before the request has nothing to assert on unless the script is inlined.
 
 **It returns `pm`, and a callback that declares a parameter gets a `done`**
 (issue #1004). Both are Postman's contract - postman-sandbox returns `pm` to
@@ -1432,6 +1435,31 @@ the three scopes behind it.
 Details are in
 [scripting.md](../engine/scripting.md#data-rows-pmiterationdata).
 
+### Migrating from Postman
+
+Every Postman global below runs today, and the import notice
+(`meta.unsupportedScriptApis`) does not name any of them. The table is for
+anyone who wants to modernise a script to `pm.*`; nothing here needs doing for
+it to keep working. The sections after it give each spelling's rules.
+
+| Postman's legacy spelling | `pm.*` replacement |
+|---------------------------|--------------------|
+| `postman.setEnvironmentVariable` / `getEnvironmentVariable` / `clearEnvironmentVariable` | `pm.environment.set` / `get` / `unset` |
+| `postman.setGlobalVariable` / `getGlobalVariable` / `clearGlobalVariable` | `pm.globals.set` / `get` / `unset` |
+| `postman.setNextRequest` | `pm.execution.setNextRequest` |
+| `postman.getResponseHeader` | `pm.response.headers.get` |
+| `postman.getResponseCookie` | `pm.cookies.get(name)` for the value, or `pm.cookies.all()` for the whole cookie object |
+| `tests["name"] = ...` | `pm.test("name", function () { ... })` |
+| `responseBody` | `pm.response.text()`, or `pm.response.json()` for the parsed body |
+| `responseCode` | `pm.response.code` |
+| `responseHeaders` | `pm.response.headers.get(name)` |
+| `responseCookies` | `pm.cookies.all()` |
+| `responseTime` | `pm.response.responseTime` |
+| `environment`, `globals` | `pm.environment.toObject()`, `pm.globals.toObject()` |
+| `data` | `pm.iterationData.toObject()` |
+| `iteration` | `pm.info.iteration` |
+| `request` | `pm.request` (a different shape: the legacy `headers` is a lower-cased object and `data` a form object or the body text, see the table below) |
+
 ### The legacy `postman` object
 
 Postman's pre-`pm.*` helper methods run (#2577), each an alias of the `pm.*`
@@ -1572,7 +1600,9 @@ accepted as given and not read. `clear()` takes no argument.
 
 ## Not (yet) supported
 
-These Postman APIs are **not** implemented - scripts that rely on them will fail:
+These Postman APIs are **not** implemented. A script that calls one throws; a
+read of one of the properties returns `undefined`, and the visualizer is
+accepted and warns:
 
 - `replaceIn(...)` on the **scoped** accessors (`pm.environment.replaceIn`,
   `pm.globals.replaceIn`, `pm.collectionVariables.replaceIn`) - only the merged
@@ -1594,9 +1624,14 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   half and the three mutators named under [Header methods](#header-methods)
   ship
 - Drawing a visualization: `pm.visualizer.set` and `.clear` are accepted and
-  warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
-  show the template in
-- `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
+  draw nothing, and each call logs one `console.warn`, as
+  [above](#visualizer-pmvisualizer); there is no Visualize tab to show the
+  template in. The script keeps running
+- `pm.test.skip`, `pm.test.index`, `pm.require`, `pm.execution.runRequest` and
+  `pm.execution.location`
+- `console.debug` and every other console method beyond `log`, `info`, `warn` and
+  `error` (`console.table`, `console.dir`, `console.time`, ...) - use
+  `console.log`
 - **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment`,
   `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`, `script.packages` and
   the libraries Postman bundles beyond `CryptoJS`, `_`, `xml2Json` and `tv4`** -
@@ -1606,11 +1641,13 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `CryptoJS` member outside that list is named by the import notice, also when
   it is read through an alias or a destructure of `CryptoJS` or
   `require('crypto-js')`, and one inside it is not
-- `Buffer` - the sandbox is not Node. A top-level `await` runs, as it does in
-  Postman: the script body is an async function (see
-  [what a script can compute](../engine/scripting.md#what-a-script-can-compute)).
-  The timers run, without waiting (see
-  [above](#timers-run-before-the-script-ends-and-do-not-wait))
+- The browser and Node globals `fetch`, `XMLHttpRequest`, `process`, `URL`,
+  `URLSearchParams`, `TextEncoder`, `TextDecoder`, `structuredClone`,
+  `localStorage`, `sessionStorage`, `window`, `document` and `alert` - the editor
+  declares each as absent and names the replacement on hover
+- `Buffer` - the sandbox is not Node. Use `btoa` / `atob` for base64 and
+  [`pm.crypto`](#hashing-pmcrypto-is-vayus-own-name-and-it-is-synchronous) for
+  hashing
 - Chai and chai-postman members outside the list in
   [Assertion chains](#assertion-chains-pmexpect), the `require()`-able libraries
   off the shelf (`cheerio`, …) and chai-postman's own `postmanRequest`,

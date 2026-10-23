@@ -364,6 +364,13 @@ interface ElectronAPI {
 	}>;
 	/** Open the logs directory in the OS file manager (Settings, General). */
 	openLogsFolder: () => Promise<string>;
+	/**
+	 * Open the installer's THIRD_PARTY_NOTICES.txt in the OS viewer (Settings,
+	 * General). Resolves with an empty string on success and the reason on
+	 * failure; a development build with no staged copy fails with a sentence
+	 * that says so.
+	 */
+	openThirdPartyNotices: () => Promise<string>;
 
 	/**
 	 * Forward one `error-logger.ts` record to the app's own log file (#1558).

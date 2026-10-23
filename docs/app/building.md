@@ -147,7 +147,22 @@ The app will:
    cp engine/build/Release/vayu-engine.exe app/build/resources/bin/
    ```
 
-3. **Build the app**:
+3. **Generate the third-party notices** into `app/build/`, where the
+   packager reads them (`build.py` does this for you; see
+   [Third-party notices](../engine/building.md#third-party-notices)):
+   ```bash
+   python scripts/generate-third-party-notices.py \
+     --out app/build/THIRD_PARTY_NOTICES.txt --app-dir app \
+     --vcpkg-share engine/build-release/vcpkg_installed/<triplet>/share
+   ```
+
+   `electron-builder.json` ships the file as an `extraResources` entry
+   (`THIRD_PARTY_NOTICES.txt`, loose in `resources/`, not in the asar), so
+   packaging fails when it is missing. The app opens it from Help › Third-party
+   notices and Settings › General (`electron/third-party-notices.ts`). A
+   development run has no staged copy and says so instead of opening a repo path.
+
+4. **Build the app**:
    ```bash
    cd app
    pnpm electron:build
@@ -483,15 +498,21 @@ at runtime:
   identical in its x64 and arm64 halves, which an arm64-only binary always is.
   The pattern is top-level because a platform-level `files` replaces the
   top-level list rather than adding to it
-- **@sigstore/verify**, **@sigstore/bundle** and **@sigstore/tuf**
-  (Apache-2.0): the check that a downloaded installer carries the
-  build-provenance attestation `release.yml` made for that exact release
-  (`electron/update-attestation.ts`, issue #2372). `@sigstore/tuf` refreshes
-  the Sigstore public-good trusted root from the root it embeds and caches it
-  in a directory the caller names. All three are imported on the first
-  verification, so they are not on the startup graph. With their closure
-  (`@sigstore/core`, `@sigstore/protobuf-specs`, `tuf-js`, `@tufjs/models`,
-  `minimatch`) they add about 160 files and 0.8 MB to the asar
+- **@sigstore/verify**, **@sigstore/bundle**, **@sigstore/tuf**,
+  **@sigstore/protobuf-specs** and **tuf-js** (Apache-2.0, MIT for `tuf-js`):
+  the check that a downloaded installer carries the build-provenance
+  attestation `release.yml` made for that exact release
+  (`electron/update-attestation.ts`, issue #2372). The Sigstore public-good
+  trusted root is refreshed by `electron/sigstore-trusted-root.ts`, which
+  builds the `tuf-js` `Updater` itself with a fetcher over the caller's
+  `fetch` (Electron's `net.fetch`, so the system proxy applies, #2738), because
+  `@sigstore/tuf`'s own client downloads with Node's global `fetch`.
+  `@sigstore/tuf` is still listed for the root it embeds (`seeds.json`), the
+  cache layout is the one it wrote, and `@sigstore/protobuf-specs` parses the
+  root it returns. All are imported on the first verification, so they are not
+  on the startup graph. With their closure (`@sigstore/core`, `@tufjs/models`,
+  `minimatch`) they add about 160 files and 0.8 MB to the asar. `tuf-js` needs
+  Node `^22.22.2 || ^24.15.0 || >=26`; Electron 44 bundles 24.21
 
 `electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
 package listed there ships a copy the app never opens: before the test that

@@ -128,6 +128,22 @@ export function extractHost(url: string): string | null {
 }
 
 /**
+ * Why @p url has no host. A host that is a whole `{{token}}` names the variable
+ * and the tools that define it (#2450): "may contain unresolved variables" sent
+ * the user hunting for a variable they could not tell was missing. A stray brace
+ * or an empty URL keeps the generic sentence.
+ */
+function undeterminedHostError(url: string): string {
+	// extractHost tolerates a non-string; so does this.
+	const authority = typeof url === "string" ? authorityOf(url) : "";
+	const unresolved = authority.matchAll(TEMPLATE).next().value;
+	if (unresolved) {
+		return `Could not determine the target host from the request URL: the host is the unresolved variable {{${unresolved[1].trim()}}}. Define it (update_collection variables, or an environment) - resolve_variables shows which names are undefined - then retry.`;
+	}
+	return "Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.";
+}
+
+/**
  * Enforce the target allowlist. An empty allowlist denies everything (safe
  * default). Matching is exact on hostname, case-insensitive. @p host is the
  * session's host, which decides how the refusal tells the user to lift it.
@@ -135,10 +151,7 @@ export function extractHost(url: string): string | null {
 export function checkAllowlist(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
 	const target = extractHost(url);
 	if (!target) {
-		return {
-			ok: false,
-			error: "Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.",
-		};
+		return { ok: false, error: undeterminedHostError(url) };
 	}
 	// "Allow all" bypasses the allowlist entirely (still requires a resolvable host).
 	if (config.allowAll) {

@@ -3,13 +3,13 @@
 The npm package [`csv-parse`](https://www.npmjs.com/package/csv-parse), version
 **1.2.4**, BSD-3-Clause (`LICENSE`, copied from the package's `LICENSE`).
 
-- Source: <https://registry.npmjs.org/csv-parse/-/csv-parse-1.2.4.tgz>
-- Integrity (registry `dist.integrity`, checked against the tarball):
-  `sha512-Mv4Ly6mshOHEIlnVGB/PZtDCT+vyvyCs5Qae/lLeAIlKNR4W7TkmSGmB10uPm7aJQYcTO/rswLzUcYu6wFlAYg==`
+- Provenance: the `csv-parse` entry of `engine/vendor/js-manifest.json` holds the
+  tarball URL, the registry `dist.integrity`, the build and this file's SHA-256.
+  `scripts/vendor-js/rebuild.sh csv-parse` fetches the tarball, checks the integrity
+  and rebuilds the file; the `VendorJsManifest` tests hash it on every test run.
 - File: `csv-parse-sync.min.js` is the package's `lib/sync.js` (865 bytes) and
   the `lib/index.js` it requires (17,868 bytes), bundled and minified by
-  esbuild (11,679 bytes, 7 lines, trailing newline; SHA-256
-  `af59d0d02b63b3c65b9bc31aa36ec83bdf1fab8a4fa413a4c3e3015ae2040f64`). It is
+  esbuild (11,679 bytes, 7 lines, trailing newline). It is
   build output: do not reformat or edit it, rebuild it.
 
 This is the version Postman's sandbox gives `require('csv-parse/lib/sync')`
@@ -42,26 +42,15 @@ records`, so it needs `module` in scope and nothing else: no `Buffer`,
   reaches the caller through `emit('error')`, which the shim throws as Node
   does when nothing listens.
 
-To reproduce, with `<repo>` this checkout:
-
-```bash
-curl -O https://registry.npmjs.org/csv-parse/-/csv-parse-1.2.4.tgz
-tar -xzf csv-parse-1.2.4.tgz
-npm install --no-save esbuild@0.28.2
-SHIMS=<repo>/engine/vendor/csv-parse/node-shims.mjs
-npx esbuild package/lib/sync.js --bundle --format=cjs --platform=neutral \
-  --minify --legal-comments=none \
-  --alias:stream=$SHIMS --alias:util=$SHIMS --alias:string_decoder=$SHIMS \
-  --inject:$SHIMS '--banner:js=(function(){' '--footer:js=})();' \
-  --outfile=csv-parse-sync.min.js
-```
-
-The result is byte-identical to the committed file. It was checked by
-evaluating it the way the engine does (a strict-mode function with a local
-`module` and `exports`, in a context with no Node globals) and comparing 27
-inputs, the error cases included, with the unbundled package running on
-Node's own built-ins: every output and every error message matched.
+To reproduce it, run `scripts/vendor-js/rebuild.sh csv-parse`; the pinned esbuild
+and its exact arguments are the manifest entry's `build`, and `node-shims.mjs`
+is listed there as an input. The result is byte-identical to the committed
+file. It was checked by evaluating it the way the engine does (a strict-mode
+function with a local `module` and `exports`, in a context with no Node
+globals) and comparing 27 inputs, the error cases included, with the
+unbundled package running on Node's own built-ins: every output and every error message matched.
 
 To upgrade within 1.x, rebuild from the new tarball, replace `LICENSE`, and
-update the version, integrity, sizes and hash here. A move to a later major is
-a behaviour change for scripts (the option renames above), not an upgrade.
+update the version and sizes here and the manifest entry
+(`docs/engine/building.md#upgrading-a-vendored-library`). A move to a later
+major is a behaviour change for scripts (the option renames above), not an upgrade.

@@ -3751,7 +3751,7 @@ here. Every other format sends no such key. See
 per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
-`unmapped_body`, `unresolved_base_url`, `unsupported_auth`,
+`unmapped_body`, `unresolved_base_url`, `no_server_url`, `unsupported_auth`,
 `oauth2_dropped_field`, `oauth2_state_regenerated`, `oauth2_unmapped_param`,
 `url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
 `vayu_extension_invalid`. Not every kind is a
@@ -7015,7 +7015,9 @@ response body and the stored trace both carry an `elements` array beside
 `scripts` - one entry per element that ran, each `{id, kind, origin, outcome,
 message?, waitedMs?}` with `outcome` one of `ok` | `failed` |
 `missing` | `skipped` | `error` (a disabled element reports `skipped` without
-its `apply` ever running) - see [Elements](elements.md#the-step-trace).
+its `apply` ever running; a script element reports `error` with the thrown
+message when its script threw and `failed` with the first failed `pm.test` as
+its message when only assertions did not hold) - see [Elements](elements.md#the-step-trace).
 
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and
@@ -8855,9 +8857,10 @@ knob.
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
   the breakdown as `tests` (see `scenario.steps` below). A step with several
-  un-inlined, enabled `script.post` elements replays all of them, joined in
-  order, as a single-request run does; a disabled one never runs and tallies
-  `skipped`. A step that carries
+  un-inlined, enabled `script.post` elements replays all of them as one
+  script, their texts joined in order - only this deferred replay joins; an
+  inline element runs in its own fresh context; a disabled one never runs and
+  tallies `skipped`. A step that carries
   no script, whose script ran inline this run, or whose script never got a
   sampled response, carries no `tests` object at all rather than a row of
   zeros.

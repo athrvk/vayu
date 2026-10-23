@@ -355,6 +355,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	}> => ipcRenderer.invoke("app:getPaths"),
 	// Settings, General's "Open logs folder" button (#1558).
 	openLogsFolder: (): Promise<string> => ipcRenderer.invoke("app:openLogsFolder"),
+	// Settings, General's "Third-party notices" button (#2693). Takes no path:
+	// main knows which file it ships.
+	openThirdPartyNotices: (): Promise<string> => ipcRenderer.invoke("app:openThirdPartyNotices"),
 
 	// Forward one error-logger.ts record to the app's own log file (#1558).
 	// One-way, like setRunProgress/setOsIconSignal below - the caller does not

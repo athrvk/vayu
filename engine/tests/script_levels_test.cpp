@@ -21,7 +21,8 @@
  *
  * Mutation check: assign the runner's result to the slot in
  * `script_kinds.cpp`'s `run_step_script` instead of folding it, and every
- * `ScriptLevelFold` case below fails.
+ * fold case below fails. For the element's own outcome (#2663), restore
+ * `result.success ? "ok" : "error"` there and the failed-assertion cases fail.
  */
 
 #ifndef NOMINMAX
@@ -181,6 +182,106 @@ TEST_F (ScriptLevelFold, TheFirstLevelThatThrewIsTheError) {
     EXPECT_EQ (outcomes[0].message.value_or (""), "XB COLLECTION PRE THROWS");
     EXPECT_EQ (outcomes[1].message.value_or (""), "a later throw is not the first");
     EXPECT_EQ (outcomes[2].status, "ok");
+}
+
+// #2663: a script element's own outcome used to be `error` with an empty
+// message whenever `success` was false, which a failed pm.test also makes it.
+// `error` is for a script that threw, `failed` for one that ran and only
+// disagreed with the response.
+TEST_F (ScriptLevelFold, AFailedAssertionIsFailedWithItsMessageNotAnError) {
+    answers["post"] = asserted ("status is 201", false);
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "failed");
+    EXPECT_EQ (outcomes[0].message.value_or (""),
+    "Test failed - status is 201: expected 1 to deeply equal 2");
+}
+
+TEST_F (ScriptLevelFold, AFailedPreRequestAssertionIsFailedToo) {
+    answers["pre"] = asserted ("sendRequest answered", false);
+
+    const auto outcomes = run (Phase::StepBefore,
+    json::array ({ script_element ("script.pre", "pre", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "failed");
+    EXPECT_NE (outcomes[0].message.value_or (""), "");
+}
+
+TEST_F (ScriptLevelFold, SeveralFailedAssertionsAreCountedAndTheFirstIsNamed) {
+    vayu::ScriptResult two_failures = asserted ("first broken", false);
+    two_failures.tests.push_back (test_named ("second broken", false));
+    two_failures.tests.push_back (test_named ("fine", true));
+    answers["post"] = two_failures;
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "failed");
+    EXPECT_EQ (outcomes[0].message.value_or (""),
+    "2 tests failed - first broken: expected 1 to deeply equal 2");
+}
+
+TEST_F (ScriptLevelFold, AThrowingScriptIsAnErrorWithTheThrownMessage) {
+    answers["post"] = threw ("ReferenceError: nope is not defined");
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "error");
+    EXPECT_EQ (outcomes[0].message.value_or (""), "ReferenceError: nope is not defined");
+}
+
+// A script that failed an assertion and then threw did both; the throw is the
+// fact worth reporting, as classify_step orders them.
+TEST_F (ScriptLevelFold, AThrowAfterAFailedAssertionIsStillAnError) {
+    vayu::ScriptResult both = asserted ("broken", false);
+    both.error_message      = "boom";
+    answers["post"]         = both;
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "error");
+    EXPECT_EQ (outcomes[0].message.value_or (""), "boom");
+}
+
+TEST_F (ScriptLevelFold, ACleanScriptIsOkWithNoMessage) {
+    answers["pre"]  = vayu::ScriptResult{};
+    answers["post"] = asserted ("passes", true);
+
+    const auto before = run (Phase::StepBefore,
+    json::array ({ script_element ("script.pre", "pre", "request") }));
+    const auto after  = run (Phase::StepAfter,
+     json::array ({ script_element ("script.post", "post", "request") }));
+
+    ASSERT_EQ (before.size (), 1u);
+    EXPECT_EQ (before[0].status, "ok");
+    EXPECT_FALSE (before[0].message.has_value ());
+    ASSERT_EQ (after.size (), 1u);
+    EXPECT_EQ (after[0].status, "ok");
+    EXPECT_FALSE (after[0].message.has_value ());
+}
+
+// An element's message describes its own script, not the step's folded list.
+TEST_F (ScriptLevelFold, AnElementsMessageIsAboutItsOwnScriptAlone) {
+    answers["collection_post"] = asserted ("collection must fail", false);
+    answers["request_post"]    = asserted ("request passes", true);
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "collection_post", "collection"),
+    script_element ("script.post", "request_post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 2u);
+    EXPECT_EQ (outcomes[0].status, "failed");
+    EXPECT_EQ (outcomes[1].status, "ok");
+    EXPECT_FALSE (outcomes[1].message.has_value ());
 }
 
 // A declarative assertion runs before a later level's script and writes the

@@ -29,6 +29,10 @@
 		{
 			"from": "../shared/icon_png/vayu_icon_256x256.png",
 			"to": "icon.png"
+		},
+		{
+			"from": "build/THIRD_PARTY_NOTICES.txt",
+			"to": "THIRD_PARTY_NOTICES.txt"
 		}
 	],
 	"asar": true,
