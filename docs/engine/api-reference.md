@@ -8839,9 +8839,10 @@ knob.
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
   the breakdown as `tests` (see `scenario.steps` below). A step with several
-  un-inlined, enabled `script.post` elements replays all of them, joined in
-  order, as a single-request run does; a disabled one never runs and tallies
-  `skipped`. A step that carries
+  un-inlined, enabled `script.post` elements replays all of them as one
+  script, their texts joined in order - only this deferred replay joins; an
+  inline element runs in its own fresh context; a disabled one never runs and
+  tallies `skipped`. A step that carries
   no script, whose script ran inline this run, or whose script never got a
   sampled response, carries no `tests` object at all rather than a row of
   zeros.

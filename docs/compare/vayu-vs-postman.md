@@ -119,7 +119,8 @@ respectively. A file a body or form field names comes across as its path, which
 Vayu sends once you choose the file again or allow its folder in Settings, and
 Digest / AWS / NTLM auth imports as data but will not execute. Most `pm.*` test
 scripts run unmodified, and so do the older ones written with `tests["..."]`,
-`responseBody` and `postman.setEnvironmentVariable` -
+`responseBody` and `postman.*`, and the bundled `require()` libraries; `cheerio`,
+Backbone and Node built-ins are not available -
 [what is covered](../app/pm-api-compatibility.md), and
 [what carries over per format](../app/import-collections/postman.md).
 
