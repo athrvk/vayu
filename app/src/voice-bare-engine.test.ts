@@ -95,6 +95,6 @@ describe("the design-mode rule", () => {
 
 	it("passes the run kinds, and the setting label", () => {
 		expect(hasDesignMode("Vayu's engine stops a Send there")).toBe(false);
-		expect(hasDesignMode("Max Design Response Body")).toBe(false);
+		expect(hasDesignMode("Max Send response body")).toBe(false);
 	});
 });

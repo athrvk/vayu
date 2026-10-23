@@ -59,13 +59,13 @@ const ENGINE_ANSWERED_HINT =
  */
 const ErrorHints: Record<string, string> = {
 	TIMEOUT:
-		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Default Request Timeout in Settings › Network & connectivity, or check the server.",
+		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Default request timeout in Settings › Network & connectivity, or check the server.",
 	CONNECTION_FAILED:
 		"Nothing answered at that address. Check the URL, and that the server is running.",
 	DNS_ERROR:
 		"The host name didn't resolve. Check the domain for typos, and that your network can reach it.",
 	SSL_ERROR:
-		"The certificate wasn't accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings › Network & connectivity › Custom CA Certificates. To skip verification for this request only, turn off Verify TLS certificate in its Settings tab. An https proxy's own certificate is checked by the same two settings.",
+		"The certificate wasn't accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings › Network & connectivity › Custom CA certificates. To skip verification for this request only, turn off Verify TLS certificate in its Settings tab. An https proxy's own certificate is checked by the same two settings.",
 	PROXY_ERROR:
 		"The proxy failed, not the endpoint. Check Settings › Network & connectivity › Proxy, and whether this proxy needs credentials in its URL.",
 	INVALID_URL:

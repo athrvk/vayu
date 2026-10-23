@@ -45,8 +45,15 @@
  * to every row, about 340 B a tool: 134,925 / 132,199 B writes off and
  * 202,291 / 197,894 B writes on, and the caps went to 136,300 / 133,600 and
  * 204,400 / 199,900 (about 1% above each).
- * #2444 (the safety caps and allowlist) and the write-gate task wording add to
- * the instructions, not to `tools/list`, so they spend none of this budget.
+ * The write-gate task wording adds to the instructions, not to `tools/list`,
+ * so it spends none of this budget. #2444's `get_safety_config` (a description
+ * and a small output schema, about 370 B a row) took the rows to 136,673 /
+ * 133,947 B writes off and 204,039 / 199,642 B writes on; the writes-off caps
+ * went to 137,100 / 134,400 and the writes-on caps still hold. #2451's paged
+ * `run_collection_smoke` and the descriptions merged beside it then measured
+ * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
+ * caps went to 137,900 / 135,200 and 205,300 / 200,900 (one measurement plus
+ * a few hundred bytes).
  */
 
 import { describe, it, expect } from "vitest";
@@ -66,10 +73,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 51, maxBytes: 136_300 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 51, maxBytes: 133_600 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 79, maxBytes: 204_400 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 79, maxBytes: 199_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 137_900 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 135_200 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 205_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 200_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

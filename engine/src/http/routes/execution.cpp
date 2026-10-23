@@ -45,6 +45,7 @@
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -659,11 +660,24 @@ bool is_scenario) {
     // a credential spelling `{{$vu}}` defers without a set behind it, and it is
     // this call that finds out. A run whose credentials spell no token parses
     // nothing here and resolves its auth in the build, as it always did.
-    auto row_auth = plan_send_row_auth (
-    json, set ? set->bound_columns : vayu::http::BoundColumnNames{});
+    const auto bound_columns = set ? set->bound_columns : vayu::http::BoundColumnNames{};
+    auto row_auth = plan_send_row_auth (json, bound_columns);
     if (!row_auth.ok) {
         out.ok    = false;
         out.error = std::move (row_auth.error);
+        return out;
+    }
+    // The token is acquired once, at the preflight below and before any script,
+    // so nothing could answer the name and it would reach the token endpoint
+    // as written (#2521).
+    if (auto token = vayu::core::first_oauth2_scope_token (row_auth.auth, bound_columns)) {
+        out.ok    = false;
+        out.error = "Auth credentials carry " + *token +
+        " in an OAuth 2.0 configuration, still a template when the run "
+        "starts. A load run acquires its token once, before any script runs, "
+        "so define the variable and compose the request for a run "
+        "('deferDynamicVariables': true), which resolves it, or write the "
+        "value into the configuration.";
         return out;
     }
     out.auth.auth        = std::move (row_auth.auth);
@@ -1541,6 +1555,9 @@ struct ExecutePayload {
     bool include_parsed_body = true;
     StreamFlag stream;
     RunOrigin origin;
+    /// The hosts the caller allows this send to reach (#2521); none stated
+    /// when absent.
+    std::optional<vayu::http::TargetPolicy> target_policy;
     /// The row this send binds, if the caller named one (issue #601).
     std::optional<nlohmann::json> data_row;
     /// Auth the exchange applies after the pre-request script (issue #2473).
@@ -1578,6 +1595,12 @@ struct DesignSend {
     /// Auth neither the build nor the bind applied, for after the pre-request
     /// script (`apply_late_auth`, issue #2473).
     std::optional<vayu::http::Auth> late_auth;
+    /// Copied from the payload; both paths judge the final URL by it.
+    std::optional<vayu::http::TargetPolicy> target_policy;
+
+    [[nodiscard]] const vayu::http::TargetPolicy* target_policy_or_null () const {
+        return target_policy ? &*target_policy : nullptr;
+    }
 };
 
 
@@ -1665,6 +1688,14 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
         return origin.error ();
     }
 
+    // A malformed policy is a 400 rather than a send nothing holds to it.
+    auto target_policy = vayu::http::read_target_policy (json);
+    if (!target_policy) {
+        vayu::utils::log_warning ("http", "POST /execute - " + target_policy.error ());
+        return ExecuteRefusal{ target_policy.error (),
+            std::string (vayu::http::INVALID_TARGET_POLICY_CODE) };
+    }
+
     // Scripts are elements now (issue #1514's clean cut, no transitional
     // alias): a caller still sending `preRequestScript` / `postRequestScript`
     // / `tests` is refused before anything is built or written, exactly as
@@ -1717,8 +1748,10 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // bind below applies them once the row has reached them.
     const int request_timeout_ms = resolve_request_timeout_ms (json,
     ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-    auto built =
-    vayu::http::build_request (json, &ctx.db, request_timeout_ms, row_auth.resolution);
+    // An OAuth 2.0 token acquired here has its endpoints judged by the policy
+    // before anything is posted (#2521).
+    auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms,
+    row_auth.resolution, *target_policy ? &**target_policy : nullptr, &ctx.server_stopping);
     if (built.parse_failed) {
         vayu::utils::log_warning ("http",
         "POST /execute - Invalid request format: " + built.error_message);
@@ -1778,6 +1811,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     out.include_parsed_body = include_parsed_body.value;
     out.stream              = std::move (stream);
     out.origin              = std::move (*origin);
+    out.target_policy       = std::move (*target_policy);
     out.data_row            = std::move (data_row.value);
     out.built               = std::move (built);
     return std::nullopt;
@@ -1872,6 +1906,7 @@ DesignSend& send) {
     send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
 
     send.data_row            = payload.data_row;
+    send.target_policy       = payload.target_policy;
     send.stream              = payload.stream;
     send.persist_variables   = payload.persist_variables;
     send.include_parsed_body = payload.include_parsed_body;
@@ -1944,20 +1979,28 @@ bool jar_off) {
 
 /**
  * What refuses a streaming send before its stream opens, in the order the
- * buffered send meets them: the residual pass (issue #1008), the auth that
- * waited on the pre-request script (issue #2473), then the file rule
- * (`file_ref.hpp`) over the allowed folders as they stand, code
- * `unsendable_file`.
+ * buffered send meets them: the residual pass (issue #1008), the caller's
+ * target policy (#2521), the auth that waited on the pre-request script
+ * (issue #2473), then the file rule (`file_ref.hpp`) over the allowed folders
+ * as they stand, code `unsendable_file`. A late OAuth 2.0 token request
+ * carries @p cancel, the handler's `server_stopping` (#2683).
  */
 std::optional<ResidualRefusal> refuse_before_stream (vayu::db::Database& db,
 vayu::Request& request,
 std::optional<vayu::http::Auth> late_auth,
-const ScriptVariableScopes& scopes) {
+const ScriptVariableScopes& scopes,
+const vayu::http::TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     if (auto refusal = resolve_residual_tokens (request, scopes)) {
         return refusal;
     }
+    if (auto refusal = refuse_disallowed_target (target_policy, request)) {
+        return refusal;
+    }
     if (late_auth) {
-        if (auto refusal = apply_late_auth (request, std::move (*late_auth), scopes)) {
+        LateTokenAcquisition acquisition{ &db, target_policy, cancel };
+        if (auto refusal =
+            apply_late_auth (request, std::move (*late_auth), scopes, &acquisition)) {
             return refusal;
         }
     }
@@ -2061,6 +2104,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 pre_ctx.transport          = transport;
                 pre_ctx.default_headers    = default_headers;
                 pre_ctx.max_response_bytes = script_response_bound;
+                pre_ctx.cancel             = &ctx.server_stopping;
                 // The same row the transfer below carries, on the same
                 // terms as the buffered path: a stream is still one send,
                 // and one send with a row is iteration 0 of 1.
@@ -2098,8 +2142,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // (issue #1008), here because this path runs the pre-request script itself
     // rather than through `execute_exchange`: a `{{token}}` the script has just
     // defined resolves before the stream opens.
-    if (auto refusal = refuse_before_stream (
-        ctx.db, send.request, std::move (send.late_auth), scopes)) {
+    if (auto refusal =
+        refuse_before_stream (ctx.db, send.request, std::move (send.late_auth),
+        scopes, send.target_policy_or_null (), &ctx.server_stopping)) {
         // What that pass can refuse (issues #1051 and #1084), in the same words
         // the buffered send refuses it with and under the code composition
         // refuses it under; what differs is where the caller reads it, this
@@ -2303,11 +2348,13 @@ std::chrono::steady_clock::time_point handler_start) {
     // no row: it has no iteration index, and a binding that cannot fail is
     // worse than a missing one (issue #300).
     ExchangeInputs inputs;
-    inputs.request      = std::move (send.request);
-    inputs.late_auth    = std::move (send.late_auth);
-    inputs.elements     = send.elements;
-    inputs.request_id   = send.run.request_id;
-    inputs.request_name = send.script_request_name;
+    inputs.request       = std::move (send.request);
+    inputs.late_auth     = std::move (send.late_auth);
+    inputs.token_cache   = &ctx.db;
+    inputs.target_policy = send.target_policy_or_null ();
+    inputs.elements      = send.elements;
+    inputs.request_id    = send.run.request_id;
+    inputs.request_name  = send.script_request_name;
     // Read at the point of use, so a settings change applies to the next
     // send without a restart (issue #705). The body bound is read the same way
     // and for the same reason (issue #1157).
@@ -2316,6 +2363,7 @@ std::chrono::steady_clock::time_point handler_start) {
     ctx.db, vayu::http::DefaultHeaderScope::Design);
     inputs.max_response_bytes     = design_response_body_bound (ctx.db);
     inputs.max_element_body_bytes = element_body_bound (ctx.db);
+    inputs.cancel                 = &ctx.server_stopping;
     // The allowed folders as they stand at this send, read once.
     vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (ctx.db));
     inputs.files = &files;
@@ -2354,8 +2402,9 @@ std::chrono::steady_clock::time_point handler_start) {
     // Taken before the write below and stored *and* returned, so the live
     // body and the restored trace carry one value. Persistence and the final
     // serialisation therefore fall outside it, by construction.
-    const double engine_ms = engine_cost_ms (
-    handler_start, exchange.response, exchange.script_ms, send.auth_fetch_ms);
+    // The build's acquisition or the late one's (#2521): a send has one.
+    const double engine_ms = engine_cost_ms (handler_start, exchange.response,
+    exchange.script_ms, send.auth_fetch_ms + exchange.auth_fetch_ms);
 
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
@@ -2377,6 +2426,18 @@ std::chrono::steady_clock::time_point handler_start) {
     // What auth wrote, so a reader that masks the answer (the MCP server) can
     // tell the credential in `rawRequest` from any other query parameter (#1845).
     record_auth_provenance (body, exchange.request);
+    // The refused rule's code (`ResidualRefusal`), the one a streaming send
+    // answers its 400 with, beside the status-0 response carrying its words.
+    if (!exchange.refusal_code.empty ()) {
+        body["refusalCode"] = exchange.refusal_code;
+        // Auth applied after the script that failed (an OAuth 2.0 token not
+        // acquired, #2521) also carries the hint a build-time failure has.
+        const auto error_code = exchange.response.error_code;
+        if (error_code == vayu::ErrorCode::AuthRequired ||
+        error_code == vayu::ErrorCode::AuthFailed) {
+            body["authErrorCode"] = exchange.refusal_code;
+        }
+    }
     // `replace`: the body is UTF-8 or base64 by now, but a header value off
     // the wire can still carry a byte that is not (#2458).
     res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
@@ -2385,28 +2446,51 @@ std::chrono::steady_clock::time_point handler_start) {
 }
 
 /**
- * Everything a design send does once its run row exists: answer an auth
- * failure, hand a stream to its worker, or run the buffered exchange.
+ * Answer a build that failed once the run row exists: its auth was not applied
+ * (an OAuth 2.0 token not acquired), or the caller's target policy refused the
+ * endpoint that token comes from (#2521). A refusal of the second kind answers
+ * as a refused final URL does, so a token acquired at the build and one
+ * acquired after the script are refused alike: a stream's 400 under the code,
+ * a buffered send's `refusalCode`. Otherwise the failed result is recorded
+ * against the run and the error returned in the body with its
+ * `authErrorCode` (engine returns 200; the status lives in the body).
+ */
+void answer_failed_build (RouteContext& ctx,
+httplib::Response& res,
+const vayu::http::RequestBuild& built,
+DesignSend& send) {
+    const bool target_refused = vayu::http::is_target_refusal_code (built.detail_code);
+    if (target_refused && send.stream.value) {
+        const std::string run_id = vayu::utils::invariant_value (
+        send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
+        refuse_stream_before_it_opens (
+        ctx, res, run_id, 400, built.error_message, built.detail_code);
+        return;
+    }
+    vayu::Response failed;
+    failed.status_code   = 0;
+    failed.status_text   = vayu::http::status_text (0);
+    failed.error_code    = built.error_code;
+    failed.error_message = built.error_message;
+    record_design_result (ctx.db, send.run_id, send.request, failed);
+    res.status          = 200;
+    nlohmann::json body = vayu::json::serialize (failed);
+    body[target_refused ? "refusalCode" : "authErrorCode"] = built.detail_code;
+    res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
+    "application/json");
+}
+
+/**
+ * Everything a design send does once its run row exists: answer a failed
+ * build, hand a stream to its worker, or run the buffered exchange.
  */
 void dispatch_design_send (RouteContext& ctx,
 httplib::Response& res,
 const vayu::http::RequestBuild& built,
 DesignSend& send,
 std::chrono::steady_clock::time_point handler_start) {
-    // Auth failure: record a failed result against the run and return the
-    // error in the body (engine returns 200; the status lives in the body).
     if (!built.ok) {
-        vayu::Response auth_resp;
-        auth_resp.status_code   = 0;
-        auth_resp.status_text   = vayu::http::status_text (0);
-        auth_resp.error_code    = built.error_code;
-        auth_resp.error_message = built.error_message;
-        record_design_result (ctx.db, send.run_id, send.request, auth_resp);
-        nlohmann::json body   = vayu::json::serialize (auth_resp);
-        body["authErrorCode"] = built.detail_code;
-        res.status            = 200;
-        res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
-        "application/json");
+        answer_failed_build (ctx, res, built, send);
         return;
     }
 
@@ -2576,14 +2660,16 @@ const nlohmann::json& json) {
  */
 /**
  * Every refusal `POST /runs` makes on the payload alone, before a run row
- * exists - so a rejected request leaves nothing behind. @p origin receives the
- * payload's `origin`, which is read here because reading it is validating it.
+ * exists - so a rejected request leaves nothing behind. @p origin and
+ * @p target_policy receive the payload's `origin` and `targetPolicy`, which are
+ * read here because reading them is validating them.
  */
 std::optional<RouteError> validate_load_request (RouteContext& ctx,
 nlohmann::json& json,
 bool is_scenario,
 bool is_scenario_load,
-RunOrigin& origin) {
+RunOrigin& origin,
+std::optional<vayu::http::TargetPolicy>& target_policy) {
     // Refused before the run row exists, and never quietly downgraded to a
     // closed-loop mode: a run that measured something other than what was
     // asked for is worse than no run at all.
@@ -2652,6 +2738,17 @@ RunOrigin& origin) {
     }
     origin = std::move (*read_origin);
 
+    // Read again by the run itself (`RunContext::target_policy`); refused here
+    // so a malformed one leaves no run behind, and kept for the token
+    // acquisitions the plan and the pre-flight make before the run exists.
+    auto policy = vayu::http::read_target_policy (json);
+    if (!policy) {
+        vayu::utils::log_warning ("http", "POST /runs - " + policy.error ());
+        return RouteError{ 400,
+            error_body (400, policy.error (), vayu::http::INVALID_TARGET_POLICY_CODE) };
+    }
+    target_policy = std::move (*policy);
+
     // Validate required fields
     if (!is_scenario) {
         if (!json.contains ("method") || !json.contains ("url")) {
@@ -2708,12 +2805,18 @@ RunOrigin& origin) {
  */
 std::optional<RouteError> resolve_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
+bool is_scenario_load,
+const vayu::http::TargetPolicy* target_policy,
 std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
 nlohmann::json& scenario_manifest) {
     vayu::core::ScenarioResolveOptions options;
+    // Only the sequential runner's steps acquire their token at the send.
+    options.oauth2_after_scripts = !is_scenario_load;
+    options.target_policy        = target_policy;
     if (auto it = json.find ("environmentId"); it != json.end () && it->is_string ()) {
         options.environment_id = it->get<std::string> ();
     }
+    options.cancel           = &ctx.server_stopping;
     options.timeout_ms       = resolve_request_timeout_ms (json,
           ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
     options.limits.max_steps = static_cast<size_t> (ctx.db.get_config_int (
@@ -2729,7 +2832,9 @@ nlohmann::json& scenario_manifest) {
     if (!resolved.ok) {
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid scenario: " + resolved.error);
-        return RouteError{ 400, error_body (400, resolved.error, "invalid_scenario") };
+        return RouteError{ 400,
+            error_body (400, resolved.error,
+            resolved.error_code.empty () ? "invalid_scenario" : resolved.error_code) };
     }
     scenario_manifest = vayu::core::build_scenario_manifest (
     resolved.request, resolved.plan, resolved.spec);
@@ -2769,10 +2874,11 @@ nlohmann::json& scenario_manifest) {
 std::optional<RouteError> resolve_and_validate_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
 bool is_scenario_load,
+const vayu::http::TargetPolicy* target_policy,
 std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
 nlohmann::json& scenario_manifest) {
-    if (auto rejection =
-        resolve_run_scenario (ctx, json, scenario_execution, scenario_manifest)) {
+    if (auto rejection = resolve_run_scenario (ctx, json, is_scenario_load,
+        target_policy, scenario_execution, scenario_manifest)) {
         return rejection;
     }
     if (!is_scenario_load) {
@@ -2799,10 +2905,14 @@ nlohmann::json& scenario_manifest) {
  * A scenario payload carries no run-level `auth` - each step's auth was
  * resolved at plan time, and a step that could not be authorized already failed
  * resolution with a 400 - so this is the single-request path's check alone.
+ * An OAuth 2.0 token endpoint @p target_policy refuses is a 400 under the
+ * policy's code, before anything is posted (#2521).
  */
-std::optional<RouteError> preflight_run_auth (RouteContext& ctx, const nlohmann::json& json) {
-    auto preflight =
-    vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+std::optional<RouteError> preflight_run_auth (RouteContext& ctx,
+const nlohmann::json& json,
+const vayu::http::TargetPolicy* target_policy) {
+    auto preflight = vayu::http::preflight_auth (
+    json.value ("auth", nlohmann::json ()), ctx.db, target_policy, &ctx.server_stopping);
     if (!preflight.ok) {
         vayu::utils::log_warning (
         "http", "POST /runs - Auth pre-flight failed: " + preflight.message);
@@ -2954,18 +3064,22 @@ httplib::Response& res) {
     const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
 
     RunOrigin origin;
-    if (auto rejection =
-        validate_load_request (ctx, json, is_scenario, is_scenario_load, origin)) {
+    std::optional<vayu::http::TargetPolicy> target_policy;
+    if (auto rejection = validate_load_request (
+        ctx, json, is_scenario, is_scenario_load, origin, target_policy)) {
         res.status = rejection->status;
         res.set_content (rejection->body.dump (), "application/json");
         return;
     }
 
+    const vayu::http::TargetPolicy* target_policy_ptr =
+    target_policy ? &*target_policy : nullptr;
+
     std::shared_ptr<const vayu::core::ScenarioExecution> scenario_execution;
     nlohmann::json scenario_manifest;
     if (is_scenario) {
-        if (auto rejection = resolve_and_validate_run_scenario (ctx, json,
-            is_scenario_load, scenario_execution, scenario_manifest)) {
+        if (auto rejection = resolve_and_validate_run_scenario (ctx, json, is_scenario_load,
+            target_policy_ptr, scenario_execution, scenario_manifest)) {
             res.status = rejection->status;
             res.set_content (rejection->body.dump (), "application/json");
             return;
@@ -3027,7 +3141,7 @@ httplib::Response& res) {
     log_started_run (json, run, run_id, scenario_execution.get ());
 
     if (!is_scenario) {
-        if (auto rejection = preflight_run_auth (ctx, json)) {
+        if (auto rejection = preflight_run_auth (ctx, json, target_policy_ptr)) {
             res.status = rejection->status;
             res.set_content (rejection->body.dump (), "application/json");
             return;

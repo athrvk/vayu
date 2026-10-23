@@ -238,7 +238,7 @@ The engine keeps one cookie jar per environment for design-mode requests
 
 ```typescript
 apiService.getFileRoots(): Promise<FileRoot[]>                 // GET /file-roots, a bare array
-apiService.allowChosenFolder(options?): Promise<AllowFolderReply>  // picker in main, then POST /file-roots
+apiService.allowChosenFolder(): Promise<AllowFolderReply>     // picker in main, then POST /file-roots
 apiService.deleteFileRoot(id: string): Promise<void>           // main's DELETE /file-roots/:id
 ```
 
@@ -251,7 +251,7 @@ which only the main process holds, so they cross the Electron bridge
 
 | `electronAPI` method | Channel | What main does |
 |---|---|---|
-| `allowFolder({defaultPath?, title?})` | `file:allowFolder` | Opens the system folder picker at `defaultPath`, then `POST /file-roots` with the folder the user chose and the secret. The renderer names only where the picker opens, never the folder. |
+| `allowFolder(key)` | `file:allowFolder` | Opens the system folder picker, then `POST /file-roots` with the folder the user chose and the secret. The renderer names the dialog by key (`"allow-folder"`, `FOLDER_DIALOG_TITLES` in `electron/file-ipc.ts`) and nothing else: the title is main's, the picker opens where the last one ended in this process (the first call, none), and an unknown or non-string key rejects (#2378). |
 | `removeAllowedFolder(id)` | `file:removeAllowedFolder` | `DELETE /file-roots/:id` with the secret, for an id shaped like one the engine mints. |
 
 Both answer only the app window's main frame (`electron/ipc-sender.ts`) and
@@ -1030,6 +1030,14 @@ unbounded and are never read for one; once the run is terminal its row carries
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
 unchanged - every send site composes first, so nothing is interpolated twice.
+For a request a pre-request script runs before, the answer keeps the names a
+scope answers written as `{{name}}` and lists them in `deferredVariables`
+(issue #2521; a `ComposedRequest` member, sorted, absent when none): the send
+resolves them after the script. The list describes the composition, not the
+request, so the composing hook drops it from the payload a send posts onward
+to `/execute` or `/runs`, and only the Code section, which calls
+`apiService.composeRequest` itself, reads it. A send also states nothing about
+hosts: only the MCP server attaches a `targetPolicy` to its sends.
 
 **GraphQL schema introspection is a send site too** (`lib/graphql/introspect.ts`,
 issue #228): it composes the endpoint, overlays the introspection query onto the

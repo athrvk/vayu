@@ -1175,7 +1175,8 @@ httplib::DataSink& sink) {
 /**
  * The inbox stream itself. Always answers `false` - the provider is done when
  * this returns - and releases the claim on every ending except a lost one,
- * where the slot already belongs to the stream that took it over.
+ * where the slot already belongs to the stream that took it over. A stopping
+ * server ends it too (#2683): the inbox outlives `Server::stop()`.
  */
 bool stream_inbox_live (RouteContext& ctx,
 const std::string& inbox_id,
@@ -1183,7 +1184,7 @@ const InboxLimits& limits,
 vayu::http::LiveClaim claim,
 int64_t last_id,
 httplib::DataSink& sink) {
-    while (sink.is_writable ()) {
+    while (sink.is_writable () && !ctx.server_stopping) {
         const InboxStep step =
         stream_inbox_step (ctx, inbox_id, limits, claim, last_id, sink);
         if (step == InboxStep::ClaimLost) {

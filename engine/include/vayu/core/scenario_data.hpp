@@ -565,10 +565,22 @@ const vayu::http::BoundColumnNames& bound_columns = {});
  * base64-encoded a basic pair, so a request whose credentials answer this
  * applies its auth after the script instead (`http::routes::apply_late_auth`),
  * which is also Postman's order. Over the same `walk_auth_credentials` the bind
- * uses, so OAuth 2.0 is never answered here: its token is acquired before the
- * send, never deferred.
+ * uses, plus every string of an OAuth 2.0 config (#2521): such a config is
+ * resolved and its token acquired after the script, by a send that holds the
+ * token cache. A load run, which acquires once at plan time, refuses one.
  */
 [[nodiscard]] bool credentials_await_scripts (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns = {});
+
+/**
+ * The first `{{name}}` in @p auth's OAuth 2.0 configuration that only the
+ * variable scopes answer, written back with its braces, or `nullopt` - for any
+ * other mode too. The OAuth 2.0 half of @ref credentials_await_scripts, named
+ * so a load run, which acquires its token once before any script, can refuse
+ * the config by the token it holds (#2521).
+ */
+[[nodiscard]] std::optional<std::string> first_oauth2_scope_token (
+const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
@@ -576,15 +588,15 @@ const vayu::http::BoundColumnNames& bound_columns = {});
  * OAuth 2.0 configuration, or `nullopt` - for any other mode as well as for an
  * oauth2 config carrying none.
  *
- * **OAuth 2.0 is the one mode deferral cannot serve**, and this is the check
- * that says so, for both callers that defer. Its token is acquired against the
- * token endpoint once - when a plan is resolved, or before a single send leaves
- * - so there is no later moment at which a row could reach the acquisition, the
- * way binding a credential before `apply_auth` encodes it reaches every other
- * mode. The identity is refused for the same reason and not a weaker one: it is
- * known per iteration, and the acquisition happens before any iteration exists
- * (issue #1055). Refused by name rather than sent to the token endpoint as the
- * literal token text.
+ * **OAuth 2.0 is the one mode the row bind cannot serve**, and this is the
+ * check that says so, for both callers that defer. Its token is acquired
+ * against the token endpoint - once when a load plan is resolved, or at a
+ * single send or sequential step - and never bound per iteration, so a row has
+ * no way to reach the acquisition, the way binding a credential before
+ * `apply_auth` encodes it reaches every other mode. The identity is refused
+ * for the same reason (issue #1055): it is an iteration's, and the bind is the
+ * only thing that answers it. Refused by name rather than sent to the token
+ * endpoint as the literal token text.
  *
  * Every other mode's credentials are walked by `walk_auth_credentials` and
  * bound; an oauth2 config is deliberately absent from that walk, which is why

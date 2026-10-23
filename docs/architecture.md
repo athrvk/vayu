@@ -193,7 +193,9 @@ lives in a localStorage-backed store main cannot see - over `notify:show`
 (`services/notify.ts`); `electron/notify.ts` decides *whether and how*, from the
 window's focus and the platform's support, and answers `notify:availability`
 for the settings row. Nothing is posted while the window is focused - the toast
-already said it. A run an agent started over MCP notifies like any other: the
+already said it. Main treats the request as untrusted: it accepts only the ten
+kinds it lists itself, caps the title at 80 and the body at 240 characters, and
+drops control characters (issue #2378). A run an agent started over MCP notifies like any other: the
 renderer is told the run began and watches it from that moment, so its end
 reaches the user who handed it over and walked away - which is the case the
 setting exists for (issue #1419). Windows shows nothing at all unless
@@ -678,6 +680,20 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   the updater offered. Electron fuses turn off `ELECTRON_RUN_AS_NODE`,
   `NODE_OPTIONS`, `--inspect` and non-ASAR loads in a packaged build, and
   `isDevelopmentBuild()` (`electron/dev-mode.ts`) requires `!app.isPackaged`.
+- **The updater installs only a verified installer (#2372)**: on the silent
+  platforms (Windows, Linux AppImage) `electron/updater.ts` holds the
+  downloaded file back until `electron/update-attestation.ts` has looked up its
+  SHA-256 in GitHub's attestations API, verified each Sigstore bundle against
+  the public-good trusted root (refreshed through `@sigstore/tuf`), and found
+  the signer to be `release.yml` in `athrvk/vayu` at the tag `v<version>` with a
+  SLSA v1 subject naming that digest. `update:downloaded`, restart-to-install
+  and the quit-time install all wait for it; a failure sends
+  `update:verificationFailed` instead and the file is never installed. Any
+  failure, including a network one, refuses: there is no path that accepts after
+  an error. The check proves the file came out of that workflow run, not that
+  the run was honest, and the trusted-root refresh uses Node's `fetch`, so it
+  does not follow the system proxy; both limits are stated in
+  [SECURITY.md](https://github.com/athrvk/vayu/blob/master/SECURITY.md#releases).
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth
   sign-in window - is created with `spellcheck: false`, so Chromium checks

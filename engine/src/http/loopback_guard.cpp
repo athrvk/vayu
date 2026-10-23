@@ -13,8 +13,6 @@
 
 #include "vayu/http/loopback_guard.hpp"
 
-#include <ada.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -23,6 +21,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/url_parts.hpp"
 
 namespace vayu::http {
 
@@ -35,28 +34,6 @@ constexpr int MAX_PORT = 65535;
 std::atomic<int>& engine_port_slot () noexcept {
     static std::atomic<int> slot{ 0 };
     return slot;
-}
-
-/**
- * @p host as a URL parser serialises it, or nullopt when it is not a host.
- *
- * WHATWG's host parser (ada, already the engine's IDNA reader) rather than a
- * private one, because the spellings that matter here are the lenient ones:
- * `127.1`, `0x7f.0.0.1` and `2130706433` are all `127.0.0.1` to libcurl, and
- * an IPv6 literal has as many spellings as it has zero runs. The parser
- * folds each to one form: a dotted quad, a lower-cased name, or a bracketed,
- * compressed IPv6 address (`[::1]`, `[::ffff:7f00:1]`).
- */
-std::optional<std::string> canonical_host (std::string_view host) {
-    std::string text (host);
-    if (text.find (':') != std::string::npos && !text.starts_with ('[')) {
-        text = "[" + text + "]"; // the bracketless form `parse_authority` and libcurl report
-    }
-    auto url = ada::parse<ada::url> ("http://x");
-    if (!url || !url->set_hostname (text)) {
-        return std::nullopt;
-    }
-    return url->get_hostname ();
 }
 
 /// A canonical dotted quad: four runs of digits. A domain such as
@@ -137,16 +114,23 @@ bool is_loopback_source (std::string_view host) {
     return is_local_host (host) || host.ends_with (".localhost");
 }
 
-/// Whether @p rule's source is the peer at @p peer (canonical) on its port.
-bool is_source_peer (std::string_view peer, int peer_port, const LocalPeerRule& rule) {
-    if (rule.source_host.empty () || rule.source_port != peer_port) {
+/// Whether the canonical @p host on @p port is what a URL naming @p named_host
+/// on @p named_port reaches: the same host, or loopback for a loopback name or
+/// address. A name that only resolves to loopback names nothing here.
+bool is_named_by (std::string_view host, int port, std::string_view named_host, int named_port) {
+    if (named_host.empty () || named_port != port) {
         return false;
     }
-    const auto source = canonical_host (rule.source_host);
-    if (!source) {
+    const auto named = canonical_host (named_host);
+    if (!named) {
         return false;
     }
-    return *source == peer || (is_local_host (peer) && is_loopback_source (*source));
+    return *named == host || (is_loopback_source (host) && is_loopback_source (*named));
+}
+
+/// Whether @p rule's source is the canonical @p host on @p port.
+bool is_source_host (std::string_view host, int port, const LocalPeerRule& rule) {
+    return is_named_by (host, port, rule.source_host, rule.source_port);
 }
 
 } // namespace
@@ -218,7 +202,26 @@ bool is_refused_local_peer (std::string_view peer_ip, int peer_port, const Local
     if (!is_local_host (*peer) && !is_link_local_host (*peer)) {
         return false;
     }
-    return !is_source_peer (*peer, peer_port, rule);
+    return !is_source_host (*peer, peer_port, rule);
+}
+
+bool is_peer_named_by (std::string_view peer_ip, int peer_port, std::string_view named_host, int named_port) {
+    const auto peer = canonical_host (peer_ip);
+    return peer && is_named_by (*peer, peer_port, named_host, named_port);
+}
+
+bool is_refused_reference_url (const std::string& url, const LocalPeerRule& rule) {
+    const detail::UrlAuthority authority = detail::parse_authority (url);
+    const auto host                      = canonical_host (authority.host);
+    // An IPv6 literal the host parser cannot read (a zone id) is refused: behind
+    // a proxy no connected peer is left to judge it.
+    if (!host) {
+        return authority.host.find (':') != std::string::npos;
+    }
+    if (!is_loopback_source (*host) && !is_link_local_host (*host)) {
+        return false;
+    }
+    return !is_source_host (*host, authority.port, rule);
 }
 
 std::string local_peer_refusal () {

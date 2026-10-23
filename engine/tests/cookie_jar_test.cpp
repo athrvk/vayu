@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <memory>
@@ -1059,6 +1060,8 @@ TEST (CookieJarWrite, AWrittenCookieIsMatchedByTheSameRulesAReceivedOneIs) {
     CookieServer server;
     vayu::Environment env;
 
+    // The write scope (#2631) refuses this one before matching ever runs; what
+    // is asserted is only that nothing for example.com reaches the transfer.
     CookieJar other_host;
     const auto wrong_host = send_after_script (other_host,
     "env_a", "pm.cookies.jar().set('https://example.com/', { name: 'session', value: 'x' });",
@@ -1778,20 +1781,331 @@ TEST (CookieJarReadScope, TheFlatReadHalfIsNotAffected) {
     EXPECT_TRUE (warnings_of (result).empty ());
 }
 
-TEST (CookieJarReadScope, WritesToAnotherSiteStayOpenAndAreNotWarnedAbout) {
-    // Decision 1 of #337: a write is scoped by the URL it names, not by the
-    // request. Only the read half is limited to the request's site.
+// ============================================================================
+// The write scope - set / unset / clear(url) reach the same sites reads do
+// (issue #2631)
+// ============================================================================
+
+namespace {
+
+/// `run_jar_read`, with a sink for the writes and the writes then applied to
+/// @p jar, as the route does after a post-request script.
+vayu::ScriptResult run_jar_write (CookieJar& jar,
+const std::string& request_url,
+const std::string& script,
+vayu::Environment& env) {
+    vayu::runtime::ScriptConfig config;
+    config.allow_send_request = true;
+    vayu::runtime::ScriptEngine engine (config);
+
+    vayu::Request request = get_request (request_url);
+    std::vector<vayu::http::CookieWrite> writes;
+    vayu::runtime::ScriptContext ctx =
+    vayu::runtime::ScriptContext::for_prerequest (request);
+    ctx.environment   = &env;
+    ctx.cookie_jar    = &jar;
+    ctx.cookie_scope  = "env_a";
+    ctx.cookie_writes = &writes;
+    const auto result = engine.execute (script, ctx);
+    jar.apply ("env_a", writes);
+    return result;
+}
+
+/// Whether anything in scope "env_a" is stored for @p host, whatever its path.
+bool jar_holds_for (const CookieJar& jar, const std::string& host) {
+    return !jar.matching ("env_a", "http://" + host + "/").empty ();
+}
+
+} // namespace
+
+TEST (CookieJarWriteScope, ADomainOfAnotherSiteIsRefusedWithAPathAndWithout) {
+    // The cookie-fixation case: the URL is the request's own, the cookie's
+    // Domain is not. With a path the old code returned before reading the URL;
+    // without one it never compared the domain to the host.
     CookieJar jar;
     vayu::Environment env;
 
-    const std::string error = apply_after_script (jar, "env_a",
-    "pm.cookies.jar().set('http://b.test/', { name: 'planted', value: 'v' });",
-    "http://a.test/users", env);
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "jar.set('http://a.test/', { name: 'sid', value: 'attacker', "
+    "domain: 'victim.test', path: '/' });"
+    "jar.set('http://a.test/', { name: 'sid2', value: 'attacker', "
+    "domain: 'victim.test' });"
+    "jar.set('http://a.test/', { name: 'sid3', value: 'attacker', "
+    "domain: '.victim.test', path: '/' });",
+    env);
 
-    EXPECT_TRUE (error.empty ()) << error;
-    const auto planted = jar.matching ("env_a", "http://b.test/");
-    ASSERT_EQ (planted.size (), 1u);
-    EXPECT_EQ (planted[0].name, "planted");
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (jar.snapshot ().empty ())
+    << "a cookie for another site's domain was stored";
+    EXPECT_FALSE (jar_holds_for (jar, "victim.test"));
+
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 3u) << "one warning per refused write";
+    for (const auto& message : warned) {
+        EXPECT_NE (message.find ("victim.test"), std::string::npos) << message;
+        EXPECT_NE (message.find ("a.test"), std::string::npos)
+        << "the warning does not name the site writes are limited to: " << message;
+        EXPECT_EQ (message.find ("attacker"), std::string::npos)
+        << "the warning carries a cookie value: " << message;
+        EXPECT_EQ (message.find ("http://"), std::string::npos)
+        << "the warning carries a URL: " << message;
+    }
+}
+
+TEST (CookieJarWriteScope, ADomainIsComparedAsTheJarKeysIt) {
+    // Case, a leading dot, a trailing-dot lookalike and a non-ASCII name must
+    // not each be a way past a comparison made on the raw text.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "for (const domain of ['VICTIM.test', '.Victim.TEST', 'evila.test', "
+    "'bücher.test']) {"
+    "  jar.set('http://a.test/', { name: 'sid', value: 'x', domain, path: '/' "
+    "});"
+    "}",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (jar.snapshot ().empty ())
+    << "a spelling of a foreign domain got past the scope";
+    EXPECT_EQ (warnings_of (result).size (), 4u);
+}
+
+TEST (CookieJarWriteScope, AForeignUrlIsRefusedAndTheCallIsStillANormalNoOp) {
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "const stored = jar.set('http://b.test/', { name: 'planted', value: 'v' },"
+    "  (err, cookie) => pm.environment.set('cb', String(err) + ':' + "
+    "cookie.name));"
+    "pm.environment.set('ret', stored.name);"
+    "jar.set('http://b.test/', 'flat', 'v');",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (jar.snapshot ().empty ())
+    << "a write for another site was staged";
+    EXPECT_EQ (env["cb"].value, "null:planted")
+    << "a refused write skipped its callback";
+    EXPECT_EQ (env["ret"].value, "planted");
+
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 2u);
+    for (const auto& message : warned) {
+        EXPECT_NE (message.find ("b.test"), std::string::npos) << message;
+    }
+}
+
+TEST (CookieJarWriteScope, UnsetAndClearOfAnotherSitesUrlLeaveItsCookiesAndWarn) {
+    CookieJar jar;
+    store_two_sites (jar);
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "const name = jar.unset('http://b.test/', 'session', "
+    "  (err, n) => pm.environment.set('unset_cb', String(err) + ':' + n));"
+    "pm.environment.set('unset_ret', name);"
+    "jar.clear('http://b.test/', "
+    "  (err) => pm.environment.set('clear_cb', String(err)));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (jar.matching ("env_a", "http://b.test/").size (), 1u)
+    << "a script deleted the cookies of a site it may not name";
+    EXPECT_EQ (jar.matching ("env_a", "http://a.test/").size (), 1u);
+    EXPECT_EQ (env["unset_cb"].value, "null:session");
+    EXPECT_EQ (env["unset_ret"].value, "session");
+    EXPECT_EQ (env["clear_cb"].value, "null");
+
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 2u);
+    for (const auto& message : warned) {
+        EXPECT_NE (message.find ("b.test"), std::string::npos) << message;
+    }
+}
+
+TEST (CookieJarWriteScope, ArgumentsAreValidatedBeforeTheScopeIsAsked) {
+    // A refusal for scope must not mask the error a bad argument already
+    // earns, and must not warn about a call that was never going to happen.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "pm.cookies.jar().set('http://b.test/', { name: 'n', value: 'v' }, "
+    "'not a function');",
+    env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("callback must be a function"), std::string::npos)
+    << result.error_message;
+    EXPECT_TRUE (warnings_of (result).empty ());
+}
+
+TEST (CookieJarWriteScope, ADomainOfTheRequestsOwnSiteStillStores) {
+    // `Domain=a.test` set from a request to www.a.test is what a Set-Cookie
+    // there would do, and what a login script writes.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://www.a.test/users",
+    "const jar = pm.cookies.jar();"
+    "jar.set('http://www.a.test/', { name: 'apex', value: 'v', domain: "
+    "'a.test', path: '/' });"
+    "jar.set('http://www.a.test/', { name: 'dotted', value: 'v', domain: "
+    "'.a.test' });"
+    "jar.set('http://a.test/', { name: 'own', value: 'v' });",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (warnings_of (result).empty ());
+    // `Domain=a.test` without a dot is host-only on the apex; `.a.test` is the
+    // one a subdomain carries too.
+    EXPECT_EQ (jar.matching ("env_a", "http://a.test/").size (), 3u)
+    << "a write inside the request's site was refused";
+    EXPECT_EQ (jar.matching ("env_a", "http://www.a.test/").size (), 1u);
+}
+
+TEST (CookieJarWriteScope, ASingleLabelDomainIsRefusedBecauseItReachesEverySiteUnderIt) {
+    // `.test` is a parent of the request host, so the site rule alone admits
+    // it - and the cookie would then ride every transfer to victim.test.
+    // There is no public-suffix list (#2731); the cheap guard is the label count.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "for (const domain of ['.test', 'test', 'TEST']) {"
+    "  jar.set('http://a.test/', { name: 'sid', value: 'x', domain, path: '/' "
+    "});"
+    "  jar.set('http://a.test/', { name: 'sid2', value: 'x', domain });"
+    "}",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (jar.snapshot ().empty ())
+    << "a cookie for a top-level domain was stored";
+    EXPECT_FALSE (jar_holds_for (jar, "victim.test"));
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 6u);
+    for (const auto& message : warned) {
+        EXPECT_NE (message.find ("single-label"), std::string::npos) << message;
+    }
+}
+
+TEST (CookieJarWriteScope, ASingleLabelDomainIsAllowedForTheExactHostAndASubdomainStays) {
+    {
+        // A host with no dot in it (`localhost`) is the only thing its own
+        // cookie domain can be.
+        CookieJar jar;
+        vayu::Environment env;
+        const auto result = run_jar_write (jar, "http://localhost/users",
+        "const jar = pm.cookies.jar();"
+        "jar.set('http://localhost/', { name: 'a', value: 'v', domain: "
+        "'localhost', path: '/' });"
+        "jar.set('http://localhost/', { name: 'b', value: 'v', domain: "
+        "'localhost' });",
+        env);
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_TRUE (warnings_of (result).empty ());
+        EXPECT_EQ (jar.matching ("env_a", "http://localhost/").size (), 2u);
+    }
+    {
+        CookieJar jar;
+        vayu::Environment env;
+        const auto result = run_jar_write (jar, "http://a.test/users",
+        "pm.cookies.jar().set('http://a.test/', { name: 'sub', value: 'v', "
+        "domain: 'evil.a.test', path: '/' });",
+        env);
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_TRUE (warnings_of (result).empty ());
+        EXPECT_EQ (jar.matching ("env_a", "http://evil.a.test/").size (), 1u);
+    }
+}
+
+TEST (CookieJarWriteScope, AHostTheScriptCalledThroughSendRequestBecomesWritable) {
+    // The server is on 127.0.0.1, a host the request (to a.test) is not for.
+    CookieServer server;
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "old", "v") });
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "const root = '" +
+    server.url ("/") +
+    "';"
+    "jar.set(root, { name: 'early', value: 'v' });"
+    "jar.unset(root, 'old');"
+    "pm.sendRequest(root + 'login', function () {});"
+    "jar.set(root, { name: 'late', value: 'v' });"
+    "jar.set(root, { name: 'late_domain', value: 'v', domain: '127.0.0.1', "
+    "path: '/' });"
+    "jar.unset(root, 'old');",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    std::vector<std::string> names;
+    for (const auto& cookie : jar.matching ("env_a", server.url ("/"))) {
+        names.push_back (cookie.name);
+    }
+    std::ranges::sort (names);
+    EXPECT_EQ (names, (std::vector<std::string>{ "late", "late_domain", "session" }))
+    << "the writes before the call should be refused and those after allowed";
+    EXPECT_EQ (warnings_of (result).size (), 2u)
+    << "only the two writes before the call should have been refused";
+}
+
+// A request a pre-request script runs before keeps its `{{name}}`s written
+// while the script runs (#2521), so the request's site is its URL as the
+// variables resolve it at the call: a stored name, or one the script set a
+// line earlier. The flat read, a jar read and a jar write all answer for that
+// site, and another site is still refused. Mutation check: return
+// `request.url` as written from `jar_request_url`, and every access to a.test
+// is refused or answers nothing.
+TEST (CookieJarWriteScope, ATemplatedRequestUrlIsTheSiteItResolvesTo) {
+    CookieJar jar;
+    store_two_sites (jar);
+    vayu::Environment env;
+    env["host"] = vayu::Variable{ .value = "a.test" };
+
+    const auto result = run_jar_write (jar, "http://{{host}}/users",
+    "const jar = pm.cookies.jar();"
+    "pm.environment.set('flat', String(pm.cookies.get('session')));"
+    "pm.environment.set('read', String(jar.get('http://a.test/', 'session')));"
+    "jar.set('http://a.test/', { name: 'stored_host', value: 'v' });"
+    "jar.set('http://b.test/', { name: 'before_set', value: 'v' });"
+    "pm.environment.set('host', 'b.test');"
+    "jar.set('http://b.test/', { name: 'after_set', value: 'v' });",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["flat"].value, "from-a");
+    EXPECT_EQ (env["read"].value, "from-a");
+    const auto names_for = [&jar] (const std::string& url) {
+        std::vector<std::string> names;
+        for (const auto& cookie : jar.matching ("env_a", url)) {
+            names.push_back (cookie.name);
+        }
+        std::ranges::sort (names);
+        return names;
+    };
+    EXPECT_EQ (names_for ("http://a.test/"),
+    (std::vector<std::string>{ "session", "stored_host" }));
+    EXPECT_EQ (names_for ("http://b.test/"),
+    (std::vector<std::string>{ "after_set", "session" }))
+    << "a write is held to the site the URL resolves to when it is made";
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 1u);
+    EXPECT_NE (warned.front ().find ("(a.test)"), std::string::npos)
+    << "the warning names the resolved site: " << warned.front ();
 }
 
 // ============================================================================

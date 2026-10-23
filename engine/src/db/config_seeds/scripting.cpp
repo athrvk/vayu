@@ -20,7 +20,7 @@ namespace vayu::db::config_seeds {
 // =============================================================================
 void seed_scripting (ConfigSeeder& seed, int64_t now) {
     seed (unit ("ms") (keywords ({ "runaway" }) (ConfigEntry{ "scriptTimeout",
-    std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS), "integer", "Script Execution Timeout",
+    std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS), "integer", "Script execution timeout",
     "How long a pre- or post-request script may run. A script "
     "that exceeds this is aborted and reported as an error, so an infinite "
     "loop "
@@ -31,7 +31,7 @@ void seed_scripting (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now })));
 
     seed (keywords ({ "debug", "print" }) (ConfigEntry{ "scriptEnableConsole",
-    vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false", "boolean", "Enable Script Console",
+    vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false", "boolean", "Enable script console",
     "Makes console.log() available inside scripts, with its output shown in "
     "the "
     "response viewer. Turn it off during a load test, where the writes cost "
@@ -41,7 +41,7 @@ void seed_scripting (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (
     keywords ({ "ram", "oom" }) (ConfigEntry{ "scriptMemoryLimit",
-    std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT), "integer", "Script Memory Limit",
+    std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT), "integer", "Script memory limit",
     "Largest heap one script execution may allocate before it is aborted. "
     "Raise "
     "it only for a script that processes very large data structures.",
@@ -52,7 +52,7 @@ void seed_scripting (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (
     unit ("bytes") (keywords ({ "recursion" }) (ConfigEntry{ "scriptStackSize",
-    std::to_string (vayu::core::constants::script_engine::STACK_SIZE), "integer", "Script Stack Size",
+    std::to_string (vayu::core::constants::script_engine::STACK_SIZE), "integer", "Script stack size",
     "Size of the call stack one script execution may use. It can only be "
     "lowered from the default: a larger stack would overflow the native "
     "thread the script runs on.",

@@ -572,14 +572,17 @@ makes a session survive from one design-mode request to the next.
 script can log in and leave the session where the real request will find it; it
 also carries any write staged before it.
 
-`pm.cookies.jar().get` / `.getAll` are **limited to the request's site** (issue
-#2358): the URL a script names must domain-match the request's host in either
-direction (`hosts_domain_related`) or match a host the execution has called
-through `pm.sendRequest` (`ContextData::addressed_hosts`). Anything else answers
-`undefined` / `[]` and leaves a console warning. The jar keeps every host's
-session for the environment, so the limit is what stops a script reading one it
-has no business with. Redirect targets are not compared. The write half is not
-limited this way and stays scoped by the URL it is given.
+`pm.cookies.jar()` is **limited to the request's site** (issues #2358 reads,
+#2631 writes): the URL a script names must domain-match the request's host in
+either direction (`hosts_domain_related`) or match a host the execution has
+called through `pm.sendRequest` (`ContextData::addressed_hosts`), and reads and
+writes ask one helper (`jar_host_in_scope`, `pm_cookies.cpp`) so they cannot
+drift. A read outside it answers `undefined` / `[]`; a `set`, `unset` or
+`clear(url)` outside it stages nothing; both leave a console warning. A `set`
+is also held to its cookie's `domain`, which is where the cookie is sent and so
+can differ from the URL. The jar keeps every host's session for the
+environment, so the limit is what stops a script reading, planting or deleting
+one it has no business with. Redirect targets are not compared.
 
 ### Auth Resolution & OAuth 2.0
 
@@ -668,11 +671,19 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
   (`{{$guid}}`, …) generated per occurrence - unless the caller asked for them
   to be deferred (`deferDynamicVariables`), which a composition made for a
   *run* does, so the run generates a fresh value per iteration instead of
-  repeating one (issue #995);
+  repeating one (issue #995). When a pre-request script runs before the send
+  (an enabled, non-blank `script.pre` on the request, a folder or the
+  collection), composition leaves every name a scope answers written and lists
+  the names in the response's `deferredVariables` (issue #2521), for the send
+  to resolve after that script. A collection run's plan asks the same of every
+  step when any element in it writes a variable before some send
+  (`VariableDeferral::Always`, below);
 - resolves `inherit` auth by walking the collection ancestor chain leaf→root
   (an explicit `noauth` terminates the walk, `none` is stepped over), and
   resolves variables inside the winning block **before** any OAuth 2.0 cache
-  key can be derived from it;
+  key can be derived from it - at composition for a run, after the
+  pre-request script for a Send or a sequential run's step, where the key is
+  computed from the resolved config either way;
 - for a `requestId`, assembles the whole payload from the stored row: flattened
   enabled headers, body, execution options, and the ordered script-part lists
   from the chain plus the request's own. An inline `request` given alongside a
@@ -682,21 +693,31 @@ ids, and returns the execute-ready payload that `POST /execute` and `POST
 Composition is **pure** - nothing is sent, no run row is created - and it is
 still the only place a payload is *composed*: an execution endpoint never
 composes one, so a payload that skipped composition is sent as supplied.
-Interpolation still happens strictly *before* the pre-request script runs
-(#226's decision D1 stands - composition was not moved to after the script the
-way Postman orders it).
+Decision D1 of #226 is now: a name resolves at compose, **except where a
+pre-request script can change its value** (issue #2521), when it resolves after
+that script - Postman's order. Whether one runs is read from the composed
+`elements` (no caller flag), so a request nothing scripts is interpolated once,
+before the send, as it always was.
 
-What #1008 added is narrower than a second composition: a name composition
-could **not** answer keeps its braces (#1009) rather than becoming `""`, and
-`resolve_residual_tokens` resolves those - and only those - once more, after
-the pre-request script and before the send, so `pm.environment.set("token", …)`
-does reach `{{token}}` in the same send. A value composition substituted is
-finished text and is never revisited, which is what keeps "resolved once" true
-of every value that had an answer. The one thing this costs: an ad-hoc payload
-posted straight to `/execute` with a literal `{{...}}` in it is no longer
-inert - if the run's scopes define that name, the send now carries its value.
-A name nothing defines still goes out written as it stands, and the load path
-does not run this pass at all. What the pass can *refuse* is what resolving a
+The second resolution is narrower than a second composition:
+`resolve_residual_tokens` resolves the names composition left written - a name
+it could **not** answer, which keeps its braces (#1009) rather than becoming
+`""` (#1008), and every name a scope answers in a request a pre-request script
+runs before (#2521) - once, after that script and before the send, so
+`pm.environment.set("token", …)` does reach `{{token}}` in the same send, on
+every run. A value composition substituted is finished text and is never
+revisited, which is what keeps "resolved once" true of every value that had an
+answer. What composition resolves whatever a script does: `{{data.*}}` and the
+bound row's names, `$` names, a name whose value reaches one of those, and a
+file path (the pass never resolves a path). The one thing this costs: an ad-hoc
+payload posted straight to `/execute` with a literal `{{...}}` in it is no
+longer inert - if the run's scopes define that name, the send now carries its
+value. A name nothing defines still goes out written as it stands, and a load
+run runs the pass per submission only where it has scopes to read, and counts
+rather than refuses. An OAuth 2.0 config defers like the rest on a Send and a
+sequential run's step: it is resolved after the script and its token acquired
+then (`apply_late_auth`, with the token cache), so a script reaches the token
+request. A load run acquires once, before any script. What the pass can *refuse* is what resolving a
 header **name** can produce, both rules held in
 `engine/include/vayu/http/header_names.hpp`: a name landing on one the request
 already carries (#1051), where the rows show two different names and the
@@ -715,14 +736,23 @@ equal being already one key. The same pass also trims the spaces and tabs
 around every name and refuses one that is not an RFC 9110 token once trimmed
 (#2467, `invalid_header_name`), which is how a name a script defined is judged;
 it reads every name for that rule as it does for the empty one, and a token
-nothing answered is left written while the text around it is judged. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+nothing answered is left written while the text around it is judged. A header
+*value* a variable would end or cut is refused here too for a scripted request,
+whose variables composition no longer substitutes (`unsendable_header`, #738's
+rule, #2521); the buffered answer carries each refusal's code as
+`refusalCode`. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
 Clients: the renderer sends its editor state through the inline shape (Send,
 load test, and History's replay - editor state can be unsaved or a detached
 copy, which is why compose-by-id alone would not do); MCP composes saved
-requests by id and gates its allowlist on the *composed* URL. The renderer
+requests by id and checks its allowlist early against the *composed* URL, then
+attaches the same rule to every send as `targetPolicy` (issue #2521), which the
+engine applies to the URL it is about to send - after the pre-request script
+and the residual pass - and to the host of an OAuth 2.0 token endpoint, before
+the token is requested. It does not cover a redirect hop or a script's
+`pm.sendRequest`. The renderer
 keeps a preview-only copy of the substitution rules
 (`app/src/lib/variable-resolution.ts`) for tab titles, previews and the
 unresolved-token painting; the shared conformance fixture
@@ -869,12 +899,22 @@ same request cannot drift apart.
   would need precedence rules, a persistence story and a UI, to hold what the
   environment scope already holds for the run's lifetime.
 
-Because the plan is composed once, a `{{variable}}` a script sets mid-run does
-**not** appear in a later step's URL - it reaches later steps through
-`pm.environment.get` in a script. Resolving once is what keeps a collection
-edited mid-run from changing the sequence underneath itself, and it is what will
-make the load-mode executor (a per-VU state machine) possible without SQLite on
-its hot path.
+The plan is composed once, but its values are not always fixed then (issue
+#2521). `resolve_scenario` reads every step's composed `elements` before it
+composes any step (`plan_variable_deferral`), and when one holds a kind the
+registry marks `writes_variables` at a phase before some send - `script.pre`,
+`script.post`, `script.setup` or any `extract.*`; not `script.teardown`, which
+runs after the last send - every step is composed with
+`VariableDeferral::Always`: each name a scope answers stays written in the plan,
+scripted step or not, and is resolved immediately before that step's send
+against the scopes as the earlier steps' scripts and extractors left them (the
+sequential runner's `execute_exchange`, the load executor's per-VU residual
+pass). So a login whose test script or extractor stores a token is followed by
+a step whose `Bearer {{token}}` sends it. A plan with no such element resolves
+its values at composition, as it always did. Fixing the structure once is what
+keeps a collection edited mid-run from changing the sequence underneath itself,
+and it is what makes the load-mode executor (a per-VU state machine) possible
+without SQLite on its hot path.
 
 **Data rows bind per iteration.** A `scenario.data` array - rows the app parsed
 from a CSV, TSV, JSON or JSONL file, sent inline, because the sandbox has no
@@ -1361,19 +1401,24 @@ row exists - and the executor is the only thing that differs.
 
 Shutdown unwinds that in a fixed order, because every one of these threads
 holds references to state `main` owns: HTTP server stopped **and its stream
-consumers drained** (`Server::stop()` closes the listener, joins its accept
-loop's thread once the requests in flight have been answered - also when the
-loop had already ended on its own, which is what the daemon's wait reads as a
-reason to shut down (#2667) - then calls `SseStreamManager::shutdown()`,
-which signals every stream and joins its worker) → run workers signalled and
-joined (each joins its own metrics and monitor threads and stops its event loop
-first) → the start-of-session recovery backup refresh interrupted and joined →
-the recovery backup refreshed once more, bounded by a deadline
+consumers drained** (`Server::stop()` sets the flag every handler reads as
+`RouteContext::server_stopping`, which cancels each outbound transfer a
+handler is making - the `/execute` send and its `pm.sendRequest`s, an OAuth
+token request, an import fetch, a connection test - and ends each SSE relay
+(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`); it then closes the
+listener and joins its accept loop's thread, which returns only once httplib
+has joined every handler, so each request in flight has answered first, also
+when the loop had already ended on its own, which is what the daemon's wait
+reads as a reason to shut down (#2667); then it calls
+`SseStreamManager::shutdown()`, which signals every stream and joins its
+worker) → run workers signalled and joined (each joins its own metrics and
+monitor threads and stops its event loop first) → the start-of-session
+recovery backup refresh interrupted and joined → the recovery backup refreshed
+once more, bounded by a deadline
 (`Database::refresh_recovery_backup_on_shutdown`, #2421) → `curl_global_cleanup`
 → `Database` / `RunManager` destroyed at scope exit → the instance lock
-released. One thread can be detached: a request handler still running three
-seconds into `Server::stop()` leaves the accept loop's thread unjoined, and
-the teardown above then runs underneath it.
+released. No thread is detached (#2683): a cancelled transfer ends at its
+next libcurl progress tick, about a second, and reports `Cancelled`.
 
 The stream drain belongs to `stop()` rather than to `~Server` because
 `curl_global_cleanup` runs *between* the two: a consumer joined only by the
@@ -1604,7 +1649,9 @@ record shape, the category list, the redaction rule and the file layout
 - **Where the redaction line falls, and why it is not one line.** Two columns of
   a run row answer two different questions, and the split is deliberate:
   `runs.config_snapshot` records the request **composed, with its credentials
-  withheld**: the payload arrives with every `{{variable}}` already resolved,
+  withheld**: the payload arrives with every `{{variable}}` composition could
+  answer already resolved (a scripted request's names stay written, #2521), and
+  the caller's `targetPolicy` is dropped, never stored,
   so `sanitize_config_snapshot` keeps `auth` down to `{mode}`, writes
   `<redacted>` for the value of every header named in the shared secret set
   (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's own

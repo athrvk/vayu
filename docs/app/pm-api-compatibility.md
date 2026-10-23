@@ -27,7 +27,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
-| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads limited to the request's site), see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
@@ -129,7 +129,8 @@ name, not a failed bind. With no row bound, `pm.variables` behaves exactly as be
 
 **`pm.variables.set(name, value, options?)` writes Postman's *local* scope** (issue #2564), the top
 tier, above the row: every read above answers from it first, `replaceIn` and
-`pm.sendRequest` substitute it, and a `{{name}}` composition could not answer goes out
+`pm.sendRequest` substitute it, and a `{{name}}` left written after composition (one it
+could not answer, or any name of a request a pre-request script runs before) goes out
 carrying it, so a pre-request `pm.variables.set("sig", …)` reaches a `{{sig}}` header. It
 keeps the value's type as the scoped setters do. `unset(name)` and `clear()` remove local
 names only. The local scope is never stored and never shown in the Variables panel; it
@@ -142,8 +143,9 @@ shape.
 ### `{{templates}}` in scripts (`pm.variables.replaceIn`)
 
 `pm.variables.replaceIn(template)` resolves `{{name}}` placeholders in a string
-with the exact semantics the request's own URL/headers/body get at compose
-time: scopes first (in `pm.variables`' precedence), then the dynamic-variable
+with the exact semantics the request's own URL/headers/body get when they
+resolve (at compose time, or after the pre-request script for a scripted request, #2521):
+scopes first (in `pm.variables`' precedence), then the dynamic-variable
 table - so `{{$guid}}`, `{{$timestamp}}` and the `{{$random*}}` set generate a
 fresh value **per occurrence**, a name nothing defines keeps its braces
 (`$name` and ordinary alike, issue #1009), and a value that itself holds
@@ -220,8 +222,8 @@ values into JavaScript is an injection. `replaceIn` keeps values as data the
 script explicitly asked to resolve.
 
 Two timing consequences worth knowing: the map is built **at call time**, so a
-variable the script set a line earlier resolves (unlike `{{}}` in the URL,
-which was composed before the script started); and the collection scope is the
+variable the script set a line earlier resolves at once (the request's own `{{}}` in
+the URL waits for the pre-request script to end, #2521); and the collection scope is the
 script context's - the request's whole collection chain, leaf shadowing
 ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
 be a string; anything else is a `TypeError` rather than a silently coerced
@@ -329,8 +331,9 @@ flag for a script to check, so a cut body would reach `JSON.parse` as corrupt
 input.
 
 **Agents cannot use it.** Vayu's MCP target allowlist is enforced in the MCP
-server, against the composed URL, *before* it calls the engine - so a request
-issued from inside a script never passes that gate. Rather than leave a hole in
+server against the composed URL, and by the engine against the URL a send is
+about to dial (`targetPolicy`, #2521) - but not against a request issued from
+inside a script, which passes neither. Rather than leave a hole in
 a control the user configured in Settings, the engine refuses script-issued
 requests unless the caller explicitly asks for them: Vayu's own Send and load
 runs ask, and the MCP server never does. See
@@ -354,8 +357,9 @@ than resolved by precedence.
 a form body's field names and values and an `auth` credential **are** resolved, as the call is made (issues #1001,
 #1067) - so a value the same script set two lines earlier is visible, which is
 Postman's rule and the reason an imported token-refresh script works. This is
-not a second pass over the composed payload: those fields were composed once,
-before the script ran, and nothing here revisits them. A name nothing defines
+not a second pass over the request being sent: that request's own names
+resolve after the pre-request script ends (#2521), and nothing here revisits
+them. A name nothing defines
 keeps its braces rather than becoming empty, as everywhere else. Two header
 *names* that resolve to one name are refused rather than sent with one of the
 two dropped - the
@@ -617,7 +621,6 @@ are the answers recorded as different, and the reason for each:
 | `{"format": "time"}`, `"25:00:00Z"` | passes | fails | `fast` takes any two digits for an hour |
 | `{"format": "time"}`, `"03:04:05"` | passes | fails | ajv leaves the offset optional; `jsonSchema` follows RFC 3339, which requires it |
 | `{"multipleOf": 0.01}`, `0.07` or `19.99` | fails | passes | ajv divides in binary floating point unless `multipleOfPrecision` is set |
-| `{"propertyNames": {"pattern": "^[a-z]+$"}}`, `{"aB": 1}` | fails | passes | a bug in `jsonSchema`, tracked as [#2719](https://github.com/athrvk/vayu/issues/2719) |
 
 A keyword `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) is one ajv 6 ignores, so the same schema passes
@@ -1259,9 +1262,12 @@ jar.clear('https://api.example.com/');                       // that URL's cooki
 jar.clear();                                                 // this environment's jar
 ```
 
-`get` and `getAll` read only the request's own site and the hosts the script has
-called through `pm.sendRequest`; any other URL answers `undefined` / `[]` with a
-console warning. See the divergences below.
+Every method names only the request's own site and the hosts the script has
+called through `pm.sendRequest`. `get` and `getAll` answer `undefined` / `[]` for
+any other URL, and `set`, `unset` and `clear(url)` store or remove nothing, each
+with a console warning. See the divergences below. In a pre-request script, where
+the request's URL still holds its `{{name}}`s (#2521), its site is that URL as the
+variables resolve it at the call.
 
 Every method is URL-scoped and takes an optional trailing callback, invoked
 inline, that carries what the call did: `get` the value, `getAll` the array,
@@ -1282,9 +1288,21 @@ Divergences from Postman:
   `undefined` / `[]` plus a console warning naming the host. The jar holds the
   sessions of every host the environment has talked to, and a collection's
   script should not be able to read them all. A redirect's target is not seen,
-  so it does not widen the scope. **Writes are not limited this way**: `set`,
-  `unset` and `clear` stay scoped by the URL they are given. Details in
+  so it does not widen the scope. Details in
   [scripting.md](../engine/scripting.md#reads-are-limited-to-the-requests-site).
+- **`jar.set`, `jar.unset` and `jar.clear(url)` are limited to the same site**
+  (#2631). A write whose URL is outside it is refused with a console warning and
+  stores or removes nothing, and so is a `set` whose cookie `domain` is outside
+  it. RFC 6265 section 5.3 has a user agent ignore a `Domain` that does not
+  domain-match the request host; Postman's own jar does not apply that rule to
+  a script's write, and here it is checked in both directions like the read
+  scope. A single-label domain (`.com`, `test`) is also refused unless it is the
+  request's own host, because it would reach every site under it; no
+  public-suffix list is applied (#2731), so `co.uk` still passes. The call still
+  returns and calls its callback as a stored write would. **A script that logs in
+  across hosts by `set`ting a cookie with a foreign `domain` stops working**:
+  call the other host through `pm.sendRequest` first and it is in scope. Details
+  in [scripting.md](../engine/scripting.md#writes-are-limited-the-same-way).
 - **A write is applied after the transfer it was made before**, not the moment
   it is called - so it rides that request and cannot be lost when the response's
   cookies are captured. Details in
@@ -1645,8 +1663,9 @@ pm.request.body = JSON.stringify({ n: 2 });
   engine applied.
 - **The script wins over engine-applied auth.** `build_request` resolves auth into the
   request before the script runs, so a script-set `Authorization` replaces the resolved one.
-  A credential still holding a `{{name}}` no variable defined at compose is applied after
-  the script instead (#2473), as Postman applies all auth; a script-set `Authorization`
+  A credential still holding a `{{name}}` no variable defined at compose, or any name of a
+  request a pre-request script runs before, is applied after the script instead (#2473,
+  #2521), as Postman applies all auth; a script-set `Authorization`
   still wins, since auth never replaces a header the request carries.
 - **A value the engine cannot send is refused, not coerced.** `method` must be a string
   (one of the seven verbs); `body` must be a string or the `RequestBody` object
@@ -1707,18 +1726,23 @@ pm.request.body = JSON.stringify({ n: 2 });
     bytes once the send has read the file - so a lifted `body.file.src` reads
     `undefined`. The body's string view is `@<name>`, and assigning the body or
     `.raw` on a binary request is refused: a script never chooses the file.
-- **Setting a variable now re-renders whatever composition left unresolved.**
-  `{{…}}` placeholders are still resolved at **compose time** (`POST /compose`,
-  engine-side since #226) before the pre-request script runs - #226's decision
-  D1 stands, composition is not being moved. What changed (#1008) is that a
-  name composition could not answer keeps its braces (#1009) instead of
-  becoming `""`, and gets resolved a second time after the pre-request script
+- **Setting a variable re-renders the request's `{{…}}` placeholders, Postman's
+  order** (#1008, #2521). `POST /compose` (engine-side since #226) resolves them
+  at compose time **unless a pre-request script runs before the send** - an
+  enabled, non-blank `script.pre` on the request, a folder or the collection.
+  Then it leaves every name a scope answers written, and so does it a name it
+  could not answer (#1009), and they are resolved after the pre-request script
   and before the send, against the scopes as the script left them. So
   `pm.environment.set("host", …)` reaches a `{{host}}` in the same request's
-  URL, as long as nothing already defined `host` at compose time. A value
-  composition *did* substitute is finished text - that pass reads the request,
-  not composition's decisions, so it is not re-resolved - and `pm.request.url`
-  is still how a script changes a value composition already substituted.
+  URL, on every run, and a script that replaces a stored token sends the new
+  one. In the script, `pm.request.url` and `pm.request.headers` hold the
+  `{{host}}` as written. A request no pre-request script runs before keeps the
+  old rule: a value composition substituted is finished text, not re-resolved,
+  and `pm.request.url` is how a script changes it. In a collection run, every
+  step defers when any step's script or extractor writes a variable before a
+  send (`script.teardown` aside), so a token a login's test script stores
+  reaches a later step's `Bearer {{token}}` on every run. `{{data.*}}`, `$`
+  names and a file path are never deferred.
 - **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
   capability.
 

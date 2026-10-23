@@ -11,6 +11,7 @@
  * click that brings the app back to what the notification was about (#1358).
  */
 
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createNotifier,
@@ -18,7 +19,10 @@ import {
 	registerNotifyIpc,
 	NOTIFY_ACTIVATED_CHANNEL,
 	NOTIFY_AVAILABILITY_CHANNEL,
+	NOTIFY_BODY_MAX,
+	NOTIFY_KINDS,
 	NOTIFY_SHOW_CHANNEL,
+	NOTIFY_TITLE_MAX,
 	NOTIFY_TEST_BODY,
 	NOTIFY_TEST_CHANNEL,
 	NOTIFY_TEST_TITLE,
@@ -324,9 +328,69 @@ describe("createNotifier - the test notification", () => {
 
 describe("readNotifyRequest", () => {
 	it("refuses a request with no title, at the line that sent it", () => {
-		expect(() => readNotifyRequest({ kind: "k", body: "b" })).toThrow(TypeError);
-		expect(() => readNotifyRequest({ kind: "", title: "t", body: "b" })).toThrow(TypeError);
+		expect(() => readNotifyRequest({ kind: "update-ready", body: "b" })).toThrow(TypeError);
+		expect(() => readNotifyRequest({ kind: "update-ready", title: "", body: "b" })).toThrow(
+			TypeError
+		);
 		expect(() => readNotifyRequest(null)).toThrow(TypeError);
+	});
+
+	it("refuses a title that is nothing once its control characters are gone", () => {
+		expect(() =>
+			readNotifyRequest({ kind: "update-ready", title: "\u0007\u001b", body: "b" })
+		).toThrow(TypeError);
+	});
+
+	it("refuses a title that is only whitespace once newlines and tabs become spaces", () => {
+		expect(() => readNotifyRequest({ kind: "update-ready", title: "\n\t", body: "b" })).toThrow(
+			TypeError
+		);
+	});
+
+	it("refuses a kind outside the closed list, and a kind that is not a string", () => {
+		expect(() => readNotifyRequest({ ...request(), kind: "k" })).toThrow(/kind/);
+		expect(() => readNotifyRequest({ ...request(), kind: "" })).toThrow(/kind/);
+		expect(() => readNotifyRequest({ ...request(), kind: 7 })).toThrow(/kind/);
+		expect(() => readNotifyRequest({ ...request(), kind: undefined })).toThrow(/kind/);
+	});
+
+	it("truncates a title to exactly the cap, ending in an ellipsis", () => {
+		const read = readNotifyRequest({ ...request(), title: "t".repeat(NOTIFY_TITLE_MAX + 50) });
+		expect(Array.from(read.title)).toHaveLength(NOTIFY_TITLE_MAX);
+		expect(read.title).toBe(`${"t".repeat(NOTIFY_TITLE_MAX - 1)}…`);
+	});
+
+	it("truncates a body to exactly the cap, ending in an ellipsis", () => {
+		const read = readNotifyRequest({ ...request(), body: "b".repeat(NOTIFY_BODY_MAX + 50) });
+		expect(Array.from(read.body)).toHaveLength(NOTIFY_BODY_MAX);
+		expect(read.body).toBe(`${"b".repeat(NOTIFY_BODY_MAX - 1)}…`);
+	});
+
+	it("leaves text at the cap untouched", () => {
+		const title = "t".repeat(NOTIFY_TITLE_MAX);
+		const body = "b".repeat(NOTIFY_BODY_MAX);
+		const read = readNotifyRequest({ ...request(), title, body });
+		expect(read.title).toBe(title);
+		expect(read.body).toBe(body);
+	});
+
+	it("does not cut a character in half when truncating", () => {
+		const read = readNotifyRequest({
+			...request(),
+			body: "\u{1F680}".repeat(NOTIFY_BODY_MAX + 1),
+		});
+		expect(Array.from(read.body)).toHaveLength(NOTIFY_BODY_MAX);
+		expect(read.body.endsWith("\u{1F680}\u2026")).toBe(true);
+	});
+
+	it("turns newlines and tabs into spaces and removes every other control character", () => {
+		const read = readNotifyRequest({
+			...request(),
+			title: "Run\u0007 done\nnow",
+			body: "a\tb\r\nc\u001b[31md\u0000\u009f",
+		});
+		expect(read.title).toBe("Run done now");
+		expect(read.body).toBe("a b  c[31md");
 	});
 
 	it("keeps a run target and falls back to the app for anything else", () => {
@@ -408,5 +472,28 @@ describe("registerNotifyIpc", () => {
 		const { ipc } = wired();
 
 		expect(ipc.call(NOTIFY_AVAILABILITY_CHANNEL)).toEqual({ available: true, reason: null });
+	});
+});
+
+/*
+ * Main cannot import the renderer's `NOTIFY_KINDS`, so the two lists are spelled
+ * twice. This is what keeps them one list: a kind added on one side alone would
+ * otherwise be a notification the renderer sends and main refuses (#2378).
+ */
+describe("the kinds main accepts match the renderer's", () => {
+	const source = readFileSync(new URL("../src/services/notify.ts", import.meta.url), "utf8");
+	const block = /export const NOTIFY_KINDS = \{([\s\S]*?)\} as const;/.exec(source)?.[1] ?? "";
+	const rendererKinds = [...block.matchAll(/^\s*\w+:\s*"([a-z-]+)",?\s*$/gm)].map((m) => m[1]);
+
+	it("finds all ten renderer kinds, so an empty scan cannot pass", () => {
+		expect(rendererKinds).toHaveLength(10);
+	});
+
+	it("lists every renderer kind", () => {
+		expect(NOTIFY_KINDS).toEqual(expect.arrayContaining(rendererKinds));
+	});
+
+	it("lists nothing the renderer does not send", () => {
+		expect(rendererKinds).toEqual(expect.arrayContaining([...NOTIFY_KINDS]));
 	});
 });

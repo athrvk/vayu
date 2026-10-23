@@ -63,6 +63,13 @@ in the engine, the app or MCP touched to make the kind exist and validate. `GET 
 serves the same list; the app and MCP render a kind's editor from its schema, with a bespoke form
 only where one is worth writing by hand.
 
+A kind that writes a variable scope sets `ElementKind::writes_variables` (every `script.*` and
+`extract.*` kind today). A collection run's plan reads it through the registry: when any step
+carries such a kind at a phase before some send, every step is composed with its `{{names}}` left
+for the send, so a value an earlier step writes reaches a later one (#2521, see
+[Scenario runs](api-reference.md#scenario-runs)). A new kind that writes a variable sets the flag
+or a plan resolves the value it writes too early.
+
 ## Schema annotations
 
 Every property in a kind's `configSchema` carries two standard JSON Schema keywords (issue

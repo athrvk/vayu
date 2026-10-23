@@ -296,9 +296,10 @@ TEST (SendWithRowAuth, ARowTokenBesideAScriptTokenDefersForBoth) {
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
 }
 
-/// OAuth 2.0 is never deferred for a script: its token is acquired before the
-/// send, against a config no script-set name can reach in time.
-TEST (SendWithRowAuth, AnOauth2ScriptTokenIsAppliedInTheBuild) {
+/// An OAuth 2.0 config holding a name the scopes answer waits for the script
+/// like any other credential (#2521): the build acquires nothing, and the
+/// exchange resolves the config and acquires after the script.
+TEST (SendWithRowAuth, AnOauth2ScriptTokenWaitsForTheScript) {
     const json payload{ { "auth",
     { { "mode", "oauth2" },
     { "config",
@@ -307,8 +308,8 @@ TEST (SendWithRowAuth, AnOauth2ScriptTokenIsAppliedInTheBuild) {
 
     const auto plan = plan_send_row_auth (payload);
     EXPECT_TRUE (plan.ok) << plan.error;
-    EXPECT_FALSE (plan.after_scripts);
-    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
+    EXPECT_TRUE (plan.after_scripts);
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
 }
 
 /// OAuth 2.0 is the one mode no deferral can serve, and it stays refused by

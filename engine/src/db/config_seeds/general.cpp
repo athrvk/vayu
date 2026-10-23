@@ -44,7 +44,7 @@ void seed_general (ConfigSeeder& seed, int64_t now) {
     // next run started. It carried the flag until #873, which told the user to
     // restart for a setting the engine had already picked up.
     seed (keywords ({ "cores", "parallelism" }) (ConfigEntry{ "workers",
-    std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker Threads",
+    std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker threads",
     "Number of background worker threads. Higher values improve throughput on "
     "multi-core systems but increase RAM usage. "
     "Default equals CPU core count.",
@@ -52,7 +52,7 @@ void seed_general (ConfigSeeder& seed, int64_t now) {
     "1", "128", std::nullopt, now }));
 
     seed (restart_required (unit ("bytes") (keywords ({ "ram" }) (ConfigEntry{ "dbCacheSize",
-    std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES), "integer", "Database Cache Size",
+    std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES), "integer", "Database cache size",
     "Memory SQLite keeps per connection for recently used database pages. A "
     "larger cache spares repeated reads while a high-RPS run writes results "
     "and "
@@ -64,7 +64,7 @@ void seed_general (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now }))));
 
     seed (restart_required (advanced (unit ("ms") (keywords ({ "contention" }) (ConfigEntry{ "dbBusyTimeout",
-    std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS), "integer", "Database Lock Wait Time",
+    std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS), "integer", "Database lock wait time",
     "How long a thread waits for the database when another one is writing to "
     "it. Result-storage threads compete for it during a high-concurrency run, "
     "and a longer wait turns a 'database is locked' failure into a pause "
@@ -78,7 +78,7 @@ void seed_general (ConfigSeeder& seed, int64_t now) {
     // workspace still holding the old default's value follows it once.
     seed (
     restart_required (keywords ({ "fsync", "pragma" }) (ConfigEntry{
-    "dbSynchronous", std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum", "Data Safety Mode",
+    "dbSynchronous", std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum", "Data safety mode",
     "How hard SQLite works to get data onto disk before reporting it "
     "written. Off: a power cut or an operating-system crash can corrupt the "
     "whole workspace file. Normal, the default: the file cannot be corrupted, "

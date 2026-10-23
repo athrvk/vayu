@@ -12,8 +12,6 @@
 
 #include "vayu/http/server.hpp"
 
-#include <chrono>
-#include <future>
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -183,21 +181,15 @@ bool Server::start () {
         return false;
     }
 
-    is_running_ = true;
-    // Shared with the thread rather than a member it writes through, because
-    // a thread `stop()` gave up on and detached may outlive this object.
-    auto exited           = std::make_shared<std::promise<void>> ();
-    server_thread_exited_ = exited->get_future ();
-    server_thread_        = std::thread ([this, exited] () {
+    is_running_    = true;
+    stopping_      = false;
+    server_thread_ = std::thread ([this] () {
         server_.listen_after_bind ();
         is_running_ = false;
-        exited->set_value ();
     });
 
-    // `stop()` racing ahead of the accept loop is missed by cpp-httplib and the
-    // join that follows then waits out its 3s detach fallback, so `start()`
-    // returns only once the loop is live - the rule managed_listener.hpp spells
-    // out for every other listener in the engine.
+    // `start()` returns only once the accept loop is live - the rule
+    // managed_listener.hpp spells out for every other listener in the engine.
     server_.wait_until_ready ();
 
     vayu::utils::log_info ("startup", "Listening on http://" + where);
@@ -210,20 +202,16 @@ void Server::stop () {
     // thread is still joinable - destroying that would terminate the process,
     // and the daemon's wait treats exactly that listener as a reason to shut
     // down. `httplib::Server::stop` is idempotent.
+    stopping_ = true;
     server_.stop ();
 
-    // Waited on rather than polled: the 100 ms re-check this replaces was the
-    // whole of "Server stopped in 100ms" on every shutdown, since the accept
-    // loop is gone within a keep-alive check interval of `stop()`.
+    // `listen_after_bind` returns only once httplib has joined its worker
+    // pool, so this join is also the join of every handler. Never detached
+    // (#2683): `daemon.cpp` destroys the run manager, curl's global state and
+    // the database right after this returns, and a handler still running would
+    // be using all three. `stopping_` is what keeps the wait short.
     if (server_thread_.joinable ()) {
-        if (server_thread_exited_.wait_for (std::chrono::seconds (3)) ==
-        std::future_status::ready) {
-            server_thread_.join ();
-        } else {
-            vayu::utils::log_warning ("shutdown",
-            "Server thread did not exit after 3 seconds, detaching...");
-            server_thread_.detach ();
-        }
+        server_thread_.join ();
     }
     is_running_ = false;
 
@@ -287,10 +275,10 @@ void Server::setup_routes () {
     // ==========================================
     // Register Modular Routes
     // ==========================================
-    route_ctx_ = std::make_unique<routes::RouteContext> (
-    routes::RouteContext{ server_, db_, run_manager_, shutdown_callback_,
-    oauth_authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
-    mock_server_manager_, sse_manager_, run_summary_cache_, grant_secret_ });
+    route_ctx_ = std::make_unique<routes::RouteContext> (routes::RouteContext{ server_,
+    db_, run_manager_, shutdown_callback_, oauth_authorize_manager_,
+    cookie_jar_, mock_issuer_manager_, inbox_manager_, mock_server_manager_,
+    sse_manager_, run_summary_cache_, grant_secret_, stopping_ });
 
     routes::register_health_routes (*route_ctx_);
     routes::register_config_routes (*route_ctx_);

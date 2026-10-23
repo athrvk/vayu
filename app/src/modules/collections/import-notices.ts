@@ -378,9 +378,10 @@ function skippedNotice(item: SkippedItem): ImportNotice | null {
 }
 
 /**
- * The `$ref`s the bundling refused, each by name, and the remote documents it
- * pulled in - a spec from the internet decides what gets inlined, so the user
- * sees both before applying (#1782).
+ * The `$ref`s the bundling did not follow (refused, or answered for by the
+ * engine), each by name, and the remote documents it pulled in - a spec from
+ * the internet decides what gets inlined, so the user sees both before applying
+ * (#1782).
  */
 function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
 	if (!report) return [];

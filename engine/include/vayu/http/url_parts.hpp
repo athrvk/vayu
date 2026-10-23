@@ -115,6 +115,20 @@ struct UrlParts {
 [[nodiscard]] std::optional<std::string> ascii_host (std::string_view host);
 
 /**
+ * @brief @p host as a WHATWG URL parser serialises it (JavaScript's
+ *        `new URL(...).hostname`), or nullopt when it is not a host.
+ *
+ * ada rather than a private parser, because the spellings that matter to a
+ * host comparison are the lenient ones: `127.1`, `0x7f.0.0.1` and
+ * `2130706433` are all `127.0.0.1` to libcurl, and an IPv6 literal has as many
+ * spellings as it has zero runs. Each folds to one form: a dotted quad, a
+ * lower-cased (punycode) name, or a bracketed, compressed IPv6 address
+ * (`[::1]`, `[::ffff:7f00:1]`). A bracketless IPv6 address, as
+ * `detail::parse_authority` and libcurl report one, is accepted too.
+ */
+[[nodiscard]] std::optional<std::string> canonical_host (std::string_view host);
+
+/**
  * @brief Where the host sits in @p url, by the rules every host comparison
  *        beside the transfer reads a URL with.
  *

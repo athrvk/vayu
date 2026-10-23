@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import {
-	checkAllowlist,
+	checkComposedTarget,
 	checkLoadCaps,
 	checkMonitorHost,
 	checkSampleCap,
@@ -40,6 +40,7 @@ import {
 	agentScriptGateSentence,
 	applyDefaultHeaderOptOuts,
 	applyRecordingKnobs,
+	asMcpSend,
 	composeLoadRunRequest,
 	DEFAULT_LOAD_MODE,
 	describeLoadShape,
@@ -52,7 +53,6 @@ import {
 	MAX_SUCCESS_SAMPLE_PERIOD,
 	readLoadParams,
 	resolveLoadShape,
-	withMcpOrigin,
 } from "./compose.js";
 import {
 	authInput,
@@ -493,7 +493,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					`Saved request "${str(args, "requestId")}" has no URL to load-test.`
 				);
 			}
-			const gate = checkAllowlist(url, ctx.config, ctx.host);
+			const gate = checkComposedTarget(composed.payload, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 
 			// A monitored run contacts a second host, so it gets a second gate.
@@ -607,7 +607,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// to (#1419) - a run has no id until this call returns.
 			let started: unknown;
 			try {
-				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
+				started = await ctx.client.startRun(asMcpSend(payload, ctx), signal);
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}

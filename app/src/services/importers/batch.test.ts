@@ -411,7 +411,7 @@ describe("detectBatch - a document the engine could not store", () => {
 
 		expect(entries).toHaveLength(1);
 		expect(entries[0].result).toBeNull();
-		expect(entries[0].error).toMatch(/over the 2\.0 KB.*Max OpenAPI Document Size/s);
+		expect(entries[0].error).toMatch(/over the 2\.0 KB.*Max OpenAPI document size/s);
 		expect(applicableEntries(entries)).toEqual([]);
 	});
 

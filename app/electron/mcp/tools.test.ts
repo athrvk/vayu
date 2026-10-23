@@ -5,6 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { buildSchema, introspectionFromSchema } from "graphql";
@@ -3177,9 +3180,13 @@ describe("run_collection_smoke", () => {
 			undefined
 		);
 		// Executed exactly as composed - resolved once, never re-resolved - with
-		// only the run's origin added beside it.
+		// only the run's origin and the session's target policy added beside it.
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(outgoing).toEqual({ ...composed, origin: { kind: "mcp" } });
+		expect(outgoing).toEqual({
+			...composed,
+			origin: { kind: "mcp" },
+			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
+		});
 		expect((res.structuredContent as { passed: number }).passed).toBe(1);
 	});
 
@@ -3365,6 +3372,31 @@ describe("run_collection_smoke", () => {
 			expect(res.content.map((c) => c.text).join("\n")).toContain(
 				"2 sub-collection(s) were NOT run"
 			);
+		});
+
+		test("a page slices the expanded list, not the direct requests", async () => {
+			const client = treeClient();
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", recursive: true, limit: 2, offset: 1 },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			const summary = res.structuredContent as {
+				results: Array<{ name: string; folder?: string }>;
+			};
+			// Expanded order is user, direct, invoice, refund: offset 1 starts at "direct".
+			expect(summary.results.map((row) => [row.name, row.folder])).toEqual([
+				["direct", "API"],
+				["invoice", "API / Billing"],
+			]);
+			expect(res.structuredContent).toMatchObject({
+				total: 2,
+				requestTotal: 4,
+				hasMore: true,
+				next: { offset: 3 },
+			});
+			// Only the page was composed; the rest of the list was read, not run.
+			expect(client.composeRequest).toHaveBeenCalledTimes(2);
 		});
 
 		test("a parent cycle terminates and runs each request once", async () => {
@@ -3837,6 +3869,484 @@ describe("run_collection_smoke", () => {
 		expect(descriptionOf(tool)).toMatch(/DIRECT requests/);
 		expect(descriptionOf(tool)).toMatch(/one at a time/);
 	});
+
+	test("the tool description steers a large collection to run_collection and says it reports progress", () => {
+		const text = descriptionOf(TOOLS.find((t) => t.name === "run_collection_smoke"));
+		expect(text).toMatch(/past about 25 requests or on a slow API use run_collection/);
+		expect(text).toMatch(/get_run_report/);
+		expect(text).toMatch(/Reports progress when the client asks/);
+	});
+
+	/**
+	 * A long smoke run was silent until it finished (#2451). The client hears
+	 * of it through `ctx.progress`, which exists only when it sent a
+	 * `progressToken`; every row ticks it exactly once, however the row ended.
+	 */
+	describe("progress", () => {
+		const SECRET = "s3cr3t-token-value";
+
+		/** Five rows, one per way a row can end; each carries SECRET wherever a row could echo it. */
+		function mixedRows() {
+			const rows = ["ok", "compose", "offlist", "status", "send"].map((kind, i) => ({
+				id: `r${i + 1}`,
+				name: `${kind} ${SECRET}`,
+				method: "GET",
+				url: `https://${kind === "offlist" ? "evil.test" : "api.example.com"}/${kind}?k=${SECRET}`,
+			}));
+			const byId = new Map(rows.map((r) => [r.id, r]));
+			return fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi
+					.fn()
+					.mockImplementation(({ requestId }: { requestId: string }) => {
+						if (requestId === "r2") {
+							return Promise.reject(new Error(`compose failed for ${SECRET}`));
+						}
+						const row = byId.get(requestId)!;
+						return Promise.resolve({ method: row.method, url: row.url, requestId });
+					}),
+				executeRequest: vi
+					.fn()
+					.mockImplementation(({ requestId }: { requestId: string }) => {
+						if (requestId === "r5")
+							return Promise.reject(new Error(`send failed ${SECRET}`));
+						return Promise.resolve({
+							status: requestId === "r4" ? 500 : 200,
+							testResults: [],
+						});
+					}),
+			});
+		}
+
+		const smoke = (ctx: ToolContext) =>
+			dispatchTool("run_collection_smoke", { collectionId: "c1" }, ctx);
+		const onApi = { allowlist: ["api.example.com"] };
+
+		test("ticks 0/total, then once per row, for a collection that all passes", async () => {
+			const rows = [1, 2, 3, 4, 5].map((n) => ({
+				id: `r${n}`,
+				name: `n${n}`,
+				method: "GET",
+				url: `https://api.example.com/${n}`,
+			}));
+			const client = fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve({
+						method: "GET",
+						url: `https://api.example.com/${requestId}`,
+					})
+				),
+				executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+			});
+			const progress = vi.fn();
+			const res = await smoke({ ...ctxWith(client, onApi), progress });
+			expect(res.structuredContent).toMatchObject({ total: 5, passed: 5 });
+			expect(progress.mock.calls).toEqual([
+				[0, 5],
+				[1, 5, "1/5 ok"],
+				[2, 5, "2/5 ok"],
+				[3, 5, "3/5 ok"],
+				[4, 5, "4/5 ok"],
+				[5, 5, "5/5 ok"],
+			]);
+		});
+
+		test("a skipped row, a compose failure, a bad status and a send error each still tick", async () => {
+			const progress = vi.fn();
+			const res = await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			expect(res.structuredContent).toMatchObject({
+				total: 5,
+				passed: 1,
+				failed: 3,
+				skipped: 1,
+			});
+			expect(progress.mock.calls).toEqual([
+				[0, 5],
+				[1, 5, "1/5 ok"],
+				[2, 5, "2/5 failed"],
+				[3, 5, "3/5 skipped"],
+				[4, 5, "4/5 failed"],
+				[5, 5, "5/5 failed"],
+			]);
+		});
+
+		test("a message is an index and a status word, never a name, url or error text", async () => {
+			const progress = vi.fn();
+			await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			const messages = progress.mock.calls.map(([, , message]) => message).filter(Boolean);
+			// Non-empty, so the loop below cannot pass by reading nothing.
+			expect(messages).toHaveLength(5);
+			for (const message of messages) {
+				expect(message).toMatch(/^\d+\/5 (ok|skipped|failed)$/);
+				expect(message).not.toContain(SECRET);
+			}
+		});
+
+		test("an empty collection ticks nothing", async () => {
+			const progress = vi.fn();
+			const client = fakeClient({ listRequests: vi.fn().mockResolvedValue([]) });
+			await smoke({ ...ctxWith(client, onApi), progress });
+			expect(progress).not.toHaveBeenCalled();
+		});
+
+		test("without ctx.progress the result is the same", async () => {
+			const progress = vi.fn();
+			const plain = await smoke(ctxWith(mixedRows(), onApi));
+			const ticked = await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			expect(progress).toHaveBeenCalled();
+			expect(plain.isError).toBeFalsy();
+			expect(plain.structuredContent).toEqual(ticked.structuredContent);
+		});
+	});
+	/**
+	 * A call runs one bounded page of the collection and says in the result what
+	 * it left (#2451). `total` and the counts stay the rows run in this call;
+	 * `requestTotal` is the collection's size in scope.
+	 */
+	describe("paging", () => {
+		const onApi = { allowlist: ["api.example.com"] };
+
+		/** `count` saved requests, named "req N", each composing to its own passing URL. */
+		function pagedClient(count: number, overrides: Parameters<typeof fakeClient>[0] = {}) {
+			const rows = Array.from({ length: count }, (_, i) => ({
+				id: `r${i + 1}`,
+				name: `req ${i + 1}`,
+				method: "GET",
+				url: `https://api.example.com/${i + 1}`,
+			}));
+			return fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve({
+						method: "GET",
+						url: `https://api.example.com/${requestId}`,
+					})
+				),
+				executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+				...overrides,
+			});
+		}
+
+		interface Paged {
+			total: number;
+			passed: number;
+			requestTotal: number;
+			hasMore: boolean;
+			next?: { offset: number };
+			cancelled?: boolean;
+			note?: string;
+			results: Array<{ name: string }>;
+		}
+
+		const smokePage = (
+			client: EngineClient,
+			args: Record<string, unknown>,
+			signal?: AbortSignal
+		) =>
+			dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, onApi),
+				signal
+			);
+		const pagedOf = (res: ToolResult) => res.structuredContent as unknown as Paged;
+		const namesOf = (res: ToolResult) => pagedOf(res).results.map((row) => row.name);
+
+		test("limit and offset cut a window from the list and say where the next one starts", async () => {
+			const client = pagedClient(5);
+			const res = await smokePage(client, { limit: 2, offset: 0 });
+			expect(namesOf(res)).toEqual(["req 1", "req 2"]);
+			expect(pagedOf(res)).toMatchObject({
+				total: 2,
+				passed: 2,
+				requestTotal: 5,
+				hasMore: true,
+				next: { offset: 2 },
+			});
+			expect(pagedOf(res).cancelled).toBeUndefined();
+			expect(pagedOf(res).note).toContain("Ran 2 of 5 requests");
+			expect(pagedOf(res).note).toContain("offset: 2");
+			expect(client.executeRequest).toHaveBeenCalledTimes(2);
+
+			const second = await smokePage(client, { limit: 2, offset: 2 });
+			expect(namesOf(second)).toEqual(["req 3", "req 4"]);
+			expect(pagedOf(second).next).toEqual({ offset: 4 });
+		});
+
+		test("the last page runs what is left and offers no next page", async () => {
+			const res = await smokePage(pagedClient(5), { limit: 2, offset: 4 });
+			expect(namesOf(res)).toEqual(["req 5"]);
+			expect(pagedOf(res)).toMatchObject({ total: 1, requestTotal: 5, hasMore: false });
+			expect(pagedOf(res)).not.toHaveProperty("next");
+			expect(pagedOf(res)).not.toHaveProperty("note");
+		});
+
+		test.each([5, 99])(
+			"an offset of %i past a 5-request list runs nothing and says so",
+			async (offset) => {
+				const client = pagedClient(5);
+				const res = await smokePage(client, { offset });
+				expect(res.isError).toBeFalsy();
+				expect(pagedOf(res)).toMatchObject({
+					total: 0,
+					requestTotal: 5,
+					hasMore: false,
+					results: [],
+				});
+				expect(pagedOf(res)).not.toHaveProperty("next");
+				expect(pagedOf(res).note).toMatch(/past the end/);
+				expect(client.composeRequest).not.toHaveBeenCalled();
+			}
+		);
+
+		test("a collection that fits one page carries the size and no note", async () => {
+			const res = await smokePage(pagedClient(3), {});
+			expect(pagedOf(res)).toMatchObject({ total: 3, requestTotal: 3, hasMore: false });
+			expect(pagedOf(res)).not.toHaveProperty("note");
+		});
+
+		test("the default limit of 25 cuts a longer list and discloses the rest in the result", async () => {
+			const client = pagedClient(30);
+			const first = await smokePage(client, {});
+			expect(pagedOf(first).results).toHaveLength(25);
+			expect(pagedOf(first)).toMatchObject({
+				total: 25,
+				requestTotal: 30,
+				hasMore: true,
+				next: { offset: 25 },
+			});
+			expect(pagedOf(first).note).toContain("Ran 25 of 30 requests");
+			// The note is in the text block a client reads, not only the structured one.
+			expect(firstText(first)).toContain("call again with offset: 25");
+
+			const rest = await smokePage(client, { offset: 25 });
+			expect(namesOf(rest)).toEqual(["req 26", "req 27", "req 28", "req 29", "req 30"]);
+			expect(pagedOf(rest).hasMore).toBe(false);
+		});
+
+		test.each([
+			["limit above 100", { limit: 101 }],
+			["limit of 0", { limit: 0 }],
+			["fractional limit", { limit: 1.5 }],
+			["negative offset", { offset: -1 }],
+		])("%s is refused before any request is composed or sent", async (_label, args) => {
+			const client = pagedClient(5);
+			const res = await smokePage(client, args);
+			expect(res.isError).toBe(true);
+			expect(client.composeRequest).not.toHaveBeenCalled();
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		});
+
+		test("the advertised input bounds limit at 100 and offset at 0", () => {
+			const shape = TOOLS.find((t) => t.name === "run_collection_smoke")!.inputSchema!;
+			const input = z.object(shape);
+			expect(input.safeParse({ collectionId: "c1", limit: 100, offset: 0 }).success).toBe(
+				true
+			);
+			expect(input.safeParse({ collectionId: "c1", limit: 101 }).success).toBe(false);
+			expect(input.safeParse({ collectionId: "c1", offset: -1 }).success).toBe(false);
+		});
+
+		test("progress counts the page it runs, not the collection", async () => {
+			const progress = vi.fn();
+			await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", limit: 2, offset: 1 },
+				{ ...ctxWith(pagedClient(5), onApi), progress }
+			);
+			expect(progress.mock.calls).toEqual([
+				[0, 2],
+				[1, 2, "1/2 ok"],
+				[2, 2, "2/2 ok"],
+			]);
+		});
+
+		test("a paged result validates against the advertised output schema, field for field", async () => {
+			const res = await smokePage(pagedClient(5), { limit: 2 });
+			const outputSchema = TOOLS.find(
+				(t) => t.name === "run_collection_smoke"
+			)!.outputSchema!;
+			expect(() => outputSchema.parse(res.structuredContent)).not.toThrow();
+			// zod's own parse strips an undeclared key; the SDK client refuses it.
+			const advertised = z.toJSONSchema(outputSchema, { io: "output" }) as unknown as {
+				properties: Record<string, unknown>;
+			};
+			const returned = Object.keys(res.structuredContent!);
+			expect(returned).toEqual(
+				expect.arrayContaining(["requestTotal", "hasMore", "next", "note"])
+			);
+			expect(Object.keys(advertised.properties)).toEqual(expect.arrayContaining(returned));
+		});
+
+		describe("cancellation", () => {
+			/** An `executeRequest` that completes @p completing sends, then runs @p onNext on the next. */
+			function executeUntil(completing: number, onNext: () => Promise<unknown>) {
+				let calls = 0;
+				return vi.fn().mockImplementation(() => {
+					calls += 1;
+					return calls <= completing
+						? Promise.resolve({ status: 200, testResults: [] })
+						: onNext();
+				});
+			}
+			const abortError = () =>
+				Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+
+			test("a cancellation after row 2 returns those two rows and where to resume", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(5, {
+					executeRequest: vi.fn().mockImplementation(() => {
+						// The cancellation lands as the second send finishes.
+						if (
+							(client.executeRequest as ReturnType<typeof vi.fn>).mock.calls
+								.length === 2
+						) {
+							controller.abort();
+						}
+						return Promise.resolve({ status: 200, testResults: [] });
+					}),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(res.isError).toBeFalsy();
+				expect(namesOf(res)).toEqual(["req 1", "req 2"]);
+				expect(pagedOf(res)).toMatchObject({
+					total: 2,
+					passed: 2,
+					requestTotal: 5,
+					cancelled: true,
+					hasMore: true,
+					next: { offset: 2 },
+				});
+				expect(pagedOf(res).note).toMatch(/^Cancelled after 2 of 5 requests/);
+				expect(client.executeRequest).toHaveBeenCalledTimes(2);
+			});
+
+			test("a send the cancellation interrupts is not a row, and the resume offset points at it", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(5, {
+					executeRequest: executeUntil(2, () => {
+						controller.abort();
+						return Promise.reject(abortError());
+					}),
+				});
+				const res = await smokePage(client, { offset: 1 }, controller.signal);
+				expect(namesOf(res)).toEqual(["req 2", "req 3"]);
+				expect(pagedOf(res)).toMatchObject({
+					total: 2,
+					failed: 0,
+					cancelled: true,
+					hasMore: true,
+					next: { offset: 3 },
+				});
+				expect(pagedOf(res).note).toContain("may have been sent");
+			});
+
+			test("a compose the cancellation interrupts is not a failed row either", async () => {
+				const controller = new AbortController();
+				let composed = 0;
+				const client = pagedClient(3, {
+					composeRequest: vi
+						.fn()
+						.mockImplementation(({ requestId }: { requestId: string }) => {
+							composed += 1;
+							if (composed === 2) {
+								controller.abort();
+								return Promise.reject(abortError());
+							}
+							return Promise.resolve({
+								method: "GET",
+								url: `https://api.example.com/${requestId}`,
+							});
+						}),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(namesOf(res)).toEqual(["req 1"]);
+				expect(pagedOf(res)).toMatchObject({
+					failed: 0,
+					cancelled: true,
+					next: { offset: 1 },
+				});
+			});
+
+			test("a send error with no cancellation stays a failed row and the run goes on", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(3, {
+					executeRequest: executeUntil(1, () =>
+						Promise.reject(new Error("socket hang up"))
+					),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(pagedOf(res)).toMatchObject({
+					total: 3,
+					passed: 1,
+					failed: 2,
+					hasMore: false,
+				});
+				expect(pagedOf(res).cancelled).toBeUndefined();
+				expect(
+					(res.structuredContent as { results: Array<{ error?: string }> }).results[1]
+						.error
+				).toBe("socket hang up");
+			});
+
+			test("a cancelled call reads its masking scopes without the aborted signal, so the rows still return", async () => {
+				const controller = new AbortController();
+				const refusesAborted = () => (signal?: AbortSignal) =>
+					signal?.aborted ? Promise.reject(abortError()) : Promise.resolve([]);
+				const client = pagedClient(3, {
+					executeRequest: executeUntil(1, () => {
+						controller.abort();
+						return Promise.reject(abortError());
+					}),
+					listCollections: vi.fn().mockImplementation(refusesAborted()),
+					listEnvironments: vi.fn().mockImplementation(refusesAborted()),
+					listAllRequests: vi.fn().mockImplementation(refusesAborted()),
+					getGlobals: vi
+						.fn()
+						.mockImplementation((signal?: AbortSignal) =>
+							signal?.aborted
+								? Promise.reject(abortError())
+								: Promise.resolve({ variables: [] })
+						),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(res.isError).toBeFalsy();
+				expect(namesOf(res)).toEqual(["req 1"]);
+				expect(pagedOf(res).cancelled).toBe(true);
+			});
+
+			test("a cancelled result validates against the advertised output schema, field for field", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(3, {
+					executeRequest: executeUntil(1, () => {
+						controller.abort();
+						return Promise.reject(abortError());
+					}),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				const outputSchema = TOOLS.find(
+					(t) => t.name === "run_collection_smoke"
+				)!.outputSchema!;
+				expect(() => outputSchema.parse(res.structuredContent)).not.toThrow();
+				const advertised = z.toJSONSchema(outputSchema, { io: "output" }) as unknown as {
+					properties: Record<string, unknown>;
+				};
+				const returned = Object.keys(res.structuredContent!);
+				expect(returned).toContain("cancelled");
+				expect(Object.keys(advertised.properties)).toEqual(
+					expect.arrayContaining(returned)
+				);
+			});
+		});
+	});
+
+	test("the description states the page size and how to page", () => {
+		const text = descriptionOf(TOOLS.find((t) => t.name === "run_collection_smoke"));
+		expect(text).toMatch(/25 requests a call by default \(`limit`, max 100\)/);
+		expect(text).toMatch(/page with `offset`/);
+		expect(text).toMatch(/edited between pages shifts the window/);
+	});
 });
 
 /**
@@ -3900,6 +4410,7 @@ describe("run_collection", () => {
 			},
 			environmentId: "env_1",
 			origin: { kind: "mcp" },
+			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
 		});
 		// The absence of `mode` is what makes this a design-mode run: a mode
 		// beside the block would hand the same plan to the load executor.
@@ -4473,6 +4984,7 @@ describe("start_load_run scenario runs", () => {
 			concurrency: 5,
 			duration: "30s",
 			origin: { kind: "mcp" },
+			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
 		});
 	});
 
@@ -6764,6 +7276,79 @@ describe("dispatchTool", () => {
 			const kinds = (executed(client).elements as Array<{ id?: string }>).map((e) => e.id);
 			expect(kinds).toEqual(["el_chain", "el_sig", "el_own", "mcp-script-post", undefined]);
 			expect((executed(client).elements as unknown[])[4]).toEqual(extractor);
+		});
+
+		test("an ad-hoc preRequestScript is composed with the stored list, so a name it sets waits for it (#2521)", async () => {
+			// Mutation check: append the ad-hoc elements to the by-id composition
+			// instead of composing again, and the engine never sees the script:
+			// `{{token}}` goes out as the stored value it resolved before the
+			// script could set it.
+			const own = {
+				id: "el_own",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('own', function () {});" },
+			};
+			type Element = { id?: string; kind?: string };
+			// The engine's rule in miniature: a `script.pre` among the composed
+			// elements leaves `{{token}}` written and names it; without one the
+			// stored value is resolved in.
+			const composeRequest = vi
+				.fn()
+				.mockImplementation(({ request }: { request?: { elements?: Element[] } }) => {
+					const elements = request?.elements ?? [own];
+					const scripted = elements.some((el) => el.kind === "script.pre");
+					return Promise.resolve({
+						method: "GET",
+						url: "https://api.example.com/users",
+						headers: [
+							{
+								name: "Authorization",
+								value: scripted ? "Bearer {{token}}" : "Bearer stored",
+							},
+						],
+						elements,
+						requestId: "req_1",
+						...(scripted ? { deferredVariables: ["token"] } : {}),
+					});
+				});
+			const client = fakeClient({ listEnvironments: listingEnv1(), composeRequest });
+			const res = await dispatchTool(
+				"run_request",
+				{
+					requestId: "req_1",
+					environmentId: "env_1",
+					preRequestScript: "pm.environment.set('token', 'new');",
+				},
+				ctxWith(client, { ...OFF, revealSecretsToAgents: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeRequest).toHaveBeenCalledTimes(2);
+			const recomposed = composeRequest.mock.calls[1][0] as {
+				requestId?: string;
+				environmentId?: string;
+				request?: { elements?: Element[] };
+			};
+			expect(recomposed).toMatchObject({ requestId: "req_1", environmentId: "env_1" });
+			expect(recomposed.request?.elements?.map((el) => el.id)).toEqual([
+				"el_own",
+				"mcp-script-pre",
+			]);
+			expect(executed(client).headers).toEqual([
+				{ name: "Authorization", value: "Bearer {{token}}" },
+			]);
+			expect(executed(client)).not.toHaveProperty("deferredVariables");
+		});
+
+		test("a by-id send with nothing ad hoc composes once", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.composeRequest).toHaveBeenCalledTimes(1);
 		});
 
 		test("a stored literal credential runs with reveal off and is not echoed", async () => {
@@ -10541,6 +11126,45 @@ describe("webhook inbox tools", () => {
 	});
 });
 
+/** A tool call that reaches the engine's send routes, and which of the two it calls. */
+interface McpSender {
+	tool: string;
+	args: Record<string, unknown>;
+	sentTo: "executeRequest" | "startRun";
+}
+
+/** Every path that starts a run, each driven by name below. */
+const RUN_STARTERS: McpSender[] = [
+	{
+		tool: "run_request",
+		args: { url: "https://api.example.com/x" },
+		sentTo: "executeRequest",
+	},
+	{
+		tool: "run_request",
+		args: { url: "https://api.example.com/x", stream: true },
+		sentTo: "executeRequest",
+	},
+	{ tool: "run_collection_smoke", args: { collectionId: "c1" }, sentTo: "executeRequest" },
+	{ tool: "run_collection", args: { collectionId: "c1" }, sentTo: "startRun" },
+	{
+		tool: "start_load_run",
+		args: { url: "https://api.example.com/x", confirmed: true },
+		sentTo: "startRun",
+	},
+	{
+		tool: "start_load_run",
+		args: {
+			scenario: { collectionId: "c1" },
+			mode: "constant_concurrency",
+			concurrency: 5,
+			duration: "30s",
+			confirmed: true,
+		},
+		sentTo: "startRun",
+	},
+];
+
 /**
  * Every tool that starts a run says the run is an agent's, and which client's
  * (#1817): History reads `origin` to tell an MCP run from one the user sent.
@@ -10549,41 +11173,7 @@ describe("webhook inbox tools", () => {
  */
 describe("every run an MCP tool starts carries an MCP origin", () => {
 	const allow = { allowlist: ["api.example.com"] };
-	const runStarters: Array<{
-		tool: string;
-		args: Record<string, unknown>;
-		sentTo: "executeRequest" | "startRun";
-	}> = [
-		{
-			tool: "run_request",
-			args: { url: "https://api.example.com/x" },
-			sentTo: "executeRequest",
-		},
-		{
-			tool: "run_request",
-			args: { url: "https://api.example.com/x", stream: true },
-			sentTo: "executeRequest",
-		},
-		{ tool: "run_collection_smoke", args: { collectionId: "c1" }, sentTo: "executeRequest" },
-		{ tool: "run_collection", args: { collectionId: "c1" }, sentTo: "startRun" },
-		{
-			tool: "start_load_run",
-			args: { url: "https://api.example.com/x", confirmed: true },
-			sentTo: "startRun",
-		},
-		{
-			tool: "start_load_run",
-			args: {
-				scenario: { collectionId: "c1" },
-				mode: "constant_concurrency",
-				concurrency: 5,
-				duration: "30s",
-				confirmed: true,
-			},
-			sentTo: "startRun",
-		},
-	];
-	const cases = runStarters.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
+	const cases = RUN_STARTERS.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
 
 	/**
 	 * One saved request in `c1`; an inline request composes to itself. `extra`
@@ -10602,7 +11192,7 @@ describe("every run an MCP tool starts carries an MCP origin", () => {
 	}
 
 	async function originSent(
-		{ tool, args, sentTo }: (typeof runStarters)[number],
+		{ tool, args, sentTo }: McpSender,
 		clientName?: () => string | undefined,
 		composedExtra?: Record<string, unknown>
 	): Promise<unknown> {
@@ -10640,6 +11230,228 @@ describe("every run an MCP tool starts carries an MCP origin", () => {
 			kind: "mcp",
 			client: "cursor",
 		});
+	});
+});
+
+/**
+ * Every send carries the session's allowlist as `targetPolicy` (#2521): the
+ * engine holds the URL it is about to send, after any pre-request script, to
+ * the same rule. A path that forgot it would send wherever a script steered,
+ * and no gate here could see it, so each sending tool is driven by name and the
+ * scan below fails on a send that skips `asMcpSend`.
+ */
+describe("every MCP send carries the session's target policy", () => {
+	const senders: McpSender[] = [
+		...RUN_STARTERS,
+		{
+			tool: "get_graphql_schema",
+			args: { url: "https://api.example.com/graphql" },
+			sentTo: "executeRequest",
+		},
+	];
+	const cases = senders.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
+
+	/** The payload @p sender's one send carried under @p safety. */
+	async function payloadSent(
+		{ tool, args, sentTo }: McpSender,
+		safety: Partial<McpSafetyConfig>,
+		composedExtra: Record<string, unknown> = {}
+	): Promise<Record<string, unknown>> {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+			composeRequest: vi.fn().mockImplementation((body: { request?: object }) =>
+				Promise.resolve({
+					...(body.request ?? { method: "GET", url: "https://api.example.com/r1" }),
+					...composedExtra,
+				})
+			),
+		});
+		// The outcome after the send is the tool's own business (the GraphQL
+		// tool refuses a fake introspection answer); the payload is the subject.
+		await dispatchTool(tool, args, ctxWith(client, safety));
+		const send = client[sentTo] as ReturnType<typeof vi.fn>;
+		expect(send).toHaveBeenCalledTimes(1);
+		return send.mock.calls[0][0] as Record<string, unknown>;
+	}
+
+	/** The `targetPolicy` @p sender's one send carried under @p safety. */
+	async function policySent(
+		sender: McpSender,
+		safety: Partial<McpSafetyConfig>,
+		composedExtra: Record<string, unknown> = {}
+	): Promise<unknown> {
+		return (await payloadSent(sender, safety, composedExtra)).targetPolicy;
+	}
+
+	// Composition's answer about itself (#2521) is for the agent that composed;
+	// the engine would ignore it on these routes, but it is not part of a send.
+	test.each(cases)("%s does not forward composition's deferredVariables", async (_, sender) => {
+		const sent = await payloadSent(
+			sender,
+			{ allowlist: ["api.example.com"] },
+			{ deferredVariables: ["token"] }
+		);
+		expect(sent).not.toHaveProperty("deferredVariables");
+	});
+
+	test.each(cases)("%s states the session's allowlist", async (_, sender) => {
+		expect(await policySent(sender, { allowlist: ["api.example.com"] })).toStrictEqual({
+			allowAll: false,
+			allowedHosts: ["api.example.com"],
+		});
+	});
+
+	test.each(cases)("%s states Allow all hosts", async (_, sender) => {
+		expect(await policySent(sender, { allowAll: true })).toStrictEqual({
+			allowAll: true,
+			allowedHosts: [],
+		});
+	});
+
+	// Both ways in, as for `origin`: an argument, and a composed payload that
+	// already carries one.
+	test.each(cases)("%s cannot be given a wider policy", async (_, sender) => {
+		const wide = { allowAll: true, allowedHosts: [] };
+		const spoofed = { ...sender, args: { ...sender.args, targetPolicy: wide } };
+		expect(
+			await policySent(spoofed, { allowlist: ["api.example.com"] }, { targetPolicy: wide })
+		).toStrictEqual({ allowAll: false, allowedHosts: ["api.example.com"] });
+	});
+
+	test("no executeRequest or startRun call in the server skips asMcpSend", () => {
+		const here = path.dirname(fileURLToPath(import.meta.url));
+		const sources = readdirSync(here, { recursive: true, encoding: "utf8" }).filter(
+			(file) =>
+				file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.includes("testkit")
+		);
+		const calls: string[] = [];
+		for (const file of sources) {
+			const text = readFileSync(path.join(here, file), "utf8");
+			for (const call of text.matchAll(/\.(executeRequest|startRun)\(\s*([\w.]*)/g)) {
+				calls.push(`${file}: ${call[1]}(${call[2]}`);
+			}
+		}
+		// Seven sends today; a scan that read nothing would pass vacuously.
+		expect(calls.length).toBeGreaterThanOrEqual(7);
+		expect(calls.filter((call) => !call.endsWith("(asMcpSend"))).toEqual([]);
+	});
+});
+
+/**
+ * The engine's refusal of the URL a script left (#2521) reads as the allowlist
+ * gate's own refusal: the host it names, and the same remedy, on each path
+ * whose answer an agent reads at once.
+ */
+describe("an engine target refusal carries the allowlist remedy", () => {
+	const refusalMessage =
+		'Host "evil.example.com", which the URL about to be sent names, is not allowed by this request\'s target policy (allowed hosts: api.example.com). Nothing was sent.';
+	const remedy = "add the host in Vayu Settings → MCP (Target allowlist)";
+
+	// The early gate cannot know a host a pre-request script chooses, so it
+	// sends, policy attached, and the engine judges the host once resolved.
+	test("a saved request whose host waits on its script reaches the engine", async () => {
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: "https://{{host}}/x",
+				deferredVariables: ["host"],
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ requestId: "r1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError, firstText(res)).toBeFalsy();
+		const sent = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(sent.targetPolicy).toStrictEqual({
+			allowAll: false,
+			allowedHosts: ["api.example.com"],
+		});
+	});
+
+	test("a buffered run_request answers an error naming the host and the remedy", async () => {
+		const client = fakeClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 0,
+				errorMessage: refusalMessage,
+				refusalCode: "target_not_allowed",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"evil.example.com"');
+		expect(firstText(res)).toContain(remedy);
+	});
+
+	test("a streaming run_request's 400 answers the same", async () => {
+		const client = fakeClient({
+			executeRequest: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 400",
+						400,
+						engineErrorBody("target_not_allowed", refusalMessage)
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x", stream: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"evil.example.com"');
+		expect(firstText(res)).toContain(remedy);
+		expect(firstText(res)).not.toContain("Engine error (400)");
+	});
+
+	test("a smoke run skips the refused request with the remedy as its reason", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/r1" }),
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 0,
+				errorMessage: refusalMessage,
+				refusalCode: "target_not_allowed",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const matrix = res.structuredContent as {
+			skipped: number;
+			results: Array<{ reason?: string }>;
+		};
+		expect(matrix.skipped).toBe(1);
+		expect(matrix.results[0].reason).toContain(remedy);
+	});
+
+	test("an unknown host asks for a resolved URL rather than an allowlist entry", async () => {
+		const client = fakeClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 0,
+				errorMessage: "Could not determine the target host.",
+				refusalCode: "target_host_unknown",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x" },
+			ctxWith(client, { allowAll: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("Resolve the URL before sending.");
+		expect(firstText(res)).not.toContain(remedy);
 	});
 });
 
@@ -15433,6 +16245,12 @@ describe("every structured read answers structuredContent its outputSchema accep
 				activeTab: { type: "run", entityId: "run_9", label: "Design run" },
 				activeEnvironment: { id: "env_1", name: "Staging" },
 			}),
+		},
+		{
+			tool: "get_safety_config",
+			has: ["allowlist", "caps", "gates", "disabledToolCount"],
+			args: {},
+			safety: { allowlist: ["a.test"], allowAll: true },
 		},
 		{ tool: "resolve_variables", args: {}, has: ["context", "variables", "summary"] },
 		{

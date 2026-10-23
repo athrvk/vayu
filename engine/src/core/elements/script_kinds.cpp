@@ -251,6 +251,7 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
         { "required", nlohmann::json::array ({ "script" }) },
         { "additionalProperties", false },
     };
+    element_kind.writes_variables = true;
     return element_kind;
 }
 

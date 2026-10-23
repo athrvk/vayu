@@ -13,6 +13,7 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <type_traits>
@@ -103,8 +104,19 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
 // Resolve an oauth2 config to a token (cache-aware) and place it on the
 // request per tokenPlacement. Shared by apply_auth and preflight_auth
 // (the latter passes a null request and only acquires).
-AuthApplyResult
-resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Database* db) {
+AuthApplyResult resolve_oauth2 (vayu::Request* req,
+const nlohmann::json& config,
+vayu::db::Database* db,
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
+    // Before the cache is read, so a token endpoint the policy refuses is
+    // refused whether or not an earlier send left its token cached (#2521).
+    if (target_policy != nullptr) {
+        if (auto refusal = refuse_token_endpoints (*target_policy, config)) {
+            return { false, vayu::ErrorCode::InvalidUrl,
+                std::move (refusal->message), std::string (refusal->code) };
+        }
+    }
     if (db == nullptr) {
         return { false, vayu::ErrorCode::AuthFailed,
             "OAuth 2.0 requires database access for the token cache", "oauth2_no_database" };
@@ -121,7 +133,8 @@ resolve_oauth2 (vayu::Request* req, const nlohmann::json& config, vayu::db::Data
     oauth::TokenError{ 409, "oauth2_interactive_required",
         "OAuth 2.0 token required (auto-fetch is disabled)" };
     if (auto_fetch) {
-        result = oauth::acquire_token (*db, config, false, std::nullopt, &token_fetch_ms);
+        result = oauth::acquire_token (
+        *db, config, false, std::nullopt, &token_fetch_ms, cancel);
     } else if (auto cached = db->get_oauth_token (oauth::cache_key (config))) {
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
@@ -248,7 +261,11 @@ Auth parse_auth (const nlohmann::json& auth) {
     return UnsupportedAuth{ mode };
 }
 
-AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
+AuthApplyResult apply_auth (vayu::Request& req,
+const Auth& auth,
+vayu::db::Database* db,
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     return std::visit (
     [&] (const auto& a) -> AuthApplyResult {
         using T = std::decay_t<decltype (a)>;
@@ -270,7 +287,7 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
             return apply_api_key (req, a);
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
-            return resolve_oauth2 (&req, a.config, db);
+            return resolve_oauth2 (&req, a.config, db, target_policy, cancel);
         } else {
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
             vayu::utils::log_debug ("http",
@@ -284,17 +301,23 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
     auth);
 }
 
-AuthApplyResult
-apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db) {
-    return apply_auth (req, parse_auth (auth), db);
+AuthApplyResult apply_auth (vayu::Request& req,
+const nlohmann::json& auth,
+vayu::db::Database* db,
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
+    return apply_auth (req, parse_auth (auth), db, target_policy, cancel);
 }
 
-AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db) {
+AuthApplyResult preflight_auth (const nlohmann::json& auth,
+vayu::db::Database& db,
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     const Auth parsed = parse_auth (auth);
     if (const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed)) {
         // Acquire (cache-aware) without touching any request - warms the token
         // cache so the run worker's apply_auth is a cache hit.
-        return resolve_oauth2 (nullptr, oauth2->config, &db);
+        return resolve_oauth2 (nullptr, oauth2->config, &db, target_policy, cancel);
     }
     return {};
 }

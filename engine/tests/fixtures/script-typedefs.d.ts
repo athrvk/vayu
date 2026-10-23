@@ -908,7 +908,7 @@ declare const pm: {
 		/**
 		 * Postman's cookie jar object - the write half, plus two URL-scoped reads. get(url, name), getAll(url), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
 		 * 
-		 * get and getAll answer only for this request's own site and for hosts this script has called through pm.sendRequest; any other URL gives undefined or [] and a console warning. Writes are not limited this way.
+		 * get and getAll answer only for this request's own site and for hosts this script has called through pm.sendRequest; any other URL gives undefined or [] and a console warning. set, unset and clear(url) are limited the same way, and a set whose cookie domain is outside that site too: a refused write stores or removes nothing and logs a console warning.
 		 * 
 		 * A write is applied after the transfer it was made before, so the request that follows carries it and the jar keeps it.
 		 * 
@@ -917,7 +917,7 @@ declare const pm: {
 		 */
 		jar(): {
 			/**
-			 * clear(url) removes every cookie that URL would have carried - unset without a name to narrow it. clear() with no URL empties this environment's jar: a session reset, and nothing wider, since other environments' jars are untouched. Nothing is on disk either way, so this costs a re-login and no more.
+			 * clear(url) removes every cookie that URL would have carried - unset without a name to narrow it, and limited to this request's site and the hosts this script has called through pm.sendRequest like unset. clear() with no URL empties this environment's jar: a session reset, and nothing wider, since other environments' jars are untouched. Nothing is on disk either way, so this costs a re-login and no more.
 			 */
 			clear(url?: string, callback?: Function): void;
 			/**
@@ -933,7 +933,7 @@ declare const pm: {
 			 */
 			getAll(url: string, callback?: Function): object[];
 			/**
-			 * Store a cookie for that URL. The cookie object needs name and value; domain, path, secure, httpOnly and expires are optional and default from the URL. expires takes a Date, a date string Date.parse accepts, or a whole number of seconds since the epoch - 0 for a session cookie. set(url, name, value) is accepted too.
+			 * Store a cookie for that URL. The cookie object needs name and value; domain, path, secure, httpOnly and expires are optional and default from the URL. expires takes a Date, a date string Date.parse accepts, or a whole number of seconds since the epoch - 0 for a session cookie. set(url, name, value) is accepted too. The URL and the cookie's domain must be this request's site or a host this script has called through pm.sendRequest; otherwise nothing is stored and a console warning is logged.
 			 * 
 			 * The stored cookie is returned and handed to the optional callback as (null, cookie), carrying the domain and path it took from the URL.
 			 * 
@@ -941,7 +941,7 @@ declare const pm: {
 			 */
 			set(url: string, cookie: object | string, value?: string | Function, callback?: Function): object;
 			/**
-			 * Remove the cookies of that name the URL would have carried. Cookies of the same name stored for another host or path are left alone. The removed name is returned and handed to the optional callback as (null, name).
+			 * Remove the cookies of that name the URL would have carried. Cookies of the same name stored for another host or path are left alone. Limited to this request's site and the hosts this script has called through pm.sendRequest: any other URL removes nothing and logs a console warning. The removed name is returned and handed to the optional callback as (null, name).
 			 */
 			unset(url: string, name: string, callback?: Function): string;
 		};
@@ -1379,7 +1379,7 @@ declare const pm: {
 		 */
 		method: string;
 		/**
-		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). {{variables}} are already resolved here.
+		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). In a pre-request script a {{variable}} is still written as its token, and resolves after the script against what it set; a test script reads the URL as sent.
 		 * 
 		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the full URL - so `===` and `typeof` are the two things that changed. Assign a string to retarget the request before it is sent, or call url.update(...); either way it must be non-empty.
 		 */

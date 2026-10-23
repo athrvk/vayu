@@ -36,6 +36,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "task_queue.hpp"
@@ -93,6 +94,14 @@ class ProxyForwarder {
         return targets.size ();
     }
 
+    /// Forward every request to @p origin (`http://127.0.0.1:port`) whatever
+    /// host its target names, as a proxy that resolves a name the test runner
+    /// cannot. The target is still recorded as received.
+    void forward_every_target_to (std::string origin) {
+        std::lock_guard<std::mutex> lock (mutex);
+        fixed_origin = std::move (origin);
+    }
+
     private:
     void record (const std::string& target) {
         std::lock_guard<std::mutex> lock (mutex);
@@ -146,6 +155,12 @@ class ProxyForwarder {
             res.set_content ("not an absolute-form request line", "text/plain");
             return;
         }
+        {
+            std::lock_guard<std::mutex> lock (mutex);
+            if (!fixed_origin.empty ()) {
+                origin = fixed_origin;
+            }
+        }
 
         httplib::Headers forwarded;
         for (const auto& [name, value] : req.headers) {
@@ -181,6 +196,7 @@ class ProxyForwarder {
 
     mutable std::mutex mutex;
     std::vector<std::string> targets;
+    std::string fixed_origin;
 };
 
 class MockProxy {
@@ -220,6 +236,11 @@ class MockProxy {
 
     std::size_t count () const {
         return forwarder.count ();
+    }
+
+    /// See `ProxyForwarder::forward_every_target_to`.
+    void forward_every_target_to (std::string origin) {
+        forwarder.forward_every_target_to (std::move (origin));
     }
 
     private:

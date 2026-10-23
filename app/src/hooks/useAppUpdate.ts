@@ -7,6 +7,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
+import { useUpdateVerificationStore } from "@/stores/update-verification-store";
+import type { UpdateVerificationFailure } from "@/types/electron";
 
 interface AvailableUpdate {
 	version: string;
@@ -26,6 +28,13 @@ interface AppUpdateState {
 	 * `readyToInstall` is what tells the banner to stop rendering a bar.
 	 */
 	downloadProgress: number | null;
+	/**
+	 * Silent path only: the downloaded installer's build-provenance attestation
+	 * did not verify (issue #2372), so it will not be installed. Replaces
+	 * `readyToInstall` for that version; cleared by the next announcement or
+	 * verified download.
+	 */
+	verificationFailure: UpdateVerificationFailure | null;
 	dismiss: () => void;
 	restartToInstall: () => void;
 	openReleasePage: () => void;
@@ -42,10 +51,12 @@ export function useAppUpdate(): AppUpdateState {
 	const [readyToInstall, setReadyToInstall] = useState(false);
 	const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
 	const [dismissed, setDismissed] = useState(false);
+	const verificationFailure = useUpdateVerificationStore((s) => s.failure);
 
 	useEffect(() => {
 		const api = window.electronAPI;
 		if (!api) return;
+		const verification = useUpdateVerificationStore.getState();
 
 		const offAvailable = api.onUpdateAvailable((info) => {
 			setUpdate(info);
@@ -57,6 +68,7 @@ export function useAppUpdate(): AppUpdateState {
 			// `update-downloaded` sets it again for the version the banner names.
 			setReadyToInstall(false);
 			setDownloadProgress(null);
+			verification.clear();
 			// Only the notify path (macOS), where this announcement is the whole
 			// story: on the silent paths the download that follows is what the
 			// user can act on, and notifying twice for one version is noise.
@@ -82,6 +94,7 @@ export function useAppUpdate(): AppUpdateState {
 			// me it's ready" - the user could not have dismissed a "restart to
 			// install" prompt that did not exist yet.
 			setDismissed(false);
+			verification.clear();
 			systemNotify.post({
 				kind: NOTIFY_KINDS.updateReady,
 				title: `Vayu ${info.version} is ready`,
@@ -90,10 +103,23 @@ export function useAppUpdate(): AppUpdateState {
 			});
 		});
 
+		// No system notification: the app's `updateReady` kind says "ready", and
+		// this is the opposite. The banner is what a user who is looking sees.
+		const offVerificationFailed = api.onUpdateVerificationFailed((failure) => {
+			setUpdate((prev) => (prev ? { ...prev, version: failure.version } : null));
+			// The main process refuses a restart after a failed verification;
+			// offering one here would be a button that does nothing.
+			setReadyToInstall(false);
+			setDownloadProgress(null);
+			setDismissed(false);
+			verification.setFailure(failure);
+		});
+
 		return () => {
 			offAvailable?.();
 			offProgress?.();
 			offDownloaded?.();
+			offVerificationFailed?.();
 		};
 	}, []);
 
@@ -111,16 +137,21 @@ export function useAppUpdate(): AppUpdateState {
 	// Only surface once we have something actionable and the user hasn't
 	// dismissed it - "actionable" now includes a download already in flight,
 	// so the silent path's progress bar shows before the update is ready
-	// rather than only once it is.
+	// rather than only once it is. A failed verification is the one outcome
+	// that must not be swallowed by the silent path's "nothing to show yet".
 	const shouldShow =
 		!dismissed &&
 		update !== null &&
-		(update.strategy === "notify" || readyToInstall || downloadProgress !== null);
+		(update.strategy === "notify" ||
+			readyToInstall ||
+			downloadProgress !== null ||
+			verificationFailure !== null);
 
 	return {
 		update: shouldShow ? update : null,
 		readyToInstall,
 		downloadProgress,
+		verificationFailure,
 		dismiss,
 		restartToInstall,
 		openReleasePage,

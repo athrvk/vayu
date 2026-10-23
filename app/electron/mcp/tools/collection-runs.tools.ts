@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { checkAllowlist } from "../safety.js";
+import { checkComposedTarget, targetPolicyRefusal } from "../safety.js";
 import { ENVIRONMENT_DEFAULT_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
 import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { EngineClient } from "../engine-client.js";
@@ -20,6 +20,8 @@ import {
 	engineErrorResult,
 	errorResult,
 	jsonResult,
+	optionalOffset,
+	optionalPageLimit,
 	requireStr,
 	str,
 	structuredResult,
@@ -27,7 +29,7 @@ import {
 	watchedRun,
 	withCaveat,
 } from "./kit.js";
-import { composeViaEngine, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
+import { asMcpSend, composeViaEngine, resolveEnvironmentId } from "./compose.js";
 import {
 	elementsTimersInput,
 	ENGINE_DEFAULT_HEADERS_POINTER,
@@ -41,9 +43,12 @@ import {
 } from "./input-schemas.js";
 import {
 	childCollectionNames,
+	DEFAULT_SMOKE_LIMIT,
+	MAX_SMOKE_LIMIT,
 	readSchemaVerdict,
 	readTestVerdict,
 	smokeResultSchema,
+	smokePageFields,
 	smokeRowUrl,
 	smokeScopeCaveat,
 } from "./output-schemas.js";
@@ -86,7 +91,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests, and the result discloses the sub-collections left out; `recursive: true` runs them too (an OpenAPI import files its operations there). Requests run one at a time, so a collection takes as long as its requests added together: past about 25 requests or on a slow API use run_collection (one stored run with a run id, `recursive` available, read with get_run_report), and keep this for a bounded pass/fail matrix. Runs 25 requests a call by default (`limit`, max 100): page with `offset` from the result's `next` (a collection edited between pages shifts the window). Reports progress when the client asks. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic and, as the app's Send does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. " +
 			ENGINE_DEFAULT_HEADERS_POINTER +
@@ -110,6 +115,23 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				.boolean()
 				.optional()
 				.describe("Also run sub-collections; each row names its `folder`."),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(MAX_SMOKE_LIMIT)
+				.optional()
+				.describe(
+					`Requests to run this call (default ${DEFAULT_SMOKE_LIMIT}, max ${MAX_SMOKE_LIMIT}). A larger value is refused.`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe(
+					"Requests to skip, for paging (default 0). Pass `next.offset` from the last result."
+				),
 			failOnSchemaError: failOnSchemaErrorInput({
 				unit: "request",
 				defaultsOn: true,
@@ -125,13 +147,16 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			// and a per-row read of one argument could only ever be wrong twice.
 			const failOnSchemaError = args.failOnSchemaError !== false;
 			const recursive = args.recursive === true;
+			// Refused before any traffic, like every bound in this registry.
+			const limit = optionalPageLimit(args, "limit", DEFAULT_SMOKE_LIMIT, MAX_SMOKE_LIMIT);
+			const offset = optionalOffset(args, "offset");
 			// Before the per-row loop: inside it, an unknown id would be one failed
 			// row per request rather than the one refusal it is.
 			let environmentId: string | undefined;
-			let list: SmokeTarget[];
+			let targets: SmokeTarget[];
 			try {
 				environmentId = await resolveEnvironmentId(args, ctx, signal);
-				list = await smokeTargets(ctx.client, collectionId, recursive, signal);
+				targets = await smokeTargets(ctx.client, collectionId, recursive, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err, ctx);
@@ -142,12 +167,38 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			const children = recursive
 				? []
 				: await childCollectionNames(ctx.client, collectionId, signal);
+			// The whole list is read once, in the engine's stable order, and the page
+			// cut from it: a window re-read per call would shift under the run.
+			const list = targets.slice(offset, offset + limit);
+			let cancelled = false;
 			const results: Array<Record<string, unknown>> = [];
 			let passed = 0;
 			let failed = 0;
 			let skipped = 0;
 
+			// One tick per row, whatever became of it. The message is an index and a
+			// status word only: the masking that covers a row's url and error text
+			// (`runOutputShape`) can run only once the loop is over, so nothing a
+			// request resolved to may ride a mid-run string (#2451).
+			const tick = () => {
+				const row = results[results.length - 1];
+				const status = row.skipped === true ? "skipped" : row.ok === true ? "ok" : "failed";
+				ctx.progress?.(
+					results.length,
+					list.length,
+					`${results.length}/${list.length} ${status}`
+				);
+			};
+			if (list.length > 0) ctx.progress?.(0, list.length);
+
 			for (const { item, folder } of list) {
+				// A cancellation ends the run with the rows finished so far. It is
+				// told from a row's own send error by the signal, not the error: the
+				// aborted fetch rejects like any other failure.
+				if (signal?.aborted) {
+					cancelled = true;
+					break;
+				}
 				const req = (item ?? {}) as {
 					id?: string;
 					name?: string;
@@ -168,6 +219,10 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						signal
 					);
 				} catch (err) {
+					if (signal?.aborted) {
+						cancelled = true;
+						break;
+					}
 					results.push({
 						name,
 						...where,
@@ -177,6 +232,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						error: err instanceof Error ? err.message : String(err),
 					});
 					failed++;
+					tick();
 					continue;
 				}
 				const method = String(outgoing.method ?? "GET");
@@ -184,7 +240,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				// Only what the row echoes is projected; the gate and the send read `url`.
 				const shownUrl = smokeRowUrl(ctx, url, outgoing.auth ?? req.auth);
 
-				const gate = checkAllowlist(url, ctx.config, ctx.host);
+				const gate = checkComposedTarget(outgoing, ctx.config, ctx.host);
 				if (!gate.ok) {
 					results.push({
 						name,
@@ -196,13 +252,30 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 						reason: gate.error,
 					});
 					skipped++;
+					tick();
 					continue;
 				}
 				try {
 					const resp = ((await ctx.client.executeRequest(
-						withMcpOrigin(outgoing, ctx),
+						asMcpSend(outgoing, ctx),
 						signal
 					)) ?? {}) as Record<string, unknown>;
+					// The engine's own allowlist refusal of where a script
+					// moved the request (#2521), reported as the gate's is.
+					const refused = targetPolicyRefusal(resp, ctx.host);
+					if (refused) {
+						results.push({
+							name,
+							...where,
+							method,
+							url: shownUrl,
+							ok: false,
+							skipped: true,
+							reason: refused,
+						});
+						skipped++;
+						continue;
+					}
 					const code =
 						typeof resp.status === "number"
 							? resp.status
@@ -242,6 +315,10 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					if (ok) passed++;
 					else failed++;
 				} catch (err) {
+					if (signal?.aborted) {
+						cancelled = true;
+						break;
+					}
 					results.push({
 						name,
 						...where,
@@ -252,19 +329,30 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					});
 					failed++;
 				}
+				tick();
 			}
 
 			// A row's `url`, `reason`, `error` and failing test lines are what the
 			// composed request resolved to, secrets included, so the matrix is run
 			// output (#1809); read after the sends, so a secret a script set is known.
-			const withhold = await runOutputShape(ctx, signal);
+			// A cancelled call reads the masking scopes unsignalled: its own signal is
+			// already aborted, and a masking read that fails closes the call on the
+			// rows it was meant to hand back. The client's budget still bounds it.
+			const withhold = await runOutputShape(ctx, cancelled ? undefined : signal);
 			return withCaveat(
 				structuredResult({
 					collectionId,
-					total: list.length,
+					total: results.length,
 					passed,
 					failed,
 					skipped,
+					...smokePageFields({
+						requestTotal: targets.length,
+						offset,
+						ran: results.length,
+						planned: list.length,
+						cancelled,
+					}),
 					results: withhold(results),
 				}),
 				smokeScopeCaveat(children)
@@ -402,7 +490,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 
 			let started: unknown;
 			try {
-				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
+				started = await ctx.client.startRun(asMcpSend(payload, ctx), signal);
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}

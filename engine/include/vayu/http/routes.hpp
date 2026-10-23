@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <expected>
@@ -1460,10 +1461,12 @@ struct SendRowAuth {
     /// (`core::credentials_await_scripts`): the bind joins the row into `auth`
     /// without applying it (`core::bind_iteration_holding_auth`), and the
     /// exchange applies it after the pre-request script
-    /// (`apply_late_auth`). A single-request load run carries it into
-    /// `core::LoadAuthPlan::after_scripts` when it declares `requestElements`;
-    /// a collection run decides it per step when its plan resolves
-    /// (`core::ScenarioStep::auth_after_scripts`).
+    /// (`apply_late_auth`). Set for an OAuth 2.0 config holding such a name
+    /// too (#2521), which the exchange then acquires through the token cache.
+    /// A single-request load run carries it into
+    /// `core::LoadAuthPlan::after_scripts` when it declares `requestElements`,
+    /// and refuses the OAuth 2.0 case; a collection run decides it per step
+    /// when its plan resolves (`core::ScenarioStep::auth_after_scripts`).
     bool after_scripts                    = false;
     vayu::http::AuthResolution resolution = vayu::http::AuthResolution::Apply;
 };
@@ -1785,6 +1788,13 @@ vayu::db::Database& db);
  */
 using ShutdownCallback = std::function<void ()>;
 
+/// The `RouteContext::server_stopping` of a context no `Server` owns: it never
+/// flips.
+[[nodiscard]] inline const std::atomic<bool>& never_stopping () {
+    static const std::atomic<bool> never{ false };
+    return never;
+}
+
 /**
  * @brief Context passed to route setup functions
  */
@@ -1817,6 +1827,12 @@ struct RouteContext {
     /// (#2356). Owned by Server; read through `admit_file_trust_write`. A
     /// context built without one refuses those writes.
     const vayu::http::GrantSecret& grant_secret = vayu::http::no_grant_secret ();
+    /// Set by `Server::stop()` before it joins the handler threads (#2683).
+    /// Every outbound transfer a handler makes carries it as
+    /// `ClientConfig::cancel`, and every SSE relay loop ends on it, so the
+    /// join waits on no request's timeout and no open stream. Owned by Server,
+    /// and no route writes it.
+    const std::atomic<bool>& server_stopping = never_stopping ();
 };
 
 // Route registration functions (implemented in separate files)

@@ -116,6 +116,25 @@ describe("links cannot navigate this window", () => {
 		expect(openExternalUrl).toHaveBeenCalledWith("https://example.test/x");
 	});
 
+	it("lets a refusal from the main process end at the click", async () => {
+		// The main process refuses an unfocused window and a second open within a
+		// second (#2378) by rejecting the invoke. A native rejected promise cannot
+		// show whether anything consumed it here (vitest does not surface an
+		// unhandled rejection from this environment), so the call returns a
+		// thenable that records whether its rejection was subscribed to.
+		const subscribed = vi.fn();
+		openExternalUrl.mockReturnValueOnce({
+			then: (_resolve: unknown, reject: (reason: unknown) => void) => {
+				subscribed();
+				reject(new Error("Refusing to open"));
+			},
+		});
+		await renderView(<MarkdownView>{"[docs](https://example.test/x)"}</MarkdownView>);
+		fireEvent.click(screen.getByRole("button", { name: "docs" }));
+		await act(async () => {});
+		expect(subscribed).toHaveBeenCalledTimes(1);
+	});
+
 	it("drops a javascript: URL before it can be opened", async () => {
 		// react-markdown's default urlTransform strips this. It is asserted here
 		// because the documented way to break it is to override `urlTransform`,

@@ -348,7 +348,8 @@ const vayu::http::FileAccessPolicy& files);
  *   `body.fields`. A value shorter than four characters is left alone.
  *
  * Everything else is kept, except the top-level `origin` (#1817), which the
- * run row stores in its own columns, and a file reference's `unresolved`,
+ * run row stores in its own columns, the top-level `targetPolicy` (#2521),
+ * which governs a send and is never stored, and a file reference's `unresolved`,
  * which is derived on read and never stored (`erase_file_trust`). If `body`
  * is not valid JSON it is returned unchanged.
  *

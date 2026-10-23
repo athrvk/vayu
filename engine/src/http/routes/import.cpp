@@ -27,6 +27,7 @@
 #include "vayu/core/run_manager.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -94,7 +95,8 @@ std::function<bool (const std::string& event, const nlohmann::json& data)>;
  * the same test see a `reference` reach the client (#2364).
  */
 std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
-const vayu::http::TransportPolicy& transport);
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel);
 
 namespace {
 
@@ -282,11 +284,13 @@ const Result<Response>& result) {
  * import succeeding or failing depending on which surface asked for it.
  */
 vayu::http::ClientConfig fetch_client_config (const FetchTarget& fetch,
-const vayu::http::TransportPolicy& transport) {
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel) {
     vayu::http::ClientConfig config;
     config.transport          = transport;
     config.max_response_bytes = fetch.max_bytes;
     config.local_peer_rule    = fetch.reference;
+    config.cancel             = cancel;
     // A stall bound in place of the total (issue #882). This route inherited
     // `Request::timeout_ms` - 30 seconds for the whole transfer - which bounds a
     // download's size rather than its health: 10 MB needed better than 340 KB/s
@@ -325,13 +329,14 @@ std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_bod
 } // namespace
 
 std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
-const vayu::http::TransportPolicy& transport) {
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel) {
     const auto target = read_fetch_target (request_body);
     const auto* fetch = std::get_if<FetchTarget> (&target);
     if (fetch == nullptr) {
         return std::nullopt;
     }
-    return fetch_client_config (*fetch, transport);
+    return fetch_client_config (*fetch, transport, cancel);
 }
 
 /**
@@ -361,17 +366,21 @@ const vayu::http::TransportPolicy& transport) {
  *                  connection by forgetting an argument. Spec re-fetch and
  *                  `$ref` bundling ride this path, so it is what makes
  *                  importing a spec by URL work behind a proxy (issue #705).
+ * @param cancel    `ClientConfig::cancel`: the route's
+ *                  `RouteContext::server_stopping` (issue #2683). Required for
+ *                  the reason @p transport is.
  * @return {http_status, json_body}. Separated from the route for unit testing.
  */
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
-const vayu::http::TransportPolicy& transport) {
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel) {
     auto target = read_fetch_target (request_body);
     if (const auto* refusal = std::get_if<FetchRefusal> (&target)) {
         return *refusal;
     }
     const auto& fetch = std::get<FetchTarget> (target);
 
-    vayu::http::Client client (fetch_client_config (fetch, transport));
+    vayu::http::Client client (fetch_client_config (fetch, transport, cancel));
     return fetch_outcome (client, client.send (fetch_request (fetch)));
 }
 
@@ -390,6 +399,7 @@ const vayu::http::TransportPolicy& transport) {
  * (`{error: {code, message}}`) carrying exactly what `import_fetch` would have
  * answered with.
  *
+ * @param cancel as `import_fetch`'s.
  * @param emit one event. Returns false once its listener has gone, which
  *             abandons the transfer rather than reading the rest of a download
  *             for nobody - and stops anything further being emitted, including
@@ -401,6 +411,7 @@ const vayu::http::TransportPolicy& transport) {
  */
 std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
 const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel,
 const ImportFetchEmitter& emit) {
     auto target = read_fetch_target (request_body);
     if (const auto* refusal = std::get_if<FetchRefusal> (&target)) {
@@ -413,7 +424,8 @@ const ImportFetchEmitter& emit) {
     uint64_t reported_at_bytes = 0;
     auto reported_at           = std::chrono::steady_clock::now ();
 
-    vayu::http::ClientConfig client_config = fetch_client_config (fetch, transport);
+    vayu::http::ClientConfig client_config =
+    fetch_client_config (fetch, transport, cancel);
     client_config.on_body_progress = [&] (uint64_t received,
                                      std::optional<uint64_t> declared_total) {
         const auto now = std::chrono::steady_clock::now ();
@@ -1541,9 +1553,9 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
     std::string ("POST /import/fetch") + (streaming ? " (streaming)" : ""));
 
     if (!streaming) {
-        auto [status, body] =
-        import_fetch (req.body, vayu::http::resolve_transport_policy (ctx.db));
-        res.status = status;
+        auto [status, body] = import_fetch (req.body,
+        vayu::http::resolve_transport_policy (ctx.db), &ctx.server_stopping);
+        res.status          = status;
         res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
         return;
@@ -1567,8 +1579,8 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
     // handler has returned and the `Request` is gone.
     const std::string body = req.body;
     const auto transport   = vayu::http::resolve_transport_policy (ctx.db);
-    res.set_content_provider (
-    "text/event-stream", [body, transport] (size_t, httplib::DataSink& sink) {
+    res.set_content_provider ("text/event-stream",
+    [body, transport, &stopping = ctx.server_stopping] (size_t, httplib::DataSink& sink) {
         size_t frame    = 0;
         const auto emit = [&sink, &frame] (
                           const std::string& event, const nlohmann::json& data) {
@@ -1581,7 +1593,7 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
             data.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace), frame++);
             return sink.write (payload.data (), payload.size ());
         };
-        import_fetch_stream (body, transport, emit);
+        import_fetch_stream (body, transport, &stopping, emit);
         sink.done ();
         return false;
     });

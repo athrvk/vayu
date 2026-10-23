@@ -58,7 +58,8 @@ export SUDO_LOG
 # The installer runs with $HOME and the macOS Applications directory both inside
 # the temp tree, so a real install cannot touch the machine running this.
 # VAYU_TTY keeps the quit prompt away from the terminal, VAYU_ASSUME_YES answers
-# it, and VAYU_RELEASE_BASE points the download at the local release below.
+# it, VAYU_RELEASE_BASE points the download at the local release below, and
+# VAYU_CURL_PROTO widens curl's https-only pin to allow that file:// release.
 installer() {
 	env \
 		HOME="$ROOT" \
@@ -67,6 +68,7 @@ installer() {
 		XDG_CACHE_HOME="$ROOT/.cache" \
 		VAYU_ROOT="$ROOT/sys" \
 		VAYU_RELEASE_BASE="file://$RELEASES" \
+		VAYU_CURL_PROTO="file,https" \
 		VAYU_ASSUME_YES=1 \
 		VAYU_TTY=/dev/null \
 		VAYU_SUDO="$SUDO_STUB" \

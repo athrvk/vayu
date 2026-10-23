@@ -15,6 +15,7 @@
  * and access to request/response data.
  */
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -369,6 +370,16 @@ struct ScriptContext {
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 
     /**
+     * @brief `ClientConfig::cancel` for every `pm.sendRequest` this script
+     *        makes (issue #2683), or null when nothing ends one early.
+     *
+     * The enclosing exchange's own (`ExchangeInputs::cancel`), so a script
+     * send inside `POST /execute` ends with the server the way the request's
+     * own send does.
+     */
+    const std::atomic<bool>* cancel = nullptr;
+
+    /**
      * @brief `pm.metrics`'s write destination (issue #1500), or null to
      *        refuse it.
      *
@@ -487,8 +498,10 @@ class ScriptEngine {
     /**
      * @brief Execute a pre-request script
      *
-     * The script sees the fully composed request - auth is already resolved
-     * into its headers and URL by the time it runs - and whatever it leaves in
+     * The script sees the composed request - auth is already resolved into its
+     * headers and URL by the time it runs, unless a credential waits on this
+     * script (`apply_late_auth`), and every `{{name}}` composition deferred
+     * past it (#2521) is still written - and whatever it leaves in
      * `pm.request` when it returns is written back into @p request before the
      * send. A script-set header therefore overrides an engine-applied one of
      * the same name.

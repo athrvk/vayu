@@ -39,6 +39,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
 
@@ -663,6 +664,16 @@ struct RunContext {
      * run's worker thread, so it needs no lock.
      */
     vayu::http::TransportPolicy transport;
+
+    /**
+     * The hosts this run's caller allows it to reach (`targetPolicy`, #2521),
+     * read from `config` at construction and absent when the payload stated
+     * none. Kept here and nowhere else: the stored snapshot drops it. A load
+     * run hands it to its event loop (`EventLoopConfig::target_policy`), which
+     * judges every submission; the sequential runner judges every step through
+     * `ExchangeInputs::target_policy`.
+     */
+    std::optional<vayu::http::TargetPolicy> target_policy;
 
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests

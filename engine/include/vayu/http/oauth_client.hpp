@@ -11,6 +11,7 @@
 #include "vayu/types.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -32,6 +33,12 @@ constexpr auto RESERVED_PARAM_NAMES =
 std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
 "code", "redirect_uri", "code_verifier", "refresh_token", "username", "password",
 "scope", "state", "code_challenge", "code_challenge_method", "response_type" });
+
+/// The config members naming a URL @ref acquire_token posts to: the grant's
+/// endpoint, and the refresh endpoint, which falls back to it when empty. A
+/// caller's target policy judges both (`refuse_token_endpoints`, #2521).
+constexpr auto TOKEN_ENDPOINT_MEMBERS =
+std::to_array<std::string_view> ({ "accessTokenUrl", "refreshTokenUrl" });
 
 /// The config lists of extra request parameters, in the order the cache key
 /// reads them (`cache_key`).
@@ -139,12 +146,16 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * @param network_ms When non-null, the milliseconds this call spent waiting on
  *        the provider's token endpoint are added to it (a refresh and the fresh
  *        grant after a rejected refresh both count); a cache hit adds nothing.
+ * @param cancel `ClientConfig::cancel` for the token request (issue #2683):
+ *        a management-API handler's `RouteContext::server_stopping`, null
+ *        everywhere else. A cancelled request is an `oauth2_network_error`.
  */
 std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
 const nlohmann::json& config,
 bool force_refresh,
 const std::optional<InteractiveExchange>& interactive,
-double* network_ms = nullptr);
+double* network_ms              = nullptr,
+const std::atomic<bool>* cancel = nullptr);
 
 /**
  * @brief Public JSON shape of a cached token (never includes the refresh token

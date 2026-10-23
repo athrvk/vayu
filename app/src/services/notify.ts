@@ -34,7 +34,11 @@ import type {
 	SystemNotificationTarget,
 } from "@/types/electron";
 
-/** The events relevant enough to interrupt another application. */
+/**
+ * The events relevant enough to interrupt another application. Main refuses any
+ * kind outside its own copy of this list (`electron/notify.ts`, #2378); add one
+ * to both, and `notify.test.ts` fails until you do.
+ */
 export const NOTIFY_KINDS = {
 	loadRunFinished: "load-run-finished",
 	loadRunStopped: "load-run-stopped",

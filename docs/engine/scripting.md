@@ -359,7 +359,9 @@ Notes on the edges:
   it, so `.an('array').that.includes(1)` does too.
 - **`jsonSchema(schema[, options])` is draft-07** and runs on the engine's
   validator rather than ajv. A failure names the first path that broke the
-  schema. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
+  schema; a constraint that records no detail (`propertyNames`, a `false`
+  schema) yields one failure at the body root that names the schema path
+  instead. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
   such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
   in **both** polarities and is named, because ignoring it would make the schema
   looser (or, under `not`, stricter) and neither verdict could be trusted.
@@ -1110,8 +1112,9 @@ Rules worth knowing before you rely on them:
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
   sees the real `Authorization` header and can replace or remove it. The one
-  exception is a credential still holding a `{{name}}` no variable defined when
-  the request was composed (#2473): that auth is applied *after* the script, so
+  exception is a credential still holding a `{{name}}` that no variable defined
+  when the request was composed, or any `{{name}}` of a request a pre-request
+  script runs before (#2473, #2521): that auth is applied *after* the script, so
   a value the script sets reaches it, and the header is not in
   `pm.request.headers` yet. A header the script sets still wins, because auth
   never replaces one the request already carries. The order is the same on a
@@ -1137,16 +1140,22 @@ Rules worth knowing before you rely on them:
   signs, hashes, measures or re-parses the body it just wrote - the
   `hmacSha256(secret, pm.request.body.raw)` shape most webhook signing needs -
   must use `pm.request.body.raw = …`, not `pm.request.body = …`.
-- **Setting a variable can re-render the URL, if composition left it
-  unresolved.** `{{placeholders}}` are still resolved at compose time
-  (`POST /compose`), strictly before any script runs (#226, D1 stands) - but a
-  name composition could not answer keeps its braces (#1009) and is resolved
-  again after the pre-request script and before the send (#1008), against the
-  scopes as the script left them. So `pm.environment.set('host', …)` reaches a
-  `{{host}}` in this send's URL as long as nothing already answered `host` at
-  compose time; a `{{host}}` composition already substituted is finished text
-  and this pass does not touch it - assign `pm.request.url` directly to change
-  that.
+- **Setting a variable re-renders the URL of a scripted request.** A request
+  a pre-request script runs before (its own, a folder's or the collection's)
+  keeps every `{{placeholder}}` a scope answers written when `POST /compose`
+  composes it (#2521, [decision D1](../app/variable-resolution.md), Postman's
+  order), and so does a name composition could not answer (#1009). All of them
+  are resolved after the pre-request script and before the send (#1008),
+  against the scopes as the script left them. So `pm.environment.set('host', …)`
+  reaches a `{{host}}` in this send's URL, on every run. Meanwhile
+  `pm.request.url` holds the `{{host}}` as written, in the script. A request no
+  pre-request script runs before is composed once, as it always was, and a
+  `{{host}}` composition substituted is finished text - assign
+  `pm.request.url` directly to change that. A collection run widens this to
+  the whole plan: when any step's script or extractor writes a variable before
+  a send (`script.teardown` aside), every step defers, so a token one step's
+  test script stores reaches a later step's `Bearer {{token}}` on every run
+  ([Scenario runs](api-reference.md#scenario-runs)).
 - **A single-request load test still does not run pre-request scripts** -
   only the `tests` (post-request) script runs there. A **scenario** load
   run's `script.pre` element does now, but only when marked `inline` or
@@ -1741,9 +1750,10 @@ pm.variables.get('nonce'); // the number as set
 - **Every read sees it first.** `get`, `has`, `toObject`, `replaceIn` and
   `pm.sendRequest` read it above the row and the named scopes, and so does the
   pass that resolves what composition left after the pre-request script, so a
-  `{{nonce}}` header goes out with the value. A name composition or the
-  data-row bind already answered before the script ran keeps that answer
-  (both run first, [decision D1](../app/variable-resolution.md)).
+  `{{nonce}}` header goes out with the value. A name composition substituted
+  for a request no pre-request script runs before, or the data-row bind
+  already answered before the script ran, keeps that answer
+  ([decision D1](../app/variable-resolution.md)).
   `{{data.column}}` is the row's own spelling and never reads the local scope.
 - **The writes are the scoped ones.** `set` keeps the value's type for the
   run and stores its string form for `{{name}}`, exactly as
@@ -1776,8 +1786,9 @@ from belongs in a named scope instead.
 an arbitrary string - runs the same resolver `POST /compose` uses
 (`request_composer.cpp::resolve_template`), over the script's scopes in
 `pm.variables`' precedence, at **call time** - so a variable the script set a
-line earlier resolves, unlike `{{}}` in the URL, which was composed before the
-script started. Dynamic variables generate per occurrence:
+line earlier resolves at once, where the request's own `{{}}` in the URL waits
+for the pre-request script to end (#2521). Dynamic variables generate per
+occurrence:
 
 ```javascript
 const id = pm.variables.replaceIn("{{$guid}}"); // fresh UUID v4
@@ -1981,8 +1992,9 @@ credential of an `auth` block are resolved
 once, against the local scope, the bound data row and the three named scopes
 exactly as `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
-token-refresh script work. It is not a second pass over the composed request:
-that payload was resolved before the script ran and nothing here revisits it.
+token-refresh script work. It is not a second pass over the request being
+sent: that request's own names resolve after the pre-request script ends
+(#2521), and nothing here revisits them.
 A name nothing defines keeps its braces (#1009), and a `{{data.column}}` the
 bound row lacks throws naming the column, the same way `replaceIn` does.
 
@@ -2197,7 +2209,9 @@ is a much worse afternoon than a thrown error.
 **A written cookie is matched by the same rules a received one is.** Setting it
 for one host does not send it to another, `/admin` does not reach `/`, and the
 jar's per-environment isolation holds - the write half is not a way around the
-matching the read half respects.
+matching the read half respects. Nor is it a way around the site limit: a write
+is held to the request's site and the hosts the script called, like a read (see
+[Writes are limited the same way](#writes-are-limited-the-same-way)).
 
 **When the write takes effect.** A write is *staged*, not applied where it is
 made, and the next transfer of that execution carries it:
@@ -2256,6 +2270,14 @@ trailing dot. For a request to `www.example.com`, `www.example.com` and
 scope only as itself. A non-ASCII host is compared as its punycode name, the one
 the jar keys on.
 
+**The request's site is its URL as the variables resolve it at the call.** A
+request a pre-request script runs before still holds its `{{name}}`s in that
+script (#2521), so its host is read the way `pm.variables.replaceIn` would read
+the URL at that moment: a `{{host}}` the environment stores, or one the script
+set a line earlier, names the site, and a write after the script moves
+`host` is held to the new one. `pm.cookies.get` and its siblings match the
+same resolved URL.
+
 A host the script has called with `pm.sendRequest` joins the allowed set from
 the moment of the call, whether or not the transfer succeeded, so "log in
 through `pm.sendRequest`, then read the session it set" works. The set lasts
@@ -2274,9 +2296,50 @@ pm.cookies.jar().get read nothing for b.example: a jar read is limited to the re
 to `b.example` does not put `b.example` in scope, so a script cannot read the
 redirect's cookies unless it called that host itself.
 
-**Writes are not limited this way.** `set`, `unset` and `clear` stay scoped by
-the URL they are given (decision 1 of #337), not by the request: a script may
-still write a cookie for another host. Only the read half is held to the site.
+#### Writes are limited the same way
+
+`set`, `unset` and `clear(url)` are held to the same allowed set as reads: the
+request's own site plus the hosts this script has addressed through
+`pm.sendRequest`, compared by the same rule (the two share one definition, so
+they cannot drift). A script - an imported collection's, say - therefore cannot
+plant a cookie for another site, nor delete that site's session.
+
+- **The URL** a write names must be in scope, for all three methods.
+- **For `set`, the cookie's `domain` must be in scope too.** Without the check a
+  cookie `{ domain: 'victim.example', path: '/' }` set through a URL of
+  `a.example` would be stored for `victim.example` and sent on the next transfer
+  to it (cookie fixation). RFC 6265 section 5.3 has a user agent ignore a
+  `Domain` that does not domain-match the request host; the jar does not apply
+  that rule itself, so the engine checks it here, and it reads the match in both
+  directions like the rest of the scope. A leading dot is ignored for the
+  comparison and the domain is compared as punycode, as the jar keys on it.
+  `Domain=example.com` set from a request to `www.example.com` is in scope and
+  still stores.
+- **A single-label domain is refused** (`.com`, `test`) unless it is exactly the
+  request's host or one the script called (a request to `localhost` may write
+  `domain: 'localhost'`). A top-level domain is a parent of every host under it,
+  so the site rule alone would admit it, and the cookie would then be sent to
+  every site there. **No public-suffix list is applied** (#2731): `co.uk` or
+  `github.io` still passes as a domain, because telling it from `example.co.uk`
+  needs the list.
+- `clear()` with no URL empties this environment's jar and is not subject to the
+  site limit (see above).
+
+A refused write does not throw and stages nothing. The call completes as an
+accepted write would - `set` returns (and passes the callback) the cookie it
+would have stored, `unset` the name - and the script's console gets one warning
+naming the host or domain, never the full URL:
+
+```
+pm.cookies.jar().set wrote nothing for the domain victim.example: a jar write is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting.md.
+```
+
+A bad argument is still the error it was; the site check runs after the
+arguments are validated. A redirect target is not in scope for writes either.
+A Postman script that logs in across hosts by `set`ting a cookie with a foreign
+`domain` stops working here; call the other host through `pm.sendRequest` first
+and its jar entries, and writes naming it, are in scope.
+
 The flat `pm.cookies` reads need no such rule - they only ever read the
 request's own URL.
 
@@ -3292,9 +3355,6 @@ moves into the agreed cases:
 - `multipleOf` with a decimal: ajv divides in binary floating point, so
   `{"multipleOf": 0.01}` rejects `0.07` and `19.99` unless `multipleOfPrecision`
   is set. `jsonSchema` answers the decimal question and passes both.
-- `propertyNames`: `jsonSchema` passes `{"aB": 1}` against
-  `{"propertyNames": {"pattern": "^[a-z]+$"}}` and ajv rejects it. The native
-  verdict is the wrong one (a bug, [#2719](https://github.com/athrvk/vayu/issues/2719)).
 
 The keywords `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) are the ones ajv 6 ignores, so a schema that

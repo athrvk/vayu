@@ -70,7 +70,7 @@ const OUTCOME: Record<ConnectionTestOutcome, { label: string; chip: string; hint
 	tls_failed: {
 		label: "TLS failed",
 		chip: "bg-status-error-fill text-white",
-		hint: "The connection was made and the certificate was not accepted. A TLS-inspecting proxy or an internal authority needs its certificate pasted into Custom CA Certificates above.",
+		hint: "The connection was made and the certificate was not accepted. A TLS-inspecting proxy or an internal authority needs its certificate pasted into Custom CA certificates above.",
 	},
 	timed_out: {
 		label: "Timed out",

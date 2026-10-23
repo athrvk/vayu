@@ -18,9 +18,9 @@
  * The folder is always one the user chose in the system picker, which the
  * main process opens and then allows itself: an allowed folder widens what
  * every request may read from disk, so the renderer cannot name one (#2356).
- * A surface that knows a likely folder - an imported file's - passes it as
- * where the picker opens. Outside Electron there is no picker and nothing that
- * may make the write, so `chooseAndAllow` is absent.
+ * Nor can it say where the picker opens or what its title says (#2378): main
+ * opens it where the last folder dialog ended. Outside Electron there is no
+ * picker and nothing that may make the write, so `chooseAndAllow` is absent.
  */
 
 import { useCallback } from "react";
@@ -31,11 +31,11 @@ import type { AllowFolderReply } from "@/types/electron";
 
 export interface AllowFolder {
 	/**
-	 * Open the system folder picker (starting at `defaultPath`), then allow what
-	 * was chosen. Resolves true when the chosen folder is allowed afterwards,
-	 * false on cancel or refusal. Absent outside Electron.
+	 * Open the system folder picker, then allow what was chosen. Resolves true
+	 * when the chosen folder is allowed afterwards, false on cancel or refusal.
+	 * Absent outside Electron.
 	 */
-	chooseAndAllow?: (defaultPath?: string) => Promise<boolean>;
+	chooseAndAllow?: () => Promise<boolean>;
 	isPending: boolean;
 }
 
@@ -67,23 +67,17 @@ export function useAllowFolder(): AllowFolder {
 	const showToast = useToastStore((s) => s.showToast);
 	const bridged = typeof window !== "undefined" && Boolean(window.electronAPI?.allowFolder);
 
-	const chooseAndAllow = useCallback(
-		async (defaultPath?: string): Promise<boolean> => {
-			let reply: AllowFolderReply;
-			try {
-				reply = await allowChosen.mutateAsync({
-					title: "Allow a folder",
-					...(defaultPath ? { defaultPath } : {}),
-				});
-			} catch {
-				// The bridge itself refused or broke: nothing reached the engine.
-				showToast("Couldn't open the folder picker. Restart Vayu.", "error");
-				return false;
-			}
-			return announce(reply, showToast);
-		},
-		[allowChosen, showToast]
-	);
+	const chooseAndAllow = useCallback(async (): Promise<boolean> => {
+		let reply: AllowFolderReply;
+		try {
+			reply = await allowChosen.mutateAsync();
+		} catch {
+			// The bridge itself refused or broke: nothing reached the engine.
+			showToast("Couldn't open the folder picker. Restart Vayu.", "error");
+			return false;
+		}
+		return announce(reply, showToast);
+	}, [allowChosen, showToast]);
 
 	return {
 		...(bridged ? { chooseAndAllow } : {}),

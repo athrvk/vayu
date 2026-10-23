@@ -250,7 +250,7 @@ describe("the unresolved banner", () => {
 		expect(screen.getByText(/this file is sent without picking it again/)).toBeInTheDocument();
 	});
 
-	it("Allow folder opens the picker at the file's folder inside Electron", async () => {
+	it("Allow folder opens the picker with no folder hint inside Electron", async () => {
 		vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
 		allowRoot.mockResolvedValue({
 			outcome: "done",
@@ -261,12 +261,7 @@ describe("the unresolved banner", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Allow folder…" }));
 
-		await waitFor(() =>
-			expect(allowRoot).toHaveBeenCalledWith({
-				title: "Allow a folder",
-				defaultPath: "/imported/data",
-			})
-		);
+		await waitFor(() => expect(allowRoot).toHaveBeenCalledWith());
 	});
 
 	// #2356: the renderer cannot allow a folder it names, so with no picker

@@ -41,7 +41,7 @@ describe("file-roots API", () => {
 		expect(get).toHaveBeenCalledWith("/file-roots");
 	});
 
-	it("allows a folder through the bridge, passing where the picker opens", async () => {
+	it("allows a folder through the bridge, naming the dialog by key and nothing else", async () => {
 		const bridge = stubBridge();
 		const reply = {
 			outcome: "done",
@@ -50,13 +50,8 @@ describe("file-roots API", () => {
 		};
 		bridge.allowFolder.mockResolvedValue(reply);
 
-		await expect(
-			apiService.allowChosenFolder({ title: "Allow a folder", defaultPath: "/data" })
-		).resolves.toEqual(reply);
-		expect(bridge.allowFolder).toHaveBeenCalledWith({
-			title: "Allow a folder",
-			defaultPath: "/data",
-		});
+		await expect(apiService.allowChosenFolder()).resolves.toEqual(reply);
+		expect(bridge.allowFolder.mock.calls).toEqual([["allow-folder"]]);
 		expect(vi.mocked(httpClient.post)).not.toHaveBeenCalled();
 	});
 

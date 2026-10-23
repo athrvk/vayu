@@ -2090,7 +2090,10 @@ HeaderList apply_script_headers (const HeaderList& lines, const Headers& written
  * Precedence over engine-applied auth falls out of the ordering rather than
  * being a special case: `build_request` resolves auth into the request before
  * the script runs, so the script sees the real outgoing set and its writes are
- * simply later.
+ * simply later. Auth that waits on the script (`apply_late_auth`: a credential
+ * naming a variable, or any `{{name}}` of a request a pre-request script runs
+ * before, #2521) is applied after it, so the script's set lacks that header and
+ * a header the script sets still wins.
  *
  * All-or-nothing. Every field is staged and validated before anything is
  * committed, so a script that sets a good header and a bad method sends

@@ -106,7 +106,7 @@ export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds })
 												size="sm"
 												className="ml-auto h-control-sm shrink-0 px-2 text-xs"
 												disabled={isPending}
-												onClick={() => void chooseAndAllow(folder)}
+												onClick={() => void chooseAndAllow()}
 												aria-label={`Allow folder ${folder}`}
 											>
 												Allow folder…

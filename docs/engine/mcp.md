@@ -270,10 +270,11 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
 | `get_app_focus`        | read     | The renderer's last snapshot over `app:focus` (app window only; no engine call) | - (names and ids only: the open tab's type, entity id and label, and the active environment's id and name; an error saying the window is not connected from the stdio CLI or before a window has published) |
+| `get_safety_config`    | read     | The session's `McpSafetyConfig` (no engine call, answers on HTTP and stdio alike) | - (`allowlist: { allowAll, hosts }` with the hosts in full, `caps: { maxRps, maxConcurrency, maxDurationSeconds, maxIterations }`, `gates: { allowWrites, allowNetworkSettings, revealSecretsToAgents }` as booleans, and `disabledToolCount`; a count, never the names; no secret value, since none is part of the config; #2444) |
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
-| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
+| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host, and held by the engine to the URL it sends (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
@@ -286,9 +287,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
-| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
-| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
+| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path and held by the engine to the URL it sends after any pre-request script (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
+| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | runs one page of the list, `limit` (default 25, max 100, a larger value refused) from `offset`, and the result's `requestTotal`, `hasMore`, `next.offset` and `note` say what is left; allowlist per host, and again by the engine on each sent URL (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed; sends a progress notification per row when the client sent a `progressToken` (index and status word only, never a name or URL) |
+| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run - and held by the engine to each step's sent URL and OAuth 2.0 token endpoint (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
@@ -326,7 +327,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist (also held by the engine, `targetPolicy`) + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default, or `constant_rps` when a positive `targetRps` is given and `mode` is left out) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); `targetRps` is `constant_rps`'s alone, and a rate beside any other stated `mode` is forwarded for the engine's `400` to refuse (#2396); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -939,8 +940,57 @@ Notes:
   files its operations under sub-collections (grouped by tag or by path, per
   `meta.folderStrategy`), so a direct-only smoke of its root answers `total: 0`;
   `import_document`'s caveat says how many sub-collections hold the requests and
-  names the recursive path. Requests run serially, so a large collection takes as
-  long as its requests do added together.
+  names the recursive path. Requests run serially, so a collection takes as long
+  as its requests do added together, and each one is real traffic: past about 25
+  requests or against a slow API the description steers an agent to
+  `run_collection` (one stored run with a run id, read with `get_run_report`),
+  leaving the smoke for a bounded pass/fail matrix.
+  **A call runs one page** (#2451): `limit` requests (default 25, max 100; a
+  larger value is refused, not clamped, like every bound in this registry)
+  starting at `offset`. The list - the direct requests, or the whole expansion of
+  a `recursive` run - is read once in the engine's stable order and then sliced
+  `[offset, offset + limit)`, so a collection edited between two calls shifts the
+  window under the second one (the description says so). `total`, `passed`,
+  `failed` and `skipped` keep their meaning as the counts of the rows run **in
+  this call**; the result adds `requestTotal` (the list's size, before the cut),
+  `hasMore`, and - only while `hasMore` is true - `next: {offset}`, the `offset`
+  that resumes. Whenever the call did not run everything in scope the result's
+  own `note` field says so in a sentence (`Ran 25 of 140 requests, starting at
+  offset 0; call again with offset: 25 for the rest.`), in the structured
+  content and so in the JSON text block alike: a default of 25 that cut a
+  collection quietly would read as a whole-collection pass. An `offset` at or
+  past `requestTotal` runs nothing and the note says so (`hasMore` false). A
+  call that ran everything carries `requestTotal` and `hasMore: false` and no
+  note. Progress (below) counts the page, not the collection.
+  **A cancellation returns what finished.** When the call's signal aborts
+  mid-run the loop stops and the result carries the rows completed so far with
+  `cancelled: true`, `hasMore: true` and `next.offset` set to `offset` plus the
+  rows returned. The abort is told from a row's own send error by the signal, not
+  by the error: an aborted fetch rejects like any other failure, but a send that
+  fails with the signal still live stays a failed row and the run goes on. The
+  request in flight at the abort is not a row, and `next.offset` points at it, so
+  resuming sends it again; the note warns it may already have reached the API.
+  The masking reads that follow the loop run without the aborted signal, since
+  one that fails closes the call and would discard the rows. The SDK itself
+  sends no response to a request whose signal aborted (a `notifications/cancelled`
+  for it, or the connection closing), so the partial result is what a caller
+  that reads the handler's return value gets - the tests, `dispatchTool` - and
+  what the cancelled loop no longer does is walk the remaining rows, each a
+  failed fetch the instant after the abort.
+  When the client sent a `progressToken` (#2451) the call reports
+  `notifications/progress` - `0/total` before the first request, then one per
+  row on every path (sent, skipped off the allowlist or failed to compose), with
+  a message of the form `3/40 ok` / `3/40 skipped` / `3/40 failed`. The message is
+  an index and a status word and nothing the request resolved to: the masking
+  that covers a row's `url`, `error` and test lines runs on the finished matrix
+  (it needs the secrets a script set along the way), so a mid-run string has no
+  such cover and carries none of that data. The notification goes out on the
+  request's own stream (`mcpReq.notify`), not the session's, and a failed or
+  post-cancellation send is dropped. A client with a short request timeout only
+  benefits if it resets that timeout on progress (the TypeScript SDK's
+  `resetTimeoutOnProgress`): a single `POST /execute` may take up to 310 s (the engine's 300 s ceiling plus
+  the client's grace), so without it the client can give up on a run still working. A call with no
+  token sends nothing.
 - **The OAuth 2.0 token tools** (issue #760) are how an agent gets a token
   problem named instead of discovering it as a wall of 401s inside a run:
   `fetch_oauth2_token` acquires (or force-refreshes) a token for a config and
@@ -1083,7 +1133,12 @@ Notes:
   run row, arrives before this client gives up. If the budget does expire, the
   tool says the call may still have completed and points at `list_runs`; it is
   never reported as an unreachable engine, because a retry could re-send a
-  request that already went out.
+  request that already went out. `run_collection_smoke` bounds the other side of
+  this: a call runs at most `limit` requests (25 by default), so one call stays
+  inside a typical client budget and a longer collection is resumed by `offset`
+  rather than lost to a timeout. It also sends a progress notification per row
+  when the client asks, which a client that resets its timeout on progress
+  (`resetTimeoutOnProgress`) can use to outlast a slow API.
 
 ### Naming what the user means
 
@@ -1227,7 +1282,8 @@ resolves `{{variables}}` and walks the collection ancestor chain to resolve
 `POST /runs` accept unchanged. Composition is pure - nothing is sent - which
 is exactly what MCP's safety model needs: every execute/load tool composes
 first, checks the **allowlist against the composed (resolved) URL**, and only
-then executes the composed payload.
+then executes the composed payload - which carries the same allowlist to the
+engine as `targetPolicy`, for the URL it is about to send (below).
 
 Four tools compose a stored request by id: `run_collection_smoke` and
 `run_collection` for every request of a collection, `start_load_run` with a
@@ -1247,15 +1303,47 @@ neither is refused. The by-id branch keeps the ad-hoc gates of the other: the
 `verifySSL: false` refusal and the agent-script refusal run first, and the
 allowlist is checked on the composed URL, not the stored one.
 
-Two things the engine may still do to that payload after the gate has run, both
-of them reasons the gate refuses a URL whose *authority* still carries a
-`{{template}}` rather than trying to check one (`safety.ts`): a pre-request
-script can assign `pm.request.url`, and since #1008 a name composition could
-not answer is resolved once more before the send. Neither can move the request
-to a host the allowlist did not see - an unresolved authority is denied
-outright, and a resolved one is the one that was checked - but a tool call that
-forwards a `preRequestScript` is not sending the composed bytes untouched, and
-the allowlist is a host rule rather than a payload one for exactly that reason.
+A pre-request script can still change where the request goes after that gate
+has run: it can assign `pm.request.url`, and since #2521 a request a
+pre-request script runs before is composed with its `{{names}}` written
+(`deferredVariables`), so a deferred `{{host}}` resolves from whatever the
+script set. The gate on the composed URL cannot see either, so the allowlist
+also travels with the send:
+
+- **`targetPolicy` on every send.** `asMcpSend` stamps the session's `allowAll`
+  and allowlist, as `{allowAll, allowedHosts}`, beside `origin` on every
+  `POST /execute` and `POST /runs` this server makes (`run_request`, streaming
+  or not, each `run_collection_smoke` row, `run_collection`, `start_load_run` in
+  both shapes and `get_graphql_schema`). The engine judges the URL it is about
+  to send, after the pre-request scripts and the residual pass, by the same
+  rule `safety.ts` applies (exact host, case-insensitive; an empty or
+  still-templated host is refused even under allow-all), and the host of every
+  OAuth 2.0 `accessTokenUrl` / `refreshTokenUrl` the request's auth would post
+  to, before any token is fetched. See
+  [`targetPolicy`](api-reference.md#post-execute). A test drives every sending
+  tool by name, and a scan fails on an `executeRequest` or `startRun` call that
+  does not go through the helper.
+- **The early gate stays, for the unscripted case.** `checkComposedTarget`
+  refuses off-list hosts before any traffic, exactly as before. The one
+  difference: a URL whose authority holds
+  templates that are *all* listed in the composed payload's `deferredVariables`
+  has no host yet - the script chooses it - so it is passed to the engine
+  instead of denied, and is refused here only when the allowlist is empty and
+  allow-all is off. A template composition could not answer is still an unknown
+  host, denied as before.
+- **The engine's refusal reads as the early one.** A buffered answer's
+  `refusalCode` (or a stream's `400` body, or the smoke row's skip reason) of
+  `target_not_allowed` becomes the allowlist remedy `settingRemedy` gives the
+  early refusal; `target_host_unknown` asks for a resolved URL. The text says
+  the allowlist is applied after the pre-request script and to an OAuth 2.0
+  token endpoint.
+- `deferredVariables` describes the composition and is stripped from the payload
+  before it is sent.
+
+What `targetPolicy` does not cover: a redirect hop a server answers with, and a
+script's `pm.sendRequest`, which is refused for MCP-started runs instead (below).
+A tool call that forwards a `preRequestScript` is still not sending the composed
+bytes untouched, but it can no longer reach a host the allowlist did not list.
 
 Scripts: the by-id compose path attaches the collection chain's, then the
 request's own, `script.pre` / `script.post` elements under `elements`
@@ -1267,12 +1355,16 @@ still builds its own `ScriptPart[]` from its editor state, a different concern
 inside the inline `request` object (issue #1517): `/execute` refuses those two
 names outright now that `elements` is the only script source, so the tool
 reads them, folds each into an ad-hoc `script.pre` / `script.post` element,
-and appends both after compose - alongside any ad-hoc `elements` argument the
-agent gave directly - so they run in addition to whatever the composed
-request already carried, never replacing it. On the by-id branch the append
-happens to the composed payload rather than in the compose body, because the
-engine's inline overlay replaces a whole key and an inline `elements` would
-drop the collection chain's and the request's own. `start_load_run`'s ad-hoc
+and adds both after the stored ones - alongside any ad-hoc `elements` argument
+the agent gave directly - so they run in addition to whatever the composed
+request already carried, never replacing it. On the by-id branch that takes
+two compositions: the engine's inline overlay replaces a whole key, so the
+first, by id, reads the collection chain's and the request's own list, and the
+second composes again with that list plus the ad-hoc entries as the inline
+`elements`. Composition decides from the elements it sees whether a
+pre-request script runs before the send (#2521), so a name an ad-hoc
+`preRequestScript` sets is left for it rather than resolved to the stored
+value first. A call with nothing ad hoc composes once. `start_load_run`'s ad-hoc
 `postRequestScript` / `tests` folds the same way now (issue #1594):
 `POST /runs` reads a single target's step-level elements under
 `requestElements`, a key distinct from `elements` there (see below), so the
@@ -1327,7 +1419,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   precedence (environment > collection chain, leaf→root > globals; enabled
   only; an unknown name keeps its braces, issue #1009; dynamic variables like
   `{{$guid}}` generated per occurrence). MCP hands it raw strings and checks
-  the allowlist against the **composed** host. `start_load_run` composes for a
+  the allowlist against the **composed** host (and the engine again against the
+  sent one, #2521). `start_load_run` composes for a
   *run*, like the app, so the `{{$guid}}` family is deferred and the engine
   generates a fresh value per iteration rather than repeating one across them
   (issue #995); see
@@ -1348,7 +1441,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   submission), and so does `run_request` with a `requestId` and no `url`.
   An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
   `postRequestScript` instead (folded into elements, above), since an ad-hoc
-  call has no chain to compose from, and they are appended after the stored
+  call has no chain to compose from, and they are composed after the stored
   ones when it sends a saved request; `start_load_run` takes the same
   `postRequestScript` for a URL-only run, folded into `requestElements` the
   same way, as described above. Those two are supplied per call, are refused while
@@ -1703,7 +1796,9 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     secret variable's value or a literal credential in its query or userinfo
     (#1892). A step that will not compose
     refuses it too - the engine resolves the same plan before creating the run
-    row and would refuse it for the same reason.
+    row and would refuse it for the same reason. The engine holds the run to the
+    same list as well (`targetPolicy`): a step's OAuth 2.0 token endpoint is
+    judged when the plan is resolved, a `400` with no run row.
   - Every argument that describes a *single* target (`url`, `requestId`,
     `method`, `headers`, `body`, `auth`, `httpVersion`, `postRequestScript`,
     `collectionId`) is **refused by name** beside a `scenario`, as are
@@ -1970,19 +2065,22 @@ longer exists.
 The sandbox can send an auxiliary request (issue #302). That would be a hole in
 the allowlist if it applied here, and the reason is structural rather than an
 oversight: **the allowlist is checked in this server, against the composed URL,
-before it calls the engine.** A request issued from inside a script never goes
-through the MCP server at all, so it could never be checked - an agent that can
-write a script would otherwise reach any host, defeating a control the user set
-in Settings.
+before it calls the engine, and handed to the engine as `targetPolicy` for the
+URL a send is about to dial** (#2521). A request issued from inside a script
+with `pm.sendRequest` goes through neither - it is not the send's URL - so it
+could never be checked: an agent that can write a script would otherwise reach
+any host, defeating a control the user set in Settings.
 
 Three ways to close that were available, and this is which one and why:
 
-- *Move the allowlist engine-side for script-issued requests.* Rejected. The
-  allowlist lives in the app's config, and the engine has no channel to it; the
-  engine would need a second implementation of host matching alongside
-  `safety.ts`'s - two copies of a security check, which drift. It would also
-  leave the engine enforcing an allowlist for one kind of request and not the
-  others, which is harder to reason about than either extreme.
+- *Move the allowlist engine-side for script-issued requests.* Rejected when
+  this was decided (#302): the allowlist lives in the app's config, and the
+  engine had no channel to it, so it would have needed a second implementation
+  of host matching alongside `safety.ts`'s - two copies of a security check,
+  which drift. #2521 has since added that channel and a second matcher for the
+  send's own URL and OAuth 2.0 token endpoints (`targetPolicy`), because a
+  pre-request script can retarget those. It still does not reach a
+  `pm.sendRequest`, and the choice below stays the control for those.
 - *Gate the feature off by default behind a setting.* Rejected. It adds a knob
   whose safe position is the only correct one for MCP, and the hole reopens the
   moment anyone flips it for an unrelated reason.
@@ -2032,7 +2130,7 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 | `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
 | `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". Two runs of different types get the tool's refusal instead, with no delta embedded. An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
 | `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
-| `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
+| `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data); tells the model to read `get_safety_config` first, so a profile is sized to the session's caps and allowlist (#2444). |
 
 `summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one
 error definition in their text, from `error-definition.ts`'s
@@ -2054,9 +2152,12 @@ no error (issue #2136); the sentence says so in a clause of its own and names
 
 ## Safety model
 
-Enforced in the MCP layer (`safety.ts`, `config.ts`), with one exception noted
-below: script-issued requests are refused engine-side, because this layer cannot
-see them. Nothing here changes engine *behaviour* for other clients. All
+Enforced in the MCP layer (`safety.ts`, `config.ts`), with two exceptions noted
+below: the engine applies the allowlist again to the URL a send is about to
+dial and to OAuth 2.0 token endpoints (`targetPolicy`, #2521), and
+script-issued requests are refused engine-side, because this layer cannot see
+them. Nothing here changes engine *behaviour* for other clients: a payload
+without a `targetPolicy` is unrestricted. All
 configurable in **Settings → MCP** and persisted (in the stdio CLI, through the
 `VAYU_MCP_*` variables, and a refusal there names the variable - see
 [Configuration](#configuration)).
@@ -2090,9 +2191,12 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   target from a remote one (`isLocalHost` in `src/lib/host-locality.ts`, a mirror
   of `isPrivateHost` that the main process cannot share);
   `host-locality.conformance.test.ts` fails on any divergence.
-  Because the check happens here, before the engine is called, a request sent
-  from inside a script could not be checked at all - so `pm.sendRequest` is
-  refused outright for runs this server starts. See
+  Because the check happens here, before the engine is called, the URL a
+  pre-request script rewrites is not seen by it - the engine applies the same
+  list to it (`targetPolicy`, see
+  [Request composition](#request-composition)) - and a request sent from inside
+  a script could not be checked at all, so `pm.sendRequest` is refused outright
+  for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
 - **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations /
   response samples (`maxResponseSamples`) on `start_load_run`; over-cap requests are rejected. With the allowlist, these are
@@ -2451,6 +2555,17 @@ secrets; see the write toggle.
 | `revealSecretsToAgents` | `false` | -        | Lift every withholding in [Secret values](#secret-values): reads, write answers and run output. |
 | `disabledTools`      | `[]`    | -           | Tool names to hide/reject.                                 |
 
+**An agent reads these through `get_safety_config`** (#2444), in one call, so it
+sizes a profile or picks a target inside the limits instead of meeting each cap
+as a separate refusal. The allowlist is listed in full: it is user configuration,
+not a secret, and `checkAllowlist` already prints the whole list on any refusal.
+The three gates (`allowWrites`, `allowNetworkSettings`, `revealSecretsToAgents`)
+are on/off only, and `disabledTools` is reported as a count, because the server
+instructions name no tool and `tools/list` is already the authority on which
+exist. `maxResponseSamples` is not in the answer; the other four caps are. The
+server instructions name all four load caps (RPS, virtual users, duration,
+iterations) without their values.
+
 The renderer never sets these directly: `main.ts` sanitizes every change
 (`sanitizeSafetyInput` - normalizes/de-dupes hosts, holds each cap to a whole
 number between 1 and its ceiling, trims and de-dupes `disabledTools`) before
@@ -2493,12 +2608,12 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
-| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host` and the optional `progress` a call gets only when the client sent a `progressToken`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
-| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`). |
+| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`, including `progress` when the call carries a `progressToken`). |
 | `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
 | `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |
@@ -2515,7 +2630,7 @@ on quit, and exposes IPC the Settings panel uses.
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
-reachable from `index.ts` - the SDK, zod, the registry and its 79 schemas built at
+reachable from `index.ts` - the SDK, zod, the registry and its 80 schemas built at
 module scope - is loaded by a cached dynamic `import()` instead, inside
 `startMcp()` after the enabled check and inside the two IPC handlers that need
 the tool catalog. The main process is unbundled, so a static import here is
@@ -2761,7 +2876,10 @@ added about 2.9 KB to each pair: 127,059 / 124,333 bytes with writes off and
 194,425 / 190,028 with writes on (reveal off / on). The loose schemas on the 23
 other object-rooted reads added 7,866 bytes more to every row, about 340 bytes
 a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
-under caps of 136,300 / 133,600 and 204,400 / 199,900.
+under caps of 136,300 / 133,600 and 204,400 / 199,900. `get_safety_config`
+(#2444) added about 370 bytes a row: 136,673 / 133,947 with writes off and
+204,039 / 199,642 with writes on, and the writes-off caps went to 137,100 /
+134,400.
 The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the

@@ -32,11 +32,17 @@
  *
  * Composition goes through `compose_request_core` / `build_request` and each
  * step's elements are `compose_elements`' resolved list, compiled once
- * (issue #1514) - which is what keeps a step byte-identical to what a Send of
- * the same request would run. There is deliberately no second copy of
- * resolution here.
+ * (issue #1514) - which is what keeps a step what a Send of the same request
+ * would run. There is deliberately no second copy of resolution here.
+ *
+ * The structure is fixed here; a value may not be (#2521). A plan in which
+ * any step carries an element that writes a variable before some send
+ * (`ElementKind::writes_variables`: a script, an extractor) composes every
+ * step with its scope names left written, for the send to resolve against
+ * what the earlier steps set. A plan with none resolves them here.
  */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -129,6 +135,9 @@ struct ScenarioStep {
     /// executor applies it with `http::routes::apply_late_auth` after
     /// `step.before` and the residual pass. Decided here, once per step, so a
     /// step whose credentials hold no such name pays nothing per iteration.
+    /// An OAuth 2.0 config only reaches this on a sequential plan
+    /// (`ScenarioResolveOptions::oauth2_after_scripts`), whose executor hands
+    /// `apply_late_auth` the token cache.
     bool auth_after_scripts = false;
 };
 
@@ -375,6 +384,19 @@ struct ScenarioResolveOptions {
     /// Applied to every composed step, exactly as `POST /execute` applies it.
     int timeout_ms = 0;
     ScenarioLimits limits;
+    /// Whether a step's OAuth 2.0 token is acquired at its send, after its
+    /// pre-request script, so a scripted step's config waits for that script
+    /// (#2521): the sequential runner, whose `execute_exchange` holds the
+    /// token cache. False for a load run, which acquires each step's token
+    /// once, here, before any script, and refuses a config name nothing
+    /// answers by then.
+    bool oauth2_after_scripts = false;
+    /// The run's caller's host rule (#2521), judged on the token endpoints of
+    /// every OAuth 2.0 token acquired here, before any is posted. Null for none.
+    const vayu::http::TargetPolicy* target_policy = nullptr;
+    /// Ends an oauth2 token request a step's auth makes while resolving
+    /// (`build_request`): `POST /runs` passes its `server_stopping` (#2683).
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 /**
@@ -387,6 +409,10 @@ struct ScenarioResolveOptions {
 struct ScenarioResolution {
     bool ok = false;
     std::string error;
+    /// The code a refusal carries when it has its own (`target_not_allowed`,
+    /// `target_host_unknown`, #2521); empty for every other refusal, which the
+    /// route answers as `invalid_scenario`.
+    std::string error_code;
     ScenarioRequest request;
     ScenarioPlan plan;
     /// The validated `data` rows, for `ScenarioExecution::data_rows`.

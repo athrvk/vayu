@@ -5,12 +5,15 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { join } from "node:path";
 import type { BrowserWindow } from "electron";
 import { app, dialog, shell } from "electron";
 // electron-updater is CommonJS; under "type": "module" the named export must
 // be pulled off the default import.
 import electronUpdater from "electron-updater";
+import type { UpdateDownloadedEvent } from "electron-updater";
 import { resolveUpdateStrategy, type UpdateStrategy } from "./updater-strategy.js";
+import { verifyInstallerAttestation } from "./update-attestation.js";
 import { appLogger } from "./app-log.js";
 import { isDevelopmentBuild } from "./dev-mode.js";
 import {
@@ -23,6 +26,17 @@ const { autoUpdater } = electronUpdater;
 
 /** The release page of the version the updater last reported as available. */
 let offeredReleaseUrl: string | null = null;
+
+/**
+ * The version of the latest download, once its installer's attestation has
+ * verified; null until then, and reset by every announced update and every
+ * download (#2372). electron-updater installs whichever file it downloaded
+ * last, so neither the restart nor the quit-time install may follow an earlier
+ * verification.
+ */
+let verifiedVersion: string | null = null;
+/** Bumped per download, so a verification a newer download superseded is dropped. */
+let downloadGeneration = 0;
 
 function releaseUrl(version: string): string {
 	return `https://github.com/${REPO}/releases/tag/v${version}`;
@@ -63,6 +77,16 @@ export interface UpdateDownloadProgress {
 	bytesPerSecond: number;
 	transferred: number;
 	total: number;
+}
+
+/**
+ * `update:verificationFailed`: the download finished but its installer is not
+ * one `release.yml` attested for this release, so it will not be installed.
+ * Sent instead of `update:downloaded`, silent strategies only.
+ */
+export interface UpdateVerificationFailure {
+	version: string;
+	reason: string;
 }
 
 /**
@@ -158,6 +182,10 @@ export type WindowAccessor = () => BrowserWindow | null;
 function liveWindow(): BrowserWindow | null {
 	const win = resolveWindow?.() ?? null;
 	return win && !win.isDestroyed() ? win : null;
+}
+
+function send(channel: string, payload: unknown): void {
+	liveWindow()?.webContents.send(channel, payload);
 }
 
 /**
@@ -288,8 +316,8 @@ function handleCheckFailure(err: unknown): void {
  * registered here: they are forwarders in main.ts's `setupIpcHandlers`, so they
  * exist before this runs and a call that lands first waits for it.
  *
- *   - silent (Windows, Linux AppImage): download in the background, then tell
- *     the renderer it can restart-and-install.
+ *   - silent (Windows, Linux AppImage): download in the background, verify the
+ *     installer's attestation, then tell the renderer it can restart-and-install.
  *   - notify (macOS, Linux .deb): only check the version feed and surface the
  *     newer release in the UI; the user updates out-of-band.
  *   - disabled (development): no-op.
@@ -311,14 +339,12 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	}
 
 	autoUpdater.autoDownload = strategy === "silent";
-	autoUpdater.autoInstallOnAppQuit = strategy === "silent";
+	// Raised only by a verified download: see `holdDownloadForVerification`.
+	autoUpdater.autoInstallOnAppQuit = false;
 	autoUpdater.allowPrerelease = false;
 
-	const send = (channel: string, payload: unknown) => {
-		liveWindow()?.webContents.send(channel, payload);
-	};
-
 	autoUpdater.on("update-available", (info) => {
+		if (strategy === "silent") invalidateVerifiedDownload();
 		offeredReleaseUrl = releaseUrl(info.version);
 		const payload: UpdateAvailablePayload = {
 			version: info.version,
@@ -348,9 +374,8 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 		send("update:downloadProgress", payload);
 	});
 
-	autoUpdater.on("update-downloaded", (info) => {
-		send("update:downloaded", { version: info.version });
-	});
+	// `autoDownload` is off on the notify path, so only the silent one downloads.
+	if (strategy === "silent") autoUpdater.on("update-downloaded", holdDownloadForVerification);
 
 	// Only surfaced for user-initiated checks; the periodic check stays silent.
 	autoUpdater.on("update-not-available", () => {
@@ -381,9 +406,123 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	intervalTimer = setInterval(() => startCheckCycle(), CHECK_INTERVAL_MS);
 }
 
-/** `update:restartToInstall`. Only meaningful on the silent path, where an update was downloaded. */
+/**
+ * Install nothing until the downloaded installer's attestation verifies
+ * (#2372). Runs on every download, a cached one electron-updater reuses
+ * included.
+ *
+ * BaseUpdater emits `update-downloaded` and then, in the same synchronous
+ * step, calls `addQuitHandler()`, which registers the quit-time install only
+ * if `autoInstallOnAppQuit` is true at that moment and reads the flag again
+ * when the app quits. So the flag is raised for the registration and dropped
+ * in a microtask, which runs once that step has returned; only a verification
+ * that passes raises it again. A quit while the verification is still running
+ * installs nothing. `updater-install-gate.test.ts` holds the installed
+ * electron-updater to that ordering.
+ *
+ * electron-updater swaps the new file into place before it emits this event,
+ * so the standing verification is dropped earlier, on `update-available`
+ * (`invalidateVerifiedDownload`); this only re-asserts it.
+ */
+function holdDownloadForVerification(info: UpdateDownloadedEvent): void {
+	const generation = ++downloadGeneration;
+	verifiedVersion = null;
+	autoUpdater.autoInstallOnAppQuit = true;
+	queueMicrotask(() => {
+		autoUpdater.autoInstallOnAppQuit = false;
+		verifyDownload(info, generation).catch((err: unknown) =>
+			refuseUnverifiedDownload(info, generation, err)
+		);
+	});
+}
+
+/**
+ * Withdraw the verification of the file staged so far, ahead of a download
+ * that may replace it (#2372).
+ *
+ * `update-available` is the hook because it is the earliest event that always
+ * precedes the swap: `doCheckForUpdates` emits it synchronously before it calls
+ * `downloadUpdate`, and the rename and `setDownloadedFile` run inside that
+ * download, before `update-downloaded`. `checking-for-update` is earlier but
+ * fires on a check that finds nothing or fails, which would leave a verified
+ * download uninstallable with no download to verify again; `download-progress`
+ * is later, and a cached file never emits it. A cached update re-announced by
+ * the periodic check is verified again through `update-downloaded`.
+ */
+function invalidateVerifiedDownload(): void {
+	downloadGeneration++;
+	verifiedVersion = null;
+	autoUpdater.autoInstallOnAppQuit = false;
+}
+
+async function verifyDownload(info: UpdateDownloadedEvent, generation: number): Promise<void> {
+	const result = await verifyInstallerAttestation({
+		file: info.downloadedFile,
+		version: info.version,
+		sigstoreCacheDir: join(app.getPath("userData"), "sigstore"),
+	});
+	// A newer download replaced the file this one checked; its own verification decides.
+	if (generation !== downloadGeneration) return;
+
+	if (!result.ok) {
+		appLogger().error("updater", "Downloaded update failed verification, not installing it", {
+			version: info.version,
+			file: info.downloadedFile,
+			reason: result.reason,
+		});
+		const failure: UpdateVerificationFailure = { version: info.version, reason: result.reason };
+		send("update:verificationFailed", failure);
+		return;
+	}
+
+	appLogger().info("updater", "Downloaded update verified", { version: info.version });
+	verifiedVersion = info.version;
+	autoUpdater.autoInstallOnAppQuit = true;
+	send("update:downloaded", { version: info.version });
+}
+
+/**
+ * `verifyDownload` threw instead of answering (`app.getPath`, or a send into a
+ * window going away). The renderer cannot be told the update is ready, so the
+ * download is refused like any other failure, and nothing here may throw: this
+ * is the last handler on that promise.
+ */
+function refuseUnverifiedDownload(
+	info: UpdateDownloadedEvent,
+	generation: number,
+	err: unknown
+): void {
+	if (generation !== downloadGeneration) return;
+	verifiedVersion = null;
+	autoUpdater.autoInstallOnAppQuit = false;
+	const reason = `Couldn't verify the update (${describeError(err)}).`;
+	appLogger().error("updater", "Downloaded update could not be verified, not installing it", {
+		version: info.version,
+		file: info.downloadedFile,
+		reason,
+	});
+	const failure: UpdateVerificationFailure = { version: info.version, reason };
+	try {
+		send("update:verificationFailed", failure);
+	} catch (sendErr) {
+		appLogger().error("updater", "Couldn't report the refused update to the window", {
+			error: describeError(sendErr),
+		});
+	}
+}
+
+/**
+ * `update:restartToInstall`. Only meaningful on the silent path, and only once
+ * the download's attestation has verified: `quitAndInstall` runs whatever
+ * file electron-updater downloaded last.
+ */
 export function restartToInstall(): void {
-	if (updaterReady) autoUpdater.quitAndInstall();
+	if (!updaterReady) return;
+	if (verifiedVersion === null) {
+		appLogger().warn("updater", "Restart to install refused: no verified download");
+		return;
+	}
+	autoUpdater.quitAndInstall();
 }
 
 /**

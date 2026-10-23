@@ -16,6 +16,11 @@
  * written, variables and all. Templated is still offered, because "the request
  * as written" is what you paste into a bug report.
  *
+ * A request a pre-request script runs before composes with its `{{templates}}`
+ * intact (#2521), so a `{{token}}` in the resolved snippet is not a failure to
+ * resolve; the engine lists the names as `deferredVariables` and a note under
+ * the snippet says the script sets them at send.
+ *
  * **Secrets are the leak vector here**, so resolved output is masked by
  * default and revealing is an explicit act. Masked values are every variable
  * the resolver marks secret plus the credential the auth mode carries - a
@@ -45,6 +50,7 @@ import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useSessionStore } from "@/stores";
 import { useLiveCommandSurfaceStore } from "@/lib/commands/live-surfaces";
 import { useCopy } from "@/hooks/useCopy";
+import { pickByCount } from "@/modules/dashboard/utils/format";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
 	ICON_MOTION,
@@ -74,6 +80,19 @@ type Mode = "resolved" | "templated";
 
 /** Shown under a snippet built from the saved row, which trails the editor. */
 const SAVED_ROW_NOTE = "From the saved request. Unsaved changes are not in this snippet.";
+
+/**
+ * Names the tokens left written in a resolved snippet because a pre-request
+ * script runs before the send (#2521), so a `{{token}}` in the command reads as
+ * deliberate rather than as a variable that failed to resolve.
+ */
+function deferredNote(names: string[]): string {
+	const tokens = names.map((name) => `{{${name}}}`).join(", ");
+	return pickByCount(names.length, {
+		one: `${tokens} is set by a pre-request script at send.`,
+		other: `${tokens} are set by a pre-request script at send.`,
+	});
+}
 
 export function CodeSection({ tab }: ContextBarSectionProps) {
 	const [target, setTarget] = useState<CodeTargetId>("curl");
@@ -138,6 +157,8 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 			: composed.data
 				? { ...(composed.data.payload as SnippetRequest), stream: settings.stream }
 				: null;
+
+	const deferredVariables = (mode === "resolved" && composed.data?.deferredVariables) || [];
 
 	const secrets = collectSecrets(getAllVariables(), source?.auth);
 
@@ -248,6 +269,11 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 					{snippet.masked && (
 						<p className="text-label text-muted-foreground m-0">
 							Secrets are hidden. Reveal them before running this.
+						</p>
+					)}
+					{deferredVariables.length > 0 && (
+						<p className="text-label text-muted-foreground m-0 break-words">
+							{deferredNote(deferredVariables)}
 						</p>
 					)}
 					{snippet.notes.map((note) => (

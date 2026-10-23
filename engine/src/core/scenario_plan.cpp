@@ -25,18 +25,32 @@
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/utils/json.hpp"
 
 namespace vayu::core {
 
 namespace {
 
-ScenarioResolution invalid (std::string reason) {
+ScenarioResolution invalid (std::string reason, std::string code = {}) {
     ScenarioResolution resolution;
-    resolution.ok    = false;
-    resolution.error = std::move (reason);
+    resolution.ok         = false;
+    resolution.error      = std::move (reason);
+    resolution.error_code = std::move (code);
     return resolution;
 }
+
+/// Why one step cannot be planned, and the code when the refusal has its own
+/// (a target policy's, #2521). A bare reason converts, so a refusal with no
+/// code is written as it always was.
+struct StepRefusal {
+    std::string reason;
+    std::string code;
+
+    StepRefusal (std::string text, std::string refusal_code = {})
+    : reason (std::move (text)), code (std::move (refusal_code)) {
+    }
+};
 
 /// The human-readable half of a compose error. `routes::error_message_of` is
 /// the shared reader for this shape, but it lives behind `routes.hpp`, which
@@ -311,6 +325,35 @@ ScenarioResolution& resolution) {
 }
 
 /**
+ * How every step of the plan over @p rows composes its scope names (#2521).
+ *
+ * `Always` when one step's composed `elements` hold a kind the registry marks
+ * `writes_variables` (`script.pre`, `script.post`, `script.setup`, every
+ * `extract.*`) at a phase before some send: an earlier step's test script or
+ * extractor can then set the token a later step reads, after the plan was
+ * composed and before that step is sent. `script.teardown` alone does not
+ * count, because it runs after the last send. The lists are composition's
+ * own, so a disabled, blank or `inherit.disable`d element is already gone.
+ */
+vayu::http::VariableDeferral plan_variable_deferral (vayu::db::Database& db,
+const std::vector<vayu::db::Request>& rows) {
+    const auto& registry = Registry::instance ();
+    const auto writes_before_a_send = [&registry] (const nlohmann::json& element) {
+        const auto* kind = registry.find (element.value ("kind", std::string{}));
+        return kind != nullptr && kind->writes_variables &&
+        std::any_of (kind->phases.begin (), kind->phases.end (),
+        [] (Phase phase) { return phase != Phase::RunEnd; });
+    };
+    for (const auto& row : rows) {
+        const auto elements = vayu::http::stored_request_elements (db, row);
+        if (std::any_of (elements.begin (), elements.end (), writes_before_a_send)) {
+            return vayu::http::VariableDeferral::Always;
+        }
+    }
+    return vayu::http::VariableDeferral::WhenScripted;
+}
+
+/**
  * One step of the plan: composed, built, and refused if it carries a token
  * nothing in this run could bind.
  *
@@ -326,8 +369,9 @@ ScenarioResolution& resolution) {
  *        was its node's first occurrence. `resolve_scenario` compiles every
  *        step's array only after that pass, from this output.
  */
-std::optional<std::string> resolve_step (vayu::db::Database& db,
+std::optional<StepRefusal> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
+vayu::http::VariableDeferral deferral,
 const vayu::db::Collection& collection,
 bool has_data,
 const vayu::http::BoundColumnNames& bound_columns,
@@ -358,7 +402,10 @@ nlohmann::json& raw_elements_out) {
     // their head. A step spelling no generator is unaffected: nothing survives
     // composition, so nothing is split and nothing is joined.
     compose_body["deferDynamicVariables"] = true;
-    auto [status, payload] = vayu::http::compose_request_core (db, compose_body);
+    auto [status, payload] = vayu::http::compose_request_core (db, compose_body,
+    options.oauth2_after_scripts ? vayu::http::OAuth2Resolution::AfterTheScript :
+                                   vayu::http::OAuth2Resolution::AtComposition,
+    deferral);
     if (status != 200) {
         return ("Cannot compose " + describe_step (index, row) + ": " +
         compose_error_message (payload));
@@ -379,24 +426,37 @@ nlohmann::json& raw_elements_out) {
     vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
     StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth, bound_columns);
 
-    // OAuth 2.0 is the one mode deferral cannot serve: its token is
-    // acquired right here, once, against the token endpoint, so there is no
-    // per-iteration acquisition for a row to reach - and adding one would
-    // mean a network round trip per virtual user per iteration. Refused by
-    // name in both directions, with or without a data set, rather than sent
+    // OAuth 2.0 is the one mode the row bind cannot serve: its token is
+    // acquired against the token endpoint - here, once, for a load run, or at
+    // each sequential step's send - never bound per iteration, and a bind per
+    // virtual user per iteration would be a network round trip each. Refused
+    // by name in both directions, with or without a data set, rather than sent
     // to the token endpoint as the literal token text.
     if (auto token = first_oauth2_deferrable_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
-        " in its OAuth 2.0 configuration. That token is acquired once, "
-        "when the run is planned, so neither a data column nor the "
-        "iteration identity can ever reach it - use a static credential "
-        "there, or move the token into the request itself.");
+        " in its OAuth 2.0 configuration. That token is acquired against "
+        "the token endpoint, never bound per iteration, so neither a data "
+        "column nor the iteration identity can ever reach it - use a static "
+        "credential there, or move the token into the request itself.");
+    }
+    // A load run acquires right here, before any script, so a name nothing
+    // answered at composition would reach the token endpoint as written.
+    if (!options.oauth2_after_scripts) {
+        if (auto token = first_oauth2_scope_token (parsed_auth, bound_columns)) {
+            return (describe_step (index, row) + " carries " + *token +
+            " in its OAuth 2.0 configuration, and no variable answers it. A "
+            "load run acquires the token once, when the run is planned and "
+            "before any script runs - define the variable in the "
+            "environment, the collection or the globals, or write the value "
+            "into the configuration.");
+        }
     }
 
     // A name composition found no scope for is one a pre-request script, an
     // inline element or a setup script may define before the send, and none
-    // of them can reach it once `apply_auth` has encoded it (issue #2473).
-    // Never true for OAuth 2.0, which is acquired right here.
+    // of them can reach it once `apply_auth` has encoded it (issue #2473). So
+    // is any name composition deferred (#2521), OAuth 2.0 config included on
+    // a sequential plan.
     const bool auth_after_scripts =
     vayu::core::credentials_await_scripts (parsed_auth, bound_columns);
 
@@ -406,10 +466,13 @@ nlohmann::json& raw_elements_out) {
     const auto auth_resolution = auth_template.empty () && !auth_after_scripts ?
     vayu::http::AuthResolution::Apply :
     vayu::http::AuthResolution::Defer;
-    auto built =
-    vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
+
+    auto built = vayu::http::build_request (payload, &db, options.timeout_ms,
+    auth_resolution, options.target_policy, options.cancel);
     if (!built.ok || built.parse_failed) {
-        return ("Cannot compose " + describe_step (index, row) + ": " + built.error_message);
+        return StepRefusal{ "Cannot compose " + describe_step (index, row) +
+            ": " + built.error_message,
+            vayu::http::is_target_refusal_code (built.detail_code) ? built.detail_code : "" };
     }
 
     // Split once, here, so no executor re-scans this step per iteration -
@@ -852,12 +915,15 @@ const ScenarioResolveOptions& options) {
     const vayu::http::BoundColumnNames bound_columns =
     bound_columns_of (resolution.data_rows);
 
+    // One answer for the whole plan, decided before any step composes: the
+    // plan's structure is fixed here, and only values wait for the send.
+    const auto deferral = plan_variable_deferral (db, rows);
     resolution.plan.steps.reserve (rows.size ());
     std::vector<nlohmann::json> raw_elements (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
-        if (auto reason = resolve_step (db, options, *collection, has_data, bound_columns,
-            index, rows[index], resolution.plan, raw_elements[index])) {
-            return invalid (*reason);
+        if (auto refusal = resolve_step (db, options, deferral, *collection, has_data,
+            bound_columns, index, rows[index], resolution.plan, raw_elements[index])) {
+            return invalid (std::move (refusal->reason), std::move (refusal->code));
         }
     }
     mark_scope_entries (raw_elements);
