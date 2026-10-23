@@ -100,6 +100,14 @@ describe("every element kind a tool schema names is a real registry kind", () =>
 		}
 	});
 
+	// #2774: the engine refuses a key the kind does not declare, so the field an
+	// agent fills blind has to say where the valid keys are listed.
+	test("the `config` field points at the resource that lists a kind's settings", () => {
+		expect(elementSchema.shape.config.description).toContain(
+			"List the valid settings with the `vayu://elements/kinds` resource or a single kind's entry"
+		);
+	});
+
 	// Confirms the two tests above would actually catch a drift, rather than
 	// vacuously passing because nothing matched: at least one real tool
 	// mentions a real kind today.

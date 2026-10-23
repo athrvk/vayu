@@ -431,7 +431,9 @@ export const elementSchema = z.object({
 	name: z.string().optional().describe("Optional display name."),
 	config: z
 		.record(z.string(), z.unknown())
-		.describe("Kind-specific configuration, validated engine-side against that kind's schema."),
+		.describe(
+			"Kind-specific configuration, validated engine-side against that kind's schema - a key the kind does not declare is refused. List the valid settings with the `vayu://elements/kinds` resource or a single kind's entry."
+		),
 });
 
 /**
