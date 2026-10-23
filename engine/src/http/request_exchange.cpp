@@ -990,6 +990,10 @@ ExchangeInputs inputs) {
         ctx.transport          = inputs.transport;
         ctx.default_headers    = inputs.default_headers;
         ctx.max_response_bytes = inputs.max_response_bytes;
+        // The send's own timeout, which both callers resolved into the
+        // request (#2833); a script cannot change it, so either script reads
+        // the value the send below uses.
+        ctx.request_timeout_ms = outcome.request.timeout_ms;
         ctx.cancel             = inputs.cancel;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request

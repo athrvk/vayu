@@ -29,6 +29,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -37,6 +38,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "timed_out_after.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -1460,6 +1462,60 @@ TEST_F (StreamExecuteTest, AStreamsScriptIsRefusedWhenTheCallerDidNotAsk) {
     EXPECT_EQ (trace["scripts"]["preScriptError"], buffered["preScriptError"]);
     EXPECT_EQ (origin_->aside_requests (), 0)
     << "a denied script still reached the network";
+}
+
+/// The timeout a script's aside call reported, per script, in the `scripts`
+/// node @p scripts (the buffered answer, or a stream's stored trace node).
+/// Fails the test for a script whose line is missing or not a timeout.
+void expect_asides_timed_out_within (const json& scripts,
+int64_t at_least_ms,
+int64_t under_ms,
+const std::string& transport) {
+    for (const std::string_view source : { "pre", "test" }) {
+        std::string line;
+        for (const auto& entry : scripts.value ("consoleLogs", json::array ())) {
+            if (entry.value ("source", "") == source) {
+                line = entry.value ("message", "");
+            }
+        }
+        const auto after_ms = vayu::tests::timed_out_after_ms (line);
+        if (!after_ms) {
+            ADD_FAILURE () << transport << " " << source << " script's aside did not time out: '"
+                           << line << "' in " << scripts.dump (2);
+            continue;
+        }
+        EXPECT_GE (*after_ms, at_least_ms) << transport << " " << source << ": " << line;
+        EXPECT_LT (*after_ms, under_ms) << transport << " " << source << ": " << line;
+    }
+}
+
+// #2833: a script's `pm.sendRequest` with no `timeout` option takes the send's
+// resolved timeout, the payload's `timeout` here, from both scripts of both
+// transports. Each transport sets it on its own contexts (the buffered one in
+// `execute_exchange`, the stream in its pre and post lambdas), so one test
+// holds all four. Healthy: about 500 ms each. Broken: the compiled-in 30 s,
+// clamped to the script's 5 s default budget, about 4,990 ms - which is also
+// what bounds a broken build, four scripts at 5 s inside the 60 s CTest limit.
+// Mutation checks: drop the `request_timeout_ms` line from
+// `execute_exchange`'s bind (buffered fails), from `pre_ctx` or from
+// `post_ctx` in `run_streaming_execution` (that stream script fails).
+TEST_F (StreamExecuteTest, AScriptsSendRequestTakesTheSendsTimeoutOnBothTransports) {
+    serve (1);
+    const std::string script = "pm.sendRequest('" + origin_->url ("/silent") +
+    "', function (err, res) { "
+    "  console.log(err ? err.code + ' ' + err.message : 'answered ' + "
+    "res.code); "
+    "});";
+    const json payload = { { "elements", script_elements (script, script) },
+        { "allowScriptRequests", true }, { "timeout", 500 } };
+
+    expect_asides_timed_out_within (send_buffered (payload), 500, 2500, "buffered");
+
+    const auto run_id = start (payload);
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    expect_asides_timed_out_within (trace["scripts"], 500, 2500, "stream");
 }
 
 // Absent, not empty. A stream that produced nothing has an empty list; a

@@ -319,7 +319,9 @@ names the one pattern that degrades silently.
 clamped to whatever is left of the script's own time budget (`scriptTimeout`,
 5s by default), because QuickJS only checks its deadline *between* bytecode
 operations - a blocking call never yields to it, so without the clamp a 5s
-script would hold its thread for the request's 30s timeout. One script may
+script would hold its thread for the whole request timeout. That timeout is
+the call's own `timeout` option, else the one the enclosing send runs under
+(the request's `timeout`, else the `defaultTimeout` setting). One script may
 issue at most **10** requests; a load run's Tests script runs once per sampled
 response, so an uncapped loop would turn post-run validation into minutes of
 apparent hang. The third is the response body: the fetch reads at most what

@@ -47,6 +47,10 @@ class AuthRefreshState {
     [[nodiscard]] const nlohmann::json& config () const {
         return plan_.config;
     }
+    /// The bound on each refresh's token request: the run's request timeout.
+    [[nodiscard]] int timeout_ms () const {
+        return plan_.timeout_ms;
+    }
     /// Header the token is placed on (`Authorization` today).
     [[nodiscard]] const std::string& header_name () const {
         return plan_.header_name;

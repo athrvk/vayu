@@ -90,7 +90,10 @@ const std::atomic<bool>* cancel) {
         interactive      = std::move (ex);
     }
 
-    auto result = oauth::acquire_token (db, config, force, interactive, nullptr, cancel);
+    // The `defaultTimeout` setting bounds the token request (#2833); this
+    // route takes no `timeout` of its own.
+    auto result = oauth::acquire_token (db, config, force, interactive,
+    resolve_request_timeout_ms (nlohmann::json::object (), db), nullptr, cancel);
     if (auto* err = std::get_if<oauth::TokenError> (&result)) {
         return { err->http_status, token_error_body (*err) };
     }

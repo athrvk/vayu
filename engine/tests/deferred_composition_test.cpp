@@ -40,6 +40,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -609,6 +610,61 @@ TEST_F (DeferredCompositionTest, OAuth2ALateTokenRequestEndsWithTheServer) {
     config["scope"]        = "read";
     EXPECT_FALSE (db_->get_oauth_token (vayu::http::oauth::cache_key (config)).has_value ())
     << "a token request the stop flag should have ended completed";
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// A token endpoint that never answers fails the send at the request's own
+// `timeout` (#2833), as `AUTH_FAILED` with the hint `oauth2_timeout`, and the
+// target is never reached. Both acquisitions are bounded: the one at the build
+// (no script) and the one after a pre-request script. Healthy, each send gives
+// up after about 1 s; with the token request on the compiled-in 30 s, the
+// first send alone takes 30 s. The 15 s bound sits between. Mutation check:
+// drop `request.timeout_ms = timeout_ms` from `Client::post`.
+TEST_F (DeferredCompositionTest, OAuth2AHungTokenEndpointFailsTheSendAtTheRequestTimeout) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "old" }, { "scope", "read" } });
+
+    for (const char* pre_script : { "", "pm.environment.set('secret', 'new');" }) {
+        seed_request (echo.url (), json::object (), pre_script,
+        client_credentials (tokens, "/token-hang"));
+        const auto started = std::chrono::steady_clock::now ();
+        const json answer  = compose_and_execute ({ { "timeout", 1000 } });
+        const auto elapsed = std::chrono::steady_clock::now () - started;
+
+        EXPECT_EQ (answer.value ("status", -1), 0) << answer.dump ();
+        EXPECT_EQ (answer.value ("errorCode", ""), "AUTH_FAILED") << answer.dump ();
+        EXPECT_EQ (answer.value ("authErrorCode", ""), "oauth2_timeout")
+        << answer.dump ();
+        EXPECT_LT (elapsed, std::chrono::seconds (15)) << "script: '" << pre_script << "'";
+    }
+    EXPECT_EQ (tokens.hits (), 2);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// A load run's pre-flight acquisition is bounded by the run's own `timeout`
+// (#2833), refused as a 400 under `oauth2_timeout` before the run row exists.
+// Healthy, about 1 s; on the compiled-in 30 s the test client's 20 s read
+// timeout gives up first. Mutation check: pass `DEFAULT_TIMEOUT_MS` to
+// `preflight_auth` in `preflight_run_auth`.
+TEST_F (DeferredCompositionTest, OAuth2ARunsPreflightIsBoundedByTheRunsTimeout) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "stored" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (), "",
+    client_credentials (tokens, "/token-hang"));
+
+    json payload = compose_for_a_run ();
+    payload.update ({ { "mode", "iterations" }, { "iterations", 1 },
+    { "concurrency", 1 }, { "timeout", 1000 } });
+    const auto started        = std::chrono::steady_clock::now ();
+    const auto [status, body] = post ("/runs", payload);
+    const auto elapsed        = std::chrono::steady_clock::now () - started;
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (body.value (json::json_pointer ("/error/code"), std::string ()), "oauth2_timeout")
+    << body.dump ();
+    EXPECT_LT (elapsed, std::chrono::seconds (15));
     EXPECT_EQ (echo.requests_seen (), 0);
 }
 

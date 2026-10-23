@@ -23,6 +23,7 @@
 
 #include "mock_server.hpp"
 #include "optional_assert.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "wait_until.hpp"
@@ -405,6 +406,7 @@ TEST_F (HttpClientTest, RawRequestOfAFollowedRedirectShowsTheFinalHop) {
 // two halves have to be joined without swallowing or duplicating it.
 TEST_F (HttpClientTest, RawRequestKeepsTheBodyAfterTheWireHeaders) {
     auto result = client_->post (mock_->url ("/post"), R"({"name": "test"})",
+    vayu::core::constants::server::DEFAULT_TIMEOUT_MS,
     { { "Content-Type", "application/json" } });
 
     ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
@@ -567,7 +569,8 @@ TEST_F (HttpClientTest, ARefusedConnectionIsStillConnectionFailed) {
 TEST_F (HttpClientTest, SendsPostRequest) {
     Headers headers = { { "Content-Type", "application/json" } };
 
-    auto result = client_->post (mock_->url ("/post"), R"({"name": "test"})", headers);
+    auto result = client_->post (mock_->url ("/post"), R"({"name": "test"})",
+    vayu::core::constants::server::DEFAULT_TIMEOUT_MS, headers);
 
     ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
 

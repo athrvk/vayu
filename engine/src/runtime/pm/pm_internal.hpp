@@ -243,6 +243,10 @@ struct ContextData {
     /// owns the rationale and the per-path choice.
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 
+    /// The timeout a `pm.sendRequest` without a `timeout` option takes - see
+    /// `ScriptContext::request_timeout_ms`.
+    int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+
     /// What ends a `pm.sendRequest` early, or null - see
     /// `ScriptContext::cancel`.
     const std::atomic<bool>* cancel = nullptr;
