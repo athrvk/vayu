@@ -1222,7 +1222,7 @@ std::optional<Error> read_request_headers (const Json& json, Request& request) {
 /** The per-request options, each optional and each with a documented default. */
 void read_request_options (const Json& json, Request& request) {
     // Options
-    if (json.contains ("timeout")) {
+    if (json.contains ("timeout") && !json["timeout"].is_null ()) {
         request.timeout_ms = json["timeout"].get<int> ();
     } else {
         // Use default timeout constant if not specified

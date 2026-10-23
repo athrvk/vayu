@@ -1150,6 +1150,17 @@ TEST_F (RunConfigValidationRouteTest, AnExecuteTimeoutInRangeSends) {
     EXPECT_EQ (status, 200) << body.dump ();
 }
 
+// `null` is "use the `defaultTimeout` setting" on a send as on a run (#2798).
+// Mutation check: read `timeout` in `read_request_options` without its
+// `is_null` guard and this answers 400 "type must be number, but is null".
+TEST_F (RunConfigValidationRouteTest, ANullExecuteTimeoutSends) {
+    const vayu::tests::EchoServer echo;
+    const json payload{ { "method", "GET" }, { "url", echo.url () }, { "timeout", nullptr } };
+    const auto [status, body] = post ("/execute", payload);
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (echo.method (), "GET") << "the request was not sent";
+}
+
 // A load run whose `timeout` is `null` sends with the `defaultTimeout` setting
 // (#2798), and the snapshot keeps the run's own config: the resolved value is
 // not written into it, so a replay takes the setting in force then. `/hang`
