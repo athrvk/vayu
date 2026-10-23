@@ -309,6 +309,17 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
 [[nodiscard]] bool header_value_reaches_wire (std::string_view value);
 
 /**
+ * @brief The request's own `Cookie` rows as one value, for `CURLOPT_COOKIE`.
+ *
+ * Every row named `Cookie` whose value reaches the wire, trimmed of its edge
+ * whitespace and joined with `; ` in row order; empty when there is none.
+ * libcurl writes this after the jar's matches on one `Cookie` line, so a
+ * request never carries two (RFC 6265 section 5.4, issue #2788), and drops it
+ * on a cross-host redirect as it would a listed `Cookie` header.
+ */
+[[nodiscard]] std::string typed_cookie_value (const Request& request);
+
+/**
  * @brief Build the `CURLOPT_HTTPHEADER` list for a request, and record what it
  *        puts on the wire.
  *
@@ -340,6 +351,13 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * the order the request holds them (issue #2466): a repeated name is sent
  * repeated, and authored order is wire order.
  *
+ * `Cookie` is the exception (issue #2788): its rows are recorded, one entry
+ * per row as typed, but never appended. libcurl ignores `CURLOPT_COOKIE`
+ * while the list names a Cookie and writes the jar's matches on a line of
+ * their own, so a listed row would put two `Cookie` lines on the wire.
+ * `apply_default_header_options` hands the rows to libcurl instead, as
+ * `typed_cookie_value`, and libcurl merges them into the jar's line.
+ *
  * libcurl also adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and
  * waits a second for the interim reply (issue #2468). Unless
  * `policy.expect_continue` is on, the list carries the removal line `Expect:`,
@@ -368,12 +386,13 @@ const DefaultHeaderPolicy& policy,
 HeaderList* sent);
 
 /**
- * @brief Apply the transfer options a default header rides on rather than a
- *        header line - today, compression negotiation.
+ * @brief Apply the transfer options a header rides on rather than a header
+ *        line: compression negotiation and the request's typed `Cookie`.
  *
- * Always sets `CURLOPT_ACCEPT_ENCODING`, clearing it when this transfer does
- * not negotiate: the load driver's handles come from a pool, so an option left
- * on from the transfer before would ask for an encoding this one refused.
+ * Always sets `CURLOPT_ACCEPT_ENCODING` and `CURLOPT_COOKIE`, clearing each
+ * when this transfer has nothing for it: the load driver's handles come from a
+ * pool, so an option left on from the transfer before would ask for an
+ * encoding this one refused, or send a cookie this one never typed.
  */
 void apply_default_header_options (CURL* curl,
 const Request& request,

@@ -158,7 +158,7 @@ TEST (DefaultHeadersTest, EveryDefaultCanBeRefusedBySend) {
 // never appends itself - libcurl's implicit `Accept: */*` and the Content-Type
 // a body implies (or libcurl's form-urlencoded default). Refusing one is
 // libcurl's removal line, which is neither an append nor a sent record.
-// Mutation check: drop the `"Accept:"` append in `build_request_header_list`
+// Mutation check: drop the `"Accept:"` append in `append_removal_lines`
 // and the first assertion reds; drop the Content-Type branch and the second.
 TEST (DefaultHeadersTest, RefusingAcceptOrContentTypeWritesLibcurlsRemovalLine) {
     vayu::Request request = get_request ();
@@ -257,7 +257,7 @@ TEST (DefaultHeadersTest, AnEmptyPolicyMemberAddsNothing) {
 // Issue #2468: libcurl adds `Expect: 100-continue` to a body over 1 MiB and
 // waits a second for a reply a server may never send. The policy defaults to
 // removing it, with libcurl's removal spelling, which is not a sent header.
-// Mutation check: drop the `"Expect:"` append in `build_request_header_list`
+// Mutation check: drop the `"Expect:"` append in `append_removal_lines`
 // and the first two assertions red; make the append unconditional and the
 // "on" case reds.
 TEST (DefaultHeadersTest, ExpectContinueIsRemovedUnlessThePolicyAllowsIt) {
