@@ -150,9 +150,10 @@ constexpr size_t MAX_RESPONSE_BODY_BYTES = size_t{ 32 } * 1024 * 1024;
 constexpr long TCP_KEEPALIVE_IDLE_SECONDS = 60;
 /// TCP keep-alive probe interval in seconds
 constexpr long TCP_KEEPALIVE_INTERVAL_SECONDS = 30;
-/// Grace added to the per-request timeout when a run drains its in-flight
-/// transfers at the natural end of its duration. A transfer that outlives its
-/// own timeout by this much is not going to complete, so it is cancelled
+/// Grace added to a transfer's own bound (the per-request timeout, or a
+/// stream's cap plus its backstop: `natural_end_drain_ms`) when a run drains
+/// its in-flight transfers at the natural end of its duration. A transfer that
+/// outlives its bound by this much is not going to complete, so it is cancelled
 /// rather than allowed to hold the run in `running` indefinitely.
 constexpr int64_t STOP_DRAIN_GRACE_MS = 2000;
 } // namespace event_loop

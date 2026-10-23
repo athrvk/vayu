@@ -120,6 +120,27 @@ class SlowMockServer {
             res.set_content ("{}", "application/json");
         });
 
+        // A healthy server-sent-events source: one event every SSE_TICK_MS
+        // for SSE_TICKS_FOR_MS, then a clean close. It outlives any ordinary
+        // request timeout while never going quiet for long.
+        svr.Get ("/sse-ticks", [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+                const auto ends = std::chrono::steady_clock::now () +
+                std::chrono::milliseconds (SSE_TICKS_FOR_MS);
+                while (!released.load (std::memory_order_relaxed) &&
+                std::chrono::steady_clock::now () < ends) {
+                    const std::string frame = "data: tick\n\n";
+                    if (!sink.write (frame.data (), frame.size ())) {
+                        return false;
+                    }
+                    std::this_thread::sleep_for (std::chrono::milliseconds (SSE_TICK_MS));
+                }
+                sink.done ();
+                return true;
+            });
+        });
+
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
 
@@ -168,6 +189,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/error";
     }
 
+    std::string sse_ticks_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/sse-ticks";
+    }
+
     std::string vitals_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/vitals";
     }
@@ -193,6 +218,10 @@ class SlowMockServer {
     static constexpr int STALL_MS = 300;
     /// How long `/stall-window` answers nothing, from its STALL_AT-th request.
     static constexpr int STALL_WINDOW_MS = 3000;
+
+    /// `/sse-ticks`' cadence and how long it streams before closing.
+    static constexpr int SSE_TICK_MS      = 100;
+    static constexpr int SSE_TICKS_FOR_MS = 6000;
 
     /// How many times either vitals endpoint has been scraped.
     int scrape_count () const {
