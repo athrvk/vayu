@@ -28,6 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
@@ -132,13 +133,15 @@ describe("a save that raced an edit", () => {
 		const initialRequest: Partial<RequestState> = { id: "req_1", name: "Req" };
 		saves = heldSave();
 		render(
-			<RequestBuilderProvider
-				initialRequest={initialRequest}
-				collectionId="col_1"
-				onSave={saves.onSave}
-			>
-				<ScriptProbe />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={initialRequest}
+					collectionId="col_1"
+					onSave={saves.onSave}
+				>
+					<ScriptProbe />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 	});
 

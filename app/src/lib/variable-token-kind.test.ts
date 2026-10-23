@@ -108,11 +108,76 @@ describe("classifyVariableToken", () => {
 	});
 });
 
+describe("a name the engine defers (#2741)", () => {
+	const deferredVariables = ["token"];
+
+	it.each([
+		["a stored value", variable("abc")],
+		["an empty value", variable("")],
+		["no definition", null],
+	])("outranks resolved, empty and undefined: %s", (_label, stored) => {
+		const kind = classifyVariableToken("token", {
+			variables: stored ? { token: stored } : {},
+			deferredVariables,
+		});
+		expect(kind.state).toBe("deferred");
+		if (kind.state === "runtime") return;
+		// The stored definition rides along so the popover can still edit it.
+		expect(kind.info).toEqual(stored);
+	});
+
+	it("paints only the names listed", () => {
+		const context = { variables: { token: variable("abc"), host: variable("h") } };
+		expect(classifyVariableToken("host", { ...context, deferredVariables }).state).toBe(
+			"resolved"
+		);
+	});
+
+	it.each([undefined, []])("changes nothing when the list is %j", (list) => {
+		const kind = classifyVariableToken("token", {
+			variables: { token: variable("abc") },
+			deferredVariables: list,
+		});
+		expect(kind.state).toBe("resolved");
+	});
+
+	it("leaves the reserved namespaces to their own rungs", () => {
+		const kind = classifyVariableToken("$vu", { variables: {}, deferredVariables: ["$vu"] });
+		expect(kind.state).toBe("runtime");
+	});
+
+	it("never reaches a script's own reads: the pre-request script is what sets the name", () => {
+		const context = {
+			variables: { token: variable("abc") },
+			getVariableOrigins: () => [
+				{ scope: "environment" as const, value: "abc", enabled: true, winner: true },
+			],
+			deferredVariables,
+		};
+		// The body-language read is deferred; the merged, scoped and row reads of a script are not.
+		expect(classifyScriptToken("token", undefined, context).state).toBe("deferred");
+		expect(classifyScriptToken("token", { via: "merged" }, context).state).toBe("resolved");
+		expect(
+			classifyScriptToken("token", { via: "scope", scope: "environment" }, context).state
+		).toBe("resolved");
+		expect(classifyScriptToken("token", { via: "bare" }, context).state).toBe("runtime");
+	});
+});
+
 describe("classifyScriptToken", () => {
-	it("falls through to the merged ladder with no hint - pm.variables.get and replaceIn", () => {
+	it("falls through to the merged ladder with no hint - a body-language token", () => {
 		const kind = classifyScriptToken("baseUrl", undefined, {
 			variables: { baseUrl: { value: "https://x", scope: "environment" } },
 		});
+		expect(kind.state).toBe("resolved");
+	});
+
+	it("reads the same ladder for a merged read - pm.variables.get and replaceIn", () => {
+		const kind = classifyScriptToken(
+			"baseUrl",
+			{ via: "merged" },
+			{ variables: { baseUrl: { value: "https://x", scope: "environment" } } }
+		);
 		expect(kind.state).toBe("resolved");
 	});
 

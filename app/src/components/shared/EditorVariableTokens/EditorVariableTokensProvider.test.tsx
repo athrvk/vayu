@@ -130,6 +130,25 @@ describe("EditorVariableTokensProvider", () => {
 		expect(screen.getByRole("button", { name: /create/i })).toBeTruthy();
 	});
 
+	it("says a script sets a deferred token in a field, and still lets its definition be edited (#2741)", () => {
+		const tokens = mountProvider({ deferredVariables: ["baseUrl"] });
+		expect(tokens.classify("baseUrl").state).toBe("deferred");
+		act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+
+		expect(
+			screen.getByText("{{baseUrl}} is set by a pre-request script at send.")
+		).toBeTruthy();
+		expect(screen.getByDisplayValue("https://api.example.com")).toBeTruthy();
+	});
+
+	it("says nothing of a script for a token the engine did not defer", () => {
+		const tokens = mountProvider({ deferredVariables: [] });
+		expect(tokens.classify("baseUrl").state).toBe("resolved");
+		act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+
+		expect(screen.queryByText(/pre-request script/)).toBeNull();
+	});
+
 	it("opens nothing for a run-time token", () => {
 		const tokens = mountProvider();
 		act(() => tokens.openTokenEditor({ name: "$guid", rect }));
@@ -394,6 +413,16 @@ describe("EditorVariableTokensProvider", () => {
 			act(() => tokens.setHoveredToken({ name: "email", rect, scriptHint: { via: "row" } }));
 			expect(cardText()).toContain("grace@example.com");
 			expect(cardText()).toContain("Bound row");
+		});
+
+		it("does not call a script's own read deferred: the script is what sets the name (#2741)", () => {
+			const tokens = mountProvider({ deferredVariables: ["baseUrl"] });
+			const hint = { via: "merged" } as const;
+			expect(tokens.classify("baseUrl", hint).state).toBe("resolved");
+
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect, scriptHint: hint }));
+			expect(screen.getByDisplayValue("https://api.example.com")).toBeTruthy();
+			expect(screen.queryByText(/pre-request script/)).toBeNull();
 		});
 
 		it("a bare script template is muted, not-interpolated, and never opens", () => {

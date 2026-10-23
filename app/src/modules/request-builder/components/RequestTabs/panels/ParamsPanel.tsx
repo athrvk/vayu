@@ -38,7 +38,14 @@ import {
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
 import { displayPathRows, isPathRow, pathRowsOf, queryRowsOf } from "../../../utils/path-variables";
-import { sendsCacheInput, sendsResolver } from "../../../utils/sends-url";
+import {
+	deferredNamesInSends,
+	sendsCacheInput,
+	sendsHasTokens,
+	sendsResolver,
+} from "../../../utils/sends-url";
+import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
+import { deferredNote } from "@/lib/deferred-note";
 import { SECRET_UI_MASK, collectSecrets, createSecretMasker } from "@/services/codegen";
 import { EmptyTableHint } from "./EmptyTableHint";
 
@@ -131,9 +138,16 @@ export default function ParamsPanel() {
 	// previewing the same generated value.
 	// What the line resolves is `utils/sends-url.ts`'s, shared with the tab
 	// title so the two cannot disagree about path rows or encoding.
+	//
+	// A name a pre-request script sets at send is the engine's to name
+	// (`POST /compose`'s `deferredVariables`, read from the Code section's cache
+	// entry), and is drawn as written rather than as its stored value (#2741).
+	// Only a URL with a `{{token}}` asks: a literal one never pays a compose.
+	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(request));
+	const deferred = deferredNamesInSends(request, engineDeferred);
 	const resolvedUrl = stableResolvedUrl(
 		request.id ?? "new",
-		sendsCacheInput(request),
+		sendsCacheInput(request, deferred),
 		sendsResolver(resolveString)
 	);
 	// Masked here, after the cache: the cache keeps the resolved URL (a
@@ -225,6 +239,11 @@ export default function ParamsPanel() {
 							{sendsText || <span className="italic">No URL</span>}
 						</span>
 					</div>
+					{deferred.length > 0 && (
+						<p className="text-label text-muted-foreground m-0 break-words">
+							{deferredNote(deferred)}
+						</p>
+					)}
 				</>
 			}
 		>

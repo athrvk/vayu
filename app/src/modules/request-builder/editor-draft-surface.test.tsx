@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, act } from "@testing-library/react";
 import { RequestBuilderProvider, useRequestBuilderContext } from "./context";
 import EditorDraftSurface from "./components/EditorDraftSurface";
@@ -68,10 +69,12 @@ function Harness({ id = "req_1" }: { id?: string }) {
 		url: "https://api.test/saved",
 	};
 	return (
-		<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
-			<UrlEditor />
-			<EditorDraftSurface />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
+				<UrlEditor />
+				<EditorDraftSurface />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

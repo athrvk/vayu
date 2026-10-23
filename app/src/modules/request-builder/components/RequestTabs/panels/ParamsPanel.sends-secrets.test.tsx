@@ -17,7 +17,7 @@
  * also reaches the URL encoded, so the encoded spellings are masked too.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { RequestBuilderContext } from "../../../context";
@@ -25,6 +25,16 @@ import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import ParamsPanel from "./ParamsPanel";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
+
+/*
+ * The panel reads `POST /compose` for the names a pre-request script defers
+ * (#2741), but only for a URL holding a `{{token}}`. This file asks nothing of
+ * the answer, so it is the plain one: nothing deferred.
+ */
+vi.mock("@/services/api", () => ({
+	apiService: { composeRequest: vi.fn().mockResolvedValue({}) },
+}));
 
 afterEach(cleanup);
 
@@ -54,11 +64,13 @@ function sendsLine(url: string, overrides: Partial<RequestState> = {}): string {
 		dataColumns: undefined,
 	} as unknown as RequestBuilderContextValue;
 	const { container } = render(
-		<TooltipProvider>
-			<RequestBuilderContext.Provider value={value}>
-				<ParamsPanel />
-			</RequestBuilderContext.Provider>
-		</TooltipProvider>
+		withQueryClient(
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={value}>
+					<ParamsPanel />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		)
 	);
 	const label = [...container.querySelectorAll("span")].find((el) => el.textContent === "Sends");
 	return label?.nextElementSibling?.textContent ?? "";

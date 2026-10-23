@@ -28,6 +28,7 @@ import type { KeyValueItem } from "@/types";
 import UrlInput from "../../UrlBar/UrlInput";
 import ParamsPanel from "./ParamsPanel";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
 
 afterEach(cleanup);
 
@@ -84,7 +85,11 @@ const keyFields = () => screen.getAllByPlaceholderText("Parameter") as HTMLInput
 
 describe("the Params tab's trailing blank row", () => {
 	it("is still there, once, in the same render as a URL edit", () => {
-		render(<Harness url="https://x/users/:id?page=1" params={[QUERY, BLANK, PATH]} />);
+		render(
+			withQueryClient(
+				<Harness url="https://x/users/:id?page=1" params={[QUERY, BLANK, PATH]} />
+			)
+		);
 		expect(keyFields().map((el) => el.value)).toEqual(["page", ""]);
 
 		fireEvent.change(screen.getByLabelText("Request URL"), {
@@ -96,19 +101,25 @@ describe("the Params tab's trailing blank row", () => {
 	});
 
 	it("is added on first render when the stored params end in a filled row", () => {
-		render(<Harness url="https://x/users/:id?page=1" params={[QUERY, PATH]} />);
+		render(
+			withQueryClient(<Harness url="https://x/users/:id?page=1" params={[QUERY, PATH]} />)
+		);
 
 		expect(keyFields().map((el) => el.value)).toEqual(["page", ""]);
 	});
 
 	it("keeps one blank row, and the focus in it, across renders and keystrokes", () => {
-		const view = render(<Harness url="https://x/y?page=1" params={[QUERY]} renderKey={0} />);
+		const view = render(
+			withQueryClient(<Harness url="https://x/y?page=1" params={[QUERY]} renderKey={0} />)
+		);
 		const blankKey = keyFields()[1];
 		blankKey.focus();
 
 		// A render that changes no params: the derived row must come back with
 		// the same id, or the row remounts and the focus is gone.
-		view.rerender(<Harness url="https://x/y?page=1" params={[QUERY]} renderKey={1} />);
+		view.rerender(
+			withQueryClient(<Harness url="https://x/y?page=1" params={[QUERY]} renderKey={1} />)
+		);
 		expect(keyFields()[1]).toBe(blankKey);
 		expect(document.activeElement).toBe(blankKey);
 

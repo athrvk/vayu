@@ -41,6 +41,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect, Profiler } from "react";
 import { render, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
@@ -94,9 +95,11 @@ function Probe() {
 }
 
 const tree = (id: string | null) => (
-	<RequestBuilderProvider initialRequest={{ id, name: "r" } as Partial<RequestState>}>
-		<Probe />
-	</RequestBuilderProvider>
+	<TestQueryClient>
+		<RequestBuilderProvider initialRequest={{ id, name: "r" } as Partial<RequestState>}>
+			<Probe />
+		</RequestBuilderProvider>
+	</TestQueryClient>
 );
 
 /**
@@ -105,12 +108,14 @@ const tree = (id: string | null) => (
  * is with `memoryKey` (issue #1272).
  */
 const runTree = (runId: string) => (
-	<RequestBuilderProvider
-		initialRequest={{ id: null, name: "r" } as Partial<RequestState>}
-		memoryKey={runId}
-	>
-		<Probe />
-	</RequestBuilderProvider>
+	<TestQueryClient>
+		<RequestBuilderProvider
+			initialRequest={{ id: null, name: "r" } as Partial<RequestState>}
+			memoryKey={runId}
+		>
+			<Probe />
+		</RequestBuilderProvider>
+	</TestQueryClient>
 );
 
 beforeEach(() => {

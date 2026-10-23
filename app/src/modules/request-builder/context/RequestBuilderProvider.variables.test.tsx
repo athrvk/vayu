@@ -20,6 +20,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { renderHook } from "@testing-library/react";
 
 const globals = { variables: {} as Record<string, unknown> };
@@ -86,9 +87,11 @@ function setup(opts: {
 
 	return renderHook(() => useRequestBuilderContext(), {
 		wrapper: ({ children }) => (
-			<RequestBuilderProvider collectionId={opts.collectionId ?? null}>
-				{children}
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider collectionId={opts.collectionId ?? null}>
+					{children}
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		),
 	}).result;
 }

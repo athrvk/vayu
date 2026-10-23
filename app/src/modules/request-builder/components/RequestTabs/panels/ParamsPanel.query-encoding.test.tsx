@@ -23,6 +23,7 @@ import { createDefaultRequestState } from "../../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import ParamsPanel from "./ParamsPanel";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
 
 afterEach(cleanup);
 
@@ -40,11 +41,13 @@ function renderPanel(url: string, params: KeyValueItem[]) {
 		dataColumns: undefined,
 	} as unknown as RequestBuilderContextValue;
 	render(
-		<TooltipProvider>
-			<RequestBuilderContext.Provider value={value}>
-				<ParamsPanel />
-			</RequestBuilderContext.Provider>
-		</TooltipProvider>
+		withQueryClient(
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={value}>
+					<ParamsPanel />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		)
 	);
 	return (field: string) => {
 		const writes = updateField.mock.calls.filter(([f]) => f === field);

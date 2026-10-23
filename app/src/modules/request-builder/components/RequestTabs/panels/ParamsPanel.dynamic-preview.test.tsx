@@ -41,6 +41,16 @@ import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
+
+/*
+ * The panel reads `POST /compose` for the names a pre-request script defers
+ * (#2741), but only for a URL holding a `{{token}}`. This file asks nothing of
+ * the answer, so it is the plain one: nothing deferred.
+ */
+vi.mock("@/services/api", () => ({
+	apiService: { composeRequest: vi.fn().mockResolvedValue({}) },
+}));
 
 const { default: ParamsPanel } = await import("./ParamsPanel");
 
@@ -67,7 +77,7 @@ function contextValue(resolveString: (input: string) => string, url: string, id:
 }
 
 function panel(value: RequestBuilderContextValue) {
-	return (
+	return withQueryClient(
 		<TooltipProvider>
 			<RequestBuilderContext.Provider value={value}>
 				<ParamsPanel />

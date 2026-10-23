@@ -2805,7 +2805,7 @@
 /*
  * `{{variable}}` tokens inside a Monaco editor (issue #1220).
  *
- * The same four states `EditableVariable` paints over a single-line field, in
+ * The same states `EditableVariable` paints over a single-line field, in
  * the same tokens - a reader who sees `{{baseUrl}}` in the URL bar and again in
  * the body beneath it sees one colour, not two. Monaco draws its own text, so
  * `inlineClassName` takes a plain global class rather than the Tailwind utility
@@ -2826,6 +2826,14 @@
 	}
 	.monaco-editor .vayu-variable-token-undefined {
 		@apply text-[hsl(var(--destructive-text))];
+	}
+	/*
+	 * A stored variable a pre-request script may replace before the send (#2741):
+	 * muted, because the stored value is not what is sent, and dashed-underlined
+	 * so it does not read as an empty one. `EditableVariable` paints the same.
+	 */
+	.monaco-editor .vayu-variable-token-deferred {
+		@apply text-[hsl(var(--muted-foreground))] underline decoration-dashed decoration-[hsl(var(--muted-foreground))] underline-offset-[3px];
 	}
 	/* A generator, an identity or a bound column: nothing to define, so muted. */
 	.monaco-editor .vayu-variable-token-runtime {

@@ -35,6 +35,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
@@ -91,9 +92,11 @@ function NameProbe() {
 function Harness({ storedName }: { storedName: string }) {
 	const initialRequest: Partial<RequestState> = { id: "req_1", name: storedName };
 	return (
-		<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
-			<NameProbe />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
+				<NameProbe />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

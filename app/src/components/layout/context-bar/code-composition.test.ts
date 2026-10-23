@@ -13,7 +13,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { composeForCode } from "./code-composition";
+import { queryKeys } from "@/queries/keys";
+import { compositionOptions, composeForCode } from "./code-composition";
 import { useLiveCommandSurfaceStore, type EditorDraft } from "@/lib/commands/live-surfaces";
 import type { RequestState } from "@/modules/request-builder/types";
 
@@ -82,5 +83,23 @@ describe("composeForCode carries the deferred names", () => {
 		composeRequest.mockResolvedValue(PLAIN);
 
 		expect((await composeForCode("req_1", null)).deferredVariables).toEqual([]);
+	});
+});
+
+describe("compositionOptions", () => {
+	// The Code section, the Sends line and the tab title read one cache entry
+	// because they build their key here; a reader spelling it again is how the
+	// entry would stop being shared.
+	it.each([
+		[true, "editor"],
+		[false, "saved"],
+	] as const)("keys a request the builder holds=%s under %s", (held, source) => {
+		expect(compositionOptions("req_1", "env_1", held).queryKey).toEqual(
+			queryKeys.compose.forRequest("req_1", "env_1", source)
+		);
+	});
+
+	it("never refetches on its own", () => {
+		expect(compositionOptions("req_1", null, false).staleTime).toBe(Infinity);
 	});
 });

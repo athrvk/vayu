@@ -32,6 +32,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
 import { render, act, waitFor } from "@testing-library/react";
 import { useResponseStore, useExecutionEventsStore } from "@/stores";
@@ -103,13 +104,15 @@ function renderFor(
 	onExecuteStream: (r: RequestState) => Promise<StreamStartResult | null>
 ) {
 	return (
-		<RequestBuilderProvider
-			initialRequest={{ id, name: id, stream: true } as Partial<RequestState>}
-			onExecute={async () => null}
-			onExecuteStream={onExecuteStream}
-		>
-			<Capture />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider
+				initialRequest={{ id, name: id, stream: true } as Partial<RequestState>}
+				onExecute={async () => null}
+				onExecuteStream={onExecuteStream}
+			>
+				<Capture />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

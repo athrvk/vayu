@@ -30,6 +30,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, act } from "@testing-library/react";
 import { RequestBuilderProvider, useRequestBuilderContext } from "./context";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
@@ -84,14 +85,16 @@ function Harness({ onExecute, url }: { onExecute?: Execute; url?: string }) {
 		url: url ?? "https://api.test/saved",
 	};
 	return (
-		<RequestBuilderProvider
-			initialRequest={initialRequest}
-			collectionId="col_1"
-			{...(onExecute ? { onExecute } : {})}
-		>
-			<UrlEditor />
-			<SendRequestCommandSurface />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider
+				initialRequest={initialRequest}
+				collectionId="col_1"
+				{...(onExecute ? { onExecute } : {})}
+			>
+				<UrlEditor />
+				<SendRequestCommandSurface />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

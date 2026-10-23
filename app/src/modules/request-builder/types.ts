@@ -657,6 +657,17 @@ export interface RequestBuilderContextValue {
 	 */
 	dataColumns?: DataContractScope;
 	/**
+	 * The names the engine left written because a pre-request script runs before
+	 * this request's send (`POST /compose`, #2521), which the token painters stop
+	 * painting as their stored values (#2741).
+	 *
+	 * Fetched here, once for the builder, and only while the request holds a
+	 * `{{token}}`: the painters are per editor and `VariableInput` must stay
+	 * renderable without a `QueryClientProvider`, the reason `dataColumns` is
+	 * resolved here too.
+	 */
+	deferredVariables?: readonly string[];
+	/**
 	 * The rows a single Send can bind, for this request (issue #601).
 	 *
 	 * Held by the provider rather than the URL bar since issue #1062, because the

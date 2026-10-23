@@ -101,6 +101,12 @@ export interface VariablePopoverProps {
 	varInfo: ResolvedVariable | null;
 	/** Whether the variable is resolved */
 	resolved: boolean;
+	/**
+	 * A sentence qualifying the answer drawn below it, for a stored value that is
+	 * not what a send will carry (a name a pre-request script sets, #2741). The
+	 * value stays editable: it is still the definition.
+	 */
+	note?: string;
 	/** Callback when value changes (required for editable mode) */
 	onValueChange?: (name: string, value: string, scope: VariableScope) => void;
 	/** Save mode: 'manual' shows Save/Cancel buttons, 'auto' saves on close */
@@ -205,6 +211,7 @@ export function VariablePopover({
 	name,
 	varInfo,
 	resolved,
+	note,
 	onValueChange,
 	saveMode = "auto",
 	disabled = false,
@@ -567,6 +574,10 @@ export function VariablePopover({
 							)}
 						</div>
 					</div>
+
+					{note && (
+						<p className="text-label leading-snug text-muted-foreground">{note}</p>
+					)}
 
 					{resolved && varInfo ? (
 						<>

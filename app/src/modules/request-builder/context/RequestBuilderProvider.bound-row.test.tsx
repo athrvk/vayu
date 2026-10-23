@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
 const globals = { variables: {} as Record<string, unknown> };
@@ -96,9 +97,14 @@ function stubReadDataFile(text = CSV) {
 function setup(requestId: string | null = "req_a") {
 	return renderHook(() => useRequestBuilderContext(), {
 		wrapper: ({ children }) => (
-			<RequestBuilderProvider collectionId={COLLECTION_ID} initialRequest={{ id: requestId }}>
-				{children}
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					collectionId={COLLECTION_ID}
+					initialRequest={{ id: requestId }}
+				>
+					{children}
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		),
 	});
 }

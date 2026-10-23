@@ -39,14 +39,16 @@ import { loadedRunReference } from "@/lib/run-reference-input";
 import { shownService } from "@/lib/shown-service";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
-import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
+import { boundRowFor, useBoundRowStore, useSessionStore, type Tab } from "@/stores";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { dataFileDisplayName, dataFileFromSnapshot } from "@/lib/run-data-file";
 import {
+	deferredNamesInSends,
 	resolveSendsUrl,
 	sendsCacheInput,
 	sendsResolver,
 } from "@/modules/request-builder/utils/sends-url";
+import { compositionOptions } from "./context-bar/code-composition";
 
 /**
  * Title for a request tab: the user-set name when there is one, otherwise the
@@ -190,6 +192,37 @@ export function iconForTab(
  */
 const stableTitleUrl = createStableResolve();
 
+/**
+ * The names a pre-request script sets at send, for each request tab, read from
+ * the compose cache and never fetched (#2741): this hook serves every open tab
+ * and the palette, and a compose per tab is exactly the cost #1310 removed. An
+ * entry exists once the Params panel or the Code section has asked for the
+ * request, so a tab nobody has opened keeps the stored URL in its title until
+ * then.
+ *
+ * Both entries are read, the editor's first: only the active tab holds the
+ * editor, and the entry composed there is the better answer for a tab the user
+ * has since left.
+ */
+function useCachedDeferredNames(tabs: Tab[]): Map<string, readonly string[]> {
+	const environmentId = useSessionStore((s) => s.activeEnvironmentId);
+	const requestTabs = tabs.filter((t) => t.type === "request" && t.entityId);
+	const entries = useQueries({
+		queries: requestTabs.flatMap((t) =>
+			[true, false].map((editorHeld) => ({
+				...compositionOptions(t.entityId ?? "", environmentId, editorHeld),
+				enabled: false,
+			}))
+		),
+	});
+	const names = new Map<string, readonly string[]>();
+	requestTabs.forEach((t, i) => {
+		const composition = entries[2 * i]?.data ?? entries[2 * i + 1]?.data;
+		if (composition) names.set(t.id, composition.deferredVariables);
+	});
+	return names;
+}
+
 export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	const requests = useQueries({
 		queries: tabs.map((t) => requestDetailOptions(t.type === "request" ? t.entityId : null)),
@@ -215,6 +248,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	 * in.
 	 */
 	const bound = useBoundRowStore((s) => s.bound);
+	const deferredByTab = useCachedDeferredNames(tabs);
 
 	return tabs.map((tab, i) => {
 		const request = requests[i]?.data;
@@ -295,11 +329,15 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				// row's bind, not this tab's own steady-state label, so it skips the
 				// cache and always resolves fresh - the same reasoning `resolveString`
 				// callers elsewhere apply (see `useVariableResolver`).
+				// A name a pre-request script sets at send stays written in it, as it
+				// does on the line (#2741); the cache input holds those names, so a
+				// changed answer re-resolves and nothing else rerolls a generator.
+				const deferred = deferredNamesInSends(request, deferredByTab.get(tab.id) ?? []);
 				const resolvedUrl = row
-					? resolveSendsUrl(request, (text) => resolveString(text, row))
+					? resolveSendsUrl(request, (text) => resolveString(text, row), deferred)
 					: stableTitleUrl(
 							request.id ?? tab.entityId ?? "",
-							sendsCacheInput(request),
+							sendsCacheInput(request, deferred),
 							sendsResolver(resolveString)
 						);
 				const name = requestTabTitle(request.name, resolvedUrl);

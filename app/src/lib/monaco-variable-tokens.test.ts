@@ -75,6 +75,7 @@ describe("variableTokenClass", () => {
 			variableTokenClass(resolved),
 			variableTokenClass({ state: "empty", info: { value: "", scope: "global" } }),
 			variableTokenClass({ state: "undefined", info: null }),
+			variableTokenClass({ state: "deferred", info: null }),
 			variableTokenClass({ state: "runtime", tone: "muted", description: "d", note: "n" }),
 			variableTokenClass({ state: "runtime", tone: "warning", description: "d", note: "n" }),
 		];

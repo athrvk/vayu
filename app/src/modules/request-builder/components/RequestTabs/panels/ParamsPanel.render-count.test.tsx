@@ -28,6 +28,7 @@ import { createDefaultRequestState } from "../../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import ParamsPanel from "./ParamsPanel";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
 
 const renderCounts: Record<string, number> = {};
 
@@ -93,7 +94,7 @@ function Harness() {
 
 describe("Params rows under a keystroke", () => {
 	it("re-renders only the row being typed in, not its siblings", () => {
-		render(<Harness />);
+		render(withQueryClient(<Harness />));
 		for (const id of IDS) renderCounts[id] = 0;
 
 		fireEvent.change(screen.getByDisplayValue("v3"), { target: { value: "v3x" } });

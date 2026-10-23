@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, fireEvent } from "@testing-library/react";
 import RequestBuilderProvider from "../../../context/RequestBuilderProvider";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
@@ -90,9 +91,11 @@ const extractElement = (id: string): ElementDef => ({
 function Harness({ id }: { id: string | null }) {
 	const initialRequest: Partial<RequestState> = { id, elements: [extractElement("el_shared")] };
 	return (
-		<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
-			<ElementsPanel />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
+				<ElementsPanel />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

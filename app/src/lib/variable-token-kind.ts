@@ -10,10 +10,12 @@
  *
  * The reserved namespaces first (`data.*`, then `$vu` / `$iteration`), then a
  * bare name a bound row answers, then the generator table, then the scopes.
- * The order is load-bearing and documented in `docs/app/COMPONENTS.md`: a scope
- * that defines `$guid` wins and takes the editable token, while a variable
- * someone named `data.email` or `$vu` answers for neither the column nor the
- * identity and must not paint as though it had.
+ * A name the engine defers past a pre-request script (#2741) comes right after
+ * the reserved namespaces, ahead of the scopes: its stored value is not what is
+ * sent. The order is load-bearing and documented in `docs/app/COMPONENTS.md`:
+ * a scope that defines `$guid` wins and takes the editable token, while a
+ * variable someone named `data.email` or `$vu` answers for neither the column
+ * nor the identity and must not paint as though it had.
  *
  * The decision lives here, apart from any paint, because two surfaces now make
  * it: `VariableInput`'s overlay strip - which owns the DOM tokens over a
@@ -70,9 +72,15 @@ export interface RuntimeToken {
  * defines. `info` is the winning definition, `null` when the name resolves to
  * nothing - which is what separates the two paints and what decides whether the
  * popover edits or offers to create.
+ *
+ * `deferred` is a stored variable whose value a pre-request script may replace
+ * before the send (#2521, #2741): `info` is still the stored definition - the
+ * popover edits it - but it is not what will be sent, so it is neither
+ * `resolved` nor `empty`. The engine decides which names; see
+ * {@link VariableTokenContext.deferredVariables}.
  */
 export interface ScopedVariableToken {
-	state: "resolved" | "empty" | "undefined";
+	state: "resolved" | "empty" | "undefined" | "deferred";
 	info: ResolvedVariable | null;
 }
 
@@ -92,6 +100,13 @@ export interface VariableTokenContext {
 	 * existing body-language callers, and `variable-token-kind.test.ts`).
 	 */
 	getVariableOrigins?: (name: string) => VariableOrigin[];
+	/**
+	 * The names `POST /compose` left written because a pre-request script runs
+	 * before the send (`deferredVariables`, #2521). Only ever the engine's
+	 * answer: whether a request is scripted is its rule, and this module holds
+	 * no copy of it. Absent or empty paints every token as it always did.
+	 */
+	deferredVariables?: readonly string[];
 }
 
 /**
@@ -108,17 +123,20 @@ export interface VariableTokenContext {
  *   higher scope also defines the name.
  * - `"row"` - the bound data row and nothing else (`pm.iterationData.get`),
  *   so the answer is a column state, never a scope's.
+ * - `"merged"` - the whole ladder, as a body-language token reads it
+ *   (`pm.variables.get`, a `replaceIn(...)` template), except that a name the
+ *   engine defers is not deferred here: the pre-request script is the thing
+ *   that sets it, and a post-request script reads it after that has run.
  * - `"bare"` - not a read at all: a `{{name}}` written into a script outside
  *   any `pm.variables.replaceIn(...)` call, which the engine sends verbatim
  *   (D16, `docs/engine/scripting.md`). Muted and informational regardless of
  *   what the name would otherwise resolve to.
  *
- * `pm.variables.get(...)` (the merged read) and a `replaceIn(...)` template
- * both read the same ladder a body-language token does, so neither carries a
- * hint - `classifyScriptToken` falls through to `classifyVariableToken`.
+ * Every span a script editor finds carries one, so a caller with no hint is
+ * a body-language token and nothing else.
  */
 export type ScriptTokenHint =
-	{ via: "scope"; scope: VariableScope } | { via: "row" } | { via: "bare" };
+	{ via: "scope"; scope: VariableScope } | { via: "row" } | { via: "merged" } | { via: "bare" };
 
 /**
  * The muted, no-edit answer for a script's bare `{{name}}` (issue #1220 script
@@ -153,10 +171,9 @@ function resolvedFromOrigin(origin: ScopeVariableOrigin): ResolvedVariable {
 }
 
 /**
- * `classifyVariableToken`, plus the three script-only answers a
- * `ScriptTokenHint` asks for. Every editor's `classify` call goes through this
- * now; a caller with no hint (every body-language token, `pm.variables.get`,
- * and a `replaceIn(...)` template) gets exactly what it always got.
+ * `classifyVariableToken`, plus the script-only answers a `ScriptTokenHint`
+ * asks for. Every editor's `classify` call goes through this; a caller with no
+ * hint (every body-language token) gets exactly what it always got.
  */
 export function classifyScriptToken(
 	name: string,
@@ -166,6 +183,10 @@ export function classifyScriptToken(
 	if (!hint) return classifyVariableToken(name, context);
 
 	if (hint.via === "bare") return BARE_SCRIPT_TEMPLATE_KIND;
+
+	if (hint.via === "merged") {
+		return classifyVariableToken(name, { ...context, deferredVariables: undefined });
+	}
 
 	if (hint.via === "row") {
 		return { state: "runtime", ...describeColumnToken(name, context.dataColumns ?? null) };
@@ -192,7 +213,7 @@ export function classifyScriptToken(
  */
 export function classifyVariableToken(
 	name: string,
-	{ variables, dataColumns }: VariableTokenContext
+	{ variables, dataColumns, deferredVariables }: VariableTokenContext
 ): VariableTokenKind {
 	// The reserved data namespace, read before the scopes: it is disjoint from
 	// them, so a variable named `data.email` never answers for the column.
@@ -213,6 +234,11 @@ export function classifyVariableToken(
 	}
 
 	const info = variables[name];
+
+	// The engine says a pre-request script may change this name before the send,
+	// so the stored value is not what is sent: neither resolved nor empty nor
+	// undefined, whatever the scopes hold.
+	if (deferredVariables?.includes(name)) return { state: "deferred", info: info ?? null };
 
 	// A bare name no scope defines, which a bound row's column answers (#1007).
 	// A scope that *does* define it keeps painting as that variable.

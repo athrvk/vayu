@@ -40,6 +40,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect, useState } from "react";
 import { render, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
@@ -118,9 +119,11 @@ function Harness() {
 let harnessStep: (s: "stash" | "away" | "back") => void = () => {};
 
 const tree = (id: string | null) => (
-	<RequestBuilderProvider initialRequest={{ id, name: "r" } as Partial<RequestState>}>
-		<Harness />
-	</RequestBuilderProvider>
+	<TestQueryClient>
+		<RequestBuilderProvider initialRequest={{ id, name: "r" } as Partial<RequestState>}>
+			<Harness />
+		</RequestBuilderProvider>
+	</TestQueryClient>
 );
 
 function renderProvider(id: string | null = "req_a") {
@@ -157,9 +160,11 @@ describe("drafts across a tab switch", () => {
 		// Guards both assertions above from passing on a stale module-level value.
 		seen.restored = "sentinel";
 		render(
-			<RequestBuilderProvider initialRequest={{ id: "req_z" } as Partial<RequestState>}>
-				<PanelStandIn />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider initialRequest={{ id: "req_z" } as Partial<RequestState>}>
+					<PanelStandIn />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 		await act(async () => {});
 		expect(seen.restored).toBe("");

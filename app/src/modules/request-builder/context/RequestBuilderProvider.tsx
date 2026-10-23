@@ -23,6 +23,7 @@ import { UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { retainKeys } from "./retain-keys";
 import { useVariableResolver, useVariableWriter, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
+import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
 import { mergeExternalWrite } from "@/lib/field-merge";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -56,6 +57,7 @@ import type {
 	RequestFieldConflicts,
 } from "../types";
 import { resolveAuthForSend } from "../utils/auth-resolution";
+import { requestHasTokens } from "../utils/request-tokens";
 import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 import { sentRequestOf } from "../utils/execute-mapping";
@@ -678,6 +680,17 @@ export default function RequestBuilderProvider({
 		return forSend ? resolveObject(forSend) : null;
 	}, [request.auth, collectionAncestors, resolveObject]);
 
+	/*
+	 * The names a pre-request script sets at send (#2521), so the token painters
+	 * stop showing their stored values as what will be sent (#2741). Asked here,
+	 * once for the builder, because painting is per editor; and only while the
+	 * request holds a `{{token}}`, so a literal request costs no compose. The
+	 * answer is the Code section's cache entry, refreshed by the invalidations
+	 * that refresh it, never per keystroke.
+	 */
+	const hasTokens = useMemo(() => requestHasTokens(request), [request]);
+	const deferredVariables = useDeferredVariables(request.id ?? "", hasTokens);
+
 	// Variable writes - shared with the collection Elements tab, see useVariableWriter.
 	const { updateVariable, writableScopes } = useVariableWriter({
 		collectionId: collectionId || undefined,
@@ -1269,6 +1282,7 @@ export default function RequestBuilderProvider({
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			deferredVariables,
 			sendWithRow,
 			lastRowIndex,
 			rememberRowIndex,
@@ -1311,6 +1325,7 @@ export default function RequestBuilderProvider({
 			updateVariable,
 			writableScopes,
 			dataColumns,
+			deferredVariables,
 			sendWithRow,
 			lastRowIndex,
 			rememberRowIndex,

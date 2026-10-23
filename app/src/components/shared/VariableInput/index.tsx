@@ -225,12 +225,13 @@ export default function VariableInput({
 				kind: classifyVariableToken(seg.varName, {
 					variables: allVariables,
 					dataColumns: variables?.dataColumns,
+					deferredVariables: variables?.deferredVariables,
 				}),
 				bounds: { "data-token-start": start, "data-token-end": offset },
 			});
 		}
 		return tokens;
-	}, [segments, allVariables, variables?.dataColumns]);
+	}, [segments, allVariables, variables?.dataColumns, variables?.deferredVariables]);
 
 	/**
 	 * Which token of the strip holds the Tab stop, as the strip stands now.
@@ -733,6 +734,7 @@ export default function VariableInput({
 							value={varInfo?.value || ""}
 							scope={varInfo?.scope || "global"}
 							resolved={!!varInfo}
+							deferred={kind.state === "deferred"}
 							// Both come from the resolver and were being dropped on
 							// the floor here: `secret` is what stops the hover
 							// tooltip printing a credential, and `sourceName` is

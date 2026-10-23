@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
 import { render, act, waitFor } from "@testing-library/react";
 import { useResponseStore, useExecutionEventsStore } from "@/stores";
@@ -136,19 +137,21 @@ describe("a response carries the request as it was at Send", () => {
 	it("buffered: keeps the URL that was sent, not the one edited while in flight", async () => {
 		const exec = deferredExecute();
 		render(
-			<RequestBuilderProvider
-				initialRequest={
-					{
-						id: "A",
-						name: "A",
-						method: "POST",
-						url: URL_A,
-					} as Partial<RequestState>
-				}
-				onExecute={exec.fn}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={
+						{
+							id: "A",
+							name: "A",
+							method: "POST",
+							url: URL_A,
+						} as Partial<RequestState>
+					}
+					onExecute={exec.fn}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
@@ -177,12 +180,14 @@ describe("a response carries the request as it was at Send", () => {
 	it("buffered: an unsaved request takes no snapshot, having nowhere to save one", async () => {
 		const exec = deferredExecute();
 		render(
-			<RequestBuilderProvider
-				initialRequest={{ name: "draft", url: URL_A } as Partial<RequestState>}
-				onExecute={exec.fn}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={{ name: "draft", url: URL_A } as Partial<RequestState>}
+					onExecute={exec.fn}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
@@ -203,15 +208,17 @@ describe("a response carries the request as it was at Send", () => {
 			eventsUrl: "/runs/run_1/events",
 		}));
 		render(
-			<RequestBuilderProvider
-				initialRequest={
-					{ id: "A", name: "A", url: URL_A, stream: true } as Partial<RequestState>
-				}
-				onExecute={async () => null}
-				onExecuteStream={onExecuteStream}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={
+						{ id: "A", name: "A", url: URL_A, stream: true } as Partial<RequestState>
+					}
+					onExecute={async () => null}
+					onExecuteStream={onExecuteStream}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
@@ -238,15 +245,17 @@ describe("a response carries the request as it was at Send", () => {
 			eventsUrl: "/runs/run_1/events",
 		}));
 		render(
-			<RequestBuilderProvider
-				initialRequest={
-					{ id: "A", name: "A", url: URL_A, stream: true } as Partial<RequestState>
-				}
-				onExecute={async () => null}
-				onExecuteStream={onExecuteStream}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={
+						{ id: "A", name: "A", url: URL_A, stream: true } as Partial<RequestState>
+					}
+					onExecute={async () => null}
+					onExecuteStream={onExecuteStream}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
