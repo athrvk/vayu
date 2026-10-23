@@ -80,7 +80,7 @@ const INSTRUCTIONS_HEAD =
 	"real traffic to a target), write (mutate saved data or engine config), and " +
 	"load (start and stop load tests). " +
 	"Every tool that puts traffic on the network is restricted to an allowlist, " +
-	"and load runs additionally enforce hard RPS, virtual-user and duration caps. Write " +
+	"and load runs additionally enforce hard RPS, virtual-user, duration and iteration caps. Write " +
 	"tools require write access, and the destructive ones ask " +
 	"for confirmation - via elicitation where the client supports it, otherwise by " +
 	"returning what the call would destroy and waiting for a `confirmed: true` " +

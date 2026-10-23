@@ -15434,6 +15434,12 @@ describe("every structured read answers structuredContent its outputSchema accep
 				activeEnvironment: { id: "env_1", name: "Staging" },
 			}),
 		},
+		{
+			tool: "get_safety_config",
+			has: ["allowlist", "caps", "gates", "disabledToolCount"],
+			args: {},
+			safety: { allowlist: ["a.test"], allowAll: true },
+		},
 		{ tool: "resolve_variables", args: {}, has: ["context", "variables", "summary"] },
 		{
 			tool: "get_request",

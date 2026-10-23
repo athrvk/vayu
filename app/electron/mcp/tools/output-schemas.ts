@@ -254,6 +254,27 @@ export const mockRoutesSchema = dataListSchema(
 export const mockActivitySchema = dataListSchema();
 export const inboxListSchema = dataListSchema(z.looseObject({ inboxId: optStr }));
 
+/**
+ * `get_safety_config`: the session's guardrails as numbers, flags and the
+ * allowlist. A fixed shape this layer builds, so nothing is optional. The gate
+ * fields are booleans by type, which is what keeps a secret value out of them.
+ */
+export const safetyConfigSchema = z.object({
+	allowlist: z.object({ allowAll: z.boolean(), hosts: z.array(z.string()) }),
+	caps: z.object({
+		maxRps: z.number(),
+		maxConcurrency: z.number(),
+		maxDurationSeconds: z.number(),
+		maxIterations: z.number(),
+	}),
+	gates: z.object({
+		allowWrites: z.boolean(),
+		allowNetworkSettings: z.boolean(),
+		revealSecretsToAgents: z.boolean(),
+	}),
+	disabledToolCount: z.number(),
+});
+
 export const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })
 	.passthrough();

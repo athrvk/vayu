@@ -163,7 +163,9 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   (`169.254.169.254`, `fd00:ec2::254`) do, like any public host.
 - **Hard load caps (enforcement).** `start_load_run` rejects requests whose RPS,
   concurrency, or duration exceed configured ceilings. Together with the
-  allowlist, these are the real limits on what load an agent can generate.
+  allowlist, these are the real limits on what load an agent can generate. An
+  agent can read the caps, the allowlisted hosts and the on/off state of the
+  gates (`get_safety_config`); it never receives a secret value through it.
 - **Confirmation gate (anti-accident, not anti-adversary).** `start_load_run`
   and the destructive deletes start or remove nothing on a first call. Where the
   client and transport let Vayu ask (a 2026-07-28 client, or stdio), the
