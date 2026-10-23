@@ -147,7 +147,16 @@ The app will:
    cp engine/build/Release/vayu-engine.exe app/build/resources/bin/
    ```
 
-3. **Build the app**:
+3. **Generate the third-party notices** into `app/build/`, where the
+   packager reads them (`build.py` does this for you; see
+   [Third-party notices](../engine/building.md#third-party-notices)):
+   ```bash
+   python scripts/generate-third-party-notices.py \
+     --out app/build/THIRD_PARTY_NOTICES.txt --app-dir app \
+     --vcpkg-share engine/build-release/vcpkg_installed/<triplet>/share
+   ```
+
+4. **Build the app**:
    ```bash
    cd app
    pnpm electron:build

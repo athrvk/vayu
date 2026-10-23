@@ -95,6 +95,10 @@ vayu/
 ### C++ (Engine)
 
 - **Standard:** C++23
+- **Vendoring a library:** a directory under `engine/vendor/` must carry its
+  `LICENSE*` (or `COPYING*`) file; the installers' `THIRD_PARTY_NOTICES.txt` is
+  generated from them and `scripts/test/third_party_notices_test.py` fails
+  without one.
 - **Style:** Google C++ Style Guide (with modifications)
 - **Formatting:** clang-format, **19 exactly**. `.clang-format` at the repository
   root governs `engine/{src,include,tests}`; `engine/vendor/` is excluded by a

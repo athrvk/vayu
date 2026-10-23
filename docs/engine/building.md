@@ -601,6 +601,39 @@ would pay the parse once per process rather than once per execution, remains an
 option nobody has built: uuid does not need one, and a ~70 KB library costs
 about one 10 ms parse in a script that requires it.
 
+### Third-party notices
+
+Every installer ships a `THIRD_PARTY_NOTICES.txt` holding the licence text of
+what Vayu bundles ([#2693](https://github.com/athrvk/vayu/issues/2693)). It is
+generated at build time by `scripts/generate-third-party-notices.py`, not kept
+in the tree: a committed list is a second place that has to learn about every
+dependency change, and the one that goes stale unnoticed. The generator reads
+the licence files the components carry themselves:
+
+- **`engine/vendor/*`**: every directory, with the full text of every
+  `LICENSE*` and `COPYING*` file in it (ajv, chai and xml2js carry one extra
+  per bundled dependency; hdrhistogram has `COPYING.txt` and `LICENSE.txt` and
+  no bare `LICENSE`). A directory with none stops the generator, naming it.
+- **vcpkg**: each `share/<port>/copyright` under `--vcpkg-share`, the
+  `installed/<triplet>/share` directory of the engine's vcpkg tree. `build.py`
+  finds it from the build directory's `CMakeCache.txt`; `release.yml` and
+  `perf-measure.yml` do the same. When it is not given the section is omitted
+  and stderr says so.
+- **npm**: with `--app-dir app`, the closure of `app/package.json`
+  `dependencies` plus the `devDependencies` that non-test source under
+  `app/src` or `app/electron` imports (Vite bundles those into the renderer),
+  read from `node_modules`. Without `node_modules` the section is omitted and
+  stderr says so; npm never fails the build.
+
+Identical licence texts are printed once, with the packages that share them.
+
+**Adding a library to `engine/vendor/` needs nothing but its licence file**
+beside it: the generator lists the directory on its own, and
+`scripts/test/third_party_notices_test.py` fails the build (and the
+`build_script` job of `pr-tests.yml`, which runs it) when a vendor directory has
+no `LICENSE*` or `COPYING*`. Run it directly:
+`python3 scripts/test/third_party_notices_test.py`.
+
 ### vcpkg Setup
 
 The build script automatically detects and uses vcpkg. If vcpkg is not found:
