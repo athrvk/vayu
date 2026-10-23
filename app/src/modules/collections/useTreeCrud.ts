@@ -392,11 +392,18 @@ export function useTreeCrud({
 			// (#1519): a named list drops every field added after it was
 			// written, which is how the previous version silently reset
 			// verifySSL, httpVersion and specOperation on every copy. `id`,
-			// `createdAt` and `updatedAt` are the only fields a copy must not
-			// carry; `order` is kept deliberately - it lands the copy directly
-			// *after* the source, the tie falling to `createdAt` (see
-			// `compareTreeOrder`, pinned to the engine's SQL).
-			const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
+			// `createdAt`, `updatedAt` and the derived `runsPreRequestScript`
+			// (#2741, recomputed engine-side for the copy) are the only fields
+			// a copy must not carry; `order` is kept deliberately - it lands
+			// the copy directly *after* the source, the tie falling to
+			// `createdAt` (see `compareTreeOrder`, pinned to the engine's SQL).
+			const {
+				id: _id,
+				createdAt: _createdAt,
+				updatedAt: _updatedAt,
+				runsPreRequestScript: _runsPreRequestScript,
+				...rest
+			} = request;
 			const copy = await createRequestMutation.mutateAsync({
 				...rest,
 				// The derived flag is stripped from a body the row has; a row

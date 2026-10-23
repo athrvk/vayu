@@ -92,6 +92,8 @@ const source: Request = {
 	stream: true,
 	mockResponseMode: "first",
 	specOperation: { operationId: "getPet", method: "GET", path: "/pets/{id}" },
+	// Derived by the engine on read (#2741); the copy's write must not carry it.
+	runsPreRequestScript: true,
 	order: 1,
 	createdAt: "2026-01-01T00:00:00.000Z",
 	updatedAt: "2026-01-02T00:00:00.000Z",
@@ -136,7 +138,7 @@ beforeEach(() => {
 });
 
 describe("duplicating a request", () => {
-	it("sends every field of the source except id and timestamps", async () => {
+	it("sends every field of the source except id, timestamps and the derived script flag", async () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
@@ -146,8 +148,15 @@ describe("duplicating a request", () => {
 		expect(getRequest).toHaveBeenCalledExactlyOnceWith("r-1");
 		expect(createRequest).toHaveBeenCalledTimes(1);
 		const sent = createRequest.mock.calls[0][0];
-		const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...expected } = source;
+		const {
+			id: _id,
+			createdAt: _createdAt,
+			updatedAt: _updatedAt,
+			runsPreRequestScript: _runs,
+			...expected
+		} = source;
 		expect(sent).toEqual({ ...expected, name: "Get pet (Copy)" });
+		expect(sent).not.toHaveProperty("runsPreRequestScript");
 	});
 
 	// #2356: the read's `unresolved` is the engine's answer for the source, not

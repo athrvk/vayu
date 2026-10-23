@@ -359,3 +359,30 @@ describe("RequestTransformer file trust flag", () => {
 		expect(RequestTransformer.toFrontend({ ...base, body }).body).toEqual(body);
 	});
 });
+
+describe("RequestTransformer runsPreRequestScript (#2741)", () => {
+	// The engine derives it on the single-request routes only; a transformer
+	// that copies field by field drops it unless it is named.
+	it.each([[true], [false]])("keeps the engine's %s answer", (answer) => {
+		const req = RequestTransformer.toFrontend({ ...base, runsPreRequestScript: answer });
+		expect(req.runsPreRequestScript).toBe(answer);
+	});
+
+	it("leaves the key absent on a row that does not carry it", () => {
+		expect(RequestTransformer.toFrontend({ ...base })).not.toHaveProperty(
+			"runsPreRequestScript"
+		);
+	});
+
+	it("ignores a value that is not a boolean", () => {
+		expect(
+			RequestTransformer.toFrontend({ ...base, runsPreRequestScript: "yes" })
+		).not.toHaveProperty("runsPreRequestScript");
+	});
+
+	it("does not put it on a summary row", () => {
+		expect(
+			RequestTransformer.toSummary({ ...base, runsPreRequestScript: true })
+		).not.toHaveProperty("runsPreRequestScript");
+	});
+});

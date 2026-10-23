@@ -20,7 +20,7 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 import { invalidateCompositions } from "@/queries/compose-invalidation";
-import { invalidateAllRequestLists } from "@/queries/collections";
+import { invalidateAllRequestLists, invalidateRequestDetails } from "@/queries/collections";
 import { queryKeys } from "@/queries/keys";
 import type { McpDataChangedEvent, McpDataEntity } from "@/types/domain";
 
@@ -87,9 +87,15 @@ const INVALIDATORS: Record<
 	 * reads `useUpdateCollectionMutation` refreshes: the collections, and every
 	 * composition, because a collection's auth, headers, scripts and variables
 	 * are what its descendant requests compose against.
+	 *
+	 * The request details too, though no list: `update_collection` may rewrite
+	 * the scripts a descendant runs, and a detail's `runsPreRequestScript`
+	 * (#2741) is derived from them. The event does not say which field changed,
+	 * so the prefix is taken, and only a mounted detail (an open tab) refetches.
 	 */
 	collectionRow: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+		invalidateRequestDetails(queryClient);
 		invalidateCompositions(queryClient);
 	},
 

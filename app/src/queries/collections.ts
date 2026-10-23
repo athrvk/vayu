@@ -34,6 +34,7 @@ import type {
 	UpdateCollectionRequest,
 	CreateRequestRequest,
 	UpdateRequestRequest,
+	ReorderMove,
 	ReorderRequest,
 	TreeRowKind,
 } from "@/types";
@@ -131,6 +132,21 @@ function requestsForCollection(
 export function invalidateAllRequestLists(queryClient: QueryClient): void {
 	queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 	queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+}
+
+/**
+ * Mark every cached request detail stale; the mounted ones refetch.
+ *
+ * For a write whose reach is the ancestor chain rather than one row: a request
+ * detail carries `runsPreRequestScript` (#2741), which the engine derives from
+ * the scripts of the request, its folder and its collection, so editing a
+ * folder's script, or moving a request or folder, changes it for rows the write
+ * never names. The details are `staleTime: Infinity`, so nothing else would
+ * refresh the flag. `requests.all` (`invalidateAllRequestLists`) covers this
+ * already, for the writes that also invalidate the lists.
+ */
+export function invalidateRequestDetails(queryClient: QueryClient): void {
+	queryClient.invalidateQueries({ queryKey: queryKeys.requests.details() });
 }
 
 /**
@@ -400,7 +416,7 @@ export function useUpdateCollectionMutation() {
 
 	return useMutation({
 		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
-		onSuccess: (updatedCollection) => {
+		onSuccess: (updatedCollection, patch) => {
 			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
 				const next =
 					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
@@ -409,6 +425,12 @@ export function useUpdateCollectionMutation() {
 			// A collection's auth, headers, scripts and variables are what every
 			// descendant request composes against.
 			invalidateCompositions(queryClient);
+			// Only the scripts and the parent decide whether a descendant runs a
+			// pre-request script (`invalidateRequestDetails`); a rename or a
+			// variable edit leaves every request's flag alone.
+			if (patch.elements !== undefined || patch.parentId !== undefined) {
+				invalidateRequestDetails(queryClient);
+			}
 		},
 	});
 }
@@ -718,6 +740,11 @@ function placeRequest(
 	);
 }
 
+/** Whether a move names the row's new parent rather than only its position. */
+function statesNewOwner(move: ReorderMove): boolean {
+	return move.type === "collection" ? "parentId" in move : move.collectionId !== undefined;
+}
+
 /**
  * Apply one atomic batch reorder - the write path behind a drop.
  *
@@ -795,7 +822,10 @@ export function useReorderMutation() {
 					"error"
 				);
 		},
-		onSettled: (_data, _error, _plan, context) => {
+		onSettled: (_data, _error, plan, context) => {
+			// A move that states a new owner changes which scripts the row runs
+			// beneath, and for a folder every row below it.
+			if (plan.moves.some(statesNewOwner)) invalidateRequestDetails(queryClient);
 			if (context?.keys.touchesCollections) {
 				queryClient.invalidateQueries({ queryKey: queryKeys.collections.list() });
 			}

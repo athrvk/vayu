@@ -946,6 +946,17 @@ export interface Request {
 	 * request level is a plain presence check.
 	 */
 	specOperation?: SpecOperation;
+	/**
+	 * Whether a send of this request runs a pre-request script: its own, its
+	 * folder's or its collection's, enabled, not blank and not switched off by
+	 * `inherit.disable` (#2741). The engine's answer to a question that depends
+	 * on the ancestor chain, so it is **derived on read, never stored**, and
+	 * only the single-request routes carry it (`GET`, and the `POST`/`PUT`
+	 * responses): a list row has none, and so does a draft with no id. Absent
+	 * reads as "not known", not as "no script". Never written back - it is
+	 * not in `CreateRequestRequest` or `UpdateRequestRequest`.
+	 */
+	runsPreRequestScript?: boolean;
 	order: number;
 	createdAt: string;
 	updatedAt: string;

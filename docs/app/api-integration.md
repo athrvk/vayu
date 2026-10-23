@@ -706,6 +706,22 @@ turns that into an absent key and drops a value it does not recognize, and
 `updateRequest`'s field is `MethodSource | null`, so leaving GraphQL - or
 picking a method by hand - clears the marker the same way.
 
+A single-request read also carries **`runsPreRequestScript`** (issue #2741):
+whether a send of the saved request runs a pre-request script, from the request
+itself, a folder above it or its collection. `GET /requests/:id` and the
+`POST`/`PUT /requests` responses answer it; the list calls do not, so
+`RequestTransformer` keeps the key absent unless the row has a boolean, and
+`toSummary` never reads it. It is derived by the engine on every read, never
+stored and never sent: it is not in `CreateRequestRequest` or
+`UpdateRequestRequest`, `buildUpdatePayload` builds the patch from the touched
+fields so it cannot ride along, and Duplicate strips it with `id` and the
+timestamps. Because a folder's or collection's script changes it for requests the
+write never names, a collection write that touches `elements` or `parentId`, a
+drop that states a new owner, and the MCP `collectionRow` family all invalidate
+the request details (`invalidateRequestDetails`); the request's own save writes
+the `PUT` response, flag included, into its detail. The one reader is the Params
+panel's Sends line (see `docs/app/variable-resolution.md`).
+
 #### Trash
 
 ```typescript

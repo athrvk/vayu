@@ -1881,7 +1881,11 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
 - **`useCreateCollectionMutation()`** - Create collection: appends the row to
   the collections list and seeds the new collection's request list with `[]`,
   so the tree mounting it makes no list call and no other list refetches
-- **`useUpdateCollectionMutation()`** - Update collection (with cache update)
+- **`useUpdateCollectionMutation()`** - Update collection (with cache update).
+  A patch that writes `elements` or `parentId` also invalidates every request
+  detail (`invalidateRequestDetails`): `runsPreRequestScript` (#2741) is derived
+  from the ancestor chain's scripts, so it changes for requests the write never
+  names, and the details are `staleTime: Infinity`
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
   also invalidates the trash list so the Trash view picks it up. Clears the
@@ -1935,7 +1939,9 @@ left it before the write returns:
   gesture layer cannot forget it.
 - `onSettled` invalidates the affected keys **once** - the collections list only
   if a collection moved or a parent was normalized, and only the request lists
-  the plan named or normalized.
+  the plan named or normalized. A move that states a new owner (a request's
+  `collectionId`, a collection's `parentId`) also invalidates the request
+  details, for the same `runsPreRequestScript` reason as a collection's scripts.
 
 Every write goes through `setQueryData` with a fresh array, never a mutation in
 place: the map `useMultipleCollectionRequests` builds is compared by reference by

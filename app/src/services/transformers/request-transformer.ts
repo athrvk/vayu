@@ -237,6 +237,11 @@ export class RequestTransformer {
 				: {}),
 			mockResponseMode: coerceMockResponseMode(raw.mockResponseMode),
 			...(asStr(raw.mockExampleId) ? { mockExampleId: asStr(raw.mockExampleId) } : {}),
+			// The engine's derived answer, present on the single-request routes
+			// only; spread so a list row keeps the key absent, not `undefined`.
+			...(typeof raw.runsPreRequestScript === "boolean"
+				? { runsPreRequestScript: raw.runsPreRequestScript }
+				: {}),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),
 		};
 	}
