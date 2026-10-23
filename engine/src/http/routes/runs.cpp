@@ -476,9 +476,9 @@ void read_optional_bool (const nlohmann::json& obj, const char* key, std::option
 // very first level already breached, `knee_*` when the search ended for a
 // reason other than latency or errors, `saturation_*` when it did not end on a
 // plateau, and a summary written by an older engine has none of them (nor the
-// error share, before #2815). Only a section that carries at least the levels it measured is
-// reported at all - an empty one says nothing a reader can act on, the same
-// rule the thresholds section follows.
+// error share, before #2815). Only a section that carries at least the levels
+// it measured is reported at all - an empty one says nothing a reader can act
+// on, the same rule the thresholds section follows.
 void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) {
     if (!stored.contains ("levels") || !stored["levels"].is_array ()) {
         return;
