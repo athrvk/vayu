@@ -262,7 +262,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
-			'Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the shape list_requests returns with `fields: "full"`. An id that names no saved request is an error naming 404.' +
+			'Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the shape list_requests returns with `fields: "full"`. An id that names no saved request is an error naming the id and list_requests.' +
 			withheldPointer(config),
 		annotations: {
 			title: "Get a request",

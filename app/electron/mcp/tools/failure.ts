@@ -166,8 +166,10 @@ function declaredKind(
 	if (!notFound) return undefined;
 	const declared =
 		"idArg" in notFound ? [notFound] : (notFound as readonly NotFoundDeclaration[]);
-	const said = sentence.toLowerCase();
-	return declared.find(({ noun }) => said.includes(noun));
+	// "<Noun> not found" at the start of the sentence, not the noun anywhere in it:
+	// the live-metrics 404 for a run that exists says "Live metrics for this run
+	// are no longer retained", and calling that an unknown id would be false.
+	return declared.find(({ noun }) => new RegExp(`^${noun}\\b.*\\bnot found`, "i").test(sentence));
 }
 
 /** The id the call named for @p kind, or undefined where it cannot be told. */

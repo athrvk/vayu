@@ -9653,6 +9653,21 @@ describe("an unknown id names the object and its list tool", () => {
 	const engine404 = (body: string, path = "/runs/run_x/report") =>
 		new EngineRequestError(`Engine responded 404 for GET ${path}`, 404, body);
 
+	test("a live-metrics 404 for a run that exists is not worded as an unknown id", async () => {
+		const body = JSON.stringify({
+			error: "Live metrics for this run are no longer retained",
+			code: "live_expired",
+			hint: "Use /runs/run_x/report for the stored report",
+		});
+		const client = fakeClient({
+			getLiveMetricsSnapshot: vi.fn().mockRejectedValue(engine404(body, "/runs/run_x/live")),
+		});
+		const res = await dispatchTool("get_live_metrics", { runId: "run_x" }, ctxWith(client));
+		const text = firstText(res);
+		expect(text).not.toContain("No run with id");
+		expect(text).toContain("no longer retained");
+	});
+
 	test("a 404 on get_run_report names the run and list_runs, with no path and no JSON", async () => {
 		const client = fakeClient({
 			getRunReport: vi.fn().mockRejectedValue(engine404(notFoundBody("Run"))),

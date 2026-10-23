@@ -217,8 +217,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				answer = await ctx.client.diffSpec({ collectionId, spec: { content } }, signal);
 			} catch (err) {
 				// The engine's own sentence is the useful one: a 400 names the
-				// collection that binds nothing and says to bind it first, a 404
-				// names the collection, and a 409 names the binding whose document
+				// collection that binds nothing and says to bind it first, and a 409 names the binding whose document
 				// the store no longer holds.
 				return engineErrorResult(err, ctx);
 			}
@@ -340,8 +339,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				);
 			} catch (err) {
 				// The engine's own sentence: a 400 names the collection that binds
-				// nothing and says to bind it first, a 404 names the collection,
-				// and a 409 says a row the comparison was made against has since
+				// nothing and says to bind it first, and a 409 says a row the comparison was made against has since
 				// gone - which is a re-check, not a bad request.
 				return engineErrorResult(err, ctx);
 			}
@@ -566,8 +564,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				exported = await ctx.client.exportSpec(collectionId, format, mode, signal);
 			} catch (err) {
-				// The engine's own sentence, which is the useful one here: a 404
-				// names the collection, and a 409 names the binding whose document
+				// The engine's own sentence, which is the useful one here: a 409 names the binding whose document
 				// it could not read and says unbinding would export a skeleton.
 				return engineErrorResult(err, ctx);
 			}
