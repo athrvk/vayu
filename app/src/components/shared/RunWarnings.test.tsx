@@ -82,6 +82,28 @@ describe("RunWarnings", () => {
 		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
 	});
 
+	// Mutation check: drop the connection_replayed title and this reads the
+	// generic "did not do everything it was asked", which this run did.
+	it("reports re-sent requests under a title that does not say the run failed", () => {
+		render(
+			<RunWarnings
+				warnings={[
+					{
+						code: "connection_replayed",
+						message:
+							"3 requests were re-sent on a new connection after the server dropped or refused a reused one.",
+						count: 3,
+					},
+				]}
+			/>
+		);
+		expect(
+			screen.getByText("Some requests were re-sent after a dropped connection")
+		).toBeTruthy();
+		expect(screen.getByText(/3 requests were re-sent on a new connection/)).toBeTruthy();
+		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
+	});
+
 	it("renders one callout per warning when a run carries both", () => {
 		render(
 			<RunWarnings
