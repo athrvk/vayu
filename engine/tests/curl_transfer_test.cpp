@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "optional_assert.hpp"
+#include "silent_listener.hpp"
 #include "task_queue.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -574,6 +575,34 @@ TEST_F (CurlTransferTest, FailedTransferKeepsTheTimingAndBytesCurlMeasured) {
     << "curl measured the time spent before the timeout";
     EXPECT_GT (response.timing.bytes_up, 0u)
     << "the request headers went out and must be counted";
+}
+
+// A load stream's total is a backstop past its duration cap, so before #2835 a
+// target whose handshake never finished held the slot until that backstop. The
+// connect bound is the request timeout: "after N" reads about 1000 healthy and
+// 15001 broken (the 10s cap plus the grace; the cap's progress callback does
+// not end a connect). The cap is well past the timeout so the two never race.
+// Mutation check: drop the event loop's `CURLOPT_CONNECTTIMEOUT_MS` line.
+TEST_F (CurlTransferTest, ALoadStreamTimesOutAHungHandshakeAtTheRequestTimeout) {
+    vayu::tests::SilentListener listener;
+    ASSERT_NE (listener.port (), 0);
+    vayu::Request request;
+    request.method        = vayu::HttpMethod::GET;
+    request.url           = listener.url ("https");
+    request.timeout_ms    = 1000;
+    request.stream_bounds = vayu::StreamBounds{ 10000, 1000 };
+
+    auto result = run_once (request);
+
+    ASSERT_TRUE (result.is_ok ())
+    << "a timeout is reported as a failed response";
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout) << response.error_message;
+    const auto after_ms = vayu::tests::timed_out_after_ms (response.error_message);
+    ASSERT_HAS_VALUE (after_ms) << response.error_message;
+    EXPECT_GE (*after_ms, 1000) << response.error_message;
+    EXPECT_LT (*after_ms, 10000) << response.error_message;
 }
 
 // ============================================================================

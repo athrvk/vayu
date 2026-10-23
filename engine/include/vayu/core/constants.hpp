@@ -425,6 +425,22 @@ constexpr int64_t spin_tail_us (int64_t remaining_us) {
 namespace server {
 /// Default request timeout in milliseconds
 constexpr int DEFAULT_TIMEOUT_MS = 30000;
+/// Ceiling on the connect phase (TCP and TLS) of every transfer, issue #2835.
+/// A stream and a stall-bounded fetch set no total deadline, and without a
+/// connect bound libcurl's 300s default (or the kernel's SYN retries) decides.
+/// A request timeout above this narrows connect to it on purpose.
+constexpr int64_t CONNECT_TIMEOUT_CAP_MS = 30000;
+/// `CURLOPT_CONNECTTIMEOUT_MS` for a transfer whose own deadline (a total, a
+/// stall window) is @p timeout_ms: the smaller of it and the cap. A deadline of
+/// zero or less is "none", which gets the cap rather than libcurl's default.
+constexpr int64_t connect_timeout_ms (int64_t timeout_ms) {
+    if (timeout_ms <= 0) {
+        return CONNECT_TIMEOUT_CAP_MS;
+    }
+    // Not std::min: a translation unit that includes <windows.h> without
+    // NOMINMAX turns `min (` into a macro (default_headers_test.cpp).
+    return timeout_ms < CONNECT_TIMEOUT_CAP_MS ? timeout_ms : CONNECT_TIMEOUT_CAP_MS;
+}
 /// Smallest heap block the daemon gives a mapping of its own, returned to the
 /// OS when freed (`platform::return_large_frees_to_os`, issue #2544). Large
 /// enough that a load run's ordinary bodies and buffers stay in the arenas,

@@ -37,6 +37,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "silent_listener.hpp"
 #include "temp_database.hpp"
 #include "timed_out_after.hpp"
 #include "vayu/core/constants.hpp"
@@ -542,6 +543,40 @@ TEST (SseConsumer, AnUnreachableHostIsAFailedRunNotAThrow) {
     EXPECT_TRUE (response.transfer_attempted);
     EXPECT_EQ (context.end_reason (), SseEndReason::Error);
     EXPECT_TRUE (context.closed ());
+}
+
+// A handshake that never finishes is the connect bound, min(timeout, 30s), and
+// fails the run like a refused connect rather than naming the idle timeout
+// (#2835). Mutation check: map every CURLE_OPERATION_TIMEDOUT to Idle again in
+// `consume_sse_stream` and the end reason reads Idle with no error code.
+TEST (SseConsumer, AHungHandshakeIsATimeoutErrorNotIdle) {
+    vayu::tests::SilentListener listener;
+    ASSERT_NE (listener.port (), 0);
+    auto spec = spec_for (listener.url ("https"), brisk_limits ());
+    spec.request.timeout_ms = 1000;
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout) << response.error_message;
+    const auto after_ms = vayu::tests::timed_out_after_ms (response.error_message);
+    ASSERT_HAS_VALUE (after_ms) << response.error_message;
+    EXPECT_GE (*after_ms, 1000) << response.error_message;
+}
+
+// The companion: the same listener over plain HTTP takes the request and says
+// nothing, which is silence on a made connection and stays Idle.
+TEST (SseConsumer, SilenceAfterTheConnectionIsMadeStaysIdle) {
+    vayu::tests::SilentListener listener;
+    ASSERT_NE (listener.port (), 0);
+    auto spec               = spec_for (listener.url ("http"), brisk_limits ());
+    spec.request.timeout_ms = 1000;
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Idle) << response.error_message;
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::None) << response.error_message;
 }
 
 TEST (SseConsumer, RecordsTheInitialResponseHeaders) {

@@ -3577,8 +3577,12 @@ stopped. It is now abandoned only after
 `constants::import_fetch::STALL_TIMEOUT_MS` below
 `STALL_FLOOR_BYTES_PER_SEC` - so a slow link finishes, slowly, and a dead one
 still ends. What bounds a transfer that never ends at all is `maxBytes` above,
-which is the bound that was always meant. Both forms of the route get this: a
-document must not arrive on one and time out on the other.
+which is the bound that was always meant. Connecting is bounded apart from
+the stall, at the stall window capped at 30 seconds (issue #2835): the stall
+window only runs once a connection is made, so a host that never completes the
+handshake would otherwise hold the fetch for libcurl's 300-second default. Both
+forms of the route get this: a document must not arrive on one and time out on
+the other.
 
 **`reference: true` marks a fetch a document asked for, not a person** (issue
 [#2364](https://github.com/athrvk/vayu/issues/2364)): `$ref` bundling sends
@@ -6797,8 +6801,11 @@ to `1`-`86400000` and defaulting to the `defaultTimeout` setting when absent or
 naming `'timeout'` before any run row exists and with nothing sent: libcurl
 reads `0` as "no timeout", and a negative value is a rejected option the
 transfer then runs without. `POST /runs` holds the same bound (see its
-[run config table](#post-runs)). A streaming send does not apply it to the
-transfer (see `stream` below) but refuses a malformed one all the same. In a
+[run config table](#post-runs)). Connecting (TCP and the TLS handshake) is
+additionally capped at 30 seconds (issue #2835), so a `timeout` above that does
+not extend how long a dead target is waited on. A streaming send does not apply
+it to the transfer (see `stream` below) but refuses a malformed one all the
+same. In a
 load run the latency histograms hold one hour at most (issue #2790): a
 completion longer than that, a timeout above `3600000` that ran out, is counted
 at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within
@@ -6887,11 +6894,15 @@ timeout happened to fire":
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
 | `maxStreamEvents` | The event cap was reached |
 | `maxStreamDurationMs` | The duration cap elapsed |
-| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` |
+| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` after the connection was made |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
-would kill a healthy one mid-flight. The only deadline is the idle one, and the
-two caps above are what bound a stream that talks forever. `maxStreamDurationMs`
+would kill a healthy one mid-flight. Two deadlines apply instead: connecting
+(TCP and the TLS handshake) is bounded by the smaller of `timeout` and 30
+seconds (issue #2835), and once connected the idle one bounds silence; the two
+caps above are what bound a stream that talks forever. A connect that runs out
+ends the stream as `error` with `errorCode` `TIMEOUT`, as a refused connection
+does, never as `idleTimeout`. `maxStreamDurationMs`
 (1000–86400000) and `maxStreamEvents` (1–10000000) override the configured
 defaults per request; sending either **without** `"stream": true` is a **400**,
 since a cap that quietly did not apply is worse than no cap.

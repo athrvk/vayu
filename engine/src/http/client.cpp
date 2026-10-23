@@ -687,7 +687,10 @@ Result<Response> Client::send (const Request& request) {
         0 };
     set_opt<CURLOPT_HEADERDATA> (curl, &header_sink);
 
-    // Set timeout
+    // Set timeout. The connect bound is set on every send because the handle
+    // is reused, and in stall mode it is the only bound the handshake has: the
+    // low-speed window never runs during it (#2835).
+    namespace server_limits = vayu::core::constants::server;
     if (impl_->config.stall_timeout_ms > 0) {
         // A stall bound in place of the total one (issue #882). Both together
         // would leave the total deciding whenever it fired first, which is the
@@ -697,8 +700,12 @@ Result<Response> Client::send (const Request& request) {
         static_cast<long> (vayu::core::constants::import_fetch::STALL_FLOOR_BYTES_PER_SEC));
         set_opt<CURLOPT_LOW_SPEED_TIME> (
         curl, static_cast<long> ((impl_->config.stall_timeout_ms + 999) / 1000));
+        set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
+        static_cast<long> (server_limits::connect_timeout_ms (impl_->config.stall_timeout_ms)));
     } else {
         set_opt<CURLOPT_TIMEOUT_MS> (curl, static_cast<long> (request.timeout_ms));
+        set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
+        static_cast<long> (server_limits::connect_timeout_ms (request.timeout_ms)));
     }
 
     CancelWatch cancel_watch{ impl_->config.cancel };

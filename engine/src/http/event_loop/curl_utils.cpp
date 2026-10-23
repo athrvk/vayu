@@ -1532,12 +1532,18 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // is a genuine failure and is reported as the timeout it is. Setting it to
     // `timeout_ms` instead would kill a legitimately long stream as an error at
     // the ordinary per-request timeout, which for a 10-minute cap and a 30s
-    // timeout is every stream.
+    // timeout is every stream. The connect phase is bounded by the request
+    // timeout either way (#2835), so a stream's dead target fails at the
+    // timeout and not at the backstop; set per submission, as the handle is
+    // pooled.
     const long transfer_timeout_ms = request.stream_bounds ?
     static_cast<long> (request.stream_bounds->max_duration_ms +
     vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS) :
     static_cast<long> (request.timeout_ms);
     set_opt<CURLOPT_TIMEOUT_MS> (curl, transfer_timeout_ms);
+    set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
+    static_cast<long> (
+    vayu::core::constants::server::connect_timeout_ms (request.timeout_ms)));
 
     // Set redirect options
     if (request.follow_redirects) {

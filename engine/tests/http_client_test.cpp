@@ -23,6 +23,7 @@
 
 #include "mock_server.hpp"
 #include "optional_assert.hpp"
+#include "silent_listener.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -1084,6 +1085,90 @@ TEST_F (HttpClientTest, ACancelFlagThatStaysClearLeavesTheTransferAlone) {
     ASSERT_TRUE (result.is_ok ());
     EXPECT_EQ (result.value ().status_code, 200) << result.value ().error_message;
     EXPECT_EQ (result.value ().error_code, ErrorCode::None);
+}
+
+// ---------------------------------------------------------------------------
+// Connect timeout (issue #2835)
+// ---------------------------------------------------------------------------
+
+TEST (ConnectTimeout, IsTheTransfersOwnDeadlineCappedAtThirtySeconds) {
+    using vayu::core::constants::server::CONNECT_TIMEOUT_CAP_MS;
+    using vayu::core::constants::server::connect_timeout_ms;
+    EXPECT_EQ (connect_timeout_ms (5000), 5000);
+    EXPECT_EQ (connect_timeout_ms (30000), 30000);
+    EXPECT_EQ (connect_timeout_ms (300000), CONNECT_TIMEOUT_CAP_MS);
+    // No deadline of its own still gets a connect bound, never libcurl's 300s.
+    EXPECT_EQ (connect_timeout_ms (0), CONNECT_TIMEOUT_CAP_MS);
+}
+
+namespace {
+
+/// Sends @p request to an https listener that never answers the handshake,
+/// and requires the send back within `HANG_BOUND`: 1s healthy, 300s (libcurl's
+/// default connect timeout) broken. On expiry the listener drops its
+/// connections so the send returns and the test fails rather than hangs.
+Result<Response> send_into_a_hung_handshake (Client& client, Request request) {
+    constexpr auto HANG_BOUND = std::chrono::seconds (10);
+    vayu::tests::SilentListener listener;
+    if (listener.port () == 0) {
+        ADD_FAILURE () << "the silent listener could not open a port";
+        return Error{ ErrorCode::InternalError, "no listener" };
+    }
+    request.method = HttpMethod::GET;
+    request.url    = listener.url ("https");
+    // `std::async` futures wait for their task on destruction, so no early
+    // return leaves the send running past `client`.
+    auto sent           = std::async (std::launch::async,
+              [&client, &request] () { return client.send (request); });
+    const bool returned = vayu::tests::wait_until (
+    [&sent] () {
+        return sent.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    },
+    HANG_BOUND);
+    if (!returned) {
+        listener.close_connections ();
+        ADD_FAILURE () << "the send outlived a 1s connect bound by 10s";
+    }
+    return sent.get ();
+}
+
+} // namespace
+
+// A stall-bounded fetch (`/import/fetch`) sets no total, and the low-speed
+// window does not run during the handshake. Mutation check: drop the
+// `CURLOPT_CONNECTTIMEOUT_MS` line in the stall branch of `Client::send` and
+// the send outlives the 10s bound.
+TEST_F (HttpClientTest, AStallBoundedSendTimesOutAHungHandshakeAtTheStallWindow) {
+    ClientConfig config;
+    config.stall_timeout_ms = 1000;
+    Client client (std::move (config));
+
+    const auto result = send_into_a_hung_handshake (client, Request{});
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, ErrorCode::Timeout) << response.error_message;
+    const auto after_ms = vayu::tests::timed_out_after_ms (response.error_message);
+    ASSERT_HAS_VALUE (after_ms) << response.error_message;
+    EXPECT_GE (*after_ms, 1000) << response.error_message;
+    EXPECT_LT (*after_ms, 10000) << response.error_message;
+}
+
+// A total already bounded the connect phase, and still does at its own value.
+TEST_F (HttpClientTest, ATotalBoundedSendTimesOutAHungHandshakeAtTheTotal) {
+    Request request;
+    request.timeout_ms = 1000;
+
+    const auto result = send_into_a_hung_handshake (*client_, request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.error_code, ErrorCode::Timeout) << response.error_message;
+    const auto after_ms = vayu::tests::timed_out_after_ms (response.error_message);
+    ASSERT_HAS_VALUE (after_ms) << response.error_message;
+    EXPECT_GE (*after_ms, 1000) << response.error_message;
+    EXPECT_LT (*after_ms, 10000) << response.error_message;
 }
 
 } // namespace vayu::http

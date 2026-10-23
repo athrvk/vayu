@@ -72,11 +72,11 @@ enum class SseEndReason : std::uint8_t {
     MaxEvents,
     /// `maxStreamDurationMs` elapsed.
     MaxDuration,
-    /// No bytes arrived for the idle timeout. A stream that hangs must not hold
-    /// its worker forever.
+    /// No bytes arrived for the idle timeout after the connection was made. A
+    /// stream that hangs must not hold its worker forever.
     Idle,
-    /// The transfer failed (connection, TLS, protocol). The run's error fields
-    /// carry what libcurl said.
+    /// The transfer failed (connection, TLS, protocol, a connect phase past its
+    /// timeout). The run's error fields carry what libcurl said.
     Error,
 };
 
