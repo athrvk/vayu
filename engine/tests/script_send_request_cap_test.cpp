@@ -32,9 +32,11 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -48,9 +50,11 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 
@@ -71,13 +75,24 @@ constexpr size_t SERVED_BYTES = size_t{ 64 } * 1024;
 constexpr size_t READ_BOUND = size_t{ 4 } * 1024;
 static_assert (READ_BOUND < SERVED_BYTES, "the bound must cut the fetched body short");
 
-/// Serves one oversized body at `/big`, and at `/hang` nothing until the
-/// fixture stops, for a script to fetch.
+/// What one script's `POST /report` carried.
+struct Report {
+    std::string body;
+    /// The correlation id header the run's default-header policy adds, empty
+    /// when the request went out without it.
+    std::string correlation_id;
+};
+
+/// Serves one oversized body at `/big`, at `/hang` nothing until the fixture
+/// stops, at `/ok` a small answer for a run's own transfers, and records what a
+/// script posts to `/report`.
 class BigBodyServer {
     public:
     BigBodyServer () {
-        // Two threads: one fetch per replayed sample, never concurrent.
-        svr_.new_task_queue = vayu::tests::pooled_task_queue (2);
+        // A `/hang` keeps its thread until the fixture stops, after the client
+        // gave up on it, so a case that hangs twice still needs threads left
+        // for `/ok` and `/report`.
+        svr_.new_task_queue = vayu::tests::pooled_task_queue (8);
         svr_.Get ("/big", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (std::string (SERVED_BYTES, 'x'), "text/plain");
         });
@@ -85,6 +100,15 @@ class BigBodyServer {
             while (!stopping_.load ()) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (10));
             }
+            res.set_content ("{}", "application/json");
+        });
+        svr_.Get ("/ok", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("{}", "application/json");
+        });
+        svr_.Post ("/report", [this] (const httplib::Request& req, httplib::Response& res) {
+            const std::lock_guard<std::mutex> lock (reports_mutex_);
+            reports_.push_back ({ req.body,
+            req.get_header_value (std::string (vayu::http::DEFAULT_CORRELATION_HEADER)) });
             res.set_content ("{}", "application/json");
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -113,12 +137,34 @@ class BigBodyServer {
         return "http://127.0.0.1:" + std::to_string (port_) + "/hang";
     }
 
+    [[nodiscard]] std::string ok_url () const {
+        return "http://127.0.0.1:" + std::to_string (port_) + "/ok";
+    }
+
+    [[nodiscard]] std::string report_url () const {
+        return "http://127.0.0.1:" + std::to_string (port_) + "/report";
+    }
+
+    [[nodiscard]] std::vector<Report> reports () const {
+        const std::lock_guard<std::mutex> lock (reports_mutex_);
+        return reports_;
+    }
+
     private:
     httplib::Server svr_;
     int port_ = 0;
     std::thread thread_;
     std::atomic<bool> stopping_{ false };
+    mutable std::mutex reports_mutex_;
+    std::vector<Report> reports_;
 };
+
+/// A setting, set the way the app sets it.
+void apply_setting (vayu::db::Database& db, const std::string& key, const std::string& value) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    db, json{ { "entries", { { key, value } } } }.dump ());
+    ASSERT_EQ (status, 200) << body.dump ();
+}
 
 /// What a refused fetch says, which is `too_large_message`'s wording.
 std::string refusal_of (size_t bound) {
@@ -169,6 +215,26 @@ std::string fetch_reporting (const std::string& url) {
     "  outcome = err ? err.code + ' ' + err.message : 'answered ' + res.code; "
     "}); "
     "throw new Error('the fetch answered: ' + outcome);";
+}
+
+/**
+ * A script that fetches @p url and posts what came back to @p report_url, for
+ * a context whose outcome a run keeps nowhere a test can read it: an inline
+ * step script's thrown text is tallied, not stored. The outcome is worded as
+ * `fetch_expecting` and `fetch_reporting` word theirs, so `refusal_of`,
+ * `whole_read_of` and `timed_out_after_ms` read it. Never throws, so the run
+ * it is part of carries on as it would without it.
+ */
+std::string fetch_and_report (const std::string& url, const std::string& report_url) {
+    return "let outcome = 'the callback never ran'; "
+           "pm.sendRequest('" +
+    url +
+    "', function (err, res) { "
+    "  outcome = err ? err.code + ' ' + err.message : 'read ' + "
+    "res.text().length; "
+    "}); "
+    "pm.sendRequest({ url: '" +
+    report_url + "', method: 'POST', body: { mode: 'raw', raw: outcome } }, function () {});";
 }
 
 // ============================================================================
@@ -445,6 +511,44 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedStepScriptFetchTakesTheDefaultTim
     ASSERT_HAS_VALUE (after_ms) << failure;
     EXPECT_GE (*after_ms, 1000) << failure;
     EXPECT_LT (*after_ms, 2500) << failure;
+}
+
+// The replay's default headers are the run's own snapshot, taken by
+// `configure_event_loop` (#2841); the correlation id is the header a bare
+// policy leaves out. Mutation-check: drop `context->script_send.default_headers
+// = loop_config.default_headers` from `configure_event_loop` and the report
+// arrives without it.
+TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchCarriesTheRunsDefaultHeaders) {
+    apply_setting (*db_, "correlationIdEnabled", "true");
+    auto context =
+    run_with_script (fetch_and_report (server_->ok_url (), server_->report_url ()));
+    vayu::core::configure_event_loop (*db_, context->config, context,
+    /*concurrency=*/1, /*timeout_ms=*/5000, /*configured_workers=*/1,
+    /*default_max_per_host=*/1);
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u) << recorded_failure ();
+    const auto reports = server_->reports ();
+    ASSERT_EQ (reports.size (), 1u);
+    EXPECT_FALSE (reports[0].correlation_id.empty ()) << reports[0].body;
+}
+
+// ============================================================================
+// Every other load-run context that allows pm.sendRequest (issue #2841)
+// ============================================================================
+
+TEST (ScriptSendInputs, DefaultInputsChangeNothing) {
+    const vayu::runtime::ScriptContext fresh;
+    vayu::runtime::ScriptContext applied;
+    vayu::runtime::ScriptSendInputs{}.apply (applied);
+
+    EXPECT_EQ (applied.max_response_bytes, fresh.max_response_bytes);
+    EXPECT_EQ (applied.request_timeout_ms, fresh.request_timeout_ms);
+    EXPECT_EQ (applied.default_headers.user_agent, fresh.default_headers.user_agent);
+    EXPECT_EQ (applied.default_headers.correlation_header,
+    fresh.default_headers.correlation_header);
 }
 
 } // namespace

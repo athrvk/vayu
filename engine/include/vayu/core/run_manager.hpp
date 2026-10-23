@@ -640,30 +640,30 @@ struct RunContext {
     std::optional<vayu::StreamBounds> stream_bounds;
 
     /**
-     * The route every transfer of this run left by, kept so the deferred
-     * script pass can leave by it too (issue #1256).
+     * What every `pm.sendRequest` of this run inherits (issue #2841): the
+     * route and default headers the run's transfers were sent under (the
+     * `EventLoopConfig::transport` and `::default_headers` snapshot, #1256),
+     * the run's resolved `timeout` and the load byte bound
+     * (`maxResponseBodyBytes`).
      *
-     * A copy of the `EventLoopConfig::transport` the run's transfers were sent
-     * under, written by `configure_event_loop` - the one place a load run
-     * resolves a policy - and read at the other end of the run by
-     * `validate_scripts`, which has no other way to reach it: the loop keeps
-     * its config behind its pImpl and is released before retention.
+     * Written by `configure_event_loop` - the one place a load run resolves
+     * them - before the loop starts, and only read afterwards: by
+     * `script.setup` / `script.teardown`, by every inline step script on the
+     * event-loop workers, and by `validate_scripts`, which has no other way
+     * to reach the route: the loop keeps its config behind its pImpl and is
+     * released before retention. The replay re-reads the bound and the
+     * timeout, which a pass may read *now*; the route and the headers are what
+     * the traffic being asserted on took, so a `pm.sendRequest` that took a
+     * different proxy, CA bundle or client certificate would report the
+     * target as broken over a `Settings` edit made while the run was in
+     * flight. Same reasoning as `scenario_runner.cpp`'s run-scoped `transport`
+     * (issue #705, epic decision 3 of #704), one run later in the lifecycle.
      *
-     * Held rather than re-resolved there because the deferred `tests` script
-     * asserts on responses these transfers produced, and a `pm.sendRequest`
-     * that took a different proxy, CA bundle or client certificate than they
-     * did would report the target as broken over a `Settings` edit made while
-     * the run was in flight. Same reasoning as `scenario_runner.cpp`'s
-     * run-scoped `transport` (issue #705, epic decision 3 of #704), one run
-     * later in the lifecycle.
-     *
-     * The default - the environment pickup a bare `TransportPolicy` carries -
-     * only ever reaches a script through a `RunContext` built by hand, since
-     * `execute_load_test` configures the loop before anything can be sampled
-     * and is the only path to the validation pass. Written and read on the
-     * run's worker thread, so it needs no lock.
+     * The defaults only ever reach a script through a `RunContext` built by
+     * hand, since `execute_load_test` configures the loop before any script
+     * runs.
      */
-    vayu::http::TransportPolicy transport;
+    vayu::runtime::ScriptSendInputs script_send;
 
     /**
      * The hosts this run's caller allows it to reach (`targetPolicy`, #2521),
@@ -1439,7 +1439,9 @@ struct RunSummaryInputs {
 
 /**
  * @brief Build, start and publish the event loop a load run drives: the one
- *        place a load run resolves its transport policy (#1256) and sizes its
+ *        place a load run resolves its transport policy (#1256), what its
+ *        scripts' `pm.sendRequest` inherits (`RunContext::script_send`,
+ *        #2841, from @p timeout_ms and the loop's own settings) and sizes its
  *        per-host connection limit (#2394). `execute_load_test` is its only
  *        production caller, for single-request and scenario runs alike.
  *        Declared here so a test drives the run's own resolution.

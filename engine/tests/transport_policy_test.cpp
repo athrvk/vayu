@@ -783,10 +783,10 @@ class LoadRunScriptTransportTest : public TransportPolicyDbTest {
     }
 };
 
-// Mutation-check: drop either half of the carry - `context->transport =
-// loop_config.transport` in `configure_event_loop`, or `script_ctx.transport =
-// replay.transport` in `run_replay` - and the fetch leaves by the environment
-// pickup instead, so the proxy sees nothing.
+// Mutation-check: drop either half of the carry - `context->script_send.transport
+// = loop_config.transport` in `configure_event_loop`, or
+// `replay.send.apply (script_ctx)` in `run_replay` - and the fetch leaves by the
+// environment pickup instead, so the proxy sees nothing.
 TEST_F (LoadRunScriptTransportTest, ADeferredScriptTraversesTheRunsProxy) {
     MockUpstream upstream;
     MockProxy proxy;

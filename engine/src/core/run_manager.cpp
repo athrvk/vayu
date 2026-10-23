@@ -102,22 +102,9 @@ struct ScriptReplay {
     /// a stream: every sample in one run is then bounded by one rule rather
     /// than by whatever the settings said when each replay reached it.
     vayu::http::SseLimits sse_limits;
-    /// What a `pm.sendRequest` from this script may read (issue #1188), read
-    /// once for the pass on the same terms as `sse_limits`. The load bound,
-    /// not the design one: this script runs once per sampled response, so its
-    /// fetches belong to the budget sized for a run rather than for a body
-    /// someone is watching for.
-    size_t max_response_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
-    /// The timeout a `pm.sendRequest` from this script takes without an option
-    /// of its own (#2833): the run's resolved request timeout, read for the
-    /// pass on the same terms as `max_response_bytes`.
-    int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
-    /// The route a `pm.sendRequest` from this script leaves by (issue #1256) -
-    /// the run's own, carried from `RunContext::transport` rather than resolved
-    /// here. A script that authenticates through a proxy the run's transfers
-    /// went through, or presents the client certificate they presented, is the
-    /// case #705 exists for; the load path was the one caller that never set it.
-    vayu::http::TransportPolicy transport;
+    /// What a `pm.sendRequest` from this script inherits (#1188, #1256, #2833,
+    /// #2841), built once for the pass by `validate_scripts`.
+    vayu::runtime::ScriptSendInputs send;
     /// What a `pm.cookies` read throws here (issue #1501), set by the same
     /// per-branch rule `failure_prefix` above is: a scenario step's replay and
     /// a single-request run's have different true things to say about why
@@ -216,11 +203,9 @@ std::vector<std::string>& failure_messages) {
             // - a duration-bounded run has no total to report, and a script
             // that could read it from one mode and not the other is worse than
             // one that never reads it.
-            script_ctx.iteration          = sample.iteration;
-            script_ctx.vu                 = sample.vu;
-            script_ctx.max_response_bytes = replay.max_response_bytes;
-            script_ctx.request_timeout_ms = replay.request_timeout_ms;
-            script_ctx.transport          = replay.transport;
+            script_ctx.iteration = sample.iteration;
+            script_ctx.vu        = sample.vu;
+            replay.send.apply (script_ctx);
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
@@ -405,9 +390,7 @@ ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engin
 vayu::http::routes::ScriptVariableScopes& scopes,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
-size_t max_response_bytes,
-int request_timeout_ms,
-const vayu::http::TransportPolicy& transport,
+const vayu::runtime::ScriptSendInputs& send,
 ScriptValidation& validation,
 std::vector<std::string>& failure_messages) {
     ScriptValidationTotals run_totals;
@@ -455,10 +438,8 @@ std::vector<std::string>& failure_messages) {
         // per-step tallies below.
         replay.failure_prefix =
         step.name.empty () ? "step " + std::to_string (i + 1) + ": " : step.name + ": ";
-        replay.sse_limits         = sse_limits;
-        replay.max_response_bytes = max_response_bytes;
-        replay.request_timeout_ms = request_timeout_ms;
-        replay.transport          = transport;
+        replay.sse_limits = sse_limits;
+        replay.send       = send;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         validation.steps[i] = totals;
@@ -532,24 +513,18 @@ vayu::db::Database& db) {
     vayu::runtime::ScriptEngine engine (script_config);
     // One read for the whole pass, shared by every replay it drives.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
-    // The same, for what a `pm.sendRequest` out of these scripts may read
-    // (issue #1188) - the load bound, because this pass is the load path's.
-    const size_t script_response_bound =
-    vayu::http::routes::load_response_body_bound (db);
-    // And the timeout those fetches take by default (#2833): the run's own,
-    // resolved as `execute_load_test` resolved it for the run's transfers.
-    const int script_request_timeout_ms =
+    // What a `pm.sendRequest` out of these scripts inherits. The route and the
+    // default headers are the run's own snapshot (`RunContext::script_send`,
+    // #1256, #2841): they are what the traffic being asserted on took, and a
+    // script that reached the target by a different route than the run did - a
+    // proxy edited mid-run, a client certificate registered since - would
+    // report a healthy target as broken. The bound (#1188, the load one,
+    // because this pass is the load path's) and the timeout (#2833) are what
+    // this pass may read *now*, so they are re-read here.
+    vayu::runtime::ScriptSendInputs script_send = context->script_send;
+    script_send.max_response_bytes = vayu::http::routes::load_response_body_bound (db);
+    script_send.request_timeout_ms =
     vayu::http::routes::resolve_request_timeout_ms (context->config, db);
-    // The route those fetches leave by (issue #1256), and the one value of this
-    // pass that is NOT re-read from the database here: it is the snapshot the
-    // run's own transfers were sent under, taken at `configure_event_loop` and
-    // kept on the context. A bound is what this pass may read *now*, so
-    // reading it now is right; a route is what the traffic being asserted on
-    // took, and a script that reached the target by a different one than the
-    // run did - a proxy edited mid-run, a client certificate registered since -
-    // would report a healthy target as broken. The run resolves it once, and
-    // both halves of the run use that one answer.
-    const vayu::http::TransportPolicy& script_transport = context->transport;
 
     // The run-level request and identity, for the single-request shape. A
     // scenario takes both off the plan step it is replaying instead, so it does
@@ -611,8 +586,7 @@ vayu::db::Database& db) {
 
     if (per_step) {
         const ScriptValidationTotals totals = replay_scenario_steps (engine,
-        scopes, context, sse_limits, script_response_bound,
-        script_request_timeout_ms, script_transport, validation, failure_messages);
+        scopes, context, sse_limits, script_send, validation, failure_messages);
         sampled                             = totals.sampled;
         passed                              = totals.passed;
         failed                              = totals.failed;
@@ -641,12 +615,10 @@ vayu::db::Database& db) {
         // `pm.iterationData` `undefined` there.
         replay.data_rows =
         context->load_data == nullptr ? nullptr : &context->load_data->rows;
-        replay.request_id         = script_request_id;
-        replay.request_name       = script_request_name;
-        replay.sse_limits         = sse_limits;
-        replay.max_response_bytes = script_response_bound;
-        replay.request_timeout_ms = script_request_timeout_ms;
-        replay.transport          = script_transport;
+        replay.request_id   = script_request_id;
+        replay.request_name = script_request_name;
+        replay.sse_limits   = sse_limits;
+        replay.send         = script_send;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         sampled = totals.sampled;
@@ -1403,16 +1375,18 @@ int default_max_per_host) {
     // response changes what the run measures.
     loop_config.default_headers = vayu::http::resolve_default_header_policy (
     db, vayu::http::DefaultHeaderScope::Load);
-    // The same snapshot, kept for the deferred script pass at the other end of
-    // the run (issue #1256): a `pm.sendRequest` out of a `tests` script must
-    // leave the way the transfers it is asserting on left, and this is the one
-    // place a load run resolves that. See `RunContext::transport`.
-    context->transport = loop_config.transport;
     // Every submission of either load shape is judged here, at the one place
     // all of them pass before the wire (#2521).
     loop_config.target_policy = context->target_policy;
     loop_config.max_response_body_bytes =
     vayu::http::routes::load_response_body_bound (db);
+    // The same answers, for every `pm.sendRequest` the run's scripts make
+    // (#1256, #2841): a script's fetch leaves the way the run's transfers
+    // left and is bounded the way they are. See `RunContext::script_send`.
+    context->script_send.transport       = loop_config.transport;
+    context->script_send.default_headers = loop_config.default_headers;
+    context->script_send.max_response_bytes = loop_config.max_response_body_bytes;
+    context->script_send.request_timeout_ms = timeout_ms;
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
