@@ -14,6 +14,7 @@
  * run's terminal status, so a stream that ended on `closed` sent `complete`
  * with no status and the app reported a lost stream. These drive the extracted
  * poll (`live_metrics_step`) with an injected clock: no DataSink, no threads.
+ * The same file holds the 404 body (`live_metrics_unavailable_response`, #2775).
  */
 
 #include <gtest/gtest.h>
@@ -34,6 +35,7 @@
 namespace {
 
 using vayu::http::routes::live_metrics_step;
+using vayu::http::routes::live_metrics_unavailable_response;
 using vayu::http::routes::LiveMetricsCursor;
 
 constexpr auto SETTLE_BOUND =
@@ -149,6 +151,28 @@ TEST_F (LiveMetricsRouteTest, TheSettleBoundStartsOnlyOnceTheTicksAreSent) {
     .completion.has_value ());
     EXPECT_TRUE (live_metrics_step (*db_, RUN_ID, *context_, cursor, closed_at + SETTLE_BOUND)
     .completion.has_value ());
+}
+
+// A stored run whose retained topic is gone and an id the engine never saw both
+// 404, and `code` is how a client tells them apart (#2775).
+TEST_F (LiveMetricsRouteTest, ARunWhoseTopicAgedOutIsLiveExpired) {
+    const auto [status, body] = live_metrics_unavailable_response (*db_, RUN_ID);
+
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (body.value ("code", ""), "live_expired") << body.dump ();
+    EXPECT_EQ (body.value ("error", ""), "Live metrics for this run are no longer retained");
+    EXPECT_EQ (body.value ("hint", ""), "Use /runs/run_live/report for the stored report");
+}
+
+TEST_F (LiveMetricsRouteTest, AnUnknownRunIsRunNotFoundWithTheErrorTextUnchanged) {
+    const auto [status, body] =
+    live_metrics_unavailable_response (*db_, "run_never_existed");
+
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (body.value ("code", ""), "run_not_found") << body.dump ();
+    EXPECT_EQ (body.value ("error", ""), "Run not found or expired");
+    EXPECT_EQ (body.value ("hint", ""),
+    "Use /runs/run_never_existed/report for the stored report");
 }
 
 } // namespace
