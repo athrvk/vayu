@@ -27,6 +27,7 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/sha256.hpp"
 
 namespace vayu::core {
 
@@ -694,15 +695,6 @@ std::vector<nlohmann::json>& rows_out) {
 
 namespace {
 
-/// A SHA-256 digest as 64 lowercase hex characters. Lowercase only, so one
-/// file's digest has exactly one spelling and two runs compare as strings.
-bool is_sha256_hex (std::string_view text) {
-    constexpr size_t SHA256_HEX_LENGTH = 64;
-    return text.size () == SHA256_HEX_LENGTH &&
-    std::all_of (text.begin (), text.end (),
-    [] (char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
-}
-
 constexpr std::string_view DATA_FILE_CAST_NUMBERS_KEY = "dataFileCastNumbers";
 
 /// The refusal for a data-file key sent on a run that carries no rows.
@@ -784,7 +776,7 @@ DataFileProvenance& out) {
         "dataFileName' is the file's name, never a path: send the name alone "
         "(got one containing a path separator)";
     }
-    if (!out.hash.empty () && !is_sha256_hex (out.hash)) {
+    if (!out.hash.empty () && !vayu::utils::is_sha256_hex (out.hash)) {
         return "'" + std::string (prefix) +
         "dataFileHash' must be the SHA-256 of the file's bytes as 64 "
         "lowercase hex characters";
