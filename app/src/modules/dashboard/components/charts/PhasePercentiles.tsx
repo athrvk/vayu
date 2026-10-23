@@ -17,13 +17,17 @@ import {
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
- * Per-phase percentiles - from `report.timingBreakdown.phases`.
+ * Per-phase percentiles - from `report.timingBreakdown.phases`, which History
+ * reads off the stored report and the live view fills from the latest gate
+ * frame (`utils/liveDistributions.ts`).
  *
  * The companion to `TimingWaterfall`, and deliberately a separate component
- * rather than more rows inside it: the waterfall shows *averages over the
- * retained trace sample* and this shows *percentiles over every completion*.
- * They are different populations, so stacking them in one table would invite
- * the reader to compare a column against its neighbour.
+ * rather than more rows inside it: the waterfall shows one *mean* per phase and
+ * this shows *percentiles*, and a mean stacked in a column beside a p99 invites
+ * the reader to compare them. Both cover every completion for a run whose
+ * engine kept the phase histograms; only a report stored before the bank held
+ * means has a waterfall over the retained trace sample, and this table is the
+ * same every-completion figure either way.
  *
  * Renders nothing at all when the section is absent - a run whose engine had
  * `phaseHistograms` off, or one recorded before the bank existed, has no
@@ -33,7 +37,11 @@ import { pluralize } from "@/modules/dashboard/utils/format";
  * p50 of 0 beside a p99 of 40ms is a run re-handshaking under load, and the
  * mean of the two is a number that looks merely unremarkable.
  */
-export function PhasePercentiles({ report }: { report: RunReport | null }) {
+export function PhasePercentiles({
+	report,
+}: {
+	report: Pick<RunReport, "timingBreakdown"> | null;
+}) {
 	const phases = phasesFromPercentiles(report?.timingBreakdown?.phases);
 	if (phases.length === 0) {
 		return null;
@@ -76,7 +84,7 @@ export function PhasePercentiles({ report }: { report: RunReport | null }) {
 			))}
 
 			<p className="pt-2.5 border-t border-dashed border-rule text-label text-muted-foreground">
-				Every completion ({sampleCount.toLocaleString()}), not the trace sample.
+				Over every completion ({sampleCount.toLocaleString()}).
 			</p>
 
 			{flagged.length > 0 && (

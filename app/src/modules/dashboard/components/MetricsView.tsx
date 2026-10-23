@@ -16,8 +16,8 @@
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
  *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
- *   Row 3   - HDR percentile plot + Avg request timing waterfall, as placeholders:
- *             both need the final report
+ *   Row 3   - HDR percentile plot + Request timing waterfall + phase percentiles (LiveDistributionRow),
+ *             from the latest gate frame
  *   Row 4   - ModeStatsRow   (mode-adaptive: 3 or 4 stat cards)
  *
  * Card/chart variants live in hero/, charts/, stats/. This file routes and
@@ -54,7 +54,6 @@ import { liveDispatchStatus } from "../utils/dispatchLag";
 import { liveRateFidelity } from "../utils/rateFidelity";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
-import { LatencyStat } from "./stats/LatencyStat";
 import {
 	RequestRateChart,
 	LatencyBreakdownChart,
@@ -65,7 +64,6 @@ import {
 	CustomMetricsChart,
 	CHART_SYNC,
 } from "./charts/uplot";
-import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { ChartLegend } from "./charts/ChartLegend";
 import {
 	LATENCY_ENTRIES,
@@ -74,10 +72,7 @@ import {
 	throughputLegend,
 } from "./charts/uplot/legend";
 import { hasSendRate } from "./charts/uplot/buildData";
-import { TimingWaterfall } from "./charts/TimingWaterfall";
-
-/** The HDR card's footer figures, drawn as dashes until the report has them. */
-const HDR_FOOTER_STATS = ["min", "mean", "p50", "p95", "p99", "max"] as const;
+import { LiveDistributionRow } from "./LiveDistributionRow";
 
 function MetricsView({
 	metrics,
@@ -463,43 +458,8 @@ function MetricsView({
 				</Card>
 			)}
 
-			{/* Row 3 - HDR plot + Timing waterfall. Both read the final report, which
-			    replaces this view when it lands, so here they only hold the place. */}
-			<div className="grid grid-cols-1 @3xl:grid-cols-2 gap-3">
-				{/* HDR */}
-				<Card pad="sm" className="min-w-0">
-					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
-							Latency distribution
-							<InfoChip tip={TOOLTIPS.latencyDistribution} />
-							<span className="ml-2 text-label font-normal text-muted-foreground">
-								HDR percentile plot
-							</span>
-						</h3>
-						<span className="text-micro font-mono text-muted-foreground">
-							available after completion
-						</span>
-					</div>
-					<SkeletonHdrPlot message="p50 / p95 / p99 finalize after the run completes" />
-					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
-						{HDR_FOOTER_STATS.map((k) => (
-							<LatencyStat key={k} k={k} v={undefined} />
-						))}
-					</div>
-				</Card>
-
-				{/* Timing waterfall */}
-				<Card pad="sm" className="min-w-0">
-					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
-							Avg request timing
-							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
-						</h3>
-						<span className="text-micro font-mono text-muted-foreground">-</span>
-					</div>
-					<TimingWaterfall report={null} />
-				</Card>
-			</div>
+			{/* Row 3 - run-so-far latency distribution + request timing */}
+			<LiveDistributionRow history={historicalMetrics} />
 
 			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />

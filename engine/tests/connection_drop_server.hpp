@@ -10,12 +10,6 @@
  * is a raw-socket listener on port 0, one thread per connection, counting
  * every request head it reads. It reads heads only, which is all the tests
  * that use it send (a GET); a body would be read as the next request.
- *
- * Every thread polls and reads the stop flag rather than blocking: neither a
- * blocking accept nor a blocking recv is reliably woken from another thread
- * on every platform. The destructor used to shut down each open socket to wake
- * its recv; on Windows a client still holding an idle keep-alive connection
- * hung it until CTest's 60s timeout in 3 of 4 runs.
  */
 
 #include <array>
@@ -79,6 +73,8 @@ class ConnectionDropServer {
         acceptor_ = std::thread ([this] () { accept_loop (); });
     }
 
+    /// Every thread waits through `wait_readable`, so each sees the stop
+    /// within one poll; a connection thread closes its own socket.
     ~ConnectionDropServer () {
         stopping_.store (true);
         if (acceptor_.joinable ()) {
@@ -87,8 +83,6 @@ class ConnectionDropServer {
         if (listener_ != NO_SOCKET) {
             close_socket (listener_);
         }
-        // Each connection thread sees the flag within one poll and closes its
-        // own socket, an idle keep-alive one included.
         for (auto& connection : connections_) {
             connection.join ();
         }
@@ -154,19 +148,32 @@ class ConnectionDropServer {
     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
     "2\r\n\r\nok";
     static constexpr std::string_view HEAD_END = "\r\n\r\n";
-    /// How often a waiting thread reads the stop flag; it bounds how long the
-    /// destructor waits, and nothing else.
-    static constexpr int STOP_POLL_MS = 20;
 
-    /// Accepts until the destructor stops it.
-    void accept_loop () {
+    /// Whether @p socket has something to read (a connection, bytes, or the
+    /// peer's close), polling until it does or the destructor stops the
+    /// server. The poll's timeout is only how often the stop flag is read.
+    /// Every wait goes through here because nothing the destructor can do to
+    /// a socket from another thread wakes a blocked call on every platform:
+    /// closing a listener does not end an `accept`, and on Windows `shutdown`
+    /// does not end a `recv`. A client that outlives the server (an
+    /// `EventLoop` torn down after the test body) still holds its last
+    /// connection open, so that `recv` is pending at every such destruction.
+    [[nodiscard]] bool wait_readable (Socket socket) const {
+        constexpr int STOP_POLL_MS = 20;
         while (!stopping_.load ()) {
             pollfd ready{};
-            ready.fd     = listener_;
-            ready.events = POLLIN;
-            if (poll_one (&ready, STOP_POLL_MS) <= 0) {
-                continue;
+            ready.fd         = socket;
+            ready.events     = POLLIN;
+            const int polled = poll_one (&ready, STOP_POLL_MS);
+            if (polled != 0) {
+                return polled > 0;
             }
+        }
+        return false;
+    }
+
+    void accept_loop () {
+        while (wait_readable (listener_)) {
             const Socket client = ::accept (listener_, nullptr, nullptr);
             if (client == NO_SOCKET) {
                 continue;
@@ -187,18 +194,8 @@ class ConnectionDropServer {
         for (;;) {
             const auto head_end = pending.find (HEAD_END);
             if (head_end == std::string::npos) {
-                if (stopping_.load ()) {
+                if (!wait_readable (client)) {
                     break;
-                }
-                pollfd readable{};
-                readable.fd      = client;
-                readable.events  = POLLIN;
-                const int polled = poll_one (&readable, STOP_POLL_MS);
-                if (polled < 0) {
-                    break;
-                }
-                if (polled == 0) {
-                    continue;
                 }
                 const auto got = ::recv (
                 client, chunk.data (), static_cast<IoLength> (chunk.size ()), 0);

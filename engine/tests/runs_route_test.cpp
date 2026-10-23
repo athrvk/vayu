@@ -2879,6 +2879,77 @@ TEST_F (RunsRouteTest, ReportCarriesPerPhasePercentiles) {
     EXPECT_EQ (reported["tls"]["count"].get<size_t> (), 4321u);
 }
 
+namespace {
+
+/// Five phases of 4321 completions each, for a summary's `phases`.
+std::array<vayu::core::MetricsCollector::Percentiles, vayu::core::TIMING_PHASE_COUNT>
+counted_phases () {
+    std::array<vayu::core::MetricsCollector::Percentiles, vayu::core::TIMING_PHASE_COUNT> phases{};
+    for (auto& phase : phases) {
+        phase.count = 4321;
+    }
+    return phases;
+}
+
+constexpr std::string_view TIMED_TRACE =
+R"({"dnsMs":1,"connectMs":2,"tlsMs":3,"firstByteMs":4,"downloadMs":5})";
+
+} // namespace
+
+// #2782: the averages are every completion's, read from each phase's stored
+// mean, not the retained trace sample's. The one stored trace says 2 ms of
+// connect; the bank's mean over 4321 completions says 0.25 ms. Mutation
+// check: drop `apply_summary_phase_means` from `apply_run_summary` and every
+// average reads the trace's.
+TEST_F (RunsRouteTest, ReportAveragesAreThePhaseMeansNotTheTraceSamples) {
+    seed ({ .id = "run_phase_means", .start_time = 1000 });
+    seed_traced_result ("run_phase_means", 200, 10.0, std::string (TIMED_TRACE));
+    auto inputs   = summary_inputs ();
+    inputs.phases = counted_phases ();
+    inputs.phase_means = std::to_array<double> ({ 0.05, 0.25, 0.75, 2.5, 0.125 });
+    db_->update_run_summary (
+    "run_phase_means", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_phase_means");
+    ASSERT_EQ (status, 200);
+    const auto& breakdown = body.at ("timingBreakdown");
+    EXPECT_DOUBLE_EQ (breakdown.at ("avgDnsMs").get<double> (), 0.05);
+    EXPECT_DOUBLE_EQ (breakdown.at ("avgConnectMs").get<double> (), 0.25);
+    EXPECT_DOUBLE_EQ (breakdown.at ("avgTlsMs").get<double> (), 0.75);
+    EXPECT_DOUBLE_EQ (breakdown.at ("avgFirstByteMs").get<double> (), 2.5);
+    EXPECT_DOUBLE_EQ (breakdown.at ("avgDownloadMs").get<double> (), 0.125);
+    EXPECT_DOUBLE_EQ (
+    breakdown.at ("phases").at ("connect").at ("mean").get<double> (), 0.25);
+}
+
+// The fallback: a summary whose phases carry no mean (stored before #2782, or
+// with one phase's mean missing) keeps the trace sample's averages, all five
+// from one population rather than a mix.
+TEST_F (RunsRouteTest, ReportAveragesFallBackToTheTraceSampleWithoutEveryPhaseMean) {
+    seed ({ .id = "run_no_means", .start_time = 1000 });
+    seed_traced_result ("run_no_means", 200, 10.0, std::string (TIMED_TRACE));
+    seed ({ .id = "run_partial_means", .start_time = 1000 });
+    seed_traced_result ("run_partial_means", 200, 10.0, std::string (TIMED_TRACE));
+
+    auto inputs   = summary_inputs ();
+    inputs.phases = counted_phases ();
+    db_->update_run_summary (
+    "run_no_means", vayu::core::build_run_summary_payload (inputs).dump ());
+    inputs.phase_means = std::to_array<double> ({ 0.05, 0.25, 0.75, 2.5, 0.125 });
+    auto partial = vayu::core::build_run_summary_payload (inputs);
+    partial["phases"]["download"].erase ("mean");
+    db_->update_run_summary ("run_partial_means", partial.dump ());
+
+    for (const auto* run_id : { "run_no_means", "run_partial_means" }) {
+        auto [status, body] = vayu::http::routes::run_report_response (*db_, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& breakdown = body.at ("timingBreakdown");
+        EXPECT_DOUBLE_EQ (breakdown.at ("avgDnsMs").get<double> (), 1.0) << run_id;
+        EXPECT_DOUBLE_EQ (breakdown.at ("avgConnectMs").get<double> (), 2.0) << run_id;
+        EXPECT_DOUBLE_EQ (breakdown.at ("avgDownloadMs").get<double> (), 5.0) << run_id;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The absent-not-zeros rule, one case per report section
 // ---------------------------------------------------------------------------

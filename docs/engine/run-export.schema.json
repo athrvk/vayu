@@ -652,7 +652,8 @@
         "p95": {"type": "number"},
         "p99": {"type": "number"},
         "max": {"type": "number"},
-        "count": {"type": "number"}
+        "count": {"type": "number"},
+        "mean": {"type": "number"}
       }
     },
     "elementTally": {
