@@ -29,6 +29,7 @@ import {
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import {
 	absentRemovalCaveat,
 	describeEnvironment,
@@ -97,6 +98,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		category: "write",
 		retry: "safe",
 		invalidates: ["environment"],
+		notFound: { ...ID_KINDS.environment, idArg: "environmentId" },
 		description: (config) =>
 			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. " +
 			GUARDED_WRITE_SENTENCE +
@@ -168,6 +170,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		name: "activate_environment",
 		category: "write",
 		invalidates: ["environment"],
+		notFound: { ...ID_KINDS.environment, idArg: "environmentId" },
 		description: (config) =>
 			"Make an environment the active one, the one the app's own switcher shows. " +
 			ENVIRONMENT_DEFAULT_SENTENCE +
@@ -238,6 +241,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		name: "delete_environment",
 		category: "write",
 		invalidates: ["environment"],
+		notFound: { ...ID_KINDS.environment, idArg: "environmentId" },
 		description:
 			"Delete an environment and every variable in it. " +
 			GUARDED_WRITE_SENTENCE +
@@ -264,8 +268,12 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			let environment: Record<string, unknown>;
 			try {
 				const found = await ctx.client.getEnvironment(environmentId, signal);
-				if (!isRecord(found))
-					return errorResult(`No environment with id "${environmentId}".`, "not_found");
+				if (!isRecord(found)) {
+					return errorResult(
+						unknownIdText(ID_KINDS.environment, environmentId),
+						"not_found"
+					);
+				}
 				environment = found;
 			} catch (err) {
 				return engineErrorResult(err, ctx);

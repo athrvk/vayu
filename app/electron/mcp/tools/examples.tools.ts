@@ -25,6 +25,7 @@ import {
 	requireStr,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
 import { requestExamplesSchema } from "./output-schemas.js";
 import {
@@ -41,6 +42,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		category: "read",
 		retry: "safe",
 		invalidates: [],
+		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
 			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.` +
@@ -68,6 +70,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		category: "write",
 		retry: { check: "list_request_examples", noun: "request example" },
 		invalidates: ["request"],
+		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
 			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. " +
 			GUARDED_WRITE_SENTENCE +
@@ -122,6 +125,10 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		name: "update_request_example",
 		category: "write",
 		invalidates: ["request"],
+		notFound: [
+			{ ...ID_KINDS.request, idArg: "requestId" },
+			{ ...ID_KINDS.example, idArg: "exampleId" },
+		],
 		description: (config) =>
 			"Correct a saved example: its name, status, headers, body or content type. " +
 			GUARDED_WRITE_SENTENCE +
@@ -171,6 +178,10 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		name: "delete_request_example",
 		category: "write",
 		invalidates: ["request"],
+		notFound: [
+			{ ...ID_KINDS.request, idArg: "requestId" },
+			{ ...ID_KINDS.example, idArg: "exampleId" },
+		],
 		description:
 			"Delete one saved example from a request. " +
 			GUARDED_WRITE_SENTENCE +
@@ -207,10 +218,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			if (!stored) {
-				return errorResult(
-					`No example with id "${exampleId}" on request "${requestId}".`,
-					"not_found"
-				);
+				return errorResult(unknownIdText(ID_KINDS.example, exampleId), "not_found");
 			}
 			const subject = describeExample(exampleId, stored);
 			const consequence =

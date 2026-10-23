@@ -12,6 +12,7 @@
  */
 
 import { type EngineClient, EngineRequestError } from "../engine-client.js";
+import { engineSentence } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
 /** One `GET /trash` row, as `purge_trash_entry` needs it to name what it destroys. */
@@ -68,27 +69,9 @@ export function describeTrashEntry(entry: TrashRow): string {
  * `POST /trash/:id/restore`. Both of restore's failure shapes name the fix (a
  * wrong id, or which collection to restore first, per `trash.cpp`), so this
  * surfaces that sentence rather than writing a second one that could disagree
- * with it.
- *
- * **The nested shape is the contract.** `error_response` in `routes.hpp` builds
- * `{"error": {"code", "message"}}` for every refusal these routes produce, and
- * that is the one shape issue #173 settled on. The flat `{"error": "..."}`
- * branch is a fallback rather than an alternative, for the same reason the
- * renderer's `readApiError` keeps one: the app and the engine sidecar are not
- * updated together, so a newer app can be talking to an older engine, and its
- * message beats the raw body. Anything else falls back to the body, then the
- * status line - reading a refusal must never throw.
+ * with it. Anything but an error body falls back to the body, then the status
+ * line - reading a refusal must never throw.
  */
 export function trashRefusalMessage(err: EngineRequestError): string {
-	try {
-		const parsed = JSON.parse(err.body) as { error?: unknown };
-		const error = parsed.error;
-		if (isRecord(error) && typeof error.message === "string" && error.message) {
-			return error.message;
-		}
-		if (typeof error === "string" && error) return error;
-	} catch {
-		// Not JSON - the raw body is the best we have.
-	}
-	return err.body || err.message;
+	return engineSentence(err.body) ?? (err.body || err.message);
 }

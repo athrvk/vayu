@@ -11,7 +11,6 @@
  */
 
 import { z } from "zod";
-import { EngineRequestError } from "../engine-client.js";
 import { secretsShape, withholdRequestUrl, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
@@ -26,6 +25,7 @@ import {
 	str,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS } from "./failure.js";
 import { fileRefInput, shapeBody } from "./request-body.js";
 import { readAuthArg, readScriptEdits, scriptElement, upsertScriptElement } from "./compose.js";
 import {
@@ -143,6 +143,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 		name: "update_request",
 		category: "write",
 		invalidates: ["request"],
+		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
 			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). " +
 			GUARDED_WRITE_SENTENCE +
@@ -306,6 +307,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 		name: "delete_request",
 		category: "write",
 		invalidates: ["request"],
+		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description:
 			"Delete a saved request. " +
 			GUARDED_WRITE_SENTENCE +
@@ -333,9 +335,6 @@ export const REQUEST_TOOLS: McpTool[] = [
 				stored =
 					value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 			} catch (err) {
-				if (err instanceof EngineRequestError && err.status === 404) {
-					return errorResult(`No saved request with id "${requestId}".`, "not_found");
-				}
 				return engineErrorResult(err, ctx);
 			}
 			const name =

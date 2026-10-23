@@ -28,6 +28,7 @@ import {
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS } from "./failure.js";
 import {
 	absentRemovalCaveat,
 	mergeVariables,
@@ -124,6 +125,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		name: "update_collection",
 		category: "write",
 		invalidates: ["collectionRow"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description: (config) =>
 			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. " +
 			GUARDED_WRITE_SENTENCE +
@@ -235,6 +237,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		name: "delete_collection",
 		category: "write",
 		invalidates: ["collection"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. " +
 			GUARDED_WRITE_SENTENCE +

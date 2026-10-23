@@ -32,7 +32,9 @@ import { targetPolicyRefusalOfErrorBody, type GuardResult } from "../safety.js";
 import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 import {
+	compactBody,
 	engineRefusalClass,
+	engineSentence,
 	FAILURES,
 	interruptedFailure,
 	isBusyDatabase,
@@ -164,10 +166,14 @@ function engineRefusal(err: EngineRequestError, ctx: ToolContext): Failure {
 	// A streaming send refuses its final URL before the stream opens (#2521).
 	const refused = targetPolicyRefusalOfErrorBody(err.body, ctx.host);
 	if (refused) return { message: refused, failureClass: "policy" };
-	return {
-		message: `Engine error (${err.status}): ${err.body || err.message}${retryHint(err)}`,
+	const failure: Failure = {
+		message: `Engine error (${err.status}): ${compactBody(err.body) || err.message}${retryHint(err)}`,
 		failureClass: engineRefusalClass(err),
 	};
+	// Kept apart from the message so the one words layer can name the missing
+	// object for a tool that declared what its ids are (#2778).
+	if (err.status !== 404) return failure;
+	return { ...failure, engineNotFound: engineSentence(err.body) ?? err.body };
 }
 
 /**

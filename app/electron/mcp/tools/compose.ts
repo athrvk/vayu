@@ -36,6 +36,7 @@ import {
 	structuredResult,
 	ToolArgError,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
 import { selectEnvironment } from "./variable-blobs.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
@@ -178,7 +179,7 @@ export async function composeViaEngine(
 	} catch (err) {
 		if (err instanceof EngineRequestError && err.status === 404 && body.requestId) {
 			throw new ToolArgError(
-				`No saved request with id "${String(body.requestId)}".`,
+				unknownIdText(ID_KINDS.request, String(body.requestId)),
 				"not_found"
 			);
 		}
