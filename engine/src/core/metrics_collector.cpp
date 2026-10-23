@@ -17,8 +17,11 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <random>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -114,33 +117,51 @@ nlohmann::json latency_distribution (const struct hdr_histogram* histogram) {
 }
 
 /**
- * The gate frame's `cumulativePhases`, from a bank that is allocated.
+ * Copy @p live, which workers may still be recording into, onto @p copy, a
+ * histogram built with the same range and precision, so hdr's plain readers
+ * can run on the copy.
  *
- * A live read: the workers keep recording with hdr_record_value_atomic while
- * this walks the counts with plain loads, so a reading can miss the
- * completions that landed during the walk. That is tolerated for a frame
- * superseded a second later; the report reads the same bank after the drain.
+ * Each count is one relaxed atomic load, the reader's half of the workers'
+ * hdr_record_value_atomic; a plain read of a count a worker is incrementing
+ * is a data race. `live`'s own total and extremes are not read at all: they
+ * are recomputed from the copied counts, so the copy agrees with itself even
+ * when completions land during the walk.
+ */
+void snapshot_histogram (const struct hdr_histogram& live, struct hdr_histogram& copy) {
+    if (copy.counts_len != live.counts_len) {
+        throw std::logic_error (
+        "a histogram snapshot needs the live histogram's shape");
+    }
+    const auto len = static_cast<size_t> (live.counts_len);
+    const std::span<int64_t> from (live.counts, len);
+    const std::span<int64_t> to (copy.counts, len);
+    std::ranges::transform (from, to.begin (), [] (int64_t& count) {
+        return std::atomic_ref<int64_t> (count).load (std::memory_order_relaxed);
+    });
+    hdr_reset_internal_counters (&copy);
+}
+
+/**
+ * The gate frame's `cumulativePhases`, from a bank that is allocated, read
+ * through @p scratch one phase at a time while the workers keep recording.
  */
 nlohmann::json phase_distributions (
-const std::array<struct hdr_histogram*, TIMING_PHASE_COUNT>& bank) {
-    // Each count read once. A completion records its five phases one after
-    // another, so a live read can find the first counted and the last not yet;
-    // waiting until every phase holds one keeps hdr_mean off a zero count.
-    std::array<int64_t, TIMING_PHASE_COUNT> counts{};
-    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-        counts.at (i) = bank.at (i)->total_count;
-    }
-    if (std::ranges::min (counts) == 0) {
-        return nullptr;
-    }
+const std::array<struct hdr_histogram*, TIMING_PHASE_COUNT>& bank,
+struct hdr_histogram& scratch) {
     nlohmann::json phases = nlohmann::json::object ();
     for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-        const struct hdr_histogram* histogram = bank.at (i);
-        phases[TIMING_PHASE_KEYS.at (i)] = { { "meanMs", mean_ms (histogram) },
-            { "p50Ms", us_to_ms (hdr_value_at_percentile (histogram, 50.0)) },
-            { "p95Ms", us_to_ms (hdr_value_at_percentile (histogram, 95.0)) },
-            { "p99Ms", us_to_ms (hdr_value_at_percentile (histogram, 99.0)) },
-            { "count", counts.at (i) } };
+        snapshot_histogram (*bank.at (i), scratch);
+        // A completion records its five phases one after another, so a live
+        // read can find the first counted and the last not yet. Null until
+        // every phase holds one keeps hdr_mean off a zero count.
+        if (scratch.total_count == 0) {
+            return nullptr;
+        }
+        phases[TIMING_PHASE_KEYS.at (i)] = { { "meanMs", mean_ms (&scratch) },
+            { "p50Ms", us_to_ms (hdr_value_at_percentile (&scratch, 50.0)) },
+            { "p95Ms", us_to_ms (hdr_value_at_percentile (&scratch, 95.0)) },
+            { "p99Ms", us_to_ms (hdr_value_at_percentile (&scratch, 99.0)) },
+            { "count", scratch.total_count } };
     }
     return phases;
 }
@@ -266,16 +287,23 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     }
     interval_recorder_ready_ = true;
 
-    // Per-phase bank. Allocated only when enabled, so "off" is a null pointer
-    // rather than a flag consulted per completion, and phase_percentiles() and
-    // the gate frame have nothing to report from. A partial failure closes
-    // what it built and leaves the bank null: the run is still fully
-    // measurable without phase percentiles, which is not true of the two
-    // histograms above.
+    // Per-phase bank, and the snapshot the gate frame reads it through.
+    // Allocated only when enabled, so "off" is a null pointer rather than a
+    // flag consulted per completion, and phase_percentiles() and the gate
+    // frame have nothing to report from. A partial failure closes what it
+    // built and leaves the bank null: the run is still fully measurable
+    // without phase percentiles, which is not true of the two histograms
+    // above.
     if (config_.phase_histograms) {
+        struct hdr_histogram* snapshot = nullptr;
+        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &snapshot) == 0) {
+            phase_snapshot_.reset (snapshot);
+        }
         for (auto*& histogram : phase_histograms_) {
-            if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
-                constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &histogram) != 0 ||
+            if (phase_snapshot_ == nullptr ||
+            hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &histogram) != 0 ||
             histogram == nullptr) {
                 // The bank is null-initialised and filled in order, so closing
                 // every non-null slot closes exactly the ones already built.
@@ -283,6 +311,7 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
                     hdr_close (built);
                 }
                 phase_histograms_.fill (nullptr);
+                phase_snapshot_.reset ();
                 vayu::utils::log_warning ("run",
                 "Run " + run_id_ +
                 ": failed to initialize per-phase histograms; the report will "
@@ -923,20 +952,28 @@ MetricsCollector::phase_percentiles () const {
 }
 
 std::optional<std::array<double, TIMING_PHASE_COUNT>> MetricsCollector::phase_means () const {
-    if (phase_histograms_[0] == nullptr || phase_histograms_[0]->total_count == 0) {
+    if (phase_histograms_[0] == nullptr) {
         return std::nullopt;
     }
     std::array<double, TIMING_PHASE_COUNT> means{};
     for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-        means.at (i) = mean_ms (phase_histograms_.at (i));
+        const struct hdr_histogram* histogram = phase_histograms_.at (i);
+        // Every phase, not only the first: the failed-run summary can read
+        // this without a drain, when a completion may have recorded its first
+        // phases and not yet its last, and hdr_mean divides by the count.
+        if (histogram->total_count == 0) {
+            return std::nullopt;
+        }
+        means.at (i) = mean_ms (histogram);
     }
     return means;
 }
 
-void MetricsCollector::put_gate_distributions (nlohmann::json& frame) const {
+void MetricsCollector::put_gate_distributions (nlohmann::json& frame) {
     frame["cumulativeLatency"] = latency_distribution (run_so_far_histogram_.get ());
-    if (phase_histograms_[0] != nullptr) {
-        frame["cumulativePhases"] = phase_distributions (phase_histograms_);
+    if (phase_snapshot_ != nullptr) {
+        frame["cumulativePhases"] =
+        phase_distributions (phase_histograms_, *phase_snapshot_);
     }
 }
 

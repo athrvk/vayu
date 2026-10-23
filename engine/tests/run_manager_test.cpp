@@ -1049,10 +1049,13 @@ TEST (LoadClock, AStalledSecondStoresNoPercentiles) {
 // one, read after the drain, is what the report says. A 100 ms frame carries
 // neither key; every gate frame carries `cumulativeLatency` and, with the
 // phase bank on by default, `cumulativePhases`; the last frame's latency
-// count is every completion and its phase means are the report's `avg*Ms`.
+// distribution is the report's `latency` and its phase means are the
+// report's `avg*Ms`.
 // Mutation checks: drop `cumulativePhases` from `put_gate_distributions` and
 // the gate assertions fail; have the report ignore the stored phase means and
-// the average comparison fails (the trace sample is a different population).
+// the average comparison fails (the trace sample is a different population);
+// feed the interval recorder a value 1 ms off the one record_latency_sample
+// gives the report's histogram and every latency comparison fails.
 TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
     const std::string db_path = "test_load_clock_gate_distributions.db";
     vayu::tests::remove_database_files (db_path);
@@ -1117,6 +1120,26 @@ TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
             EXPECT_NEAR (phases.at (phase).at ("meanMs").get<double> (),
             breakdown.at (average).get<double> (), 1e-9)
             << phase << " against " << average;
+        }
+
+        // The live view's last HDR points are History's. One
+        // record_latency_sample feeds the report's histogram and the window
+        // the run-so-far one is merged from, with one value, and the final
+        // frame merges the last window after the drain, so the two hold the
+        // same buckets and read the same to the double.
+        const auto& live_latency   = last.at ("cumulativeLatency");
+        const auto& report_latency = report.at ("latency");
+        EXPECT_EQ (live_latency.at ("count").get<size_t> (),
+        report.at ("summary").at ("totalRequests").get<size_t> ());
+        constexpr auto LATENCY_KEYS =
+        std::to_array<std::pair<std::string_view, std::string_view>> (
+        { { "minMs", "min" }, { "p50Ms", "p50" }, { "p75Ms", "p75" },
+        { "p90Ms", "p90" }, { "p95Ms", "p95" }, { "p99Ms", "p99" },
+        { "p999Ms", "p999" }, { "maxMs", "max" } });
+        for (const auto& [live_key, report_key] : LATENCY_KEYS) {
+            EXPECT_NEAR (live_latency.at (live_key).get<double> (),
+            report_latency.at (report_key).get<double> (), 1e-9)
+            << live_key << " against latency." << report_key;
         }
 
         manager.shutdown ();

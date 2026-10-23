@@ -434,9 +434,11 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   `timingBreakdown.phases` and, through each phase's mean, its `avg*Ms` (issue #2782).
   Deliberately **not** gated on the trace-retention decision: a trace is stored for about 1% of
   completions, and escaping that biased sample is the whole point. The gate frame also reads the
-  bank once a second for its `cumulativePhases`, while the workers still write: a plain read
-  racing their atomic adds, tolerated because the frame is superseded a second later and the
-  final frame is read after the drain. Off - `phaseHistograms`, or a run's own
+  bank once a second for its `cumulativePhases`, while the workers still write. It copies each
+  phase's counts with atomic loads into one reader-owned histogram and runs hdr's plain readers
+  on the copy, recounting its total from what was copied, so a phase's figures and its count are
+  one reading; hdr's readers on the live bank would be plain reads racing the workers' atomic
+  adds. Off - `phaseHistograms`, or a run's own
   `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
   check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a

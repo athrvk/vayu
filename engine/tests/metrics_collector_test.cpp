@@ -7,7 +7,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
@@ -1967,6 +1969,77 @@ TEST_F (MetricsCollectorTest, PhaseHistogramsSafeUnderConcurrentWriters) {
     ASSERT_HAS_VALUE (phases);
     for (const auto& phase : *phases) {
         EXPECT_EQ (phase.count, static_cast<size_t> (kThreads) * kPerThread);
+    }
+}
+
+// #2782: the gate frame reads the bank while the workers write it. Every
+// completion records the same five values, so a reading taken mid-write is
+// still exactly those values with a count that never goes backwards: a mean
+// off its value is a total read apart from the counts it divides.
+// Mutation check: read the bank itself in phase_distributions (hdr_mean and
+// hdr_value_at_percentile on the live histogram) and a plain build fails here
+// with a mean read high (1.02-1.05 for 1 ms, five runs of five). Under TSan
+// that read, and a plain load in place of the atomic_ref one, are reported
+// as data races only when hdrhistogram itself is built with -fsanitize=thread,
+// which the linux-tsan preset does not do today: the workers' atomic adds
+// happen inside it.
+TEST_F (MetricsCollectorTest, GatePhaseReadingsStayWholeUnderConcurrentWriters) {
+    static constexpr std::array<double, TIMING_PHASE_COUNT> VALUES = { 1.0, 2.0,
+        3.0, 4.0, 5.0 };
+
+    constexpr int kThreads   = 4;
+    constexpr int kPerThread = 5000;
+
+    std::atomic<int> writers_left{ kThreads };
+    std::vector<std::thread> writers;
+    writers.reserve (kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        writers.emplace_back ([this, &writers_left] () {
+            const auto timing =
+            phase_timing (VALUES[0], VALUES[1], VALUES[2], VALUES[3], VALUES[4]);
+            for (int i = 0; i < kPerThread; ++i) {
+                collector->record_success (
+                200, 15.0, 0.0, "", SuccessTraceReason::None, nullptr, &timing);
+            }
+            writers_left.fetch_sub (1);
+        });
+    }
+
+    // Non-fatal and joined before reporting, for the reason
+    // SuccessCountNeverExceedsTotalRequests gives.
+    std::array<size_t, TIMING_PHASE_COUNT> last_counts{};
+    std::string broken;
+    while (writers_left.load () > 0 && broken.empty ()) {
+        nlohmann::json frame;
+        collector->put_gate_distributions (frame);
+        const auto& phases = frame.at ("cumulativePhases");
+        if (phases.is_null ()) {
+            continue;
+        }
+        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+            const auto& phase  = phases.at (TIMING_PHASE_KEYS.at (i));
+            const size_t count = phase.at ("count").get<size_t> ();
+            // Within HdrHistogram's 3 significant figures of the one value.
+            if (count < last_counts.at (i) ||
+            std::abs (phase.at ("meanMs").get<double> () - VALUES.at (i)) > 0.01 ||
+            std::abs (phase.at ("p99Ms").get<double> () - VALUES.at (i)) > 0.01) {
+                broken = phase.dump ();
+                break;
+            }
+            last_counts.at (i) = count;
+        }
+    }
+    for (auto& writer : writers) {
+        writer.join ();
+    }
+    EXPECT_TRUE (broken.empty ()) << "a live phase reading broke: " << broken;
+
+    nlohmann::json settled;
+    collector->put_gate_distributions (settled);
+    for (const auto* key : TIMING_PHASE_KEYS) {
+        EXPECT_EQ (settled.at ("cumulativePhases").at (key).at ("count").get<size_t> (),
+        static_cast<size_t> (kThreads) * kPerThread)
+        << key;
     }
 }
 

@@ -895,8 +895,8 @@ class MetricsCollector {
      * Indexed by @ref TimingPhase. Read once, after the run has drained - the
      * bank is written concurrently by every event-loop worker and only this
      * post-run read is quiescent, exactly like `calculate_percentiles`. The
-     * one live reader is `put_gate_distributions`, which accepts what a read
-     * racing the writers costs.
+     * gate frame reads the bank live through a snapshot instead
+     * (`put_gate_distributions`).
      *
      * `nullopt` says the run has no phase distribution to report at all:
      * either `phase_histograms` was off, or nothing successful completed.
@@ -910,10 +910,11 @@ class MetricsCollector {
     /**
      * @brief Whole-run mean of each network phase, in milliseconds (#2782).
      *
-     * Indexed by @ref TimingPhase, over the same completions, with the same
-     * nullopt rule and the same read-after-drain contract as
-     * `phase_percentiles()`. A separate accessor because `Percentiles` is the
-     * shape of every histogram reading here and no other one has a mean.
+     * Indexed by @ref TimingPhase, over the same completions and with the
+     * same read-after-drain contract as `phase_percentiles()`; nullopt when
+     * the bank is off or any of the five phases is still empty. A separate
+     * accessor because `Percentiles` is the shape of every histogram reading
+     * here and no other one has a mean.
      */
     [[nodiscard]] std::optional<std::array<double, TIMING_PHASE_COUNT>> phase_means () const;
 
@@ -927,13 +928,15 @@ class MetricsCollector {
      * sample; `null` until a sampled window held a completion.
      *
      * `cumulativePhases` is `{dns, connect, tls, firstByte, download}`, each
-     * `{meanMs, p50Ms, p95Ms, p99Ms, count}`, `null` until a completion
-     * recorded its phases, and absent when the phase bank is off. The bank is
-     * read while the workers still record into it, so one reading can lag a
-     * completion or two behind the counts beside it; the reading after the
+     * `{meanMs, p50Ms, p95Ms, p99Ms, count}`, `null` until every phase holds
+     * a completion, and absent when the phase bank is off. The workers are
+     * still recording, so each phase is read from a snapshot of its counts
+     * taken with atomic loads (`phase_snapshot_`); a phase's figures and its
+     * count are one reading, while two phases' counts can differ by the
+     * completions that landed between their snapshots. The reading after the
      * drain is exact and equals the report's.
      */
-    void put_gate_distributions (nlohmann::json& frame) const;
+    void put_gate_distributions (nlohmann::json& frame);
 
     /**
      * @brief What a streaming run's completions delivered (issue #576).
@@ -1242,6 +1245,12 @@ class MetricsCollector {
     // same reason latency_histogram_'s do; read after the drain for the
     // report, and live once a second for the gate frame (put_gate_distributions).
     std::array<struct hdr_histogram*, TIMING_PHASE_COUNT> phase_histograms_{};
+    // The gate frame's live read of the bank: each phase's counts are copied
+    // in with atomic loads, then hdr's plain readers run on the copy, because
+    // they read the counts plainly and a plain read beside the workers'
+    // atomic writes is a data race. Producer thread only; allocated and freed
+    // with the bank, so null exactly when the bank is.
+    OwnedHistogram phase_snapshot_;
 
     // Per-completion event counts for a streaming run (issue #576). Null when
     // `stream_metrics` is off, exactly like the bank above, so the null check
