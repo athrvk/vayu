@@ -928,7 +928,7 @@ class MetricsCollector {
      * sample; `null` until a sampled window held a completion.
      *
      * `cumulativePhases` is `{dns, connect, tls, firstByte, download}`, each
-     * `{meanMs, p50Ms, p95Ms, p99Ms, count}`, `null` until every phase holds
+     * `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, `null` until every phase holds
      * a completion, and absent when the phase bank is off. The workers are
      * still recording, so each phase is read from a snapshot of its counts
      * taken with atomic loads (`phase_snapshot_`); a phase's figures and its

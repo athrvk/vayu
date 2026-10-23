@@ -187,7 +187,7 @@ struct hdr_histogram& scratch) {
             { "p50Ms", us_to_ms (hdr_value_at_percentile (&scratch, 50.0)) },
             { "p95Ms", us_to_ms (hdr_value_at_percentile (&scratch, 95.0)) },
             { "p99Ms", us_to_ms (hdr_value_at_percentile (&scratch, 99.0)) },
-            { "count", scratch.total_count } };
+            { "maxMs", us_to_ms (hdr_max (&scratch)) }, { "count", scratch.total_count } };
     }
     return phases;
 }

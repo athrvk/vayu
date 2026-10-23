@@ -1052,8 +1052,10 @@ TEST (LoadClock, AStalledSecondStoresNoPercentiles) {
 // distribution is the report's `latency` and its phase means are the
 // report's `avg*Ms`.
 // Mutation checks: drop `cumulativePhases` from `put_gate_distributions` and
-// the gate assertions fail; have the report ignore the stored phase means and
-// the average comparison fails (the trace sample is a different population);
+// the gate assertions fail; drop `maxMs` from a phase entry and the percentile
+// comparison throws on the missing key; have the report ignore the stored
+// phase means and the average comparison fails (the trace sample is a
+// different population);
 // feed the interval recorder a value 1 ms off the one record_latency_sample
 // gives the report's histogram and every latency comparison fails.
 TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
@@ -1120,6 +1122,17 @@ TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
             EXPECT_NEAR (phases.at (phase).at ("meanMs").get<double> (),
             breakdown.at (average).get<double> (), 1e-9)
             << phase << " against " << average;
+
+            // The live table's percentiles and max are the report's, read
+            // from the same bank after the same drain.
+            const auto& stored = breakdown.at ("phases").at (phase);
+            for (const auto& [live_key, report_key] :
+            std::to_array<std::pair<std::string_view, std::string_view>> ({ { "p50Ms", "p50" },
+            { "p95Ms", "p95" }, { "p99Ms", "p99" }, { "maxMs", "max" } })) {
+                EXPECT_NEAR (phases.at (phase).at (live_key).get<double> (),
+                stored.at (report_key).get<double> (), 1e-9)
+                << phase << " " << live_key << " against " << report_key;
+            }
         }
 
         // The live view's last HDR points are History's. One

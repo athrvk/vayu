@@ -1872,9 +1872,11 @@ TEST_F (MetricsCollectorTest, GateCumulativeLatencyCoversEverySampledCompletion)
 // #2782: `cumulativePhases` carries each phase's mean beside its tail, null
 // until a completion recorded its phases, and its means are the ones the
 // report's averages read. Ninety reused connections and ten that paid 20 ms
-// of connect and 30 ms of TLS: a mean of 2 and 3 ms with a p50 of 0.
-// Mutation check: drop the `cumulativePhases` write in put_gate_distributions
-// and this fails at the first `contains`.
+// of connect and 30 ms of TLS: a mean of 2 and 3 ms with a p50 of 0 and a max
+// of 20 and 30.
+// Mutation checks: drop the `cumulativePhases` write in put_gate_distributions
+// and this fails at the first `contains`; drop the `maxMs` entry and it fails
+// at the first `maxMs`.
 TEST_F (MetricsCollectorTest, GateCumulativePhasesCarryEachPhasesMeanAndTail) {
     nlohmann::json before;
     collector->put_gate_distributions (before);
@@ -1914,6 +1916,12 @@ TEST_F (MetricsCollectorTest, GateCumulativePhasesCarryEachPhasesMeanAndTail) {
     EXPECT_DOUBLE_EQ (phases.at ("connect").at ("p50Ms").get<double> (), 0.0);
     EXPECT_NEAR (phases.at ("connect").at ("p95Ms").get<double> (), 20.0, 0.05);
     EXPECT_NEAR (phases.at ("tls").at ("p99Ms").get<double> (), 30.0, 0.05);
+    // The worst completion, which no percentile below 100 reaches.
+    EXPECT_NEAR (phases.at ("dns").at ("maxMs").get<double> (), 1.0, 0.01);
+    EXPECT_NEAR (phases.at ("connect").at ("maxMs").get<double> (), 20.0, 0.05);
+    EXPECT_NEAR (phases.at ("tls").at ("maxMs").get<double> (), 30.0, 0.05);
+    EXPECT_NEAR (phases.at ("firstByte").at ("maxMs").get<double> (), 5.0, 0.01);
+    EXPECT_NEAR (phases.at ("download").at ("maxMs").get<double> (), 2.0, 0.01);
 
     const auto means = collector->phase_means ();
     ASSERT_HAS_VALUE (means);
