@@ -29,7 +29,7 @@ k6 was built for exactly that and Vayu is not trying to be it.
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | Yes (in script) |
 | **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | Environment variables and script options (`tlsAuth`) |
 | **Postman collection import** | Yes (v2.0 + v2.1) | Limited |
-| **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
+| **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No built-in importer; via a generator (`openapi-to-k6`)\*\*\* |
 | **k6 script import** | No - a k6 test is code, not a request record | N/A |
 | **Open source** | Yes (dual-license) | Yes (AGPL v3) |
 
@@ -48,8 +48,17 @@ only, never traces, samples or request values, and the HTML page runs no script
 and loads nothing. Detail:
 [the HTML report](../engine/api-reference.md#the-html-report).
 
-k6 scripts do not import. Bring the OpenAPI spec or Postman collection the
-script was written against, then set the load profile in the Load test dialog.
+\*\*\* **A generator, not an importer.** k6 itself reads no OpenAPI document.
+Grafana publishes [`openapi-to-k6`](https://github.com/grafana/openapi-to-k6),
+which "converts an OpenAPI schema to a TypeScript client to use with k6", and
+k6's [integrations page](https://grafana.com/docs/k6/latest/misc/integrations/)
+lists an "OpenAPI generator" under Converters. What it produces is a TypeScript
+client to call from a k6 script you still write, not a load test of its own.
+Checked on 2026-10-23 against both pages.
+
+k6 scripts do not import. Vayu reads the OpenAPI spec or Postman collection the
+script was written against directly, with no generator step; then set the load
+profile in the Load test dialog.
 The load-test format that does import is a JMeter `.jmx` plan:
 [what carries over](../app/import-collections/jmeter.md).
 

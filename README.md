@@ -78,7 +78,7 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 | **Mock servers** | Collection mock + OAuth issuer + webhook inbox | No | No | No | Yes (cloud tier) |
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON | Yes (in script) | CSV | CSV / JSON |
 | **Postman Collection Import** | Yes (v2.0 + v2.1) | Yes (via converter) | Limited | No | Native |
-| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | Yes (2.0 / 3.x) | No | No | Yes |
+| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | Yes (2.0 / 3.x) | Via generator (`openapi-to-k6`) | No | Yes |
 | **Open Source** | Yes (dual-license) | Yes (MIT) | Yes (AGPL v3) | Yes (Apache 2.0) | Partial |
 
 ---
