@@ -10933,23 +10933,31 @@ event's first byte. A second copy would be a second number to keep true.
 ```json
 "capacity": {
   "sloMs": 200,
+  "maxErrorPct": 1,
   "stopReason": "slo_exceeded",
   "maxHealthyConcurrency": 48, "maxHealthyRps": 23400, "p99AtMaxHealthyMs": 41.2,
-  "kneeConcurrency": 64, "kneeP99Ms": 312.0,
-  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4 } ]
+  "kneeConcurrency": 64, "kneeP99Ms": 312.0, "kneeErrorPct": 0.4,
+  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4, "errorPct": 0 } ]
 }
 ```
 
-`stopReason` is one of `slo_exceeded`, `plateau`, `cap_reached`, `deadline` or
-`stopped` - see [Capacity semantics](#post-runs). The two optional halves are
-**omitted rather than zeroed**, and the distinction carries information:
+`stopReason` is one of `slo_exceeded`, `errors_exceeded`, `plateau`,
+`cap_reached`, `deadline` or `stopped` - see [Capacity semantics](#post-runs).
+`maxErrorPct` is the error-share limit each level was judged against, and
+`errorPct` / `kneeErrorPct` are percentages (0-100) on the same scale, so a
+reader can mark an over-limit level without knowing the constant. The two
+optional halves are **omitted rather than zeroed**, and the distinction carries
+information:
 
-- `maxHealthy*` is absent when the very first level already breached the budget.
-  The search found no sustainable capacity, which is not the same claim as a
-  capacity of zero.
-- `knee*` is absent unless `stopReason` is `slo_exceeded`. A run that ended at
-  its ceiling, its deadline, or on a plateau inside the budget never watched the
-  target give out, so it has no knee to report.
+- `maxHealthy*` is absent when the very first level already breached the budget
+  (on latency or on errors). The search found no sustainable capacity, which is
+  not the same claim as a capacity of zero.
+- `knee*` is absent unless `stopReason` is `slo_exceeded` or `errors_exceeded`.
+  A run that ended at its ceiling, its deadline, or on a plateau inside the
+  budget never watched the target give out, so it has no knee to report.
+- `maxErrorPct`, `kneeErrorPct` and `levels[].errorPct` are absent from a run
+  stored before the search judged errors (#2815): it never measured an error
+  share, and a 0 would call every level clean.
 
 `levels[]` is one entry per level *judged*, in order - bounded by construction
 (a search holds tens of levels, not thousands). A level that breached once and

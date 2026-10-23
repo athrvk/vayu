@@ -203,11 +203,11 @@ constexpr auto MONITOR_SERIES_KEYS =
 std::to_array<std::string_view> ({ "min", "max", "avg", "count" });
 constexpr auto TEST_VALIDATION_KEYS = std::to_array<std::string_view> (
 { "samplesTested", "testsPassed", "testsFailed", "successRate" });
-constexpr auto CAPACITY_KEYS =
-std::to_array<std::string_view> ({ "sloMs", "stopReason", "maxHealthyConcurrency",
-"maxHealthyRps", "p99AtMaxHealthyMs", "kneeConcurrency", "kneeP99Ms" });
+constexpr auto CAPACITY_KEYS = std::to_array<std::string_view> (
+{ "sloMs", "maxErrorPct", "stopReason", "maxHealthyConcurrency", "maxHealthyRps",
+"p99AtMaxHealthyMs", "kneeConcurrency", "kneeP99Ms", "kneeErrorPct" });
 constexpr auto CAPACITY_LEVEL_KEYS =
-std::to_array<std::string_view> ({ "concurrency", "rps", "p99Ms" });
+std::to_array<std::string_view> ({ "concurrency", "rps", "p99Ms", "errorPct" });
 constexpr auto COVERAGE_KEYS =
 std::to_array<std::string_view> ({ "operationsTotal", "operationsCovered",
 "declaredResponsesTotal", "declaredResponsesHit", "declaredResponseCoveragePct",

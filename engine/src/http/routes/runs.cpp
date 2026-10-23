@@ -419,6 +419,18 @@ void read_number (const nlohmann::json& obj, const char* key, T& out) {
     }
 }
 
+// Copy a stored number to @p to under the report's name, or leave the key
+// absent: a summary written before #2815 measured no error share, and reading
+// that as 0% would report a level as clean that nothing checked.
+void copy_optional_number (const nlohmann::json& from,
+const char* from_key,
+nlohmann::json& to,
+const char* to_key) {
+    if (from.contains (from_key) && from[from_key].is_number ()) {
+        to[to_key] = from[from_key];
+    }
+}
+
 // The stored summary's budget verdict, or nothing when the run was never
 // judged. The checks are the section: a stored object with no readable rows
 // says nothing a reader can act on, so it is treated as absent rather than
@@ -453,9 +465,9 @@ void read_optional_bool (const nlohmann::json& obj, const char* key, std::option
 // into the report's camelCase shape.
 //
 // Every field is optional on the way in: `max_healthy_*` is absent when the
-// very first level already breached the SLO, `knee_*` when the search ended for
-// a reason other than latency, and a summary written by an older engine has
-// none of them. Only a section that carries at least the levels it measured is
+// very first level already breached, `knee_*` when the search ended for a
+// reason other than latency or errors, and a summary written by an older
+// engine has none of them (nor the error share, before #2815). Only a section that carries at least the levels it measured is
 // reported at all - an empty one says nothing a reader can act on, the same
 // rule the thresholds section follows.
 void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) {
@@ -474,14 +486,17 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
         read_number (level, "concurrency", concurrency);
         read_number (level, "rps", rps);
         read_number (level, "p99_ms", p99_ms);
-        levels.push_back (
-        { { "concurrency", concurrency }, { "rps", rps }, { "p99Ms", p99_ms } });
+        nlohmann::json reported = { { "concurrency", concurrency },
+            { "rps", rps }, { "p99Ms", p99_ms } };
+        copy_optional_number (level, "error_pct", reported, "errorPct");
+        levels.push_back (std::move (reported));
     }
 
     nlohmann::json capacity;
     double slo_ms = 0.0;
     read_number (stored, "slo_ms", slo_ms);
     capacity["sloMs"] = slo_ms;
+    copy_optional_number (stored, "max_error_pct", capacity, "maxErrorPct");
     capacity["stopReason"] =
     stored.contains ("stop_reason") && stored["stop_reason"].is_string () ?
     stored["stop_reason"].get<std::string> () :
@@ -506,6 +521,7 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
         read_number (stored, "knee_p99_ms", p99_ms);
         capacity["kneeConcurrency"] = concurrency;
         capacity["kneeP99Ms"]       = p99_ms;
+        copy_optional_number (stored, "knee_error_pct", capacity, "kneeErrorPct");
     }
 
     extras.has_capacity = true;
