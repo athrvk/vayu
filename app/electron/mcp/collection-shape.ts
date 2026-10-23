@@ -70,12 +70,15 @@ export function readDataContract(schema: unknown): DataContract | null {
 
 /**
  * One collection row with its `dataSchema` stated or dropped, and its
- * remembered `dataFile` added when @p ctx knows one. Anything else passes
+ * remembered `dataFile` added when @p ctx knows one. The engine's own
+ * `specFile` and `dataFile` bindings (#2765) are dropped: an agent has no use
+ * for the spec file, and `dataFile` is named only from @p ctx, so a host with
+ * no record of paths (the stdio CLI) still names none. Anything else passes
  * through.
  */
 export function presentCollection(row: unknown, ctx?: DataFileLookup): unknown {
 	if (!isRecord(row)) return row;
-	const { dataSchema, ...rest } = row;
+	const { dataSchema, specFile: _specFile, dataFile: _storedDataFile, ...rest } = row;
 	const contract = readDataContract(dataSchema);
 	const location = typeof row.id === "string" ? ctx?.dataFileLocation?.(row.id) : undefined;
 	return {

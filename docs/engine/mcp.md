@@ -1988,8 +1988,11 @@ It is absent otherwise, which means every cell is a string. An agent building
 `data` rows from the file reads it the same way, so its rows match the ones the
 app would send, and says so with `dataFileCastNumbers: true` on the run.
 
-A path is true of one filesystem only, which is why it never reaches the engine
-or an export. It may reach MCP because the Electron-hosted server listens on
+A path is true of one filesystem only, which is why it never reaches an export.
+The engine stores each collection's `specFile` and `dataFile` binding on its row
+(issue #2765) so a workspace backup carries them, but MCP drops both from every
+collection row it answers and names `dataFile` from the app's record alone, as
+above. A path may reach MCP because the Electron-hosted server listens on
 loopback (`MCP_HOST`): every client that can read the answer runs on the machine
 the path names, and can open the file with its own access, the way a person
 would. The stdio CLI runs without the app, so it has no record and never names

@@ -286,6 +286,34 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		expect(rows[0]).not.toHaveProperty("dataFile");
 	});
 
+	/*
+	 * The engine stores both bindings on the row (#2765) and answers `{}` for
+	 * none. MCP names neither of its own: `specFile` never, `dataFile` only from
+	 * the host's record, as before. Mutation check: drop either key from the
+	 * destructuring in presentCollection and this fails.
+	 */
+	test("the engine's stored bindings never reach an agent", async () => {
+		const STORED = {
+			...DECLARED,
+			specFile: { path: "/specs/pets.yaml", fileName: "pets.yaml" },
+			dataFile: { path: "/elsewhere/old.csv", fileName: "old.csv" },
+		};
+		const UNBOUND = { ...NONE, specFile: {}, dataFile: {} };
+		const listed = async (ctx: ToolContext) =>
+			rowsOf(await dispatchTool("list_collections", FULL, ctx));
+
+		const [hosted, unboundHosted] = await listed(
+			ctxWith(collectionsClient([STORED, UNBOUND]), { dataFileLocation: remembered })
+		);
+		expect(hosted).not.toHaveProperty("specFile");
+		expect(hosted.dataFile).toEqual(USERS_FILE);
+		expect(unboundHosted).toEqual({ id: "col_none", name: "Health" });
+
+		const [cli] = await listed(ctxWith(collectionsClient([STORED])));
+		expect(cli).not.toHaveProperty("specFile");
+		expect(cli).not.toHaveProperty("dataFile");
+	});
+
 	test("it rides a read tool, answered with writes off, and names a path, never contents", async () => {
 		const tool = TOOLS.find((t) => t.name === "list_collections")!;
 		expect(tool.category).toBe("read");
