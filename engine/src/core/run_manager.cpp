@@ -2184,7 +2184,10 @@ RunManager& manager) {
         size_t concurrency =
         static_cast<size_t> (config.value ("concurrency", default_max_concurrent));
         const double target_rps = open_loop_rate (config); // 0 = unlimited
-        int timeout_ms          = config.value ("timeout", 30000);
+        // Resolved per run, never written into `config_snapshot`: a replayed
+        // snapshot would turn today's setting into an explicit timeout.
+        const int timeout_ms =
+        vayu::http::routes::resolve_request_timeout_ms (config, db);
 
         configure_event_loop (db, config, context, concurrency, timeout_ms,
         configured_workers, default_max_per_host);

@@ -66,6 +66,19 @@ size_t design_response_body_bound (vayu::db::Database& db) {
     static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
 }
 
+int resolve_request_timeout_ms (const nlohmann::json& payload, int configured_default) {
+    const auto timeout = payload.find ("timeout");
+    if (timeout != payload.end () && timeout->is_number ()) {
+        return timeout->get<int> ();
+    }
+    return configured_default;
+}
+
+int resolve_request_timeout_ms (const nlohmann::json& payload, vayu::db::Database& db) {
+    return resolve_request_timeout_ms (payload,
+    db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+}
+
 size_t element_body_bound (vayu::db::Database& db) {
     return static_cast<size_t> (db.get_config_int ("maxElementBodyBytes",
     static_cast<int> (vayu::core::constants::elements::MAX_BODY_BYTES)));
