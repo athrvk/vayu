@@ -43,6 +43,9 @@ struct CapacityWindow {
     /// The p99 of every completion the level's settled ticks sampled, from one
     /// histogram (#2388) - the signal the SLO is judged against.
     double p99_ms = 0.0;
+    /// Percentage (0-100) of the level's completions that were errors (#2815),
+    /// judged against `max_error_pct`; 0 when nothing completed.
+    double error_pct = 0.0;
 };
 
 /// The search's tunables. The first five come off the run config; the rest are
@@ -68,6 +71,8 @@ struct CapacityConfig {
     /// Consecutive breaching windows before the search stops. Two, not one, so
     /// a single noisy window re-measures instead of ending the run.
     size_t slo_breach_windows = 2;
+    /// A level whose `error_pct` is above this breaches, whatever its p99.
+    double max_error_pct = 1.0;
 };
 
 enum class CapacityAction : std::uint8_t { Hold, StepUp, Stop };
@@ -77,9 +82,12 @@ enum class CapacityAction : std::uint8_t { Hold, StepUp, Stop };
 /// tests and the logs cannot spell them three ways.
 namespace capacity_stop {
 inline constexpr const char* SLO_EXCEEDED = "slo_exceeded";
-inline constexpr const char* PLATEAU      = "plateau";
-inline constexpr const char* CAP_REACHED  = "cap_reached";
-inline constexpr const char* DEADLINE     = "deadline";
+/// The stopping level's p99 was inside the SLO and its error share was not.
+/// When both breach, latency is the reason reported.
+inline constexpr const char* ERRORS_EXCEEDED = "errors_exceeded";
+inline constexpr const char* PLATEAU         = "plateau";
+inline constexpr const char* CAP_REACHED     = "cap_reached";
+inline constexpr const char* DEADLINE        = "deadline";
 /// The operator stopped the run before the search reached a conclusion. Not one
 /// of the four the search decides for itself, and deliberately distinct from
 /// `deadline`: a cancelled search found no limit, and saying it ran out of
@@ -103,8 +111,12 @@ struct CapacityDecision {
  * Total over any history, including an empty one (which answers "start at
  * `start_concurrency`"), so the strategy has no special first-step branch.
  *
- * The policy, in the order it is applied:
- * - `slo_breach_windows` consecutive breaching windows → stop `slo_exceeded`.
+ * A window *breaches* when its p99 is above `slo_ms` or its error share is
+ * above `max_error_pct`: a target answering fast errors is not sustaining the
+ * level. The policy, in the order it is applied:
+ * - `slo_breach_windows` consecutive breaching windows → stop `slo_exceeded`
+ *   when the last one's p99 is over the SLO, `errors_exceeded` when only its
+ *   error share is over the limit.
  * - a single breaching window → **hold** the same level and re-measure. The
  *   consecutive requirement is the whole reason `Hold` exists: one unlucky
  *   window (a GC pause, a cold cache) is not a capacity limit.
@@ -124,16 +136,20 @@ const std::vector<CapacityWindow>& history);
 /// The answer a capacity run exists to give, plus the audit trail behind it.
 struct CapacitySummary {
     double slo_ms = 0.0;
+    /// The error-share limit the levels were judged against, so a reader can
+    /// mark an over-limit level without re-deriving the constant.
+    double max_error_pct = 0.0;
     std::string stop_reason;
-    /// The highest level that stayed inside the SLO, and what it did there.
-    /// Absent when the very first level already breached - the search never
-    /// found a healthy level, and reporting zero would read like one.
+    /// The highest level that breached on neither latency nor errors, and
+    /// what it did there. Absent when the very first level already breached -
+    /// the search never found a healthy level, and reporting zero would read
+    /// like one.
     std::optional<CapacityWindow> max_healthy;
     /// The level the service gave out at: the first breaching level above
-    /// `max_healthy`. Absent when the search ended for a reason other than
-    /// latency (a cap, a deadline, a plateau inside the budget) - there is no
-    /// knee to report, and inventing one from the last level would claim a
-    /// limit that was never observed.
+    /// `max_healthy`. Absent unless the search stopped `slo_exceeded` or
+    /// `errors_exceeded` (a cap, a deadline, a plateau inside the budget saw
+    /// no limit) - inventing one from the last level would claim a limit that
+    /// was never observed.
     std::optional<CapacityWindow> knee;
     /// One entry per level held, in order, including a re-measured hold.
     std::vector<CapacityWindow> levels;

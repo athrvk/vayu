@@ -358,7 +358,9 @@ Notes:
   search's *ceiling* (`concurrency`) and its starting level
   (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
   `sloMs` and `stepDuration` are that mode's own two fields, and
-  `get_run_report` returns the search's findings under `capacity`. Every shape
+  `get_run_report` returns the search's findings under `capacity`, including
+  each level's `errorPct`, the `kneeErrorPct` and the `maxErrorPct` limit a
+  level breaches above, beside the p99s. Every shape
   field the agent leaves out is sent as the engine's default for the mode
   ([Load defaults](#load-defaults)), so the caps judge the run that will start,
   the confirmation preview states it in words ("constant_concurrency, 100
@@ -395,8 +397,14 @@ Notes:
   *unlimited*.
   **There is no per-run timeout, and that is not an omission**: the engine has
   no such field - every transfer is bounded by the `defaultTimeout` setting
-  (`resolve_request_timeout_ms`), which `update_engine_config` changes. Recorded
-  here so it is not re-derived as a gap each time the schema is read.
+  (`resolve_request_timeout_ms`), which `update_engine_config` changes, the run's
+  OAuth 2.0 token fetches and its deferred `tests` script's `pm.sendRequest`
+  included (issue #2833). Four transfers keep bounds of their own: a stream
+  ends on its idle timeout and its duration and event caps, never a
+  whole-transfer deadline; the import fetch has its own 30 s and stall timeout;
+  the connection test its 10 s; and the server-vitals monitor its scrape
+  timeout. Recorded here so it is not re-derived as a gap each time the schema
+  is read.
 - **An agent can bind a collection to a spec now, export one, ask whether a
   contract has drifted and apply the safe half of that drift** (issues
   [#862](https://github.com/athrvk/vayu/issues/862),
@@ -1144,10 +1152,16 @@ Notes:
   on a third-party server, so its budget is derived from the engine's own
   `defaultTimeout` setting (read per call from `GET /config`, up to its 300s
   ceiling) plus 10s of grace - the same rule the renderer uses for its proxied
-  calls. That way the engine's own `TIMEOUT` error, with its error code and its
-  run row, arrives before this client gives up. If the budget does expire, the
-  tool says the call may still have completed and what to check before
-  repeating it, which depends on the tool (see [Error results](#error-results));
+  calls. It is a worst case for the payload sent (#2836,
+  `electron/mcp/execute-budget.ts`): the setting again when `auth.mode` is
+  `oauth2` (the token fetch has the same bound), plus the `scriptTimeout`
+  setting (60s when unreadable) for every enabled `script.pre` / `script.post`
+  element, because one call runs them in sequence. A request with neither keeps
+  exactly the setting plus 10s. That way the engine's own `TIMEOUT` error, with
+  its error code and its run row, arrives before this client gives up. If the
+  budget does expire, the tool says the call may still have completed and what
+  to check before repeating it, which depends on the tool (see
+  [Error results](#error-results));
   it is never reported as an unreachable engine, because a retry could re-send a
   request that already went out. `run_collection_smoke` bounds the other side of
   this: a call runs at most `limit` requests (25 by default), so one call stays
@@ -1852,9 +1866,9 @@ Every tool that composes with an environment - those two (`start_load_run`'s
 `get_graphql_schema` - picks it by the rule `resolve_variables` follows, in one
 helper (`resolveEnvironmentId`, issue #2480): an omitted `environmentId` is the
 **active** environment, as the app's Send does; `"none"` is no environment; and
-an id no environment has is refused with `No environment with id "<id>".`
-before anything is composed or sent, where `POST /compose` alone would degrade
-it to an empty scope and send every environment token literally. The
+an id no environment has is refused with the unknown-id sentence (*Error
+results*, below) before anything is composed or sent, where `POST /compose`
+alone would degrade it to an empty scope and send every environment token literally. The
 environment picked is also the one the send's cookie jar, its History row and,
 with write access on, its scripts' environment writes belong to, so a call that
 names none lands in the active environment's jar and row exactly as the user's
@@ -2052,9 +2066,40 @@ by the wrapper `server.ts` puts in front of its `tools/call` handler.
 |---------|-------------|---------------|-----------|
 | `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
 | `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
-| `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry |
+| `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry; worded as below |
 | `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
 | `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
+
+**An id that names nothing** (#2778) is answered with the missing object and
+the tool that lists them, on one line, with no HTTP path and no engine JSON:
+
+```text
+No run with id "run_x" (it may have been deleted or the id is mistyped). List runs with list_runs.
+```
+
+A tool declares what its id arguments are as `notFound` (`NotFoundDeclaration`
+in `app/electron/mcp/tools/contract.ts`): the object's `noun`, the `list_*`
+tool, and the argument (`idArg`) holding the id, with the kinds shared in
+`ID_KINDS` (`failure.ts`). `describeFailure` words an engine 404 from it and
+the call's own arguments. A tool taking several kinds (`update_request_example`
+takes a request and an example) declares one entry each, and the entry used is
+the one whose noun the engine's sentence contains ("Example not found"); an
+`idArg` that is a list (`compare_runs`' two run ids) names an id only when the
+engine's sentence carries it, since nothing else says which was missing. A kind
+with no list tool (a spec, whose id comes from a collection's binding) ends at
+the cause. A 404 the declaration does not describe, and a tool that declares
+nothing, answers the engine's body instead. A lookup a tool makes itself
+before it calls the engine (a delete that reads the row to name it in the
+prompt, a variable scope) words a miss with the same sentence
+(`unknownIdText`), so the text does not depend on which step noticed. Every
+tool with a `<kind>Id` argument declares `notFound` or is on the named
+exemption list in `tools.test.ts` with its reason.
+
+Every other engine error is `Engine error (<status>): <body>` with the body on
+one line - JSON re-serialized without indentation, anything else with its
+whitespace collapsed - so the text of a 4xx or 5xx does not depend on how the
+engine happened to format the answer. A 507 and a busy database keep their
+retry sentence after it.
 
 **What a timed-out or cancelled call is told to check** (#2777) is a fact about
 the tool, so each tool declares it as `retry` (`RetryAdvice` in

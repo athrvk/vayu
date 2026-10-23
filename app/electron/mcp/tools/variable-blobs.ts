@@ -29,6 +29,7 @@ import {
 } from "../variable-origins.js";
 import type { ToolContext } from "./contract.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
 /**
@@ -102,7 +103,7 @@ export async function selectEnvironment(
 	if (environmentId !== undefined && environmentId !== "") {
 		const found = rows.find((row) => isRecord(row) && row.id === environmentId);
 		if (!found)
-			throw new ToolArgError(`No environment with id "${environmentId}".`, "not_found");
+			throw new ToolArgError(unknownIdText(ID_KINDS.environment, environmentId), "not_found");
 		return found as Record<string, unknown>;
 	}
 	return rows.find((row) => isRecord(row) && row.isActive === true) as
@@ -133,7 +134,7 @@ export async function gatherVariableScopes(
 		const rows = (Array.isArray(listed) ? listed : []) as CollectionLike[];
 		chain = collectionChain(rows, collectionId);
 		if (chain.length === 0)
-			throw new ToolArgError(`No collection with id "${collectionId}".`, "not_found");
+			throw new ToolArgError(unknownIdText(ID_KINDS.collection, collectionId), "not_found");
 	}
 
 	let environment: OriginScopes["environment"];

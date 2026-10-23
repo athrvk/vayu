@@ -18,7 +18,7 @@
  */
 
 import type { EngineRequestError } from "../engine-client.js";
-import type { RetryAdvice, ToolResult } from "./contract.js";
+import type { IdKind, NotFoundDeclaration, RetryAdvice, ToolResult } from "./contract.js";
 
 /**
  * What kind of failure an error result is, which decides what an agent does
@@ -52,6 +52,12 @@ export interface Failure {
 	/** Complete on its own: for a reader with no tool in hand, the generic advice. */
 	message: string;
 	interrupted?: Interrupted;
+	/**
+	 * The engine's sentence for a 404 ("Run not found"). Present only on an
+	 * engine 404, which is what lets {@link describeFailure} word it as an
+	 * unknown id when the tool declared what its ids name.
+	 */
+	engineNotFound?: string;
 }
 
 /** What to do about a call that may have completed, for a tool that declared nothing. */
@@ -111,15 +117,92 @@ export interface FailureDescription {
 	error: FailureDetail;
 }
 
+/** What a tool says about itself that a failure's words depend on. */
+export interface ToolWords {
+	/** The tool's declared advice for an interrupted call. */
+	retry?: RetryAdvice;
+	/** What the tool's id arguments name, for an engine 404. */
+	notFound?: NotFoundDeclaration | readonly NotFoundDeclaration[];
+	/** The call's arguments, which hold the id an unknown-id answer names. */
+	args?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The kinds of stored object an id names, shared by the tools that declare
+ * them (`notFound`) and by the lookups that word an unknown id themselves, so
+ * one kind has one noun and one list tool.
+ */
+export const ID_KINDS = {
+	collection: { noun: "collection", list: "list_collections" },
+	request: { noun: "request", list: "list_requests" },
+	environment: { noun: "environment", list: "list_environments" },
+	example: { noun: "example", list: "list_request_examples" },
+	run: { noun: "run", list: "list_runs" },
+	inbox: { noun: "inbox", list: "list_webhook_inboxes" },
+	mockServer: { noun: "mock server", list: "list_mock_servers" },
+	mockIssuer: { noun: "mock issuer", list: "list_mock_issuers" },
+	// A spec id comes from a collection's binding; there is no list route for it.
+	spec: { noun: "spec" },
+} as const satisfies Record<string, IdKind>;
+
+/**
+ * The sentence for an id nothing holds (#2778). @p id is absent where the
+ * call cannot say which of its ids was the missing one. A `list_<plural>` tool
+ * names the plural itself, so the sentence never pluralizes a noun by hand.
+ */
+export function unknownIdText({ noun, list }: IdKind, id?: string): string {
+	const subject =
+		id === undefined ? `No ${noun} matches the id given` : `No ${noun} with id "${id}"`;
+	const cause = "it may have been deleted or the id is mistyped";
+	if (list === undefined) return `${subject} (${cause}).`;
+	return `${subject} (${cause}). List ${list.replace(/^list_/, "").replace(/_/g, " ")} with ${list}.`;
+}
+
+/** The declaration whose noun the engine's @p sentence names, if any. */
+function declaredKind(
+	notFound: ToolWords["notFound"],
+	sentence: string
+): NotFoundDeclaration | undefined {
+	if (!notFound) return undefined;
+	const declared =
+		"idArg" in notFound ? [notFound] : (notFound as readonly NotFoundDeclaration[]);
+	// "<Noun> not found" at the start of the sentence, not the noun anywhere in it:
+	// the live-metrics 404 for a run that exists says "Live metrics for this run
+	// are no longer retained", and calling that an unknown id would be false.
+	return declared.find(({ noun }) => new RegExp(`^${noun}\\b.*\\bnot found`, "i").test(sentence));
+}
+
+/** The id the call named for @p kind, or undefined where it cannot be told. */
+function namedId(
+	{ idArg }: NotFoundDeclaration,
+	args: ToolWords["args"],
+	sentence: string
+): string | undefined {
+	const given = (name: string): string | undefined => {
+		const value = args?.[name];
+		return typeof value === "string" && value !== "" ? value : undefined;
+	};
+	if (typeof idArg === "string") return given(idArg);
+	return idArg.map(given).find((value) => value !== undefined && sentence.includes(value));
+}
+
+/** The unknown-id answer for an engine 404 the tool declared, else the failure's own words. */
+function notFoundText(failure: Failure, { notFound, args }: ToolWords): string {
+	const sentence = failure.engineNotFound;
+	if (sentence === undefined) return failure.message;
+	const kind = declaredKind(notFound, sentence);
+	return kind ? unknownIdText(kind, namedId(kind, args, sentence)) : failure.message;
+}
+
 /**
  * What the client reads for @p failure. The one place a failure becomes words,
  * so wording one per class or per tool is a change to this function alone.
- * @p retry is the tool's declared advice for an interrupted call.
+ * @p tool is what the failing tool declared about itself.
  */
-export function describeFailure(failure: Failure, retry?: RetryAdvice): FailureDescription {
+export function describeFailure(failure: Failure, tool: ToolWords = {}): FailureDescription {
 	const text = failure.interrupted
-		? interruptedText(failure.interrupted, retry)
-		: failure.message;
+		? interruptedText(failure.interrupted, tool.retry)
+		: notFoundText(failure, tool);
 	return {
 		text,
 		error: {
@@ -155,6 +238,44 @@ export function engineRefusalClass(err: EngineRequestError): FailureClass {
 	if (err.status === 503 && !isBusyDatabase(err)) return "unreachable";
 	if (err.status >= 500) return "transient";
 	return "input";
+}
+
+/**
+ * An engine body on one line. The engine pretty-prints some answers and not
+ * others, and a result text that spans lines for one tool and not another is
+ * a difference no reader asked for (#2778). JSON is re-serialized without
+ * indentation; anything else has its whitespace runs collapsed.
+ */
+export function compactBody(body: string): string {
+	try {
+		return JSON.stringify(JSON.parse(body));
+	} catch {
+		return body.replace(/\s+/g, " ").trim();
+	}
+}
+
+/**
+ * The sentence in an engine error body, or undefined where there is none.
+ *
+ * **The nested shape is the contract.** `error_response` in `routes.hpp` builds
+ * `{"error": {"code", "message"}}` for every refusal these routes produce, and
+ * that is the one shape issue #173 settled on. The flat `{"error": "..."}`
+ * branch is a fallback rather than an alternative, for the same reason the
+ * renderer's `readApiError` keeps one: the app and the engine sidecar are not
+ * updated together, so a newer app can be talking to an older engine.
+ */
+export function engineSentence(body: string): string | undefined {
+	try {
+		const error = (JSON.parse(body) as { error?: unknown } | null)?.error;
+		if (typeof error === "string" && error) return error;
+		if (typeof error === "object" && error !== null) {
+			const { message } = error as { message?: unknown };
+			if (typeof message === "string" && message) return message;
+		}
+	} catch {
+		// Not JSON - the caller falls back to the raw body.
+	}
+	return undefined;
 }
 
 /**

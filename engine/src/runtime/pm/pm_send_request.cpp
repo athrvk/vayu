@@ -795,6 +795,8 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     }
 
     Request request;
+    // Before the options are read, so a `timeout` option replaces it (#2833).
+    request.timeout_ms    = data->request_timeout_ms;
     vayu::http::Auth auth = vayu::http::NoAuth{};
     if (auto reason = build_send_request (ctx, argv[0], request, auth)) {
         return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
@@ -834,7 +836,7 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // The script's wall-clock budget is enforced by a QuickJS interrupt handler
     // that only runs *between bytecode operations*, so a blocking C function
     // never yields to it: without this clamp a 5s script could hold its thread
-    // for the request's 30s timeout, six times the budget the user set, with
+    // for the whole request timeout, many times the budget the user set, with
     // no error and no way to interrupt it.
     if (auto remaining = remaining_script_budget_ms (ctx)) {
         if (*remaining <= 0) {

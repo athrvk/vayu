@@ -3160,8 +3160,12 @@ export interface RunReport {
 	 * `undefined` for every other mode - a fixed-target run measured a point,
 	 * not a curve, so there is no knee to show. `maxHealthy*` is absent when the
 	 * very first level already breached (the search found no sustainable
-	 * capacity) and `knee*` when the search ended for a reason other than
-	 * latency, so neither can be read as a measured zero. `stopReason` is typed
+	 * capacity) and `knee*` when the search ended for a reason other than the
+	 * target giving out on latency (`slo_exceeded`) or errors
+	 * (`errors_exceeded`), so neither can be read as a measured zero. The error
+	 * share (`maxErrorPct`, `kneeErrorPct`, `levels[].errorPct`, percent 0-100)
+	 * is absent for a run stored by an engine that did not judge errors, which
+	 * is not the claim "every level was clean". `stopReason` is typed
 	 * loosely for the same reason `thresholdValidation.metric` is: a newer
 	 * sidecar may stop for a reason this build has no words for.
 	 */
@@ -3173,7 +3177,10 @@ export interface RunReport {
 		p99AtMaxHealthyMs?: number;
 		kneeConcurrency?: number;
 		kneeP99Ms?: number;
-		levels: { concurrency: number; rps: number; p99Ms: number }[];
+		/** The error limit, in percent, that the levels were judged against. */
+		maxErrorPct?: number;
+		kneeErrorPct?: number;
+		levels: { concurrency: number; rps: number; p99Ms: number; errorPct?: number }[];
 	};
 	/**
 	 * How many records each of the run's bounded stores thinned away.

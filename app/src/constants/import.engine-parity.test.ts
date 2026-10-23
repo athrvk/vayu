@@ -6,7 +6,8 @@
  */
 
 /**
- * The streamed-fetch event names, held on both sides (issue #882).
+ * The streamed-fetch event names and the stall bound, held on both sides
+ * (issues #882, #2836).
  *
  * This drift is silent by construction, which is why it needs a guard: an SSE
  * event whose name the reader does not recognize is an event the reader
@@ -16,13 +17,15 @@
  *
  * Read out of the engine's own header rather than restated here, which is what
  * makes this a drift guard instead of a second copy of the same list: move
- * either side and it fails.
+ * either side and it fails. The stall bound is the same kind of mirror: the
+ * renderer's budget for the call is derived from it, so a changed engine figure
+ * must move the renderer's.
  */
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { IMPORT_FETCH_EVENTS } from "./import";
+import { IMPORT_FETCH_EVENTS, IMPORT_FETCH_STALL_TIMEOUT_MS } from "./import";
 
 /** Held in the testkit, so CI routes an edit to the header back to this suite. */
 const [CONSTANTS_HPP] = ENGINE_READING_GUARDS.importEvents.paths.map(fromRepoRoot);
@@ -50,5 +53,13 @@ describe("streamed import-fetch events match the engine", () => {
 		["EVENT_ERROR", IMPORT_FETCH_EVENTS.ERROR],
 	])("%s", (engineName, rendererValue) => {
 		expect(engineString(engineName)).toBe(rendererValue);
+	});
+});
+
+describe("the import-fetch stall bound matches the engine", () => {
+	it("mirrors constants::import_fetch::STALL_TIMEOUT_MS", () => {
+		const match = constantsHpp.match(/constexpr\s+long\s+STALL_TIMEOUT_MS\s*=\s*(\d+)\s*;/);
+		if (!match) throw new Error("constants.hpp declares no long STALL_TIMEOUT_MS");
+		expect(IMPORT_FETCH_STALL_TIMEOUT_MS).toBe(Number(match[1]));
 	});
 });

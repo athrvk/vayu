@@ -77,9 +77,10 @@ std::vector<ExtraParam> extra_params (const nlohmann::json& config, std::string_
  * provider_* fields carry the RFC 6749 error body when one was returned.
  */
 struct TokenError {
-    int http_status = 500; // 400 | 401 | 409 | 502
+    int http_status = 500; // 400 | 401 | 409 | 502 | 504
     std::string code; // "oauth2_invalid_config" | "oauth2_interactive_required"
                       // | "oauth2_provider_error" | "oauth2_network_error"
+                      // | "oauth2_timeout"
     std::string message;
     int provider_status = 0;
     // `{}` rather than bare declarations: every construction here is a
@@ -143,6 +144,9 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * says and whether the row was fresh, expired or refreshable. The old refresh
  * token is not carried over; the provider's answer replaces the row whole.
  *
+ * @param timeout_ms The resolved request timeout (#2833): one deadline for the
+ *        whole acquisition, so the fresh grant after a rejected refresh gets
+ *        what the refresh left. Running out of it is a 504 `oauth2_timeout`.
  * @param network_ms When non-null, the milliseconds this call spent waiting on
  *        the provider's token endpoint are added to it (a refresh and the fresh
  *        grant after a rejected refresh both count); a cache hit adds nothing.
@@ -154,6 +158,7 @@ std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database
 const nlohmann::json& config,
 bool force_refresh,
 const std::optional<InteractiveExchange>& interactive,
+int timeout_ms,
 double* network_ms              = nullptr,
 const std::atomic<bool>* cancel = nullptr);
 

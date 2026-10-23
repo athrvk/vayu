@@ -33,6 +33,10 @@ using vayu::http::MockIssuerStart;
 
 namespace {
 
+/// The bound every token request here is given: the engine's own default, so
+/// none of these tests is about the timeout.
+constexpr int TOKEN_TIMEOUT_MS = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+
 std::vector<std::string> split_jwt (const std::string& jwt) {
     std::vector<std::string> parts;
     size_t pos = 0;
@@ -220,8 +224,8 @@ TEST_F (MockIssuerTest, ClientCredentialsMintsAVerifiableJwt) {
     const auto issuer = mgr.start (json{ { "expiresInSeconds", 120 } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
-    auto result = vayu::http::oauth::acquire_token (
-    *db_, client_credentials_config (issuer), false, std::nullopt);
+    auto result = vayu::http::oauth::acquire_token (*db_,
+    client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     const auto token = std::get<vayu::db::OAuthToken> (result);
 
@@ -243,8 +247,8 @@ TEST_F (MockIssuerTest, ConfiguredClaimsRideAlong) {
     { "claims", { { "sub", "alice" }, { "roles", json::array ({ "admin" }) } } } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
-    auto result = vayu::http::oauth::acquire_token (
-    *db_, client_credentials_config (issuer), false, std::nullopt);
+    auto result = vayu::http::oauth::acquire_token (*db_,
+    client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     const auto payload =
     decode_jwt_payload (std::get<vayu::db::OAuthToken> (result).access_token);
@@ -260,7 +264,8 @@ TEST_F (MockIssuerTest, PasswordGrantSubjectIsTheUser) {
     json config = { { "grantType", "password" }, { "accessTokenUrl", issuer.token_url },
         { "clientId", "cid" }, { "clientSecret", "sec" }, { "username", "bob" },
         { "password", "hunter2" }, { "scope", "read" } };
-    auto result = vayu::http::oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto result = vayu::http::oauth::acquire_token (
+    *db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     const auto token = std::get<vayu::db::OAuthToken> (result);
     EXPECT_EQ (token.scope, "read");
@@ -282,7 +287,7 @@ TEST_F (MockIssuerTest, AuthorizationCodeWithPkceRoundTrips) {
         { "accessTokenUrl", issuer.token_url }, { "clientId", "cid" },
         { "clientSecret", "sec" } };
     auto result = vayu::http::oauth::acquire_token (*db_, config, false,
-    vayu::http::oauth::InteractiveExchange{ code, verifier, redirect });
+    vayu::http::oauth::InteractiveExchange{ code, verifier, redirect }, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result))
     << std::get<vayu::http::oauth::TokenError> (result).message;
     EXPECT_TRUE (signature_verifies (
@@ -304,8 +309,8 @@ TEST_F (MockIssuerTest, AuthorizationCodeRejectsAWrongVerifier) {
         { "accessTokenUrl", issuer.token_url }, { "clientId", "cid" },
         { "clientSecret", "sec" } };
     auto result = vayu::http::oauth::acquire_token (*db_, config, false,
-    vayu::http::oauth::InteractiveExchange{
-    code, vayu::http::pkce::random_token (32), redirect });
+    vayu::http::oauth::InteractiveExchange{ code, vayu::http::pkce::random_token (32), redirect },
+    TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (result));
     EXPECT_EQ (std::get<vayu::http::oauth::TokenError> (result).code, "oauth2_provider_error");
 }
@@ -325,12 +330,12 @@ TEST_F (MockIssuerTest, AuthorizationCodeIsSingleUse) {
     const vayu::http::oauth::InteractiveExchange exchange{ code, "", redirect };
 
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (
-    vayu::http::oauth::acquire_token (*db_, config, false, exchange)));
+    vayu::http::oauth::acquire_token (*db_, config, false, exchange, TOKEN_TIMEOUT_MS)));
     // The cached token would answer a second acquire, so force past it: the
     // *code* is what must be spent.
     db_->delete_oauth_token (vayu::http::oauth::cache_key (config));
     EXPECT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (
-    vayu::http::oauth::acquire_token (*db_, config, false, exchange)));
+    vayu::http::oauth::acquire_token (*db_, config, false, exchange, TOKEN_TIMEOUT_MS)));
 }
 
 TEST_F (MockIssuerTest, AuthorizeRefusesAMismatchedRedirectUri) {
@@ -346,7 +351,8 @@ TEST_F (MockIssuerTest, AuthorizeRefusesAMismatchedRedirectUri) {
         { "accessTokenUrl", issuer.token_url }, { "clientId", "cid" },
         { "clientSecret", "sec" } };
     auto result = vayu::http::oauth::acquire_token (*db_, config, false,
-    vayu::http::oauth::InteractiveExchange{ code, "", "http://127.0.0.1:9/elsewhere" });
+    vayu::http::oauth::InteractiveExchange{ code, "", "http://127.0.0.1:9/elsewhere" },
+    TOKEN_TIMEOUT_MS);
     EXPECT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (result));
 }
 
@@ -356,12 +362,14 @@ TEST_F (MockIssuerTest, RefreshRotatesAndSpendsTheOldToken) {
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
     const auto config = client_credentials_config (issuer);
-    auto first = vayu::http::oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto first        = vayu::http::oauth::acquire_token (
+    *db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (first));
     const std::string original_refresh = std::get<vayu::db::OAuthToken> (first).refresh_token;
     ASSERT_FALSE (original_refresh.empty ());
 
-    auto refreshed = vayu::http::oauth::acquire_token (*db_, config, true, std::nullopt);
+    auto refreshed = vayu::http::oauth::acquire_token (
+    *db_, config, true, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (refreshed))
     << std::get<vayu::http::oauth::TokenError> (refreshed).message;
     const auto rotated = std::get<vayu::db::OAuthToken> (refreshed);
@@ -384,8 +392,8 @@ TEST_F (MockIssuerTest, RefreshTokensCanBeTurnedOff) {
     const auto issuer = mgr.start (json{ { "issueRefreshTokens", false } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
-    auto result = vayu::http::oauth::acquire_token (
-    *db_, client_credentials_config (issuer), false, std::nullopt);
+    auto result = vayu::http::oauth::acquire_token (*db_,
+    client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     EXPECT_TRUE (std::get<vayu::db::OAuthToken> (result).refresh_token.empty ());
 }
@@ -405,17 +413,20 @@ TEST_F (MockIssuerTest, ConfiguredClientsGateTheTokenEndpoint) {
         json config = client_credentials_config (issuer, "known", "s3cret");
         config["credentialsPlacement"] = placement;
         config["credentialsId"]        = placement; // distinct cache keys
-        auto ok = vayu::http::oauth::acquire_token (*db_, config, false, std::nullopt);
+        auto ok                        = vayu::http::oauth::acquire_token (
+        *db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
         EXPECT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (ok)) << placement;
     }
 
     auto wrong_secret = vayu::http::oauth::acquire_token (*db_,
-    client_credentials_config (issuer, "known", "nope"), false, std::nullopt);
+    client_credentials_config (issuer, "known", "nope"), false, std::nullopt,
+    TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (wrong_secret));
     EXPECT_EQ (std::get<vayu::http::oauth::TokenError> (wrong_secret).provider_status, 401);
 
     auto unknown_client = vayu::http::oauth::acquire_token (*db_,
-    client_credentials_config (issuer, "stranger", "s3cret"), false, std::nullopt);
+    client_credentials_config (issuer, "stranger", "s3cret"), false,
+    std::nullopt, TOKEN_TIMEOUT_MS);
     EXPECT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (unknown_client));
 }
 
@@ -428,8 +439,8 @@ TEST_F (MockIssuerTest, ServerErrorModeClassifiesAsAProviderError) {
     const auto issuer = mgr.start (json{ { "failureMode", "server_error" } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
-    auto result = vayu::http::oauth::acquire_token (
-    *db_, client_credentials_config (issuer), false, std::nullopt);
+    auto result = vayu::http::oauth::acquire_token (*db_,
+    client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (result));
     const auto err = std::get<vayu::http::oauth::TokenError> (result);
     EXPECT_EQ (err.code, "oauth2_provider_error");
@@ -442,8 +453,8 @@ TEST_F (MockIssuerTest, InvalidClientModeFailsCleanly) {
     const auto issuer = mgr.start (json{ { "failureMode", "invalid_client" } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
-    auto result = vayu::http::oauth::acquire_token (
-    *db_, client_credentials_config (issuer), false, std::nullopt);
+    auto result = vayu::http::oauth::acquire_token (*db_,
+    client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (result));
     const auto err = std::get<vayu::http::oauth::TokenError> (result);
     EXPECT_EQ (err.provider_status, 401);
@@ -456,8 +467,8 @@ TEST_F (MockIssuerTest, SlowModeDelaysTheTokenEndpoint) {
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
     const auto started = std::chrono::steady_clock::now ();
-    auto result        = vayu::http::oauth::acquire_token (
-    *db_, client_credentials_config (issuer), false, std::nullopt);
+    auto result        = vayu::http::oauth::acquire_token (*db_,
+           client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - started)
                             .count ();
@@ -471,8 +482,8 @@ TEST_F (MockIssuerTest, FailureModeFlipsOnALiveIssuer) {
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
     const auto config = client_credentials_config (issuer);
 
-    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (
-    vayu::http::oauth::acquire_token (*db_, config, false, std::nullopt)));
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (vayu::http::oauth::acquire_token (
+    *db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS)));
 
     const auto updated =
     mgr.update (issuer.issuer_id, json{ { "failureMode", "server_error" } });
@@ -481,7 +492,8 @@ TEST_F (MockIssuerTest, FailureModeFlipsOnALiveIssuer) {
     EXPECT_EQ (updated.issuer["failureMode"], "server_error");
 
     // force past the cached token so the request actually reaches the issuer
-    auto after = vayu::http::oauth::acquire_token (*db_, config, true, std::nullopt);
+    auto after = vayu::http::oauth::acquire_token (
+    *db_, config, true, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (after));
     EXPECT_EQ (std::get<vayu::http::oauth::TokenError> (after).provider_status, 500);
 }

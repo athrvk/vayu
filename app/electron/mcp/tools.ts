@@ -220,10 +220,16 @@ export function toolCatalog(): McpToolInfo[] {
  * since the constant is built before any host is known. Only an error is
  * resolved; a success carries workspace data, which is never rewritten.
  */
-function failureAnswer(result: ToolResult, toolName: string, ctx: ToolContext): ToolResult {
+function failureAnswer(
+	result: ToolResult,
+	toolName: string,
+	ctx: ToolContext,
+	args?: Record<string, unknown>
+): ToolResult {
+	const tool = findTool(toolName);
 	const { text, error } = describeFailure(
 		FAILURES.get(result) ?? unclassified(result, toolName, ctx),
-		interruptedAdviceFor(findTool(toolName))
+		{ retry: interruptedAdviceFor(tool), notFound: tool?.notFound, args }
 	);
 	const [, ...caveats] = result.content;
 	return resolveRemedyTokens(
@@ -294,7 +300,7 @@ export async function dispatchTool(
 	const result = tool
 		? await serveCall(tool, args, ctx, signal)
 		: errorResult(`Unknown tool: ${name}`, "input");
-	if (result.isError) return failureAnswer(result, name, ctx);
+	if (result.isError) return failureAnswer(result, name, ctx, args);
 	// Only a call that succeeded changed anything. A tool that returned an error
 	// result may still have got as far as the engine, but it cannot say so, and
 	// an invalidation storm on every rejected call would be worse than the one

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <utility>
 
@@ -31,6 +32,9 @@ std::pair<int, nlohmann::json>
 oauth2_token_get (vayu::db::Database& db, const std::string& key);
 std::pair<int, nlohmann::json>
 oauth2_token_delete (vayu::db::Database& db, const std::string& key);
+// Declared in config.cpp; how a test sets `defaultTimeout` as a client does.
+std::pair<int, nlohmann::json>
+apply_config_update (vayu::db::Database& db, const std::string& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -114,6 +118,30 @@ TEST_F (OAuthRouteTest, PostInteractiveExchangesTheCodeOverACachedRow) {
     const auto stored = db_->get_oauth_token (cached.cache_key);
     ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->access_token, "AT1");
+}
+
+// The route takes no `timeout`: the `defaultTimeout` setting bounds the token
+// request (#2833), and running out of it is a 504 under its own code rather
+// than a 502 network error. Healthy, this answers after about 1 s; reading the
+// compiled-in 30 s instead, it answers after 30 s. The 15 s bound sits between.
+TEST_F (OAuthRouteTest, PostAgainstAHungTokenEndpointIs504AtTheDefaultTimeout) {
+    db_->init ();
+    const json update{ { "entries", { { "defaultTimeout", "1000" } } } };
+    const auto [config_status, config_body] =
+    vayu::http::routes::apply_config_update (*db_, update.dump ());
+    ASSERT_EQ (config_status, 200) << config_body.dump ();
+
+    vayu::tests::MockTokenServer idp;
+    const json request = { { "config",
+    { { "grantType", "client_credentials" },
+    { "accessTokenUrl", idp.url ("/token-hang") }, { "clientId", "cid" } } } };
+    const auto started = std::chrono::steady_clock::now ();
+    auto [status, body] = vayu::http::routes::oauth2_token_post (*db_, request.dump ());
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_EQ (status, 504) << body.dump ();
+    EXPECT_EQ (body["error"]["code"], "oauth2_timeout");
+    EXPECT_LT (elapsed, std::chrono::seconds (15));
 }
 
 TEST_F (OAuthRouteTest, GetReportsNotFoundThenFound) {

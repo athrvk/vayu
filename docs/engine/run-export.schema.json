@@ -389,12 +389,14 @@
           "additionalProperties": false,
           "properties": {
             "sloMs": {"type": "number"},
+            "maxErrorPct": {"type": "number"},
             "stopReason": {"type": "string"},
             "maxHealthyConcurrency": {"type": "number"},
             "maxHealthyRps": {"type": "number"},
             "p99AtMaxHealthyMs": {"type": "number"},
             "kneeConcurrency": {"type": "number"},
             "kneeP99Ms": {"type": "number"},
+            "kneeErrorPct": {"type": "number"},
             "levels": {
               "type": "array",
               "items": {
@@ -403,7 +405,8 @@
                 "properties": {
                   "concurrency": {"type": "number"},
                   "rps": {"type": "number"},
-                  "p99Ms": {"type": "number"}
+                  "p99Ms": {"type": "number"},
+                  "errorPct": {"type": "number"}
                 }
               }
             }

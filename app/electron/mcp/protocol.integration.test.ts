@@ -507,7 +507,7 @@ describe("MCP protocol handshake (in-memory)", () => {
 				getRun: vi
 					.fn()
 					.mockRejectedValue(
-						new EngineRequestError("Engine responded 404", 404, "no such run")
+						new EngineRequestError("Engine responded 404", 404, "Run not found")
 					),
 			}),
 		});
@@ -515,8 +515,10 @@ describe("MCP protocol handshake (in-memory)", () => {
 			name: "get_run",
 			arguments: { runId: "run_gone" },
 		})) as { content: Array<{ text: string }>; structuredContent?: unknown };
-		// get_run names the id in place of the engine's body.
-		const text = 'Engine error (404): No run with id "run_gone".';
+		// get_run names the id and the list tool in place of the engine's body.
+		const text =
+			'No run with id "run_gone" (it may have been deleted or the id is mistyped). ' +
+			"List runs with list_runs.";
 		expect(res.content).toEqual([{ type: "text", text }]);
 		expect(res.structuredContent).toEqual({
 			error: { class: "not_found", retryable: false, advice: text },

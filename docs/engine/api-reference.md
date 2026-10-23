@@ -5960,7 +5960,13 @@ a `{{data.*}}` token in one is refused like one anywhere else in the config.
 
 `expiresAt` is `null` for a non-expiring token; `scope` is omitted when empty.
 Errors carry an `oauth2_*` code: `400` invalid config, `401` provider rejected
-the request, `409` interactive authorization required, `502` network error.
+the request, `409` interactive authorization required, `502` network error,
+`504` `oauth2_timeout` when the token endpoint did not answer in time. The
+token request is bounded by the `defaultTimeout` setting (this route takes no
+`timeout` of its own), and the bound covers the whole acquisition: a refresh
+the provider rejects falls back to a fresh grant that gets only what the
+refresh left (issue #2833). The same bound holds for the token exchange of the
+interactive flow below.
 A token response nested past 100 levels is treated as unparseable (`401`
 `oauth2_provider_error`, "unparseable response"), never cached (issue #2413).
 
@@ -6804,6 +6810,14 @@ load run the latency histograms hold one hour at most (issue #2790): a
 completion longer than that, a timeout above `3600000` that ran out, is counted
 at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within
 0.1%) rather than the true duration, and the sample is never left out.
+The same deadline bounds the OAuth 2.0 token request an `auth` block makes
+(issue #2833), a refresh and the fresh grant a rejected refresh falls back to
+counted together: a token endpoint that does not answer within it fails the
+send as `AUTH_FAILED` with `authErrorCode` `oauth2_timeout`, and the request
+itself is never sent. It is also the default timeout of every `pm.sendRequest`
+the send's scripts make, buffered or streamed; a call's own `timeout` option
+replaces it, and the script's remaining budget can only lower either
+([Scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
 
 **`requestId` and `environmentId` must be strings** (issue #1917): an id of any
 other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
@@ -9167,7 +9181,7 @@ default, and whose message names the offending field and why the bound exists:
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
-| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). It also bounds the run's OAuth 2.0 token fetches (the pre-flight's, each step's at plan time, and every mid-run refresh) and is the default timeout of a `pm.sendRequest` from a sequential run's step scripts or a load run's deferred `tests` script (#2833). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
@@ -9351,14 +9365,21 @@ therefore what `targetRps × duration` asked for.
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
 the level, and then steps up by 25% (at least +1) while the level stayed inside
-`sloMs`. A level's `p99_ms` is the percentile of every completion at the level
+its budget. A level's `p99_ms` is the percentile of every completion at the level
 after its first three live ticks, which measure the transition to the new
 target, read from one histogram; it is not a mean of 100 ms window percentiles,
 which a level with a periodic pause would pass. Its `rps` is the mean throughput
-over the same ticks. It stops - and names the reason in
-the report - when p99 exceeds `sloMs` across **two consecutive** judged levels
-(`slo_exceeded`; one breaching measurement re-measures the same level rather than
-ending the search), when two step-ups buy under 5% more throughput
+over the same ticks, and its `error_pct` the share of the requests completed over
+them that were errors, by the one definition every surface reports (a status
+outside 2xx/3xx, or no response; a Stop-cancelled request is neither). A level
+**breaches** when its p99 exceeds `sloMs` *or* its error share exceeds 1%
+(`constants::capacity::ERROR_RATE_PCT`, no run-config knob): a target answering
+fast 503s is not sustaining the level. The search stops - and names the reason
+in the report - after **two consecutive** breaching judged levels (one
+breaching measurement re-measures the same level rather than ending the
+search): `slo_exceeded` when the last one's p99 is over `sloMs`,
+`errors_exceeded` when its p99 is inside `sloMs` and only its error share is
+over the limit. It also stops when two step-ups buy under 5% more throughput
 (`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
 runs out (`deadline`), or when the operator stops the run (`stopped`).
 
@@ -9372,11 +9393,17 @@ one number - the MCP tool's cap does.
 The search steers by what the metrics thread publishes each live tick rather
 than sampling the collector itself, so it takes nothing away from what `GET
 /runs/:id/live` streams. A level in which no request was timed (`latencySamples`
-`0`, percentiles `null` on the frame) is not judged and stays open: reading it
-as "answered instantly" would climb straight past the limit. A request that
-timed out is timed (see [Latency population](#latency-population)), so a level
-of nothing but timeouts has samples, is judged, and reports a p99 near the
-timeout - the level fails its latency limit, which is the right verdict.
+`0`, percentiles `null` on the frame) and no error was counted is not judged and
+stays open: reading it as "answered instantly" would climb straight past the
+limit. A request that timed out is timed (see
+[Latency population](#latency-population)), so a level of nothing but timeouts
+has samples, is judged, and reports a p99 near the timeout - the level fails its
+latency limit, which is the right verdict. A refused connection records no
+latency but is counted, so a level of nothing but refusals is judged too, at a
+p99 of 0 and an error share of 100%, and fails its error limit. A level is
+also not judged until it has counted at least one completion: the error share
+is read from status counts that can trail the latency samples by a tick, and
+judging before they arrive would read a failing level as error-free.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 p99 per level and a sequence has one per step.
 
@@ -11015,23 +11042,31 @@ event's first byte. A second copy would be a second number to keep true.
 ```json
 "capacity": {
   "sloMs": 200,
+  "maxErrorPct": 1,
   "stopReason": "slo_exceeded",
   "maxHealthyConcurrency": 48, "maxHealthyRps": 23400, "p99AtMaxHealthyMs": 41.2,
-  "kneeConcurrency": 64, "kneeP99Ms": 312.0,
-  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4 } ]
+  "kneeConcurrency": 64, "kneeP99Ms": 312.0, "kneeErrorPct": 0.4,
+  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4, "errorPct": 0 } ]
 }
 ```
 
-`stopReason` is one of `slo_exceeded`, `plateau`, `cap_reached`, `deadline` or
-`stopped` - see [Capacity semantics](#post-runs). The two optional halves are
-**omitted rather than zeroed**, and the distinction carries information:
+`stopReason` is one of `slo_exceeded`, `errors_exceeded`, `plateau`,
+`cap_reached`, `deadline` or `stopped` - see [Capacity semantics](#post-runs).
+`maxErrorPct` is the error-share limit each level was judged against, and
+`errorPct` / `kneeErrorPct` are percentages (0-100) on the same scale, so a
+reader can mark an over-limit level without knowing the constant. The two
+optional halves are **omitted rather than zeroed**, and the distinction carries
+information:
 
-- `maxHealthy*` is absent when the very first level already breached the budget.
-  The search found no sustainable capacity, which is not the same claim as a
-  capacity of zero.
-- `knee*` is absent unless `stopReason` is `slo_exceeded`. A run that ended at
-  its ceiling, its deadline, or on a plateau inside the budget never watched the
-  target give out, so it has no knee to report.
+- `maxHealthy*` is absent when the very first level already breached the budget
+  (on latency or on errors). The search found no sustainable capacity, which is
+  not the same claim as a capacity of zero.
+- `knee*` is absent unless `stopReason` is `slo_exceeded` or `errors_exceeded`.
+  A run that ended at its ceiling, its deadline, or on a plateau inside the
+  budget never watched the target give out, so it has no knee to report.
+- `maxErrorPct`, `kneeErrorPct` and `levels[].errorPct` are absent from a run
+  stored before the search judged errors (#2815): it never measured an error
+  share, and a 0 would call every level clean.
 
 `levels[]` is one entry per level *judged*, in order - bounded by construction
 (a search holds tens of levels, not thousands). A level that breached once and
@@ -11631,6 +11666,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |
+| 504 | OAuth 2.0 token endpoint did not answer within the `defaultTimeout` setting (`/oauth2/token`, `oauth2_timeout`) |
 | 507 | The disk holding the data is full (a resource write, `insufficient_storage`) |
 
 ## Notes

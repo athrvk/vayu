@@ -904,14 +904,17 @@ Result<Response> Client::get (const std::string& url, const Headers& headers) {
     return send (request);
 }
 
-Result<Response>
-Client::post (const std::string& url, const std::string& body, const Headers& headers) {
+Result<Response> Client::post (const std::string& url,
+const std::string& body,
+int timeout_ms,
+const Headers& headers) {
     Request request;
     request.method       = HttpMethod::POST;
     request.url          = url;
     request.body.mode    = BodyMode::Text;
     request.body.content = body;
     request.headers      = HeaderList (headers);
+    request.timeout_ms   = timeout_ms;
     return send (request);
 }
 

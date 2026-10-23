@@ -288,6 +288,10 @@ constexpr double PLATEAU_GAIN_PCT = 5.0;
 /// Consecutive breaching windows before the search stops. Two, not one, so a
 /// single noisy window re-measures instead of ending the run.
 constexpr size_t SLO_BREACH_WINDOWS = 2;
+/// A level whose error share (`vayu::count_status_failures` over its
+/// completions) is above this percentage breaches, whatever its p99 (#2815): a
+/// target answering fast 503s is not sustaining that level.
+constexpr double ERROR_RATE_PCT = 1.0;
 } // namespace capacity
 
 /**

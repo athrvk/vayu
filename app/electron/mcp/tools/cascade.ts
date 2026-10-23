@@ -12,6 +12,7 @@
 
 import type { EngineClient } from "../engine-client.js";
 import { collectionParentId } from "../variable-origins.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { ToolArgError } from "./kit.js";
 
 /**
@@ -107,8 +108,9 @@ export async function readCascadeScope(
 ): Promise<CascadeScope> {
 	const rows = readCollectionRows(await client.listCollections(signal));
 	const subtree = collectionSubtree(rows, collectionId);
-	if (subtree === null)
-		throw new ToolArgError(`No collection with id "${collectionId}".`, "not_found");
+	if (subtree === null) {
+		throw new ToolArgError(unknownIdText(ID_KINDS.collection, collectionId), "not_found");
+	}
 	const lists = await Promise.all(subtree.map((id) => client.listRequests(id, signal)));
 	const requests = lists.reduce<number>(
 		(total, list) => total + (Array.isArray(list) ? list.length : 0),

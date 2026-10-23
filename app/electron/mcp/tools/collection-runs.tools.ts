@@ -29,6 +29,7 @@ import {
 	watchedRun,
 	withCaveat,
 } from "./kit.js";
+import { ID_KINDS } from "./failure.js";
 import { asMcpSend, composeViaEngine, resolveEnvironmentId } from "./compose.js";
 import {
 	elementsTimersInput,
@@ -365,6 +366,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		category: "execute",
 		retry: "never-blind",
 		invalidates: ["run", "cookie", "variables"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. For a collection bound to an OpenAPI document, pass failOnSchemaError: true to make that contract a gate, as the app's Run Collection checkbox does - off by default, the verdict is reported without deciding pass/fail. A script error in a step does not end its iteration, as in Postman; pass stopOnError: true to end it at every errored step, and read `stepsNotRun` in the report to see what errors cost. Pass `thresholds` to judge the run against pass/fail budgets, the same way a load run can. Sends real traffic and, as the app's Run Collection does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
 		annotations: {

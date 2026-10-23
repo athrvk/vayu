@@ -213,9 +213,12 @@ class CapacitySearch {
     /// The epoch this level's reset request was answered with; 0 until the
     /// level has settled and asked for one.
     uint64_t level_epoch_ = 0;
-    /// The newest tick's level latency under `level_epoch_`.
+    /// The newest tick's level reading under `level_epoch_`.
     size_t level_samples_    = 0;
     double level_p99_ms_     = 0.0;
+    size_t level_completed_  = 0;
+    size_t level_failed_     = 0;
+    double level_error_pct_  = 0.0;
     const char* stop_reason_ = nullptr;
 };
 

@@ -108,6 +108,10 @@ struct ScriptReplay {
     /// fetches belong to the budget sized for a run rather than for a body
     /// someone is watching for.
     size_t max_response_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
+    /// The timeout a `pm.sendRequest` from this script takes without an option
+    /// of its own (#2833): the run's resolved request timeout, read for the
+    /// pass on the same terms as `max_response_bytes`.
+    int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
     /// The route a `pm.sendRequest` from this script leaves by (issue #1256) -
     /// the run's own, carried from `RunContext::transport` rather than resolved
     /// here. A script that authenticates through a proxy the run's transfers
@@ -215,6 +219,7 @@ std::vector<std::string>& failure_messages) {
             script_ctx.iteration          = sample.iteration;
             script_ctx.vu                 = sample.vu;
             script_ctx.max_response_bytes = replay.max_response_bytes;
+            script_ctx.request_timeout_ms = replay.request_timeout_ms;
             script_ctx.transport          = replay.transport;
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
@@ -401,6 +406,7 @@ vayu::http::routes::ScriptVariableScopes& scopes,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 size_t max_response_bytes,
+int request_timeout_ms,
 const vayu::http::TransportPolicy& transport,
 ScriptValidation& validation,
 std::vector<std::string>& failure_messages) {
@@ -451,6 +457,7 @@ std::vector<std::string>& failure_messages) {
         step.name.empty () ? "step " + std::to_string (i + 1) + ": " : step.name + ": ";
         replay.sse_limits         = sse_limits;
         replay.max_response_bytes = max_response_bytes;
+        replay.request_timeout_ms = request_timeout_ms;
         replay.transport          = transport;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
@@ -529,6 +536,10 @@ vayu::db::Database& db) {
     // (issue #1188) - the load bound, because this pass is the load path's.
     const size_t script_response_bound =
     vayu::http::routes::load_response_body_bound (db);
+    // And the timeout those fetches take by default (#2833): the run's own,
+    // resolved as `execute_load_test` resolved it for the run's transfers.
+    const int script_request_timeout_ms =
+    vayu::http::routes::resolve_request_timeout_ms (context->config, db);
     // The route those fetches leave by (issue #1256), and the one value of this
     // pass that is NOT re-read from the database here: it is the snapshot the
     // run's own transfers were sent under, taken at `configure_event_loop` and
@@ -599,12 +610,12 @@ vayu::db::Database& db) {
     std::vector<std::string> failure_messages;
 
     if (per_step) {
-        const ScriptValidationTotals totals =
-        replay_scenario_steps (engine, scopes, context, sse_limits,
-        script_response_bound, script_transport, validation, failure_messages);
-        sampled = totals.sampled;
-        passed  = totals.passed;
-        failed  = totals.failed;
+        const ScriptValidationTotals totals = replay_scenario_steps (engine,
+        scopes, context, sse_limits, script_response_bound,
+        script_request_timeout_ms, script_transport, validation, failure_messages);
+        sampled                             = totals.sampled;
+        passed                              = totals.passed;
+        failed                              = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
         if (sampled == 0) {
             return validation;
@@ -634,6 +645,7 @@ vayu::db::Database& db) {
         replay.request_name       = script_request_name;
         replay.sse_limits         = sse_limits;
         replay.max_response_bytes = script_response_bound;
+        replay.request_timeout_ms = script_request_timeout_ms;
         replay.transport          = script_transport;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
@@ -2835,15 +2847,22 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         size_t requests_expected = context->requests_expected.load ();
         double elapsed_seconds = context->seconds_since_load_start (now_steady_ms);
 
+        // One distribution for the frame's error counts and the level's, so
+        // the capacity search judges a level's errors as the frame reports them.
+        std::map<int, size_t> own_snapshot;
+        const std::map<int, size_t>& statuses = status_snapshot != nullptr ?
+        *status_snapshot :
+        (own_snapshot = mc.status_code_distribution ());
+
         // Before the sample, so a level the capacity search opened since the
         // previous tick starts with this tick's window.
-        mc.adopt_level_epoch (context->requested_level_epoch ());
+        mc.adopt_level_epoch (context->requested_level_epoch (), statuses);
         // Exactly once per tick: it resets the window on read, and folds the
         // window into the open second before that.
         auto window = mc.sample_window_percentiles ();
 
         auto stats = mc.get_current_stats (active_count, elapsed_seconds,
-        requests_sent, requests_expected, status_snapshot, &window);
+        requests_sent, requests_expected, &statuses, &window);
 
         size_t current_total      = stats["totalRequests"].get<size_t> ();
         const WindowReading rates = rate_window.push (
@@ -2886,7 +2905,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Publish the same numbers to the strategies' feedback path, before
         // the SSE payload rather than after: a capacity search polls this every
         // tick, and the serialize-and-append below is the slower half.
-        context->publish_live_tick ({ 0, interval_rps, backpressure, mc.level_latency () });
+        context->publish_live_tick (
+        { 0, interval_rps, backpressure, mc.level_latency (statuses) });
 
         // Framed by the ring, which assigns the id under its own lock: a run
         // with a monitor has a second producer appending to it, and reading the

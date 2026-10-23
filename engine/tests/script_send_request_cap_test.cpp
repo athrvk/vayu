@@ -7,7 +7,8 @@
 
 /**
  * @file tests/script_send_request_cap_test.cpp
- * @brief The bound a script's own fetch reads under (issue #1188).
+ * @brief The bounds a script's own fetch runs under: the byte bound (issue
+ *        #1188) and the request timeout (issue #2833).
  *
  * `pm.sendRequest` builds its own `ClientConfig`, so nothing the enclosing
  * exchange sets on its send reaches it by default - which is how it stayed the
@@ -28,6 +29,8 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -39,6 +42,7 @@
 #include "step_elements_test_helper.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
+#include "timed_out_after.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
@@ -67,7 +71,8 @@ constexpr size_t SERVED_BYTES = size_t{ 64 } * 1024;
 constexpr size_t READ_BOUND = size_t{ 4 } * 1024;
 static_assert (READ_BOUND < SERVED_BYTES, "the bound must cut the fetched body short");
 
-/// Serves one oversized body at `/big`, for a script to fetch.
+/// Serves one oversized body at `/big`, and at `/hang` nothing until the
+/// fixture stops, for a script to fetch.
 class BigBodyServer {
     public:
     BigBodyServer () {
@@ -76,12 +81,20 @@ class BigBodyServer {
         svr_.Get ("/big", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (std::string (SERVED_BYTES, 'x'), "text/plain");
         });
+        svr_.Get ("/hang", [this] (const httplib::Request&, httplib::Response& res) {
+            while (!stopping_.load ()) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            }
+            res.set_content ("{}", "application/json");
+        });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
     }
 
     ~BigBodyServer () {
+        // httplib's stop() waits for a running handler, so /hang lets go first.
+        stopping_.store (true);
         svr_.stop ();
         if (thread_.joinable ()) {
             thread_.join ();
@@ -96,10 +109,15 @@ class BigBodyServer {
         return "http://127.0.0.1:" + std::to_string (port_) + "/big";
     }
 
+    [[nodiscard]] std::string hang_url () const {
+        return "http://127.0.0.1:" + std::to_string (port_) + "/hang";
+    }
+
     private:
     httplib::Server svr_;
     int port_ = 0;
     std::thread thread_;
+    std::atomic<bool> stopping_{ false };
 };
 
 /// What a refused fetch says, which is `too_large_message`'s wording.
@@ -138,6 +156,19 @@ std::string fetch_expecting (const std::string& url, const std::string& expected
     script.replace (script.find ("__EXPECTED__"),
     std::string ("__EXPECTED__").size (), expected);
     return script;
+}
+
+/// A script that fetches @p url and always throws with what came back, so a
+/// replay records the outcome - a timeout's message names the deadline the
+/// fetch ran under - as its failure.
+std::string fetch_reporting (const std::string& url) {
+    return "let outcome = 'the callback never ran'; "
+           "pm.sendRequest('" +
+    url +
+    "', function (err, res) { "
+    "  outcome = err ? err.code + ' ' + err.message : 'answered ' + res.code; "
+    "}); "
+    "throw new Error('the fetch answered: ' + outcome);";
 }
 
 // ============================================================================
@@ -242,10 +273,18 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
      * started by a person carries and an agent-started one does not.
      */
     std::shared_ptr<vayu::core::RunContext> run_expecting (const std::string& expected) const {
-        const json cfg = { { "response_sample_rate", 1 },
-            { "max_response_samples", 10 }, { "allowScriptRequests", true } };
-        auto context   = std::make_shared<vayu::core::RunContext> (RUN_ID, cfg);
-        context->test_script = fetch_expecting (server_->url (), expected);
+        return run_with_script (fetch_expecting (server_->url (), expected));
+    }
+
+    /// The same run with @p script as its `tests` script and @p payload's
+    /// members added to the run's payload.
+    static std::shared_ptr<vayu::core::RunContext>
+    run_with_script (const std::string& script, json payload = json::object ()) {
+        payload["response_sample_rate"] = 1;
+        payload["max_response_samples"] = 10;
+        payload["allowScriptRequests"]  = true;
+        auto context = std::make_shared<vayu::core::RunContext> (RUN_ID, payload);
+        context->test_script = script;
 
         vayu::Response sample;
         sample.status_code     = 200;
@@ -264,6 +303,12 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
      */
     std::shared_ptr<vayu::core::RunContext> step_run_expecting (
     const std::string& expected) const {
+        return step_run_with_script (fetch_expecting (server_->url (), expected));
+    }
+
+    /// The scenario shape with @p script as the step's `tests` script.
+    std::shared_ptr<vayu::core::RunContext> step_run_with_script (
+    const std::string& script) const {
         const json cfg = { { "response_sample_rate", 1 },
             { "max_response_samples", 10 }, { "allowScriptRequests", true } };
         auto context   = std::make_shared<vayu::core::RunContext> (RUN_ID, cfg);
@@ -276,8 +321,7 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
         vayu::core::ScenarioStep step;
         step.index    = 0;
         step.name     = "Fetch";
-        step.elements = vayu::tests::step_elements_with_post_script (
-        fetch_expecting (server_->url (), expected));
+        step.elements = vayu::tests::step_elements_with_post_script (script);
         step.request.method = vayu::HttpMethod::GET;
         step.request.url    = server_->url ();
         execution->plan.steps.push_back (step);
@@ -294,6 +338,13 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
         vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1,
         /*data_row_index=*/std::nullopt });
         return context;
+    }
+
+    /// A setting, set the way the app sets it.
+    void set_config (const std::string& key, int value) {
+        auto [status, body] = vayu::http::routes::apply_config_update (*db_,
+        R"({"entries":{")" + key + R"(":")" + std::to_string (value) + R"("}})");
+        ASSERT_EQ (status, 200) << body.dump ();
     }
 
     /// What the replay recorded, which is where the script's thrown sentence
@@ -348,6 +399,52 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptUnderTheBoundReadsTheWholeB
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << recorded_failure ();
+}
+
+// ============================================================================
+// The load path: the timeout a replayed script's fetch takes (issue #2833)
+// ============================================================================
+
+// The script throws with its fetch's outcome, so the recorded failure carries
+// the deadline the fetch ran under. Healthy: about the run's timeout. Broken:
+// the compiled-in 30 s clamped to the script's 5 s default budget, about
+// 4,990 ms, which is also what bounds a broken build.
+//
+// Mutation-check: drop `script_ctx.request_timeout_ms = replay.request_timeout_ms`
+// from `run_replay`, or the line setting it on the single-request replay in
+// `validate_scripts`, and the fetch reports about 4,990 ms.
+TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchTakesTheRunsTimeout) {
+    const auto validation = vayu::core::validate_scripts (
+    run_with_script (fetch_reporting (server_->hang_url ()), json{ { "timeout", 500 } }), *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    ASSERT_EQ (validation.run->failed, 1u) << recorded_failure ();
+    const std::string failure = recorded_failure ();
+    const auto after_ms       = vayu::tests::timed_out_after_ms (failure);
+    ASSERT_HAS_VALUE (after_ms) << failure;
+    EXPECT_GE (*after_ms, 500) << failure;
+    EXPECT_LT (*after_ms, 2500) << failure;
+}
+
+// The scenario shape threads the timeout through `replay_scenario_steps`, and
+// with no `timeout` in the payload the run's timeout is the `defaultTimeout`
+// setting (its floor is 1000). Mutation-check: drop the line setting it in
+// `replay_scenario_steps`.
+TEST_F (ScriptSendRequestCapLoadTest, AReplayedStepScriptFetchTakesTheDefaultTimeoutSetting) {
+    set_config ("defaultTimeout", 1000);
+
+    const auto validation = vayu::core::validate_scripts (
+    step_run_with_script (fetch_reporting (server_->hang_url ())), *db_);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& step = validation.steps[0];
+    ASSERT_HAS_VALUE (step);
+    ASSERT_EQ (step->failed, 1u) << recorded_failure ();
+    const std::string failure = recorded_failure ();
+    const auto after_ms       = vayu::tests::timed_out_after_ms (failure);
+    ASSERT_HAS_VALUE (after_ms) << failure;
+    EXPECT_GE (*after_ms, 1000) << failure;
+    EXPECT_LT (*after_ms, 2500) << failure;
 }
 
 } // namespace

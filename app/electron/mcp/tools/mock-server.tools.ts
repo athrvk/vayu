@@ -21,6 +21,7 @@ import {
 	requireStr,
 	withCaveat,
 } from "./kit.js";
+import { ID_KINDS } from "./failure.js";
 import { mockActivitySchema, mockRoutesSchema, mockServerListSchema } from "./output-schemas.js";
 import { mockServerCaveat, mockServerStartPayload } from "./mock-server.js";
 
@@ -30,6 +31,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		category: "execute",
 		retry: { check: "list_mock_servers", noun: "mock server" },
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Start a local mock server that answers a collection's saved examples, and return its id and base URL. Use it to stand up the API a client under test expects without that API existing: point the client at the returned url and every request whose method and path match a saved request in the collection gets that request's example back - status, headers and body. A route whose request has no saved example answers 501, and a path that matches nothing answers 404, so the returned routeCount and routesWithoutExample are what say whether the mock is usable; get_mock_routes lists them. latencyMs and errorRatePct are how a client's timeout and retry handling get exercised - errorRatePct injects synthesized 500s at that rate. It needs no allowlist entry: the engine binds every mock to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. Which browser pages may read its answers is separate: by default any page can, without credentials, and allowedOrigins narrows that to the listed origins, with credentials. Stop it with stop_mock_server when you are done; a mock keeps its port until then.",
 		annotations: {
@@ -115,6 +117,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		name: "get_mock_routes",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.mockServer, idArg: "mockId" },
 		description:
 			"List the routes one mock server is serving: method, path template, the saved request behind each, and whether that request has an example (hasExample false means the route answers 501). This is how 'the mock answers 404' gets diagnosed without sending a request per guess. The table is a snapshot taken when the mock started and cannot change under it - editing the collection means restarting the mock - so a second read answers the same thing. Each row also carries `mode` (the request's mockResponseMode), `exampleName` (which saved example it currently answers with, when resolvable), and `hits` (how many times this route has been served since the mock started) - the last one does change under repeated reads, unlike the rest of the table.",
 		annotations: {
@@ -137,6 +140,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		category: "read",
 		retry: "safe",
 		invalidates: [],
+		notFound: { ...ID_KINDS.mockServer, idArg: "mockId" },
 		description: (config) =>
 			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty." +
 			withheldPointer(config, "recorded"),
@@ -171,6 +175,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		name: "stop_mock_server",
 		category: "execute",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.mockServer, idArg: "mockId" },
 		description:
 			"Stop a running mock server and free its port. Unlike a webhook inbox there is nothing left to read afterwards - a mock records nothing, so its record goes with its listener and it disappears from list_mock_servers. Requests sent to the URL after this are refused by the machine. An unknown id is an error, not a silent success.",
 		annotations: {

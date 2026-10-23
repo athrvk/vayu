@@ -31,6 +31,14 @@ class MetricsCollectorTest : public ::testing::Test {
         collector = std::make_unique<MetricsCollector> ("test_run", config);
     }
 
+    /// The producer's level calls, each against the distribution as it stands.
+    void adopt_level (uint64_t epoch) {
+        collector->adopt_level_epoch (epoch, collector->status_code_distribution ());
+    }
+    [[nodiscard]] MetricsCollector::LevelLatency read_level () const {
+        return collector->level_latency (collector->status_code_distribution ());
+    }
+
     std::unique_ptr<MetricsCollector> collector;
 };
 
@@ -458,7 +466,7 @@ TEST_F (MetricsCollectorTest, LevelLatencyIsThePercentileOfTheLevelNotTheMeanOfI
     constexpr int WINDOWS          = 100;
     constexpr int SLOW_EVERY       = 10;
     constexpr int SAMPLES_A_WINDOW = 10;
-    collector->adopt_level_epoch (1);
+    adopt_level (1);
 
     double window_p99_sum = 0.0;
     for (int window = 0; window < WINDOWS; ++window) {
@@ -471,7 +479,7 @@ TEST_F (MetricsCollectorTest, LevelLatencyIsThePercentileOfTheLevelNotTheMeanOfI
     ASSERT_NEAR (window_p99_sum / WINDOWS, 75.0, 0.1)
     << "the fixture is not the bimodal level the issue describes";
 
-    const auto level = collector->level_latency ();
+    const auto level = read_level ();
     EXPECT_EQ (level.epoch, 1u);
     EXPECT_EQ (level.samples, static_cast<size_t> (WINDOWS * SAMPLES_A_WINDOW));
     // HdrHistogram at 3 significant figures holds a value to 0.1%.
@@ -484,17 +492,17 @@ TEST_F (MetricsCollectorTest, LevelLatencyIsThePercentileOfTheLevelNotTheMeanOfI
 // Mutation-check: reset unconditionally in adopt_level_epoch and the first
 // re-adopt fails; drop the reset and the new epoch still holds the old level.
 TEST_F (MetricsCollectorTest, AdoptingANewLevelEpochAndOnlyThatResetsTheLevel) {
-    EXPECT_EQ (collector->level_latency ().samples, 0u);
+    EXPECT_EQ (read_level ().samples, 0u);
     for (int i = 0; i < 10; ++i) {
         collector->record_success (200, 500.0, 0.0);
     }
     (void)collector->sample_window_percentiles ();
-    collector->adopt_level_epoch (0);
-    EXPECT_EQ (collector->level_latency ().samples, 10u)
+    adopt_level (0);
+    EXPECT_EQ (read_level ().samples, 10u)
     << "re-adopting the epoch it holds reset the level";
 
-    collector->adopt_level_epoch (1);
-    const auto fresh = collector->level_latency ();
+    adopt_level (1);
+    const auto fresh = read_level ();
     EXPECT_EQ (fresh.epoch, 1u);
     EXPECT_EQ (fresh.samples, 0u) << "a new epoch kept the previous level";
     EXPECT_DOUBLE_EQ (fresh.p99_ms, 0.0);
@@ -505,10 +513,46 @@ TEST_F (MetricsCollectorTest, AdoptingANewLevelEpochAndOnlyThatResetsTheLevel) {
     (void)collector->sample_window_percentiles ();
     (void)collector->sample_window_percentiles (); // an empty window
     (void)collector->take_second_percentiles ();
-    collector->adopt_level_epoch (1);
-    const auto level = collector->level_latency ();
+    adopt_level (1);
+    const auto level = read_level ();
     EXPECT_EQ (level.samples, 5u);
     EXPECT_NEAR (level.p99_ms, 20.0, 0.02);
+}
+
+// #2815: a level's error share counts from the distribution it was adopted at,
+// so the level before it does not leak in; a refused connection counts though
+// it recorded no latency, and a Stop-cancelled request counts in neither.
+// Mutation-check: drop the baseline in adopt_level_epoch and the fresh level
+// reads the previous level's 10 requests and 3 failures.
+TEST_F (MetricsCollectorTest, LevelCountsStartAtTheAdoptedEpochAndIncludeNoResponseFailures) {
+    for (int i = 0; i < 7; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    for (int i = 0; i < 3; ++i) {
+        collector->record_success (503, 10.0, 0.0);
+    }
+    (void)collector->sample_window_percentiles ();
+    adopt_level (1);
+    const auto fresh = read_level ();
+    EXPECT_EQ (fresh.completed, 0u)
+    << "the previous level leaked into this one";
+    EXPECT_EQ (fresh.failed, 0u);
+    EXPECT_DOUBLE_EQ (fresh.error_pct (), 0.0);
+
+    for (int i = 0; i < 8; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    collector->record_success (503, 10.0, 0.0);
+    collector->record_error (vayu::ErrorCode::ConnectionFailed, "Connection refused");
+    collector->record_cancelled ();
+    (void)collector->sample_window_percentiles ();
+
+    const auto level = read_level ();
+    EXPECT_EQ (level.samples, 9u)
+    << "the refused connection recorded a latency";
+    EXPECT_EQ (level.completed, 10u);
+    EXPECT_EQ (level.failed, 2u);
+    EXPECT_DOUBLE_EQ (level.error_pct (), 20.0);
 }
 
 // ============================================================================

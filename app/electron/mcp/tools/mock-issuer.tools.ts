@@ -13,6 +13,7 @@
 import { z } from "zod";
 import type { McpTool } from "./contract.js";
 import { callEngine, callEngineStructured, requireStr, ToolArgError } from "./kit.js";
+import { ID_KINDS } from "./failure.js";
 import { mockIssuerListSchema } from "./output-schemas.js";
 import {
 	MOCK_ISSUER_FAILURE_MODES,
@@ -119,6 +120,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 		name: "stop_mock_issuer",
 		category: "execute",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.mockIssuer, idArg: "issuerId" },
 		description:
 			"Stop a running OAuth 2.0 mock issuer and free its port. Tokens it already minted stay valid until they expire - nothing verifies them against the issuer once it is gone. An unknown id is an error, not a silent success.",
 		annotations: {
@@ -138,6 +140,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 		name: "update_mock_issuer",
 		category: "execute",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.mockIssuer, idArg: "issuerId" },
 		description:
 			"Change how a running OAuth 2.0 mock issuer's /token endpoint behaves, live: its failure mode and its slow-mode delay. Use it to walk a client through a sequence - mint a token against a healthy issuer, flip it to server_error to see the retry, flip it back - without stopping the issuer, which would invalidate the token URL the request under test is already pointed at and change the signing key. This is a merge-patch: a field you omit keeps its current value. Only these two settings can change under a running issuer; the port, client list, claims and refresh-token setting are fixed when it starts, and asking to change one is an error telling you to start a new issuer.",
 		annotations: {

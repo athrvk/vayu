@@ -17,6 +17,7 @@
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/pkce.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -178,7 +179,9 @@ const std::map<std::string, std::string>& params) {
 
     const std::string code = params.count ("code") ? params.at ("code") : "";
     oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri };
-    auto result = oauth::acquire_token (db, config, false, exchange);
+    // Bounded by the setting: an exchange has no payload to carry a timeout.
+    auto result = oauth::acquire_token (db, config, false, exchange,
+    routes::resolve_request_timeout_ms (nlohmann::json::object (), db));
     if (!std::holds_alternative<vayu::db::OAuthToken> (result)) {
         outcome.error   = std::get<oauth::TokenError> (result).message;
         outcome.heading = "Token exchange failed";
@@ -415,7 +418,9 @@ const std::atomic<bool>* cancel) {
     } else {
         const std::string code = params.count ("code") ? params.at ("code") : "";
         oauth::InteractiveExchange ex{ code, code_verifier, redirect_uri };
-        auto result = oauth::acquire_token (db, config, false, ex, nullptr, cancel); // no lock held
+        auto result = oauth::acquire_token (db, config, false, ex,
+        routes::resolve_request_timeout_ms (nlohmann::json::object (), db), nullptr,
+        cancel); // no lock held
         if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
             result_state = kCompleted;
             cache_key    = oauth::cache_key (config);

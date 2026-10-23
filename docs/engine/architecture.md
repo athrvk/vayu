@@ -1163,8 +1163,8 @@ run end.
 
 ### 5. `capacity` (closed-loop, adaptive)
 
-Steps the concurrency target up while latency holds, and stops itself at the
-knee. It answers "what can this service sustain" without a human bisecting
+Steps the concurrency target up while latency and errors hold, and stops itself
+at the knee. It answers "what can this service sustain" without a human bisecting
 concurrency by hand.
 
 ```json
@@ -1175,11 +1175,16 @@ concurrency by hand.
 Each level is held for `stepDuration`, then judged on its p99 - the percentile of
 every completion sampled after its settle ticks, from one histogram, never a mean
 of 100 ms window percentiles (#2388) - and its mean throughput over the same
-ticks. Healthy levels step up 25% (at least +1); a single
-breaching window **holds** the level and re-measures rather than ending the
-search. The stop reasons are `slo_exceeded` (two consecutive breaching windows),
-`plateau` (two step-ups bought under 5% more throughput), `cap_reached`,
-`deadline` and `stopped`, and the report's `capacity` section names which fired.
+ticks, and on its error share: the requests it completed over those ticks that
+were errors, counted from the same status distribution the live frame reports
+(#2815). A level breaches when its p99 is over `sloMs` or its error share is over
+`constants::capacity::ERROR_RATE_PCT` (1%). Healthy levels step up 25% (at least
++1); a single breaching window **holds** the level and re-measures rather than
+ending the search. The stop reasons are `slo_exceeded` (two consecutive
+breaching windows, the last over `sloMs`), `errors_exceeded` (the same, the last
+inside `sloMs` and over the error limit), `plateau` (two step-ups bought under 5%
+more throughput), `cap_reached`, `deadline` and `stopped`, and the report's
+`capacity` section names which fired.
 
 ### Bounded streams under load
 
@@ -1269,13 +1274,19 @@ the level's last settle tick (`SETTLE_TICKS`) the search bumps
 `RunContext::request_level_reset()`, the metrics thread compares
 `requested_level_epoch()` with the one it holds before sampling each window and
 resets the histogram on a change, and every tick publishes the epoch it applied
-beside the level's p99 and sample count. The search reads only ticks carrying
+beside the level's p99, sample count and the completions and failures counted
+since the same epoch change (#2815). The search reads only ticks carrying
 the epoch it asked for: one produced in between still holds the settle ticks.
 Requesting on the last settle tick rather than when the level opens is what
 keeps the transition out without the metrics thread knowing `SETTLE_TICKS`.
-A level whose histogram holds no sample is not judged and stays open: an empty
-histogram's percentiles are zeros, and reading those as "answered instantly"
-would climb straight past the limit the search exists to find. The controller's
+A level whose histogram holds no sample and that counted no failure is not
+judged and stays open: an empty histogram's percentiles are zeros, and reading
+those as "answered instantly" would climb straight past the limit the search
+exists to find. A counted failure is judged even with no latency behind it (a
+refused connection records none). A level that has samples but has counted no
+completion is not judged either (#2815): the status snapshot the counts are
+taken from can lag the histogram by a tick, and a share of nothing reads as 0%
+errors, which would step a level failing every request up. The controller's
 policy itself lives in
 `core/capacity_controller.hpp` as pure functions over a level history - no clock,
 no collector, no run context - so it is unit-tested without a server.
