@@ -54,6 +54,7 @@ add_executable(vayu_tests
     rate_limit_test.cpp
     metrics_helper_test.cpp
     metrics_collector_test.cpp
+    histogram_ceiling_test.cpp
     execution_trace_test.cpp
     import_route_test.cpp
     diagnostics_route_test.cpp
