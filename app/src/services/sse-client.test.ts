@@ -85,6 +85,58 @@ describe("mapSseMetrics", () => {
 		expect(m.cumulative_p99_ms).toBeNull();
 	});
 
+	describe("the gate frame's run-so-far distributions (issue #2782)", () => {
+		const latency = {
+			minMs: 1,
+			p50Ms: 5,
+			p75Ms: 8,
+			p90Ms: 12,
+			p95Ms: 20,
+			p99Ms: 40,
+			p999Ms: 90,
+			maxMs: 120,
+			count: 600,
+		};
+		const phase = { meanMs: 0.5, p50Ms: 0.4, p95Ms: 1, p99Ms: 2, count: 600 };
+		const phases = {
+			dns: phase,
+			connect: phase,
+			tls: phase,
+			firstByte: { ...phase, meanMs: 3.1 },
+			download: phase,
+		};
+
+		it("passes both objects through as sent", () => {
+			const m = mapSseMetrics({
+				timestamp: 1,
+				cumulativeLatency: latency,
+				cumulativePhases: phases,
+			});
+			expect(m.cumulative_latency).toEqual(latency);
+			expect(m.cumulative_phases).toEqual(phases);
+		});
+
+		it("keeps a null as null: nothing has completed yet, not a measured zero", () => {
+			const m = mapSseMetrics({
+				timestamp: 1,
+				cumulativeLatency: null,
+				cumulativePhases: null,
+			});
+			expect(m.cumulative_latency).toBeNull();
+			expect(m.cumulative_phases).toBeNull();
+		});
+
+		it("keeps an absent key undefined: not a gate frame, or the phase histograms are off", () => {
+			const off = mapSseMetrics({ timestamp: 1, cumulativeLatency: latency });
+			expect(off.cumulative_latency).toEqual(latency);
+			expect(off.cumulative_phases).toBeUndefined();
+
+			const between = mapSseMetrics({ timestamp: 1 });
+			expect(between.cumulative_latency).toBeUndefined();
+			expect(between.cumulative_phases).toBeUndefined();
+		});
+	});
+
 	it("keeps a window with no completion as null percentiles, not 0 ms (issue #2386)", () => {
 		// As the engine sends it, `latencySamples` included, which the app does not read.
 		const frame = {
