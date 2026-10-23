@@ -1495,7 +1495,7 @@ afterwards inherit, and there is no pass over existing files.
 
 ### Workspace backups
 
-`vayu.db` holds everything a person has built - collections, environments,
+`vayu.db` holds what a person has built - collections, requests, environments,
 stored credentials and run history - and until issue #987 there was no copy of
 it the user controlled. The `.bak` beside it is **not** one: it is rewritten
 once the engine listens and again at a clean shutdown, so it exists to give a
@@ -1506,7 +1506,9 @@ corrupt file something to restore from, not to let anyone go back to last week.
 the engine is working: copying `vayu.db` by hand is not, because the `-wal`
 beside it holds committed transactions the main file does not, so the copy is a
 database missing its most recent writes. `VACUUM INTO` reads one consistent
-snapshot and writes a defragmented database that is complete on its own.
+snapshot and writes a defragmented database that is complete on its own. That
+is the whole of what a backup holds: the database, and nothing the app keeps
+for itself ([below](#what-a-backup-does-not-hold)).
 
 Names are UTC and fixed-width so they sort chronologically as text. After each
 backup the newest `maxBackupsRetained` snapshots are kept (default 5, `0` =
@@ -1534,6 +1536,39 @@ Restore by hand, with the engine stopped.
    belong to the database you just replaced, and leaving them behind reapplies
    its writes on top of the snapshot.
 4. Start Vayu again.
+
+The tabs and file bindings the app keeps for itself are not in the snapshot, so
+after a restore the tabs come back empty and every collection's bound spec file
+and data file is unbound (see below). The collections, requests and
+environments are all there.
+
+#### What a backup does not hold
+
+The snapshot is `vayu.db`. The app keeps some state outside it, in two places
+the engine never sees, and a restore does not bring either back:
+
+- **The renderer's `localStorage`** (keys in `app/src/constants/storage-keys.ts`):
+  open tabs (`vayu.tabs`), the active environment and collection
+  (`vayu.session`), shell layout (`vayu.layout`), the location of each
+  collection's bound spec document (`vayu.spec-files`) and data file
+  (`vayu.data-files`), the last load-test configuration
+  (`vayu:lastLoadTestConfig`), which inboxes may notify (`vayu.inbox-notify`),
+  client settings (`vayu.client-settings`), the host-sleep intervals recorded
+  under a run (`vayu.host-sleeps`), the recovery notice already seen
+  (`vayu.recovery-notice`) and the appearance preferences (`vayu-theme-source`,
+  `vayu-color-scheme` and the other `vayu-ui-*` keys).
+- **Three JSON files under the Electron `userData` folder**
+  (`app/electron/json-store.ts`): `window-state.json` (window size and
+  position), `response-cache-clear.json` (the version that last cleared the
+  response cache) and `mcp-config.json` (the MCP allowlist, caps and on/off
+  switch).
+
+What a restore costs on the app side: the Spec tab cannot re-read its bound
+file and the Data tab's file binding is gone, until each is picked again; saved
+load-test values, notification opt-ins and open tabs reset; and the MCP
+allowlist and caps come back at their locked-down defaults, the safe direction.
+A spec document's text and a collection's binding to it are in the database and
+survive; only the file *location* on this machine does not.
 
 **Going back to an older Vayu.** An older engine refuses a workspace a newer
 one migrated. The `vayu-<stamp>-pre-v<N>.db` the update saved is the workspace

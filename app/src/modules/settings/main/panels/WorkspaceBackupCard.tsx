@@ -11,12 +11,14 @@
  * One button that asks the engine for a snapshot of the workspace, and the path
  * it wrote (issue #987).
  *
- * Everything a person has built in Vayu - collections, environments, stored
+ * What a person has built in Vayu - collections, environments, stored
  * credentials, run history - lives in one SQLite file, and until this there was
- * no copy of it the user controlled. The `.bak` the engine keeps is not one: it
- * is overwritten once the engine listens and again at a clean shutdown, and
- * exists so a corrupt file has something to restore from, not so someone can go
- * back to last week.
+ * no copy of it the user controlled. Tabs, bound file locations and the other
+ * app-side state are outside that file, so outside the copy
+ * (`docs/engine/architecture.md#what-a-backup-does-not-hold`). The `.bak` the
+ * engine keeps is not one: it is overwritten once the engine listens and again
+ * at a clean shutdown, and exists so a corrupt file has something to restore
+ * from, not so someone can go back to last week.
  *
  * It sits in General beside Data management and Storage paths, because this is
  * engine-held state the user did not type - the same reason CookiesCard is
@@ -101,9 +103,11 @@ export function WorkspaceBackupCard() {
 					<CardTitle>{WORKSPACE_BACKUP.label}</CardTitle>
 				</div>
 				<CardDescription>
-					Writes a complete, compacted copy of the database - collections, environments,
-					credentials and run history - into a backups folder beside it. Safe to run while
-					Vayu is working; copying the database file by hand is not.
+					A compacted copy of the database - collections, requests, environments,
+					credentials and run history - saved into a backups folder beside it. Tabs, bound
+					spec and data file locations, saved load-test values and MCP settings live in
+					the app and are not in it. Safe to run while Vayu is working; copying the
+					database file by hand is not.
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">

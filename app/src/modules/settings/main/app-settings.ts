@@ -104,7 +104,7 @@ export const APP_SETTINGS = [
 		anchor: "workspace-backup",
 		panel: "general",
 		label: "Backup",
-		searchText: "Take a complete copy of the database and show where the snapshot was written.",
+		searchText: "Take a copy of the database and show where the snapshot was written.",
 		keywords: ["backup", "snapshot", "restore", "export database", "copy"],
 	},
 	{

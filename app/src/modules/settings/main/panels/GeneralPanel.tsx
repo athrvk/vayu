@@ -297,7 +297,7 @@ export default function GeneralPanel() {
 				</CardContent>
 			</Card>
 
-			{/* A copy of the whole workspace the user controls (#987). Beside
+			{/* A copy of the database the user controls (#987). Beside
 			    Data management because it answers the question that card
 			    raises - what happens to all this if the file is lost - and
 			    above Storage paths, which prints the database it copies. */}
