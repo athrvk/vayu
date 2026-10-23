@@ -113,6 +113,7 @@ const TOKEN_CLASS: Record<string, string> = {
 	resolved: "vayu-variable-token-resolved",
 	empty: "vayu-variable-token-empty",
 	undefined: "vayu-variable-token-undefined",
+	deferred: "vayu-variable-token-deferred",
 	"runtime-muted": "vayu-variable-token-runtime",
 	"runtime-warning": "vayu-variable-token-warning",
 };

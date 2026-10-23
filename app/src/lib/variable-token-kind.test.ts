@@ -108,6 +108,51 @@ describe("classifyVariableToken", () => {
 	});
 });
 
+describe("a name the engine defers (#2741)", () => {
+	const deferredVariables = ["token"];
+
+	it.each([
+		["a stored value", variable("abc")],
+		["an empty value", variable("")],
+		["no definition", null],
+	])("outranks resolved, empty and undefined: %s", (_label, stored) => {
+		const kind = classifyVariableToken("token", {
+			variables: stored ? { token: stored } : {},
+			deferredVariables,
+		});
+		expect(kind.state).toBe("deferred");
+		if (kind.state === "runtime") return;
+		// The stored definition rides along so the popover can still edit it.
+		expect(kind.info).toEqual(stored);
+	});
+
+	it("paints only the names listed", () => {
+		const context = { variables: { token: variable("abc"), host: variable("h") } };
+		expect(classifyVariableToken("host", { ...context, deferredVariables }).state).toBe(
+			"resolved"
+		);
+	});
+
+	it.each([undefined, []])("changes nothing when the list is %j", (list) => {
+		const kind = classifyVariableToken("token", {
+			variables: { token: variable("abc") },
+			deferredVariables: list,
+		});
+		expect(kind.state).toBe("resolved");
+	});
+
+	it("leaves the reserved namespaces to their own rungs", () => {
+		const kind = classifyVariableToken("$vu", { variables: {}, deferredVariables: ["$vu"] });
+		expect(kind.state).toBe("runtime");
+	});
+
+	it("reaches a script's merged read, and not an accessor's own scope", () => {
+		const context = { variables: { token: variable("abc") }, deferredVariables };
+		expect(classifyScriptToken("token", undefined, context).state).toBe("deferred");
+		expect(classifyScriptToken("token", { via: "bare" }, context).state).toBe("runtime");
+	});
+});
+
 describe("classifyScriptToken", () => {
 	it("falls through to the merged ladder with no hint - pm.variables.get and replaceIn", () => {
 		const kind = classifyScriptToken("baseUrl", undefined, {

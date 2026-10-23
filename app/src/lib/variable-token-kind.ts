@@ -10,7 +10,9 @@
  *
  * The reserved namespaces first (`data.*`, then `$vu` / `$iteration`), then a
  * bare name a bound row answers, then the generator table, then the scopes.
- * The order is load-bearing and documented in `docs/app/COMPONENTS.md`: a scope
+ * A name the engine defers past a pre-request script (#2741) comes right after
+ * the reserved namespaces, ahead of the scopes: its stored value is not what is
+ * sent. The order is load-bearing and documented in `docs/app/COMPONENTS.md`: a scope
  * that defines `$guid` wins and takes the editable token, while a variable
  * someone named `data.email` or `$vu` answers for neither the column nor the
  * identity and must not paint as though it had.
@@ -70,9 +72,15 @@ export interface RuntimeToken {
  * defines. `info` is the winning definition, `null` when the name resolves to
  * nothing - which is what separates the two paints and what decides whether the
  * popover edits or offers to create.
+ *
+ * `deferred` is a stored variable whose value a pre-request script may replace
+ * before the send (#2521, #2741): `info` is still the stored definition - the
+ * popover edits it - but it is not what will be sent, so it is neither
+ * `resolved` nor `empty`. The engine decides which names; see
+ * {@link VariableTokenContext.deferredVariables}.
  */
 export interface ScopedVariableToken {
-	state: "resolved" | "empty" | "undefined";
+	state: "resolved" | "empty" | "undefined" | "deferred";
 	info: ResolvedVariable | null;
 }
 
@@ -92,6 +100,13 @@ export interface VariableTokenContext {
 	 * existing body-language callers, and `variable-token-kind.test.ts`).
 	 */
 	getVariableOrigins?: (name: string) => VariableOrigin[];
+	/**
+	 * The names `POST /compose` left written because a pre-request script runs
+	 * before the send (`deferredVariables`, #2521). Only ever the engine's
+	 * answer: whether a request is scripted is its rule, and this module holds
+	 * no copy of it. Absent or empty paints every token as it always did.
+	 */
+	deferredVariables?: readonly string[];
 }
 
 /**
@@ -192,7 +207,7 @@ export function classifyScriptToken(
  */
 export function classifyVariableToken(
 	name: string,
-	{ variables, dataColumns }: VariableTokenContext
+	{ variables, dataColumns, deferredVariables }: VariableTokenContext
 ): VariableTokenKind {
 	// The reserved data namespace, read before the scopes: it is disjoint from
 	// them, so a variable named `data.email` never answers for the column.
@@ -213,6 +228,11 @@ export function classifyVariableToken(
 	}
 
 	const info = variables[name];
+
+	// The engine says a pre-request script may change this name before the send,
+	// so the stored value is not what is sent: neither resolved nor empty nor
+	// undefined, whatever the scopes hold.
+	if (deferredVariables?.includes(name)) return { state: "deferred", info: info ?? null };
 
 	// A bare name no scope defines, which a bound row's column answers (#1007).
 	// A scope that *does* define it keeps painting as that variable.

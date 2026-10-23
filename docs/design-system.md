@@ -1861,14 +1861,15 @@ keyboard-only feature defeats the point of the key.
 outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
 `text-muted-foreground` / `text-destructive-text` for resolved, empty and
 undefined; Monaco draws its own text, so the same three colours (plus
-`text-muted-foreground` for a run-time token and `text-warning-text` for a
-`data.*` column no contract declares) are declared in `index.css` as five
-global classes its decorations can name - `vayu-variable-token-*`, under a
+`text-muted-foreground` for a run-time token, `text-warning-text` for a
+`data.*` column no contract declares, and `text-muted-foreground` with a dashed
+underline for a name a pre-request script sets, #2741) are declared in
+`index.css` as six global classes its decorations can name - `vayu-variable-token-*`, under a
 `.monaco-editor` prefix so they outrank the theme rules Monaco injects at
 runtime. They are the one place a global class is the right answer rather than
 a utility string, for the same reason the scrollbar block is: no component
 stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is
-the sixth, `vayu-time-token`: a dotted underline in `--muted-foreground`
+the seventh, `vayu-time-token`: a dotted underline in `--muted-foreground`
 rather than a colour, so the language's own token colour still reads under it.
 → `variable-token-classes.test.ts`
 

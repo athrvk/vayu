@@ -91,6 +91,16 @@ export interface VariableSupport {
 	 * before this member, and surfaces with no scope), and the text is shown as is.
 	 */
 	maskSecrets?: (text: string) => string;
+	/**
+	 * The names `POST /compose` left written because a pre-request script runs
+	 * before the send (`deferredVariables`, #2521, #2741). A token naming one is
+	 * not painted as the stored value it holds: that is not what will be sent.
+	 *
+	 * Only ever the engine's answer; the renderer has no rule of its own for
+	 * which requests are scripted. Optional: absent (every scope with no request
+	 * to compose, and every consumer built before this member) paints as it did.
+	 */
+	deferredVariables?: readonly string[];
 }
 
 /**
