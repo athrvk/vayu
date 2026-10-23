@@ -97,8 +97,16 @@ const updateCollection = {
 	isError: false,
 	error: null as Error | null,
 };
+/** How the bound file is read: a write of its own, built when it is sent. */
+const readingUpdate = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => updateCollection,
+	useDataFileReadingMutation: () => readingUpdate,
 }));
 
 /**
@@ -188,6 +196,7 @@ beforeEach(() => {
 	designHeaders = [];
 	loadHeaders = [];
 	updateCollection.mutate.mockReset();
+	readingUpdate.mutate.mockReset();
 	updateCollection.isPending = false;
 	updateCollection.isError = false;
 	updateCollection.error = null;
@@ -1788,13 +1797,12 @@ describe("a pick declares the contract (issue #2050)", () => {
 		// `dataFileCastNumbers` from `buildLoadTestConfig` and this fails.
 		expect(config.dataFileCastNumbers).toBe(true);
 		// Mutation check: drop `writer.rememberReading` from `changeReading`
-		// and the next pre-fill reads the file as text. The binding alone, no
-		// `dataSchema`: how a value is read declares nothing.
-		expect(updateCollection.mutate).toHaveBeenCalledTimes(1);
-		expect(updateCollection.mutate.mock.calls[0][0]).toEqual({
-			id: "col_1",
-			dataFile: expect.objectContaining({ path: "/home/u/plans.csv", castNumbers: true }),
-		});
+		// and the next pre-fill reads the file as text. The reading alone, no
+		// contract write: how a value is read declares nothing.
+		expect(readingUpdate.mutate.mock.calls).toEqual([
+			[{ id: "col_1", path: "/home/u/plans.csv", castNumbers: true }],
+		]);
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
 	});
 
 	it("Read numbers as numbers lives in the selection for a request in no collection", async () => {

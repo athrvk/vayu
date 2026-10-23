@@ -398,9 +398,20 @@ republishes nothing. A reader that holds the `Collection` (the Data tab) reads
 // useDataContractWriter: the binding rides the same PUT as the columns
 mutate({ id, dataSchema: { columns, declaredAt, fileName }, dataFile: { path, fileName, hash, castNumbers } });
 mutate({ id, dataSchema: null, dataFile: null });          // Clear / Remove
-mutate({ id, dataFile: { ...bound, castNumbers } });       // rememberReading
+// useDataFileReadingMutation: the binding is built when the write is sent
+mutateReading({ id, path, castNumbers });                  // rememberReading
 recordDataFileHash(path, hash);  // queries/file-bindings.ts: every binding at that path whose hash moved
 ```
+
+**A collection's binding writes go out one at a time** (`queries/file-bindings.ts`).
+The engine replaces a binding object whole, so a hash write built from the
+binding before a pick or a toggle landed would put the old one back. Every
+update that carries `specFile` or `dataFile` waits for the same collection's
+earlier binding writes (`writeFileBinding`, which the update hook routes them
+through, and which stores the answered row itself); the two that change one
+member of the binding - a re-read's hash and a toggle's `castNumbers` - are
+built from the store only once those have landed (`reviseDataFileBinding`), and
+send nothing if the binding no longer names their file by then.
 
 **Persistence:** none here; the engine row.
 
@@ -463,7 +474,7 @@ text, `true` reads an unquoted integer or decimal as a number. It describes
 pick) and Remove takes it with the path. Toggling the checkbox writes it
 through `useDataContractWriter`'s `rememberReading`, a binding-only update
 that is sent only while the binding still names the toggled file's path and
-reads it the other way; a hash refresh keeps it. Every re-read
+reads it the other way when the write goes out; a hash refresh keeps it. Every re-read
 (`readDeclaredDataFile`, which requires the flag) parses with it, so the Run
 dialog's pre-fill, the load dialog's, Send-with-row and the Data tab all read
 the file the way the user last chose. A run sends it beside the rows as
@@ -1937,9 +1948,13 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
   the collections list and seeds the new collection's request list with `[]`,
   so the tree mounting it makes no list call and no other list refetches
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update,
-  `storeUpdatedCollection`). Invalidates every cached composition unless the
-  update carries only `specFile` / `dataFile`, which nothing composes against
-  (#2765)
+  `storeUpdatedCollection`). An update carrying `specFile` / `dataFile` goes
+  through `writeFileBinding`, behind the collection's earlier binding writes.
+  Invalidates every cached composition unless the update carries only
+  `specFile` / `dataFile`, which nothing composes against (#2765)
+- **`useDataFileReadingMutation()`** - Change how a bound data file is read
+  (`castNumbers`, #2540) through `rememberDataFileReading`, the binding built
+  when the write is sent
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
   also invalidates the trash list so the Trash view picks it up. It writes no

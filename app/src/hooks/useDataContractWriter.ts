@@ -20,7 +20,8 @@
 
 import { useCallback } from "react";
 
-import { useUpdateCollectionMutation } from "@/queries/collections";
+import { useDataFileReadingMutation, useUpdateCollectionMutation } from "@/queries/collections";
+import { readsDifferently } from "@/queries/file-bindings";
 import { useDataFileStore } from "@/stores";
 import type { DataFileLocation } from "@/types";
 import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
@@ -47,7 +48,10 @@ export interface DataContractWriter {
  *        contract to declare, and a pick there stays a plain run input.
  */
 export function useDataContractWriter(collectionId: string | null | undefined): DataContractWriter {
-	const { mutate, isPending, isError, error } = useUpdateCollectionMutation();
+	const contract = useUpdateCollectionMutation();
+	const reading = useDataFileReadingMutation();
+	const { mutate } = contract;
+	const { mutate: mutateReading } = reading;
 
 	const declare = useCallback(
 		(file: SelectedDataFile) => {
@@ -78,17 +82,23 @@ export function useDataContractWriter(collectionId: string | null | undefined): 
 		(file: SelectedDataFile) => {
 			if (!collectionId || !file.path) return;
 			const castNumbers = file.parsed.castNumbers;
-			// Only while the binding still names this file: a toggle on a file
-			// the binding no longer holds (its declare failed, or it had no path)
-			// must not re-describe the file that is bound.
+			// Checked again when the write is sent; this keeps a toggle that
+			// changes nothing from becoming a pending write.
 			const bound = useDataFileStore.getState().locations[collectionId];
-			if (bound?.path !== file.path || (bound.castNumbers ?? false) === castNumbers) return;
-			mutate({ id: collectionId, dataFile: { ...bound, castNumbers } });
+			if (!readsDifferently(bound, file.path, castNumbers)) return;
+			mutateReading({ id: collectionId, path: file.path, castNumbers });
 		},
-		[collectionId, mutate]
+		[collectionId, mutateReading]
 	);
 
-	return { declare, clear, rememberReading, isPending, isError, error };
+	return {
+		declare,
+		clear,
+		rememberReading,
+		isPending: contract.isPending || reading.isPending,
+		isError: contract.isError || reading.isError,
+		error: contract.error ?? reading.error,
+	};
 }
 
 /**

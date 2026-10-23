@@ -80,8 +80,16 @@ const updateCollection = {
 	isError: false,
 	error: null as Error | null,
 };
+/** How the bound file is read: a write of its own, built when it is sent. */
+const readingUpdate = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => updateCollection,
+	useDataFileReadingMutation: () => readingUpdate,
 }));
 
 /**
@@ -89,7 +97,8 @@ vi.mock("@/queries/collections", () => ({
  * that writes is `file-bindings.test.ts`'s; here it only has to be asked.
  */
 const recordDataFileHash = vi.fn();
-vi.mock("@/queries/file-bindings", () => ({
+vi.mock("@/queries/file-bindings", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries/file-bindings")>()),
 	recordDataFileHash: (...args: unknown[]) => recordDataFileHash(...args),
 }));
 
@@ -119,6 +128,7 @@ beforeEach(() => {
 	requestsByCollection.clear();
 	mutate.mockClear();
 	updateCollection.mutate.mockReset();
+	readingUpdate.mutate.mockReset();
 	updateCollection.isPending = false;
 	updateCollection.isError = false;
 	updateCollection.error = null;
@@ -1191,19 +1201,11 @@ describe("pre-filling from the declared data file", () => {
 
 		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada", id: 1 }]);
 		// Mutation check: drop `writer.rememberReading` and the next pre-fill
-		// reads the file as text again. The binding alone, no `dataSchema`.
-		expect(updateCollection.mutate.mock.calls).toEqual([
-			[
-				{
-					id: "col_1",
-					dataFile: {
-						path: "/home/u/users.csv",
-						fileName: "users.csv",
-						castNumbers: true,
-					},
-				},
-			],
+		// reads the file as text again. The reading alone, no contract write.
+		expect(readingUpdate.mutate.mock.calls).toEqual([
+			[{ id: "col_1", path: "/home/u/users.csv", castNumbers: true }],
 		]);
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
 		// Not a pick: the pre-fill's one-pass-per-row stands.
 		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty("value", "");
 	});

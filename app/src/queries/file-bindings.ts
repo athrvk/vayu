@@ -26,8 +26,8 @@ import { logError } from "@/errors/error-logger";
 import { queryClient as appQueryClient } from "@/lib/query-client";
 import { useDataFileStore } from "@/stores/data-file-store";
 import { useSpecFileStore } from "@/stores/spec-file-store";
-import type { Collection, UpdateCollectionRequest } from "@/types";
-import { storeUpdatedCollection } from "./collections";
+import type { Collection, DataFileLocation, UpdateCollectionRequest } from "@/types";
+import { compareTreeOrder } from "@/types";
 import { queryKeys } from "./keys";
 
 /** Whether two locations name the same file the same way, member by member. */
@@ -97,22 +97,122 @@ export function installFileBindingMirror(queryClient: QueryClient): () => void {
 	});
 }
 
+/**
+ * Put a row the engine answered for a write into the collections list, in tree
+ * order: the one cache write through which a binding reaches the stores. The
+ * collection update hook stores every other answer through it too.
+ */
+export function storeUpdatedCollection(queryClient: QueryClient, updated: Collection): void {
+	queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
+		const next = old?.map((c) => (c.id === updated.id ? updated : c)) ?? [];
+		return next.sort(compareTreeOrder);
+	});
+}
+
 /** A collection update that carries a file binding and nothing else. */
 export type FileBindingUpdate = Pick<UpdateCollectionRequest, "id" | "specFile" | "dataFile">;
 
+/** Whether @p update writes a spec-file or data-file binding. */
+export function carriesFileBinding(update: UpdateCollectionRequest): boolean {
+	return "specFile" in update || "dataFile" in update;
+}
+
 /**
- * Write a binding outside a mutation hook - a re-read's hash, the one-time
- * import - and put the answered row in @p queryClient's list, which is what
- * reaches the stores. Rejects with the engine's error; the caller decides
- * whether a failure is the user's to see.
+ * Each collection's last binding write, settled either way. The engine replaces
+ * a binding object whole, so two writes in flight land in whichever order it
+ * answers them, and a write built from the binding before an earlier one landed
+ * puts the earlier binding back.
  */
-export async function writeFileBinding(
+const bindingWriteTails = new Map<string, Promise<void>>();
+
+/** Run @p send once collection @p id's earlier binding writes have landed and been stored. */
+function afterEarlierBindingWrites<T>(id: string, send: () => Promise<T>): Promise<T> {
+	const result = (bindingWriteTails.get(id) ?? Promise.resolve()).then(send);
+	const tail = result.then(
+		() => undefined,
+		() => undefined
+	);
+	bindingWriteTails.set(id, tail);
+	void tail.then(() => {
+		if (bindingWriteTails.get(id) === tail) bindingWriteTails.delete(id);
+	});
+	return result;
+}
+
+async function sendAndStore(
 	queryClient: QueryClient,
-	update: FileBindingUpdate
+	update: UpdateCollectionRequest
 ): Promise<Collection> {
 	const updated = await apiService.updateCollection(update);
 	storeUpdatedCollection(queryClient, updated);
 	return updated;
+}
+
+/**
+ * Write a collection update that carries a binding - a pick, a Remove, the
+ * one-time import - after that collection's earlier binding writes, and put
+ * the answered row in @p queryClient's list, which is what reaches the stores.
+ * Rejects with the engine's error; the caller decides whether a failure is the
+ * user's to see.
+ */
+export function writeFileBinding(
+	queryClient: QueryClient,
+	update: UpdateCollectionRequest
+): Promise<Collection> {
+	return afterEarlierBindingWrites(update.id, () => sendAndStore(queryClient, update));
+}
+
+/**
+ * Rewrite collection @p id's data-file binding as @p revise answers it, built
+ * from the binding as it stands once every earlier binding write has landed -
+ * never from the one a caller saw before sending. Answers `undefined`, and
+ * sends nothing, when there is no binding then or @p revise answers
+ * `undefined` for it (the binding moved to another file, or already says it).
+ * The binding is read off the store, so @p queryClient is the client
+ * {@link installFileBindingMirror} follows, as it is in the app.
+ */
+export function reviseDataFileBinding(
+	queryClient: QueryClient,
+	id: string,
+	revise: (bound: DataFileLocation) => DataFileLocation | undefined
+): Promise<Collection | undefined> {
+	return afterEarlierBindingWrites(id, async () => {
+		const bound = useDataFileStore.getState().locations[id];
+		const dataFile = bound && revise(bound);
+		return dataFile ? sendAndStore(queryClient, { id, dataFile }) : undefined;
+	});
+}
+
+/** A change of how collection `id`'s bound file at `path` is read (#2540). */
+export interface DataFileReading {
+	id: string;
+	path: string;
+	castNumbers: boolean;
+}
+
+/**
+ * Write @p reading's `castNumbers` onto the binding, only while it still
+ * names that file and reads it otherwise: a toggle on a file the binding no
+ * longer holds (its declare failed, or it had no path) must not re-describe
+ * the file that is bound. Built from the binding at send time, so a hash
+ * write that landed first is kept rather than put back.
+ */
+export function rememberDataFileReading(
+	queryClient: QueryClient,
+	{ id, path, castNumbers }: DataFileReading
+): Promise<Collection | undefined> {
+	return reviseDataFileBinding(queryClient, id, (bound) =>
+		readsDifferently(bound, path, castNumbers) ? { ...bound, castNumbers } : undefined
+	);
+}
+
+/** Whether @p bound names the file at @p path and reads it other than @p castNumbers says. */
+export function readsDifferently(
+	bound: DataFileLocation | undefined,
+	path: string,
+	castNumbers: boolean
+): boolean {
+	return bound?.path === path && (bound.castNumbers ?? false) !== castNumbers;
 }
 
 /**
@@ -121,8 +221,10 @@ export async function writeFileBinding(
  * file whose bytes changed changed for every collection bound to it.
  *
  * Written only where the hash moved, so re-reading an unchanged file writes
- * nothing. A failed write is logged, not shown: the read it rode on
- * succeeded, and the next read of the file tries again.
+ * nothing, and only while the binding still names `path` when the write is
+ * sent: a pick that landed first named another file. A failed write is
+ * logged, not shown: the read it rode on succeeded, and the next read of the
+ * file tries again.
  */
 export function recordDataFileHash(
 	path: string,
@@ -130,14 +232,16 @@ export function recordDataFileHash(
 	queryClient: QueryClient = appQueryClient
 ): void {
 	if (!DATA_FILE_HASH_PATTERN.test(hash)) return;
+	const measures = (bound: DataFileLocation) => bound.path === path && bound.hash !== hash;
 	for (const [id, location] of Object.entries(useDataFileStore.getState().locations)) {
-		if (location.path !== path || location.hash === hash) continue;
-		writeFileBinding(queryClient, { id, dataFile: { ...location, hash } }).catch(
-			(error: unknown) =>
-				logError(error instanceof Error ? error : new Error(String(error)), "low", {
-					component: "renderer",
-					action: "record-data-file-hash",
-				})
+		if (!measures(location)) continue;
+		reviseDataFileBinding(queryClient, id, (bound) =>
+			measures(bound) ? { ...bound, hash } : undefined
+		).catch((error: unknown) =>
+			logError(error instanceof Error ? error : new Error(String(error)), "low", {
+				component: "renderer",
+				action: "record-data-file-hash",
+			})
 		);
 	}
 }

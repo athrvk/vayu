@@ -17,6 +17,13 @@ import { useCallback, useMemo } from "react";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
 import { invalidateCompositions } from "./compose-invalidation";
+import {
+	carriesFileBinding,
+	rememberDataFileReading,
+	storeUpdatedCollection,
+	writeFileBinding,
+	type DataFileReading,
+} from "./file-bindings";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
@@ -390,19 +397,6 @@ export function useCreateCollectionMutation() {
 	});
 }
 
-/**
- * Put a row the engine answered for a write into the collections list, in tree
- * order. Shared by the collection update and the file-binding writes made
- * outside it (`queries/file-bindings.ts`), so a binding written either way
- * reaches `useFileBindingMirror` through the one cache write.
- */
-export function storeUpdatedCollection(queryClient: QueryClient, updated: Collection): void {
-	queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
-		const next = old?.map((c) => (c.id === updated.id ? updated : c)) ?? [];
-		return next.sort(compareTreeOrder);
-	});
-}
-
 /** The fields a collection update can carry that no request composes against. */
 const FILE_BINDING_FIELDS: ReadonlySet<string> = new Set(["id", "specFile", "dataFile"]);
 
@@ -423,13 +417,31 @@ export function useUpdateCollectionMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
+		// A binding write waits for the collection's earlier ones and stores its
+		// own answer (`writeFileBinding`); storing it again here could put back a
+		// row a later binding write has already replaced.
+		mutationFn: (data: UpdateCollectionRequest) =>
+			carriesFileBinding(data)
+				? writeFileBinding(queryClient, data)
+				: apiService.updateCollection(data),
 		onSuccess: (updatedCollection, update) => {
-			storeUpdatedCollection(queryClient, updatedCollection);
+			if (!carriesFileBinding(update)) storeUpdatedCollection(queryClient, updatedCollection);
 			// A collection's auth, headers, scripts and variables are what every
 			// descendant request composes against.
 			if (!changesOnlyFileBindings(update)) invalidateCompositions(queryClient);
 		},
+	});
+}
+
+/**
+ * Change how a collection's bound data file is read (`rememberDataFileReading`).
+ * Apart from {@link useUpdateCollectionMutation} because its binding is built
+ * when the write is sent, not when it is asked for.
+ */
+export function useDataFileReadingMutation() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (reading: DataFileReading) => rememberDataFileReading(queryClient, reading),
 	});
 }
 

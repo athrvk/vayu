@@ -46,8 +46,17 @@ const mutation = {
 	error: null as Error | null,
 };
 
+/** How the bound file is read: a write of its own, built when it is sent. */
+const readingMutation = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
+	useDataFileReadingMutation: () => readingMutation,
 }));
 
 /**
@@ -114,6 +123,7 @@ function succeed() {
 beforeEach(() => {
 	configEntries.length = 0;
 	mutation.mutate.mockClear();
+	readingMutation.mutate.mockClear();
 	mutation.isPending = false;
 	mutation.isError = false;
 	mutation.error = null;
@@ -401,19 +411,11 @@ describe("the remembered file", () => {
 		fireEvent.click(await screen.findByRole("checkbox", { name: /Read numbers as numbers/ }));
 
 		expect(screen.getByRole("cell", { name: "7" })).toBeTruthy();
-		// The binding alone: no `dataSchema`, so the contract is not re-declared.
-		expect(mutation.mutate.mock.calls).toEqual([
-			[
-				{
-					id: "col_1",
-					dataFile: {
-						path: "/home/u/users.csv",
-						fileName: "users.csv",
-						castNumbers: true,
-					},
-				},
-			],
+		// The reading alone: the contract is not re-declared.
+		expect(readingMutation.mutate.mock.calls).toEqual([
+			[{ id: "col_1", path: "/home/u/users.csv", castNumbers: true }],
 		]);
+		expect(mutation.mutate).not.toHaveBeenCalled();
 	});
 
 	it("says it is reading rather than claiming there is nothing to compare", async () => {
