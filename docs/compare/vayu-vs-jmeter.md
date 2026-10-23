@@ -29,7 +29,7 @@ the request in.
 | **MCP / agent control** | Built in, local, drives the load engine | No |
 | **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | JVM properties and the Java keystore |
 | **Postman collection import** | Yes (v2.0 + v2.1) | No |
-| **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
+| **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No built-in importer (checked 2026-10-23) |
 | **JMeter `.jmx` import** | Yes - samplers, extractors, assertions, timers and logic controllers, an unmapped class counted rather than dropped\*\* | N/A |
 | **Open source** | Yes (dual-license) | Yes (Apache 2.0) |
 
@@ -45,11 +45,26 @@ in both PEM-pair and PKCS#12 form. Detail:
 
 \*\* **Common, not complete.** JMeter's own class list is open-ended - plugins
 add more of them - so this is a mapping table, not a JMeter-compatibility
-claim: HTTP samplers, JSON/regex/boundary extractors, the five assertion
-kinds, all four timer kinds and the six logic controllers map onto Vayu's
-element model, and a class this importer has no mapping for (a listener, a
-cookie manager, a protocol Vayu's HTTP engine does not speak) is counted by
-its own class name rather than silently dropped. Detail:
+claim. HTTP samplers and the JSON/regex/boundary extractors map onto Vayu's
+element model, and so do:
+
+- **Four assertion classes** (`ResponseAssertion`, `DurationAssertion`,
+  `SizeAssertion`, `JSONPathAssertion`), which become five Vayu assertion kinds
+  because a `ResponseAssertion` on the response code is `assert.status` and any
+  other field is `assert.contains`.
+- **Four timer classes** (`ConstantTimer`, `UniformRandomTimer`,
+  `GaussianRandomTimer`, `ConstantThroughputTimer`). JMeter ships more, among
+  them the Precise Throughput, Synchronizing and Poisson Random timers and the
+  JSR223 and BeanShell timers, and none of those is mapped.
+- **Five of the six logic controllers** (`LoopController`, `IfController`,
+  `OnceOnlyController`, `TransactionController`, `ThroughputController`).
+  `SwitchController` imports as a plain folder, with its members and without a
+  `control.switch`, because JMeter selects by list index or variable value and
+  the plan never declares the named cases that element needs.
+
+A class this importer has no mapping for (a listener, a cookie manager, a
+protocol Vayu's HTTP engine does not speak) is counted by its own class name
+rather than silently dropped. Detail, class by class:
 [the JMeter import doc](../app/import-collections/jmeter.md).
 
 \*\*\* **What the file leaves out.** The report holds aggregates and time series
@@ -104,7 +119,8 @@ are things Vayu plans to catch up on:
   other than HTTP, distributed execution, a plugin sampler, `SwitchController`,
   or a JSR223/BeanShell script (imported disabled, since Groovy and BeanShell
   are not JavaScript). A plan built from the common element set (HTTP samplers,
-  the extractors, assertions, timers and logic controllers in the table above)
+  the extractors, assertions, timers and the five translated logic controllers
+  in the table above)
   imports and runs; a team fluent in JMeter's full plugin ecosystem is still
   better served staying there.
 - **Your load model needs a load-run logic jump.** Think time and pacing
