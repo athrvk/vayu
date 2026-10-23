@@ -306,6 +306,17 @@ export const WINDOW_STATE_SAVE_DEBOUNCE_MS = 500;
 // Dev server (must match vite.config.ts)
 export const DEV_SERVER_URL = "http://localhost:5173";
 
+/**
+ * The privileged scheme a packaged build serves its renderer from (#2380), so
+ * the document has one real origin and CSP `'self'` names it alone. Not plain
+ * `vayu`, which a user may well give an OAuth provider as a redirect scheme.
+ * `scripts/perf/startup-harness.cjs` spells it again and must match.
+ */
+export const APP_SCHEME = "vayu-app";
+export const APP_HOST = "app";
+/** What a packaged window loads; see app-protocol.ts for how it is answered. */
+export const APP_ENTRY_URL = `${APP_SCHEME}://${APP_HOST}/index.html`;
+
 // Project links
 export const REPO = "athrvk/vayu";
 /**
