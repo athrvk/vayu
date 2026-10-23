@@ -49,7 +49,11 @@
  * so it spends none of this budget. #2444's `get_safety_config` (a description
  * and a small output schema, about 370 B a row) took the rows to 136,673 /
  * 133,947 B writes off and 204,039 / 199,642 B writes on; the writes-off caps
- * went to 137,100 / 134,400 and the writes-on caps still hold.
+ * went to 137,100 / 134,400 and the writes-on caps still hold. #2451's paged
+ * `run_collection_smoke` and the descriptions merged beside it then measured
+ * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
+ * caps went to 137,900 / 135,200 and 205,300 / 200,900 (one measurement plus
+ * a few hundred bytes).
  */
 
 import { describe, it, expect } from "vitest";
@@ -69,10 +73,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 137_100 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 134_400 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 204_400 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 199_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 137_900 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 135_200 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 205_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 200_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
