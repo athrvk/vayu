@@ -9996,9 +9996,19 @@ run end). This is the pattern the bundled app uses.
 
 **Responses:**
 - `200` - SSE stream (active run, or finished run still within the retention window).
-- `404` - run not found or evicted past `liveRetentionMs`; the body hints
-  `Use /runs/:runId/report for the stored report`. Clients should fall back to
-  the stored report in this case.
+- `404` - no live topic for the run. The flat body is `{"error", "code",
+  "hint"}` and `code` says which of two cases it is (#2775):
+  - `live_expired` - the run is stored but its topic aged out past
+    `liveRetentionMs`; `error` is `Live metrics for this run are no longer
+    retained`.
+  - `run_not_found` - the engine has no run by that id; `error` is `Run not
+    found or expired`.
+
+  Both hint `Use /runs/:runId/report for the stored report`, and a client
+  should fall back to the stored report in either case (for `run_not_found` the
+  report then answers its own `404`). `code` is for clients to branch on; the
+  bundled app has no reader for it yet, and the MCP wording lands separately
+  (#2779).
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
 `liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,

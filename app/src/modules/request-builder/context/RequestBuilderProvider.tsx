@@ -58,6 +58,7 @@ import type {
 } from "../types";
 import { resolveAuthForSend } from "../utils/auth-resolution";
 import { requestHasTokens } from "../utils/request-tokens";
+import { leaveDeferredField } from "../utils/sends-url";
 import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 import { sentRequestOf } from "../utils/execute-mapping";
@@ -655,7 +656,7 @@ export default function RequestBuilderProvider({
 	// Variable resolution
 	const {
 		resolveString,
-		resolveField,
+		resolveField: resolveStoredField,
 		resolveObject,
 		getVariable: resolverGetVariable,
 		getAllVariables: resolverGetAllVariables,
@@ -690,6 +691,9 @@ export default function RequestBuilderProvider({
 	 */
 	const hasTokens = useMemo(() => requestHasTokens(request), [request]);
 	const deferredVariables = useDeferredVariables(request.id ?? "", hasTokens);
+	// The field previews (the rows' sigma peek, the Body tab's Resolved pane) leave
+	// the same names written, so none of them prints a value the script replaces.
+	const resolveField = leaveDeferredField(resolveStoredField, deferredVariables);
 
 	// Variable writes - shared with the collection Elements tab, see useVariableWriter.
 	const { updateVariable, writableScopes } = useVariableWriter({

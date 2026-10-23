@@ -21,6 +21,7 @@ import {
 	elementsArg,
 	engineErrorResult,
 	errorResult,
+	guardErrorResult,
 	isRecord,
 	str,
 	ToolArgError,
@@ -238,7 +239,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			// Before anything is composed, let alone sent: a refusal that arrived
 			// after the exchange would be a request already made insecurely. `true`
 			// falls through - it restates the composed default (issue #795).
-			if (args.verifySSL === false) return errorResult(INSECURE_TLS_REFUSAL);
+			if (args.verifySSL === false) return errorResult(INSECURE_TLS_REFUSAL, "policy");
 			// The same posture for the same reason: a script is refused before the
 			// compose that would carry it, not after an exchange that ran it (#1834).
 			refuseAgentScripts(args, ctx, elementsArg(args));
@@ -246,7 +247,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			const url = str(args, "url") || undefined;
 			const linkId = str(args, "requestId");
 			const target = composeTarget(args, url, linkId);
-			if (target === undefined) return errorResult(NO_TARGET_ERROR);
+			if (target === undefined) return errorResult(NO_TARGET_ERROR, "input");
 			const sendsSaved = url === undefined;
 
 			// Compose engine-side (pure), gate on the composed URL, then execute
@@ -273,11 +274,11 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 					);
 				}
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			const gate = checkComposedTarget(payload, ctx.config, ctx.host);
-			if (!gate.ok) return errorResult(gate.error!);
+			if (!gate.ok) return guardErrorResult(gate);
 			// By id the engine stamped it already; ad hoc it is only the History link.
 			if (linkId !== undefined) payload.requestId = linkId;
 

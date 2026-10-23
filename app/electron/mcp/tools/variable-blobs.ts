@@ -101,7 +101,8 @@ export async function selectEnvironment(
 	const rows = Array.isArray(listed) ? listed : [];
 	if (environmentId !== undefined && environmentId !== "") {
 		const found = rows.find((row) => isRecord(row) && row.id === environmentId);
-		if (!found) throw new ToolArgError(`No environment with id "${environmentId}".`);
+		if (!found)
+			throw new ToolArgError(`No environment with id "${environmentId}".`, "not_found");
 		return found as Record<string, unknown>;
 	}
 	return rows.find((row) => isRecord(row) && row.isActive === true) as
@@ -131,7 +132,8 @@ export async function gatherVariableScopes(
 		const listed = await ctx.client.listCollections(signal);
 		const rows = (Array.isArray(listed) ? listed : []) as CollectionLike[];
 		chain = collectionChain(rows, collectionId);
-		if (chain.length === 0) throw new ToolArgError(`No collection with id "${collectionId}".`);
+		if (chain.length === 0)
+			throw new ToolArgError(`No collection with id "${collectionId}".`, "not_found");
 	}
 
 	let environment: OriginScopes["environment"];
@@ -291,7 +293,8 @@ export function mergeVariables(
 		}
 		if (!ctx.config.revealSecretsToAgents && stated.secret === false && base.secret === true) {
 			throw new ToolArgError(
-				`"${name}" is a secret, and this call would make it readable. Agents cannot clear "secret" while Reveal secrets to agents is off - ask the user to ${settingRemedy("revealSecretsToAgents", ctx.host)}, or to clear the flag in the app's Variables drawer.`
+				`"${name}" is a secret, and this call would make it readable. Agents cannot clear "secret" while Reveal secrets to agents is off - ask the user to ${settingRemedy("revealSecretsToAgents", ctx.host)}, or to clear the flag in the app's Variables drawer.`,
+				"policy"
 			);
 		}
 		merged[name] = { enabled: true, ...base, ...stated };

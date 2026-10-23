@@ -174,7 +174,8 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				const listed = await ctx.client.listInboxes(signal);
 				const rows = isRecord(listed) && Array.isArray(listed.data) ? listed.data : [];
 				const found = rows.find((row) => isRecord(row) && row.inboxId === inboxId);
-				if (!isRecord(found)) return errorResult(`No webhook inbox with id "${inboxId}".`);
+				if (!isRecord(found))
+					return errorResult(`No webhook inbox with id "${inboxId}".`, "not_found");
 				inbox = found;
 			} catch (err) {
 				return engineErrorResult(err, ctx);

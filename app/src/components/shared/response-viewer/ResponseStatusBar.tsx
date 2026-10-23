@@ -26,7 +26,13 @@ import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { TimeRow } from "@/lib/time-value";
-import { ENGINE_COST_TIP, formatResponseTime, formatSize, isReportedMs } from "./utils";
+import {
+	ENGINE_COST_TIP,
+	formatResponseTime,
+	formatSize,
+	isReportedMs,
+	responseSizeTip,
+} from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -38,6 +44,11 @@ export interface ResponseStatusBarProps {
 	time?: number;
 	/** Omitted by callers that have no size. */
 	size?: number;
+	/**
+	 * The response headers, read only for the size hover (#2787): a Content-Length
+	 * beside a Content-Encoding is the compressed length, which `size` is not.
+	 */
+	headers?: Record<string, string>;
 	/**
 	 * Vayu's own share of `time` (#2132), in ms - `timing.engineMs`. Absent for a
 	 * stream, an auth-failure reply and rows stored before the engine reported
@@ -106,6 +117,7 @@ export function ResponseStatusBar({
 	statusText,
 	time,
 	size,
+	headers,
 	engineMs,
 	httpVersion,
 	httpVersionDowngraded,
@@ -217,7 +229,10 @@ export function ResponseStatusBar({
 			)}
 
 			{size !== undefined && (
-				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+				<div
+					className="flex items-center gap-1.5 text-xs text-muted-foreground"
+					title={responseSizeTip(headers)}
+				>
 					<FileText className="size-icon-sm" />
 					<span className="tabular-nums">{formatSize(size)}</span>
 				</div>

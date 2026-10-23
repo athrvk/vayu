@@ -8471,7 +8471,8 @@ describe("dispatchTool", () => {
 			});
 
 			expect(res.isError).toBe(true);
-			expect(res.structuredContent).toBeUndefined();
+			// The refusal's class and nothing of the comparison.
+			expect(Object.keys(res.structuredContent ?? {})).toEqual(["error"]);
 			const text = firstText(res);
 			expect(text).toContain("run_a (Load test)");
 			expect(text).toContain("run_b (Collection run)");
@@ -9237,6 +9238,280 @@ describe("engine transport failures are told apart", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/Start vayu-engine, or point VAYU_ENGINE_URL/);
 		expect(firstText(res)).not.toMatch(/Vayu app/);
+	});
+});
+
+/*
+ * Every error result carries `structuredContent.error` (#2776): the class an
+ * agent acts on, whether the same call can succeed again, and the advice, which
+ * is the result's own text.
+ */
+describe("every error result carries a failure class", () => {
+	const ALLOWED = { allowlist: ["api.example.com"] };
+
+	/** `run_request` against an allowed host, its send failing with @p err. */
+	const sendFailingWith = (err: unknown) =>
+		dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x" },
+			ctxWith(fakeClient({ executeRequest: vi.fn().mockRejectedValue(err) }), ALLOWED)
+		);
+	const engineAnswered = (status: number, body: string) =>
+		sendFailingWith(new EngineRequestError(`Engine responded ${status}`, status, body));
+
+	const cases: Array<[string, string, () => Promise<ToolResult>]> = [
+		[
+			"a host off the allowlist",
+			"policy",
+			() =>
+				dispatchTool(
+					"run_request",
+					{ url: "https://elsewhere.example.com/" },
+					ctxWith(fakeClient(), ALLOWED)
+				),
+		],
+		[
+			"a load run over the concurrency cap",
+			"policy",
+			() =>
+				dispatchTool(
+					"start_load_run",
+					{ url: "https://api.example.com/", concurrency: 100_000, duration: "10s" },
+					ctxWith(fakeClient(), ALLOWED)
+				),
+		],
+		[
+			"a load run whose duration is not one",
+			"input",
+			() =>
+				dispatchTool(
+					"start_load_run",
+					{ url: "https://api.example.com/", concurrency: 1, duration: "forever" },
+					ctxWith(fakeClient(), ALLOWED)
+				),
+		],
+		[
+			"a write while writes are off",
+			"policy",
+			() => dispatchTool("create_collection", { name: "API" }, ctxWith(fakeClient())),
+		],
+		[
+			"a tool switched off in Settings",
+			"policy",
+			() =>
+				dispatchTool(
+					"get_engine_health",
+					{},
+					ctxWith(fakeClient(), { disabledTools: ["get_engine_health"] })
+				),
+		],
+		[
+			// The stdio CLI never has a window, so calling again cannot help.
+			"no Vayu window to ask",
+			"policy",
+			() => dispatchTool("get_app_focus", {}, ctxWith(fakeClient())),
+		],
+		[
+			"a file body sent inline",
+			"policy",
+			() =>
+				dispatchTool(
+					"run_request",
+					{ url: "https://api.example.com/", bodyType: "binary" },
+					ctxWith(fakeClient(), ALLOWED)
+				),
+		],
+		[
+			"an engine target-policy refusal",
+			"policy",
+			() =>
+				engineAnswered(
+					400,
+					engineErrorBody("target_not_allowed", 'Host "evil.example.com" is not allowed.')
+				),
+		],
+		["an engine 403", "policy", () => engineAnswered(403, "forbidden")],
+		["an engine 400", "input", () => engineAnswered(400, "bad request")],
+		["an engine 409", "input", () => engineAnswered(409, "already exists")],
+		["an engine 413", "input", () => engineAnswered(413, "too large")],
+		[
+			"a missing required argument",
+			"input",
+			() => dispatchTool("get_run", {}, ctxWith(fakeClient())),
+		],
+		["an unknown tool", "input", () => dispatchTool("no_such_tool", {}, ctxWith(fakeClient()))],
+		["an engine 404", "not_found", () => engineAnswered(404, "not found")],
+		[
+			"a run id the engine does not hold",
+			"not_found",
+			() =>
+				dispatchTool(
+					"get_run",
+					{ runId: "run_gone" },
+					ctxWith(
+						fakeClient({
+							getRun: vi
+								.fn()
+								.mockRejectedValue(
+									new EngineRequestError("Engine responded 404", 404, "")
+								),
+						})
+					)
+				),
+		],
+		[
+			"a saved request id compose does not hold",
+			"not_found",
+			() =>
+				dispatchTool(
+					"run_request",
+					{ requestId: "req_gone" },
+					ctxWith(
+						fakeClient({
+							composeRequest: vi
+								.fn()
+								.mockRejectedValue(
+									new EngineRequestError("Engine responded 404", 404, "")
+								),
+						}),
+						ALLOWED
+					)
+				),
+		],
+		[
+			"a client-budget timeout",
+			"transient",
+			() => sendFailingWith(new EngineTimeoutError("POST", "/execute", 130_000)),
+		],
+		[
+			"a cancelled call",
+			"transient",
+			() => sendFailingWith(new DOMException("The operation was aborted.", "AbortError")),
+		],
+		["an engine 500", "transient", () => engineAnswered(500, "boom")],
+		["an engine 507", "transient", () => engineAnswered(507, "disk full")],
+		[
+			"a busy database",
+			"transient",
+			() => engineAnswered(503, engineErrorBody("unavailable", "The database is busy")),
+		],
+		[
+			"an unclassified transport error",
+			"transient",
+			() => sendFailingWith(new Error("socket hang up")),
+		],
+		[
+			"a handler that threw",
+			"transient",
+			() =>
+				dispatchTool(
+					"get_app_focus",
+					{},
+					{
+						...ctxWith(fakeClient()),
+						appFocus: () => {
+							throw new Error("window gone mid-read");
+						},
+					}
+				),
+		],
+		[
+			"a masking lookup that failed",
+			"transient",
+			() =>
+				dispatchTool(
+					"run_request",
+					{ url: "https://api.example.com/" },
+					ctxWith(
+						fakeClient({
+							executeRequest: vi
+								.fn()
+								.mockResolvedValue({ status: 200, bodyRaw: "ok" }),
+							getGlobals: vi
+								.fn()
+								.mockRejectedValue(new Error("Engine responded 500")),
+						}),
+						ALLOWED
+					)
+				),
+		],
+		[
+			"an engine that refused the connection",
+			"unreachable",
+			() =>
+				sendFailingWith(new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876")),
+		],
+		[
+			"an engine shutting down",
+			"unreachable",
+			() => engineAnswered(503, engineErrorBody("unavailable", "Engine is shutting down")),
+		],
+	];
+
+	const RETRYABLE = new Set(["transient", "unreachable"]);
+
+	test.each(cases)("%s is %s", async (_, failureClass, call) => {
+		const res = await call();
+		expect(res.isError).toBe(true);
+		expect(res.structuredContent).toEqual({
+			error: {
+				class: failureClass,
+				retryable: RETRYABLE.has(failureClass),
+				advice: firstText(res),
+			},
+		});
+	});
+
+	test("the advice is the remedy-resolved text, not the token", async () => {
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/", bodyType: "binary" },
+			ctxWith(fakeClient(), ALLOWED, "cli")
+		);
+		const error = (res.structuredContent as { error: { advice: string } }).error;
+		expect(error.advice).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "cli"));
+		expect(error.advice).not.toMatch(/\{\{remedy:/);
+	});
+
+	test("a caveat appended to an error keeps the error's class", async () => {
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/", requestId: "req_1" },
+			ctxWith(
+				fakeClient({
+					executeRequest: vi
+						.fn()
+						.mockRejectedValue(new TypeError("fetch failed: connect ECONNREFUSED")),
+				}),
+				ALLOWED
+			)
+		);
+		expect(res.content.length).toBe(2);
+		expect(res.structuredContent).toMatchObject({ error: { class: "unreachable" } });
+	});
+
+	test("a success carries no failure", async () => {
+		const res = await dispatchTool("get_engine_health", {}, ctxWith(fakeClient()));
+		expect(res.isError).toBeFalsy();
+		expect(res.structuredContent).not.toHaveProperty("error");
+	});
+
+	/*
+	 * `errorResult` is what records the class, so an error result assembled by
+	 * hand would reach dispatch unclassed and be answered with a guess. The one
+	 * other builder is dispatch's own answer, made from the recorded class.
+	 */
+	test("no source builds an error result except errorResult and dispatch", () => {
+		const here = path.dirname(fileURLToPath(import.meta.url));
+		const sources = readdirSync(here, { recursive: true, encoding: "utf8" }).filter(
+			(file) =>
+				file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.includes("testkit")
+		);
+		const builders = sources.filter((file) =>
+			/isError:\s*true/.test(readFileSync(path.join(here, file), "utf8"))
+		);
+		// A scan that found neither read nothing.
+		expect(builders.sort()).toEqual(["tools.ts", path.join("tools", "kit.ts")]);
 	});
 });
 
@@ -16446,6 +16721,30 @@ describe("get_graphql_schema", () => {
 			});
 			expect(res.isError).toBe(true);
 			expect(firstText(res)).toMatch(/disallows introspection/);
+		});
+
+		test.each([
+			[
+				"an endpoint never reached",
+				"unreachable",
+				{ status: 0, errorCode: "CONNECTION_FAILED" },
+			],
+			["rejected credentials", "input", { status: 401, bodyRaw: "" }],
+			["an endpoint's 5xx", "transient", { status: 503, bodyRaw: "" }],
+			["a body that is not JSON", "input", { status: 200, bodyRaw: "<html>" }],
+			[
+				"introspection disallowed",
+				"policy",
+				{
+					status: 200,
+					bodyRaw: JSON.stringify({
+						errors: [{ message: "introspection is not allowed" }],
+					}),
+				},
+			],
+		])("%s is %s", async (_, failureClass, executed) => {
+			const res = await call(executed);
+			expect(res.structuredContent).toMatchObject({ error: { class: failureClass } });
 		});
 
 		test("refuses an answer over the limit before parsing it", async () => {

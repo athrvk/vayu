@@ -80,6 +80,17 @@ change doesn't need.
 - **Title: imperative mood, present tense**, matching this repo's own recent
   commit style (`feat(app): ...`, `fix(engine): ...`) - describe what the
   change does, not what was wrong before it.
+- **The `Conventional title` check validates the title, so the type must be
+  one it accepts.** `.github/workflows/pr-title.yml` runs
+  `amannn/action-semantic-pull-request` on every non-bot pull request. The
+  type is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+  `chore`, `ci`, `build` (the table in `CONTRIBUTING.md`); the scope is
+  optional (`ci: ...` and `fix(app): ...` both pass); the subject must not
+  start with a capital letter. A component name is a scope, never a type:
+  `app(collections): ...` fails with an unknown-type error, `feat(app): ...`
+  passes. The issue titles use the `component(area):` form, so do not copy an
+  issue title into the PR. The check reads the title on every edit, so fix a
+  red one with `gh pr edit --title` (or the PR update tool); no push needed.
 - **Link the issue, don't restate it.** `Closes #123` - the issue text is one
   click away and copying it into the description doubles a maintenance
   surface for no reader benefit.

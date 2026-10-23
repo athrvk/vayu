@@ -189,7 +189,9 @@ from the engine's in-memory collector, and a **finished** run stays readable for
 the `liveRetentionMs` window (default 60s, `GET /config`) - a reader attaching
 late still gets the run's ticks replayed from the start. Once that window
 expires, or for a run id the engine has never seen, it returns `404` with a hint
-pointing at `GET /runs/:runId/report` for the stored report.
+pointing at `GET /runs/:runId/report` for the stored report. The body's `code`
+tells the two apart: `live_expired` for a stored run whose window has passed,
+`run_not_found` for an id the engine has no row for.
 
 ## Prerequisites
 

@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { refusalsText, type BoundField, type DataFieldContext } from "@/lib/data-bind-escaping";
+import { deferredNamesIn, deferredNote } from "@/lib/deferred-note";
 import { isBlankRow } from "./key-value";
 import { keyValueGrid } from "./grid";
 import type { KeyValueItem, KeyValueRowExtra, VariableSupport } from "@/types";
@@ -105,18 +106,28 @@ interface KeyValueRowProps {
  * **A row the send would refuse says so here** (issue #2639): a picked row's
  * cell with a line break, bound into a header, previews as its token with the
  * reason beneath it. A refusal names the token and never the cell.
+ *
+ * **A name a pre-request script sets at send stays written** (#2762), and the
+ * row keeps its marker though resolving changed nothing: the sentence beneath
+ * says why the token is still there.
  */
 function ResolvedPeek({
 	label,
 	resolved,
 	refusals,
+	deferred,
 	mask,
 }: {
 	label: string;
 	resolved: string;
 	refusals: string[];
+	deferred: string[];
 	mask?: (text: string) => string;
 }) {
+	const notes = [
+		refusals.length > 0 ? refusalsText(refusals) : null,
+		deferred.length > 0 ? deferredNote(deferred) : null,
+	].filter((note) => note !== null);
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -132,7 +143,15 @@ function ResolvedPeek({
 			<TooltipContent side="left" className="max-w-md">
 				<TooltipValue
 					className="font-mono"
-					hint={refusals.length > 0 ? refusalsText(refusals) : undefined}
+					hint={
+						notes.length > 0
+							? notes.map((note) => (
+									<span key={note} className="block">
+										{note}
+									</span>
+								))
+							: undefined
+					}
 				>
 					{mask ? mask(resolved) : resolved}
 				</TooltipValue>
@@ -193,6 +212,8 @@ function resolverFor(
 	return resolve;
 }
 
+const NO_NAMES: readonly string[] = [];
+
 /** A field read with no variable scope: its own text, nothing refused. */
 const asTyped = (text: string): BoundField => ({ text, refusals: [] });
 
@@ -226,15 +247,23 @@ function KeyValueRow({
 	const resolvedKey = key.text;
 	const resolvedValue = value.text;
 	const refusals = [...key.refusals, ...value.refusals];
+	const deferred = deferredNamesIn(variables?.deferredVariables ?? NO_NAMES, [
+		item.key,
+		item.value,
+	]);
 	/*
 	 * "Contains a variable" is exactly "resolving changed something". A row whose
 	 * text is already literal has nothing to peek at, which is the condition the
 	 * marker keys off - and with no scope nothing resolves, so a table outside
 	 * the request builder shows no marker at all rather than an empty one. A
-	 * refused token previews as itself, so a refusal opens the peek on its own.
+	 * refused token previews as itself, so a refusal opens the peek on its own,
+	 * and so does a deferred one (#2762), where the note is the reason to open it.
 	 */
 	const hasVariables =
-		item.key !== resolvedKey || item.value !== resolvedValue || refusals.length > 0;
+		item.key !== resolvedKey ||
+		item.value !== resolvedValue ||
+		refusals.length > 0 ||
+		deferred.length > 0;
 
 	const keyReadOnly = readOnly || !canEditKey;
 	const valueReadOnly = readOnly || !canEditValue;
@@ -387,6 +416,7 @@ function KeyValueRow({
 						label={item.key || "this row"}
 						resolved={resolvedValue ? `${resolvedKey}: ${resolvedValue}` : resolvedKey}
 						refusals={refusals}
+						deferred={deferred}
 						mask={variables?.maskSecrets}
 					/>
 				) : (

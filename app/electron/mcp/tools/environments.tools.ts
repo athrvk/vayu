@@ -69,7 +69,10 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			const name = requireStr(args, "name");
 			const patch = isRecord(args.variables) ? args.variables : undefined;
 			if (args.variables !== undefined && patch === undefined) {
-				return errorResult('"variables" must be an object mapping names to values.');
+				return errorResult(
+					'"variables" must be an object mapping names to values.',
+					"input"
+				);
 			}
 			// Merged against nothing, which is what turns the string form into a
 			// stored entry and enforces "a new variable carries a value" - on a
@@ -118,13 +121,17 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			const environmentId = requireStr(args, "environmentId");
 			const patch = isRecord(args.variables) ? args.variables : undefined;
 			if (args.variables !== undefined && patch === undefined) {
-				return errorResult('"variables" must be an object mapping names to values.');
+				return errorResult(
+					'"variables" must be an object mapping names to values.',
+					"input"
+				);
 			}
 			const removals = removalNames(args);
 			const rename = str(args, "name");
 			if (patch === undefined && removals.length === 0 && rename === undefined) {
 				return errorResult(
-					'Pass at least one change: "variables", "removeVariables" or "name".'
+					'Pass at least one change: "variables", "removeVariables" or "name".',
+					"input"
 				);
 			}
 			// Fetch the current env so we merge (the PUT replaces the whole blob)
@@ -256,7 +263,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			try {
 				const found = await ctx.client.getEnvironment(environmentId, signal);
 				if (!isRecord(found))
-					return errorResult(`No environment with id "${environmentId}".`);
+					return errorResult(`No environment with id "${environmentId}".`, "not_found");
 				environment = found;
 			} catch (err) {
 				return engineErrorResult(err, ctx);

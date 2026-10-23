@@ -17,6 +17,7 @@ import {
 	callEngine,
 	callEngineStructured,
 	errorResult,
+	guardErrorResult,
 	isRecord,
 	requireStr,
 	str,
@@ -58,10 +59,11 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		},
 		handler: async (args, ctx, signal) => {
 			const config = isRecord(args.config) ? args.config : undefined;
-			if (!config) return errorResult('"config" must be an OAuth 2.0 config object.');
+			if (!config)
+				return errorResult('"config" must be an OAuth 2.0 config object.', "input");
 			const grantType = str(config, "grantType");
 			if (grantType === "authorization_code") {
-				return errorResult(OAUTH2_INTERACTIVE_REFUSAL);
+				return errorResult(OAUTH2_INTERACTIVE_REFUSAL, "policy");
 			}
 			// Both URLs the engine may post to. The refresh URL defaults to the
 			// token URL engine-side, so it is only checked when it names a
@@ -71,7 +73,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 				const url = str(config, key);
 				if (url === undefined || url === "") continue;
 				const gate = checkAllowlist(url, ctx.config, ctx.host);
-				if (!gate.ok) return errorResult(`${key}: ${gate.error!}`);
+				if (!gate.ok) return guardErrorResult(gate, `${key}: `);
 			}
 			const payload: Record<string, unknown> = { config };
 			if (args.force === true) payload.force = true;

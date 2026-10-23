@@ -2358,7 +2358,7 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `HeadersViewer.tsx` - the headers family, three variants in one file: the collapsible table, `CompactHeadersViewer` (same content on a sunken slab, for panes with no room for a table), and `ResponseHeadersPanel` (the Headers *tab* - request collapsed above response open, with the empty state `HeadersViewer` alone cannot give). The panel's request section lists the request as it was sent (issue #2464), taken from the engine's recorded raw request when it has one: `wire-headers.ts` reads the header block of `rawRequest` into `ResponseState.wireRequestHeaders`, every line in wire order, the transport's own (`Host`, `Accept`, `Content-Length`, the jar's `Cookie`) beside the author's and a repeated name as separate rows, so `HeadersViewer` takes a list of `[name, value]` lines as well as a map. It is derived once, in both response funnels, so a live send and a restored run list the same lines. With no recorded frame (a restored row, whose Raw tab fabricates one, and a failed send) the section lists `ResponseState.requestHeaderLines` (issue #2466): the request's own lines as sent, in order, a repeated name a row each in the spelling typed, which both funnels set through `sentHeaderLines` (`/execute`'s `requestHeaderLines`, the trace's `request.sentHeaderLines`; an empty list is an absent one). Only an answer that predates both shows the folded `requestHeaders`. The compact viewers keep reading `requestHeaders`. The response side renders the header lines as received (`headerLines`, issue #2460): a repeated name is a row each, in the server's case, and the Headers tab count counts them; with no lines the table is built from the folded map (`resolveHeaderLines`). A load-run sample and an inbox capture keep the map alone.
 - `StatusCodeBadge.tsx` - the status chip
 - `TestsChip.tsx` - what a step's assertions came to, as one line (issue #724). Two states and an absent third: a step that asserted nothing is given no tally and renders no chip, because `0 passed` reads as a result where the truth is that nothing was claimed. Here rather than in the step list because it summarises a *response*, and because the live half (the `step` event's two numbers) and the restored half (the stored list, tallied) must not word it two ways
-- `ResponseStatusBar.tsx` - status chip + elapsed time + payload size. Beside the elapsed time, when the response carries `timing.engineMs`, a muted "in Vayu" figure: Vayu's own cost for the send (#2132), with `ENGINE_COST_TIP` (`utils.ts`) as its hover and the Timing tab's tip. Drawn only for a finite figure of zero or more; a stream, an auth failure and an older stored row show none
+- `ResponseStatusBar.tsx` - status chip + elapsed time + payload size (hover: `RESPONSE_SIZE_TIP`, "decoded body bytes", plus the compressed length when the `headers` prop shows a Content-Encoding, #2787). Beside the elapsed time, when the response carries `timing.engineMs`, a muted "in Vayu" figure: Vayu's own cost for the send (#2132), with `ENGINE_COST_TIP` (`utils.ts`) as its hover and the Timing tab's tip. Drawn only for a finite figure of zero or more; a stream, an auth failure and an older stored row show none
 - `ResponseActions.tsx` - the copy/download pair. Given `rawBytes`, Download writes those exact bytes as a Blob under the response's Content-Type (`downloadBlob`, `lib/download-text-file.ts`) with an extension from that type, and Copy is disabled behind a `DisabledHint` for a body with no text
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
@@ -2498,6 +2498,21 @@ the row's unresolved key, so it never carried one. A scope without `maskSecrets`
 (a surface with no variables) shows the text as is. `KeyValuePeek.secrets.test.tsx`
 renders each table through its real panel.
 
+**The Σ peek leaves a deferred name written** (#2762). A name `POST /compose`
+lists in `deferredVariables` is set by a pre-request script at send, so the
+stored value is not what the row sends. `RequestBuilderProvider` hands the table
+a `resolveField` that leaves such a `{{name}}` as written (`leaveDeferredField`,
+`utils/sends-url.ts`, memoised per resolver and set of names so
+`stableRowField`'s identity check still holds and a `{{$randomInt}}` does not
+reroll), and `KeyValueRow` reads `variables.deferredVariables` itself for the
+names its key and value use (`deferredNamesIn`): `hasVariables` stays true for a
+row whose only token is deferred, so it keeps its marker, and `ResolvedPeek`
+puts `deferredNote` in the tooltip's `hint` slot, on a line of its own beneath
+any refusal. Every table behind `variables` gets it with no per-table code,
+OAuth 2.0 token-request rows included; the Body tab's Resolved pane reads the
+same `resolveField` and puts the sentence under its text
+(`KeyValueRow.deferred.test.tsx`, `RequestBuilderProvider.deferred-previews.test.tsx`).
+
 **`fieldContext` says what kind of field the rows are** (issue #2639): `header`
 for the Headers tab, `plain` (the default) for every other table, as the
 engine's bind treats them. Each row resolves its key and value through
@@ -2585,7 +2600,10 @@ would say the opposite of the Code section and the Params tab's Sends line.
 while the request holds a `{{token}}` anywhere a painter draws one
 (`requestHasTokens`), and hands them down as `VariableSupport.deferredVariables`;
 `classifyVariableToken` takes them as an input and puts a listed name first among
-the scope rungs, so it decides nothing about which requests are scripted. Until
+the scope rungs, so it decides nothing about which requests are scripted. The
+resolved views read the same names: the provider's `resolveField` leaves them
+written, so the key/value rows' Σ peek and the Body tab's Resolved pane print
+`{{token}}` with the sentence rather than the stored value (#2762). Until
 the answer lands, and when it is empty, every token paints as it always did. A
 script editor never paints a deferred token: the pre-request script is what sets
 the name, and a post-request script reads it after that has run, so

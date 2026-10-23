@@ -106,8 +106,15 @@ export default function CollectionTree() {
 				getRequestsByCollection,
 				expandedCollectionIds,
 				creatingSubfolder,
+				selectedRequestId,
 			}),
-		[collections, getRequestsByCollection, expandedCollectionIds, creatingSubfolder]
+		[
+			collections,
+			getRequestsByCollection,
+			expandedCollectionIds,
+			creatingSubfolder,
+			selectedRequestId,
+		]
 	);
 
 	/*

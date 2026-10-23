@@ -49,11 +49,16 @@ export interface DecodedBody {
 	bytes?: ResponseBytes;
 }
 
+/** A header's value by name, whatever case the name arrived in; `""` when absent. */
+export function headerValueOf(headers: Record<string, string> | undefined, name: string): string {
+	if (!headers) return "";
+	const key = Object.keys(headers).find((k) => k.toLowerCase() === name);
+	return key ? headers[key] : "";
+}
+
 /** The Content-Type header's value, whatever case its name arrived in. */
 export function contentTypeOf(headers: Record<string, string> | undefined): string {
-	if (!headers) return "";
-	const key = Object.keys(headers).find((k) => k.toLowerCase() === "content-type");
-	return key ? headers[key] : "";
+	return headerValueOf(headers, "content-type");
 }
 
 /** A Content-Type split into the parts a type decision reads, lowercased. */

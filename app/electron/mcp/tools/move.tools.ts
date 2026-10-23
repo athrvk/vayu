@@ -81,7 +81,7 @@ export const MOVE_TOOLS: McpTool[] = [
 			if (refused) return refused;
 			const type = requireStr(args, "type");
 			if (type !== "collection" && type !== "request") {
-				return errorResult('"type" must be "collection" or "request".');
+				return errorResult('"type" must be "collection" or "request".', "input");
 			}
 			const id = requireStr(args, "id");
 			// Read off the raw value rather than through `str`, which answers
@@ -89,7 +89,7 @@ export const MOVE_TOOLS: McpTool[] = [
 			// "last" and land the row at the opposite end of the one it named.
 			const position = args.position === undefined ? "last" : args.position;
 			if (position !== "first" && position !== "last") {
-				return errorResult('"position" must be "first" or "last".');
+				return errorResult('"position" must be "first" or "last".', "input");
 			}
 
 			let batch: Record<string, unknown>;
@@ -99,7 +99,7 @@ export const MOVE_TOOLS: McpTool[] = [
 						? await planCollectionMove(args, id, position, ctx, signal)
 						: await planRequestMove(args, id, position, ctx, signal);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			const withhold = secretsShape(ctx, withholdReorderRows);
@@ -137,7 +137,7 @@ async function planCollectionMove(
 	}
 	const rows = readCollectionRows(await ctx.client.listCollections(signal));
 	const subtree = collectionSubtree(rows, id);
-	if (subtree === null) throw new ToolArgError(`No collection with id "${id}".`);
+	if (subtree === null) throw new ToolArgError(`No collection with id "${id}".`, "not_found");
 	// The UI's own refusal set, walked here so the answer names the problem.
 	// The engine rejects the same batch under its lock - that check is the one
 	// that is race-free and stays the authority; this one exists so an agent is
@@ -150,7 +150,7 @@ async function planCollectionMove(
 		);
 	}
 	if (parentId !== null && !rows.some((row) => row.id === parentId)) {
-		throw new ToolArgError(`No collection with id "${parentId}".`);
+		throw new ToolArgError(`No collection with id "${parentId}".`, "not_found");
 	}
 	// The top level holds collections only, so there is no request list to read.
 	const requests =
