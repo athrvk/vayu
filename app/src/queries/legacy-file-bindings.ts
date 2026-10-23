@@ -18,7 +18,7 @@
  * The key is removed only once every write it asked for has landed, so a
  * launch that cannot reach the engine leaves it for the next.
  *
- * Retirement: this module, `useLegacyFileBindingImport` and
+ * Retirement (#2809): this module, `useLegacyFileBindingImport` and
  * `LEGACY_FILE_BINDING_KEYS` go together once no supported release can leave
  * the keys behind - with the `file:` origin hand-off they are fed by
  * (`electron/legacy-storage-migration.ts`, #2763).
