@@ -2555,8 +2555,19 @@ TEST_F (ScenarioLoadTest, AThinkTimeRunsMeanInFlightIsItsShareOfTimeOnTheWire) {
     << report.at ("scenario").dump ();
     const double avg_in_flight = summary.at ("avgInFlight").get<double> ();
     EXPECT_GT (avg_in_flight, 0.0);
-    EXPECT_LT (avg_in_flight, static_cast<double> (VUS) / 2.0)
-    << "the run's mean in flight counted the virtual users' think waits";
+    // A virtual user is on the wire for its two requests and idle for the
+    // 200 ms think, so its share of time in flight is L / (L + 200) with L the
+    // report's own mean latency over two requests. The bound follows the
+    // runner's measured latency (a slow leg raises both sides) and sits far
+    // below the user count, which a mean that counted the think waits would
+    // read.
+    constexpr double THINK_MS = 200.0;
+    const double wire_ms = 2.0 * report.at ("latency").at ("avg").get<double> ();
+    const double bound =
+    ((static_cast<double> (VUS) * wire_ms / (wire_ms + THINK_MS)) * 1.5) + 0.5;
+    EXPECT_LT (avg_in_flight, bound)
+    << "the run's mean in flight counted the virtual users' think waits: "
+    << summary.dump ();
     EXPECT_LE (summary.at ("peakConcurrency").get<size_t> (), VUS);
 }
 
