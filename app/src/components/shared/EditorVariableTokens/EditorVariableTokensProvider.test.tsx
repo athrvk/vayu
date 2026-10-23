@@ -130,6 +130,25 @@ describe("EditorVariableTokensProvider", () => {
 		expect(screen.getByRole("button", { name: /create/i })).toBeTruthy();
 	});
 
+	it("says a script sets a deferred token, and still lets its definition be edited (#2741)", () => {
+		const tokens = mountProvider({ deferredVariables: ["baseUrl"] });
+		expect(tokens.classify("baseUrl").state).toBe("deferred");
+		act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+
+		expect(
+			screen.getByText("{{baseUrl}} is set by a pre-request script at send.")
+		).toBeTruthy();
+		expect(screen.getByDisplayValue("https://api.example.com")).toBeTruthy();
+	});
+
+	it("says nothing of a script for a token the engine did not defer", () => {
+		const tokens = mountProvider({ deferredVariables: [] });
+		expect(tokens.classify("baseUrl").state).toBe("resolved");
+		act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+
+		expect(screen.queryByText(/pre-request script/)).toBeNull();
+	});
+
 	it("opens nothing for a run-time token", () => {
 		const tokens = mountProvider();
 		act(() => tokens.openTokenEditor({ name: "$guid", rect }));

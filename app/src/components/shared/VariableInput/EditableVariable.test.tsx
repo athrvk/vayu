@@ -123,6 +123,20 @@ describe("hovering an editable token", () => {
 		expect(screen.queryByText(/Not defined in any scope/)).not.toBeInTheDocument();
 	});
 
+	it("says a script sets a deferred name, keeping its definition editable (#2741)", () => {
+		const { container } = renderToken({ deferred: true });
+		hover(container);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog).toHaveTextContent("{{merchantId}} is set by a pre-request script at send.");
+		expect(within(dialog).getByDisplayValue("mrc_8813")).toBeInTheDocument();
+	});
+
+	it("says nothing of a script for a name that is not deferred", () => {
+		const { container } = renderToken();
+		hover(container);
+		expect(screen.getByRole("dialog")).not.toHaveTextContent("pre-request script");
+	});
+
 	it("masks a secret exactly as a keyboard-opened popover would", () => {
 		const { container } = renderToken({ secret: true, value: "sk_live_abcdef" });
 		hover(container);
@@ -285,5 +299,25 @@ describe("clicking the token", () => {
 
 		fireEvent.click(trigger);
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
+	});
+});
+
+describe("a token's colour (#2741)", () => {
+	it.each([
+		["a stored value", {}, "text-primary"],
+		["an empty value", { value: "" }, "text-muted-foreground"],
+		["no definition", { resolved: false, value: "" }, "text-destructive-text"],
+	])("is told apart for %s", (_label, props, tone) => {
+		const { container } = renderToken(props);
+		expect(wrapperOf(container).className).toContain(tone);
+		expect(wrapperOf(container).className).not.toContain("decoration-dashed");
+	});
+
+	it("is dashed and muted for a deferred name, whatever the scopes hold", () => {
+		const { container } = renderToken({ deferred: true });
+		const { className } = wrapperOf(container);
+		expect(className).toContain("decoration-dashed");
+		expect(className).toContain("text-muted-foreground");
+		expect(className).not.toContain("text-primary");
 	});
 });

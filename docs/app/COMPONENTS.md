@@ -2556,8 +2556,9 @@ size, never a height class (the key-value rows and the binary body's fields are
 UrlInput is the one text field that is a band component, not a control: it
 fills the min-h-band-md URL bar, so its h-full is correct.
 
-**A token has four states, decided in the order `resolveTemplate` decides
-them** - reserved namespaces first, then the scopes, then the generator table.
+**A token has five states, decided in the order `resolveTemplate` decides
+them** - reserved namespaces first, then a name the engine defers, then the
+scopes, then the generator table.
 The overlay paints that decision rather than making it; `classifyVariableToken`
 makes it, for every surface (see below):
 
@@ -2567,6 +2568,7 @@ makes it, for every surface (see below):
 | `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken`, or a decoration in an editor | muted, "not generated here", no popover |
 | `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable`, or a decoration in an editor | accent when it resolves, **red** when it does not; hover opens the popover inert (issue #1220 hover redesign), a click places a caret, and Enter/Space - or ⇧⌘D in an editor - opens it focused |
 | `{{$guid}}` - a generator | `RuntimeToken`, or a decoration in an editor | muted, "generated per use", no popover |
+| `{{token}}` - a name `POST /compose` lists in `deferredVariables` because a pre-request script runs before the send (#2741) | `EditableVariable`, or a decoration in an editor | **muted, dashed underline**, never the accent of a resolved token; the popover opens as for a stored variable (the definition is still editable) with "`{{token}}` is set by a pre-request script at send." above it |
 
 The two reserved rows sit above the scopes for the same reason and the generator
 row below them for the opposite one: a scope that defines `$guid` wins and takes
@@ -2575,7 +2577,22 @@ neither the column nor the identity, so it must not paint as though it had. The
 identity names are matched exactly, so `{{$vus}}` is an ordinary unknown `$name`
 and keeps the red paint that is how a typo is spotted (issue #186).
 
-**The same four states now paint inside the Monaco body and GraphQL editors
+**A deferred token is the engine's call, not the classifier's.** The stored value
+of a name a script sets is not what the send carries, so painting it as resolved
+would say the opposite of the Code section and the Params tab's Sends line.
+`RequestBuilderProvider` asks for the names once per builder
+(`useDeferredVariables`, the Code section's `POST /compose` cache entry), only
+while the request holds a `{{token}}` anywhere a painter draws one
+(`requestHasTokens`), and hands them down as `VariableSupport.deferredVariables`;
+`classifyVariableToken` takes them as an input and puts a listed name first among
+the scope rungs, so it decides nothing about which requests are scripted. Until
+the answer lands, and when it is empty, every token paints as it always did. A
+script's own `pm.variables.get` / `replaceIn` read is classified through the same
+ladder and so carries the paint too; an accessor that names one scope, a row
+read or a bare `{{name}}` in script text does not. The collection tab's editors
+have no request to compose and never defer.
+
+**The same states now paint inside the Monaco body and GraphQL editors
 too** (issue #1220), as decorations rather than DOM tokens - there is no
 `<input>` behind that text to overlay. For a run-time token, hovering still
 opens the app's own read-only card (`TokenHoverCard`) over the token's screen

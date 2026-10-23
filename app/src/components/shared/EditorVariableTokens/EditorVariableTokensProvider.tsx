@@ -34,6 +34,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VariablePopover } from "@/components/ui";
+import { deferredNote } from "@/lib/deferred-note";
 import {
 	classifyScriptToken,
 	type ScriptTokenHint,
@@ -140,6 +141,7 @@ export function EditorVariableTokensProvider({
 	const allVariables = useMemo(() => support.getAllVariables(), [support]);
 	const dataColumns = support.dataColumns;
 	const getVariableOrigins = support.getVariableOrigins;
+	const deferredVariables = support.deferredVariables;
 
 	const classify = useCallback(
 		(name: string, scriptHint?: ScriptTokenHint): VariableTokenKind =>
@@ -147,8 +149,9 @@ export function EditorVariableTokensProvider({
 				variables: allVariables,
 				dataColumns,
 				getVariableOrigins,
+				deferredVariables,
 			}),
-		[allVariables, dataColumns, getVariableOrigins]
+		[allVariables, dataColumns, getVariableOrigins, deferredVariables]
 	);
 
 	const openTokenEditor = useCallback((request: TokenEditRequest) => {
@@ -255,6 +258,7 @@ export function EditorVariableTokensProvider({
 						name={active.name}
 						varInfo={scoped.info}
 						resolved={scoped.state !== "undefined"}
+						note={scoped.state === "deferred" ? deferredNote([active.name]) : undefined}
 						onValueChange={canWrite ? support.updateVariable : undefined}
 						saveMode="auto"
 						origins={originsForHint(getVariableOrigins(active.name), active.scriptHint)}

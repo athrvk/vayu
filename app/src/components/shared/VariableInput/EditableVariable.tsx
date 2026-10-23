@@ -27,6 +27,7 @@ import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { variableProps } from "@/lib/context-menu";
 import { TIMING } from "@/config/timing";
+import { deferredNote } from "@/lib/deferred-note";
 // The specific module, not the `../../context` barrel - matching the sibling
 // `VariableInput/index.tsx`, whose tests mock this exact path.
 import type { VariableScope as RequestBuilderVariableScope, VariableSupport } from "@/types";
@@ -40,6 +41,12 @@ export interface EditableVariableProps {
 	scope: RequestBuilderVariableScope;
 	/** Whether the variable is resolved (exists) */
 	resolved: boolean;
+	/**
+	 * A pre-request script sets this name at send (#2741): the stored value is
+	 * not what is sent, so the token is neither painted as resolved nor lets the
+	 * popover present that value as the answer.
+	 */
+	deferred?: boolean;
 	/** Callback when variable value changes */
 	onValueChange?: (name: string, value: string, scope: RequestBuilderVariableScope) => void;
 	/** Whether editing is disabled */
@@ -62,6 +69,29 @@ export interface EditableVariableProps {
 	tabIndex?: number;
 }
 
+/**
+ * The token's colour. A deferred name is checked before `resolved` and `value`:
+ * the stored value it holds is not what is sent, so it must not read as
+ * resolved (primary) or as an empty value either. Mirrors the `deferred` class
+ * in `index.css` that paints the same state in Monaco.
+ */
+function toneClass({
+	resolved,
+	deferred,
+	value,
+}: {
+	resolved: boolean;
+	deferred: boolean;
+	value: string;
+}): string {
+	if (deferred) {
+		return "text-muted-foreground underline decoration-dashed underline-offset-[3px] hover:bg-muted";
+	}
+	if (!resolved) return "text-destructive-text hover:bg-destructive-text/10";
+	if (!value) return "text-muted-foreground hover:bg-muted";
+	return "text-primary hover:bg-primary/10";
+}
+
 /** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */
 const POPOVER_CONTENT_SELECTOR = '[data-slot="popover-content"]';
 
@@ -73,6 +103,7 @@ export default function EditableVariable({
 	value,
 	scope,
 	resolved,
+	deferred = false,
 	onValueChange,
 	disabled = false,
 	secret = false,
@@ -227,13 +258,10 @@ export default function EditableVariable({
 			trigger={token}
 			triggerClassName={cn(
 				"inline cursor-pointer transition-colors rounded-md",
-				!resolved
-					? "text-destructive-text hover:bg-destructive-text/10"
-					: !value
-						? "text-muted-foreground hover:bg-muted"
-						: "text-primary hover:bg-primary/10",
+				toneClass({ resolved, deferred, value }),
 				disabled && "cursor-default opacity-50"
 			)}
+			note={deferred ? deferredNote([name]) : undefined}
 		/>
 	);
 }
