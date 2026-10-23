@@ -417,8 +417,9 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	/*
 	 * chai runs (#2655) as require('chai') only, a separate object from
 	 * pm.expect: the expect, assert, should and use calls a script makes read
-	 * clean, an assertion chain is not restated (any member types), and a
-	 * top-level member chai lacks or a sub-path of the package stays an error.
+	 * clean, an assertion chain is not restated (any member types, the
+	 * chai-postman response assertions of #2751 included), and a top-level
+	 * member chai lacks or a sub-path of the package stays an error.
 	 */
 	it("declares require('chai') as the library's top-level members", () => {
 		expect(
@@ -429,6 +430,7 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 					"pm.test('chai', () => {",
 					"\texpect(pm.response.json().id).to.equal(7);",
 					"\texpect(1, 'context').to.be.a('number').and.not.equal(2);",
+					"\texpect(pm.response).to.have.status(200).and.to.not.be.clientError;",
 					"\tassert.deepEqual({ a: 1 }, { a: 1 });",
 					"\tassert(true, 'holds');",
 					"});",

@@ -166,7 +166,11 @@ because chai's is a property of the `chai` module rather than a global. The
 shelf's [`require('chai')`](#chai) is that module, a separate object from
 `pm.expect`, so a `pm.expect` failure is not an instance of
 `require('chai').AssertionError`; test `e.name`. The same name comes off the
-[response assertions](#response-assertions), which are chai in Postman too.
+[response assertions](#response-assertions), which are chai in Postman too,
+whether they are written `pm.response.to.have.status(200)` or as
+`require('chai').expect(pm.response).to.have.status(200)` (the second forwards to
+the first, so the error is the same native one, and not an instance of
+`chai.AssertionError` either).
 **A mistake in the script text is still a `TypeError`** - a matcher called with
 no argument, a name nothing implements - because nothing was asserted: the call
 itself was wrong.
@@ -783,6 +787,10 @@ pm.response.to.have.responseTime(120);                    // ... and the equalit
 pm.response.to.have.responseSize.below(2048);             // body and header bytes together
 pm.response.to.not.have.status(500);                      // every member has a negated twin
 ```
+
+`require('chai').expect(pm.response)` takes the same members after `to`
+(`expect(pm.response).to.have.status(200)`, `.to.not.be.ok`), forwarding each
+to the call above; see [`chai`](#chai).
 
 `have.status` means two different things depending on the argument's type: a
 number is the status code, a string is compared against the reason phrase
@@ -3278,14 +3286,26 @@ pm.test('the order is complete', () => {
 ```
 
 - **It is not `pm.expect`.** `pm.expect` is Vayu's own implementation of
-  chai's `expect` with chai-postman's response members
-  ([`pm.expect()`](#pmexpect)); `require('chai')` is the library itself,
-  a separate object, and loading it changes nothing about `pm.expect`. In
-  Postman the two are one chai with chai-postman installed, so
-  `require('chai').expect(pm.response).to.have.status(200)` runs there; here the
-  module has chai's members only, and that line throws
-  `Invalid Chai property: status`. Use `pm.expect` or `pm.response.to` for the
-  response assertions.
+  chai's `expect` ([`pm.expect()`](#pmexpect)); `require('chai')` is the library
+  itself, a separate object, and loading it changes nothing about `pm.expect`.
+- **It carries chai-postman's response assertions** (#2751), as Postman's chai
+  does, so `expect(pm.response).to.have.status(200)` runs as
+  `pm.response.to.have.status(200)` does: `status`, `statusCode`,
+  `statusReason`, `statusCodeClass`, `header`, `body`, `jsonBody` and
+  `jsonSchema` as calls; `ok`, `success`, `info`, `redirection`, `clientError`,
+  `serverError`, `error`, `accepted`, `withoutContent`, `badRequest`,
+  `unauthorized`, `unauthorised`, `forbidden`, `notFound`, `notAcceptable`,
+  `rateLimited`, `json` and `withBody` as properties; and `responseTime` and
+  `responseSize` as a call and a chain. Each forwards to the
+  [native chain](#response-assertions), so the verdict and the message are
+  that chain's and `.not` is its `to.not`. The target must be `pm.response`
+  itself: any other value throws `TypeError: chai.<name> expects pm.response as
+  the target of expect()`, rather than asserting on the execution's response
+  while the script wrote about something else. `expect()`'s second argument is
+  not used, as on `pm.response.to`. chai's own `ok` keeps its meaning for every
+  other target. The plugin adds no member to the module, no global, and nothing
+  to `pm.expect`. A failure is a Vayu `AssertionError`, not an instance of
+  `chai.AssertionError`, exactly as for `pm.expect`.
 - **A failure inside `pm.test` is an ordinary failed test** with chai's
   message: `expect(1).to.equal(2)` records `AssertionError: expected 1 to
   equal 2`, as a `pm.expect` failure would. Outside a `pm.test` it aborts the

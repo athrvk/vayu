@@ -9328,8 +9328,10 @@ TEST_F (ScriptEngineTest, RequireShelfChaiLeavesPmExpectUnchanged) {
         try { pm.expect(1).to.equal(2); } catch (e) {
             pm.environment.set('instance', String(e instanceof chai.AssertionError));
         }
-        pm.environment.set('status',
-            failure(function () { chai.expect(pm.response).to.have.status(200); }));
+        pm.environment.set('response assertion',
+            failure(function () { chai.expect(pm.response).to.have.status(404); }));
+        pm.environment.set('pm.expect response',
+            failure(function () { return pm.expect(pm.response).to.have.status; }));
         pm.test('pm.expect still records', function () { pm.expect(2).to.be.above(1); });
     )JS",
     request, response, env);
@@ -9343,10 +9345,247 @@ TEST_F (ScriptEngineTest, RequireShelfChaiLeavesPmExpectUnchanged) {
     << "a chai plugin reached pm.expect: " << env["plugin"].value;
     EXPECT_EQ (env["chai plugin"].value, "held");
     EXPECT_EQ (env["instance"].value, "false");
-    // Postman's chai carries chai-postman; this module is chai's own.
-    EXPECT_EQ (env["status"].value, "Error: Invalid Chai property: status");
+    // The response assertions are the chai module's own plugin and are not on
+    // pm.expect, whose chain is native and has no `status`.
+    EXPECT_EQ (env["response assertion"].value,
+    "AssertionError: Expected status code 404 but got 200");
+    EXPECT_NE (env["pm.expect response"].value.find ("TypeError"), std::string::npos)
+    << "the response assertions reached pm.expect: "
+    << env["pm.expect response"].value;
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+namespace {
+
+/// One response assertion, spelled after `expect(pm.response).` and after
+/// `pm.response.`.
+struct ResponseAssertionCase {
+    std::string_view chain;
+    bool holds;
+};
+
+/// What @p script's `chai` and `native` environment variables hold after it
+/// ran @p chain both ways: "held", or the thrown `name: message`.
+struct ResponseVerdicts {
+    std::string chai;
+    std::string native;
+};
+
+} // namespace
+
+// require('chai') carries chai-postman's response assertions (#2751):
+// `expect(pm.response).to.have.status(200)` is `pm.response.to.have.status(200)`
+// by delegation, so each case's verdict and message must equal the native
+// spelling's. Mutation: skip the glue's `module.exports.use(...)` and every
+// case fails ("Invalid Chai property").
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertions) {
+    ScriptEngine roomy{ library_call_config () };
+    response.status_code     = 404;
+    response.status_text     = "Not Found";
+    response.body            = R"({"id":7,"name":"Ada"})";
+    response.headers         = { { "X-Request-Id", "abc123" } };
+    response.timing.total_ms = 150.5;
+
+    constexpr auto CASES = std::to_array<ResponseAssertionCase> ({
+    { "to.have.status(404)", true },
+    { "to.have.status(200)", false },
+    { "to.have.statusCode(404)", true },
+    { "to.have.statusCode(200)", false },
+    { "to.have.statusCodeClass(4)", true },
+    { "to.have.statusCodeClass(2)", false },
+    { "to.have.statusReason('Not Found')", true },
+    { "to.have.statusReason('OK')", false },
+    { "to.have.header('X-Request-Id', 'abc123')", true },
+    { "to.have.header('X-Request-Id', 'other')", false },
+    { "to.have.header('X-Missing')", false },
+    { "to.have.body(/Ada/)", true },
+    { "to.have.body('nothing')", false },
+    { "to.have.jsonBody('id', 7)", true },
+    { "to.have.jsonBody('id', 8)", false },
+    { "to.have.jsonSchema({ type: 'object', required: ['id'] })", true },
+    { "to.have.jsonSchema({ type: 'array' })", false },
+    { "to.be.notFound", true },
+    { "to.be.clientError", true },
+    { "to.be.error", true },
+    { "to.be.ok", false },
+    { "to.be.success", false },
+    { "to.be.serverError", false },
+    { "to.be.json", true },
+    { "to.be.withBody", true },
+    // `not` is chai's flag and becomes the native `to.not` chain.
+    { "to.not.have.status(404)", false },
+    { "to.not.have.status(200)", true },
+    { "to.not.be.notFound", false },
+    { "to.not.be.ok", true },
+    { "to.have.responseTime.below(200)", true },
+    { "to.have.responseTime.above(200)", false },
+    { "to.have.responseTime(150.5)", true },
+    { "to.have.responseTime(1)", false },
+    { "to.not.have.responseTime.below(200)", false },
+    { "to.have.responseSize.above(0)", true },
+    });
+
+    for (const auto& item : CASES) {
+        const std::string chain (item.chain);
+        std::string script =
+        "var expect = require('chai').expect;\n"
+        "function run(f) { try { f(); return 'held'; } catch (e) { "
+        "return e.name + ': ' + e.message; } }\n"
+        "pm.environment.set('chai', run(function () { expect(pm.response).";
+        script += chain;
+        script += "; }));\n"
+                  "pm.environment.set('native', run(function () { "
+                  "pm.response.";
+        script += chain;
+        script += "; }));\n";
+        const auto result = roomy.execute_test (script, request, response, env);
+        ASSERT_TRUE (result.success) << chain << ": " << result.error_message;
+        EXPECT_EQ (env["chai"].value, env["native"].value) << chain;
+        EXPECT_EQ (env["chai"].value == "held", item.holds)
+        << chain << ": " << env["chai"].value;
+    }
+}
+
+// The failure is the native chain's message, thrown as Vayu's AssertionError.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionFailureCarriesTheNativeMessage) {
+    ScriptEngine roomy{ library_call_config () };
+    response.status_code = 404;
+    const auto result    = roomy.execute_test (R"JS(
+        const { expect } = require('chai');
+        pm.test('chai spelling', function () { expect(pm.response).to.have.status(200); });
+        pm.test('native spelling', function () { pm.response.to.have.status(200); });
+    )JS",
+       request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_EQ (result.tests[0].error_message, result.tests[1].error_message);
+    EXPECT_NE (result.tests[0].error_message.find ("404"), std::string::npos)
+    << result.tests[0].error_message;
+}
+
+// A matcher hands the assertion back, so chai's chain words continue it, which
+// the native chain does not offer after a call.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsChainOn) {
+    ScriptEngine roomy{ library_call_config () };
+    response.status_code = 404;
+    response.headers     = { { "X-Request-Id", "abc123" } };
+    const auto result    = roomy.execute_test (R"JS(
+        const { expect } = require('chai');
+        pm.test('chained', function () {
+            expect(pm.response).to.have.status(404).and.to.have.header('X-Request-Id');
+            expect(pm.response).to.be.notFound.and.to.be.clientError;
+        });
+        pm.test('second link fails', function () {
+            expect(pm.response).to.have.status(404).and.to.have.status(200);
+        });
+    )JS",
+       request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_NE (result.tests[1].error_message.find ("200"), std::string::npos)
+    << result.tests[1].error_message;
+}
+
+// chai's own `ok` keeps its meaning for every target but the response, and the
+// plugin adds nothing to the module's members.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsLeaveChaiItselfAlone) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_EQ (
+    shelf_answer (roomy, request,
+    "(function () { var chai = require('chai'); var out = []; "
+    "chai.expect(1).to.be.ok; "
+    "try { chai.expect(0).to.be.ok; } catch (e) { out.push(e.message); } "
+    "chai.expect(0).to.not.be.ok; "
+    "out.push(Object.keys(chai).join()); return out.join('|'); })()"),
+    "expected +0 to be truthy|version,AssertionError,use,util,config,Assertion,"
+    "expect,should,Should,assert");
+}
+
+// Any other target is refused by name: asserting on the execution's response
+// while the script wrote about another value would pass for the wrong reason.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsRefuseOtherTargets) {
+    ScriptEngine roomy{ library_call_config () };
+    constexpr auto TARGETS = std::to_array<std::string_view> ({
+    "expect({ code: 200 }).to.have.status(200)",
+    "expect(200).to.have.status(200)",
+    "expect(pm.response.json()).to.have.jsonBody('id')",
+    "expect({}).to.be.notFound",
+    "expect(undefined).to.have.responseTime.below(1)",
+    });
+    for (const auto& target : TARGETS) {
+        const auto result =
+        roomy.execute_test ("var expect = require('chai').expect;\n"
+                            "try { " +
+        std::string (target) +
+        "; pm.environment.set('out', 'held'); } "
+        "catch (e) { pm.environment.set('out', e.name + ': ' + e.message); }\n",
+        request, response, env);
+        ASSERT_TRUE (result.success) << target << ": " << result.error_message;
+        EXPECT_NE (env["out"].value.find ("TypeError: chai."), std::string::npos)
+        << target << ": " << env["out"].value;
+        EXPECT_NE (
+        env["out"].value.find ("expects pm.response as the target of expect()"),
+        std::string::npos)
+        << target << ": " << env["out"].value;
+    }
+}
+
+// The plugin reads `pm` as it was when chai loaded, so a script that replaces
+// the global afterwards neither breaks the assertions nor redirects them.
+// Mutation: read the global `pm` inside the methods and the verdict is a
+// TypeError about the target.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsSurviveAReplacedPm) {
+    ScriptEngine roomy{ library_call_config () };
+    response.status_code = 404;
+    const auto result    = roomy.execute_test (R"JS(
+        var expect = require('chai').expect;
+        var realPm = pm;
+        pm = { response: { to: { have: { status: function () { throw new Error('hijacked'); } } } } };
+        var out;
+        try { expect(realPm.response).to.have.status(404); out = 'held'; }
+        catch (e) { out = e.name + ': ' + e.message; }
+        pm = realPm;
+        pm.environment.set('out', out);
+    )JS",
+       request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["out"].value, "held");
+}
+
+// A response-less execution has no `pm.response.to`; the assertion says so
+// rather than reading a missing object.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsNeedAResponse) {
+    ScriptEngine roomy{ library_call_config () };
+    EXPECT_NE (
+    shelf_answer (roomy, request,
+    "(function () { try { require('chai').expect(pm.response).to.have."
+    "status(200); return 'held'; } catch (e) { return e.name + ': ' + "
+    "e.message; } })()")
+    .find ("needs a response"),
+    std::string::npos);
+}
+
+// The plugin is applied when the module is evaluated and the module is cached
+// for the execution, so a second require answers the same, already-extended
+// object without evaluating chai again.
+TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsApplyOncePerExecution) {
+    ScriptEngine roomy{ library_call_config () };
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    const auto result   = roomy.execute_test (R"JS(
+        var first = require('chai');
+        var second = require('chai');
+        pm.environment.set('same', String(first === second));
+        second.expect(pm.response).to.have.status(200);
+    )JS",
+      request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["same"].value, "true");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
 // The glue's `module` is the factory's and the bundle defines nothing outside
