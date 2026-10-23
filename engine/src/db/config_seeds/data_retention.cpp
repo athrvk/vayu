@@ -153,10 +153,11 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
     "Keep at most this many workspace snapshots in the backups folder beside "
     "the database; older ones are removed after each new backup. The copy Vayu "
     "saves before an update changes the workspace counts too. Each snapshot "
-    "is a compacted copy of the database - collections, requests, "
-    "environments, credentials and run history - so a higher value, or 0 for "
-    "unlimited, costs disk. Tabs, bound spec and data file locations, saved "
-    "load-test values and MCP settings live in the app and are not in it. "
+    "is a compacted copy of the database - collections and the paths of the "
+    "spec and data files they are bound to, requests, environments, "
+    "credentials and run history - so a higher value, or 0 for unlimited, "
+    "costs disk. Tabs, saved load-test values and MCP settings live in the "
+    "app and are not in it. "
     "Only files Vayu wrote are ever removed; a copy you put there yourself is "
     "left alone.",
     "data_retention", std::to_string (vayu::core::constants::database::MAX_BACKUPS_RETAINED),

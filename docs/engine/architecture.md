@@ -1537,11 +1537,19 @@ Restore by hand, with the engine stopped.
    its writes on top of the snapshot.
 4. Start Vayu again.
 
-The tabs and file bindings the app keeps for itself are not in the snapshot.
+The tabs and other state the app keeps for itself are not in the snapshot.
 An in-place restore on the same machine leaves them as they were, and they may
 name rows the snapshot lacks. On a new machine, or after a profile reset, they
 start empty ([below](#what-a-backup-does-not-hold)). The collections, requests
-and environments are all there.
+and environments are all there, and so is each collection's spec-file and
+data-file binding (issue #2765): the Spec and Data tabs show the bound paths as
+they were written. A path names a file on the machine that picked it, so after
+a restore elsewhere the file is usually absent - the tab shows the path struck
+through, with the reason, once it fails to read. The binding is not itself
+permission to read a file: the app opens a path only under a file grant
+(`file_grants`, which the snapshot carries too), so a restored binding opens
+only a file that was picked at that same path, and any other asks to be picked
+again.
 
 **Going back to an older Vayu.** An older engine refuses a workspace a newer
 one migrated. The `vayu-<stamp>-pre-v<N>.db` the update saved is the workspace
@@ -1571,9 +1579,7 @@ the engine never sees, and a restore does not write either:
 
 - **The renderer's `localStorage`** (keys in `app/src/constants/storage-keys.ts`):
   open tabs (`vayu.tabs`), the active environment and collection
-  (`vayu.session`), shell layout (`vayu.layout`), the location of each
-  collection's bound spec document (`vayu.spec-files`) and data file
-  (`vayu.data-files`), the last load-test configuration
+  (`vayu.session`), shell layout (`vayu.layout`), the last load-test configuration
   (`vayu:lastLoadTestConfig`), which inboxes may notify (`vayu.inbox-notify`),
   client settings (`vayu.client-settings`), the host-sleep intervals recorded
   under a run (`vayu.host-sleeps`), the recovery notice already seen
@@ -1587,15 +1593,23 @@ the engine never sees, and a restore does not write either:
   switch).
 
 What that costs depends on where the snapshot is restored. On the same machine
-the app state is untouched: it keeps whatever it held, and a tab or file
-binding may point at a collection the snapshot does not have. On a new machine,
-after a profile reset or after an uninstall with `--purge`, the app state is
-gone: the Spec tab cannot re-read its bound file and the Data tab's file binding
-is gone until each is picked again; saved load-test values, notification
-opt-ins and open tabs are empty; and the MCP allowlist and caps start at their
-locked-down defaults, the safe direction. A spec document's text and a
-collection's binding to it are in the database and survive; only the file
-*location* on a machine does not.
+the app state is untouched: it keeps whatever it held, and a tab may point at a
+collection the snapshot does not have. On a new machine, after a profile reset
+or after an uninstall with `--purge`, the app state is gone: saved load-test
+values, notification opt-ins and open tabs are empty, and the MCP allowlist and
+caps start at their locked-down defaults, the safe direction. A spec document's
+text, a collection's binding to it and the location of each collection's
+picked spec file and data file (`collections.spec_file` / `data_file`, issue
+#2765) are in the database and survive, so the Spec and Data tabs name the same
+files as before; a file that is not at its path on this machine reads as
+unresolved until it is picked again.
+
+Before #2765 the two file bindings were `localStorage` keys
+(`vayu.spec-files`, `vayu.data-files`). The first launch of a release that
+stores them on the row moves each binding onto the collection it named, if the
+engine still lists that collection and it holds no binding yet, and removes the
+key once every move has landed. A binding of a collection that was deleted or
+in the trash at that launch is not moved.
 ### Logging
 
 `vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`

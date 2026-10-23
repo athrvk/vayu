@@ -57,10 +57,11 @@ Take one snapshot of the workspace database and print where it was written.
 vayu-cli backup
 ```
 
-The snapshot is a compacted copy of the database - collections, requests,
-environments, credentials and run history - written into `backups/` beside it.
-Tabs, bound file locations and the other state the app keeps for itself are not
-in it ([what a backup does not hold](architecture.md#what-a-backup-does-not-hold)).
+The snapshot is a compacted copy of the database - collections (with the paths
+of the spec and data files they are bound to), requests, environments,
+credentials and run history - written into `backups/` beside it. Tabs, saved
+load-test values and the other state the app keeps for itself are not in it
+([what a backup does not hold](architecture.md#what-a-backup-does-not-hold)).
 It is taken through the running daemon on purpose: the engine holds the database open, and copying that file by hand is
 not safe under WAL, because the `-wal` beside it holds committed transactions
 the main file does not.

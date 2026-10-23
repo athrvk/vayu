@@ -60,14 +60,19 @@ function backUp() {
 }
 
 describe("WorkspaceBackupCard", () => {
-	it("says the copy is the database and that tabs and file locations are not in it", () => {
+	it("says the copy is the database, bound file paths included, and that tabs are not in it", () => {
 		render(<WorkspaceBackupCard />);
 
-		// The card used to read as "a complete copy"; the Spec and Data tabs'
-		// bound file locations and the open tabs are app-side state it never held.
+		// The card used to read as "a complete copy"; the open tabs, saved
+		// load-test values and MCP settings are app-side state it never held.
+		// The Spec and Data tabs' file bindings ride the collection row since
+		// #2765, so the card names them inside the copy, not outside it.
 		const description = screen.getByText(/a compacted copy of the database/i);
 		expect(description).toHaveTextContent(
-			/tabs, bound spec and data file locations, saved load-test values and MCP settings live in the app and are not in it/i
+			/collections and the paths of the spec and data files they are bound to/i
+		);
+		expect(description).toHaveTextContent(
+			/tabs, saved load-test values and MCP settings live in the app and are not in it/i
 		);
 		expect(description).not.toHaveTextContent(/complete|workspace/i);
 	});
