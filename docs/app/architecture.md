@@ -127,6 +127,14 @@ The `EngineSidecar` class manages the C++ engine process:
 - **Development**: Binary at `../engine/build/vayu-engine` (or `Debug/vayu-engine.exe` on Windows)
 - **Production**: Binary at `resources/bin/vayu-engine` (packaged with Electron app)
 
+Beside `bin/`, `electron-builder.json`'s `extraResources` also ships
+`icon.png` and `THIRD_PARTY_NOTICES.txt` loose in `resources/` (outside the
+asar, so the OS can open them). `electron/third-party-notices.ts` resolves the
+notices: `process.resourcesPath` when packaged, and in development
+`app/build/` only if a build has staged a copy there - otherwise it answers
+with a sentence rather than a path. The `app:openThirdPartyNotices` channel
+(no argument) and the Help menu item both go through it.
+
 ### React Application (`src/`)
 
 The React app follows a component-based architecture:

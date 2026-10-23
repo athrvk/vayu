@@ -1497,6 +1497,33 @@ def setup_icons(project_root: Path):
 
     spinner.stop()
 
+def vcpkg_share_dir(build_dir: Path) -> Optional[Path]:
+    """installed/<triplet>/share of the vcpkg tree a configured build used.
+
+    Read from the CMake cache rather than guessed: the installed tree sits in
+    the build directory under manifest mode but wherever VCPKG_INSTALLED_DIR
+    points when a developer or CI overrides it.
+    """
+    installed = cached_variable(build_dir, "VCPKG_INSTALLED_DIR")
+    triplet = cached_variable(build_dir, "VCPKG_TARGET_TRIPLET")
+    if not installed or not triplet:
+        return None
+    return Path(installed) / triplet / "share"
+
+def stage_third_party_notices(project_root: Path, vcpkg_share: Optional[Path]) -> bool:
+    """Write app/build/THIRD_PARTY_NOTICES.txt for electron-builder to ship (#2693)."""
+    app_dir = project_root / "app"
+    command = [
+        sys.executable, "-I", str(project_root / "scripts" / "generate-third-party-notices.py"),
+        "--out", str(app_dir / "build" / "THIRD_PARTY_NOTICES.txt"),
+        "--repo", str(project_root),
+        "--app-dir", str(app_dir),
+    ]
+    if vcpkg_share:
+        command += ["--vcpkg-share", str(vcpkg_share)]
+    success, _ = run_command(command, cwd=project_root, description="Third-party notices")
+    return success
+
 def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path, clean: bool = False) -> bool:
     """Build Electron app."""
     app_dir = project_root / "app"
@@ -1608,6 +1635,21 @@ def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path,
 
             spinner.stop()
             print()
+
+        # Third-party notices. Not under `if engine_binary`: an app-only build
+        # packages too, and the installer must carry the licences either way.
+        vcpkg_share = vcpkg_share_dir(project_root / "engine" / "build-release")
+        if not vcpkg_share:
+            log_dim('No configured engine build to read vcpkg licences from; the notices omit C++ dependencies')
+        spinner = Spinner("Generating third-party notices")
+        spinner.start()
+        if stage_third_party_notices(project_root, vcpkg_share):
+            spinner.stop()
+        else:
+            spinner.stop(Style.CROSS, Style.RED)
+            return False
+
+        print()
 
         # Package
         spinner = Spinner("Packaging application")

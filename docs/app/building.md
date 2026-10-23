@@ -147,7 +147,22 @@ The app will:
    cp engine/build/Release/vayu-engine.exe app/build/resources/bin/
    ```
 
-3. **Build the app**:
+3. **Generate the third-party notices** into `app/build/`, where the
+   packager reads them (`build.py` does this for you; see
+   [Third-party notices](../engine/building.md#third-party-notices)):
+   ```bash
+   python scripts/generate-third-party-notices.py \
+     --out app/build/THIRD_PARTY_NOTICES.txt --app-dir app \
+     --vcpkg-share engine/build-release/vcpkg_installed/<triplet>/share
+   ```
+
+   `electron-builder.json` ships the file as an `extraResources` entry
+   (`THIRD_PARTY_NOTICES.txt`, loose in `resources/`, not in the asar), so
+   packaging fails when it is missing. The app opens it from Help › Third-party
+   notices and Settings › General (`electron/third-party-notices.ts`). A
+   development run has no staged copy and says so instead of opening a repo path.
+
+4. **Build the app**:
    ```bash
    cd app
    pnpm electron:build

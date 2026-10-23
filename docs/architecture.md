@@ -742,6 +742,9 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **macOS**: `Vayu.app/Contents/Resources/bin/vayu-engine`
 - **Windows**: `resources/bin/vayu-engine.exe`
 - **Linux**: `resources/bin/vayu-engine`
+- **Beside the engine, loose in `resources/`** (`extraResources`, outside the
+  asar so the OS can open them): `icon.png` and `THIRD_PARTY_NOTICES.txt`
+  (`#2693`; reached from Help › Third-party notices and Settings › General)
 - **Data Directory** (`app.getPath("userData")`, named by `main.ts` from
   `USER_DATA_DIR_NAME` in `app/electron/constants.ts`):
   - macOS: `~/Library/Application Support/Vayu/`

@@ -212,6 +212,23 @@ jobs:
             cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico
           fi
 
+      # The notices file electron-builder.json ships beside the app (#2693): a
+      # missing `from` file fails packaging, installer or `dir` alike. The
+      # engine is the production preset's, so its CMake cache names the vcpkg
+      # tree. Unlike release.yml this does not fail on a missing vcpkg share
+      # directory - the measurement does not publish the file, it only needs it
+      # to exist.
+      - name: Stage the third-party notices
+        shell: bash
+        run: |
+          cache=engine/build-release/CMakeCache.txt
+          installed=$(sed -n 's/^VCPKG_INSTALLED_DIR:[A-Z]*=//p' "$cache")
+          triplet=$(sed -n 's/^VCPKG_TARGET_TRIPLET:[A-Z]*=//p' "$cache")
+          python scripts/generate-third-party-notices.py \
+            --out app/build/THIRD_PARTY_NOTICES.txt \
+            --vcpkg-share "$installed/$triplet/share" \
+            --app-dir app
+
       # `dir`, not the installers release.yml builds: an unpacked build is the
       # same asar, the same staged engine and the same main process, and it is
       # what the cold-start leg launches. Paying three runners to also compress
