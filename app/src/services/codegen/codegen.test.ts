@@ -1703,6 +1703,8 @@ describe("repeated headers", () => {
 		});
 		expect(code).toContain('"Cookie": "a=1; b=2"');
 		expect(notes[0]).toContain('"; "');
+		expect(notes[0]).toContain("Vayu sends them joined the same way");
+		expect(notes[0]).not.toContain("separate lines");
 	});
 
 	it("keeps every other header where it was, and notes nothing when no name repeats", () => {
