@@ -733,7 +733,7 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **Load models**: `constant_rps` is open-loop (dispatch at a fixed rate); `constant_concurrency`,
   `ramp_up`, `iterations` and `capacity` are closed-loop (hold a target in-flight count).
   `capacity` is the one whose target adapts to what the run measured, stepping up until latency
-  breaks its budget. See [Engine Architecture](engine/architecture.md#load-test-strategies).
+  or the error share breaks its budget. See [Engine Architecture](engine/architecture.md#load-test-strategies).
 - **Efficient Caching**: TanStack Query caches server responses in Manager
 
 ## File Locations

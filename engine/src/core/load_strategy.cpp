@@ -1411,19 +1411,23 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
     if (elapsed_ms - level_started_ms_ < config_.step_duration_ms) {
         return true;
     }
-    if (level_samples_ == 0) {
+    if (level_samples_ == 0 && level_failed_ == 0) {
         // Not one timed completion landed in the level's histogram - neither
         // an answer nor a failure whose transfer ran, which a timeout is
-        // (#2384). Judging it would read a service that measured nothing as
-        // one that answered instantly, and the search would climb straight
-        // past the limit it exists to find. The level stays open instead; a
-        // search that never gets a timed completion ends on its deadline
-        // having reported only the levels it actually measured.
+        // (#2384) - and no failure was counted either. Judging it would read a
+        // service that measured nothing as one that answered instantly, and
+        // the search would climb straight past the limit it exists to find.
+        // The level stays open instead; a search that never gets a completion
+        // ends on its deadline having reported only the levels it measured.
+        // A counted failure is judged even with no latency behind it (#2815):
+        // a refused connection records none, and a level of nothing but
+        // refusals is the clearest error breach there is.
         return true;
     }
 
     history_.push_back ({ current_,
-    rps_windows_ > 0 ? rps_sum_ / static_cast<double> (rps_windows_) : 0.0, level_p99_ms_ });
+    rps_windows_ > 0 ? rps_sum_ / static_cast<double> (rps_windows_) : 0.0,
+    level_p99_ms_, level_error_pct_ });
 
     const CapacityDecision decision = decide_next_level (config_, history_);
     switch (decision.action) {
@@ -1455,6 +1459,8 @@ void CapacitySearch::open_level (size_t level, int64_t now_ms) {
     level_epoch_      = 0;
     level_samples_    = 0;
     level_p99_ms_     = 0.0;
+    level_failed_     = 0;
+    level_error_pct_  = 0.0;
     // Adopt the newest published sequence so the first tick this level
     // counts is one produced after the target moved, not the one already
     // sitting there describing the previous level.
@@ -1491,8 +1497,10 @@ void CapacitySearch::collect_tick () {
     // A tick under an older epoch was produced before the reset applied, and
     // its level histogram still holds the previous level or the settle ticks.
     if (tick->level.epoch == level_epoch_) {
-        level_samples_ = tick->level.samples;
-        level_p99_ms_  = tick->level.p99_ms;
+        level_samples_   = tick->level.samples;
+        level_p99_ms_    = tick->level.p99_ms;
+        level_failed_    = tick->level.failed;
+        level_error_pct_ = tick->level.error_pct ();
     }
 }
 
@@ -1512,7 +1520,8 @@ class CapacityLoadStrategy : public LoadStrategy {
 
         vayu::utils::log_info ("run", "Starting Capacity Discovery Load Test");
         vayu::utils::log_info ("run",
-        "  SLO: p99 < " + std::to_string (capacity_config.slo_ms) + " ms");
+        "  SLO: p99 < " + std::to_string (capacity_config.slo_ms) +
+        " ms, errors <= " + std::to_string (capacity_config.max_error_pct) + "%");
         vayu::utils::log_info ("run",
         "  Step duration: " + std::to_string (capacity_config.step_duration_ms) + " ms");
         vayu::utils::log_info ("run",

@@ -9293,14 +9293,21 @@ therefore what `targetRps × duration` asked for.
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
 the level, and then steps up by 25% (at least +1) while the level stayed inside
-`sloMs`. A level's `p99_ms` is the percentile of every completion at the level
+its budget. A level's `p99_ms` is the percentile of every completion at the level
 after its first three live ticks, which measure the transition to the new
 target, read from one histogram; it is not a mean of 100 ms window percentiles,
 which a level with a periodic pause would pass. Its `rps` is the mean throughput
-over the same ticks. It stops - and names the reason in
-the report - when p99 exceeds `sloMs` across **two consecutive** judged levels
-(`slo_exceeded`; one breaching measurement re-measures the same level rather than
-ending the search), when two step-ups buy under 5% more throughput
+over the same ticks, and its `error_pct` the share of the requests completed over
+them that were errors, by the one definition every surface reports (a status
+outside 2xx/3xx, or no response; a Stop-cancelled request is neither). A level
+**breaches** when its p99 exceeds `sloMs` *or* its error share exceeds 1%
+(`constants::capacity::ERROR_RATE_PCT`, no run-config knob): a target answering
+fast 503s is not sustaining the level. The search stops - and names the reason
+in the report - after **two consecutive** breaching judged levels (one
+breaching measurement re-measures the same level rather than ending the
+search): `slo_exceeded` when the last one's p99 is over `sloMs`,
+`errors_exceeded` when its p99 is inside `sloMs` and only its error share is
+over the limit. It also stops when two step-ups buy under 5% more throughput
 (`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
 runs out (`deadline`), or when the operator stops the run (`stopped`).
 
@@ -9314,11 +9321,14 @@ one number - the MCP tool's cap does.
 The search steers by what the metrics thread publishes each live tick rather
 than sampling the collector itself, so it takes nothing away from what `GET
 /runs/:id/live` streams. A level in which no request was timed (`latencySamples`
-`0`, percentiles `null` on the frame) is not judged and stays open: reading it
-as "answered instantly" would climb straight past the limit. A request that
-timed out is timed (see [Latency population](#latency-population)), so a level
-of nothing but timeouts has samples, is judged, and reports a p99 near the
-timeout - the level fails its latency limit, which is the right verdict.
+`0`, percentiles `null` on the frame) and no error was counted is not judged and
+stays open: reading it as "answered instantly" would climb straight past the
+limit. A request that timed out is timed (see
+[Latency population](#latency-population)), so a level of nothing but timeouts
+has samples, is judged, and reports a p99 near the timeout - the level fails its
+latency limit, which is the right verdict. A refused connection records no
+latency but is counted, so a level of nothing but refusals is judged too, at a
+p99 of 0 and an error share of 100%, and fails its error limit.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 p99 per level and a sequence has one per step.
 

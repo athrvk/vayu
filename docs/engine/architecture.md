@@ -1139,8 +1139,8 @@ run end.
 
 ### 5. `capacity` (closed-loop, adaptive)
 
-Steps the concurrency target up while latency holds, and stops itself at the
-knee. It answers "what can this service sustain" without a human bisecting
+Steps the concurrency target up while latency and errors hold, and stops itself
+at the knee. It answers "what can this service sustain" without a human bisecting
 concurrency by hand.
 
 ```json
@@ -1151,11 +1151,16 @@ concurrency by hand.
 Each level is held for `stepDuration`, then judged on its p99 - the percentile of
 every completion sampled after its settle ticks, from one histogram, never a mean
 of 100 ms window percentiles (#2388) - and its mean throughput over the same
-ticks. Healthy levels step up 25% (at least +1); a single
-breaching window **holds** the level and re-measures rather than ending the
-search. The stop reasons are `slo_exceeded` (two consecutive breaching windows),
-`plateau` (two step-ups bought under 5% more throughput), `cap_reached`,
-`deadline` and `stopped`, and the report's `capacity` section names which fired.
+ticks, and on its error share: the requests it completed over those ticks that
+were errors, counted from the same status distribution the live frame reports
+(#2815). A level breaches when its p99 is over `sloMs` or its error share is over
+`constants::capacity::ERROR_RATE_PCT` (1%). Healthy levels step up 25% (at least
++1); a single breaching window **holds** the level and re-measures rather than
+ending the search. The stop reasons are `slo_exceeded` (two consecutive
+breaching windows, the last over `sloMs`), `errors_exceeded` (the same, the last
+inside `sloMs` and over the error limit), `plateau` (two step-ups bought under 5%
+more throughput), `cap_reached`, `deadline` and `stopped`, and the report's
+`capacity` section names which fired.
 
 ### Bounded streams under load
 

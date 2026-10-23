@@ -57,8 +57,8 @@ CapacityConfig search () {
     return config;
 }
 
-CapacityWindow window (size_t concurrency, double rps, double p99_ms) {
-    return CapacityWindow{ concurrency, rps, p99_ms };
+CapacityWindow window (size_t concurrency, double rps, double p99_ms, double error_pct = 0.0) {
+    return CapacityWindow{ concurrency, rps, p99_ms, error_pct };
 }
 
 TEST (CapacityControllerTest, EmptyHistoryStartsAtStartConcurrency) {
@@ -162,6 +162,50 @@ TEST (CapacityControllerTest, ACapBreachStillReportsTheLatencyLimitFirst) {
     EXPECT_STREQ (decision.stop_reason, stop::SLO_EXCEEDED);
 }
 
+// #2815: a target answering fast 503s is not sustaining the level. One such
+// window re-measures, like a latency breach.
+// Mutation-check: drop the error half of `breaches` and this steps up.
+TEST (CapacityControllerTest, AFastLevelThatMostlyFailsHolds) {
+    const auto decision = decide_next_level (
+    search (), { window (40, 4000, 20.0), window (50, 9000, 3.0, 94.0) });
+    EXPECT_EQ (decision.action, CapacityAction::Hold);
+    EXPECT_EQ (decision.next_concurrency, 50u);
+}
+
+// Mutation-check: report SLO_EXCEEDED for every breach stop and this fails.
+TEST (CapacityControllerTest, TwoErrorBreachesInsideTheSloStopErrorsExceeded) {
+    const std::vector<CapacityWindow> history{ window (40, 4000, 20.0),
+        window (50, 9000, 3.0, 94.0), window (50, 9100, 3.0, 95.0) };
+    const auto decision = decide_next_level (search (), history);
+    EXPECT_EQ (decision.action, CapacityAction::Stop);
+    EXPECT_STREQ (decision.stop_reason, stop::ERRORS_EXCEEDED);
+
+    // Mutation-check: report a knee for SLO_EXCEEDED only and this has none.
+    const auto summary = summarize_capacity (search (), history, decision.stop_reason);
+    ASSERT_HAS_VALUE (summary.knee);
+    EXPECT_EQ (summary.knee->concurrency, 50u);
+    EXPECT_DOUBLE_EQ (summary.knee->error_pct, 95.0);
+    ASSERT_HAS_VALUE (summary.max_healthy);
+    EXPECT_EQ (summary.max_healthy->concurrency, 40u);
+}
+
+TEST (CapacityControllerTest, ExactlyAtTheErrorLimitIsHealthy) {
+    // The limit is "errors at most 1%"; a share *of* 1% has not breached it.
+    const double limit = search ().max_error_pct;
+    const auto decision =
+    decide_next_level (search (), { window (40, 4000, 20.0, limit) });
+    EXPECT_EQ (decision.action, CapacityAction::StepUp);
+}
+
+// Mutation-check: test the error share before the p99 when naming the reason
+// and this reads errors_exceeded.
+TEST (CapacityControllerTest, LatencyIsTheReasonWhenBothBreach) {
+    const auto decision = decide_next_level (search (),
+    { window (50, 4200, 180.0, 40.0), window (50, 4100, 210.0, 45.0) });
+    EXPECT_EQ (decision.action, CapacityAction::Stop);
+    EXPECT_STREQ (decision.stop_reason, stop::SLO_EXCEEDED);
+}
+
 // ---------------------------------------------------------------------------
 // Summarizing what the search found
 // ---------------------------------------------------------------------------
@@ -205,6 +249,42 @@ TEST (CapacityControllerTest, NoHeadlineWhenTheFirstLevelAlreadyBreached) {
     EXPECT_EQ (summary.knee->concurrency, 10u);
 }
 
+// A level that held the latency budget while failing is not the capacity.
+// Mutation-check: judge max_healthy on the p99 alone and this reports 64.
+TEST (CapacityControllerTest, TheHeadlineSkipsALevelThatBreachedOnErrors) {
+    const std::vector<CapacityWindow> history{ window (48, 23400, 41.2, 0.5),
+        window (64, 30000, 12.0, 30.0), window (64, 31000, 11.0, 35.0) };
+    const auto summary = summarize_capacity (search (), history, stop::ERRORS_EXCEEDED);
+
+    ASSERT_HAS_VALUE (summary.max_healthy);
+    EXPECT_EQ (summary.max_healthy->concurrency, 48u);
+    EXPECT_DOUBLE_EQ (summary.max_healthy->error_pct, 0.5);
+}
+
+TEST (CapacityControllerTest, NoHeadlineWhenEveryLevelFailed) {
+    const std::vector<CapacityWindow> history{ window (10, 5000, 1.0, 100.0),
+        window (10, 5100, 1.0, 100.0) };
+    const auto decision = decide_next_level (search (), history);
+    EXPECT_STREQ (decision.stop_reason, stop::ERRORS_EXCEEDED);
+
+    const auto summary = summarize_capacity (search (), history, decision.stop_reason);
+    EXPECT_FALSE (summary.max_healthy.has_value ());
+    ASSERT_HAS_VALUE (summary.knee);
+    EXPECT_EQ (summary.knee->concurrency, 10u);
+}
+
+TEST (CapacityControllerTest, PayloadCarriesTheErrorShareAndItsLimit) {
+    const auto summary = summarize_capacity (search (),
+    { window (10, 5000, 1.0, 0.0), window (20, 9000, 2.0, 60.0), window (20, 9100, 2.0, 70.0) },
+    stop::ERRORS_EXCEEDED);
+    const auto payload = build_capacity_summary_payload (summary);
+
+    EXPECT_DOUBLE_EQ (payload["max_error_pct"].get<double> (), search ().max_error_pct);
+    EXPECT_DOUBLE_EQ (payload["knee_error_pct"].get<double> (), 70.0);
+    EXPECT_DOUBLE_EQ (payload["levels"][1]["error_pct"].get<double> (), 60.0);
+    EXPECT_EQ (payload["stop_reason"], "errors_exceeded");
+}
+
 TEST (CapacityControllerTest, PayloadOmitsWhatWasNotObserved) {
     const auto summary = summarize_capacity (search (),
     { window (10, 90, 400.0), window (10, 88, 420.0) }, stop::SLO_EXCEEDED);
@@ -231,6 +311,7 @@ TEST (CapacityControllerTest, ConfigReadsTheDeclaredBounds) {
     EXPECT_EQ (parsed.max_concurrency, 512u);
     EXPECT_EQ (parsed.step_duration_ms, 3000);
     EXPECT_EQ (parsed.deadline_ms, 120000);
+    EXPECT_DOUBLE_EQ (parsed.max_error_pct, vayu::core::constants::capacity::ERROR_RATE_PCT);
 }
 
 TEST (CapacityControllerTest, ACapBelowTheStartBecomesASingleLevelSearch) {

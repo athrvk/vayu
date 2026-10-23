@@ -16,8 +16,14 @@ namespace vayu::core {
 
 namespace {
 
-bool breaches (const CapacityWindow& window, double slo_ms) {
-    return window.p99_ms > slo_ms;
+bool over_slo (const CapacityConfig& config, const CapacityWindow& window) {
+    return window.p99_ms > config.slo_ms;
+}
+
+/// One definition for the stop decision and the headline, so a level the
+/// search stopped on can never be reported as the sustainable one.
+bool breaches (const CapacityConfig& config, const CapacityWindow& window) {
+    return over_slo (config, window) || window.error_pct > config.max_error_pct;
 }
 
 /**
@@ -81,14 +87,17 @@ const std::vector<CapacityWindow>& history) {
 
     size_t trailing_breaches = 0;
     for (auto it = history.rbegin (); it != history.rend (); ++it) {
-        if (!breaches (*it, config.slo_ms)) {
+        if (!breaches (config, *it)) {
             break;
         }
         ++trailing_breaches;
     }
 
     if (trailing_breaches >= config.slo_breach_windows) {
-        return { CapacityAction::Stop, last.concurrency, capacity_stop::SLO_EXCEEDED };
+        // Latency wins when both breach: it is the budget the caller named.
+        const char* reason = over_slo (config, last) ? capacity_stop::SLO_EXCEEDED :
+                                                       capacity_stop::ERRORS_EXCEEDED;
+        return { CapacityAction::Stop, last.concurrency, reason };
     }
     if (trailing_breaches > 0) {
         // One breaching window is a suspicion, not a verdict: re-measure the
@@ -114,12 +123,13 @@ CapacitySummary summarize_capacity (const CapacityConfig& config,
 const std::vector<CapacityWindow>& history,
 const char* stop_reason) {
     CapacitySummary summary;
-    summary.slo_ms      = config.slo_ms;
-    summary.stop_reason = stop_reason != nullptr ? stop_reason : "";
-    summary.levels      = history;
+    summary.slo_ms        = config.slo_ms;
+    summary.max_error_pct = config.max_error_pct;
+    summary.stop_reason   = stop_reason != nullptr ? stop_reason : "";
+    summary.levels        = history;
 
     for (const auto& window : history) {
-        if (breaches (window, config.slo_ms)) {
+        if (breaches (config, window)) {
             continue;
         }
         if (!summary.max_healthy || window.concurrency >= summary.max_healthy->concurrency) {
@@ -127,11 +137,13 @@ const char* stop_reason) {
         }
     }
 
-    // A knee is only ever reported for the stop that observed one. A run that
+    // A knee is only ever reported for the stops that observed one. A run that
     // ended at its cap, its deadline, or on a plateau inside the budget never
     // saw the service give out, and naming its last level "the knee" would
     // claim a limit nothing measured.
-    if (summary.stop_reason == capacity_stop::SLO_EXCEEDED && !history.empty ()) {
+    const bool gave_out = summary.stop_reason == capacity_stop::SLO_EXCEEDED ||
+    summary.stop_reason == capacity_stop::ERRORS_EXCEEDED;
+    if (gave_out && !history.empty ()) {
         summary.knee = history.back ();
     }
 
@@ -141,14 +153,15 @@ const char* stop_reason) {
 nlohmann::json build_capacity_summary_payload (const CapacitySummary& summary) {
     nlohmann::json levels = nlohmann::json::array ();
     for (const auto& level : summary.levels) {
-        levels.push_back ({ { "concurrency", level.concurrency },
-        { "rps", level.rps }, { "p99_ms", level.p99_ms } });
+        levels.push_back ({ { "concurrency", level.concurrency }, { "rps", level.rps },
+        { "p99_ms", level.p99_ms }, { "error_pct", level.error_pct } });
     }
 
     nlohmann::json payload;
-    payload["slo_ms"]      = summary.slo_ms;
-    payload["stop_reason"] = summary.stop_reason;
-    payload["levels"]      = levels;
+    payload["slo_ms"]        = summary.slo_ms;
+    payload["max_error_pct"] = summary.max_error_pct;
+    payload["stop_reason"]   = summary.stop_reason;
+    payload["levels"]        = levels;
     // Both halves are omitted rather than zeroed when they were not observed -
     // "the first level already breached" and "the service sustained nothing"
     // are different findings, and only the absent key can say the first.
@@ -160,6 +173,7 @@ nlohmann::json build_capacity_summary_payload (const CapacitySummary& summary) {
     if (summary.knee) {
         payload["knee_concurrency"] = summary.knee->concurrency;
         payload["knee_p99_ms"]      = summary.knee->p99_ms;
+        payload["knee_error_pct"]   = summary.knee->error_pct;
     }
     return payload;
 }
@@ -175,6 +189,7 @@ int64_t deadline_ms) {
     out.step_growth        = defaults::STEP_GROWTH;
     out.plateau_gain_pct   = defaults::PLATEAU_GAIN_PCT;
     out.slo_breach_windows = defaults::SLO_BREACH_WINDOWS;
+    out.max_error_pct      = defaults::ERROR_RATE_PCT;
 
     // Read through an explicit type check rather than `json::value`, which
     // *throws* on a key holding the wrong type. The route rejects those, but
