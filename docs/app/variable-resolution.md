@@ -1091,7 +1091,11 @@ dashed underline and, in its popover, the same sentence. It reads the same
 `POST /compose` entry (`useDeferredVariables`), fetched once per builder and
 only while the request holds a `{{token}}` anywhere the composer interpolates
 (`requestHasTokens`); the classifier receives the engine's names and decides
-nothing about scripts, so an unscripted request paints exactly as before.
+nothing about scripts, so an unscripted request paints exactly as before. The
+script editors are the exception: a token inside a pre-request script is not
+deferred (that script is what sets the name), and a post-request script reads
+the value after the pre-request one ran, so a script's reads paint from the
+stored scopes as before.
 
 A script can also change a value composition already resolved (a name no
 pre-request script runs before) by editing `pm.request` directly; the

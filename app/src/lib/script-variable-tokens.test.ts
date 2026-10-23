@@ -41,8 +41,7 @@ describe("scriptVariableTokenRanges", () => {
 		expect(byName.get("baseUrl")?.scriptHint).toEqual({ via: "scope", scope: "environment" });
 		expect(byName.get("token")?.scriptHint).toEqual({ via: "scope", scope: "global" });
 		expect(byName.get("shopId")?.scriptHint).toEqual({ via: "scope", scope: "collection" });
-		// The merged read carries no hint - it falls through to the ordinary ladder.
-		expect(byName.get("merged")?.scriptHint).toBeUndefined();
+		expect(byName.get("merged")?.scriptHint).toEqual({ via: "merged" });
 		expect(byName.get("email")?.scriptHint).toEqual({ via: "row" });
 	});
 
@@ -62,11 +61,11 @@ describe("scriptVariableTokenRanges", () => {
 		expect(ranges.some((r) => r.name === "baseUrl")).toBe(false);
 	});
 
-	it("finds every {{name}} inside a replaceIn(...) template, with no scope hint", () => {
+	it("finds every {{name}} inside a replaceIn(...) template, as merged reads", () => {
 		const ranges = scriptVariableTokenRanges(
 			model(['const u = pm.variables.replaceIn("{{host}}/{{path}}");'])
 		);
-		const names = ranges.filter((r) => r.scriptHint === undefined).map((r) => r.name);
+		const names = ranges.filter((r) => r.scriptHint?.via === "merged").map((r) => r.name);
 		expect(names).toEqual(["host", "path"]);
 	});
 
@@ -79,7 +78,7 @@ describe("scriptVariableTokenRanges", () => {
 	it("does not double-count a replaceIn template's own tokens as bare", () => {
 		const ranges = scriptVariableTokenRanges(model(['pm.variables.replaceIn("{{host}}");']));
 		expect(ranges).toHaveLength(1);
-		expect(ranges[0].scriptHint).toBeUndefined();
+		expect(ranges[0].scriptHint).toEqual({ via: "merged" });
 	});
 
 	it("ignores a name inside a // line comment", () => {
@@ -116,7 +115,7 @@ describe("scriptVariableTokenRanges", () => {
 		expect(byName.get("baseUrl")).toEqual({ via: "scope", scope: "environment" });
 		expect(byName.get("ignored")).toBeUndefined(); // never found - it was in a comment
 		expect(ranges.some((r) => r.name === "ignored")).toBe(false);
-		expect(byName.get("base")).toBeUndefined(); // the replaceIn template - merged ladder
+		expect(byName.get("base")).toEqual({ via: "merged" }); // the replaceIn template
 		expect(byName.get("unwrapped")).toEqual({ via: "bare" });
 	});
 });

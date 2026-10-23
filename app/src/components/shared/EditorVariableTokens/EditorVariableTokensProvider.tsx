@@ -54,8 +54,9 @@ import { TokenHoverCard } from "./TokenHoverCard";
  * scope only for a `"scope"` read (never a bound row, which that accessor
  * cannot see), the row alone for a `"row"` read, none at all for a `"bare"`
  * mention (it is not a read, so nothing shadows it), and everything for a
- * caller with no hint - a body-language token, `pm.variables.get`, or a
- * `replaceIn(...)` template, all of which answer from the whole ladder.
+ * `"merged"` read (`pm.variables.get`, a `replaceIn(...)` template) or a
+ * caller with no hint (a body-language token), all of which answer from the
+ * whole ladder.
  *
  * Filtering matters beyond tidiness: `TokenHoverCard`'s `HoverAnswer` checks
  * `origins` for a `"row"` entry *before* looking at `kind` at all, so an
@@ -70,6 +71,7 @@ function originsForHint(
 	if (!scriptHint) return origins;
 	if (scriptHint.via === "bare") return [];
 	if (scriptHint.via === "row") return origins.filter((o) => o.scope === "row");
+	if (scriptHint.via === "merged") return origins;
 	return origins.filter((o) => o.scope === scriptHint.scope);
 }
 

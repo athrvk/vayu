@@ -2587,10 +2587,12 @@ while the request holds a `{{token}}` anywhere a painter draws one
 `classifyVariableToken` takes them as an input and puts a listed name first among
 the scope rungs, so it decides nothing about which requests are scripted. Until
 the answer lands, and when it is empty, every token paints as it always did. A
-script's own `pm.variables.get` / `replaceIn` read is classified through the same
-ladder and so carries the paint too; an accessor that names one scope, a row
-read or a bare `{{name}}` in script text does not. The collection tab's editors
-have no request to compose and never defer.
+script editor never paints a deferred token: the pre-request script is what sets
+the name, and a post-request script reads it after that has run, so
+`pm.variables.get` / `replaceIn` (the `"merged"` hint), an accessor that names
+one scope, a row read and a bare `{{name}}` in script text all paint as they
+always did. The collection tab's editors have no request to compose and never
+defer.
 
 **The same states now paint inside the Monaco body and GraphQL editors
 too** (issue #1220), as decorations rather than DOM tokens - there is no

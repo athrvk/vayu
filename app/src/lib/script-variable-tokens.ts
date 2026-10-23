@@ -158,13 +158,12 @@ function positionAt(lineStarts: number[], offset: number): { lineNumber: number;
 	return { lineNumber: lo + 1, column: offset - lineStarts[lo] + 1 };
 }
 
-/** The hint a read of this accessor implies - `undefined` for the merged read (`pm.variables`). */
-function hintForAccessor(accessor: string): ScriptTokenHint | undefined {
+/** The hint a read of this accessor implies; `pm.variables` is the merged read. */
+function hintForAccessor(accessor: string): ScriptTokenHint {
 	const read = PM_ACCESSORS[accessor];
-	if (!read) return undefined;
-	if (read.reads === "row") return { via: "row" };
-	if (read.reads === "scope") return { via: "scope", scope: read.scope as VariableScope };
-	return undefined; // "merged" - the ordinary ladder, same as a body-language token.
+	if (read?.reads === "row") return { via: "row" };
+	if (read?.reads === "scope") return { via: "scope", scope: read.scope as VariableScope };
+	return { via: "merged" };
 }
 
 export function scriptVariableTokenRanges(
@@ -221,8 +220,7 @@ export function scriptVariableTokenRanges(
 	}
 
 	// 2. `pm.variables.replaceIn("...{{name}}...")` - every `{{name}}` inside the
-	// argument, with no hint: it reads the merged ladder, same as a body-language
-	// token.
+	// argument, read from the merged ladder like `pm.variables.get`.
 	const replaceInPrefix = /pm\??\.variables\??\.replaceIn\s*\(\s*(['"])/g;
 	for (const match of masked.matchAll(replaceInPrefix)) {
 		const quote = match[1];
@@ -235,7 +233,7 @@ export function scriptVariableTokenRanges(
 			const name = inner[1].trim();
 			if (!name) continue;
 			const tokenStart = start + inner.index;
-			pushRange(name, tokenStart, tokenStart + inner[0].length, undefined);
+			pushRange(name, tokenStart, tokenStart + inner[0].length, { via: "merged" });
 		}
 	}
 
