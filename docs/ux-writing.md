@@ -141,6 +141,10 @@ scattered strings land the same way.
   length): under a minute it is `formatLatency` (0.4 reads `400ms`, 4.2 reads
   `4.20s`), from a minute up grouped whole seconds (`75s`, `3,600s`), so a clock
   and a latency never print the same span two ways, and the unit comes with it.
+  The response viewer's total and queue wait (`formatDuration`,
+  `formatResponseTime`) follow the same rule, so a 2.27 ms send reads `2.27 ms`
+  there and as a load p50; only its phase breakdown (`formatPhaseDuration`)
+  keeps a ladder of its own, one decimal in the tens of milliseconds.
   A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), `axisRate` (`1.2k/s`) or `axisVitals`
   (`1.2k`), which take their decimals from the tick spacing so no two

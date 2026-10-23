@@ -39,20 +39,20 @@ describe("the status bar's Vayu figure", () => {
 		bar(3.4);
 
 		const figure = screen.getByText(/in Vayu/);
-		expect(figure).toHaveTextContent("- 3 ms in Vayu");
+		expect(figure).toHaveTextContent("- 3.4 ms in Vayu");
 		expect(figure).toHaveAttribute("title", ENGINE_COST_TIP);
 		// Inside the time block, right after the time itself.
 		expect(figure.previousElementSibling).toHaveTextContent("120 ms");
 	});
 
-	it("keeps two decimals under a millisecond", () => {
+	it("keeps its decimals below 10 ms, as the load surfaces do", () => {
 		bar(0.4);
-		expect(screen.getByText(/in Vayu/)).toHaveTextContent("- 0.40 ms in Vayu");
+		expect(screen.getByText(/in Vayu/)).toHaveTextContent("- 0.4 ms in Vayu");
 	});
 
 	it("shows a zero, which is a measurement", () => {
 		bar(0);
-		expect(screen.getByText(/in Vayu/)).toHaveTextContent("- 0.00 ms in Vayu");
+		expect(screen.getByText(/in Vayu/)).toHaveTextContent("- 0 ms in Vayu");
 	});
 
 	it("is absent when the engine reported none", () => {

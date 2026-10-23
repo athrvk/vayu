@@ -65,7 +65,7 @@ describe("ResponseTimingTab", () => {
 		expect(screen.getAllByText("1.01")).toHaveLength(2);
 		expect(screen.getAllByText("s").length).toBeGreaterThan(0);
 		// The queue wait stays in ms. Converting it would print "0.00 s".
-		expect(screen.getByText("0.20")).toBeInTheDocument();
+		expect(screen.getByText("0.2")).toBeInTheDocument();
 		expect(screen.getAllByText("ms").length).toBeGreaterThan(0);
 	});
 
@@ -93,7 +93,7 @@ describe("ResponseTimingTab", () => {
 				labels[i].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING
 			).toBeTruthy();
 		});
-		expect(screen.getByText("0.40")).toBeInTheDocument();
+		expect(screen.getByText("0.4")).toBeInTheDocument();
 	});
 
 	it("omits the Vayu stat when none was reported, and never relabels Queue as it", () => {
@@ -102,16 +102,16 @@ describe("ResponseTimingTab", () => {
 		expect(screen.queryByText("Vayu")).not.toBeInTheDocument();
 		// Queue keeps its own label and its own number.
 		expect(screen.getByText("Queue")).toBeInTheDocument();
-		expect(screen.getByText("0.20")).toBeInTheDocument();
+		expect(screen.getByText("0.2")).toBeInTheDocument();
 	});
 
 	it("keeps Queue and Vayu as two stats with two values", () => {
 		renderTab({ timing: { ...sample, engineMs: 0.4 } });
 
 		expect(screen.getByText("Queue")).toBeInTheDocument();
-		expect(screen.getByText("0.20")).toBeInTheDocument();
+		expect(screen.getByText("0.2")).toBeInTheDocument();
 		expect(screen.getByText("Vayu")).toBeInTheDocument();
-		expect(screen.getByText("0.40")).toBeInTheDocument();
+		expect(screen.getByText("0.4")).toBeInTheDocument();
 	});
 
 	it("handles all-zero phases without dividing by zero", () => {

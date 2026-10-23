@@ -74,7 +74,7 @@ describe("the response pane's Vayu figure", () => {
 		state.response = response(0.4);
 		renderViewer();
 
-		expect(screen.getByText("- 0.40 ms in Vayu")).toBeInTheDocument();
+		expect(screen.getByText("- 0.4 ms in Vayu")).toBeInTheDocument();
 	});
 
 	it("shows nothing for a response without one", () => {
