@@ -24,6 +24,8 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <curl/curl.h>
@@ -35,6 +37,7 @@
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/list_page.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 
@@ -47,6 +50,9 @@ namespace vayu::http::routes {
 nlohmann::json cookies_response (const vayu::http::CookieJar& jar);
 nlohmann::json clear_cookies_response (vayu::http::CookieJar& jar,
 const std::optional<std::string>& scope);
+// The same GET with its `q` / `limit` / `offset` keys (#2443).
+std::pair<int, nlohmann::json> cookies_response (const vayu::http::CookieJar& jar,
+const ListPageQuery& page_query);
 } // namespace vayu::http::routes
 
 using vayu::http::Client;
@@ -2205,3 +2211,115 @@ TEST (CookieJarRoute, AbsentScopeClearsEverythingAndAnEmptyOneClearsOnlyTheNoEnv
     EXPECT_EQ (cleared["cleared"], 1u);
     EXPECT_TRUE (jar.snapshot ().empty ());
 }
+
+namespace {
+
+// -- GET /cookies: `q` / `limit` / `offset` (#2443) --------------------------
+
+/// Three scopes - the no-environment jar and two environments - whose
+/// cookies, flattened in scope-key then line order, are named `c0`..`c5`.
+void fill_three_scopes (CookieJar& jar) {
+    const auto line = [] (const std::string& domain, const std::string& name) {
+        return netscape_line (domain, "FALSE", "/", "FALSE", "0", name, "v_" + name);
+    };
+    jar.store ("env_b", { line ("b.example.com", "c4"), line ("Shop.Example.com", "c5") });
+    jar.store (std::string (NO_ENVIRONMENT_SCOPE),
+    { line ("api.example.com", "c0"), line ("other.test", "SESSION_c1") });
+    jar.store ("env_a", { line ("auth.Example.COM", "c2"), line ("x.test", "c3") });
+}
+
+std::vector<std::string> names_of (const nlohmann::json& rows) {
+    std::vector<std::string> names;
+    for (const auto& row : rows) {
+        names.push_back (row.at ("name").get<std::string> ());
+    }
+    return names;
+}
+
+// With none of the three keys the route answers `{scopes}` exactly as before.
+// Mutation check: answer a call with no key through `list_page_of` and this
+// reds.
+TEST (CookieJarRoute, NoPagingKeysAnswersTheScopesBodyByteForByte) {
+    CookieJar jar;
+    fill_three_scopes (jar);
+    auto [status, body] =
+    vayu::http::routes::cookies_response (jar, vayu::http::routes::ListPageQuery{});
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.dump (), vayu::http::routes::cookies_response (jar).dump ());
+}
+
+// The paged form is flat: each cookie carries its scope's `environmentId`,
+// null for the no-environment jar, in scope-key then line order. `q` matches
+// the name or the domain, case-insensitively, and a cleared jar's cookies
+// never match. Mutation check: drop the domain half of the predicate and the
+// cookies matched only by domain go missing.
+TEST (CookieJarRoute, PagedFormMatchesQAgainstNameOrDomainAcrossFlattenedScopes) {
+    CookieJar jar;
+    fill_three_scopes (jar);
+
+    auto [status, body] =
+    vayu::http::routes::cookies_response (jar, { .q = "eXaMpLe.com" });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (names_of (body["data"]),
+    (std::vector<std::string>{ "c0", "c2", "c4", "c5" }));
+    EXPECT_EQ (body["pagination"]["total"], 4);
+    const auto& first = body["data"][0];
+    EXPECT_TRUE (first["environmentId"].is_null ());
+    EXPECT_EQ (first["value"], "v_c0");
+    EXPECT_EQ (first["domain"], "api.example.com");
+    EXPECT_EQ (first["path"], "/");
+    EXPECT_EQ (first["secure"], false);
+    EXPECT_EQ (first["httpOnly"], false);
+    EXPECT_EQ (first["expires"], 0);
+    EXPECT_FALSE (first.contains ("includeSubdomains"));
+    EXPECT_EQ (body["data"][1]["environmentId"], "env_a");
+    EXPECT_EQ (body["data"][3]["environmentId"], "env_b");
+
+    auto [by_name_status, by_name] =
+    vayu::http::routes::cookies_response (jar, { .q = "session" });
+    ASSERT_EQ (by_name_status, 200);
+    EXPECT_EQ (names_of (by_name["data"]), (std::vector<std::string>{ "SESSION_c1" }));
+
+    jar.clear ("env_a");
+    auto [cleared_status, cleared] =
+    vayu::http::routes::cookies_response (jar, { .q = "c2" });
+    ASSERT_EQ (cleared_status, 200);
+    EXPECT_TRUE (cleared["data"].empty ());
+    EXPECT_EQ (cleared["pagination"]["total"], 0);
+}
+
+// Pages walk the flattened order without a gap or a repeat. Mutation check:
+// drop the offset from ListPage::window and every page restarts at `c0`.
+TEST (CookieJarRoute, PagedFormWalksTheFlattenedCookiesInStablePages) {
+    CookieJar jar;
+    fill_three_scopes (jar);
+    std::vector<std::string> walked;
+    for (const auto& [offset, returned, has_more] :
+    { std::tuple{ "0", 4, true }, std::tuple{ "4", 2, false } }) {
+        auto [status, body] = vayu::http::routes::cookies_response (
+        jar, { .limit = "4", .offset = offset });
+        ASSERT_EQ (status, 200) << body.dump ();
+        EXPECT_EQ (body["pagination"]["returned"], returned) << offset;
+        EXPECT_EQ (body["pagination"]["hasMore"], has_more) << offset;
+        EXPECT_EQ (body["pagination"]["total"], 6) << offset;
+        for (const auto& name : names_of (body["data"])) {
+            walked.push_back (name);
+        }
+    }
+    EXPECT_EQ (walked,
+    (std::vector<std::string>{ "c0", "SESSION_c1", "c2", "c3", "c4", "c5" }));
+}
+
+TEST (CookieJarRoute, PagedFormRefusesABadLimitOrOffset) {
+    CookieJar jar;
+    fill_three_scopes (jar);
+    for (const auto& [query, code] :
+    { std::pair{ vayu::http::routes::ListPageQuery{ .limit = "0" }, "invalid_limit" },
+    std::pair{ vayu::http::routes::ListPageQuery{ .offset = "5abc" }, "invalid_offset" } }) {
+        auto [status, body] = vayu::http::routes::cookies_response (jar, query);
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_EQ (body["error"]["code"], code);
+    }
+}
+
+} // namespace

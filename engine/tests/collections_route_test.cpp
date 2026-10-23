@@ -24,13 +24,18 @@
 
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/list_page.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/json.hpp"
 
 using nlohmann::json;
 
@@ -46,6 +51,9 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// Defined in collections.cpp; the GET /collections answer, {status, body}.
+std::pair<int, nlohmann::json> list_collections_response (vayu::db::Database& db,
+const ListPageQuery& page_query);
 } // namespace vayu::http::routes
 
 namespace {
@@ -273,6 +281,87 @@ TEST_F (CollectionsRouteTest, ARootAppendsAfterTheOtherRootsOnly) {
 
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"], 3);
+}
+
+// -- GET /collections: `q` / `limit` / `offset` (#2443) ----------------------
+
+std::vector<std::string> ids_of (const json& rows) {
+    std::vector<std::string> ids;
+    for (const auto& row : rows) {
+        ids.push_back (row.at ("id").get<std::string> ());
+    }
+    return ids;
+}
+
+// With none of the three keys the route answers the bare array it always has,
+// every live collection serialized in the documented order. Mutation check:
+// answer a call with no key through `list_page_of` and this reds.
+TEST_F (CollectionsRouteTest, ListWithNoPagingKeysIsTheBareArrayByteForByte) {
+    seed_collection ("col_b", "B", std::nullopt, 1);
+    seed_collection ("col_a", "A", std::nullopt, 0);
+    json expected = json::array ();
+    for (const auto& c : db_->get_collections ()) {
+        expected.push_back (vayu::json::serialize (c));
+    }
+    ASSERT_EQ (expected.size (), 2U);
+
+    auto [status, body] = vayu::http::routes::list_collections_response (
+    *db_, vayu::http::routes::ListPageQuery{});
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.dump (), expected.dump ());
+}
+
+// `q` is a case-insensitive substring of the name, and a collection in the
+// trash never matches. Mutation check: drop the `matches` predicate from
+// list_collections_response and the unmatched rows come back.
+TEST_F (CollectionsRouteTest, PagedListMatchesQAgainstTheNameCaseInsensitively) {
+    seed_collection ("col_pay", "Payments API", std::nullopt, 0);
+    seed_collection ("col_users", "Users", std::nullopt, 1);
+    seed_collection ("col_pay2", "legacy PAYMENTS v1", "col_users", 0);
+    seed_collection ("col_old", "Old payments", std::nullopt, 2);
+    db_->delete_collection ("col_old");
+
+    auto [status, body] =
+    vayu::http::routes::list_collections_response (*db_, { .q = "payMENTS" });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (ids_of (body["data"]), (std::vector<std::string>{ "col_pay", "col_pay2" }));
+    EXPECT_EQ (body["pagination"]["total"], 2);
+    const auto pay = db_->get_collection ("col_pay");
+    ASSERT_HAS_VALUE (pay);
+    EXPECT_EQ (body["data"][0], vayu::json::serialize (*pay));
+}
+
+// Pages walk the documented order without a gap or a repeat. Mutation check:
+// drop the offset from ListPage::window and every page restarts at the top.
+TEST_F (CollectionsRouteTest, PagedListWalksTheOrderedRowsInStablePages) {
+    for (int i = 4; i >= 0; --i) {
+        seed_collection ("col_" + std::to_string (i), "C", std::nullopt, i);
+    }
+    std::vector<std::string> walked;
+    for (const auto& [offset, returned, has_more] : { std::tuple{ "0", 2, true },
+         std::tuple{ "2", 2, true }, std::tuple{ "4", 1, false } }) {
+        auto [status, body] = vayu::http::routes::list_collections_response (
+        *db_, { .limit = "2", .offset = offset });
+        ASSERT_EQ (status, 200) << body.dump ();
+        EXPECT_EQ (body["pagination"]["returned"], returned) << offset;
+        EXPECT_EQ (body["pagination"]["hasMore"], has_more) << offset;
+        EXPECT_EQ (body["pagination"]["total"], 5) << offset;
+        for (const auto& id : ids_of (body["data"])) {
+            walked.push_back (id);
+        }
+    }
+    EXPECT_EQ (walked,
+    (std::vector<std::string>{ "col_0", "col_1", "col_2", "col_3", "col_4" }));
+}
+
+TEST_F (CollectionsRouteTest, PagedListRefusesABadLimitOrOffset) {
+    for (const auto& [query, code] :
+    { std::pair{ vayu::http::routes::ListPageQuery{ .limit = "5abc" }, "invalid_limit" },
+    std::pair{ vayu::http::routes::ListPageQuery{ .offset = "" }, "invalid_offset" } }) {
+        auto [status, body] = vayu::http::routes::list_collections_response (*db_, query);
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_EQ (body["error"]["code"], code);
+    }
 }
 
 } // namespace

@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -49,12 +50,15 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/db/sibling_order.hpp"
+#include "vayu/http/list_page.hpp"
 
 using nlohmann::json;
 
 namespace vayu::http::routes {
 // Defined in trash.cpp / examples.cpp - the pair (or body) each handler writes.
 nlohmann::json trash_list_body (vayu::db::Database& db);
+std::pair<int, nlohmann::json>
+trash_list_response (vayu::db::Database& db, const ListPageQuery& page_query);
 std::pair<int, nlohmann::json>
 trash_restore_response (vayu::db::Database& db, const std::string& id);
 std::pair<int, nlohmann::json>
@@ -73,6 +77,9 @@ namespace vayu::db {
 namespace {
 
 namespace routes = vayu::http::routes;
+// `list_page.hpp` brings in the `vayu::json` namespace, which would otherwise
+// win the lookup of `json` from inside `vayu::db`.
+using nlohmann::json;
 
 constexpr const char* TEST_DB_PATH = "test_trash.db";
 
@@ -357,6 +364,106 @@ TEST_F (TrashTest, TheListRouteCarriesEveryFieldOfAnEntry) {
     EXPECT_EQ (item["collections"], 0);
     EXPECT_EQ (item["requests"], 1);
     EXPECT_GT (item["deletedAt"].get<int64_t> (), 0);
+}
+
+// -- `q` / `limit` / `offset` (#2443) ----------------------------------------
+
+std::vector<std::string> ids_of (const json& rows) {
+    std::vector<std::string> ids;
+    for (const auto& row : rows) {
+        ids.push_back (row.at ("id").get<std::string> ());
+    }
+    return ids;
+}
+
+// With none of the three keys the route answers `{items, total}` exactly as
+// before. Mutation check: answer a call with no key through `list_page_of`
+// and this reds.
+TEST_F (TrashTest, TheListRouteWithNoPagingKeysIsTheItemsBodyByteForByte) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    db_->delete_request ("req_1");
+    db_->delete_collection ("col_1");
+
+    auto [status, body] = routes::trash_list_response (*db_, routes::ListPageQuery{});
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.dump (), routes::trash_list_body (*db_).dump ());
+}
+
+// `q` is a case-insensitive substring of a root's name. What a cascade took
+// is not a root and never matches, and a restored row has left the trash.
+// Mutation check: drop the `matches` predicate from trash_list_response and
+// the unmatched root comes back.
+TEST_F (TrashTest, TheListRouteMatchesQAgainstARootsNameCaseInsensitively) {
+    make_collection ("col_pay", "Payments");
+    make_collection ("col_child", "payments sandbox", "col_pay");
+    make_collection ("col_users", "Users");
+    make_collection ("col_back", "PAYMENTS restored");
+    make_request ("req_refund", "col_users");
+    Request pay;
+    pay.id            = "req_pay";
+    pay.collection_id = "col_users";
+    pay.name          = "Pay a PaYmEnT";
+    pay.url           = "https://example.test/";
+    db_->save_request (pay);
+    db_->delete_collection ("col_pay");
+    db_->delete_request ("req_pay");
+    db_->delete_request ("req_refund");
+    db_->delete_collection ("col_back");
+    ASSERT_EQ (routes::trash_restore_response (*db_, "col_back").first, 200);
+
+    // The legacy body's rows, in its order, kept where `q` matches.
+    const auto legacy = routes::trash_list_body (*db_);
+    json expected     = json::array ();
+    for (const auto& item : legacy["items"]) {
+        if (item["id"] == "col_pay" || item["id"] == "req_pay") {
+            expected.push_back (item);
+        }
+    }
+    ASSERT_EQ (expected.size (), 2U) << "the fixture seeded the wrong roots";
+
+    auto [status, body] = routes::trash_list_response (*db_, { .q = "PAYMENT" });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["data"], expected);
+    EXPECT_EQ (body["pagination"]["total"], 2);
+}
+
+// Pages walk the newest-first order without a gap or a repeat. Mutation
+// check: drop the offset from ListPage::window and every page restarts at the
+// newest root.
+TEST_F (TrashTest, TheListRouteWalksTheRootsInStablePages) {
+    for (int i = 0; i < 5; ++i) {
+        const std::string id = "col_" + std::to_string (i);
+        make_collection (id, "Folder");
+        db_->delete_collection (id);
+    }
+    const auto all = ids_of (routes::trash_list_body (*db_)["items"]);
+    ASSERT_EQ (all.size (), 5U);
+
+    std::vector<std::string> walked;
+    for (const auto& [offset, returned, has_more] : { std::tuple{ "0", 2, true },
+         std::tuple{ "2", 2, true }, std::tuple{ "4", 1, false } }) {
+        auto [status, body] =
+        routes::trash_list_response (*db_, { .limit = "2", .offset = offset });
+        ASSERT_EQ (status, 200) << body.dump ();
+        EXPECT_EQ (body["pagination"]["returned"], returned) << offset;
+        EXPECT_EQ (body["pagination"]["hasMore"], has_more) << offset;
+        EXPECT_EQ (body["pagination"]["total"], 5) << offset;
+        for (const auto& id : ids_of (body["data"])) {
+            walked.push_back (id);
+        }
+    }
+    EXPECT_EQ (walked, all);
+}
+
+TEST_F (TrashTest, TheListRouteRefusesABadLimitOrOffset) {
+    for (const auto& [query, code] :
+    { std::pair{ routes::ListPageQuery{ .limit = "501" }, "invalid_limit" },
+    std::pair{ routes::ListPageQuery{ .offset = "-1" }, "invalid_offset" } }) {
+        auto [status, body] = routes::trash_list_response (*db_, query);
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_EQ (error_field (body, "code"), code);
+    }
 }
 
 // ---------------------------------------------------------------------------

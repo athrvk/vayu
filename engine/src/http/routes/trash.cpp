@@ -22,6 +22,7 @@
  * that was deleted and the counts answer the rest of it.
  */
 
+#include "vayu/http/list_page.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -59,6 +60,30 @@ nlohmann::json trash_list_body (vayu::db::Database& db) {
         items.push_back (trash_entry_json (entry));
     }
     return nlohmann::json{ { "items", items }, { "total", items.size () } };
+}
+
+/**
+ * Testable core of GET /trash with its query: `trash_list_body` when
+ * @p page_query names none of `q` / `limit` / `offset`, and otherwise one page
+ * of the roots whose `name` holds `q`, newest first, in the
+ * `{data, pagination}` envelope (#2443).
+ */
+std::pair<int, nlohmann::json>
+trash_list_response (vayu::db::Database& db, const ListPageQuery& page_query) {
+    if (!page_query.present ()) {
+        return { 200, trash_list_body (db) };
+    }
+    const auto page = parse_list_page (page_query);
+    if (!page) {
+        return as_response (page.error ());
+    }
+    return { 200,
+        list_page_of (
+        *page, db.get_trash (),
+        [&page] (const vayu::db::TrashEntry& entry) {
+            return page->matches (entry.name);
+        },
+        trash_entry_json) };
 }
 
 /**
@@ -108,12 +133,17 @@ void register_trash_routes (RouteContext& ctx) {
      * GET /trash
      * What has been deleted and can still be restored - roots only, newest
      * first, each with the descendants its delete took.
+     * Query params: q, limit, offset (optional) - any of them answers one page
+     * of the roots whose name holds `q`, in the `{data, pagination}` envelope
+     * (#2443).
      * Returns: {items: [{id, kind, name, deletedAt, parentId, collections,
-     * requests}], total}.
+     * requests}], total}, or that envelope; 400 for a bad `limit` or `offset`.
      */
-    ctx.server.Get ("/trash", [&ctx] (const httplib::Request&, httplib::Response& res) {
+    ctx.server.Get ("/trash", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            res.set_content (trash_list_body (ctx.db).dump (), "application/json");
+            auto [status, body] = trash_list_response (ctx.db, list_page_query (req));
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "http", "GET /trash - Error: " + std::string (e.what ()));

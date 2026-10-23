@@ -673,6 +673,10 @@ logged as a warning: it means a client skipped composition.
   and callers (`DesignRunView`) keep those apart: only a real 404 becomes
   `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's;
   `?fields=summary` answers only the columns a tree is built from (#2546).
+  `q` / `limit` / `offset` page it, and `GET /collections`, `/trash` and
+  `/cookies`, in the `GET /runs` envelope (#2443, `http/list_page.hpp`, the one
+  parser and envelope); a call naming none of the three gets the legacy answer
+  byte for byte, so add a list route's paging there, never per route.
 - **A streaming request is a different execution model, declared not detected**
   (#573). `POST /execute` with `"stream": true` creates the run row, hands the
   transfer to `SseStreamManager` (declared before `server_`, like the listener

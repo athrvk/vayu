@@ -30,6 +30,8 @@
 
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/list_page.hpp"
+#include "vayu/utils/json.hpp"
 
 using nlohmann::json;
 
@@ -42,9 +44,11 @@ std::string list_requests_body (vayu::db::Database& db, const std::string& colle
 // Defined in requests.cpp; the GET /requests body with no `collectionId`.
 std::string list_all_requests_body (vayu::db::Database& db);
 // Defined in requests.cpp; the whole GET /requests route, {status, body_text}.
+// The default names none of `q` / `limit` / `offset` (#2443).
 std::pair<int, std::string> list_requests_response (vayu::db::Database& db,
 const std::optional<std::string>& collection_id,
-std::string_view fields);
+std::string_view fields,
+const ListPageQuery& page_query = {});
 // Defined in requests.cpp; each returns {http_status, json_body}.
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
@@ -119,11 +123,14 @@ class RequestsRouteTest : public ::testing::Test {
         db_->create_collection (col);
     }
 
-    void seed_request_at (const std::string& id, const std::string& collection_id, int order) {
+    void seed_request_at (const std::string& id,
+    const std::string& collection_id,
+    int order,
+    const std::string& name = {}) {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = collection_id;
-        r.name          = id;
+        r.name          = name.empty () ? id : name;
         r.method        = vayu::HttpMethod::GET;
         r.url           = "https://example.test/";
         r.order         = order;
@@ -362,6 +369,145 @@ TEST_F (RequestsRouteTest, UnknownFieldsIs400) {
             std::string::npos)
             << fields;
         }
+    }
+}
+
+// -- `q` / `limit` / `offset` (#2443) ----------------------------------------
+
+std::vector<std::string> ids_of (const json& rows) {
+    std::vector<std::string> ids;
+    for (const auto& row : rows) {
+        ids.push_back (row.at ("id").get<std::string> ());
+    }
+    return ids;
+}
+
+std::pair<int, json> paged_requests (vayu::db::Database& db,
+const std::optional<std::string>& collection_id,
+std::string_view fields,
+const vayu::http::routes::ListPageQuery& query) {
+    auto [status, body] =
+    vayu::http::routes::list_requests_response (db, collection_id, fields, query);
+    return { status, json::parse (body) };
+}
+
+// `q` is a case-insensitive substring of the name, in both row shapes and both
+// scopes, and a request in the trash (or under a trashed collection) never
+// matches though its name does. Mutation check: drop the `matches` predicate
+// from serialize_request_page and every row comes back.
+TEST_F (RequestsRouteTest, PagedListMatchesQAgainstTheNameCaseInsensitively) {
+    seed_collection_at ("col_a", "", 0);
+    seed_collection_at ("col_gone", "", 1);
+    seed_request_at ("req_get", "col_a", 0, "Get Users");
+    seed_request_at ("req_order", "col_a", 1, "Create order");
+    seed_request_at ("req_list", "col_a", 2, "list users by team");
+    seed_request_at ("req_deleted", "col_a", 3, "Delete USERS");
+    seed_request_at ("req_gone", "col_gone", 0, "users of a gone folder");
+    db_->delete_request ("req_deleted");
+    db_->delete_collection ("col_gone");
+
+    for (const auto& collection_id :
+    { std::optional<std::string>{}, std::optional<std::string>{ "col_a" } }) {
+        for (const char* fields : { "", "summary" }) {
+            auto [status, body] =
+            paged_requests (*db_, collection_id, fields, { .q = "uSeRs" });
+            ASSERT_EQ (status, 200) << body;
+            EXPECT_EQ (ids_of (body["data"]),
+            (std::vector<std::string>{ "req_get", "req_list" }))
+            << fields;
+            EXPECT_EQ (body["pagination"]["total"], 2) << fields;
+            EXPECT_EQ (body["pagination"]["limit"], 50) << fields;
+        }
+    }
+    // The trashed rows are invisible even to a `q` only they would match.
+    auto [status, body] = paged_requests (*db_, std::nullopt, "", { .q = "delete" });
+    ASSERT_EQ (status, 200) << body;
+    EXPECT_TRUE (body["data"].empty ());
+    EXPECT_EQ (body["pagination"]["total"], 0);
+}
+
+// Pages walk the documented order without a gap or a repeat, and each says
+// how many it holds and whether another follows. Mutation check: drop the
+// `index < page.offset` skip and every page restarts at the first row.
+TEST_F (RequestsRouteTest, PagedListWalksTheOrderedRowsInStablePages) {
+    seed_collection_at ("col_a", "", 0);
+    for (int i = 4; i >= 0; --i) {
+        seed_request_at ("req_" + std::to_string (i), "col_a", i);
+    }
+    const auto legacy =
+    json::parse (vayu::http::routes::list_requests_body (*db_, "col_a"));
+
+    for (const char* fields : { "", "summary" }) {
+        json walked = json::array ();
+        for (const auto& [offset, returned, has_more] : { std::tuple{ "0", 2, true },
+             std::tuple{ "2", 2, true }, std::tuple{ "4", 1, false } }) {
+            auto [status, body] = paged_requests (
+            *db_, "col_a", fields, { .limit = "2", .offset = offset });
+            ASSERT_EQ (status, 200) << body;
+            EXPECT_EQ (body["pagination"]["returned"], returned) << offset;
+            EXPECT_EQ (body["pagination"]["hasMore"], has_more) << offset;
+            EXPECT_EQ (body["pagination"]["total"], 5) << offset;
+            EXPECT_EQ (body["pagination"]["offset"], std::stoi (offset)) << offset;
+            EXPECT_EQ (body["pagination"]["limit"], 2) << offset;
+            for (const auto& row : body["data"]) {
+                walked.push_back (row);
+            }
+        }
+        EXPECT_EQ (ids_of (walked), ids_of (legacy)) << fields;
+        if (std::string_view (fields).empty ()) {
+            EXPECT_EQ (walked, legacy) << "a page row is not the list's row";
+        }
+    }
+
+    auto [status, past] = paged_requests (*db_, "col_a", "", { .offset = "9" });
+    ASSERT_EQ (status, 200) << past;
+    EXPECT_TRUE (past["data"].empty ());
+    EXPECT_FALSE (past["pagination"]["hasMore"].get<bool> ());
+}
+
+/// The summary list's text as the route wrote it before it took paging keys:
+/// each row's own dump, comma-joined inside one array.
+std::string summary_list_text (const std::vector<vayu::db::RequestSummary>& rows) {
+    std::string text = "[";
+    for (const auto& row : rows) {
+        text += (text.size () > 1 ? "," : "") + vayu::json::serialize (row).dump ();
+    }
+    return text + "]";
+}
+
+// With none of the three keys the route answers exactly what it did before
+// it took them, compared against text built without list_requests_response.
+// Mutation check: route a call with no key through paged_requests_body and
+// the bare array becomes an envelope.
+TEST_F (RequestsRouteTest, NoPagingKeysAnswersTheBareListByteForByte) {
+    seed_request ();
+    const vayu::http::routes::ListPageQuery none{};
+    const auto answer = [this, &none] (const std::optional<std::string>& collection_id,
+                        std::string_view fields) {
+        return vayu::http::routes::list_requests_response (*db_, collection_id, fields, none);
+    };
+
+    EXPECT_EQ (answer (std::nullopt, ""),
+    std::make_pair (200, vayu::http::routes::list_all_requests_body (*db_)));
+    EXPECT_EQ (answer ("col_1", ""),
+    std::make_pair (200, vayu::http::routes::list_requests_body (*db_, "col_1")));
+    EXPECT_EQ (answer (std::nullopt, "summary"),
+    std::make_pair (
+    200, summary_list_text (db_->get_request_summaries_in_live_collections ())));
+    EXPECT_EQ (answer ("col_1", "summary"),
+    std::make_pair (200,
+    summary_list_text (db_->get_request_summaries_in_collection ("col_1"))));
+}
+
+TEST_F (RequestsRouteTest, PagedListRefusesABadLimitOrOffset) {
+    seed_request ();
+    for (const auto& [query, code] :
+    { std::pair{ vayu::http::routes::ListPageQuery{ .limit = "0" }, "invalid_limit" },
+    std::pair{ vayu::http::routes::ListPageQuery{ .limit = "501" }, "invalid_limit" },
+    std::pair{ vayu::http::routes::ListPageQuery{ .offset = "-1" }, "invalid_offset" } }) {
+        auto [status, body] = paged_requests (*db_, std::nullopt, "summary", query);
+        EXPECT_EQ (status, 400) << body;
+        EXPECT_EQ (body["error"]["code"], code);
     }
 }
 

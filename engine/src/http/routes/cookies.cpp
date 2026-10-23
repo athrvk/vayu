@@ -16,12 +16,60 @@
  * are the whole user-visible surface of the jar's lifetime.
  */
 
+#include "vayu/http/list_page.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace vayu::http::routes {
+
+namespace {
+
+// null, not "", for the no-environment jar: the app renders a name for an id
+// and a placeholder for null, and an empty string would be an id it could
+// never resolve.
+nlohmann::json environment_id_json (const std::optional<std::string>& environment_id) {
+    return environment_id.has_value () ? nlohmann::json (*environment_id) :
+                                         nlohmann::json (nullptr);
+}
+
+nlohmann::json cookie_json (const vayu::http::JarCookie& cookie) {
+    // No `includeSubdomains`: the panel has no reader for it, and the leading
+    // dot libcurl writes on a `Domain=` cookie already shows the same thing
+    // where it matters. It stays a jar field because `cookie_matches` needs it.
+    return { { "name", cookie.name }, { "value", cookie.value },
+        { "domain", cookie.domain }, { "path", cookie.path }, { "secure", cookie.secure },
+        { "httpOnly", cookie.http_only }, { "expires", cookie.expires } };
+}
+
+/// One cookie of the paged answer, carrying the scope it sits in.
+struct ScopedCookie {
+    std::optional<std::string> environment_id;
+    vayu::http::JarCookie cookie;
+};
+
+/// Every cookie in scope-key order, then each jar's own line order.
+std::vector<ScopedCookie> flatten (std::vector<vayu::http::CookieScopeView> scopes) {
+    std::vector<ScopedCookie> flat;
+    for (auto& scope : scopes) {
+        for (auto& cookie : scope.cookies) {
+            flat.push_back ({ scope.environment_id, std::move (cookie) });
+        }
+    }
+    return flat;
+}
+
+nlohmann::json scoped_cookie_json (const ScopedCookie& scoped) {
+    auto row             = cookie_json (scoped.cookie);
+    row["environmentId"] = environment_id_json (scoped.environment_id);
+    return row;
+}
+
+} // namespace
 
 /**
  * Testable core of GET /cookies.
@@ -36,22 +84,10 @@ nlohmann::json cookies_response (const vayu::http::CookieJar& jar) {
     nlohmann::json scopes = nlohmann::json::array ();
     for (const auto& scope : jar.snapshot ()) {
         nlohmann::json entry;
-        // null, not "", for the no-environment jar: the app renders a name for
-        // an id and a placeholder for null, and an empty string would be an id
-        // it could never resolve.
-        entry["environmentId"] = scope.environment_id.has_value () ?
-        nlohmann::json (*scope.environment_id) :
-        nlohmann::json (nullptr);
+        entry["environmentId"] = environment_id_json (scope.environment_id);
         nlohmann::json cookies = nlohmann::json::array ();
         for (const auto& cookie : scope.cookies) {
-            // No `includeSubdomains`: the panel has no reader for it, and the
-            // leading dot libcurl writes on a `Domain=` cookie already shows
-            // the same thing where it matters. It stays a jar field because
-            // `cookie_matches` needs it.
-            cookies.push_back ({ { "name", cookie.name },
-            { "value", cookie.value }, { "domain", cookie.domain },
-            { "path", cookie.path }, { "secure", cookie.secure },
-            { "httpOnly", cookie.http_only }, { "expires", cookie.expires } });
+            cookies.push_back (cookie_json (cookie));
         }
         entry["cookies"] = std::move (cookies);
         scopes.push_back (std::move (entry));
@@ -60,6 +96,32 @@ nlohmann::json cookies_response (const vayu::http::CookieJar& jar) {
     nlohmann::json response;
     response["scopes"] = std::move (scopes);
     return response;
+}
+
+/**
+ * Testable core of GET /cookies with its query, returning
+ * {http_status, json_body}: `cookies_response` when @p page_query names none
+ * of `q` / `limit` / `offset`, and otherwise one page of the cookies whose
+ * name or domain holds `q`, flattened out of their scopes (each row carries
+ * its scope's `environmentId`), in the `{data, pagination}` envelope (#2443).
+ */
+std::pair<int, nlohmann::json> cookies_response (const vayu::http::CookieJar& jar,
+const ListPageQuery& page_query) {
+    if (!page_query.present ()) {
+        return { 200, cookies_response (jar) };
+    }
+    const auto page = parse_list_page (page_query);
+    if (!page) {
+        return as_response (page.error ());
+    }
+    return { 200,
+        list_page_of (
+        *page, flatten (jar.snapshot ()),
+        [&page] (const ScopedCookie& scoped) {
+            return page->matches (scoped.cookie.name) ||
+            page->matches (scoped.cookie.domain);
+        },
+        scoped_cookie_json) };
 }
 
 /**
@@ -84,9 +146,21 @@ void register_cookie_routes (RouteContext& ctx) {
     /**
      * GET /cookies
      * The jar's contents, one entry per scope that holds anything.
+     * Query params: q, limit, offset (optional) - any of them answers one page
+     * of the cookies whose name or domain holds `q`, flattened out of their
+     * scopes, in the `{data, pagination}` envelope (#2443).
      */
-    ctx.server.Get ("/cookies", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        res.set_content (cookies_response (ctx.cookie_jar).dump (), "application/json");
+    ctx.server.Get ("/cookies", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto [status, body] =
+            cookies_response (ctx.cookie_jar, list_page_query (req));
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "http", "GET /cookies - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
     });
 
     /**
