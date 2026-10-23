@@ -360,7 +360,8 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
  * entry, and say so. The entry sits where the name first appeared, keeps that
  * row's spelling and joins the values with ", " - `Cookie` with "; ", as the
  * engine's own folded record does - and the note names each name that was
- * joined, because Vayu sends those rows as separate lines.
+ * joined, because Vayu sends those rows as separate lines - except `Cookie`,
+ * which it sends as the same "; " join (issue #2788).
  *
  * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a
  * dictionary. curl and HTTPie repeat a header and never call this.
@@ -381,8 +382,12 @@ export function foldRepeatedHeaders(
 	const out = [...folded].map(([key, { name, values }]): [string, string] => {
 		if (values.length === 1) return [name, values[0]];
 		const separator = key === "cookie" ? "; " : ", ";
+		const sent =
+			key === "cookie"
+				? "Vayu sends them joined the same way"
+				: "Vayu sends them as separate lines";
 		notes.push(
-			`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; Vayu sends them as separate lines.`
+			`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; ${sent}.`
 		);
 		return [name, values.join(separator)];
 	});

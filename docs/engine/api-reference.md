@@ -1860,7 +1860,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
 - `disableCookies` keeps the cookie jar out of every send of this request: no
   jar cookie is attached and no `Set-Cookie` is stored. A `Cookie` header the
   request carries still goes out, and a pre-request script's
-  `pm.cookies.jar()` write is still persisted.
+  `pm.cookies.jar()` write is still persisted. With the jar on, a typed
+  `Cookie` and the jar's matches go out as one `Cookie` line, the jar's
+  first, never as two (issue #2788).
 - `disabledSystemHeaders` names headers the engine does not add on its own. It
   is stored lowercased and deduplicated in first-appearance order, and
   unioned on every send with the per-send `disabledDefaultHeaders` (see
@@ -5810,8 +5812,9 @@ appended regardless. The app's code snippets apply the same rule
 (`engine/tests/fixtures/auth-header-precedence.json`).
 
 **Redirects.** With `followRedirects` on, a redirect to another host (a different
-host name or port) drops the `Authorization` header, so `bearer`, `basic` and an
-`oauth2` token placed in the header stop at the first host, as libcurl does.
+host name or port) drops the `Authorization` header and a typed `Cookie`, so
+`bearer`, `basic` and an `oauth2` token placed in the header stop at the first
+host, as libcurl does.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
 the request carries - is sent to the host the redirect leads to. A query-located
 key is part of the URL as sent; the next hop is whatever the response's
@@ -7411,11 +7414,14 @@ paragraph above for why a hop's cookie is not necessarily one the jar kept.
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
 that frame declares one* (`Content-Length` above zero, or `Transfer-Encoding:
-chunked`). So it carries what libcurl added on its own - the `Cookie` line the
+chunked`). So it carries what libcurl added on its own - the cookies the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
-`requestHeaders`. The app's Headers tab lists the sent request from this block,
-line by line in wire order, so the tab shows the whole wire while the
+`requestHeaders`. The jar's cookies and the request's typed `Cookie` rows share
+one `Cookie` line, the jar's first and the typed rows after them joined with
+`"; "` (issue #2788); a redirect to another host drops the typed part, as it
+drops a typed `Authorization`. The app's Headers tab lists the sent request
+from this block, line by line in wire order, so the tab shows the whole wire while the
 script-visible record stays the engine's. When the final hop sent no body, the
 string ends at the blank line that closes the header block: a `POST` answered
 `301`, `302` or `303` is re-sent as a body-less `GET`, so the body it started

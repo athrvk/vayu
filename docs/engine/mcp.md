@@ -1522,8 +1522,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
 - **Headers as lines** (issue #2466) - `headers` on `run_request`,
   `start_load_run` and `get_graphql_schema` is an array of `{name, value}`
   lines or a string map. Each line is sent as its own header line, in the order
-  given and in the spelling written, so `Link`, `Forwarded`, two `Cookie` lines
-  or `X-Dup` beside `x-dup` are repeated rather than collapsed; a map holds one
+  given and in the spelling written, so `Link`, `Forwarded` or `X-Dup` beside
+  `x-dup` are repeated rather than collapsed (`Cookie` rows are the exception:
+  they go out as one `; `-joined line with the jar's cookies, issue #2788); a
+  map holds one
   value per name and cannot repeat one. Both go to `POST /compose` as given, which
   answers lines either way, and a line that is not an object with a string
   `name` is refused by its position. The same payload that composes is the one
@@ -1537,7 +1539,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   [default headers](api-reference.md#default-request-headers) a send adds - a
   default `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id
   where one is switched on - and
-  the `Cookie` line the jar matched for the environment. A header the call
+  the `Cookie` line the jar matched for the environment (merged with any
+  `Cookie` the call typed). A header the call
   wrote itself always wins over the default of that name, and
   `disabledDefaultHeaders` on the payload refuses one outright.
   `run_request` and `start_load_run` take that list as an argument

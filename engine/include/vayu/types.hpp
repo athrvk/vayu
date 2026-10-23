@@ -602,7 +602,9 @@ struct Request {
      *
      * Neither half runs: no jar cookie is attached and no `Set-Cookie` is
      * stored. A `Cookie` header the request itself carries still goes out, and
-     * the response still reports what the server set. Read by each driver
+     * the response still reports what the server set. With the jar on, that
+     * typed `Cookie` and the jar's matches go out as one `Cookie` line, the
+     * jar's first (`typed_cookie_value`, issue #2788). Read by each driver
      * where it decides whether a jar rides the transfer - the buffered and
      * streaming design sends and a scenario load run's per-VU session.
      */
@@ -920,6 +922,10 @@ struct Response {
     /**
      * @brief Every header line `build_request_header_list` put on the wire, in
      *        order, a repeated name repeated (issue #2466).
+     *
+     * A typed `Cookie` row is listed as typed, one entry per row, though
+     * libcurl sends the rows merged with the jar's matches on one line (issue
+     * #2788); that line is `raw_request`'s.
      *
      * Served as `requestHeaderLines`, and folded to one value per name
      * (`HeaderList::folded`) as `requestHeaders`.

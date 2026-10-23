@@ -562,7 +562,10 @@ makes a session survive from one design-mode request to the next.
   plain. The verbose transfer log keeps its redaction (`debug_redact.hpp`): a
   log gets exported and shared, the raw view is read on the machine whose
   Settings already display the same value. A script-written cookie is on that
-  frame too, since it goes out on the same transfer.
+  frame too, since it goes out on the same transfer. A `Cookie` the request
+  types joins that line rather than going out beside it (issue #2788): its rows
+  ride `CURLOPT_COOKIE`, which libcurl writes after the jar's matches on the
+  one line, so a request never carries two `Cookie` headers.
 - **History keeps that frame too, cookies included.** The jar itself is never
   persisted, but a design or scenario run stores the message its transfer sent
   as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the
