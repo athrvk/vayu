@@ -259,8 +259,8 @@ export const SPEC_TOOLS: McpTool[] = [
 	{
 		name: "sync_spec",
 		category: "write",
+		// A repeat re-applies the same document, so the call is safe to repeat.
 		retry: "safe",
-		// A repeat re-applies the same document; the extra stored copy is its only trace.
 		// The same set a bind uses, and for the same reason: the document and the
 		// binding live on the collection row, and the requests this creates,
 		// updates and deletes live beneath it. A sync moves both at once, so
@@ -447,8 +447,8 @@ export const SPEC_TOOLS: McpTool[] = [
 	{
 		name: "bind_spec",
 		category: "write",
+		// A repeat re-applies the same document, so the call is safe to repeat.
 		retry: "safe",
-		// A repeat re-applies the same document; the extra stored copy is its only trace.
 		// Both families: the binding lives on the collection row, and the stamps
 		// this writes and clears live on the requests beneath it. Declaring only
 		// the collection would leave an open request list showing identity a bind
