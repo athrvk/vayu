@@ -668,6 +668,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
             auto scopes = overlay.materialize (context->lifecycle_scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            context->script_send.apply (script_ctx);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -747,6 +748,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
             auto scopes = overlay.materialize (context->lifecycle_scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            context->script_send.apply (script_ctx);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);

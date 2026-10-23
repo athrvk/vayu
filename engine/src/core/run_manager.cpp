@@ -1925,6 +1925,7 @@ vayu::http::routes::ScriptVariableScopes& base_scopes) {
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
             vayu::http::routes::bind_variable_scopes (script_ctx, base_scopes);
+            context->script_send.apply (script_ctx);
             return vayu::http::routes::execute_script (
             setup_engine, script, script_ctx, "Setup");
         },
@@ -2016,6 +2017,7 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
             vayu::http::routes::bind_variable_scopes (script_ctx, *scopes);
+            context->script_send.apply (script_ctx);
             return vayu::http::routes::execute_script (
             teardown_engine, script, script_ctx, "Teardown");
         },
