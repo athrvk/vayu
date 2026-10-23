@@ -41,11 +41,13 @@ export const ENGINE_BASE_URL = `http://${ENGINE_HOST}:${ENGINE_PORT}`;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * Calls that proxy a remote server (/request, /import/fetch) are bounded by
+ * Calls that proxy a remote server (/execute, /oauth2/token) are bounded by
  * the engine's user-configurable `defaultTimeout` setting, not this client.
  * The UI timeout for those calls is derived as engine timeout + grace so the
  * engine's own TIMEOUT error (with proper error code) always arrives before
- * the UI aborts.
+ * the UI aborts. `/import/fetch` is bounded by the engine's fixed stall
+ * (`IMPORT_FETCH_STALL_TIMEOUT_MS`), not the setting, and takes the same grace
+ * on top of that.
  */
 export const PROXIED_TIMEOUT_GRACE_MS = 10_000;
 

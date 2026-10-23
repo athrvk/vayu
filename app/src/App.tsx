@@ -73,7 +73,7 @@ function App() {
 	usePrefetchRuns();
 
 	// Keep engine config warm - proxied call timeouts derive from its
-	// defaultTimeout setting (see services/api.ts proxiedRequestTimeoutMs)
+	// defaultTimeout and scriptTimeout settings (see services/api.ts proxiedRequestTimeoutMs)
 	useConfigQuery();
 
 	// Fetch pm.* completions and register them with Monaco's JavaScript language

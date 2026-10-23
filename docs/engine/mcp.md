@@ -1152,10 +1152,16 @@ Notes:
   on a third-party server, so its budget is derived from the engine's own
   `defaultTimeout` setting (read per call from `GET /config`, up to its 300s
   ceiling) plus 10s of grace - the same rule the renderer uses for its proxied
-  calls. That way the engine's own `TIMEOUT` error, with its error code and its
-  run row, arrives before this client gives up. If the budget does expire, the
-  tool says the call may still have completed and what to check before
-  repeating it, which depends on the tool (see [Error results](#error-results));
+  calls. It is a worst case for the payload sent (#2836,
+  `electron/mcp/execute-budget.ts`): the setting again when `auth.mode` is
+  `oauth2` (the token fetch has the same bound), plus the `scriptTimeout`
+  setting (60s when unreadable) for every enabled `script.pre` / `script.post`
+  element, because one call runs them in sequence. A request with neither keeps
+  exactly the setting plus 10s. That way the engine's own `TIMEOUT` error, with
+  its error code and its run row, arrives before this client gives up. If the
+  budget does expire, the tool says the call may still have completed and what
+  to check before repeating it, which depends on the tool (see
+  [Error results](#error-results));
   it is never reported as an unreachable engine, because a retry could re-send a
   request that already went out. `run_collection_smoke` bounds the other side of
   this: a call runs at most `limit` requests (25 by default), so one call stays

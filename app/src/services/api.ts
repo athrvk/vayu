@@ -9,7 +9,7 @@
 
 import { httpClient, ApiError, EngineUnreachableError } from "./http-client";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
-import { IMPORT_FETCH_EVENTS } from "@/constants/import";
+import { IMPORT_FETCH_EVENTS, IMPORT_FETCH_STALL_TIMEOUT_MS } from "@/constants/import";
 import type { AllowFolderReply } from "@/types/electron";
 import {
 	RequestTransformer,
@@ -133,9 +133,9 @@ import type { ImportResult } from "@/services/importers/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
+import { executeBudgetMs } from "@/lib/execute-budget";
 import {
 	PROXIED_TIMEOUT_GRACE_MS,
-	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
 	STATS_PAGE_LIMIT,
 	RUN_SAMPLES_PAGE_LIMIT,
 	RUNS_PAGE_LIMIT,
@@ -146,22 +146,40 @@ import {
 const APP_ORIGIN: RunOrigin = { kind: "app" };
 
 /**
- * Timeout for engine calls that proxy a remote server (/request,
- * /import/fetch). These block for as long as the target takes, bounded by the
- * engine's user-configurable `defaultTimeout` setting - so derive the UI
- * timeout from it instead of the flat default, with enough grace that the
- * engine's own TIMEOUT error (proper error code) arrives before the UI aborts.
- * Falls back to the engine's max when the config cache is cold. If per-request
- * timeout overrides are ever added, this must become max(default, override).
+ * The client's budget for `POST /import/fetch`: the engine's stall bound plus
+ * the grace, not the `defaultTimeout` setting, because the engine does not
+ * bound this route by the setting. A total (the buffered form) or an idle gap
+ * (the streamed form) of this length outlasts the longest silence the engine
+ * allows, so its own error arrives first. A steady download slower than this
+ * still aborts the buffered form client-side while the engine keeps reading.
  */
-function proxiedRequestTimeoutMs(): number {
+const IMPORT_FETCH_BUDGET_MS = IMPORT_FETCH_STALL_TIMEOUT_MS + PROXIED_TIMEOUT_GRACE_MS;
+
+/** A config entry's value as a number, `0` when the cache is cold or the value unreadable. */
+function configuredMs(key: string): number {
 	const config = queryClient.getQueryData<GetConfigResponse>(queryKeys.config.all);
-	const engineTimeout = Number(config?.entries.find((e) => e.key === "defaultTimeout")?.value);
-	const base =
-		Number.isFinite(engineTimeout) && engineTimeout > 0
-			? engineTimeout
-			: ENGINE_MAX_DEFAULT_TIMEOUT_MS;
-	return base + PROXIED_TIMEOUT_GRACE_MS;
+	const value = Number(config?.entries.find((e) => e.key === key)?.value);
+	return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * The abort budget for an engine call that proxies a remote server: the engine's
+ * own bound plus enough grace that its TIMEOUT error (with a proper code and a
+ * recorded run) arrives before the UI aborts. Falls back to the engine's maxima
+ * when the config cache is cold.
+ *
+ * With no payload this is the `defaultTimeout` setting plus the grace, which is
+ * all a bare transfer needs (`/oauth2/token`). Given the `POST /execute` payload
+ * it is a worst case for that request - an OAuth 2.0 token fetch and every
+ * script add their own bounds ({@link executeBudgetMs}) - because the call runs
+ * them in sequence. `/import/fetch` is not budgeted here: the engine bounds it
+ * by a fixed stall, not the setting ({@link IMPORT_FETCH_BUDGET_MS}).
+ */
+function proxiedRequestTimeoutMs(payload?: unknown): number {
+	return executeBudgetMs(payload, {
+		defaultTimeoutMs: configuredMs("defaultTimeout"),
+		scriptTimeoutMs: configuredMs("scriptTimeout"),
+	});
 }
 
 /**
@@ -838,7 +856,7 @@ export const apiService = {
 		return await httpClient.post<SanityResult>(
 			API_ENDPOINTS.EXECUTE_REQUEST,
 			{ ...data, allowScriptRequests: true, origin: APP_ORIGIN, includeParsedBody: false },
-			{ timeout: proxiedRequestTimeoutMs() }
+			{ timeout: proxiedRequestTimeoutMs(data) }
 		);
 	},
 
@@ -1075,7 +1093,7 @@ export const apiService = {
 	 * always been, which is what `ref-bundler` and the spec re-fetch want - they
 	 * have nowhere to draw a bar and no reason to pay for a stream. With it the
 	 * timeout becomes an *idle* one, so an 8 MB document arriving steadily is no
-	 * longer racing `proxiedRequestTimeoutMs`.
+	 * longer racing {@link IMPORT_FETCH_BUDGET_MS}.
 	 * @param options marks the fetch as a `$ref` a document asked for (issue
 	 * #2364), which the engine holds to a stricter rule than a URL a person typed.
 	 * Only `ref-bundler`'s fetches pass it; the body is otherwise exactly
@@ -1096,12 +1114,12 @@ export const apiService = {
 		};
 		if (!onProgress) {
 			return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, body, {
-				timeout: proxiedRequestTimeoutMs(),
+				timeout: IMPORT_FETCH_BUDGET_MS,
 			});
 		}
 
 		for await (const message of httpClient.stream(API_ENDPOINTS.IMPORT_FETCH, body, {
-			idleTimeout: proxiedRequestTimeoutMs(),
+			idleTimeout: IMPORT_FETCH_BUDGET_MS,
 			...(signal ? { signal } : {}),
 		})) {
 			// An engine that has never heard of streaming answered the same request
@@ -1186,7 +1204,7 @@ export const apiService = {
 	},
 
 	// OAuth 2.0 - the engine proxies the token endpoint, so use the longer
-	// proxied timeout (as with executeRequest / importFetch).
+	// proxied timeout (as with executeRequest).
 	async fetchOAuth2Token(data: OAuth2TokenRequest): Promise<OAuth2TokenResponse> {
 		return await httpClient.post<OAuth2TokenResponse>(API_ENDPOINTS.OAUTH2_TOKEN, data, {
 			timeout: proxiedRequestTimeoutMs(),
