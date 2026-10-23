@@ -88,12 +88,13 @@ export default function DataTab({ collection }: DataTabProps) {
 	/** The remembered file is being opened. Not the same as "no file yet". */
 	const [reading, setReading] = useState(() => willReadRemembered(collection));
 	/**
-	 * Why the remembered file could not be re-read - moved, renamed, or no longer
-	 * parsing. Kept apart from `fileError`, which is a refusal of a file the user
-	 * just picked: this one leaves the picker empty and usable, because picking
-	 * the file again is the whole fix.
+	 * Why the bound file could not be re-read - moved, renamed, never granted on
+	 * this machine, or no longer parsing - and which path that was. Kept apart
+	 * from `fileError`, which is a refusal of a file the user just picked: this
+	 * one leaves the picker empty and usable, because picking the file again is
+	 * the whole fix.
 	 */
-	const [readFailure, setReadFailure] = useState<string | null>(null);
+	const [failedRead, setFailedRead] = useState<{ path: string; message: string } | null>(null);
 	/*
 	 * The row cap the re-read is measured against, same as a hand-picked file
 	 * (issue #751). A file that has grown past the setting is refused here rather
@@ -102,6 +103,10 @@ export default function DataTab({ collection }: DataTabProps) {
 	const { maxRows } = useDataFileLimits();
 	const writer = useDataContractWriter(collection.id);
 	const remembered = collection.dataFile;
+	// Only while the binding still names the path that failed: a pick that has
+	// since been declared binds another file, which this read said nothing about.
+	const readFailure =
+		failedRead && remembered?.path === failedRead.path ? failedRead.message : null;
 
 	const declared = collection.dataSchema?.columns ?? [];
 	const declaredContract = hasDataContract(collection.dataSchema);
@@ -146,11 +151,13 @@ export default function DataTab({ collection }: DataTabProps) {
 			.catch((e: unknown) => {
 				if (cancelled) return;
 				setReading(false);
-				setReadFailure(
-					e instanceof DataFileError || e instanceof Error
-						? e.message
-						: "Couldn't read the declared file - pick it again to compare."
-				);
+				setFailedRead({
+					path: location.path,
+					message:
+						e instanceof DataFileError || e instanceof Error
+							? e.message
+							: "Couldn't read the declared file - pick it again to compare.",
+				});
 			});
 
 		return () => {

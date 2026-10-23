@@ -464,6 +464,34 @@ describe("the remembered file", () => {
 	});
 
 	/*
+	 * A failed read describes the path it read. Once a pick has been declared
+	 * the row binds another file, and striking that one through would call a
+	 * file unreadable that nothing has tried. Mutation check: strike on the
+	 * failure alone, not on the failure of the bound path, and this fails.
+	 */
+	it("stops striking once the binding names another file", async () => {
+		remember("/home/u/gone.csv", "gone.csv");
+		vi.stubGlobal("electronAPI", {
+			readDataFile: () => Promise.reject(new Error("ENOENT: no such file")),
+			getFilePath: () => "",
+		});
+		const view = render(
+			<DataTab collection={collection({ columns: ["id"], fileName: "gone.csv" })} />
+		);
+		await waitFor(() => expect(screen.getByText(/ENOENT/)).toBeTruthy());
+
+		// The declare of a newly picked file landed: the row binds plans.csv.
+		remember("/home/u/plans.csv", "plans.csv");
+		view.rerender(
+			<DataTab collection={collection({ columns: ["plan"], fileName: "plans.csv" })} />
+		);
+
+		expect(screen.getByText("/home/u/plans.csv").className).not.toContain("line-through");
+		expect(screen.getByText("plans.csv").className).not.toContain("line-through");
+		expect(screen.queryByText(/ENOENT/)).toBeNull();
+	});
+
+	/*
 	 * The row cap on the tab's own re-read (issue #751). The picker refuses a
 	 * hand-picked file over `maxScenarioDataRows` naming the setting; a file
 	 * declared under a higher cap and re-read under a lower one has to meet the

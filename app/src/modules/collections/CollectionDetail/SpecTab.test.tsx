@@ -626,6 +626,32 @@ describe("a bound collection", () => {
 		expect(screen.getByText(/which is not at \/home\/u\/petstore.json/)).toBeTruthy();
 	});
 
+	it("strikes only the path that failed, not one bound since", async () => {
+		specMetaQuery.data = { sourceUrl: null, fetchedAt: 0, contentBytes: 2048 };
+		readSpecMeta = async () => ({ sourceUrl: null });
+		vi.stubGlobal("electronAPI", {
+			getFilePath: () => "",
+			readSpecFile: () => Promise.reject(new Error("not there")),
+		});
+		const view = render(<SpecTab collection={boundToFile()} />);
+		fireEvent.click(screen.getByRole("button", { name: /check for changes/i }));
+		await waitFor(() =>
+			expect(screen.getByText("/home/u/petstore.json").className).toContain("line-through")
+		);
+
+		// Unbound and bound again from another file: nothing has tried that one.
+		// Mutation check: keep a bare "unreadable" flag and this fails.
+		view.rerender(
+			<SpecTab
+				collection={collection(boundToFile().openapi, {
+					path: "/home/u/billing.json",
+					fileName: "billing.json",
+				})}
+			/>
+		);
+		expect(screen.getByText("/home/u/billing.json").className).not.toContain("line-through");
+	});
+
 	it("unbinds with an explicit null, and forgets the file in the same write", () => {
 		render(<SpecTab collection={boundToFile()} />);
 

@@ -186,10 +186,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	// Which export dialog is open, if either. One field: the menu opens one.
 	const [exporting, setExporting] = useState<"openapi" | "postman" | null>(null);
 	const [fetching, setFetching] = useState(false);
-	// The bound file did not read on the last check: moved, renamed, or a path
+	// The bound path that did not read on the last check: moved, renamed, or
 	// restored from another machine (#2765). Learned from an attempted read,
-	// never asked for up front.
-	const [fileUnreadable, setFileUnreadable] = useState(false);
+	// never asked for up front, and true only while the binding still names it.
+	const [unreadablePath, setUnreadablePath] = useState<string | null>(null);
 	// The bound the fetch below carries: this tab only ever fetches a document
 	// it is about to bind, so it is the same cap the engine will store it under
 	// (issue #784).
@@ -328,7 +328,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<BoundSpec
 					sourceUrl={specMeta?.sourceUrl ?? null}
 					filePath={specFile?.path}
-					fileUnreadable={fileUnreadable}
+					fileUnreadable={!!specFile && specFile.path === unreadablePath}
 					specHash={binding?.specHash}
 					fetchedAt={specMeta?.fetchedAt}
 					contentBytes={specMeta?.contentBytes}
@@ -477,7 +477,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					// are not passed either - the engine walks the subtree itself.
 					specId={boundSpecId}
 					specFile={specFile}
-					onFileRead={(readable) => setFileUnreadable(!readable)}
+					onFileRead={(readable) =>
+						setUnreadablePath(readable ? null : (specFile?.path ?? null))
+					}
 				/>
 			)}
 
