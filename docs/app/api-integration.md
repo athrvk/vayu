@@ -920,6 +920,23 @@ declining it answers `body: null`. The MCP server does not send it - its
 engine's default (`electron/mcp/tools.test.ts` asserts the payload). The
 streaming send answers `202` with no body, so the flag is not part of it.
 
+**`executeRequest` budgets its abort timer as a worst case for the payload**
+(#2836, `executeBudgetMs` in `lib/execute-budget.ts`). One `POST /execute` runs
+the pre-request script, the late OAuth 2.0 token fetch, the transfer and the
+test script in sequence, so the client arms the request timeout (the
+`defaultTimeout` setting, or the payload's own `timeout` if larger; 300 s when
+the config cache is cold) once for the transfer, again when `auth.mode` is
+`oauth2` (the token fetch is bounded by the same request timeout), plus the
+`scriptTimeout` setting (60 s when cold) for every enabled `script.pre` /
+`script.post` element in `elements`, plus the 10 s grace. The engine gives each
+script element its own deadline, so a collection's script and the request's are
+two terms. A payload with neither OAuth nor a script is exactly the setting plus
+the grace, so a hung engine is declared dead as fast as before for the common
+send. The MCP client keeps a copy in `electron/mcp/execute-budget.ts` (the main
+process cannot import renderer modules); `execute-budget.parity.test.ts` holds
+the two to the same number. `fetchOAuth2Token` has no script to wait for and
+stays at the setting plus the grace.
+
 `startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
 the load dialog's file picker parses the file and sends the same array it
 previewed, and the engine binds one row per request the run sends. Omitted when

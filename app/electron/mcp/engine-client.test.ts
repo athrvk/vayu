@@ -182,6 +182,93 @@ describe("EngineClient /execute abort budget", () => {
 		await expect(pending).rejects.toMatchObject({ timeoutMs: 210_000 });
 	});
 
+	/**
+	 * Advance past `timeoutMs` and require the budget to have fired exactly then.
+	 * Asserted through `settled()` first: awaiting `rejects` on a call whose
+	 * budget is longer than expected would hang under fake timers instead of
+	 * failing.
+	 */
+	async function expectBudget(
+		run: { pending: Promise<unknown>; settled: () => boolean },
+		timeoutMs: number
+	) {
+		await vi.advanceTimersByTimeAsync(timeoutMs - 1_000);
+		expect(run.settled()).toBe(false);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(run.settled()).toBe(true);
+		await expect(run.pending).rejects.toMatchObject({ timeoutMs });
+	}
+
+	// One /execute runs the pre-request script, the late OAuth 2.0 token fetch,
+	// the transfer and the test script in sequence, so a budget of the transfer
+	// alone aborts a call the engine is still legitimately working on (#2836).
+	const OAUTH = { mode: "oauth2", config: {} };
+	const script = (kind: string, extra: Record<string, unknown> = {}) => ({
+		id: `el_${kind}`,
+		kind,
+		enabled: true,
+		config: { script: "1;" },
+		...extra,
+	});
+
+	it("budgets an OAuth 2.0 token fetch and a pre-request script on top of the transfer", async () => {
+		const run = await startExecute(
+			[
+				{ key: "defaultTimeout", value: "120000" },
+				{ key: "scriptTimeout", value: "7000" },
+			],
+			{ url: "https://slow.example.com", auth: OAUTH, elements: [script("script.pre")] }
+		);
+
+		// setting + setting + scriptTimeout + 10s grace
+		await expectBudget(run, 257_000);
+	});
+
+	it("budgets a script per enabled script element and skips a disabled one", async () => {
+		const run = await startExecute(
+			[
+				{ key: "defaultTimeout", value: "120000" },
+				{ key: "scriptTimeout", value: "7000" },
+			],
+			{
+				url: "https://slow.example.com",
+				elements: [
+					script("script.pre"),
+					script("script.post"),
+					script("script.pre", { id: "el_off", enabled: false }),
+					{ id: "el_x", kind: "assert.status", enabled: true, config: {} },
+				],
+			}
+		);
+
+		await expectBudget(run, 144_000);
+	});
+
+	it("falls back to the 60s script ceiling when scriptTimeout cannot be read", async () => {
+		const run = await startExecute([{ key: "defaultTimeout", value: "120000" }], {
+			url: "https://slow.example.com",
+			elements: [script("script.post")],
+		});
+
+		await expectBudget(run, 190_000);
+	});
+
+	it("keeps a payload with neither OAuth nor a script at the setting plus grace", async () => {
+		const run = await startExecute(
+			[
+				{ key: "defaultTimeout", value: "120000" },
+				{ key: "scriptTimeout", value: "7000" },
+			],
+			{
+				url: "https://slow.example.com",
+				auth: { mode: "bearer", token: "t" },
+				elements: [{ id: "el_a", kind: "assert.status", enabled: true, config: {} }],
+			}
+		);
+
+		await expectBudget(run, 130_000);
+	});
+
 	it("leaves engine-local calls on the flat budget and probes no config for them", async () => {
 		vi.useFakeTimers();
 		const { fetchImpl, urls } = executeFetch([{ key: "defaultTimeout", value: "120000" }]);

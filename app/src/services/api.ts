@@ -133,9 +133,9 @@ import type { ImportResult } from "@/services/importers/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
+import { executeBudgetMs } from "@/lib/execute-budget";
 import {
 	PROXIED_TIMEOUT_GRACE_MS,
-	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
 	STATS_PAGE_LIMIT,
 	RUN_SAMPLES_PAGE_LIMIT,
 	RUNS_PAGE_LIMIT,
@@ -155,23 +155,31 @@ const APP_ORIGIN: RunOrigin = { kind: "app" };
  */
 const IMPORT_FETCH_BUDGET_MS = IMPORT_FETCH_STALL_TIMEOUT_MS + PROXIED_TIMEOUT_GRACE_MS;
 
-/**
- * Timeout for engine calls that proxy a remote server (/execute,
- * /oauth2/token). These block for as long as the target takes, bounded by the
- * engine's user-configurable `defaultTimeout` setting - so derive the UI
- * timeout from it instead of the flat default, with enough grace that the
- * engine's own TIMEOUT error (proper error code) arrives before the UI aborts.
- * Falls back to the engine's max when the config cache is cold. If per-request
- * timeout overrides are ever added, this must become max(default, override).
- */
-function proxiedRequestTimeoutMs(): number {
+/** A config entry's value as a number, `0` when the cache is cold or the value unreadable. */
+function configuredMs(key: string): number {
 	const config = queryClient.getQueryData<GetConfigResponse>(queryKeys.config.all);
-	const engineTimeout = Number(config?.entries.find((e) => e.key === "defaultTimeout")?.value);
-	const base =
-		Number.isFinite(engineTimeout) && engineTimeout > 0
-			? engineTimeout
-			: ENGINE_MAX_DEFAULT_TIMEOUT_MS;
-	return base + PROXIED_TIMEOUT_GRACE_MS;
+	const value = Number(config?.entries.find((e) => e.key === key)?.value);
+	return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * The abort budget for an engine call that proxies a remote server: the engine's
+ * own bound plus enough grace that its TIMEOUT error (with a proper code and a
+ * recorded run) arrives before the UI aborts. Falls back to the engine's maxima
+ * when the config cache is cold.
+ *
+ * With no payload this is the `defaultTimeout` setting plus the grace, which is
+ * all a bare transfer needs (`/oauth2/token`). Given the `POST /execute` payload
+ * it is a worst case for that request - an OAuth 2.0 token fetch and every
+ * script add their own bounds ({@link executeBudgetMs}) - because the call runs
+ * them in sequence. `/import/fetch` is not budgeted here: the engine bounds it
+ * by a fixed stall, not the setting ({@link IMPORT_FETCH_BUDGET_MS}).
+ */
+function proxiedRequestTimeoutMs(payload?: unknown): number {
+	return executeBudgetMs(payload, {
+		defaultTimeoutMs: configuredMs("defaultTimeout"),
+		scriptTimeoutMs: configuredMs("scriptTimeout"),
+	});
 }
 
 /**
@@ -848,7 +856,7 @@ export const apiService = {
 		return await httpClient.post<SanityResult>(
 			API_ENDPOINTS.EXECUTE_REQUEST,
 			{ ...data, allowScriptRequests: true, origin: APP_ORIGIN, includeParsedBody: false },
-			{ timeout: proxiedRequestTimeoutMs() }
+			{ timeout: proxiedRequestTimeoutMs(data) }
 		);
 	},
 
@@ -1196,7 +1204,7 @@ export const apiService = {
 	},
 
 	// OAuth 2.0 - the engine proxies the token endpoint, so use the longer
-	// proxied timeout (as with executeRequest / importFetch).
+	// proxied timeout (as with executeRequest).
 	async fetchOAuth2Token(data: OAuth2TokenRequest): Promise<OAuth2TokenResponse> {
 		return await httpClient.post<OAuth2TokenResponse>(API_ENDPOINTS.OAUTH2_TOKEN, data, {
 			timeout: proxiedRequestTimeoutMs(),

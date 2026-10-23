@@ -14,6 +14,8 @@
  *        JSON, so return types are intentionally loose.
  */
 
+import { executeBudgetMs, type BudgetSettings } from "./execute-budget.js";
+
 /** Raised for non-2xx engine responses, carrying the status and body text. */
 export class EngineRequestError extends Error {
 	constructor(
@@ -61,26 +63,7 @@ export interface EngineClientOptions {
 const DEFAULT_TIMEOUT_MS = 35_000;
 
 /**
- * The three values below mirror `app/src/config/network.ts` (the renderer
- * derives the same budget for its proxied calls); the main process cannot
- * import renderer modules, so they are duplicated here. Keep them in sync.
- *
- * Grace on top of the engine's own timeout, so the engine's TIMEOUT error -
- * which carries a proper error code and a recorded run - always arrives before
- * this client gives up.
- */
-const PROXIED_TIMEOUT_GRACE_MS = 10_000;
-
-/**
- * Ceiling of the engine's `defaultTimeout` setting (`seed_default_config` in
- * engine/src/db/database.cpp caps it at 300000). Used when the setting cannot
- * be read, so an unreadable config never shortens the budget below what the
- * engine may legitimately take.
- */
-const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
-
-/**
- * Budget for the `GET /config` probe that derives the one above. Deliberately
+ * Budget for the `GET /config` probe that sizes a proxied call's budget. Deliberately
  * short: it reads a local SQLite-backed row, and a slow answer must not delay
  * the call it is sizing - a failed probe falls back to the ceiling.
  */
@@ -256,12 +239,17 @@ export class EngineClient {
 	 * keeps a legitimately slow request from being aborted here while the engine
 	 * completes it there, with the side effects and the run row already real.
 	 *
+	 * A `POST /execute` also runs its OAuth 2.0 token fetch and its scripts in
+	 * sequence with the transfer, so the budget is a worst case for the payload
+	 * ({@link executeBudgetMs}), not a bare transfer. A payload with neither is
+	 * the timeout plus the grace, as it always was.
+	 *
 	 * MCP-composed payloads carry no `timeout` of their own (`payload_from_stored`
 	 * emits none), so the config read - not the payload - is what does the work;
 	 * the `max` covers an inline payload that does carry a larger one.
 	 */
 	private async proxiedTimeoutMs(payload: unknown, signal?: AbortSignal): Promise<number> {
-		let configured = 0;
+		let settings: BudgetSettings = { defaultTimeoutMs: 0, scriptTimeoutMs: 0 };
 		try {
 			const cfg = await this.request<unknown>(
 				"GET",
@@ -270,16 +258,15 @@ export class EngineClient {
 				signal,
 				CONFIG_PROBE_TIMEOUT_MS
 			);
-			configured = readDefaultTimeoutMs(cfg);
+			settings = {
+				defaultTimeoutMs: readConfigMs(cfg, "defaultTimeout"),
+				scriptTimeoutMs: readConfigMs(cfg, "scriptTimeout"),
+			};
 		} catch {
-			// Unreachable, slow or malformed config: fall back to the ceiling
-			// rather than to a budget shorter than the engine may take.
+			// Unreachable, slow or malformed config: the ceilings apply, rather
+			// than a budget shorter than the engine may take.
 		}
-		const base = Math.max(
-			readPayloadTimeoutMs(payload),
-			configured > 0 ? configured : ENGINE_MAX_DEFAULT_TIMEOUT_MS
-		);
-		return base + PROXIED_TIMEOUT_GRACE_MS;
+		return executeBudgetMs(payload, settings);
 	}
 
 	// --- Health & metadata ---------------------------------------------------
@@ -1458,26 +1445,17 @@ function isAbortError(err: unknown): boolean {
 }
 
 /**
- * Read the engine's `defaultTimeout` (milliseconds) out of a `GET /config`
- * body. Values arrive as strings. Returns 0 when the entry is absent or not a
- * positive number, which the caller reads as "unknown".
+ * Read one millisecond setting out of a `GET /config` body. Values arrive as
+ * strings. Returns 0 when the entry is absent or not a positive number, which
+ * the budget reads as "unknown".
  */
-function readDefaultTimeoutMs(config: unknown): number {
+function readConfigMs(config: unknown, key: string): number {
 	const raw =
 		config && typeof config === "object" ? (config as Record<string, unknown>).entries : null;
 	const entries = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
-	const entry = entries.find((e) => e && typeof e === "object" && e.key === "defaultTimeout");
+	const entry = entries.find((e) => e && typeof e === "object" && e.key === key);
 	const value = Number(entry?.value);
 	return Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-/** A payload's own `timeout` override in milliseconds, or 0 when it carries none. */
-function readPayloadTimeoutMs(payload: unknown): number {
-	const value =
-		payload && typeof payload === "object"
-			? (payload as Record<string, unknown>).timeout
-			: undefined;
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 /** Parse one SSE event block ("event: x\ndata: y") into its fields. */
