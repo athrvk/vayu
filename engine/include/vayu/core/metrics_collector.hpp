@@ -807,6 +807,23 @@ class MetricsCollector {
         return http_version_downgraded_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Count the times one transfer was re-sent on a new connection
+     *        (`Response::connection_replays`, #2799).
+     *
+     * Like the downgrade, about what the report means rather than how the run
+     * performed: each replay is a request the target received and the run did
+     * not count, with its latency folded into the request that was counted.
+     * Lock-free, called once per completed transfer that was replayed.
+     */
+    void record_connection_replays (size_t replays) {
+        connection_replays_.fetch_add (replays, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t connection_replays () const {
+        return connection_replays_.load (std::memory_order_relaxed);
+    }
+
     // ========================================================================
     // Real-time stats (lock-free reads)
     // ========================================================================
@@ -1175,6 +1192,7 @@ class MetricsCollector {
     std::atomic<size_t> total_bytes_sent_{ 0 };
     std::atomic<size_t> total_bytes_recv_{ 0 };
     std::atomic<size_t> http_version_downgraded_{ 0 };
+    std::atomic<size_t> connection_replays_{ 0 };
 
     // Per-code counts, lock-free on the hot path. HTTP status codes (and the
     // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).

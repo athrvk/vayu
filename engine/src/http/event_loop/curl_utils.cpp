@@ -1027,6 +1027,10 @@ bool refuses_local_peer (ConnectedPeerCheck* check, const char* peer_ip, int pee
  * recognises by asking the reserved-port predicate the same question, or by
  * the refusal the check recorded.
  *
+ * Every call is counted on the check, when there is one: libcurl makes it once
+ * per request it is about to write, which is the only place a replay on a new
+ * connection shows (#2799, `connection_replays`).
+ *
  * Fails closed: an exception must not cross libcurl's C frames, and a
  * predicate that could not answer is no reason to send.
  */
@@ -1040,17 +1044,39 @@ char* /*conn_local_ip*/,
 int conn_primary_port,
 int /*conn_local_port*/) {
     try {
+        auto* check = static_cast<ConnectedPeerCheck*> (clientp);
+        if (check != nullptr) {
+            ++check->requests_started;
+        }
         if (conn_primary_ip != nullptr &&
         vayu::http::is_reserved_loopback_target (conn_primary_ip, conn_primary_port)) {
             return CURL_PREREQFUNC_ABORT;
         }
-        return refuses_local_peer (static_cast<ConnectedPeerCheck*> (clientp),
-               conn_primary_ip, conn_primary_port) ?
+        return refuses_local_peer (check, conn_primary_ip, conn_primary_port) ?
         CURL_PREREQFUNC_ABORT :
         CURL_PREREQFUNC_OK;
     } catch (...) {
         return CURL_PREREQFUNC_ABORT;
     }
+}
+
+/**
+ * How many times libcurl re-sent this transfer's request on a new connection
+ * after a reused one was dropped or refused before a response byte (#2799).
+ *
+ * libcurl does that on its own (`Curl_retry_request`, no option turns it off)
+ * and reports nothing; the pre-request callback is the one trace it leaves.
+ * Each request written is one call, and a redirect hop or an auth reload is
+ * the only other reason for a second, which `CURLINFO_REDIRECT_COUNT` counts
+ * and a replay does not. A transfer that never reached the callback reads 0.
+ * `CURLINFO_NUM_CONNECTS` cannot answer this: a fresh request and a replay of
+ * a dead reused connection both open one.
+ */
+int connection_replays (CURL* curl, const ConnectedPeerCheck& check) {
+    long redirects = 0;
+    get_info<CURLINFO_REDIRECT_COUNT> (curl, &redirects);
+    const long replays = check.requests_started - 1L - std::max (0L, redirects);
+    return static_cast<int> (std::max (0L, replays));
 }
 
 } // namespace
@@ -1523,8 +1549,10 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // scoped rather than per-request because libcurl only reuses a cached
     // connection when its proxy and TLS config match, so varying either per
     // transfer would partition every worker's pool and multiply handshakes
-    // (epic decision 3 of #704).
-    apply_transport_policy (curl, config.transport, request.verify_ssl, url);
+    // (epic decision 3 of #704). The transfer's own check carries no rule here;
+    // it is what counts a replay (#2799).
+    apply_transport_policy (
+    curl, config.transport, request.verify_ssl, url, &data->peer_check);
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)
@@ -1615,6 +1643,10 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // downgrades every one of them. The flag rides out on each trace instead.
     response.http_version_downgraded = vayu::http::http_version_downgraded (
     data->request.http_version, response.http_version);
+
+    // Read before the error branch: a replay that then failed still put the
+    // request on the wire twice.
+    response.connection_replays = connection_replays (curl, data->peer_check);
 
     // Perceived latency: wall-clock from submit() to now. steady_clock is
     // monotonic so it's not affected by NTP jumps.

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "vayu/http/curl_error_buffer.hpp"
+#include "vayu/http/event_loop/connected_peer_check.hpp"
 #include "vayu/http/sse_frame_counter.hpp"
 #include "vayu/types.hpp"
 
@@ -111,6 +112,10 @@ struct TransferData {
     /// Header names the debug collector redacts beyond the shared list - the
     /// request's `Request::secret_header_names`.
     std::vector<std::string> secret_header_names;
+
+    /// The `CURLOPT_PREREQDATA` this transfer's handle carries: no peer rule on
+    /// this path, only the count `connection_replays` is read from (#2799).
+    ConnectedPeerCheck peer_check;
 
     CurlErrorBuffer errors;
     struct curl_slist* headers_list = nullptr;

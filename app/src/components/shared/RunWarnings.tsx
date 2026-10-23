@@ -9,12 +9,13 @@
  * "This run is not what it looks like" - what a load run did not do, above
  * the totals it would otherwise hide behind (issue #1503).
  *
- * A request sent with a `{{token}}` composition never resolved, or a step
- * whose pre-request script load mode never runs, both still let the run
- * finish and both still count as sent - a reader who only checks the error
- * rate would see a green run. Silent when the report carries no `warnings`
- * at all, which is every run before this field existed and every run that
- * genuinely had nothing to report.
+ * A request sent with a `{{token}}` composition never resolved, a step
+ * whose pre-request script load mode never runs, a per-host connection limit
+ * the run had to raise, or requests libcurl re-sent on a new connection all
+ * still let the run finish and still count as sent - a reader who only checks
+ * the error rate would see a green run. Silent when the report carries no
+ * `warnings` at all, which is every run before this field existed and every
+ * run that genuinely had nothing to report.
  */
 
 import { Callout } from "./Callout";
@@ -27,6 +28,9 @@ const TITLES: Record<string, string> = {
 	pre_request_script_skipped: "Pre-request script won't run",
 	// The run did everything; the generic title would say it did not (#2394).
 	per_host_limit_raised: "Connections per host were raised",
+	// The run did not fail either; the target just saw more requests than the
+	// totals count (#2799).
+	connection_replayed: "Some requests were re-sent after a dropped connection",
 };
 
 export interface RunWarningsProps {

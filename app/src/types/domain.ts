@@ -2666,12 +2666,13 @@ export interface RunTransactionSummary {
 export interface RunReport {
 	/**
 	 * What this run did not do (issue #1503): a request sent with an
-	 * unresolved `{{token}}` because load mode runs no residual pass, or a
-	 * step whose pre-request script that mode never executes. Never refuses
-	 * the run - a literal `{{` can be deliberate in a body - only names it,
-	 * so a green run and one that quietly sent every request unauthenticated
-	 * do not read the same. Absent, not empty, for a run with nothing to
-	 * report.
+	 * unresolved `{{token}}` because load mode runs no residual pass, a step
+	 * whose pre-request script that mode never executes, a per-host connection
+	 * limit raised above its setting (#2394), or requests libcurl re-sent on a
+	 * new connection (#2799). Never refuses the run - a literal `{{` can be
+	 * deliberate in a body - only names it, so a green run and one that quietly
+	 * sent every request unauthenticated do not read the same. Absent, not
+	 * empty, for a run with nothing to report.
 	 */
 	warnings?: Array<{
 		code: string;
@@ -2825,6 +2826,19 @@ export interface RunReport {
 		 * which is exact for its exchange.
 		 */
 		httpVersionDowngraded?: number;
+		/**
+		 * Requests libcurl re-sent on a new connection after the server dropped
+		 * or refused a reused one before answering (#2799). Each is counted once
+		 * in `totalRequests`, so the target received `totalRequests` plus this.
+		 * The `connection_replayed` entry in `warnings` is the surface the app
+		 * shows (its message carries the count); the number itself is for MCP
+		 * and export readers.
+		 *
+		 * Unlike `httpVersionDowngraded`, absent and `0` differ: `0` is a run
+		 * that counted and saw none, absent is a run stored before the count
+		 * existed, or reported from its sampled results.
+		 */
+		connectionReplays?: number;
 	};
 	latency: {
 		min: number;

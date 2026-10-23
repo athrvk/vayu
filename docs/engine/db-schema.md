@@ -1417,6 +1417,7 @@ default, so `sync_schema()` can
   "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
   "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
+  "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "error_types": { "timeout": 2, "connection_failed": 1 },
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
@@ -1460,6 +1461,14 @@ run over reused connections genuinely has a TLS p50 of 0.
 are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
+
+`connection_replays` (issue #2799) counts the requests libcurl re-sent on a new connection after
+the server dropped or refused a reused one before answering. Each replayed request is still one
+entry in `total_requests` and `status_codes`, by the outcome of its last attempt, so the target
+received `total_requests + connection_replays` requests. Written by the completed and the failed
+run alike, `0` included; a non-zero count also adds a `connection_replayed` entry to `warnings`.
+A summary stored before the issue has no key, and the report then leaves
+`summary.connectionReplays` out rather than reading it as `0`.
 
 `error_types` (issue #2400) is every error the run recorded, by the type name its stored
 error traces carry (`timeout`, `connection_failed`, ...), counted by the collector as it

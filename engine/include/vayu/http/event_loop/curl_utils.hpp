@@ -17,6 +17,7 @@
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/connected_peer_check.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -27,40 +28,6 @@ namespace vayu::http::detail {
 // Forward declaration
 struct TransferData;
 class DnsCache;
-
-/**
- * @brief The host and port a URL dials.
- */
-struct UrlAuthority {
-    /// Hostname, or the address of an IP-literal URL with its brackets removed.
-    /// Empty when the URL names no authority. A non-ASCII name is in its
-    /// punycode form, the one the transfer dials (`ascii_host`).
-    std::string host;
-    /// Explicit port, or the scheme default when the URL names none.
-    int port = 0;
-    /// True when `host` is an address rather than a name, so there is nothing
-    /// to resolve and nothing to pin.
-    bool is_ip_literal = false;
-};
-
-/**
- * @brief One transfer's connect-time state beyond the process-wide reserved
- *        ports: what `apply_transport_policy` hands libcurl as
- *        `CURLOPT_PREREQDATA`, so it must outlive `curl_easy_perform`.
- *
- * Only the single-request client builds one, for a `/import/fetch` reference
- * (#2364); every other transfer passes none.
- */
-struct ConnectedPeerCheck {
-    /// The rule a reference fetch runs under, or null for none.
-    const LocalPeerRule* local_peers = nullptr;
-    /// The proxy the transfer names (`configured_proxy`), written by
-    /// `apply_transport_policy`. `local_peers` does not refuse it (#2605).
-    std::optional<UrlAuthority> proxy;
-    /// Set by the callback when `local_peers` refused the connection, so
-    /// `curl_to_error` can name that rule rather than libcurl's abort.
-    bool refused_local_peer = false;
-};
 
 /**
  * @brief The proxy @p policy puts on a handle by URL, as the authority
@@ -143,7 +110,10 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * null included, so a pooled handle never keeps a previous transfer's state.
  * With a proxy in force the peer judged is the proxy, for both rules; the
  * applier records `configured_proxy` on @p peer_check, so the reference rule
- * passes that proxy while the reserved ports still refuse it.
+ * passes that proxy while the reserved ports still refuse it. The callback
+ * also counts every call on @p peer_check (`requests_started`), which is how a
+ * request libcurl re-sent on a new connection is seen at all (#2799,
+ * `connection_replays`).
  *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
@@ -159,7 +129,7 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *            a feature it is not using.
  * @param peer_check This transfer's connect-time state, or null. Must outlive
  *                   the transfer; the applier writes its `proxy` and the
- *                   callback its refusal into it.
+ *                   callback its refusal and its count into it.
  * @return The registry entry whose certificate was put on the handle, or null
  *         when none matched. Points into @p policy and lives exactly as long -
  *         a caller that keeps it (both design funnels record the label on the

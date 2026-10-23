@@ -137,7 +137,8 @@
             "bytesReceived": {"type": "number"},
             "httpVersionDowngraded": {"type": "number"},
             "throughputBytesPerSec": {"type": "number"},
-            "sendingDurationSeconds": {"description": "The window sendRate and rateControl divide by: load start to the end of sending, the end-of-run drain excluded (issue #2392). Absent for a run stored before it.", "type": "number"}
+            "sendingDurationSeconds": {"description": "The window sendRate and rateControl divide by: load start to the end of sending, the end-of-run drain excluded (issue #2392). Absent for a run stored before it.", "type": "number"},
+            "connectionReplays": {"description": "Requests libcurl re-sent on a new connection after the server dropped or refused a reused one before answering (issue #2799). Each is still one counted request and never an error; the target received this many more requests than totalRequests. Absent for a run stored before it.", "type": "integer", "minimum": 0}
           }
         },
         "latency": {
@@ -263,7 +264,10 @@
                 "description": "Written by the engine; names user-chosen variable names at most.",
                 "type": "string"
               },
-              "count": {"type": "number"},
+              "count": {
+                "description": "unresolved_tokens: requests sent with an unresolved variable. connection_replayed: requests re-sent on a new connection, equal to summary.connectionReplays.",
+                "type": "number"
+              },
               "names": {"$ref": "#/definitions/names"},
               "steps": {"type": "number"},
               "configured": {

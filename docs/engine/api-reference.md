@@ -9462,6 +9462,20 @@ flight after its effective timeout (the run's `timeout`, else the
 never answered: it stays an error, under status code `0`, and its stored error
 record carries `error_type` `cancelled` (`errors.types` in the report).
 
+A request libcurl **re-sent on a new connection** is not an error either
+(issue #2799). When the server drops or refuses a kept-alive connection after
+reading a request and before writing a byte of the answer (an idle timeout, a
+per-connection request cap, an HTTP/2 refused stream), libcurl replays the
+request on a fresh connection on its own; no option turns that off short of
+giving up connection reuse. The replayed request is one request with one
+outcome: counted once in `totalRequests` and the status-code distribution, a
+success or an error by the status of its last attempt, and with a latency that
+covers both attempts. What the target saw is not hidden: each replay is
+counted in the report's `summary.connectionReplays` and raises the run's
+`connection_replayed` [warning](#get-runsrunidreport), so the target received
+`totalRequests + connectionReplays` requests. A non-idempotent request (a
+`POST`) may have run twice there.
+
 ### Latency population
 
 A load run's latency figures all describe one set of requests: every request
@@ -10515,8 +10529,8 @@ run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive)
 `summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
 `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
 `errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
-`bytesReceived`, `httpVersionDowngraded`, and `avgRps`, `throughput` and `sendRate` over the time
-since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
+`bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput` and
+`sendRate` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
 still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
 (`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
 `timingBreakdown` and `slowRequests` are absent. In the moment between the summary write and the
@@ -10697,6 +10711,7 @@ named it.
     "bytesReceived": 7680000,
     "throughputBytesPerSec": 127152.32,
     "httpVersionDowngraded": 0,
+    "connectionReplays": 0,
     "sendingDurationSeconds": 60.0
   },
   "latency": {
@@ -10921,7 +10936,14 @@ is of another kind: the run did everything, but opened more connections per
 host than `eventLoopMaxPerHost` says, because each worker's share of the
 virtual users (`ceil(concurrency / workers)`) was larger; it carries
 `configured` (the setting) and `effective` (the per-host limit each worker ran
-with). Absent, not an empty array, for a run
+with). `connection_replayed` ([#2799](https://github.com/athrvk/vayu/issues/2799))
+is another: libcurl re-sent `count` requests on a new connection after the
+server dropped or refused a reused one before answering, so the target
+received that many more requests than the run counted, each of those
+requests' latency covers both attempts, and a non-idempotent one may have run
+twice; `count` equals `summary.connectionReplays`, and it is raised only when
+that is above 0 (see [What counts as an error](#what-counts-as-an-error)).
+Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
 load shape alike (issue #1540): a single-request run with no data set and a
@@ -11089,6 +11111,21 @@ never written, neither of which can produce a figure. The key is absent only
 from an engine older than 0.15.0. That is deliberately a weaker guarantee than
 the per-response `httpVersionDowngraded`, which is exact for the exchange it
 describes.
+
+`summary.connectionReplays` is the count of requests libcurl re-sent on a new
+connection after the server dropped or refused a reused one before a byte of
+the answer (issue #2799). The extra sends are in no other count, not
+`totalRequests`, the error counts or `noResponseRequests`: each replayed
+request is counted once, by the outcome of its last attempt, so the target
+received `totalRequests +
+connectionReplays` requests (see
+[What counts as an error](#what-counts-as-an-error)). A non-zero value also
+raises the `connection_replayed` warning. **Absent and `0` are different
+answers**: `0` is a run whose engine counted and saw none (the key is always
+stored, zero included), and absent is a run stored before the count existed,
+or one reported from its sampled results because its summary was malformed or
+never written. A partial report of a running load run reads it from the live
+counter.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
 error, trace and tested-response sets are complete, and a non-zero count means

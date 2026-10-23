@@ -1669,6 +1669,16 @@ the requested protocol - without it a run measured entirely over HTTP/1.1 still
 read "HTTP/2" there
 ([#215](https://github.com/athrvk/vayu/issues/215)).
 
+Load runs also carry `report.summary.connectionReplays`, the count of requests
+libcurl re-sent on a new connection after the server dropped or refused a
+reused one before answering ([#2799](https://github.com/athrvk/vayu/issues/2799)).
+The app does not draw the number: the engine's `connection_replayed` entry in
+`report.warnings` is the surface, and `RunWarnings` renders it as a callout
+titled "Some requests were re-sent after a dropped connection" with the count in
+its message. The number is for MCP and export readers. Unlike
+`httpVersionDowngraded`, **absent and `0` differ**: `0` is a run that counted
+and saw none, absent a run stored before the count existed.
+
 `authNotice` is the engine's sentence for a request whose auth mode it stores but
 does not execute (`digest`, `ntlm`, ...), which is sent without authentication
 (issue #2474). The key is **absent** when there is nothing to say, on the live
