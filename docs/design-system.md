@@ -1508,8 +1508,9 @@ rather than an exemption.
 The collections tree draws depth twice: by the row's `paddingLeft`
 (`rowInsetPx(depth)`, a 16px `INDENT_STEP`) and by a 1px vertical guide for
 each ancestor level `k` of a row, `0 <= k < depth`, at
-`x = rowInsetPx(k) + var(--spacing-target) / 2`: the centre of level `k`'s
-chevron, so it follows the density setting with the chevron. The guide is the
+`x = rowInsetPx(k) + var(--spacing-target) / 2 - 0.5px`: the 1px line centred
+on the centre of level `k`'s chevron (a layer is placed by its left edge), so
+it follows the density setting with the chevron. The guide is the
 divider token `--rule` (it reads on whichever surface the panel sits on, in
 both themes), painted as one background layer per level on the row itself
 (`treeGuideStyle`, `modules/collections/tree-guide-style.ts`), so a level adds

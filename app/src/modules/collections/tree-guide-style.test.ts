@@ -31,7 +31,8 @@ function layers(value: unknown): string[] {
 }
 
 /** Where a level's guide sits: the centre of that level's chevron. */
-const positionOf = (level: number) => `calc(${rowInsetPx(level)}px + var(--spacing-target) / 2) 0`;
+const positionOf = (level: number) =>
+	`calc(${rowInsetPx(level)}px + var(--spacing-target) / 2 - 0.5px) 0`;
 
 describe("treeGuideStyle", () => {
 	it("draws nothing for a root row, which has no ancestors", () => {

@@ -17,10 +17,14 @@ const ACTIVE_GUIDE_COLOR = "hsl(var(--primary) / 0.5)";
 const layer = (color: string) => `linear-gradient(${color}, ${color})`;
 
 /**
- * The centre of level `level`'s chevron, which is where its guide runs. Read
- * off `--spacing-target`, so it follows the density setting with the chevron.
+ * The left edge of level `level`'s guide: its 1px line is centred on the
+ * centre of that level's chevron. A background layer is placed by its left
+ * edge, so the line sits half a pixel back from the centre; without that
+ * half pixel every guide ran 0.5px right of its chevron, measured at both
+ * densities. Read off `--spacing-target`, so it follows the density setting.
  */
-const guideX = (level: number) => `calc(${rowInsetPx(level)}px + var(--spacing-target) / 2)`;
+const guideX = (level: number) =>
+	`calc(${rowInsetPx(level)}px + var(--spacing-target) / 2 - 0.5px)`;
 
 /**
  * The indent guides of a row at `depth` (#2773): one 1px vertical line for each
