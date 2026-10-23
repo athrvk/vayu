@@ -24,12 +24,13 @@
  * so the memo never holds secret text; it is rebuilt only with `getAllVariables`,
  * which is what changes when a variable does (#1810).
  *
- * Every other member is read straight off the context, `dataColumns` (the declared
- * data contract, issue #600) and `deferredVariables` (the names a pre-request
- * script sets, #2741) included. The provider resolves those from the
- * collections and the compose it already holds rather than this hook querying: a token
- * painter that reached for the query cache would need a `QueryClientProvider`
- * above every mount of `VariableInput`, which is the coupling the prop removed.
+ * Every other member is read straight off the context, `dataColumns` (the
+ * declared data contract, issue #600) and `deferredVariables` (the names a
+ * pre-request script sets, #2741) included. The provider resolves those from
+ * the collections and the compose it already holds rather than this hook
+ * querying: a token painter that reached for the query cache would need a
+ * `QueryClientProvider` above every mount of `VariableInput`, which is the
+ * coupling the prop removed.
  */
 
 import { useMemo } from "react";
