@@ -9428,16 +9428,18 @@ TEST_F (ScriptEngineTest, RequireChaiResponseAssertions) {
 
     for (const auto& item : CASES) {
         const std::string chain (item.chain);
-        const auto result = roomy.execute_test (
+        std::string script =
         "var expect = require('chai').expect;\n"
         "function run(f) { try { f(); return 'held'; } catch (e) { "
         "return e.name + ': ' + e.message; } }\n"
-        "pm.environment.set('chai', run(function () { expect(pm.response)." +
-        chain +
-        "; }));\n"
-        "pm.environment.set('native', run(function () { pm.response." +
-        chain + "; }));\n",
-        request, response, env);
+        "pm.environment.set('chai', run(function () { expect(pm.response).";
+        script += chain;
+        script += "; }));\n"
+                  "pm.environment.set('native', run(function () { "
+                  "pm.response.";
+        script += chain;
+        script += "; }));\n";
+        const auto result = roomy.execute_test (script, request, response, env);
         ASSERT_TRUE (result.success) << chain << ": " << result.error_message;
         EXPECT_EQ (env["chai"].value, env["native"].value) << chain;
         EXPECT_EQ (env["chai"].value == "held", item.holds)
