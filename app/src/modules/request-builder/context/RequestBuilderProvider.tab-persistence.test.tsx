@@ -31,6 +31,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, screen, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
@@ -76,9 +77,11 @@ function TabProbe() {
 function Harness({ id }: { id: string }) {
 	const initialRequest: Partial<RequestState> = { id };
 	return (
-		<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
-			<TabProbe />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider initialRequest={initialRequest} collectionId="col_1">
+				<TabProbe />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

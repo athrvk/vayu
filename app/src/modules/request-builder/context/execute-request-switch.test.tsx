@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
 import { render, act, waitFor } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
@@ -93,12 +94,14 @@ function Capture() {
 
 function renderFor(id: string, onExecute: (r: RequestState) => Promise<ResponseState | null>) {
 	return (
-		<RequestBuilderProvider
-			initialRequest={{ id, name: id } as Partial<RequestState>}
-			onExecute={onExecute}
-		>
-			<Capture />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider
+				initialRequest={{ id, name: id } as Partial<RequestState>}
+				onExecute={onExecute}
+			>
+				<Capture />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

@@ -147,7 +147,7 @@ namespace being disjoint, can never answer for the column. So a `data.*` token
 gets the muted run-time treatment (`RuntimeToken`) and a tooltip naming the run's
 data file, and no surface offers to create one. See
 [COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
-for the four token states.
+for the token states.
 
 A **collection run** is the one place that reading is not left to the user: a
 run started without a data file whose plan still carries a `data.*` token is
@@ -1083,6 +1083,15 @@ the cache and never fetches, so a tab nobody has opened keeps the stored URL.
 A name just typed shows its stored value until the autosave PUT's invalidation
 recomposes. A request with no id yet (an unsaved draft, a past run's detached
 copy) has nothing to compose by and keeps the plain preview.
+
+The request builder's `{{token}}` painting says the same (#2741): a name in
+`deferredVariables` is not painted as resolved in the URL, header, body or
+auth fields, nor offered as the value that will be sent, but drawn muted with a
+dashed underline and, in its popover, the same sentence. It reads the same
+`POST /compose` entry (`useDeferredVariables`), fetched once per builder and
+only while the request holds a `{{token}}` anywhere the composer interpolates
+(`requestHasTokens`); the classifier receives the engine's names and decides
+nothing about scripts, so an unscripted request paints exactly as before.
 
 A script can also change a value composition already resolved (a name no
 pre-request script runs before) by editing `pm.request` directly; the

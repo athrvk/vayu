@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { render, act } from "@testing-library/react";
 import { useEffect } from "react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
@@ -71,11 +72,13 @@ function TabWatcher() {
 
 function mount(id: string | null, bodyMode: BodyMode) {
 	render(
-		<RequestBuilderProvider
-			initialRequest={{ id, name: "r", bodyMode } as Partial<RequestState>}
-		>
-			<TabWatcher />
-		</RequestBuilderProvider>
+		<TestQueryClient>
+			<RequestBuilderProvider
+				initialRequest={{ id, name: "r", bodyMode } as Partial<RequestState>}
+			>
+				<TabWatcher />
+			</RequestBuilderProvider>
+		</TestQueryClient>
 	);
 }
 

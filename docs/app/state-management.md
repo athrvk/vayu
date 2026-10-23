@@ -2191,7 +2191,10 @@ into a pane that can never load on every restart.
   all build their query from, so they share one entry (#2741). The Code section
   fetches it on expand. The Sends line fetches it only for a URL holding a
   `{{token}}` (default mount behaviour, so a tab switch back is a cache hit),
-  for the `deferredVariables` it needs. The strip only reads it: a disabled
+  for the `deferredVariables` it needs. `RequestBuilderProvider` reads it too, once
+  per builder and only while the request holds a `{{token}}` anywhere
+  (`requestHasTokens`), so the token painters can leave those names unpainted as
+  resolved. The strip only reads it: a disabled
   observer per request tab, editor entry first, never a fetch. Keyed by environment as well as request, because the same request
   composes differently per environment and one key for both would serve the
   wrong snippet after a switch. `source` is `"editor"` while the mounted

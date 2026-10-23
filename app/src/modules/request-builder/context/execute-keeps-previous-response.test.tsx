@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
 import { render, act, waitFor } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
@@ -101,12 +102,14 @@ describe("a send keeps the previous response until its own lands", () => {
 	it("holds the previous exchange for the whole of a re-send", async () => {
 		const first = deferredExecute();
 		render(
-			<RequestBuilderProvider
-				initialRequest={{ id: "A", name: "A" } as Partial<RequestState>}
-				onExecute={first.fn}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={{ id: "A", name: "A" } as Partial<RequestState>}
+					onExecute={first.fn}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
@@ -141,13 +144,15 @@ describe("a send keeps the previous response until its own lands", () => {
 		const onExecuteStream = vi.fn(() => new Promise<never>(() => {}));
 
 		const { rerender } = render(
-			<RequestBuilderProvider
-				initialRequest={{ id: "A", name: "A" } as Partial<RequestState>}
-				onExecute={exec.fn}
-				onExecuteStream={onExecuteStream}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={{ id: "A", name: "A" } as Partial<RequestState>}
+					onExecute={exec.fn}
+					onExecuteStream={onExecuteStream}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
@@ -163,13 +168,15 @@ describe("a send keeps the previous response until its own lands", () => {
 			ctx().updateField("stream", true);
 		});
 		rerender(
-			<RequestBuilderProvider
-				initialRequest={{ id: "A", name: "A" } as Partial<RequestState>}
-				onExecute={exec.fn}
-				onExecuteStream={onExecuteStream}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TestQueryClient>
+				<RequestBuilderProvider
+					initialRequest={{ id: "A", name: "A" } as Partial<RequestState>}
+					onExecute={exec.fn}
+					onExecuteStream={onExecuteStream}
+				>
+					<Capture />
+				</RequestBuilderProvider>
+			</TestQueryClient>
 		);
 
 		await act(async () => {
