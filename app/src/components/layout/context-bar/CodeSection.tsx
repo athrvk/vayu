@@ -45,12 +45,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, RefreshCw, Eye, EyeOff } from "lucide-react";
-import { queryKeys } from "@/queries/keys";
 import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useSessionStore } from "@/stores";
-import { useLiveCommandSurfaceStore } from "@/lib/commands/live-surfaces";
 import { useCopy } from "@/hooks/useCopy";
-import { pickByCount } from "@/modules/dashboard/utils/format";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
 	ICON_MOTION,
@@ -72,7 +69,7 @@ import {
 } from "@/services/codegen";
 import type { SnippetRequest } from "@/services/codegen";
 import { SectionEmpty, SectionLoading } from "./Section";
-import { composeForCode } from "./code-composition";
+import { compositionOptions, deferredNote, useEditorHeld } from "./code-composition";
 import { templatedRequest } from "./templated-request";
 import type { ContextBarSectionProps } from "./types";
 
@@ -80,19 +77,6 @@ type Mode = "resolved" | "templated";
 
 /** Shown under a snippet built from the saved row, which trails the editor. */
 const SAVED_ROW_NOTE = "From the saved request. Unsaved changes are not in this snippet.";
-
-/**
- * Names the tokens left written in a resolved snippet because a pre-request
- * script runs before the send (#2521), so a `{{token}}` in the command reads as
- * deliberate rather than as a variable that failed to resolve.
- */
-function deferredNote(names: string[]): string {
-	const tokens = names.map((name) => `{{${name}}}`).join(", ");
-	return pickByCount(names.length, {
-		one: `${tokens} is set by a pre-request script at send.`,
-		other: `${tokens} are set by a pre-request script at send.`,
-	});
-}
 
 export function CodeSection({ tab }: ContextBarSectionProps) {
 	const [target, setTarget] = useState<CodeTargetId>("curl");
@@ -108,35 +92,16 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 	});
 
 	const requestId = request?.id ?? "";
-	// Flips when a builder takes this request on or lets it go, not per keystroke:
-	// the slot is rewritten only when the builder's request id changes.
-	const editorHeld = useLiveCommandSurfaceStore(
-		(s) => !!requestId && s.editorDraft?.requestId === requestId
-	);
+	const editorHeld = useEditorHeld(requestId);
 
 	const composed = useQuery({
-		queryKey: queryKeys.compose.forRequest(
-			requestId,
-			activeEnvironmentId,
-			editorHeld ? "editor" : "saved"
-		),
-		queryFn: () => composeForCode(requestId, activeEnvironmentId),
+		...compositionOptions(requestId, activeEnvironmentId, editorHeld),
 		enabled: mode === "resolved" && !!requestId,
-		// Never refetched on its own: a compose is a round trip, and the section
-		// would otherwise pay one per keystroke behind it (#1310). It is refreshed
-		// by an explicit act instead - the user's refresh button, or an
-		// invalidation from a committed write, the renderer's own PUT or an MCP
-		// agent's, to this request, its collection chain, an environment or the
-		// globals (`invalidateCompositions`, #1438, #1877). `invalidateQueries`
-		// refetches a mounted observer whatever its `staleTime`, so this value
-		// gates the cost without gating correctness.
-		staleTime: Infinity,
 		// The section only mounts while expanded, so this is one compose per
 		// expand, not per keystroke. A snippet cached from the editor goes stale
 		// at the next edit until autosave invalidates it; recomposing on mount
 		// keeps a collapse, edit, re-expand from serving it unlabelled.
 		refetchOnMount: editorHeld ? "always" : true,
-		retry: false,
 	});
 
 	if (!request) return <SectionEmpty>No request loaded</SectionEmpty>;
