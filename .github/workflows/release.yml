@@ -403,6 +403,31 @@ jobs:
           cp engine/build-release/vayu-engine app/build/resources/bin/vayu-engine
           chmod +x app/build/resources/bin/vayu-engine
 
+      # Generated, not committed: the licence of every vendored library, vcpkg
+      # port and bundled npm package, read from the files each carries
+      # (#2693). Fails when the vcpkg tree cannot be found rather than shipping
+      # an installer without the C++ dependencies' licences. The macOS engine
+      # is two builds of one dependency set, so either tree answers.
+      - name: Generate third-party notices
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cache=engine/build-release-arm64/CMakeCache.txt
+          else
+            cache=engine/build-release/CMakeCache.txt
+          fi
+          installed=$(sed -n 's/^VCPKG_INSTALLED_DIR:[A-Z]*=//p' "$cache")
+          triplet=$(sed -n 's/^VCPKG_TARGET_TRIPLET:[A-Z]*=//p' "$cache")
+          share="$installed/$triplet/share"
+          if [ ! -d "$share" ]; then
+            echo "::error::no vcpkg share directory at '$share' (from $cache); the notices would omit the C++ dependencies"
+            exit 1
+          fi
+          python scripts/generate-third-party-notices.py \
+            --out app/build/THIRD_PARTY_NOTICES.txt \
+            --vcpkg-share "$share" \
+            --app-dir app
+
       - name: Package application
         working-directory: app
         run: pnpm run electron:pack
