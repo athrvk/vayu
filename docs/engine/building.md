@@ -627,6 +627,11 @@ the licence files the components carry themselves:
 
 Identical licence texts are printed once, with the packages that share them.
 
+`electron-builder.json` copies the file next to the app as a loose resource
+(`extraResources`), and the app opens it from **Help › Third-party notices**
+and **Settings › General** (`app:openThirdPartyNotices`). The native About
+panel's credits point at the menu item.
+
 **Adding a library to `engine/vendor/` needs nothing but its licence file**
 beside it: the generator lists the directory on its own, and
 `scripts/test/third_party_notices_test.py` fails the build (and the

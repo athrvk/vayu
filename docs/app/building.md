@@ -156,6 +156,12 @@ The app will:
      --vcpkg-share engine/build-release/vcpkg_installed/<triplet>/share
    ```
 
+   `electron-builder.json` ships the file as an `extraResources` entry
+   (`THIRD_PARTY_NOTICES.txt`, loose in `resources/`, not in the asar), so
+   packaging fails when it is missing. The app opens it from Help › Third-party
+   notices and Settings › General (`electron/third-party-notices.ts`). A
+   development run has no staged copy and says so instead of opening a repo path.
+
 4. **Build the app**:
    ```bash
    cd app

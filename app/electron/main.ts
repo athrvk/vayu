@@ -24,6 +24,7 @@ import {
 	session,
 	shell,
 } from "electron";
+import { existsSync } from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -36,6 +37,7 @@ import {
 import { engineOrigin, enginePort, enginePortFixed, fixEnginePort } from "./engine-endpoint.js";
 import { appLinkUrl } from "./app-links.js";
 import { resolveAppPaths } from "./app-paths.js";
+import { openThirdPartyNotices, openThirdPartyNoticesFromMenu } from "./third-party-notices.js";
 import {
 	createDataFileSystem,
 	hashDataFile,
@@ -274,6 +276,23 @@ function appIconPath(): string {
 	return isDev
 		? path.join(app.getAppPath(), "..", "shared", "icon_png", "vayu_icon_256x256.png")
 		: path.join(process.resourcesPath, "icon.png");
+}
+
+/**
+ * Open the licence notices the installer ships (#2693), for the Help menu and
+ * Settings, General. Resolves with `shell.openPath`'s answer: empty on success,
+ * the reason on failure.
+ */
+function openNotices(): Promise<string> {
+	return openThirdPartyNotices(
+		{
+			isDev,
+			appPath: app.getAppPath(),
+			resourcesPath: process.resourcesPath,
+			exists: existsSync,
+		},
+		shell
+	);
 }
 
 /**
@@ -905,6 +924,13 @@ function createMenu() {
 				{
 					label: "Report an Issue",
 					click: () => shell.openExternal(ISSUES_URL),
+				},
+				{
+					label: "Third-party notices",
+					click: () =>
+						void openThirdPartyNoticesFromMenu(openNotices, (msg, fields) =>
+							appLogger().warn("main", msg, fields)
+						),
 				},
 				...(isMac
 					? []
@@ -1551,6 +1577,10 @@ function setupIpcHandlers() {
 	// this handler cannot drift from the sidecar's own data directory.
 	ipcMain.handle("app:getPaths", () => resolveAppPaths());
 
+	// Settings, General's "Third-party notices" button (#2693). No argument: the
+	// renderer asks for the file, it never names a path.
+	ipcMain.handle("app:openThirdPartyNotices", () => openNotices());
+
 	// Re-open a collection's declared data file (issue #599). The renderer names
 	// the path, so a read passes the extension allowlist, the grant registry (a
 	// file the user picked, dropped or opened, #2357) and the engine's fetched
@@ -1761,7 +1791,7 @@ app.whenReady().then(async () => {
 		// every platform - it was version and copyright alone on the two that
 		// could not open it at all until #1361.
 		authors: ["Atharva Kusumbia"],
-		credits: `${DOCS_URL}\nhttps://github.com/athrvk/vayu`,
+		credits: `${DOCS_URL}\nhttps://github.com/athrvk/vayu\n\nLicence notices for the software Vayu includes: Help › Third-party notices.`,
 	});
 
 	// Create application menu
