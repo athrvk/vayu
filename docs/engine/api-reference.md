@@ -7416,8 +7416,8 @@ and an h2 request rendered in HTTP/1 form - none of which appear in
 `requestHeaders`. The jar's cookies and the request's typed `Cookie` rows share
 one `Cookie` line, the jar's first and the typed rows after them joined with
 `"; "` (issue #2788); a redirect to another host drops the typed part, as it
-drops a typed `Authorization`. The app's Headers tab lists the sent request from this block,
-line by line in wire order, so the tab shows the whole wire while the
+drops a typed `Authorization`. The app's Headers tab lists the sent request
+from this block, line by line in wire order, so the tab shows the whole wire while the
 script-visible record stays the engine's. When the final hop sent no body, the
 string ends at the blank line that closes the header block: a `POST` answered
 `301`, `302` or `303` is re-sent as a body-less `GET`, so the body it started
