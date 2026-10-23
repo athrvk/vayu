@@ -43,6 +43,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 	{
 		name: "create_environment",
 		category: "write",
+		retry: { check: "list_environments", noun: "environment" },
 		invalidates: ["environment"],
 		description: (config) =>
 			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. " +
@@ -94,6 +95,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 	{
 		name: "update_environment",
 		category: "write",
+		retry: "safe",
 		invalidates: ["environment"],
 		description: (config) =>
 			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. " +

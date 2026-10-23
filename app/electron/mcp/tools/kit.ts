@@ -34,6 +34,7 @@ import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 import {
 	engineRefusalClass,
 	FAILURES,
+	interruptedFailure,
 	isBusyDatabase,
 	type Failure,
 	type FailureClass,
@@ -73,8 +74,16 @@ export function textResult(text: string): ToolResult {
  * would hand every site that forgot one a class it did not choose.
  */
 export function errorResult(message: string, failureClass: FailureClass): ToolResult {
-	const result: ToolResult = { content: [{ type: "text", text: message }], isError: true };
-	FAILURES.set(result, { failureClass, message });
+	return failureResult({ failureClass, message });
+}
+
+/** An error result for a {@link Failure} built elsewhere, its marker intact. */
+function failureResult(failure: Failure): ToolResult {
+	const result: ToolResult = {
+		content: [{ type: "text", text: failure.message }],
+		isError: true,
+	};
+	FAILURES.set(result, failure);
 	return result;
 }
 
@@ -115,8 +124,7 @@ function retryHint(err: EngineRequestError): string {
 }
 
 export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
-	const { message, failureClass } = engineFailure(err, ctx);
-	return errorResult(message, failureClass);
+	return failureResult(engineFailure(err, ctx));
 }
 
 /**
@@ -128,24 +136,17 @@ export function engineFailure(err: unknown, ctx: ToolContext): Failure {
 	const msg = err instanceof Error ? err.message : String(err);
 	// An abort means the engine was reachable and working - the opposite of the
 	// "not running, retry" advice below. Whatever was in flight may well have
-	// completed engine-side, so say so instead of inviting a second send.
+	// completed engine-side, so say so instead of inviting a second send. What
+	// to check first depends on the tool, so `describeFailure` writes that part.
 	if (err instanceof EngineTimeoutError) {
-		return {
-			message:
-				`The engine did not answer within this client's ${Math.round(err.timeoutMs / 1000)}s budget. ` +
-				`It may still have completed the call - check run history (list_runs) before retrying. ` +
-				`For a target that is legitimately this slow, raise the engine's "defaultTimeout" ` +
-				`with update_engine_config.`,
-			failureClass: "transient",
-		};
+		return interruptedFailure(
+			`The engine did not answer within this client's ${Math.round(err.timeoutMs / 1000)}s budget.`,
+			`For a target that is legitimately this slow, raise the engine's "defaultTimeout" ` +
+				`with update_engine_config.`
+		);
 	}
 	if (err instanceof Error && (err.name === "AbortError" || /abort/i.test(msg))) {
-		return {
-			message:
-				`The call was cancelled before the engine answered. It may still have completed - ` +
-				`check run history (list_runs) before retrying. (${msg})`,
-			failureClass: "transient",
-		};
+		return interruptedFailure(`The call was cancelled before the engine answered.`, `(${msg})`);
 	}
 	if (/ECONNREFUSED|fetch failed/i.test(msg)) {
 		return {

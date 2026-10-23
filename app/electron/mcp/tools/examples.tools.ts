@@ -39,6 +39,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 	{
 		name: "list_request_examples",
 		category: "read",
+		retry: "safe",
 		invalidates: [],
 		description: (config) =>
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
@@ -65,6 +66,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 	{
 		name: "create_request_example",
 		category: "write",
+		retry: { check: "list_request_examples", noun: "request example" },
 		invalidates: ["request"],
 		description: (config) =>
 			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. " +

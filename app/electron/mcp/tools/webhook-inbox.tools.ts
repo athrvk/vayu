@@ -44,6 +44,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 	{
 		name: "start_webhook_inbox",
 		category: "execute",
+		retry: { check: "list_webhook_inboxes", noun: "webhook inbox" },
 		invalidates: ["service"],
 		description:
 			"Start a local webhook inbox and return its id and URL. It records every request sent to it - method, path, query, headers, body, caller address - so an agent can point a webhook at the URL, trigger it, and then assert on what actually arrived with get_inbox_captures. It needs no allowlist entry: the inbox listens on this machine's loopback interface only, which MCP does not let you change, so it is unreachable from off the machine. Which browser pages may read its answers is separate: by default any page can, without credentials, and allowedOrigins narrows that to the listed origins, with credentials. Give it a canned `response` to make the sender see a specific status, body, headers or delay - the reply every captured request gets, changeable later with update_inbox_response. Stop it with stop_webhook_inbox when you are done (the captures survive a stop), or delete_webhook_inbox to remove it and them.",
@@ -198,6 +199,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 	{
 		name: "get_inbox_captures",
 		category: "read",
+		retry: "safe",
 		invalidates: [],
 		description: (config) =>
 			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +

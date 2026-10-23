@@ -146,6 +146,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 	{
 		name: "update_globals",
 		category: "write",
+		retry: "safe",
 		invalidates: ["environment"],
 		description: (config) =>
 			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. " +
