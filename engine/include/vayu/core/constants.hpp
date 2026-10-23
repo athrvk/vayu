@@ -776,8 +776,19 @@ constexpr size_t EXEMPLARS_PER_STATUS = 3;
 constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 /// HdrHistogram significant figures (3 = ~0.1% precision)
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
-/// HdrHistogram max trackable latency in microseconds (1 hour)
+/// HdrHistogram max trackable latency in microseconds (1 hour). Every latency
+/// histogram is built to this range, and every latency record goes through
+/// `clamp_to_latency_ceiling`.
 constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
+/// @p latency_us held to `HISTOGRAM_MAX_LATENCY_US`, so a completion longer
+/// than the range lands in the top bucket (#2790). `hdr_record_value_atomic`
+/// refuses a value past the range and its return is not read, so an unclamped
+/// record would leave a completion counted in the totals and the mean but
+/// missing from every percentile, the max and the histogram's count. The
+/// percentiles saturate at one hour; sums and means stay unclamped.
+constexpr int64_t clamp_to_latency_ceiling (int64_t latency_us) {
+    return std::min (latency_us, HISTOGRAM_MAX_LATENCY_US);
+}
 /// Whether a load run feeds the five per-phase histograms (config key
 /// `phaseHistograms`). On by default: the phase values are computed for every
 /// completion anyway, and without this bank they survive only for the ~1% of

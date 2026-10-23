@@ -854,6 +854,25 @@ TEST_F (ScenarioLoadTest, AnUnreachedStepReportsZeroesRatherThanAnEmptyHistogram
     EXPECT_EQ (unreached.max, 0.0);
 }
 
+// #2790: a step completion, answered or failed, past the histogram's one-hour
+// range lands in its top bucket. Healthy: three samples, p99 and max at
+// 3600 s. Broken (the clamp removed): one sample and both read 10 ms.
+TEST (StepHistogramsCeiling, AStepOverAnHourLandsInTheTopBucket) {
+    constexpr double ninety_minutes_ms = 5'400'000.0;
+    constexpr double one_hour_ms       = 3'600'000.0;
+    vayu::core::StepHistograms steps (1);
+    steps.record (0, 10.0);
+    steps.record (0, ninety_minutes_ms);
+    steps.record_error (0);
+    steps.record_failed_transfer (0, ninety_minutes_ms);
+
+    EXPECT_EQ (steps.completed (0), 3u);
+    EXPECT_EQ (steps.latency_samples (0), 3u);
+    const auto percentiles = steps.percentiles (0);
+    EXPECT_NEAR (percentiles.p99, one_hour_ms, one_hour_ms * 0.001);
+    EXPECT_NEAR (percentiles.max, one_hour_ms, one_hour_ms * 0.001);
+}
+
 // #2384: a step whose transfer ran and failed (here a timeout) joins its own
 // histogram at its duration, so the step's p99 and the run's describe the same
 // attempts, and `finish_step` still counts it once. Mutation check: drop the

@@ -435,6 +435,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   escaping that biased sample is the whole point. Off - `phaseHistograms`, or a run's own
   `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
   check. Written through `hdr_record_value_atomic` for the same reason the two above are.
+- **A one-hour ceiling**: every latency histogram (the run's, the interval recorder, the phase
+  bank, the per-step and the per-transaction ones) spans 1 µs to one hour
+  (`HISTOGRAM_MAX_LATENCY_US`), and every record goes through `clamp_to_latency_ceiling`
+  (issue #2790). A `timeout` may be up to 24 hours, and HdrHistogram refuses a value past its
+  range, so without the clamp a longer completion was in the totals and the mean but in no
+  percentile. Clamped, it lands in the top bucket: percentiles and `max` saturate at one hour,
+  while the counts, sums and means stay exact.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately. A latency sample is any request

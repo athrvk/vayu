@@ -79,7 +79,8 @@ void TransactionHistograms::record (const std::string& name, int64_t latency_us,
     if (errored) {
         entry.errors.fetch_add (1, std::memory_order_relaxed);
     }
-    hdr_record_value_atomic (entry.histogram, std::max<int64_t> (0, latency_us));
+    hdr_record_value_atomic (entry.histogram,
+    constants::metrics_collector::clamp_to_latency_ceiling (std::max<int64_t> (0, latency_us)));
 }
 
 nlohmann::json TransactionHistograms::build () const {

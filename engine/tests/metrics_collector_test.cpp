@@ -122,6 +122,38 @@ TEST_F (MetricsCollectorTest, FailedTransfersWithADurationJoinTheLatencyPopulati
     EXPECT_NEAR (percentiles.p95, 10.0, 0.01);
 }
 
+// #2790: a completion past the histogram's one-hour range lands in its top
+// bucket instead of vanishing from the percentiles. Healthy: p99 and max read
+// 3600 s (within the 0.1% of 3 significant figures) and every count is 100.
+// Broken (the clamp removed): the two 90-minute values are refused, so p99 and
+// max read 10 ms and the histograms hold 98. The mean is never clamped.
+TEST_F (MetricsCollectorTest, ACompletionOverAnHourLandsInTheTopBucket) {
+    constexpr double ninety_minutes_ms = 5'400'000.0;
+    constexpr double one_hour_ms       = 3'600'000.0;
+    for (int i = 0; i < 98; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    collector->record_success (200, ninety_minutes_ms, 0.0);
+    collector->record_error (vayu::ErrorCode::Timeout, "timed out", "", nullptr,
+    AttemptDuration{ ninety_minutes_ms, 0.0 });
+
+    EXPECT_EQ (collector->latency_samples (), 100u);
+    EXPECT_EQ (collector->latency_count (), 100);
+    EXPECT_DOUBLE_EQ (collector->average_latency (),
+    ((98.0 * 10.0) + (2.0 * ninety_minutes_ms)) / 100.0);
+
+    const auto cumulative = collector->calculate_percentiles ();
+    EXPECT_EQ (cumulative.count, 100u);
+    EXPECT_NEAR (cumulative.p99, one_hour_ms, one_hour_ms * 0.001);
+    EXPECT_NEAR (cumulative.max, one_hour_ms, one_hour_ms * 0.001);
+
+    // The rolling-window recorder is fed the same value on its own line.
+    const auto window = collector->sample_window_percentiles ();
+    EXPECT_EQ (window.count, 100u);
+    EXPECT_NEAR (window.p99, one_hour_ms, one_hour_ms * 0.001);
+    EXPECT_NEAR (window.max, one_hour_ms, one_hour_ms * 0.001);
+}
+
 // The queue wait's mean divides by the same population as the latency's.
 TEST_F (MetricsCollectorTest, AFailedTransfersQueueWaitJoinsTheMeanBesideItsLatency) {
     collector->record_success (200, 50.0, 10.0);
@@ -1800,6 +1832,26 @@ TEST_F (MetricsCollectorTest, PhasePercentilesSeparateTailFromBody) {
     // The mean this replaces would have read 2.5ms - a number that looks like a
     // uniformly slightly-slow handshake rather than 5% of requests paying 50ms.
     EXPECT_NEAR ((*phases)[kTls].p99, 50.0, 1.0);
+}
+
+// #2790: a download phase can outlast the one-hour range on its own. Healthy:
+// the download histogram holds both completions and its p99 and max read
+// 3600 s. Broken (the clamp removed): it holds one and both read 1 ms.
+TEST_F (MetricsCollectorTest, APhaseOverAnHourLandsInTheTopBucket) {
+    constexpr double ninety_minutes_ms = 5'400'000.0;
+    constexpr double one_hour_ms       = 3'600'000.0;
+    const auto quick                   = phase_timing (0.0, 0.0, 0.0, 5.0, 1.0);
+    const auto endless = phase_timing (0.0, 0.0, 0.0, 5.0, ninety_minutes_ms);
+    collector->record_success (200, 6.0, 0.0, "", SuccessTraceReason::None, nullptr, &quick);
+    collector->record_success (200, ninety_minutes_ms + 5.0, 0.0, "",
+    SuccessTraceReason::None, nullptr, &endless);
+
+    auto phases = collector->phase_percentiles ();
+    ASSERT_HAS_VALUE (phases);
+    const auto& download = (*phases)[kDownload];
+    EXPECT_EQ (download.count, 2u);
+    EXPECT_NEAR (download.p99, one_hour_ms, one_hour_ms * 0.001);
+    EXPECT_NEAR (download.max, one_hour_ms, one_hour_ms * 0.001);
 }
 
 // The escape hatch has to actually cost nothing: off means no bank, and a

@@ -374,6 +374,19 @@ TEST (ControlTransactionSum, IncludeTimersFoldsAWholeMillisecondWaitAsMicrosecon
     expect_transaction_ms (run_transaction ({ 0.9, 0.9, 0.9 }, true, 5), 7.7);
 }
 
+// #2790: a transaction summing past the histogram's one-hour range lands in
+// its top bucket, while the close keeps the true sum. Healthy: p50 and max at
+// 3600 s. Broken (the clamp removed): the histogram refuses the one value and
+// both read 0.
+TEST (ControlTransactionSum, ASumOverAnHourLandsInTheTopBucket) {
+    const auto pass = run_transaction ({ 2'700'000.0, 2'700'000.0 });
+    expect_transaction_ms (pass, 3'600'000.0);
+    ASSERT_EQ (pass.outcomes.size (), 2u);
+    const auto& close = pass.outcomes.back ();
+    ASSERT_HAS_VALUE (close.duration_us);
+    EXPECT_EQ (*close.duration_us, 5'400'000'000);
+}
+
 TEST (ControlTransactionSum, OnlyTheClosingOutcomeCarriesADuration) {
     const auto pass = run_transaction ({ 0.9, 0.9, 0.9 });
     ASSERT_EQ (pass.outcomes.size (), 3u);

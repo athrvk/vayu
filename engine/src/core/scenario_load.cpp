@@ -166,7 +166,8 @@ void StepHistograms::record_latency (size_t step, double latency_ms) {
     // every event-loop worker records concurrently - the plain record is a
     // non-atomic read-modify-write on counts[] and loses increments.
     hdr_record_value_atomic (histograms_[step],
-    static_cast<int64_t> (std::max (0.0, latency_ms) * 1000.0));
+    constants::metrics_collector::clamp_to_latency_ceiling (
+    static_cast<int64_t> (std::max (0.0, latency_ms) * 1000.0)));
 }
 
 void StepHistograms::record (size_t step, double latency_ms) {

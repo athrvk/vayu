@@ -6752,7 +6752,11 @@ naming `'timeout'` before any run row exists and with nothing sent: libcurl
 reads `0` as "no timeout", and a negative value is a rejected option the
 transfer then runs without. `POST /runs` holds the same bound (see its
 [run config table](#post-runs)). A streaming send does not apply it to the
-transfer (see `stream` below) but refuses a malformed one all the same.
+transfer (see `stream` below) but refuses a malformed one all the same. A
+load run's percentiles and `max` saturate at one hour (issue #2790): a longer
+completion is recorded in the histograms' top bucket, while the request counts
+and the mean (`avgLatencyMs`) carry its true duration
+([Latency population](#latency-population)).
 
 **`requestId` and `environmentId` must be strings** (issue #1917): an id of any
 other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
@@ -9446,6 +9450,13 @@ set. The per-phase histograms of the [timing breakdown](#get-runsrunidreport)
 stay answered-only: a request that failed has no connect, TLS or first-byte
 split to report. A scenario step's histogram follows the same rule as the
 run's.
+
+Every latency histogram spans one hour (issue #2790): the run's, the live
+windows, the per-phase bank, a scenario step's and a `control.transaction`'s.
+A completion longer than that (a `timeout` may be up to 24 hours) is recorded
+in the top bucket, so its percentiles and `max` read one hour while the counts
+and the mean carry its true duration. That is the one case where the mean can
+read above the `max`.
 
 Where libcurl reports the failure, the test is whether the transfer reached
 the network, not which error it ended with. A redirect to a scheme the engine
