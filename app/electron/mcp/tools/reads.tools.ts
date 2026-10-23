@@ -215,7 +215,7 @@ export const READ_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description: (config) =>
-			"Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the shape list_requests returns for each of its rows plus runsPreRequestScript: true when a send of it runs a pre-request script (its own, its folder's or its collection's), false when it does not. That flag is derived on every read and is on this tool only, so a row from list_requests never carries it. An id that names no saved request is an error naming 404." +
+			"Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the shape list_requests returns for each of its rows plus runsPreRequestScript: true when a send of it runs a pre-request script (its own, its folder's or its collection's), false when it does not. The flag is derived on every read and is not on list_requests rows. An id that names no saved request is an error naming 404." +
 			withheldPointer(config),
 		annotations: {
 			title: "Get a request",

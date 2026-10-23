@@ -13543,6 +13543,38 @@ describe("secret withholding", () => {
 		expect(body).toEqual(REQUESTS[0]);
 	});
 
+	// #2741: the three single-request routes carry the engine's derived flag and
+	// the list does not, so the tools' descriptions say exactly that. A projection
+	// that rebuilt the row from a field list would drop it from all three.
+	test("the single-request tools hand back runsPreRequestScript as the engine sent it", async () => {
+		const row = { ...REQUESTS[0], runsPreRequestScript: true };
+		const client = fakeClient({
+			getRequest: vi.fn().mockResolvedValue(row),
+			createRequest: vi.fn().mockResolvedValue(row),
+			updateRequest: vi.fn().mockResolvedValue(row),
+		});
+		const ctx = ctxWith(client, { allowWrites: true });
+		const calls: Array<[string, Record<string, unknown>]> = [
+			["get_request", { requestId: "req_1" }],
+			["create_request", { collectionId: "c1", name: "x", url: "https://api.example.com" }],
+			["update_request", { requestId: "req_1", name: "x" }],
+		];
+		for (const [tool, args] of calls) {
+			const res = await dispatchTool(tool, args, ctx);
+			expect(res.isError, tool).toBeFalsy();
+			expect(JSON.parse(firstText(res)).runsPreRequestScript, tool).toBe(true);
+		}
+	});
+
+	test("the descriptions say which tools carry runsPreRequestScript, and list_requests is not one", () => {
+		const text = (name: string) => descriptionOf(TOOLS.find((t) => t.name === name));
+		for (const name of ["get_request", "create_request", "update_request"]) {
+			expect(text(name), name).toContain("runsPreRequestScript");
+		}
+		expect(text("get_request")).not.toMatch(/on this tool only/);
+		expect(text("list_requests")).not.toContain("runsPreRequestScript");
+	});
+
 	test("get_request answers an unknown id as an error naming 404", async () => {
 		const client = fakeClient({
 			getRequest: vi

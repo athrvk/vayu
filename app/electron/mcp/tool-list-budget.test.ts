@@ -53,7 +53,10 @@
  * `run_collection_smoke` and the descriptions merged beside it then measured
  * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
  * caps went to 137,900 / 135,200 and 205,300 / 200,900 (one measurement plus
- * a few hundred bytes).
+ * a few hundred bytes). #2741's `runsPreRequestScript` sentence on
+ * `create_request` and `update_request` (and the longer `get_request` one)
+ * took the writes-on rows to 205,324 / 200,927 B, and those caps went to
+ * 205,600 / 201,200.
  */
 
 import { describe, it, expect } from "vitest";
@@ -75,8 +78,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 137_900 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 135_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 205_300 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 200_900 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 205_600 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 201_200 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
