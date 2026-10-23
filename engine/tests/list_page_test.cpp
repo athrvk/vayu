@@ -80,6 +80,7 @@ TEST (ParseListPage, TakesTheWholeRangeOfLimit) {
     }
 }
 
+// Mutation check: drop the `*limit == 0` refusal in parse_list_page and this fails.
 TEST (ParseListPage, RefusesALimitThatIsNotAnIntegerFromOneToTheCap) {
     for (const char* limit : { "0", "501", "-1", "5abc", "", "+5", " 5", "1.5",
          "abc", "99999999999999999999999" }) {
