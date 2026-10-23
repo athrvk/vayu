@@ -77,6 +77,9 @@ export default function PerformanceTab({
 	// loaded series runs to thousands of them.
 	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
 	const isRampUp = derived.mode === "ramp_up";
+	// The figure the Rate fidelity card shows (a stopped run is judged by pace,
+	// #2805); the stored value covers a caller that hands over no derived figure.
+	const achievement = derived.rateAchievementPct ?? report.rateControl?.achievement ?? 0;
 
 	return (
 		<div className="space-y-6">
@@ -290,16 +293,14 @@ export default function PerformanceTab({
 								<p
 									className={cn(
 										"text-metric font-bold",
-										report.rateControl.achievement >= 95 &&
-											report.rateControl.achievement <= 105
+										achievement >= 95 && achievement <= 105
 											? "text-success-text"
-											: report.rateControl.achievement >= 80 &&
-												  report.rateControl.achievement <= 120
+											: achievement >= 80 && achievement <= 120
 												? "text-warning-text"
 												: "text-destructive-text"
 									)}
 								>
-									{formatNumber(report.rateControl.achievement)}%
+									{formatNumber(achievement)}%
 								</p>
 								{/* Absent on a run stored before #2392, and 0 expected is the
 								    engine falling back to the legacy formula: no plan to state. */}

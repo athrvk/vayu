@@ -1329,6 +1329,9 @@ struct RunSummaryInputs {
     // figure here that is about the report's own validity rather than about
     // performance - see MetricsCollector::record_http_version_downgrade.
     size_t http_version_downgraded = 0;
+    // Requests libcurl re-sent on a new connection after a reused one was
+    // dropped or refused (#2799) - see MetricsCollector::record_connection_replays.
+    size_t connection_replays = 0;
     // Absent when the run had no test script or no sampled responses - the
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;
@@ -1428,7 +1431,8 @@ struct RunSummaryInputs {
  * @brief The summary's `warnings` array for a finished run (issue #1503): an
  *        unresolved `{{token}}` that was sent anyway, and, for a scenario run,
  *        the steps whose `script.pre` did not run inline (#1938), and a
- *        per-host connection limit the run raised (#2394). Declared here
+ *        per-host connection limit the run raised (#2394), and requests
+ *        re-sent on a new connection (#2799). Declared here
  *        so a test reaches the rule without driving a whole run.
  */
 [[nodiscard]] nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context);

@@ -17,6 +17,7 @@
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/connected_peer_check.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -27,40 +28,6 @@ namespace vayu::http::detail {
 // Forward declaration
 struct TransferData;
 class DnsCache;
-
-/**
- * @brief The host and port a URL dials.
- */
-struct UrlAuthority {
-    /// Hostname, or the address of an IP-literal URL with its brackets removed.
-    /// Empty when the URL names no authority. A non-ASCII name is in its
-    /// punycode form, the one the transfer dials (`ascii_host`).
-    std::string host;
-    /// Explicit port, or the scheme default when the URL names none.
-    int port = 0;
-    /// True when `host` is an address rather than a name, so there is nothing
-    /// to resolve and nothing to pin.
-    bool is_ip_literal = false;
-};
-
-/**
- * @brief One transfer's connect-time state beyond the process-wide reserved
- *        ports: what `apply_transport_policy` hands libcurl as
- *        `CURLOPT_PREREQDATA`, so it must outlive `curl_easy_perform`.
- *
- * Only the single-request client builds one, for a `/import/fetch` reference
- * (#2364); every other transfer passes none.
- */
-struct ConnectedPeerCheck {
-    /// The rule a reference fetch runs under, or null for none.
-    const LocalPeerRule* local_peers = nullptr;
-    /// The proxy the transfer names (`configured_proxy`), written by
-    /// `apply_transport_policy`. `local_peers` does not refuse it (#2605).
-    std::optional<UrlAuthority> proxy;
-    /// Set by the callback when `local_peers` refused the connection, so
-    /// `curl_to_error` can name that rule rather than libcurl's abort.
-    bool refused_local_peer = false;
-};
 
 /**
  * @brief The proxy @p policy puts on a handle by URL, as the authority
@@ -143,7 +110,10 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * null included, so a pooled handle never keeps a previous transfer's state.
  * With a proxy in force the peer judged is the proxy, for both rules; the
  * applier records `configured_proxy` on @p peer_check, so the reference rule
- * passes that proxy while the reserved ports still refuse it.
+ * passes that proxy while the reserved ports still refuse it. The callback
+ * also counts every call on @p peer_check (`requests_started`), which is how a
+ * request libcurl re-sent on a new connection is seen at all (#2799,
+ * `connection_replays`).
  *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
@@ -159,7 +129,7 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *            a feature it is not using.
  * @param peer_check This transfer's connect-time state, or null. Must outlive
  *                   the transfer; the applier writes its `proxy` and the
- *                   callback its refusal into it.
+ *                   callback its refusal and its count into it.
  * @return The registry entry whose certificate was put on the handle, or null
  *         when none matched. Points into @p policy and lives exactly as long -
  *         a caller that keeps it (both design funnels record the label on the
@@ -309,6 +279,17 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
 [[nodiscard]] bool header_value_reaches_wire (std::string_view value);
 
 /**
+ * @brief The request's own `Cookie` rows as one value, for `CURLOPT_COOKIE`.
+ *
+ * Every row named `Cookie` whose value reaches the wire, trimmed of its edge
+ * whitespace and joined with `; ` in row order; empty when there is none.
+ * libcurl writes this after the jar's matches on one `Cookie` line, so a
+ * request never carries two (RFC 6265 section 5.4, issue #2788), and drops it
+ * on a cross-host redirect as it would a listed `Cookie` header.
+ */
+[[nodiscard]] std::string typed_cookie_value (const Request& request);
+
+/**
  * @brief Build the `CURLOPT_HTTPHEADER` list for a request, and record what it
  *        puts on the wire.
  *
@@ -340,6 +321,13 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * the order the request holds them (issue #2466): a repeated name is sent
  * repeated, and authored order is wire order.
  *
+ * `Cookie` is the exception (issue #2788): its rows are recorded, one entry
+ * per row as typed, but never appended. libcurl ignores `CURLOPT_COOKIE`
+ * while the list names a Cookie and writes the jar's matches on a line of
+ * their own, so a listed row would put two `Cookie` lines on the wire.
+ * `apply_default_header_options` hands the rows to libcurl instead, as
+ * `typed_cookie_value`, and libcurl merges them into the jar's line.
+ *
  * libcurl also adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and
  * waits a second for the interim reply (issue #2468). Unless
  * `policy.expect_continue` is on, the list carries the removal line `Expect:`,
@@ -368,12 +356,13 @@ const DefaultHeaderPolicy& policy,
 HeaderList* sent);
 
 /**
- * @brief Apply the transfer options a default header rides on rather than a
- *        header line - today, compression negotiation.
+ * @brief Apply the transfer options a header rides on rather than a header
+ *        line: compression negotiation and the request's typed `Cookie`.
  *
- * Always sets `CURLOPT_ACCEPT_ENCODING`, clearing it when this transfer does
- * not negotiate: the load driver's handles come from a pool, so an option left
- * on from the transfer before would ask for an encoding this one refused.
+ * Always sets `CURLOPT_ACCEPT_ENCODING` and `CURLOPT_COOKIE`, clearing each
+ * when this transfer has nothing for it: the load driver's handles come from a
+ * pool, so an option left on from the transfer before would ask for an
+ * encoding this one refused, or send a cookie this one never typed.
  */
 void apply_default_header_options (CURL* curl,
 const Request& request,

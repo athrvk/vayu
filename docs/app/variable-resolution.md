@@ -1089,7 +1089,17 @@ copy) has nothing to compose by and keeps the plain preview.
 The request builder's `{{token}}` painting says the same (#2741): a name in
 `deferredVariables` is not painted as resolved in the URL, header, body or
 auth fields, nor offered as the value that will be sent, but drawn muted with a
-dashed underline and, in its popover, the same sentence. It reads the same
+dashed underline and, in its popover, the same sentence. The two views that
+print a resolved value say it too (#2762): the key/value rows' Σ peek (Headers,
+Params and path variables, form-data, urlencoded, the OAuth 2.0 token-request
+rows) and the Body tab's Resolved pane leave the name written and carry the
+sentence, in the peek's hint line and under the pane's text. The builder hands
+both a `resolveField` that leaves the names written (`leaveDeferredField` in
+`utils/sends-url.ts`, the rule `resolveSendsUrl` applies to the URL), and
+resolves every other token as before; a row whose only token is deferred keeps
+its Σ marker, since the sentence is what the peek then says. A picked data row
+still escapes its cells by the text around them, because the field is resolved
+whole rather than cut around the deferred token. It reads the same
 `POST /compose` entry (`useDeferredVariables`), fetched once per builder and
 only while the request holds a `{{token}}` anywhere the composer interpolates
 (`requestHasTokens`), so a builder holding such a request asks `/compose` on

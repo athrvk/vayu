@@ -17,6 +17,7 @@
 
 import type { IntrospectionQuery } from "graphql";
 import { readRequestOverrides } from "./compose.js";
+import type { FailureClass } from "./failure.js";
 import { isRecord, str, ToolArgError } from "./kit.js";
 import { MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
 
@@ -138,42 +139,75 @@ function hostOf(url: string): string {
 	}
 }
 
+/**
+ * Why an answer holds no schema, classed as the tool error it becomes (#2776).
+ * The endpoint's refusals are `input` - the request named the wrong endpoint or
+ * credentials - except where the class table says otherwise.
+ */
+export interface IntrospectionRefusal {
+	error: string;
+	failureClass: FailureClass;
+}
+
+const asInput = (error: string): IntrospectionRefusal => ({ error, failureClass: "input" });
+
 /** Why an exchange that never reached the endpoint (`status: 0`) failed. */
-function unreachedError(answer: Record<string, unknown>, url: string): string {
+function unreachedError(answer: Record<string, unknown>, url: string): IntrospectionRefusal {
 	const code = typeof answer.errorCode === "string" ? answer.errorCode : "";
 	const detail = typeof answer.errorMessage === "string" ? ` ${answer.errorMessage}` : "";
 	const named = code ? ` (${code})` : "";
 	if (code === "AUTH_REQUIRED" || code === "AUTH_FAILED") {
-		return `Couldn't get an OAuth 2.0 token for the introspection request${named}.${detail}`;
+		return asInput(
+			`Couldn't get an OAuth 2.0 token for the introspection request${named}.${detail}`
+		);
 	}
-	return `Couldn't reach ${hostOf(url)}${named}.${detail}`;
+	return {
+		error: `Couldn't reach ${hostOf(url)}${named}.${detail}`,
+		failureClass: "unreachable",
+	};
 }
 
 /** Why a non-2xx answer is not a schema; null for a 2xx. */
-function statusError(status: number): string | null {
+function statusError(status: number): IntrospectionRefusal | null {
 	if (status === 401 || status === 403) {
-		return `The endpoint rejected these credentials (HTTP ${status}). Check the request's auth.`;
+		return asInput(
+			`The endpoint rejected these credentials (HTTP ${status}). Check the request's auth.`
+		);
 	}
 	if (status < 200 || status >= 300) {
-		return `The endpoint answered HTTP ${status}; introspection needs a 2xx.`;
+		return {
+			error: `The endpoint answered HTTP ${status}; introspection needs a 2xx.`,
+			failureClass: status >= 500 ? "transient" : "input",
+		};
 	}
 	return null;
 }
 
-const NOT_JSON = "The endpoint answered, but not with JSON - it may not be a GraphQL endpoint.";
+const NOT_JSON = asInput(
+	"The endpoint answered, but not with JSON - it may not be a GraphQL endpoint."
+);
 
 /** Why a parsed 2xx body is not an introspection result; null when it is one. */
-function bodyError(parsed: unknown): string | null {
-	if (!isRecord(parsed)) return "The endpoint's answer is not an introspection result.";
+function bodyError(parsed: unknown): IntrospectionRefusal | null {
+	if (!isRecord(parsed)) return asInput("The endpoint's answer is not an introspection result.");
 	const errors = Array.isArray(parsed.errors) ? parsed.errors : [];
 	if (errors.length > 0) {
 		const messages = errors.map((e) => (isRecord(e) ? String(e.message ?? "") : ""));
-		return messages.some((m) => INTROSPECTION_DISABLED.test(m))
-			? "This endpoint disallows introspection, so its schema cannot be read through it."
-			: `The endpoint answered with ${errors.length} GraphQL error(s) rather than an introspection result.`;
+		// The endpoint's own rule: no argument this tool takes would lift it.
+		if (messages.some((m) => INTROSPECTION_DISABLED.test(m))) {
+			return {
+				error: "This endpoint disallows introspection, so its schema cannot be read through it.",
+				failureClass: "policy",
+			};
+		}
+		return asInput(
+			`The endpoint answered with ${errors.length} GraphQL error(s) rather than an introspection result.`
+		);
 	}
 	if (!parsed.data) {
-		return "The endpoint answered with no introspection data - it may not be a GraphQL endpoint.";
+		return asInput(
+			"The endpoint answered with no introspection data - it may not be a GraphQL endpoint."
+		);
 	}
 	return null;
 }
@@ -187,30 +221,34 @@ function bodyError(parsed: unknown): string | null {
 export function readIntrospectionAnswer(
 	answer: unknown,
 	url: string
-): { data: unknown } | { error: string } {
-	if (!isRecord(answer)) return { error: "Engine returned an unusable answer to the send." };
+): { data: unknown } | IntrospectionRefusal {
+	if (!isRecord(answer)) {
+		return {
+			error: "Engine returned an unusable answer to the send.",
+			failureClass: "transient",
+		};
+	}
 	const status = typeof answer.status === "number" ? answer.status : 0;
-	if (status === 0) return { error: unreachedError(answer, url) };
+	if (status === 0) return unreachedError(answer, url);
 	const refused = statusError(status);
-	if (refused) return { error: refused };
+	if (refused) return refused;
 	// A body the engine could not hold as UTF-8 text is not a JSON document,
 	// and its `bodyRaw` is base64 whose length is not the body's (issue #2458).
-	if (answer.bodyEncoding === "base64") return { error: NOT_JSON };
+	if (answer.bodyEncoding === "base64") return NOT_JSON;
 	const raw = typeof answer.bodyRaw === "string" ? answer.bodyRaw : "";
 	const bytes = Buffer.byteLength(raw, "utf8");
 	if (bytes > MAX_INTROSPECTION_BYTES) {
-		return {
-			error: `The introspection response is too large: ${Math.round(bytes / (1024 * 1024))} MB, over the ${MAX_INTROSPECTION_BYTES / (1024 * 1024)} MB limit.`,
-		};
+		return asInput(
+			`The introspection response is too large: ${Math.round(bytes / (1024 * 1024))} MB, over the ${MAX_INTROSPECTION_BYTES / (1024 * 1024)} MB limit.`
+		);
 	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
 	} catch {
-		return { error: NOT_JSON };
+		return NOT_JSON;
 	}
-	const unreadable = bodyError(parsed);
-	return unreadable ? { error: unreadable } : { data: (parsed as { data: unknown }).data };
+	return bodyError(parsed) ?? { data: (parsed as { data: unknown }).data };
 }
 
 /** A schema printed as SDL, whole or as the named types asked for. */

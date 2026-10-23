@@ -109,9 +109,13 @@ export function BreakpointStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** p99 at peak - tail latency at the breakpoint (or the run's p99 so far if uncrossed). */
+/**
+ * p99 at peak - the worst whole-second p99 while the run held its peak load,
+ * not the breakpoint tick's, which was read at a lighter load. The run's p99 so
+ * far stands in until a tick at the peak has a reading.
+ */
 export function P99AtPeakStat({ d }: { d: DashboardDerived }) {
-	const p99 = d.breakpoint.crossed ? (d.breakpoint.p99Ms ?? d.p99Latency) : d.p99Latency;
+	const p99 = d.p99AtPeakMs ?? d.p99Latency;
 	const { value, unit } = formatLatencyParts(p99);
 	return <StatCard label="p99 at peak" value={value} unit={unit} infoTip={TOOLTIPS.p99AtPeak} />;
 }

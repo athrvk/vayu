@@ -39,6 +39,7 @@ vi.mock("@/services/api", () => ({
 		listTrash: vi.fn(),
 		restoreTrashEntry: vi.fn(),
 		purgeTrashEntry: vi.fn(),
+		updateCollection: vi.fn(),
 	},
 }));
 
@@ -150,35 +151,27 @@ describe("usePurgeTrashMutation", () => {
 		expect(invalidatedKeys()).not.toContain(queryKeys.requests.all.join("/"));
 	});
 
-	it("forgets the purged id's remembered data-file and spec-file paths (#1890)", async () => {
-		for (const id of ["c1", "c2"]) {
-			useDataFileStore
-				.getState()
-				.setDataFile(id, { path: `/d/${id}.csv`, fileName: `${id}.csv` });
-			useSpecFileStore
-				.getState()
-				.setSpecFile(id, { path: `/s/${id}.yaml`, fileName: `${id}.yaml` });
-		}
+	/*
+	 * The purged row's spec-file and data-file bindings are its own columns
+	 * (#2765) and go with it, engine-side. A trashed row was already out of the
+	 * list the stores mirror, so there is nothing here to clear either - and a
+	 * write naming a purged id would be a 404. Mutation check: clear either
+	 * binding from the purge's `onSuccess` and this fails.
+	 */
+	it("writes no binding and touches neither store: the purge takes them with the row", async () => {
+		useDataFileStore.setState({ locations: { c2: { path: "/d/c2.csv", fileName: "c2.csv" } } });
+		useSpecFileStore.setState({
+			locations: { c2: { path: "/s/c2.yaml", fileName: "c2.yaml" } },
+		});
+		const dataFiles = useDataFileStore.getState().locations;
+		const specFiles = useSpecFileStore.getState().locations;
 		const { result } = renderHook(() => usePurgeTrashMutation(), { wrapper });
 
 		await result.current.mutateAsync("c1");
 
-		expect(useDataFileStore.getState().locations.c1).toBeUndefined();
-		expect(useSpecFileStore.getState().locations.c1).toBeUndefined();
-		expect(useDataFileStore.getState().locations.c2).toBeDefined();
-		expect(useSpecFileStore.getState().locations.c2).toBeDefined();
-	});
-
-	it("keeps the remembered paths when the purge fails", async () => {
-		useDataFileStore.getState().setDataFile("gone", { path: "/d/g.csv", fileName: "g.csv" });
-		useSpecFileStore.getState().setSpecFile("gone", { path: "/s/g.yaml", fileName: "g.yaml" });
-		vi.mocked(apiService.purgeTrashEntry).mockRejectedValue(new Error("Request not found"));
-		const { result } = renderHook(() => usePurgeTrashMutation(), { wrapper });
-
-		await expect(result.current.mutateAsync("gone")).rejects.toThrow("Request not found");
-
-		expect(useDataFileStore.getState().locations.gone).toBeDefined();
-		expect(useSpecFileStore.getState().locations.gone).toBeDefined();
+		expect(apiService.updateCollection).not.toHaveBeenCalled();
+		expect(useDataFileStore.getState().locations).toBe(dataFiles);
+		expect(useSpecFileStore.getState().locations).toBe(specFiles);
 	});
 
 	it("refetches the list when the purge fails, the same way a failed restore does", async () => {

@@ -31,6 +31,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useDataFileStore } from "@/stores";
 import type { DataFileHashReply } from "@/types/electron";
 import { useDataFileStatus } from "./useDataFileStatus";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 
 const A = "a".repeat(64);
 const B = "b".repeat(64);
@@ -39,7 +40,7 @@ const found = (hash: string): DataFileHashReply => ({ status: "found", hash });
 const MISSING: DataFileHashReply = { status: "missing" };
 
 function remember(collectionId: string, hash: string | undefined, castNumbers?: boolean) {
-	useDataFileStore.getState().setDataFile(collectionId, {
+	bindDataFile(collectionId, {
 		path: "/data/users.csv",
 		fileName: "users.csv",
 		...(hash ? { hash } : {}),
@@ -89,12 +90,12 @@ describe("useDataFileStatus without the hash bridge (the stored hash)", () => {
 		expect(result.current).toBe("unknown");
 	});
 
-	it("follows the store when a re-read records a new hash", () => {
+	it("follows the store when the binding records a new hash", () => {
 		remember("col_1", A);
 		const { result } = renderHook(() => useDataFileStatus("col_1", A, undefined));
 		expect(result.current).toBe("unchanged");
 
-		act(() => useDataFileStore.getState().recordDataFileHash("/data/users.csv", B));
+		act(() => remember("col_1", B));
 		expect(result.current).toBe("changed");
 	});
 });
@@ -234,7 +235,7 @@ describe("useDataFileStatus with the hash bridge (the file as it is now)", () =>
 		await waitFor(() => expect(result.current).toBe("missing"));
 
 		act(() =>
-			useDataFileStore.getState().setDataFile("col_1", {
+			bindDataFile("col_1", {
 				path: "/data/other.csv",
 				fileName: "other.csv",
 			})

@@ -1662,3 +1662,53 @@ TEST_F (LoadRunToTerminalTest, ACompletedRunStoresTheExactErrorTypes) {
     << summary.dump ();
     EXPECT_EQ (summary["sampling"]["errors_dropped"].get<size_t> (), 2u);
 }
+
+// #2798: a load run that sets no `timeout` of its own sends with the
+// `defaultTimeout` setting, as `POST /execute` does. Each case reads the stored
+// `error_types`, so none depends on how fast the runner is. A `null` timeout
+// never reaches the worker (the route erases it, #1893);
+// run_config_validation_test.cpp drives that case through `POST /runs`.
+class LoadRunTimeoutTest : public LoadRunToTerminalTest {
+    protected:
+    /// Through the row, not the route: the route's bounds are not the subject.
+    void set_default_timeout (const char* ms) {
+        auto entry = db->get_config_entry ("defaultTimeout");
+        ASSERT_HAS_VALUE (entry);
+        entry->value = ms;
+        db->save_config_entry (*entry);
+    }
+
+    nlohmann::json two_requests_to (const std::string& url) const {
+        return { { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 2 },
+            { "url", url }, { "method", "GET" }, { "workers", 1 } };
+    }
+
+    void expect_timeouts (const std::optional<vayu::db::Run>& row, int count) {
+        ASSERT_HAS_VALUE (row);
+        const auto summary = nlohmann::json::parse (row->summary);
+        EXPECT_EQ (summary["error_types"], (nlohmann::json{ { "timeout", count } }))
+        << summary.dump ();
+    }
+};
+
+// `/hang` never answers. At the setting's floor (1000) the run ends in about a
+// second; one that ignores the setting waits the compiled-in 30s, past
+// run_to_terminal_row's 20s wait, so it fails as a hang rather than on a clock.
+// Mutation check: put `config.value ("timeout", 30000)` back in
+// execute_load_test and this reds with "the run never reached a terminal status".
+TEST_F (LoadRunTimeoutTest, ARunWithNoTimeoutUsesTheDefaultTimeoutSetting) {
+    set_default_timeout ("1000");
+    expect_timeouts (run_to_terminal_row ("run-default-timeout-e2e",
+                     two_requests_to (server->hang_url ())),
+    2);
+}
+
+// `/slow` answers in 500ms: inside the 3000ms setting, outside the run's own
+// 100ms (a lower bound, so a slow runner cannot fail it). Mutation
+// check: make the resolver return the setting first and this reds at `{}`.
+TEST_F (LoadRunTimeoutTest, AnExplicitTimeoutBeatsTheSetting) {
+    set_default_timeout ("3000");
+    auto config       = two_requests_to (server->slow_url ());
+    config["timeout"] = 100;
+    expect_timeouts (run_to_terminal_row ("run-explicit-timeout-e2e", config), 2);
+}

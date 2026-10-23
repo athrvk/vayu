@@ -86,8 +86,8 @@ export interface SelectedDataFile {
 	/**
 	 * Where the file is on this machine, when Electron could say (issue #599).
 	 *
-	 * Only ever used to *remember* the file - `data-file-store` keys it by
-	 * collection so the Run dialog can pre-fill next time. Empty in a browser
+	 * Only ever used to *bind* the file - the collection's `dataFile` keeps it
+	 * so the Run dialog can pre-fill next time. Empty in a browser
 	 * and for a drag-and-drop of remote content, which is why every reader of it
 	 * has a no-path path.
 	 */

@@ -299,7 +299,8 @@ that goes back to a bare `400`.
 
 One rule, identical for every resource (issue #1485): a request's `params` /
 `headers` / `body` / `auth`, a collection's `variables` / `auth` / `dataSchema`
-/ `openapi`, and an environment's `variables` are each refused with a `413`
+/ `openapi` / `specFile` / `dataFile`, and an environment's `variables` are each
+refused with a `413`
 when the serialized value is over the engine's field cap (10 MiB,
 `json::MAX_FIELD_SIZE` in `engine/include/vayu/core/constants.hpp`) - naming
 the field, its size and the cap, and leaving the stored row untouched. `POST
@@ -1466,7 +1467,9 @@ the null-vs-absent rule.
   "order": 0,               // Optional, appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
   "dataSchema": {},         // Optional, the declared data contract - see below
-  "openapi": {}             // Optional, the bound spec document - see below
+  "openapi": {},            // Optional, the bound spec document - see below
+  "specFile": {},           // Optional, the bound spec file - see below
+  "dataFile": {}            // Optional, the bound data file - see below
 }
 ```
 
@@ -1476,8 +1479,10 @@ the null-vs-absent rule.
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
 `null`, or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
-when a serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
-engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
+when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
+`dataFile` is over the engine's
+[field cap](#a-stored-json-field-has-a-write-time-cap), or a file binding's
+`path` or `fileName` is over its own (below).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -1496,7 +1501,9 @@ its value, an explicit `null` resets it to the default.
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "dataSchema": null,       // Optional, null clears the declared contract
-  "openapi": null           // Optional, null unbinds the spec document
+  "openapi": null,          // Optional, null unbinds the spec document
+  "specFile": null,         // Optional, null unbinds the spec file
+  "dataFile": null          // Optional, null unbinds the data file
 }
 ```
 
@@ -1509,8 +1516,10 @@ list it just left. See [Ordering](#ordering).
 **Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
 on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
-serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
-engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
+serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
+`dataFile` is over the engine's
+[field cap](#a-stored-json-field-has-a-write-time-cap), or a file binding's
+`path` or `fileName` is over its own (below).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -1550,9 +1559,8 @@ them, each at most 256 characters - `declaredAt` a number, `fileName` a string.
 Each violation is a `400` naming the field (`Invalid 'dataSchema.columns': ...`)
 that writes nothing.
 
-The schema is stored; the file's **rows are not**, anywhere, and neither is its
-path - it is machine-local and stays app-side. See
-[Data-driven runs](../app/data-driven-runs.md).
+The schema is stored; the file's **rows are not**, anywhere. Where the file is
+lives in `dataFile`, below. See [Data-driven runs](../app/data-driven-runs.md).
 
 **`openapi` (both verbs, and `POST /import/apply`):** the OpenAPI document this
 collection is bound to (issue #637).
@@ -1582,6 +1590,32 @@ and a run of it reports `hash_mismatch` as before.
 
 Deleting the document is refused while a collection binds it - the binding is
 never cascaded away, see [DELETE /specs/:id](#delete-specsid).
+
+**`specFile` and `dataFile` (both verbs; refused by `POST /import/apply`):** the
+files this collection's Spec and Data tabs are bound to (issue #2765), stored so
+a [workspace backup](#post-workspacebackup) carries them.
+
+```json
+{"path":"/home/me/specs/pets.yaml","fileName":"pets.yaml"}
+{"path":"/home/me/data/users.csv","fileName":"users.csv","hash":"<hex sha256>","castNumbers":true}
+```
+
+`{}` means no file, and is what an absent field on create and an explicit `null`
+on update both resolve to, so unbinding is `{"specFile": null}`. A present value
+must be an object (`400` otherwise). A *non-empty* one must carry `path` and
+`fileName` as non-empty strings and no member beyond its own: `specFile` holds
+those two, `dataFile` adds an optional `hash` (64 lowercase hex characters, the
+SHA-256 of the file's bytes, the digest a run records as `dataFileHash`) and an
+optional boolean `castNumbers`. Each violation is a `400` naming the field or
+member that writes nothing; a `path` over 96 KiB or a `fileName` over 1 KiB is a
+`413` naming the member, its size and the cap. The path's form is not checked: it
+is the location on the machine that picked the file, so a Windows path is stored
+on Linux as written. A stored path grants nothing - a request body may send a
+file only under the [file trust rule](#allowed-folders-file-roots) - and the engine never opens
+either file. Neither field appears in `POST /export/postman` or
+`POST /specs/export`. A `POST /import/apply` collection item carrying either is a
+`400` with `error.item`, because an import describes a document from elsewhere;
+`null` passes.
 
 ### DELETE /collections/:id
 
@@ -1860,7 +1894,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
 - `disableCookies` keeps the cookie jar out of every send of this request: no
   jar cookie is attached and no `Set-Cookie` is stored. A `Cookie` header the
   request carries still goes out, and a pre-request script's
-  `pm.cookies.jar()` write is still persisted.
+  `pm.cookies.jar()` write is still persisted. With the jar on, a typed
+  `Cookie` and the jar's matches go out as one `Cookie` line, the jar's
+  first, never as two (issue #2788).
 - `disabledSystemHeaders` names headers the engine does not add on its own. It
   is stored lowercased and deduplicated in first-appearance order, and
   unioned on every send with the per-send `disabledDefaultHeaders` (see
@@ -4127,6 +4163,9 @@ Messages, by case:
 - `400` `Missing required field: name`, with `item: "c1"`, and the other
   per-field errors of the matching `POST /<resource>`, including a wrong-typed
   field (`"name": 42`), which is a `400` rather than a `500`.
+- `400` `'specFile' is not part of an import: it binds a file on this machine,
+  set with PUT /collections/:id`, with `item: "c1"`, and the same for
+  `dataFile` (issue #2765); `null` passes.
 - `400` `Import too large: 10001 items exceeds the limit of 10000 per call`.
 - `500` `<detail>` - the transaction itself failed; nothing was
   written.
@@ -5810,8 +5849,9 @@ appended regardless. The app's code snippets apply the same rule
 (`engine/tests/fixtures/auth-header-precedence.json`).
 
 **Redirects.** With `followRedirects` on, a redirect to another host (a different
-host name or port) drops the `Authorization` header, so `bearer`, `basic` and an
-`oauth2` token placed in the header stop at the first host, as libcurl does.
+host name or port) drops the `Authorization` header and a typed `Cookie`, so
+`bearer`, `basic` and an `oauth2` token placed in the header stop at the first
+host, as libcurl does.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
 the request carries - is sent to the host the redirect leads to. A query-located
 key is part of the URL as sent; the next hop is whatever the response's
@@ -6752,7 +6792,11 @@ naming `'timeout'` before any run row exists and with nothing sent: libcurl
 reads `0` as "no timeout", and a negative value is a rejected option the
 transfer then runs without. `POST /runs` holds the same bound (see its
 [run config table](#post-runs)). A streaming send does not apply it to the
-transfer (see `stream` below) but refuses a malformed one all the same.
+transfer (see `stream` below) but refuses a malformed one all the same. In a
+load run the latency histograms hold one hour at most (issue #2790): a
+completion longer than that, a timeout above `3600000` that ran out, is counted
+at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within
+0.1%) rather than the true duration, and the sample is never left out.
 
 **`requestId` and `environmentId` must be strings** (issue #1917): an id of any
 other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
@@ -7407,11 +7451,14 @@ paragraph above for why a hop's cookie is not necessarily one the jar kept.
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
 that frame declares one* (`Content-Length` above zero, or `Transfer-Encoding:
-chunked`). So it carries what libcurl added on its own - the `Cookie` line the
+chunked`). So it carries what libcurl added on its own - the cookies the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
-`requestHeaders`. The app's Headers tab lists the sent request from this block,
-line by line in wire order, so the tab shows the whole wire while the
+`requestHeaders`. The jar's cookies and the request's typed `Cookie` rows share
+one `Cookie` line, the jar's first and the typed rows after them joined with
+`"; "` (issue #2788); a redirect to another host drops the typed part, as it
+drops a typed `Authorization`. The app's Headers tab lists the sent request
+from this block, line by line in wire order, so the tab shows the whole wire while the
 script-visible record stays the engine's. When the final hop sent no body, the
 string ends at the blank line that closes the header block: a `POST` answered
 `301`, `302` or `303` is re-sent as a body-less `GET`, so the body it started
@@ -9109,7 +9156,7 @@ default, and whose message names the offending field and why the bound exists:
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
-| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
@@ -9136,7 +9183,11 @@ constants in `engine/include/vayu/core/constants.hpp`: `duration` 60 s for a
 constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run and
 10 for an `iterations` run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1. A
 `capacity` run's `duration` defaults to its own 300 s search deadline instead.
-None of them is written to the stored snapshot; only what the body carried is.
+`timeout` is the exception: it defaults to the `defaultTimeout` setting (30 s
+unless changed in Settings), read when the run starts, for a single-request
+and a scenario run alike. None of them is written to the stored snapshot; only
+what the body carried is, so a replayed snapshot that carried no `timeout`
+takes the setting in force at its own start.
 
 **A rate belongs to `constant_rps`, in both directions.** Both checks sit in
 `validate_run_config` (`check_constant_rps_rate` and
@@ -9406,9 +9457,24 @@ So `totalRequests` is the requests that got an outcome,
 `successfulRequests + failedRequests`, and every request the run sent is in
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
 cancellation is exempt. When a run reaches its natural end, a request still in
-flight after its own timeout plus a 2s grace is cancelled too, and that one
+flight after its effective timeout (the run's `timeout`, else the
+`defaultTimeout` setting) plus a 2s grace is cancelled too, and that one
 never answered: it stays an error, under status code `0`, and its stored error
 record carries `error_type` `cancelled` (`errors.types` in the report).
+
+A request libcurl **re-sent on a new connection** is not an error either
+(issue #2799). When the server drops or refuses a kept-alive connection after
+reading a request and before writing a byte of the answer (an idle timeout, a
+per-connection request cap, an HTTP/2 refused stream), libcurl replays the
+request on a fresh connection on its own; no option turns that off short of
+giving up connection reuse. The replayed request is one request with one
+outcome: counted once in `totalRequests` and the status-code distribution, a
+success or an error by the status of its last attempt, and with a latency that
+covers both attempts. What the target saw is not hidden: each replay is
+counted in the report's `summary.connectionReplays` and raises the run's
+`connection_replayed` [warning](#get-runsrunidreport), so the target received
+`totalRequests + connectionReplays` requests. A non-idempotent request (a
+`POST`) may have run twice there.
 
 ### Latency population
 
@@ -9430,7 +9496,7 @@ with the percentiles and the max. It is not divided by `totalRequests`.
 Left out, because they have no duration to report:
 
 - a request a Stop cancelled (`cancelled`), and a request cancelled at a run's
-  natural end after its timeout plus the grace, which is an error with no
+  natural end after its effective timeout plus the grace, which is an error with no
   duration;
 - a request refused before the wire: one dropped at the `maxInFlight` cap
   (`droppedRequests`), an invalid URL or an unsendable header, a residual
@@ -9961,9 +10027,19 @@ run end). This is the pattern the bundled app uses.
 
 **Responses:**
 - `200` - SSE stream (active run, or finished run still within the retention window).
-- `404` - run not found or evicted past `liveRetentionMs`; the body hints
-  `Use /runs/:runId/report for the stored report`. Clients should fall back to
-  the stored report in this case.
+- `404` - no live topic for the run. The flat body is `{"error", "code",
+  "hint"}` and `code` says which of two cases it is (#2775):
+  - `live_expired` - the run is stored but its topic aged out past
+    `liveRetentionMs`; `error` is `Live metrics for this run are no longer
+    retained`.
+  - `run_not_found` - the engine has no run by that id; `error` is `Run not
+    found or expired`.
+
+  Both hint `Use /runs/:runId/report for the stored report`, and a client
+  should fall back to the stored report in either case (for `run_not_found` the
+  report then answers its own `404`). `code` is for clients to branch on; the
+  bundled app has no reader for it yet, and the MCP wording lands separately
+  (#2779).
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
 `liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,
@@ -10373,7 +10449,8 @@ cancelled request was submitted, so it is counted, but **not as an error**
 request the run sent is in exactly one of `totalRequests` and `cancelled`.
 
 A run that ends **naturally** still lets its in-flight requests finish, but only
-up to its own `timeout` plus a 2s grace; anything still outstanding then is
+up to its effective timeout (its own `timeout`, else the `defaultTimeout`
+setting) plus a 2s grace; anything still outstanding then is
 cancelled the same way - and, because nobody asked for that one to stop, it is
 an error with no response, not a cancellation. Without that bound an upstream
 that never answers would hold the run in `running` indefinitely.
@@ -10454,8 +10531,8 @@ run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive)
 `summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
 `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
 `errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
-`bytesReceived`, `httpVersionDowngraded`, and `avgRps`, `throughput` and `sendRate` over the time
-since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
+`bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput` and
+`sendRate` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
 still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
 (`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
 `timingBreakdown` and `slowRequests` are absent. In the moment between the summary write and the
@@ -10636,6 +10713,7 @@ named it.
     "bytesReceived": 7680000,
     "throughputBytesPerSec": 127152.32,
     "httpVersionDowngraded": 0,
+    "connectionReplays": 0,
     "sendingDurationSeconds": 60.0
   },
   "latency": {
@@ -10732,7 +10810,8 @@ named it.
 `totalDurationSeconds`, the same figure) is the wall time from load start - the
 instant of the first submission - to the last request settling, so it includes
 the end-of-run drain, in which requests still in flight at the deadline are let
-answer (up to their `timeout` plus a grace). `avgRps` and `throughput` are
+answer (up to the run's effective timeout, its `timeout` or else the
+`defaultTimeout` setting, plus a grace). `avgRps` and `throughput` are
 completed requests over that wall time: they describe what the target served,
 and a run whose requests outlive its deadline reads below its target there by
 design. `sendRate` and `rateControl` describe what the generator sent, and
@@ -10745,9 +10824,13 @@ submitting, before the drain. `rateControl.achievement` is
 the same name. A shortfall there is not only a slow generator: a request
 dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, and a Stop
 ends the sending early, so a stopped run's achievement is the share of its plan
-it reached. The app's live Rate fidelity card instead divides by what the
-target owed up to now (`targetRps` times the time spent sending, capped at the
-duration), so on a Stop it reads the pace and the stored report reads the plan.
+it reached. The app's Rate fidelity card instead divides by what the target
+owed up to now (`targetRps` times the time spent sending, capped at the
+duration), so on a Stop it reads the pace. It does so live, and for a stopped
+run in History from `requestsSent`, `sendingDurationSeconds` and the configured
+duration (issue #2805), while the stored `rateControl.achievement` stays the
+plan share and the card states it beside the figure ("stopped at 50% of the
+planned 60s"). A stopped report without the counts keeps its stored value.
 
 An `iterations` run, single-request or scenario, is the one exception: its
 loop returns on its last submission with the batch before it still in flight,
@@ -10858,7 +10941,14 @@ is of another kind: the run did everything, but opened more connections per
 host than `eventLoopMaxPerHost` says, because each worker's share of the
 virtual users (`ceil(concurrency / workers)`) was larger; it carries
 `configured` (the setting) and `effective` (the per-host limit each worker ran
-with). Absent, not an empty array, for a run
+with). `connection_replayed` ([#2799](https://github.com/athrvk/vayu/issues/2799))
+is another: libcurl re-sent `count` requests on a new connection after the
+server dropped or refused a reused one before answering, so the target
+received that many more requests than the run counted, each of those
+requests' latency covers both attempts, and a non-idempotent one may have run
+twice; `count` equals `summary.connectionReplays`, and it is raised only when
+that is above 0 (see [What counts as an error](#what-counts-as-an-error)).
+Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
 load shape alike (issue #1540): a single-request run with no data set and a
@@ -11026,6 +11116,21 @@ never written, neither of which can produce a figure. The key is absent only
 from an engine older than 0.15.0. That is deliberately a weaker guarantee than
 the per-response `httpVersionDowngraded`, which is exact for the exchange it
 describes.
+
+`summary.connectionReplays` is the count of requests libcurl re-sent on a new
+connection after the server dropped or refused a reused one before a byte of
+the answer (issue #2799). The extra sends are in no other count, not
+`totalRequests`, the error counts or `noResponseRequests`: each replayed
+request is counted once, by the outcome of its last attempt, so the target
+received `totalRequests +
+connectionReplays` requests (see
+[What counts as an error](#what-counts-as-an-error)). A non-zero value also
+raises the `connection_replayed` warning. **Absent and `0` are different
+answers**: `0` is a run whose engine counted and saw none (the key is always
+stored, zero included), and absent is a run stored before the count existed,
+or one reported from its sampled results because its summary was malformed or
+never written. A partial report of a running load run reads it from the live
+counter.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
 error, trace and tested-response sets are complete, and a non-zero count means

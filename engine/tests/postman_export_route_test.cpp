@@ -776,6 +776,36 @@ TEST_F (PostmanExportRouteTest, WritesNothing) {
     EXPECT_EQ (after->updated_at, before->updated_at);
 }
 
+// A collection's spec-file and data-file bindings are paths on one machine
+// (#2765), and an export is a document for elsewhere: neither the root's nor a
+// folder's reaches it, with secrets or without. Mutation check: write the
+// root's `spec_file` into `folder.description` in `postman_export.cpp` and the
+// path appears.
+TEST_F (PostmanExportRouteTest, NamesNoBoundFile) {
+    const json bindings{ { "specFile",
+                         { { "path", "/home/me/private-dir/pets-local.yaml" },
+                         { "fileName", "pets-local.yaml" } } },
+        { "dataFile",
+        { { "path", "/home/me/private-dir/rows-local.csv" }, { "fileName", "rows-local.csv" } } } };
+    const std::string id = import_text (postman_collection (
+    R"({"name":"Folder","item":[{"name":"Get","request":{"method":"GET","url":"https://x.com"}}]})"));
+    ASSERT_FALSE (id.empty ());
+    for (const auto& c : db_->get_collections ()) {
+        auto [status, body] =
+        vayu::http::routes::update_collection_response (*db_, c.id, bindings);
+        ASSERT_EQ (status, 200) << body.dump ();
+    }
+    ASSERT_GT (db_->get_collections ().size (), 1u)
+    << "the folder is a collection too";
+
+    for (const bool secrets : { true, false }) {
+        const std::string text = export_ok (id, secrets).dump ();
+        EXPECT_EQ (text.find ("private-dir"), std::string::npos) << text;
+        EXPECT_EQ (text.find ("pets-local"), std::string::npos) << text;
+        EXPECT_EQ (text.find ("rows-local"), std::string::npos) << text;
+    }
+}
+
 // A stored header row may carry members beyond `key`, `value` and `enabled`,
 // and the export reads the column back in its stored key order (#2497).
 // Mutation check: parse with `nlohmann::ordered_json::parse` in `column`

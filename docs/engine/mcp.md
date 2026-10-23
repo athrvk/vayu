@@ -200,7 +200,7 @@ the clients in the ✅ row, so no client waits for a notice that never comes. Se
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
-holds that record. See [Data files](#data-files). `get_app_focus` is the same
+publishes it to the HTTP server. See [Data files](#data-files). `get_app_focus` is the same
 shape: the open tab and environment are renderer state, so it answers an error
 saying the window is not connected on stdio.
 
@@ -1522,8 +1522,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
 - **Headers as lines** (issue #2466) - `headers` on `run_request`,
   `start_load_run` and `get_graphql_schema` is an array of `{name, value}`
   lines or a string map. Each line is sent as its own header line, in the order
-  given and in the spelling written, so `Link`, `Forwarded`, two `Cookie` lines
-  or `X-Dup` beside `x-dup` are repeated rather than collapsed; a map holds one
+  given and in the spelling written, so `Link`, `Forwarded` or `X-Dup` beside
+  `x-dup` are repeated rather than collapsed (`Cookie` rows are the exception:
+  they go out as one `; `-joined line with the jar's cookies, issue #2788); a
+  map holds one
   value per name and cannot repeat one. Both go to `POST /compose` as given, which
   answers lines either way, and a line that is not an object with a string
   `name` is refused by its position. The same payload that composes is the one
@@ -1537,7 +1539,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   [default headers](api-reference.md#default-request-headers) a send adds - a
   default `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id
   where one is switched on - and
-  the `Cookie` line the jar matched for the environment. A header the call
+  the `Cookie` line the jar matched for the environment (merged with any
+  `Cookie` the call typed). A header the call
   wrote itself always wins over the default of that name, and
   `disabledDefaultHeaders` on the payload refuses one outright.
   `run_request` and `start_load_run` take that list as an argument
@@ -1961,8 +1964,9 @@ A collection's declared data file reaches MCP in two parts (issue #1742).
 `dataSchema` is the contract - column names, the file's name, when it was
 declared - and is the same on every machine, so it rides the engine row.
 `dataFile: { path, fileName, hash }` is where that file is **on this machine**,
-and comes from the app's renderer (`stores/data-file-store.ts`), which publishes
-its whole map to the main process over `dataFile:locations`
+and comes from the app's renderer (`stores/data-file-store.ts`, its mirror of
+the collections list's bindings), which publishes its whole map to the main
+process over `dataFile:locations`
 (`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
 keeping only an absolute path with an extension `dataFile:read` would open).
 `hash` (issue #2051) is the SHA-256 of the file's bytes, as 64 lowercase hex.
@@ -1988,8 +1992,11 @@ It is absent otherwise, which means every cell is a string. An agent building
 `data` rows from the file reads it the same way, so its rows match the ones the
 app would send, and says so with `dataFileCastNumbers: true` on the run.
 
-A path is true of one filesystem only, which is why it never reaches the engine
-or an export. It may reach MCP because the Electron-hosted server listens on
+A path is true of one filesystem only, which is why it never reaches an export.
+The engine stores each collection's `specFile` and `dataFile` binding on its row
+(issue #2765) so a workspace backup carries them, but MCP drops both from every
+collection row it answers (`move_item`'s renumbered rows included) and names
+`dataFile` from the app's record alone, as above. A path may reach MCP because the Electron-hosted server listens on
 loopback (`MCP_HOST`): every client that can read the answer runs on the machine
 the path names, and can open the file with its own access, the way a person
 would. The stdio CLI runs without the app, so it has no record and never names
@@ -2018,6 +2025,35 @@ bytes and cannot tell the readings apart. The run tools take rows,
 never a path: `dataFileName` is `dataFile.fileName`, and a value holding a `/`
 or `\` is refused by the tool schema (pointing at `dataFile.fileName`) and by
 the engine alike.
+
+### Error results
+
+A tool that fails answers an MCP error result (`isError: true`) whose text
+says what went wrong and what to do, and whose `structuredContent` is the same
+failure for a machine (#2776):
+
+```json
+{ "error": { "class": "policy", "retryable": false, "advice": "Host \"x.example.com\" is not on the MCP allowlist. ..." } }
+```
+
+`advice` is the result's text. A tool's `outputSchema` describes its success,
+and the SDK holds only a success to it, so the error shape is the same on every
+tool. That includes the errors the SDK answers before any tool runs: an argument
+its schema check refuses (`Input validation error: ...`) is classed `input`,
+and anything else it catches (an answer its output check refuses) `transient`,
+by the wrapper `server.ts` puts in front of its `tools/call` handler.
+
+`class` is one of five, set where the error is built (`errorResult` in
+`app/electron/mcp/tools/kit.ts`, which requires one) and mapped in
+`app/electron/mcp/tools/failure.ts`:
+
+| `class` | `retryable` | What it means | Raised by |
+|---------|-------------|---------------|-----------|
+| `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
+| `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
+| `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry |
+| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says when to check run history first | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
+| `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
 
 ## Resources
 
@@ -2679,7 +2715,7 @@ And two run renderer → main for MCP's sake:
 
 | Channel              | Purpose                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
-| `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
+| `dataFile:locations` | The whole map of bound data-file paths, on launch and on every change (see below). |
 | `app:focus`          | The open tab (type, entity id, label) and active environment (id, name), whole, on launch and on every change; `get_app_focus` reads the copy `electron/app-focus.ts` rebuilds field by field. |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the

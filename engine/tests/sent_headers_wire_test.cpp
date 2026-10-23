@@ -37,6 +37,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -574,7 +575,7 @@ TEST_F (SentHeadersWireTest, ATextBodyIsTextPlainOnEveryVerbThatCarriesOne) {
     }
 }
 
-// Mutation check: drop the removal line in `build_request_header_list` and the
+// Mutation check: drop the removal line in `append_removal_lines` and the
 // server sees libcurl's form type on a request with no body to describe.
 TEST_F (SentHeadersWireTest, ABodylessPostSendsNoContentType) {
     Request request = get_request (server_->url ());
@@ -694,7 +695,7 @@ ClientConfig expect_client_config (bool allow) {
     return config;
 }
 
-// Mutation check: drop the `Expect:` line in `build_request_header_list` and
+// Mutation check: drop the `Expect:` line in `append_removal_lines` and
 // the 2 MiB case below carries libcurl's own.
 TEST_F (SentHeadersWireTest, ALargeBodyCarriesNoExpectByDefault) {
     auto result =
@@ -781,6 +782,127 @@ TEST_F (SentHeadersWireTest, TheStreamConsumerRemovesExpectByDefault) {
 
     EXPECT_FALSE (server_->has_header ("Expect")) << server_->header ("Expect");
     EXPECT_FALSE (response.request_headers.contains ("Expect"));
+}
+
+// ---------------------------------------------------------------------------
+// One Cookie line (issue #2788). RFC 6265 section 5.4 allows a request one
+// `Cookie` header, and libcurl writes the jar's matches on a line of its own,
+// so the typed rows ride `CURLOPT_COOKIE` and join that line. The record keeps
+// the typed rows as typed; the merged line is the wire's.
+// ---------------------------------------------------------------------------
+
+/// A cookie for every path on the echo server's host, in libcurl's Netscape
+/// format, the representation the jar stores and a VU's session seeds.
+std::string jar_cookie_line (const std::string& name, const std::string& value) {
+    return "127.0.0.1\tFALSE\t/\tFALSE\t4102444800\t" + name + "\t" + value;
+}
+
+Request typed_cookie_request (const std::string& url) {
+    Request request = get_request (url);
+    request.headers.add ("Cookie", "manual=1");
+    return request;
+}
+
+// Mutation check: append the Cookie rows to the list in
+// `build_request_header_list` again and two lines arrive, `hop=1` and
+// `manual=1`, because libcurl then ignores `CURLOPT_COOKIE`.
+TEST_F (SentHeadersWireTest, AJarCookieAndATypedCookieArriveAsOneLine) {
+    CookieJar jar;
+    jar.store (std::string (NO_ENVIRONMENT_SCOPE), { jar_cookie_line ("hop", "1") });
+    ClientConfig config;
+    config.cookie_jar = &jar;
+    Client client (config);
+
+    auto result = client.send (typed_cookie_request (server_->url ()));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "Cookie" }),
+    (Lines{ { "Cookie", "hop=1; manual=1" } }));
+    EXPECT_EQ (lines_named (lines_of (result.value ().request_headers), { "Cookie" }),
+    (Lines{ { "Cookie", "manual=1" } }));
+}
+
+// No jar on the transfer, which is what `disableCookies` hands the client
+// (`execute_exchange`): the typed part alone, still one line.
+TEST_F (SentHeadersWireTest, ATypedCookieWithNoJarArrivesAlone) {
+    auto result = client_->send (typed_cookie_request (server_->url ()));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "Cookie" }),
+    (Lines{ { "Cookie", "manual=1" } }));
+}
+
+// Each row is trimmed of its edge whitespace before the join, so none lands
+// between two cookie-pairs; a blank row is dropped as any blank header is.
+TEST_F (SentHeadersWireTest, TwoTypedCookieRowsArriveAsOneLineInRowOrder) {
+    Request request = get_request (server_->url ());
+    request.headers.add ("Cookie", "a=1 ");
+    request.headers.add ("cookie", "  ");
+    request.headers.add ("cookie", "\tb=2");
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "Cookie" }),
+    (Lines{ { "Cookie", "a=1; b=2" } }));
+    EXPECT_EQ (lines_named (lines_of (result.value ().request_headers), { "Cookie" }),
+    (Lines{ { "Cookie", "a=1 " }, { "cookie", "\tb=2" } }));
+}
+
+// libcurl keeps a typed cookie on the host it was typed for, as it did when the
+// row rode the header list. Another port is another host to it. No jar here:
+// jar cookies key on the host, not the port, so one would follow the hop.
+// Mutation check: set `CURLOPT_UNRESTRICTED_AUTH` in
+// `apply_default_header_options` and `manual=1` reaches the second server.
+TEST_F (SentHeadersWireTest, ARedirectToAnotherHostDropsTheTypedCookie) {
+    EchoServer other;
+    Request request = typed_cookie_request (server_->redirect_to (other.url ()));
+    request.follow_redirects = true;
+
+    ASSERT_TRUE (client_->send (request).is_ok ());
+
+    ASSERT_EQ (other.requests_seen (), 1);
+    EXPECT_FALSE (other.has_header ("Cookie")) << other.header ("Cookie");
+}
+
+// The option is written on every transfer, cleared to null when nothing is
+// typed. Mutation check: clear it to "" in `apply_default_header_options` and
+// the second send carries a bare `Cookie: ` line.
+TEST_F (SentHeadersWireTest, NoTypedCookieSendsNoCookieLineOnAReusedHandle) {
+    ASSERT_TRUE (client_->send (typed_cookie_request (server_->url ())).is_ok ());
+    ASSERT_TRUE (client_->send (get_request (server_->url ())).is_ok ());
+
+    EXPECT_FALSE (server_->has_header ("Cookie")) << server_->header ("Cookie");
+}
+
+TEST_F (SentHeadersWireTest, TheLoadDriverMergesAVirtualUsersSessionAndATypedCookie) {
+    Request request       = typed_cookie_request (server_->url ());
+    request.track_cookies = true;
+    request.cookie_lines  = { jar_cookie_line ("hop", "1") };
+
+    EventLoop loop;
+    loop.start ();
+    auto result = loop.submit_async (request).future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (lines_named (server_->header_lines (), { "Cookie" }),
+    (Lines{ { "Cookie", "hop=1; manual=1" } }));
+}
+
+TEST_F (SentHeadersWireTest, TheStreamConsumerSendsTypedCookieRowsAsOneLine) {
+    SseStreamRequest stream_request;
+    stream_request.run_id  = "run-typed-cookie";
+    stream_request.request = typed_cookie_request (server_->url ());
+    stream_request.request.headers.add ("Cookie", "second=2");
+    SseStreamContext context (stream_request.run_id, stream_request.limits);
+
+    const vayu::Response response = consume_sse_stream (stream_request, context);
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "Cookie" }),
+    (Lines{ { "Cookie", "manual=1; second=2" } }));
+    EXPECT_EQ (lines_named (lines_of (response.request_headers), { "Cookie" }),
+    (Lines{ { "Cookie", "manual=1" }, { "Cookie", "second=2" } }));
 }
 
 } // namespace

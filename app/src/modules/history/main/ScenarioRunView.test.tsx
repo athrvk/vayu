@@ -25,6 +25,7 @@ import ScenarioRunView from "./ScenarioRunView";
 import { useDataFileStore, useScenarioRunStore, useToastStore } from "@/stores";
 import { formatNumber } from "@/lib/format-number";
 import type { Run, RunReport, StepOutcome } from "@/types";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 
 const reportQuery = {
 	data: undefined as RunReport | undefined,
@@ -530,7 +531,7 @@ describe("the data file the run was driven by", () => {
 	});
 
 	it("says the file changed when the collection's remembered hash differs", () => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/users.csv",
 			fileName: "users.csv",
 			hash: HASH_B,
@@ -545,7 +546,7 @@ describe("the data file the run was driven by", () => {
 	});
 
 	it("adds nothing when the remembered hash matches the run's", () => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/users.csv",
 			fileName: "users.csv",
 			hash: HASH_A,
@@ -561,7 +562,7 @@ describe("the data file the run was driven by", () => {
 
 	// Mutation check: classify by hash alone again and this fails (#2636).
 	it("says the number reading changed when the same file is now bound the other way", () => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/plans.csv",
 			fileName: "plans.csv",
 			hash: HASH_A,
@@ -580,7 +581,7 @@ describe("the data file the run was driven by", () => {
 	});
 
 	it("says the file is no longer at its path when the main process reports it gone", async () => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/users.csv",
 			fileName: "users.csv",
 			hash: HASH_A,
@@ -601,7 +602,7 @@ describe("the data file the run was driven by", () => {
 	});
 
 	it("keeps the changed note for a file that is there and differs, and never adds the missing one", async () => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/users.csv",
 			fileName: "users.csv",
 			hash: HASH_A,
@@ -622,7 +623,7 @@ describe("the data file the run was driven by", () => {
 	});
 
 	it("adds neither note for a file that is there and matches", async () => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/users.csv",
 			fileName: "users.csv",
 			hash: HASH_A,

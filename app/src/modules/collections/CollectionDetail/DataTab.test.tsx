@@ -24,9 +24,9 @@
  *  - **Clear sends `null`, not `{}`.** The engine reads absent as "keep"; a
  *    cleared contract is only expressible as an explicit null that survives to
  *    the wire, and `{}` would read as "keep" too.
- *  - **The path is remembered, and the rows are not.** The store holds where the
- *    file is so the Run dialog can pre-fill; nothing anywhere holds what was in
- *    it.
+ *  - **The path is bound, and the rows are not.** The collection row holds
+ *    where the file is (`dataFile`, written with the columns, #2765) so the Run
+ *    dialog can pre-fill; nothing anywhere holds what was in it.
  *
  * And then what the remembered path is *for*, here (issue #727): the tab whose
  * job is the comparison reads the file back itself, rather than rendering
@@ -37,7 +37,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { useDataFileStore } from "@/stores";
-import type { Collection } from "@/types";
+import type { Collection, DataFileLocation } from "@/types";
 
 const mutation = {
 	mutate: vi.fn(),
@@ -46,8 +46,17 @@ const mutation = {
 	error: null as Error | null,
 };
 
+/** How the bound file is read: a write of its own, built when it is sent. */
+const readingMutation = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
+	useDataFileReadingMutation: () => readingMutation,
 }));
 
 /**
@@ -79,6 +88,9 @@ vi.mock("@/queries", () => ({
 
 const { default: DataTab } = await import("./DataTab");
 
+/** The file the collection is bound to, as the row carries it; none by default. */
+let boundFile: DataFileLocation | undefined;
+
 const collection = (dataSchema?: Collection["dataSchema"]): Collection =>
 	({
 		id: "col_1",
@@ -89,6 +101,7 @@ const collection = (dataSchema?: Collection["dataSchema"]): Collection =>
 		auth: { mode: "none" },
 		elements: [],
 		dataSchema,
+		...(boundFile ? { dataFile: boundFile } : {}),
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
 	}) as Collection;
@@ -110,15 +123,17 @@ function succeed() {
 beforeEach(() => {
 	configEntries.length = 0;
 	mutation.mutate.mockClear();
+	readingMutation.mutate.mockClear();
 	mutation.isPending = false;
 	mutation.isError = false;
 	mutation.error = null;
+	boundFile = undefined;
 	useDataFileStore.setState({ locations: {} });
 	vi.stubGlobal("electronAPI", { getFilePath: () => "/home/u/users.csv" });
 });
 
 describe("declaring a contract", () => {
-	it("declares the picked file's columns with no button press, and remembers where it is", async () => {
+	it("declares the picked file's columns with no button press, and binds where it is", async () => {
 		render(<DataTab collection={collection()} />);
 		await pickFile("users.csv", "id,email\n1,a@b.c");
 
@@ -128,12 +143,10 @@ describe("declaring a contract", () => {
 		expect(payload.dataSchema.fileName).toBe("users.csv");
 		expect(typeof payload.dataSchema.declaredAt).toBe("number");
 
-		// Remembered only once the write lands: a path pointing at a file whose
+		// In the same write as the columns: a path pointing at a file whose
 		// columns were never declared would pre-fill a run with a file nothing
 		// can be checked against.
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
-		succeed();
-		expect(useDataFileStore.getState().locations.col_1).toEqual({
+		expect(payload.dataFile).toEqual({
 			path: "/home/u/users.csv",
 			fileName: "users.csv",
 			// SHA-256 of the picked bytes (issue #2051), so MCP can name the
@@ -149,11 +162,9 @@ describe("declaring a contract", () => {
 		await pickFile("users.csv", "id,email\n1,secret@example.test");
 		succeed();
 
-		// Neither the payload nor the store may carry a cell of the file.
+		// The payload is everything the row stores, binding included: no cell of
+		// the file may be in it.
 		expect(JSON.stringify(mutation.mutate.mock.calls[0][0])).not.toContain(
-			"secret@example.test"
-		);
-		expect(JSON.stringify(useDataFileStore.getState().locations)).not.toContain(
 			"secret@example.test"
 		);
 	});
@@ -170,20 +181,17 @@ describe("declaring a contract", () => {
 		succeed();
 
 		expect(mutation.mutate.mock.calls[0][0].dataSchema.columns).toEqual(["id"]);
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(mutation.mutate.mock.calls[0][0].dataFile).toBeNull();
 	});
 
-	it("forgets a stale remembered path when the picked file carries none", async () => {
-		useDataFileStore.setState({
-			locations: { col_1: { path: "/home/u/old.csv", fileName: "old.csv" } },
-		});
+	it("forgets a stale bound path when the picked file carries none", async () => {
+		boundFile = { path: "/home/u/old.csv", fileName: "old.csv" };
 		// No `readDataFile`: the file is not re-read, so the picker offers Choose file.
 		vi.stubGlobal("electronAPI", { getFilePath: () => "" });
 		render(<DataTab collection={collection({ columns: ["id"], fileName: "old.csv" })} />);
 		await pickFile("new.csv", "plan\nfree");
-		succeed();
 
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(mutation.mutate.mock.calls[0][0].dataFile).toBeNull();
 	});
 
 	it("keeps the preview and a retry when the declare fails", async () => {
@@ -202,11 +210,9 @@ describe("declaring a contract", () => {
 });
 
 describe("removing the file", () => {
-	/** A contract from users.csv, its file remembered and re-read into the picker. */
+	/** A contract from users.csv, its file bound and re-read into the picker. */
 	function renderDeclared() {
-		useDataFileStore.setState({
-			locations: { col_1: { path: "/home/u/users.csv", fileName: "users.csv" } },
-		});
+		boundFile = { path: "/home/u/users.csv", fileName: "users.csv" };
 		vi.stubGlobal("electronAPI", {
 			readDataFile: vi.fn(() =>
 				Promise.resolve({
@@ -222,13 +228,15 @@ describe("removing the file", () => {
 		return view;
 	}
 
-	it("clears the contract and forgets the remembered path", async () => {
+	it("clears the contract and the bound file in one write", async () => {
 		renderDeclared();
 		fireEvent.click(await screen.findByRole("button", { name: /remove/i }));
 
-		expect(mutation.mutate.mock.calls[0][0]).toEqual({ id: "col_1", dataSchema: null });
-		succeed();
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(mutation.mutate.mock.calls[0][0]).toEqual({
+			id: "col_1",
+			dataSchema: null,
+			dataFile: null,
+		});
 	});
 
 	it("then declares the next file picked, with the old columns gone", async () => {
@@ -236,14 +244,14 @@ describe("removing the file", () => {
 		fireEvent.click(await screen.findByRole("button", { name: /remove/i }));
 		succeed();
 		// The mutation landed: the collection comes back with no contract.
+		boundFile = undefined;
 		view.rerender(<DataTab collection={collection({})} />);
 
 		await pickFile("plans.csv", "plan,price\nfree,0");
 
 		const [payload] = mutation.mutate.mock.calls[mutation.mutate.mock.calls.length - 1];
 		expect(payload.dataSchema.columns).toEqual(["plan", "price"]);
-		succeed();
-		expect(useDataFileStore.getState().locations.col_1).toEqual({
+		expect(payload.dataFile).toEqual({
 			path: "/home/u/plans.csv",
 			fileName: "plans.csv",
 			hash: "b7359bc0b274253135286ab911139026c671d4a11f8df272d20bd5342fa265c0",
@@ -294,18 +302,18 @@ describe("an existing contract", () => {
 		expect(screen.queryByRole("button", { name: /declare columns|re-declare/i })).toBeNull();
 	});
 
-	it("clears with an explicit null, and forgets the remembered file", () => {
-		useDataFileStore.setState({
-			locations: { col_1: { path: "/home/u/users.csv", fileName: "users.csv" } },
-		});
+	it("clears with an explicit null, and forgets the bound file", () => {
+		boundFile = { path: "/home/u/users.csv", fileName: "users.csv" };
 		render(<DataTab collection={collection({ columns: ["id"] })} />);
 
 		fireEvent.click(screen.getByRole("button", { name: /clear/i }));
 
 		// `null`, not `{}` and not an omission: absent means "keep" to the engine.
-		expect(mutation.mutate.mock.calls[0][0]).toEqual({ id: "col_1", dataSchema: null });
-		succeed();
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(mutation.mutate.mock.calls[0][0]).toEqual({
+			id: "col_1",
+			dataSchema: null,
+			dataFile: null,
+		});
 	});
 
 	it("offers no Clear when there is nothing declared to clear", () => {
@@ -351,7 +359,7 @@ describe("the remembered file", () => {
 	});
 
 	function remember(path = "/home/u/users.csv", fileName = "users.csv") {
-		useDataFileStore.setState({ locations: { col_1: { path, fileName } } });
+		boundFile = { path, fileName };
 	}
 
 	it("compares the remembered file with zero clicks", async () => {
@@ -367,6 +375,8 @@ describe("the remembered file", () => {
 		);
 		expect(screen.getByText(/does not declare: nickname/i)).toBeTruthy();
 		expect(read).toHaveBeenCalledWith("/home/u/users.csv");
+		// Where the binding points is on screen, and not struck: the file read.
+		expect(screen.getByText("/home/u/users.csv").className).not.toContain("line-through");
 		// Mutation check for the auto-read: without it this callout is what shows,
 		// which is the reported incoherence.
 		expect(screen.queryByText(/Nothing to compare yet/i)).toBeNull();
@@ -375,11 +385,7 @@ describe("the remembered file", () => {
 	});
 
 	it("reads the remembered file the way its binding says (#2540)", async () => {
-		useDataFileStore.setState({
-			locations: {
-				col_1: { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true },
-			},
-		});
+		boundFile = { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true };
 		const read = bridge(() => csv("id\n007", "users.csv"));
 		vi.stubGlobal("electronAPI", { readDataFile: read, getFilePath: () => "" });
 
@@ -393,8 +399,11 @@ describe("the remembered file", () => {
 		).toBe(true);
 	});
 
-	it("remembers a toggle on the binding without re-declaring (#2540)", async () => {
+	it("writes a toggle to the binding without re-declaring (#2540)", async () => {
 		remember();
+		// The writer finds the binding by id, through the store that mirrors the
+		// collections list in the app.
+		useDataFileStore.setState({ locations: { col_1: boundFile! } });
 		const read = bridge(() => csv("id\n007", "users.csv"));
 		vi.stubGlobal("electronAPI", { readDataFile: read, getFilePath: () => "" });
 
@@ -402,11 +411,10 @@ describe("the remembered file", () => {
 		fireEvent.click(await screen.findByRole("checkbox", { name: /Read numbers as numbers/ }));
 
 		expect(screen.getByRole("cell", { name: "7" })).toBeTruthy();
-		expect(useDataFileStore.getState().locations.col_1).toEqual({
-			path: "/home/u/users.csv",
-			fileName: "users.csv",
-			castNumbers: true,
-		});
+		// The reading alone: the contract is not re-declared.
+		expect(readingMutation.mutate.mock.calls).toEqual([
+			[{ id: "col_1", path: "/home/u/users.csv", castNumbers: true }],
+		]);
 		expect(mutation.mutate).not.toHaveBeenCalled();
 	});
 
@@ -446,10 +454,43 @@ describe("the remembered file", () => {
 		// name is struck through and the picker is still usable.
 		const name = screen.getByText("gone.csv");
 		expect(name.className).toContain("line-through");
+		// And the path the binding names stays on screen, struck too: after a
+		// restore on another machine it is the one thing that says which file
+		// to find (#2765). Mutation check: drop the "Bound to" line and this
+		// fails.
+		expect(screen.getByText("/home/u/gone.csv").className).toContain("line-through");
 		expect(screen.queryByText(/Couldn't read the data file/i)).toBeNull();
 		expect(screen.getByText(/Nothing to compare yet/i)).toBeTruthy();
 		// No Remove (nothing is selected), so Clear is how this contract is reset.
 		expect(screen.getByRole("button", { name: /clear/i })).toBeTruthy();
+	});
+
+	/*
+	 * A failed read describes the path it read. Once a pick has been declared
+	 * the row binds another file, and striking that one through would call a
+	 * file unreadable that nothing has tried. Mutation check: strike on the
+	 * failure alone, not on the failure of the bound path, and this fails.
+	 */
+	it("stops striking once the binding names another file", async () => {
+		remember("/home/u/gone.csv", "gone.csv");
+		vi.stubGlobal("electronAPI", {
+			readDataFile: () => Promise.reject(new Error("ENOENT: no such file")),
+			getFilePath: () => "",
+		});
+		const view = render(
+			<DataTab collection={collection({ columns: ["id"], fileName: "gone.csv" })} />
+		);
+		await waitFor(() => expect(screen.getByText(/ENOENT/)).toBeTruthy());
+
+		// The declare of a newly picked file landed: the row binds plans.csv.
+		remember("/home/u/plans.csv", "plans.csv");
+		view.rerender(
+			<DataTab collection={collection({ columns: ["plan"], fileName: "plans.csv" })} />
+		);
+
+		expect(screen.getByText("/home/u/plans.csv").className).not.toContain("line-through");
+		expect(screen.getByText("plans.csv").className).not.toContain("line-through");
+		expect(screen.queryByText(/ENOENT/)).toBeNull();
 	});
 
 	/*

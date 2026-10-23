@@ -8,172 +8,30 @@
 /**
  * Data File Store
  *
- * Where a collection's data file lives on **this machine** - one
- * `{path, fileName, hash?, castNumbers?}` per collection id, so the Run dialog
- * can re-read the file the user declared their contract from, the way they
- * chose to read it, instead of asking for it every time (issue #599).
+ * Every collection's data file, keyed by collection id (issue #599) - a
+ * **mirror** of `Collection.dataFile` across the collections list, not a
+ * record of its own. The engine row is the record (#2765), so a backup carries
+ * the binding and a trashed collection keeps it; `useFileBindingMirror` copies
+ * the list into this map in the same tick the list's cache is written, and
+ * nothing else writes it. A binding is changed through the collection update
+ * (`dataFile` on `PUT /collections/:id`): `useDataContractWriter` for a pick, a
+ * Remove or a change of reading, `recordDataFileHash` for a re-read.
  *
- * Two things this store is deliberately not:
- *
- * - **It is not the contract.** The declared columns are collection state and
- *   ride the engine row (`Collection.dataSchema`), because they are the same on
- *   every machine and travel through import. A *path* is true of one filesystem
- *   only, so it stays here and never reaches the engine or an export. The one
- *   reader outside the renderer is the app's own MCP server, which listens on
- *   loopback and so only answers clients on this same machine
- *   (`useDataFileLocationMirror` publishes it, issue #1742).
- * - **It never holds rows.** A data file's rows are user data of unknown
- *   sensitivity and are persisted nowhere in Vayu - not here, not engine-side,
- *   not in a run snapshot (which records the row count, the file's name and its
- *   content hash). Only the path, the file's name, the hash of its bytes and how
- *   its values are read are stored, and `data-file-store.test.ts` asserts the
- *   persisted payload against that rule rather than trusting it.
+ * Kept as a store for the readers that hold an id rather than a row - the Run
+ * dialogs' pre-fill, Send-with-row, a run's file status - and for
+ * `useDataFileLocationMirror`, which publishes it to the main process for MCP
+ * (issue #1742). It never holds rows: a data file's rows are user data of
+ * unknown sensitivity and are persisted nowhere in Vayu.
  */
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { STORAGE_KEYS } from "@/constants/storage-keys";
-import { DATA_FILE_HASH_PATTERN } from "@/services/data-files/hash";
+import type { DataFileLocation } from "@/types";
 
-/** Where a collection's data file was last picked from, on this machine. */
-export interface DataFileLocation {
-	/** Absolute path, obtained from the preload `getFilePath` bridge at pick time. */
-	path: string;
-	/** The file's own name, for a message about a file that has since moved. */
-	fileName: string;
-	/**
-	 * SHA-256 of the file's bytes the last time the app read it (issue #2051),
-	 * the digest a run records as `dataFileHash`. Absent on a location
-	 * remembered before hashes were recorded, until the next read.
-	 */
-	hash?: string;
-	/**
-	 * Read this CSV/TSV file's unquoted numbers as numbers (#2540), the
-	 * picker's "Read numbers as numbers". A fact about how *this* file is read,
-	 * so a pick of a file starts it off; absent means off. Every re-read of the
-	 * path parses with it, so the rows a run sends match the preview.
-	 */
-	castNumbers?: boolean;
-}
+export type { DataFileLocation } from "@/types";
 
 interface DataFileState {
-	/** Keyed by collection id; a collection with no entry has no remembered file. */
-	locations: Record<string, DataFileLocation>;
-
-	setDataFile: (collectionId: string, location: DataFileLocation) => void;
-	clearDataFile: (collectionId: string) => void;
-	/**
-	 * A read of `path` answered `hash`: every location at that path takes it.
-	 * Keyed by path rather than collection because a read is of a path, and a
-	 * file whose bytes changed changed for every collection remembering it.
-	 */
-	recordDataFileHash: (path: string, hash: string) => void;
-	/**
-	 * Remember whether `collectionId`'s file is read with numbers cast. Only
-	 * while the binding still names `path`: a toggle on a file the binding no
-	 * longer holds (its declare failed, or it had no path) must not re-describe
-	 * the file that is remembered.
-	 */
-	setDataFileCastNumbers: (collectionId: string, path: string, castNumbers: boolean) => void;
-}
-
-interface PersistedDataFiles {
+	/** Keyed by collection id; a collection with no entry has no data file. */
 	locations: Record<string, DataFileLocation>;
 }
 
-/**
- * Normalize a persisted payload into locations this app is willing to open.
- *
- * Rebuilt rather than trusted: an entry that is not a `{path, fileName}` pair of
- * strings would reach the read IPC *as a path*, and a half-written or
- * hand-edited payload must not be what names a file to open. Dropping a bad
- * entry is right where repairing it is not - there is nothing to repair a path
- * *to*, and the picker is one click away.
- *
- * Wired as **both** `migrate` and `merge` below, deliberately. `migrate` runs
- * only when the stamped version differs (without it zustand throws the whole
- * payload away, so the next bump needs it); `merge` runs on every rehydrate,
- * which is what makes the normalization apply to the same-version payload that
- * is the overwhelmingly common case.
- */
-function normalizeDataFiles(persisted: unknown): PersistedDataFiles {
-	const stored = (persisted ?? {}) as Partial<PersistedDataFiles>;
-	const locations: Record<string, DataFileLocation> = {};
-	if (stored.locations && typeof stored.locations === "object") {
-		for (const [collectionId, value] of Object.entries(stored.locations)) {
-			const entry = value as Partial<DataFileLocation> | null;
-			if (typeof entry?.path !== "string" || typeof entry?.fileName !== "string") continue;
-			// A malformed hash drops the hash, not the location: the next read
-			// of the path records a good one.
-			const hash =
-				typeof entry.hash === "string" && DATA_FILE_HASH_PATTERN.test(entry.hash)
-					? { hash: entry.hash }
-					: {};
-			// Anything but a boolean is dropped, which reads as off: the file's
-			// own text, the safe reading.
-			const castNumbers =
-				typeof entry.castNumbers === "boolean" ? { castNumbers: entry.castNumbers } : {};
-			locations[collectionId] = {
-				path: entry.path,
-				fileName: entry.fileName,
-				...hash,
-				...castNumbers,
-			};
-		}
-	}
-	return { locations };
-}
-
-export const useDataFileStore = create<DataFileState>()(
-	persist(
-		(set) => ({
-			locations: {},
-			setDataFile: (collectionId, location) =>
-				set((state) => ({ locations: { ...state.locations, [collectionId]: location } })),
-			clearDataFile: (collectionId) =>
-				set((state) => {
-					// Rebuilt without the key rather than set to undefined: an
-					// `undefined` value survives `Object.entries` and would be read
-					// back as an entry whose path is not a string.
-					const next = { ...state.locations };
-					delete next[collectionId];
-					return { locations: next };
-				}),
-			recordDataFileHash: (path, hash) =>
-				set((state) => {
-					// The normalizer's rule, applied on the way in as well.
-					if (!DATA_FILE_HASH_PATTERN.test(hash)) return state;
-					const stale = Object.entries(state.locations).filter(
-						([, location]) => location.path === path && location.hash !== hash
-					);
-					// Unchanged state when nothing moved, so a re-read of an
-					// unchanged file does not republish the map to the main process.
-					if (stale.length === 0) return state;
-					const next = { ...state.locations };
-					for (const [collectionId, location] of stale) {
-						next[collectionId] = { ...location, hash };
-					}
-					return { locations: next };
-				}),
-			setDataFileCastNumbers: (collectionId, path, castNumbers) =>
-				set((state) => {
-					const location = state.locations[collectionId];
-					if (location?.path !== path || location.castNumbers === castNumbers)
-						return state;
-					return {
-						locations: {
-							...state.locations,
-							[collectionId]: { ...location, castNumbers },
-						},
-					};
-				}),
-		}),
-		{
-			name: STORAGE_KEYS.DATA_FILE_STORE,
-			version: 1,
-			partialize: (state) => ({ locations: state.locations }),
-			migrate: normalizeDataFiles,
-			merge: (persisted, current) => ({ ...current, ...normalizeDataFiles(persisted) }),
-		}
-	)
-);
+export const useDataFileStore = create<DataFileState>()(() => ({ locations: {} }));

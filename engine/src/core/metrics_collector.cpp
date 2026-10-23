@@ -432,9 +432,9 @@ void MetricsCollector::record_latency_sample (double latency_ms, double queue_wa
     // plain hdr_record_value / hdr_interval_recorder_record_value pair is a
     // non-atomic `counts[i] += 1; total_count += 1`, which loses increments and
     // tears min/max under concurrent writers.
-    // Convert milliseconds to microseconds for histogram precision
-    const int64_t latency_us =
-    std::max<int64_t> (static_cast<int64_t> (latency_ms * 1000.0), 1);
+    // Convert milliseconds to microseconds for histogram precision; one value
+    // feeds both histograms, so they agree on a completion past the ceiling.
+    const int64_t latency_us = histogram_latency_us (latency_ms, 1);
     hdr_record_value_atomic (latency_histogram_, latency_us);
     // Also feed the rolling-window recorder, the one source of every live and
     // stored per-tick percentile.
@@ -538,8 +538,8 @@ const Timing* phases) {
             // a 0ms phase is the common case (a reused connection does no DNS
             // and no handshake), so flooring it to 1us would inflate every
             // percentile of the phases that legitimately did not run.
-            hdr_record_value_atomic (phase_histograms_.at (i),
-            static_cast<int64_t> (std::max (0.0, values.at (i)) * 1000.0));
+            hdr_record_value_atomic (
+            phase_histograms_.at (i), histogram_latency_us (values.at (i), 0));
         }
     }
 

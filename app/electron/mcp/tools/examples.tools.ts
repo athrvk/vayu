@@ -154,7 +154,8 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			const payload = exampleWritePayload(args);
 			if (Object.keys(payload).length === 0) {
 				return errorResult(
-					'Pass at least one field to change ("name", "status", "headers", "body" or "contentType").'
+					'Pass at least one field to change ("name", "status", "headers", "body" or "contentType").',
+					"input"
 				);
 			}
 			return callEngine(
@@ -204,7 +205,10 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			if (!stored) {
-				return errorResult(`No example with id "${exampleId}" on request "${requestId}".`);
+				return errorResult(
+					`No example with id "${exampleId}" on request "${requestId}".`,
+					"not_found"
+				);
 			}
 			const subject = describeExample(exampleId, stored);
 			const consequence =

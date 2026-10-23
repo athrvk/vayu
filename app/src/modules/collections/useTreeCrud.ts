@@ -8,13 +8,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Edit2, Copy, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
-import {
-	useTabsStore,
-	useSaveStore,
-	useToastStore,
-	useDataFileStore,
-	useSpecFileStore,
-} from "@/stores";
+import { useTabsStore, useSaveStore, useToastStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCreateCollectionMutation,
@@ -443,11 +437,10 @@ export function useTreeCrud({
 	 * What the delete threw away on the client, captured before it runs.
 	 *
 	 * A restore brings the rows back, and nothing else: the tab the delete
-	 * closed stays closed and the collection's remembered data-file and
-	 * spec-file paths (#599, #1890) stay cleared, because the delete discarded
-	 * all three on the way out. None can be read back afterwards - that is the
-	 * point of capturing here, while they still exist - so the closure this
-	 * returns carries them.
+	 * closed stays closed, because the delete discarded it on the way out and
+	 * it cannot be read back afterwards - so the closure this returns carries
+	 * it. The collection's spec-file and data-file bindings need no capture:
+	 * they are columns of the trashed row (#2765), and the restore returns them.
 	 *
 	 * **Only the tab that was focused.** Restoring a collection whose cascade
 	 * closed nine tabs must not reopen nine tabs; the complaint this answers is
@@ -461,7 +454,7 @@ export function useTreeCrud({
 	 * exists to prevent.
 	 */
 	const captureClientState = useCallback(
-		(entityIds: Iterable<string>, collectionId?: string) => {
+		(entityIds: Iterable<string>) => {
 			const { openTabs, activeTabId } = useTabsStore.getState();
 			const affected = new Set(entityIds);
 			const active = openTabs.find((t) => t.id === activeTabId);
@@ -469,21 +462,9 @@ export function useTreeCrud({
 				active && active.entityId && affected.has(active.entityId)
 					? { type: active.type, entityId: active.entityId }
 					: null;
-			const dataFile = collectionId
-				? (useDataFileStore.getState().locations[collectionId] ?? null)
-				: null;
-			const specFile = collectionId
-				? (useSpecFileStore.getState().locations[collectionId] ?? null)
-				: null;
 
 			return () => {
 				if (closedActiveTab) openTab(closedActiveTab);
-				if (collectionId && dataFile) {
-					useDataFileStore.getState().setDataFile(collectionId, dataFile);
-				}
-				if (collectionId && specFile) {
-					useSpecFileStore.getState().setSpecFile(collectionId, specFile);
-				}
 			};
 		},
 		[openTab]
@@ -582,9 +563,8 @@ export function useTreeCrud({
 			const affected = collectDescendantEntityIds(collectionId, collections, (id) =>
 				getRequestsByCollection(id).map((r) => r.id)
 			);
-			// Captured before the mutation: its own `onSuccess` clears the
-			// data-file path, and `closeTabsForEntities` below closes the tab.
-			const restoreClientState = captureClientState(affected, collectionId);
+			// Captured before `closeTabsForEntities` below closes the tab.
+			const restoreClientState = captureClientState(affected);
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
 				closeTabsForEntities(affected);

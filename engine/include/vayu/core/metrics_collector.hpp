@@ -22,6 +22,7 @@
  * - All errors preserved, success results sampled if memory constrained
  */
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -43,6 +44,26 @@
 #include "vayu/types.hpp"
 
 namespace vayu::core {
+
+/// A duration in microseconds, held to what a latency histogram can record.
+/// `hdr_record_value_atomic` refuses a value above the histogram's ceiling and
+/// counts nothing, so an unclamped completion longer than
+/// `HISTOGRAM_MAX_LATENCY_US` (a request `timeout` may be set to 24 h) would be
+/// absent from every percentile and from max; clamped, it lands in the top
+/// bucket and total_count stays the number of completions (#2790).
+[[nodiscard]] inline int64_t clamp_to_histogram_ceiling (int64_t latency_us) {
+    return std::min (latency_us, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US);
+}
+
+/// @p latency_ms as the histogram's microseconds: at least @p floor_us (a
+/// histogram cannot hold a negative value, and the latency one cannot hold 0),
+/// at most the ceiling. Clamped in double before the cast, so a duration past
+/// int64 range is not undefined behaviour, and a NaN takes the floor.
+[[nodiscard]] inline int64_t histogram_latency_us (double latency_ms, int64_t floor_us) {
+    const double us = std::max (static_cast<double> (floor_us), latency_ms * 1000.0);
+    return static_cast<int64_t> (std::min (us,
+    static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US)));
+}
 
 /**
  * @brief Who sent a sampled response, as the executor knew it at submission.
@@ -787,6 +808,23 @@ class MetricsCollector {
         return http_version_downgraded_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Count the times one transfer was re-sent on a new connection
+     *        (`Response::connection_replays`, #2799).
+     *
+     * Like the downgrade, about what the report means rather than how the run
+     * performed: each replay is a request the target received and the run did
+     * not count, with its latency folded into the request that was counted.
+     * Lock-free, called once per completed transfer that was replayed.
+     */
+    void record_connection_replays (size_t replays) {
+        connection_replays_.fetch_add (replays, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t connection_replays () const {
+        return connection_replays_.load (std::memory_order_relaxed);
+    }
+
     // ========================================================================
     // Real-time stats (lock-free reads)
     // ========================================================================
@@ -1190,6 +1228,7 @@ class MetricsCollector {
     std::atomic<size_t> total_bytes_sent_{ 0 };
     std::atomic<size_t> total_bytes_recv_{ 0 };
     std::atomic<size_t> http_version_downgraded_{ 0 };
+    std::atomic<size_t> connection_replays_{ 0 };
 
     // Per-code counts, lock-free on the hot path. HTTP status codes (and the
     // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).

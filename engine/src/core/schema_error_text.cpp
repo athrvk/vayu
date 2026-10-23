@@ -100,10 +100,30 @@ const std::string& pointer) {
     return std::format ("'{}' is required", node_title (field_node, missing));
 }
 
+/** The declared keys of @p container's `properties`, in the schema's own
+ *  order, comma separated; empty when it declares none or is unresolvable. */
+std::string declared_setting_names (const nlohmann::json* container) {
+    if (container == nullptr || !container->contains ("properties") ||
+    !(*container)["properties"].is_object ()) {
+        return {};
+    }
+    std::string names;
+    for (const auto& member : (*container)["properties"].items ()) {
+        if (!names.empty ()) {
+            names += ", ";
+        }
+        names += member.key ();
+    }
+    return names;
+}
+
 /** The other shape of the same rule: the unwanted key's own name is the only
  *  place valijson puts it, and there is no title to look up for a property
- *  this schema never declared. */
-std::optional<std::string> additional_property_rejection (const std::string& d) {
+ *  this schema never declared. The pointer names the *container* of that key,
+ *  so its declared `properties` are what the caller should have used. */
+std::optional<std::string> additional_property_rejection (const nlohmann::json& schema,
+const std::string& d,
+const std::string& pointer) {
     if (d.rfind ("Object contains a property that could not be validated using", 0) != 0) {
         return std::nullopt;
     }
@@ -113,7 +133,11 @@ std::optional<std::string> additional_property_rejection (const std::string& d) 
     const std::string extra = first == std::string::npos ?
     std::string () :
     d.substr (first + 1, last - first - 1);
-    return std::format ("'{}' is not a setting this element has", extra);
+    const std::string valid = declared_setting_names (schema_node_at (schema, pointer));
+    if (valid.empty ()) {
+        return std::format ("'{}' is not a setting this element has", extra);
+    }
+    return std::format ("'{}' is not a setting this element has. Settings: {}", extra, valid);
 }
 
 /** "Value type not permitted by 'type' constraint." - the schema's own
@@ -265,7 +289,7 @@ const std::string& error_json_pointer) {
     if (auto r = required_property_rejection (schema, error_description, error_json_pointer)) {
         return *r;
     }
-    if (auto r = additional_property_rejection (error_description)) {
+    if (auto r = additional_property_rejection (schema, error_description, error_json_pointer)) {
         return *r;
     }
     if (auto r = scalar_constraint_rejection (schema, error_description, error_json_pointer)) {

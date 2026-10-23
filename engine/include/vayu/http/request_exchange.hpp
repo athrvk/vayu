@@ -824,6 +824,24 @@ ExchangeInputs inputs);
 [[nodiscard]] size_t design_response_body_bound (vayu::db::Database& db);
 
 /**
+ * The timeout a request or run payload sends with: its own numeric `timeout`
+ * when it carries one, otherwise `configured_default`. Absent and `null` both
+ * mean "use the default". Reads, never validates: every route range-checks
+ * `timeout` (`REQUEST_TIMEOUT_FIELD` in `routes/execution.cpp`) before this.
+ */
+[[nodiscard]] int resolve_request_timeout_ms (const nlohmann::json& payload,
+int configured_default);
+
+/**
+ * The same, with the default read from this database's `defaultTimeout`
+ * setting (compiled-in `DEFAULT_TIMEOUT_MS` when unset). The one place the key
+ * is spelled, for `POST /execute`, a scenario plan and a load run alike: a load
+ * run that read its own literal instead ignored the setting (#2798).
+ */
+[[nodiscard]] int resolve_request_timeout_ms (const nlohmann::json& payload,
+vayu::db::Database& db);
+
+/**
  * What this database is configured to let an `extract.json` / `assert.jsonpath`
  * element parse as JSON (`maxElementBodyBytes`, issue #1514's reopen), for the
  * same reason its `maxDesignResponseBodyBytes` sibling above is one function:

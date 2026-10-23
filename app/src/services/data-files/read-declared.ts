@@ -11,8 +11,8 @@
  * `index.ts` is deliberately pure - text in, rows out - and stays that way: the
  * *first* read of a file is a `FileReader` in the picker, driven by a user who
  * just chose it. This module is the other read, the one no click asks for: the
- * path `data-file-store` remembered, opened again through the Electron bridge so
- * a surface can show the file as it is on disk *now*.
+ * path the collection's `dataFile` binding names, opened again through the
+ * Electron bridge so a surface can show the file as it is on disk *now*.
  *
  * It exists as one function because three surfaces do it - the Run dialog's
  * pre-fill, Send-with-row, and the Data tab's comparison - and each had (or was
@@ -32,10 +32,11 @@
  * hand-picked file. `maxRows` is required rather than optional so a fourth
  * surface cannot re-open the hole by omitting it.
  *
- * It is also where the remembered location learns the file's current content
- * hash (issue #2051): every byte read records it against the path, so
- * `data-file-store` (and through it MCP's `list_collections`) carries the
- * digest of the file as the app last saw it rather than as it was first picked.
+ * It is also where the binding learns the file's current content hash (issue
+ * #2051): every byte read records it against the path (`recordDataFileHash`,
+ * which writes the engine row only when the digest moved), so the binding - and
+ * through it MCP's `list_collections` - carries the digest of the file as the
+ * app last saw it rather than as it was first picked.
  * Recorded before decoding, since it describes the bytes on disk whether or not
  * they still parse; it changes no declaration, only what is known about the
  * file the declaration already names.
@@ -45,7 +46,7 @@ import { decodeDataFile } from "./decode";
 import { DataFileError } from "./errors";
 import { describeRowCapRefusal } from "./row-cap";
 import { parseDataFile, type ParsedDataFile } from "./index";
-import { useDataFileStore } from "@/stores/data-file-store";
+import { recordDataFileHash } from "@/queries/file-bindings";
 import type { DataFileHashReply } from "@/types/electron";
 
 /** A file re-read from disk, in the shape the pickers already hold. */
@@ -98,8 +99,8 @@ export function canHashDeclaredDataFile(): boolean {
  * would answer, without its bytes crossing to the renderer. A file that has
  * moved resolves `{ status: "missing" }` (#2057); it rejects with
  * `NoDataFileBridgeError` outside Electron and with the main process's message
- * when the request is refused (extension, empty path). It records nothing in
- * `data-file-store`, whose hash stays the one the app last read the file with.
+ * when the request is refused (extension, empty path). It records nothing on
+ * the binding, whose hash stays the one the app last read the file with.
  */
 export async function hashDeclaredDataFile(path: string): Promise<DataFileHashReply> {
 	const hash = window.electronAPI?.hashDataFile;
@@ -140,7 +141,7 @@ export async function readDeclaredDataFile(
 	if (!read) throw new NoDataFileBridgeError();
 
 	const { bytes, fileName, hash } = await read(path);
-	useDataFileStore.getState().recordDataFileHash(path, hash);
+	recordDataFileHash(path, hash);
 	// The same decode and the same parser the picker runs, so a file re-read
 	// here cannot disagree with the file as it was declared.
 	const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);

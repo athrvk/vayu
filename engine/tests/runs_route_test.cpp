@@ -1527,6 +1527,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.latency.p999            = 35.0;
     inputs.latency_avg_ms          = 12.5;
     inputs.http_version_downgraded = 4;
+    inputs.connection_replays      = 6;
     inputs.tests     = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
     inputs.retention = vayu::core::SamplingRetention{ 4, 300, 12, 900 };
     return inputs;
@@ -1566,6 +1567,9 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     // It has to survive the store -> report round trip, or a run measured over
     // HTTP/1.1 keeps being labelled with the protocol that was requested.
     EXPECT_EQ (summary["httpVersionDowngraded"].get<size_t> (), 4u);
+    // Requests libcurl re-sent on a new connection (#2799). Mutation check:
+    // drop the `connection_replays` read in runs.cpp and this key is absent.
+    EXPECT_EQ (summary.value ("connectionReplays", size_t{ 0 }), 6u);
 
     // successful/failed are recounted from the stored distribution, so the 3
     // transport errors (code 0) land on the failed side.
@@ -1815,6 +1819,21 @@ TEST_F (RunsRouteTest, ReportFromAnOlderSummaryKeepsTheOldRateFidelity) {
     EXPECT_FALSE (rate.contains ("requestsSent"));
     EXPECT_FALSE (rate.contains ("requestsExpected"));
     EXPECT_FALSE (body["summary"].contains ("sendingDurationSeconds"));
+}
+
+// A run stored before #2799 never looked for replays, so its report claims
+// no count rather than a 0 nobody measured.
+TEST_F (RunsRouteTest, ReportFromAnOlderSummaryOmitsConnectionReplays) {
+    seed ({ .id = "run_pre_replays", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_TRUE (stored.contains ("connection_replays"));
+    stored.erase ("connection_replays");
+    db_->update_run_summary ("run_pre_replays", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_pre_replays");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body["summary"].contains ("connectionReplays"))
+    << body["summary"].dump ();
 }
 
 // Every store a run keeps is bounded, so the report has to say how much each

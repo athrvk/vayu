@@ -61,10 +61,11 @@ namespace monitor_limits = constants::monitor;
  *
  * Passed in rather than read here so the functions below stay pure over
  * arbitrary JSON and hold no `Database` - the same split
- * `resolve_request_timeout_ms` draws in the execution route, where the caller
- * resolves the configured default and the decision function only takes a
- * number. The member defaults are the compile-time seeds, which is what lets a
- * test (or any caller without a database to hand) omit the argument entirely.
+ * `resolve_request_timeout_ms` draws in `http/request_exchange.hpp`, where the
+ * decision function only takes a number and its `Database` overload resolves
+ * the configured default. The member defaults are the compile-time seeds,
+ * which is what lets a test (or any caller without a database to hand) omit
+ * the argument entirely.
  */
 struct MonitorLimits {
     /// Cadence for a block that names no `intervalMs` (`monitorIntervalMs`).

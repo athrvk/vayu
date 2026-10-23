@@ -57,10 +57,11 @@ Take one snapshot of the workspace database and print where it was written.
 vayu-cli backup
 ```
 
-The snapshot is a compacted copy of the database - collections, requests,
-environments, credentials and run history - written into `backups/` beside it.
-Tabs, bound file locations and the other state the app keeps for itself are not
-in it ([what a backup does not hold](architecture.md#what-a-backup-does-not-hold)).
+The snapshot is a compacted copy of the database - collections (with the paths
+of the spec and data files they are bound to), requests, environments,
+credentials and run history - written into `backups/` beside it. Tabs, saved
+load-test values and the other state the app keeps for itself are not in it
+([what a backup does not hold](architecture.md#what-a-backup-does-not-hold)).
 It is taken through the running daemon on purpose: the engine holds the database open, and copying that file by hand is
 not safe under WAL, because the `-wal` beside it holds committed transactions
 the main file does not.
@@ -188,7 +189,9 @@ from the engine's in-memory collector, and a **finished** run stays readable for
 the `liveRetentionMs` window (default 60s, `GET /config`) - a reader attaching
 late still gets the run's ticks replayed from the start. Once that window
 expires, or for a run id the engine has never seen, it returns `404` with a hint
-pointing at `GET /runs/:runId/report` for the stored report.
+pointing at `GET /runs/:runId/report` for the stored report. The body's `code`
+tells the two apart: `live_expired` for a stored run whose window has passed,
+`run_not_found` for an id the engine has no row for.
 
 ## Prerequisites
 

@@ -1635,6 +1635,17 @@ LiveMetricsCursor& cursor,
 std::chrono::steady_clock::time_point now);
 
 /**
+ * The `404` of `GET /runs/:id/live` when no context is active or retained for
+ * @p run_id (#2775). The flat `{error, code, hint}` body, not the nested
+ * `send_error` shape, so a client reading `error` as a string keeps working;
+ * `code` tells a stored run whose topic aged out (`live_expired`) from an id
+ * the engine has no row for (`run_not_found`). Both hint at the stored report.
+ * Defined in metrics.cpp; live_metrics_route_test.cpp drives it directly.
+ */
+std::pair<int, nlohmann::json>
+live_metrics_unavailable_response (vayu::db::Database& db, const std::string& run_id);
+
+/**
  * Testable core of `GET /runs/:id/report`: `{http_status, json_body}`, 404 for
  * a missing run. Defined in runs.cpp; `POST /export/run-report` reads it too.
  *

@@ -873,6 +873,15 @@ rather than contradict:
   defensible word, not "beats".
 - **Tune concurrency before anything else.** c=400 costs 17% of throughput and
   38x the p99 versus c=64. No engine knob on this page moves the number that far.
+- **A target that closes reused connections shows as replays, not errors.**
+  When a server (or a load balancer with an idle timeout or a per-connection
+  request cap) drops a kept-alive connection after reading a request and before
+  answering, libcurl re-sends that request on a new connection on its own. The
+  run counts it once, by the replay's outcome, and its latency includes both
+  attempts, so a tail made of replays reads as a slow target rather than a
+  failing one. The count is the report's `summary.connectionReplays` and the
+  `connection_replayed` warning (#2799); the target received
+  `totalRequests + connectionReplays` requests.
 
 ### The app-engine gap
 

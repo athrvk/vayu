@@ -33,7 +33,6 @@ import { MaskingIncompleteError } from "./withhold.js";
 import { DEFAULT_MCP_SAFETY_CONFIG } from "./config.js";
 import {
 	resolveDescription,
-	type McpHost,
 	type McpTool,
 	type McpToolInfo,
 	type ToolContext,
@@ -41,12 +40,14 @@ import {
 } from "./tools/contract.js";
 import {
 	errorResult,
+	isRecord,
 	NOTHING_CHANGED,
 	STARTED_RUNS,
 	str,
 	ToolArgError,
 	writesDisabled,
 } from "./tools/kit.js";
+import { describeFailure, FAILURES, sdkErrorClass, type Failure } from "./tools/failure.js";
 import { READ_TOOLS } from "./tools/reads.tools.js";
 import { SAFETY_TOOLS } from "./tools/safety.tools.js";
 import { GRAPHQL_SCHEMA_TOOLS } from "./tools/graphql-schema.tools.js";
@@ -159,7 +160,8 @@ export function withheldWriteRefusal(name: string, ctx: ToolContext): ToolResult
 	if (ctx.config.disabledTools.includes(name)) return null;
 	const tool = findTool(name);
 	if (!tool || tool.category !== "write") return null;
-	return writesDisabled(ctx);
+	const refusal = writesDisabled(ctx);
+	return refusal ? failureAnswer(refusal, name, ctx) : null;
 }
 
 // --- Tool definitions --------------------------------------------------------
@@ -207,24 +209,61 @@ export function toolCatalog(): McpToolInfo[] {
 }
 
 /**
- * A refusal shared by several tools (`INLINE_FILE_REFUSAL`, `INSECURE_TLS_REFUSAL`)
- * names its remedy with a token, since the constant is built before any host is
- * known. Only an error's text is resolved: a success carries workspace data,
- * which is never rewritten.
+ * The error result @p result stands for, as the client receives it: the text
+ * {@link describeFailure} writes for its failure, and the same failure as
+ * `structuredContent.error`, which the SDK does not hold to a tool's
+ * `outputSchema` because that schema describes a success.
+ *
+ * Remedy tokens are resolved here: a refusal shared by several tools
+ * (`INLINE_FILE_REFUSAL`, `INSECURE_TLS_REFUSAL`) names its remedy with one,
+ * since the constant is built before any host is known. Only an error is
+ * resolved; a success carries workspace data, which is never rewritten.
  */
-function withRemedyResolved(result: ToolResult, host: McpHost): ToolResult {
-	if (!result.isError) return result;
-	return {
-		...result,
-		content: result.content.map((part) =>
-			part.type === "text" ? { ...part, text: resolveRemedyTokens(part.text, host) } : part
-		),
-	};
+function failureAnswer(result: ToolResult, toolName: string, ctx: ToolContext): ToolResult {
+	const { text, error } = describeFailure(
+		FAILURES.get(result) ?? unclassified(result, toolName, ctx)
+	);
+	const [, ...caveats] = result.content;
+	return resolveRemedyTokens(
+		{
+			content: [{ type: "text", text }, ...caveats],
+			structuredContent: { error },
+			isError: true,
+		},
+		ctx.host
+	);
+}
+
+/**
+ * @p answer, a `tools/call` answer the SDK produced, with a failure class on an
+ * error that has none. The SDK answers some errors without calling any handler
+ * - an argument its schema check refused, an answer its output check refused -
+ * so they never pass {@link dispatchTool}. Every other answer, including an
+ * error dispatch already classed, is returned as it came.
+ */
+export function classifySdkError(answer: unknown, toolName: string, ctx: ToolContext): unknown {
+	if (!isRecord(answer) || answer.isError !== true) return answer;
+	if (isRecord(answer.structuredContent) && "error" in answer.structuredContent) return answer;
+	const content = Array.isArray(answer.content) ? answer.content : [];
+	const first: unknown = content[0];
+	const text = isRecord(first) && typeof first.text === "string" ? first.text : "";
+	return failureAnswer(errorResult(text, sdkErrorClass(text)), toolName, ctx);
+}
+
+/**
+ * An error result no builder classed. `errorResult` takes a class, so this is
+ * a result assembled by hand; it is logged rather than guessed at silently, and
+ * answered as the unclassified fallback is: worth one more try.
+ */
+function unclassified(result: ToolResult, toolName: string, ctx: ToolContext): Failure {
+	ctx.log?.warn("mcp", "Error result without a failure class", { tool: toolName });
+	return { failureClass: "transient", message: result.content[0]?.text ?? "" };
 }
 
 /**
  * Dispatch a `tools/call`. Converts argument errors into tool errors so the
- * agent gets a readable message instead of a protocol failure.
+ * agent gets a readable message instead of a protocol failure, and gives every
+ * error result its class (#2776) on the way out.
  *
  * The single dispatch path: `server.ts` routes every registered tool callback
  * through here, so the disabled-tool rejection below is the same code the tests
@@ -239,32 +278,50 @@ export async function dispatchTool(
 	signal?: AbortSignal
 ): Promise<ToolResult> {
 	const tool = findTool(name);
-	if (!tool) return errorResult(`Unknown tool: ${name}`);
-	// Tools the user switched off in Settings are rejected (and are also omitted
-	// from tools/list, so a well-behaved client won't call them).
-	if (ctx.config.disabledTools.includes(name)) {
-		return errorResult(
-			`Tool "${name}" is disabled. To use it, ask the user to ${settingRemedy("disabledTools", ctx.host)}.`
-		);
-	}
-	let result: ToolResult;
-	try {
-		result = withRemedyResolved(await tool.handler(args, ctx, signal), ctx.host);
-	} catch (err) {
-		if (err instanceof ToolArgError || err instanceof MaskingIncompleteError) {
-			return withRemedyResolved(errorResult(err.message), ctx.host);
-		}
-		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
-	}
-	// One record per served call, whichever transport served it (#1558) - the
-	// one place both the Electron-hosted host and the stdio CLI route through.
-	ctx.log?.debug("mcp", "Served tool call", { tool: name });
+	const result = tool
+		? await serveCall(tool, args, ctx, signal)
+		: errorResult(`Unknown tool: ${name}`, "input");
+	if (result.isError) return failureAnswer(result, name, ctx);
 	// Only a call that succeeded changed anything. A tool that returned an error
 	// result may still have got as far as the engine, but it cannot say so, and
 	// an invalidation storm on every rejected call would be worse than the one
 	// stale list a genuinely-partial failure leaves behind. A confirmation
 	// preview is the third case: successful, and deliberately without effect.
-	if (!result.isError && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx, result);
+	if (tool && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx, result);
+	return result;
+}
+
+/** @p tool's answer to one call, a thrown error answered as an error result. */
+async function serveCall(
+	tool: McpTool,
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<ToolResult> {
+	// Tools the user switched off in Settings are rejected (and are also omitted
+	// from tools/list, so a well-behaved client won't call them).
+	if (ctx.config.disabledTools.includes(tool.name)) {
+		return errorResult(
+			`Tool "${tool.name}" is disabled. To use it, ask the user to ${settingRemedy("disabledTools", ctx.host)}.`,
+			"policy"
+		);
+	}
+	let result: ToolResult;
+	try {
+		result = await tool.handler(args, ctx, signal);
+	} catch (err) {
+		if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
+		// The projection's own lookup failed; its message says to retry once the
+		// engine answers.
+		if (err instanceof MaskingIncompleteError) return errorResult(err.message, "transient");
+		return errorResult(
+			`Unexpected error: ${err instanceof Error ? err.message : String(err)}`,
+			"transient"
+		);
+	}
+	// One record per served call, whichever transport served it (#1558) - the
+	// one place both the Electron-hosted host and the stdio CLI route through.
+	ctx.log?.debug("mcp", "Served tool call", { tool: tool.name });
 	return result;
 }
 

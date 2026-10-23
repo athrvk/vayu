@@ -26,7 +26,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { transformWithOxc } from "vite";
-import { STORAGE_KEYS } from "../src/constants/storage-keys";
+import { LEGACY_FILE_BINDING_KEYS, STORAGE_KEYS } from "../src/constants/storage-keys";
 import type { IpcSenderLike } from "./ipc-sender.js";
 import {
 	LEGACY_STORAGE_ARG,
@@ -107,8 +107,10 @@ describe("vayuEntries", () => {
 		expect(() => vayuEntries(answer)).toThrow(/file: origin answered/);
 	});
 
-	it("passes every key the renderer persists", () => {
-		const keys = Object.values(STORAGE_KEYS);
+	it("passes every key the renderer persists, and the legacy ones it still imports", () => {
+		// The file bindings an older build kept (#2765) still have to reach the
+		// app origin, or the one-time import there finds nothing to move.
+		const keys = [...Object.values(STORAGE_KEYS), ...Object.values(LEGACY_FILE_BINDING_KEYS)];
 		expect(keys.length).toBeGreaterThan(15);
 		expect(keys.filter((key) => !isVayuStorageKey(key))).toEqual([]);
 	});

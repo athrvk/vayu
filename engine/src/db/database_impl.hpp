@@ -210,6 +210,12 @@ inline auto make_vayu_storage (const std::string& path) {
     // it onto an existing, non-empty collections table and every pre-existing
     // row backfills to `{}`, which is how "bound to no spec" is spelled.
     make_column ("openapi", &Collection::openapi, default_value (std::string ("{}"))),
+    // The spec-file and data-file bindings (issue #2765, schema version 8),
+    // the same NOT NULL + default_value shape so sync_schema backfills `{}`.
+    // A stored path is not a grant: whether a body may send the file is still
+    // `FileAccessPolicy`'s answer from `file_roots` and `file_grants`.
+    make_column ("spec_file", &Collection::spec_file, default_value (std::string ("{}"))),
+    make_column ("data_file", &Collection::data_file, default_value (std::string ("{}"))),
     make_column ("order", &Collection::order),
     make_column ("created_at", &Collection::created_at),
     make_column ("updated_at", &Collection::updated_at),

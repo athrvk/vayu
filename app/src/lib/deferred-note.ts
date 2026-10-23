@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { VARIABLE_PATTERN } from "@/constants/variables";
 import { pickByCount } from "@/modules/dashboard/utils/format";
 
 /**
@@ -22,4 +23,27 @@ export function deferredNote(names: readonly string[]): string {
 		one: `${tokens} is set by a pre-request script at send.`,
 		other: `${tokens} are set by a pre-request script at send.`,
 	});
+}
+
+/** The name inside a `{{name}}` token, trimmed the way the resolvers read it. */
+export function tokenName(token: string): string {
+	return token.slice(2, -2).trim();
+}
+
+/**
+ * The names in @p deferred that @p texts use, in order of first appearance. The
+ * engine lists every name a scope answers for the whole request, not the ones a
+ * given field holds.
+ */
+export function deferredNamesIn(deferred: readonly string[], texts: readonly string[]): string[] {
+	if (deferred.length === 0) return [];
+	const answered = new Set(deferred);
+	const used = new Set<string>();
+	for (const text of texts) {
+		for (const [token] of text.matchAll(VARIABLE_PATTERN)) {
+			const name = tokenName(token);
+			if (answered.has(name)) used.add(name);
+		}
+	}
+	return [...used];
 }

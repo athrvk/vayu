@@ -776,7 +776,8 @@ constexpr size_t EXEMPLARS_PER_STATUS = 3;
 constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 /// HdrHistogram significant figures (3 = ~0.1% precision)
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
-/// HdrHistogram max trackable latency in microseconds (1 hour)
+/// HdrHistogram max trackable latency in microseconds (1 hour). A longer
+/// duration is clamped to it at the record site (`histogram_latency_us`).
 constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// Whether a load run feeds the five per-phase histograms (config key
 /// `phaseHistograms`). On by default: the phase values are computed for every
@@ -1046,6 +1047,20 @@ namespace data_schema {
 constexpr size_t MAX_COLUMNS      = 1024;
 constexpr size_t MAX_COLUMN_CHARS = 256;
 } // namespace data_schema
+
+/**
+ * @brief Bounds on a collection's `specFile` / `dataFile` binding (issue
+ * #2765), in UTF-8 bytes. Each sits just above the longest value any of the
+ * three platforms can open, so no real file is refused: a Windows
+ * extended-length path is at most 32,767 UTF-16 units of at most 3 UTF-8
+ * bytes each (98,301; Linux stops at 4,096 and macOS at 1,024), and a file
+ * name at most 255 units or characters (NTFS 765 bytes, APFS 1,020, ext4
+ * 255).
+ */
+namespace file_binding {
+constexpr size_t MAX_PATH_BYTES      = size_t{ 96 } * 1024;
+constexpr size_t MAX_FILE_NAME_BYTES = 1024;
+} // namespace file_binding
 
 /**
  * @brief OpenAPI document bounds (issue #637).
