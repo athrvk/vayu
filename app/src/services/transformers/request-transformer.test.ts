@@ -363,6 +363,9 @@ describe("RequestTransformer file trust flag", () => {
 describe("RequestTransformer runsPreRequestScript (#2741)", () => {
 	// The engine derives it on the single-request routes only; a transformer
 	// that copies field by field drops it unless it is named.
+	// Mutation check: delete the `runsPreRequestScript` spread in
+	// `toFrontend` and the first case fails; test `!== undefined` rather than
+	// `typeof ... === "boolean"` and the non-boolean case fails.
 	it.each([[true], [false]])("keeps the engine's %s answer", (answer) => {
 		const req = RequestTransformer.toFrontend({ ...base, runsPreRequestScript: answer });
 		expect(req.runsPreRequestScript).toBe(answer);

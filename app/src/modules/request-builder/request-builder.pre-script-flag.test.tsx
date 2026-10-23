@@ -12,6 +12,10 @@
  * The engine's `runsPreRequestScript` (#2741) reaches the builder's provider
  * from the request the builder fetched, and is never written back: it is
  * derived on read, so the PUT merge-patch carries it for no field.
+ *
+ * Mutation check: delete the `runsPreRequestScript={fetchedRequest?...}` prop
+ * in `index.tsx` and the "reaches the provider" cases fail; add the flag to the
+ * `initialRequest` it builds and the "seeded editor state" case fails.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

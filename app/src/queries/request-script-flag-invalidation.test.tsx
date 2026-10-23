@@ -17,6 +17,12 @@
  * reaches a request only through its ancestors has to invalidate the detail
  * itself. "Invalidated" is the assertion, not "absent": it is what sends the
  * next read back to the engine.
+ *
+ * Mutation check, in `queries/collections.ts`: drop the `setQueryData` in
+ * `useUpdateRequestMutation` and the save case fails; make the collection
+ * patch's guard `true` and "only the name changes" fails, `false` and the two
+ * script/parent cases fail; make the drop's guard never fire and the two
+ * new-owner cases fail, always fire and "states no new owner" fails.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

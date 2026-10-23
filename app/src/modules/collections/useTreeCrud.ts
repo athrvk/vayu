@@ -406,8 +406,9 @@ export function useTreeCrud({
 			} = request;
 			const copy = await createRequestMutation.mutateAsync({
 				...rest,
-				// The derived flag is stripped from a body the row has; a row
-				// without one copies none rather than throwing here.
+				// The file-trust flag (`unresolved`, not `runsPreRequestScript`) is
+				// stripped from a body the row has; a row without one copies none
+				// rather than throwing here.
 				...(rest.body ? { body: withoutBodyFileTrust(rest.body) } : {}),
 				name: `${request.name} (Copy)`,
 			});

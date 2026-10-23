@@ -238,9 +238,12 @@ describe("invalidateForMcpEvent", () => {
 		// Create, update and unbind change no list under the row, so an agent
 		// renaming every collection in turn must not refetch the workspace's
 		// request lists once per call. Mutation check: call
-		// `invalidateAllRequestLists` from this family and both keys appear.
+		// `invalidateAllRequestLists` from this family and it adds
+		// `requests.all` (the lists key, and the details with it) and the
+		// warm-cache key `prefetch.allRequests()`; each assertion below fails.
 		const { keys } = keysFor({ entity: "collectionRow", collectionId: "col_1" });
 		expect(familyOf(keys, queryKeys.requests.lists())).toEqual([]);
+		expect(keys).not.toContainEqual(queryKeys.requests.all);
 		expect(keys).not.toContainEqual(queryKeys.prefetch.allRequests());
 		expect(keys).not.toContainEqual(queryKeys.trash.all);
 	});
