@@ -843,7 +843,7 @@ min/max/options):
       "key": "workers",
       "value": "8",
       "type": "integer",
-      "label": "Worker Threads",
+      "label": "Worker threads",
       "description": "Number of background worker threads. Higher values improve throughput on multi-core systems but increase RAM usage. Default equals CPU core count.",
       "category": "general_engine",
       "default": "8",
@@ -858,7 +858,7 @@ min/max/options):
       "key": "defaultHttpVersion",
       "value": "auto",
       "type": "enum",
-      "label": "Default HTTP Version",
+      "label": "Default HTTP version",
       "description": "Protocol a newly created request starts with...",
       "category": "network_performance",
       "default": "auto",
@@ -876,7 +876,7 @@ min/max/options):
       "key": "dbCacheSize",
       "value": "67108864",
       "type": "integer",
-      "label": "Database Cache Size",
+      "label": "Database cache size",
       "description": "Memory SQLite keeps per connection for recently used database pages...",
       "category": "general_engine",
       "default": "67108864",
@@ -960,8 +960,9 @@ never declare one.
 The app renders it as the suffix inside the input, which is where a unit is
 stated **once** - so a seeded description never spells the same unit out as an
 "in milliseconds" clause, and a label never carries a `(ms)` suffix; a test
-over the catalogue enforces both. `bytes` additionally selects human-readable
-formatting for the value, the range hint and the default line (`104857600`
+over the catalogue enforces both. Labels are sentence case ("Default request
+timeout", "Correlation ID"), enforced by a second catalogue test. `bytes`
+additionally selects human-readable formatting for the value, the range hint and the default line (`104857600`
 reads as `100.0 MB`), which the app used to select from a hardcoded list of
 three keys - so a byte-valued entry added engine-side was formatted as a raw
 number until someone edited a TypeScript array. A client that meets a unit it
@@ -1087,6 +1088,11 @@ stored numeric values are unchanged, but a script that tested
 `pm.response.errorCode === 'CONNECTION_FAILED'` for these two failures now sees
 the new spelling. A load run records them under the error types
 `too_many_redirects` and `bad_content_encoding`.
+
+A send still in flight when the engine shuts down is cancelled rather than
+waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is
+making: the send answers, and its trace records, `CANCELLED` with
+`errorMessage` `Request cancelled`, about a second after the shutdown began.
 
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.
@@ -3510,10 +3516,25 @@ and is fetched exactly as before, loopback and redirects included.
   Vayu does not fetch a reference from a loopback or link-local address other
   than its source document's own host and port - not when the URL names one and
   not when a host name resolves to one`, on both forms of the route.
-- **With a proxy in force the connected peer is the proxy**, so the rule judges
-  the proxy's address and the proxy decides where the request goes next. A
-  proxy listening on loopback is therefore refused for a reference unless it
-  is the source's host and port.
+- **The URL is judged before anything is dialled**, by the same source rule: a
+  reference whose host names a loopback or link-local address in any spelling,
+  `localhost` or a `*.localhost` name is refused with the same `502`, and the
+  source's own host and port stay allowed (issue
+  [#2605](https://github.com/athrvk/vayu/issues/2605)).
+- **A proxy you configured is not refused.** With a proxy in force the
+  connected peer is the proxy, so the rule passes the one the transport names
+  (`manual`, or `system` when it resolved one; matched on its address and port,
+  a `localhost` proxy URL meeting any loopback address) and the URL check above
+  is what judges the reference. Behind a proxy the engine cannot see where the
+  proxy sends the request next, so a host *name* the proxy resolves to loopback
+  is the proxy's to answer. A proxy URL with no port is dialled on libcurl's
+  proxy default, `1080` (`443` for an `https` proxy).
+- **`environment` mode stays uncovered**, as does `system` when it resolved
+  nothing and falls back to it. There libcurl reads the proxy from
+  the process environment (`http_proxy`, `https_proxy`) and the engine never
+  learns it, so a proxy on loopback picked up that way is still refused for
+  every reference unless it is the source's host and port. Set it as `manual`
+  to fetch references through it.
 - Vayu's own engine and MCP ports stay refused whatever the source
   ([Reserved local ports](#reserved-local-ports)); this rule is added to that
   one, never in place of it.
@@ -6239,7 +6260,10 @@ wider rule on the same connected-address check: every loopback and link-local
 peer is refused unless it is the source document's own host and port (issue
 [#2364](https://github.com/athrvk/vayu/issues/2364), see
 [POST /import/fetch](#post-importfetch)). It is added to the reserved ports,
-so a source on one of them does not open it.
+so a source on one of them does not open it. The rule passes the proxy the
+transport names and judges the reference's URL instead (issue
+[#2605](https://github.com/athrvk/vayu/issues/2605)); the reserved ports do
+not: a proxy on one of them is still refused.
 
 #### Path variables
 

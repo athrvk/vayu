@@ -37,6 +37,7 @@
  * resolution here.
  */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -375,6 +376,9 @@ struct ScenarioResolveOptions {
     /// Applied to every composed step, exactly as `POST /execute` applies it.
     int timeout_ms = 0;
     ScenarioLimits limits;
+    /// Ends an oauth2 token request a step's auth makes while resolving
+    /// (`build_request`): `POST /runs` passes its `server_stopping` (#2683).
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 /**

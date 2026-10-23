@@ -171,6 +171,13 @@ interface UpdateDownloadProgress {
 	total: number;
 }
 
+/** Mirrors `UpdateVerificationFailure` in `electron/updater.ts`. */
+export interface UpdateVerificationFailure {
+	version: string;
+	/** Why the attestation was refused, as `update-attestation.ts` words it. */
+	reason: string;
+}
+
 /**
  * Outcome of a check the user asked for. Mirrors `UpdateCheckResult` in
  * `electron/updater.ts`; the two are separated only by the process boundary.
@@ -298,6 +305,12 @@ interface ElectronAPI {
 	// Auto-update
 	onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;
 	onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+	/**
+	 * Silent strategies only: sent instead of `onUpdateDownloaded` when the
+	 * installer's build-provenance attestation does not verify, and the update
+	 * will not be installed.
+	 */
+	onUpdateVerificationFailed: (callback: (info: UpdateVerificationFailure) => void) => () => void;
 	/** Silent strategies only (Windows, Linux AppImage) - see updater.ts. */
 	onDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
 	restartToInstallUpdate: () => Promise<void>;
@@ -378,14 +391,16 @@ interface ElectronAPI {
 	getFilePath: (file: File) => string;
 
 	/**
-	 * Open the system folder picker, starting at `defaultPath`, and allow the
-	 * folder the user chooses (#2356): the main process makes the engine write,
-	 * because only it holds the secret the engine requires for one, and the
-	 * renderer names only where the picker opens. Resolves with the engine's
-	 * answer rather than rejecting on a refusal. Renderer callers go through
+	 * Open the system folder picker and allow the folder the user chooses
+	 * (#2356): the main process makes the engine write, because only it holds
+	 * the secret the engine requires for one. The renderer names the dialog by
+	 * key and nothing else - the title is main's, and the picker opens where the
+	 * last one ended (#2378). The key mirrors `FolderDialogKey` in
+	 * `electron/file-ipc.ts`. Resolves with the engine's answer rather than
+	 * rejecting on a refusal. Renderer callers go through
 	 * `apiService.allowChosenFolder`. Absent outside Electron.
 	 */
-	allowFolder: (options?: { defaultPath?: string; title?: string }) => Promise<AllowFolderReply>;
+	allowFolder: (key: "allow-folder") => Promise<AllowFolderReply>;
 
 	/** Stop allowing a folder, by its row's id. Same reply family; absent outside Electron. */
 	removeAllowedFolder: (id: string) => Promise<RemoveFolderReply>;

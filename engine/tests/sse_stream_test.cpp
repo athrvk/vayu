@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -798,9 +799,9 @@ class RelayTest : public ::testing::Test {
         db_->init ();
         manager_ = std::make_unique<SseStreamManager> ();
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
-        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
-        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
-        mock_server_manager_, *manager_, run_summary_cache_ });
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr, authorize_manager_,
+        cookie_jar_, mock_issuer_manager_, inbox_manager_, mock_server_manager_, *manager_,
+        run_summary_cache_, vayu::http::no_grant_secret (), server_stopping_ });
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -871,6 +872,8 @@ class RelayTest : public ::testing::Test {
     /// Held by pointer so `TearDown` can join its workers *before* the
     /// database they write through goes away - see the note there (#646).
     std::unique_ptr<SseStreamManager> manager_;
+    /// What `Server::stop()` sets (#2683); this fixture has no `Server`.
+    std::atomic<bool> server_stopping_{ false };
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
     std::unique_ptr<StreamServer> origin_;
 };
@@ -967,6 +970,43 @@ TEST_F (RelayTest, ASecondConcurrentWatcherIsRefused) {
     auto second = client ().Get ("/runs/run_test/events");
     ASSERT_TRUE (second);
     EXPECT_EQ (second->status, 200);
+}
+
+// A relay of a stream still going ends once the server is stopping, with no
+// completion frame for a stream that has not completed (#2683): `Server::stop()`
+// joins the relay's handler before it drains the stream consumer. Healthy: the
+// relay sees the flag within one poll (50ms). Mutation check: drop the
+// `stopping` check from `relay_run_events`, and the relay runs on to the
+// stream's 30s cap and ends on `event: complete`.
+TEST_F (RelayTest, AStoppingServerEndsTheRelayOfAStreamStillGoing) {
+    origin_ = std::make_unique<StreamServer> ();
+    auto context =
+    manager_->start (spec_for (origin_->url ("/endless"), brisk_limits ()));
+    ASSERT_NE (context, nullptr);
+
+    std::atomic<bool> read_something{ false };
+    std::string body; // Written by the reader alone, read once it has finished.
+    auto reader = std::async (std::launch::async, [this, &read_something, &body] () {
+        auto watcher = client ();
+        return watcher.Get ("/runs/run_test/events", [&] (const char* data, size_t length) {
+            body.append (data, length);
+            read_something.store (true);
+            return true;
+        });
+    });
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&read_something] () { return read_something.load (); }))
+    << "the relay never wrote a frame";
+
+    server_stopping_.store (true);
+    EXPECT_TRUE (vayu::tests::wait_until ([&reader] () {
+        return reader.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    }))
+    << "the relay ran on with the server stopping";
+    EXPECT_FALSE (context->closed ())
+    << "the stream ended, so the flag proved nothing";
+    reader.get ();
+    EXPECT_EQ (body.find ("event: complete"), std::string::npos) << body;
 }
 
 TEST_F (RelayTest, AnExpiredStreamIsSweptAndReads404) {

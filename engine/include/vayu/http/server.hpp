@@ -10,7 +10,6 @@
 #include <httplib.h>
 
 #include <atomic>
-#include <future>
 #include <memory>
 #include <string>
 #include <thread>
@@ -55,6 +54,17 @@ class Server {
      * listening.
      */
     [[nodiscard]] bool start ();
+
+    /**
+     * @brief Close the listener, end what its handlers are waiting on, and
+     *        join them.
+     *
+     * No handler outlives this call (#2683): the daemon tears down curl's
+     * global state and the database right after it. It is bounded because
+     * each handler's outbound transfer is cancelled and each SSE relay ends
+     * first (`RouteContext::server_stopping`); work that waits on nothing
+     * outside the engine, a database write, is finished rather than cut.
+     */
     void stop ();
     bool is_running () const;
 
@@ -114,14 +124,15 @@ class Server {
     /// managers that own listeners or transfers. It holds derived data and can
     /// be dropped at any point without losing anything (see #1150).
     RunSummaryCache run_summary_cache_;
+    /// `RouteContext::server_stopping`: what lets `stop()` end the handlers it
+    /// joins (#2683). Read by handlers, so declared before server_ for the
+    /// same reason as the members above.
+    std::atomic<bool> stopping_{ false };
     /// Every registered handler captures a reference to this, so it is
     /// declared before server_ for the same reason as the members above.
     std::unique_ptr<routes::RouteContext> route_ctx_;
     httplib::Server server_;
     std::thread server_thread_;
-    /// Ready once `server_thread_`'s accept loop has returned, so `stop()` can
-    /// join the moment it does instead of re-checking on a fixed quantum.
-    std::future<void> server_thread_exited_;
     std::atomic<bool> is_running_{ false };
     routes::ShutdownCallback shutdown_callback_;
 };

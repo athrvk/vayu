@@ -20,7 +20,7 @@ import { describe, expect, test, vi } from "vitest";
 import { PROMPTS } from "./prompts.js";
 import { resolveSafetyConfig } from "./config.js";
 import { KNOWN_LOAD_MODES } from "./safety.js";
-import type { ToolContext } from "./tools.js";
+import { TOOLS, type ToolContext } from "./tools.js";
 import type { EngineClient } from "./engine-client.js";
 
 const REPORT = { latency: { p99: 120 }, summary: { avgRps: 500 }, statusCodes: { "200": 10 } };
@@ -76,6 +76,17 @@ describe("suggest_load_profile", () => {
 			)
 		);
 		expect(text).toMatch(/capacity[^.]*sloMs|sloMs[^.]*capacity/s);
+	});
+
+	test("points at the tool that reports the session's caps and allowlist", async () => {
+		const text = textOf(
+			await prompt("suggest_load_profile").build(
+				{ url: "https://api.example.com" },
+				ctxWith(fakeClient())
+			)
+		);
+		expect(TOOLS.map((tool) => tool.name)).toContain("get_safety_config");
+		expect(text).toContain("get_safety_config");
 	});
 
 	test("needs no engine data", async () => {

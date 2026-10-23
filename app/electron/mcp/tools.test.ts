@@ -3367,6 +3367,31 @@ describe("run_collection_smoke", () => {
 			);
 		});
 
+		test("a page slices the expanded list, not the direct requests", async () => {
+			const client = treeClient();
+			const res = await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", recursive: true, limit: 2, offset: 1 },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			const summary = res.structuredContent as {
+				results: Array<{ name: string; folder?: string }>;
+			};
+			// Expanded order is user, direct, invoice, refund: offset 1 starts at "direct".
+			expect(summary.results.map((row) => [row.name, row.folder])).toEqual([
+				["direct", "API"],
+				["invoice", "API / Billing"],
+			]);
+			expect(res.structuredContent).toMatchObject({
+				total: 2,
+				requestTotal: 4,
+				hasMore: true,
+				next: { offset: 3 },
+			});
+			// Only the page was composed; the rest of the list was read, not run.
+			expect(client.composeRequest).toHaveBeenCalledTimes(2);
+		});
+
 		test("a parent cycle terminates and runs each request once", async () => {
 			const client = treeClient({
 				listCollections: vi.fn().mockResolvedValue([
@@ -3836,6 +3861,484 @@ describe("run_collection_smoke", () => {
 		const tool = TOOLS.find((t) => t.name === "run_collection_smoke");
 		expect(descriptionOf(tool)).toMatch(/DIRECT requests/);
 		expect(descriptionOf(tool)).toMatch(/one at a time/);
+	});
+
+	test("the tool description steers a large collection to run_collection and says it reports progress", () => {
+		const text = descriptionOf(TOOLS.find((t) => t.name === "run_collection_smoke"));
+		expect(text).toMatch(/past about 25 requests or on a slow API use run_collection/);
+		expect(text).toMatch(/get_run_report/);
+		expect(text).toMatch(/Reports progress when the client asks/);
+	});
+
+	/**
+	 * A long smoke run was silent until it finished (#2451). The client hears
+	 * of it through `ctx.progress`, which exists only when it sent a
+	 * `progressToken`; every row ticks it exactly once, however the row ended.
+	 */
+	describe("progress", () => {
+		const SECRET = "s3cr3t-token-value";
+
+		/** Five rows, one per way a row can end; each carries SECRET wherever a row could echo it. */
+		function mixedRows() {
+			const rows = ["ok", "compose", "offlist", "status", "send"].map((kind, i) => ({
+				id: `r${i + 1}`,
+				name: `${kind} ${SECRET}`,
+				method: "GET",
+				url: `https://${kind === "offlist" ? "evil.test" : "api.example.com"}/${kind}?k=${SECRET}`,
+			}));
+			const byId = new Map(rows.map((r) => [r.id, r]));
+			return fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi
+					.fn()
+					.mockImplementation(({ requestId }: { requestId: string }) => {
+						if (requestId === "r2") {
+							return Promise.reject(new Error(`compose failed for ${SECRET}`));
+						}
+						const row = byId.get(requestId)!;
+						return Promise.resolve({ method: row.method, url: row.url, requestId });
+					}),
+				executeRequest: vi
+					.fn()
+					.mockImplementation(({ requestId }: { requestId: string }) => {
+						if (requestId === "r5")
+							return Promise.reject(new Error(`send failed ${SECRET}`));
+						return Promise.resolve({
+							status: requestId === "r4" ? 500 : 200,
+							testResults: [],
+						});
+					}),
+			});
+		}
+
+		const smoke = (ctx: ToolContext) =>
+			dispatchTool("run_collection_smoke", { collectionId: "c1" }, ctx);
+		const onApi = { allowlist: ["api.example.com"] };
+
+		test("ticks 0/total, then once per row, for a collection that all passes", async () => {
+			const rows = [1, 2, 3, 4, 5].map((n) => ({
+				id: `r${n}`,
+				name: `n${n}`,
+				method: "GET",
+				url: `https://api.example.com/${n}`,
+			}));
+			const client = fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve({
+						method: "GET",
+						url: `https://api.example.com/${requestId}`,
+					})
+				),
+				executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+			});
+			const progress = vi.fn();
+			const res = await smoke({ ...ctxWith(client, onApi), progress });
+			expect(res.structuredContent).toMatchObject({ total: 5, passed: 5 });
+			expect(progress.mock.calls).toEqual([
+				[0, 5],
+				[1, 5, "1/5 ok"],
+				[2, 5, "2/5 ok"],
+				[3, 5, "3/5 ok"],
+				[4, 5, "4/5 ok"],
+				[5, 5, "5/5 ok"],
+			]);
+		});
+
+		test("a skipped row, a compose failure, a bad status and a send error each still tick", async () => {
+			const progress = vi.fn();
+			const res = await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			expect(res.structuredContent).toMatchObject({
+				total: 5,
+				passed: 1,
+				failed: 3,
+				skipped: 1,
+			});
+			expect(progress.mock.calls).toEqual([
+				[0, 5],
+				[1, 5, "1/5 ok"],
+				[2, 5, "2/5 failed"],
+				[3, 5, "3/5 skipped"],
+				[4, 5, "4/5 failed"],
+				[5, 5, "5/5 failed"],
+			]);
+		});
+
+		test("a message is an index and a status word, never a name, url or error text", async () => {
+			const progress = vi.fn();
+			await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			const messages = progress.mock.calls.map(([, , message]) => message).filter(Boolean);
+			// Non-empty, so the loop below cannot pass by reading nothing.
+			expect(messages).toHaveLength(5);
+			for (const message of messages) {
+				expect(message).toMatch(/^\d+\/5 (ok|skipped|failed)$/);
+				expect(message).not.toContain(SECRET);
+			}
+		});
+
+		test("an empty collection ticks nothing", async () => {
+			const progress = vi.fn();
+			const client = fakeClient({ listRequests: vi.fn().mockResolvedValue([]) });
+			await smoke({ ...ctxWith(client, onApi), progress });
+			expect(progress).not.toHaveBeenCalled();
+		});
+
+		test("without ctx.progress the result is the same", async () => {
+			const progress = vi.fn();
+			const plain = await smoke(ctxWith(mixedRows(), onApi));
+			const ticked = await smoke({ ...ctxWith(mixedRows(), onApi), progress });
+			expect(progress).toHaveBeenCalled();
+			expect(plain.isError).toBeFalsy();
+			expect(plain.structuredContent).toEqual(ticked.structuredContent);
+		});
+	});
+	/**
+	 * A call runs one bounded page of the collection and says in the result what
+	 * it left (#2451). `total` and the counts stay the rows run in this call;
+	 * `requestTotal` is the collection's size in scope.
+	 */
+	describe("paging", () => {
+		const onApi = { allowlist: ["api.example.com"] };
+
+		/** `count` saved requests, named "req N", each composing to its own passing URL. */
+		function pagedClient(count: number, overrides: Parameters<typeof fakeClient>[0] = {}) {
+			const rows = Array.from({ length: count }, (_, i) => ({
+				id: `r${i + 1}`,
+				name: `req ${i + 1}`,
+				method: "GET",
+				url: `https://api.example.com/${i + 1}`,
+			}));
+			return fakeClient({
+				listRequests: vi.fn().mockResolvedValue(rows),
+				composeRequest: vi.fn().mockImplementation(({ requestId }: { requestId: string }) =>
+					Promise.resolve({
+						method: "GET",
+						url: `https://api.example.com/${requestId}`,
+					})
+				),
+				executeRequest: vi.fn().mockResolvedValue({ status: 200, testResults: [] }),
+				...overrides,
+			});
+		}
+
+		interface Paged {
+			total: number;
+			passed: number;
+			requestTotal: number;
+			hasMore: boolean;
+			next?: { offset: number };
+			cancelled?: boolean;
+			note?: string;
+			results: Array<{ name: string }>;
+		}
+
+		const smokePage = (
+			client: EngineClient,
+			args: Record<string, unknown>,
+			signal?: AbortSignal
+		) =>
+			dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, onApi),
+				signal
+			);
+		const pagedOf = (res: ToolResult) => res.structuredContent as unknown as Paged;
+		const namesOf = (res: ToolResult) => pagedOf(res).results.map((row) => row.name);
+
+		test("limit and offset cut a window from the list and say where the next one starts", async () => {
+			const client = pagedClient(5);
+			const res = await smokePage(client, { limit: 2, offset: 0 });
+			expect(namesOf(res)).toEqual(["req 1", "req 2"]);
+			expect(pagedOf(res)).toMatchObject({
+				total: 2,
+				passed: 2,
+				requestTotal: 5,
+				hasMore: true,
+				next: { offset: 2 },
+			});
+			expect(pagedOf(res).cancelled).toBeUndefined();
+			expect(pagedOf(res).note).toContain("Ran 2 of 5 requests");
+			expect(pagedOf(res).note).toContain("offset: 2");
+			expect(client.executeRequest).toHaveBeenCalledTimes(2);
+
+			const second = await smokePage(client, { limit: 2, offset: 2 });
+			expect(namesOf(second)).toEqual(["req 3", "req 4"]);
+			expect(pagedOf(second).next).toEqual({ offset: 4 });
+		});
+
+		test("the last page runs what is left and offers no next page", async () => {
+			const res = await smokePage(pagedClient(5), { limit: 2, offset: 4 });
+			expect(namesOf(res)).toEqual(["req 5"]);
+			expect(pagedOf(res)).toMatchObject({ total: 1, requestTotal: 5, hasMore: false });
+			expect(pagedOf(res)).not.toHaveProperty("next");
+			expect(pagedOf(res)).not.toHaveProperty("note");
+		});
+
+		test.each([5, 99])(
+			"an offset of %i past a 5-request list runs nothing and says so",
+			async (offset) => {
+				const client = pagedClient(5);
+				const res = await smokePage(client, { offset });
+				expect(res.isError).toBeFalsy();
+				expect(pagedOf(res)).toMatchObject({
+					total: 0,
+					requestTotal: 5,
+					hasMore: false,
+					results: [],
+				});
+				expect(pagedOf(res)).not.toHaveProperty("next");
+				expect(pagedOf(res).note).toMatch(/past the end/);
+				expect(client.composeRequest).not.toHaveBeenCalled();
+			}
+		);
+
+		test("a collection that fits one page carries the size and no note", async () => {
+			const res = await smokePage(pagedClient(3), {});
+			expect(pagedOf(res)).toMatchObject({ total: 3, requestTotal: 3, hasMore: false });
+			expect(pagedOf(res)).not.toHaveProperty("note");
+		});
+
+		test("the default limit of 25 cuts a longer list and discloses the rest in the result", async () => {
+			const client = pagedClient(30);
+			const first = await smokePage(client, {});
+			expect(pagedOf(first).results).toHaveLength(25);
+			expect(pagedOf(first)).toMatchObject({
+				total: 25,
+				requestTotal: 30,
+				hasMore: true,
+				next: { offset: 25 },
+			});
+			expect(pagedOf(first).note).toContain("Ran 25 of 30 requests");
+			// The note is in the text block a client reads, not only the structured one.
+			expect(firstText(first)).toContain("call again with offset: 25");
+
+			const rest = await smokePage(client, { offset: 25 });
+			expect(namesOf(rest)).toEqual(["req 26", "req 27", "req 28", "req 29", "req 30"]);
+			expect(pagedOf(rest).hasMore).toBe(false);
+		});
+
+		test.each([
+			["limit above 100", { limit: 101 }],
+			["limit of 0", { limit: 0 }],
+			["fractional limit", { limit: 1.5 }],
+			["negative offset", { offset: -1 }],
+		])("%s is refused before any request is composed or sent", async (_label, args) => {
+			const client = pagedClient(5);
+			const res = await smokePage(client, args);
+			expect(res.isError).toBe(true);
+			expect(client.composeRequest).not.toHaveBeenCalled();
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		});
+
+		test("the advertised input bounds limit at 100 and offset at 0", () => {
+			const shape = TOOLS.find((t) => t.name === "run_collection_smoke")!.inputSchema!;
+			const input = z.object(shape);
+			expect(input.safeParse({ collectionId: "c1", limit: 100, offset: 0 }).success).toBe(
+				true
+			);
+			expect(input.safeParse({ collectionId: "c1", limit: 101 }).success).toBe(false);
+			expect(input.safeParse({ collectionId: "c1", offset: -1 }).success).toBe(false);
+		});
+
+		test("progress counts the page it runs, not the collection", async () => {
+			const progress = vi.fn();
+			await dispatchTool(
+				"run_collection_smoke",
+				{ collectionId: "c1", limit: 2, offset: 1 },
+				{ ...ctxWith(pagedClient(5), onApi), progress }
+			);
+			expect(progress.mock.calls).toEqual([
+				[0, 2],
+				[1, 2, "1/2 ok"],
+				[2, 2, "2/2 ok"],
+			]);
+		});
+
+		test("a paged result validates against the advertised output schema, field for field", async () => {
+			const res = await smokePage(pagedClient(5), { limit: 2 });
+			const outputSchema = TOOLS.find(
+				(t) => t.name === "run_collection_smoke"
+			)!.outputSchema!;
+			expect(() => outputSchema.parse(res.structuredContent)).not.toThrow();
+			// zod's own parse strips an undeclared key; the SDK client refuses it.
+			const advertised = z.toJSONSchema(outputSchema, { io: "output" }) as unknown as {
+				properties: Record<string, unknown>;
+			};
+			const returned = Object.keys(res.structuredContent!);
+			expect(returned).toEqual(
+				expect.arrayContaining(["requestTotal", "hasMore", "next", "note"])
+			);
+			expect(Object.keys(advertised.properties)).toEqual(expect.arrayContaining(returned));
+		});
+
+		describe("cancellation", () => {
+			/** An `executeRequest` that completes @p completing sends, then runs @p onNext on the next. */
+			function executeUntil(completing: number, onNext: () => Promise<unknown>) {
+				let calls = 0;
+				return vi.fn().mockImplementation(() => {
+					calls += 1;
+					return calls <= completing
+						? Promise.resolve({ status: 200, testResults: [] })
+						: onNext();
+				});
+			}
+			const abortError = () =>
+				Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+
+			test("a cancellation after row 2 returns those two rows and where to resume", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(5, {
+					executeRequest: vi.fn().mockImplementation(() => {
+						// The cancellation lands as the second send finishes.
+						if (
+							(client.executeRequest as ReturnType<typeof vi.fn>).mock.calls
+								.length === 2
+						) {
+							controller.abort();
+						}
+						return Promise.resolve({ status: 200, testResults: [] });
+					}),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(res.isError).toBeFalsy();
+				expect(namesOf(res)).toEqual(["req 1", "req 2"]);
+				expect(pagedOf(res)).toMatchObject({
+					total: 2,
+					passed: 2,
+					requestTotal: 5,
+					cancelled: true,
+					hasMore: true,
+					next: { offset: 2 },
+				});
+				expect(pagedOf(res).note).toMatch(/^Cancelled after 2 of 5 requests/);
+				expect(client.executeRequest).toHaveBeenCalledTimes(2);
+			});
+
+			test("a send the cancellation interrupts is not a row, and the resume offset points at it", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(5, {
+					executeRequest: executeUntil(2, () => {
+						controller.abort();
+						return Promise.reject(abortError());
+					}),
+				});
+				const res = await smokePage(client, { offset: 1 }, controller.signal);
+				expect(namesOf(res)).toEqual(["req 2", "req 3"]);
+				expect(pagedOf(res)).toMatchObject({
+					total: 2,
+					failed: 0,
+					cancelled: true,
+					hasMore: true,
+					next: { offset: 3 },
+				});
+				expect(pagedOf(res).note).toContain("may have been sent");
+			});
+
+			test("a compose the cancellation interrupts is not a failed row either", async () => {
+				const controller = new AbortController();
+				let composed = 0;
+				const client = pagedClient(3, {
+					composeRequest: vi
+						.fn()
+						.mockImplementation(({ requestId }: { requestId: string }) => {
+							composed += 1;
+							if (composed === 2) {
+								controller.abort();
+								return Promise.reject(abortError());
+							}
+							return Promise.resolve({
+								method: "GET",
+								url: `https://api.example.com/${requestId}`,
+							});
+						}),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(namesOf(res)).toEqual(["req 1"]);
+				expect(pagedOf(res)).toMatchObject({
+					failed: 0,
+					cancelled: true,
+					next: { offset: 1 },
+				});
+			});
+
+			test("a send error with no cancellation stays a failed row and the run goes on", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(3, {
+					executeRequest: executeUntil(1, () =>
+						Promise.reject(new Error("socket hang up"))
+					),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(pagedOf(res)).toMatchObject({
+					total: 3,
+					passed: 1,
+					failed: 2,
+					hasMore: false,
+				});
+				expect(pagedOf(res).cancelled).toBeUndefined();
+				expect(
+					(res.structuredContent as { results: Array<{ error?: string }> }).results[1]
+						.error
+				).toBe("socket hang up");
+			});
+
+			test("a cancelled call reads its masking scopes without the aborted signal, so the rows still return", async () => {
+				const controller = new AbortController();
+				const refusesAborted = () => (signal?: AbortSignal) =>
+					signal?.aborted ? Promise.reject(abortError()) : Promise.resolve([]);
+				const client = pagedClient(3, {
+					executeRequest: executeUntil(1, () => {
+						controller.abort();
+						return Promise.reject(abortError());
+					}),
+					listCollections: vi.fn().mockImplementation(refusesAborted()),
+					listEnvironments: vi.fn().mockImplementation(refusesAborted()),
+					listAllRequests: vi.fn().mockImplementation(refusesAborted()),
+					getGlobals: vi
+						.fn()
+						.mockImplementation((signal?: AbortSignal) =>
+							signal?.aborted
+								? Promise.reject(abortError())
+								: Promise.resolve({ variables: [] })
+						),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				expect(res.isError).toBeFalsy();
+				expect(namesOf(res)).toEqual(["req 1"]);
+				expect(pagedOf(res).cancelled).toBe(true);
+			});
+
+			test("a cancelled result validates against the advertised output schema, field for field", async () => {
+				const controller = new AbortController();
+				const client = pagedClient(3, {
+					executeRequest: executeUntil(1, () => {
+						controller.abort();
+						return Promise.reject(abortError());
+					}),
+				});
+				const res = await smokePage(client, {}, controller.signal);
+				const outputSchema = TOOLS.find(
+					(t) => t.name === "run_collection_smoke"
+				)!.outputSchema!;
+				expect(() => outputSchema.parse(res.structuredContent)).not.toThrow();
+				const advertised = z.toJSONSchema(outputSchema, { io: "output" }) as unknown as {
+					properties: Record<string, unknown>;
+				};
+				const returned = Object.keys(res.structuredContent!);
+				expect(returned).toContain("cancelled");
+				expect(Object.keys(advertised.properties)).toEqual(
+					expect.arrayContaining(returned)
+				);
+			});
+		});
+	});
+
+	test("the description states the page size and how to page", () => {
+		const text = descriptionOf(TOOLS.find((t) => t.name === "run_collection_smoke"));
+		expect(text).toMatch(/25 requests a call by default \(`limit`, max 100\)/);
+		expect(text).toMatch(/page with `offset`/);
+		expect(text).toMatch(/edited between pages shifts the window/);
 	});
 });
 
@@ -15433,6 +15936,12 @@ describe("every structured read answers structuredContent its outputSchema accep
 				activeTab: { type: "run", entityId: "run_9", label: "Design run" },
 				activeEnvironment: { id: "env_1", name: "Staging" },
 			}),
+		},
+		{
+			tool: "get_safety_config",
+			has: ["allowlist", "caps", "gates", "disabledToolCount"],
+			args: {},
+			safety: { allowlist: ["a.test"], allowAll: true },
 		},
 		{ tool: "resolve_variables", args: {}, has: ["context", "variables", "summary"] },
 		{

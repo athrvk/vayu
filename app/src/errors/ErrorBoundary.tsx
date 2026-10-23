@@ -16,6 +16,13 @@ import { AlertCircle, RefreshCw, Home, Copy, Check } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { logError } from "./error-logger";
 
+/**
+ * The main process replaces a record's whole `fields` with `{ truncated: true }`
+ * once they serialise past 4000 characters (`electron/log-ipc.ts`), and a deep
+ * component stack alone can reach that, taking severity and component with it.
+ */
+const COMPONENT_STACK_LOG_CHARS = 2000;
+
 // App version from package.json (injected by Vite via vite.config.ts)
 const APP_VERSION = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
 
@@ -72,7 +79,7 @@ export class ErrorBoundary extends Component<Props, State> {
 			component: "ErrorBoundary",
 			action: "componentDidCatch",
 			metadata: {
-				componentStack: errorInfo.componentStack,
+				componentStack: errorInfo.componentStack?.slice(0, COMPONENT_STACK_LOG_CHARS),
 			},
 		});
 

@@ -20,16 +20,20 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "engine_port_stand_in.hpp"
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
+#include "proxy_server.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http::routes {
-// Declared in import.cpp; returns {http_status, json_body}.
+// Declared in import.cpp; returns {http_status, json_body}. No server owns
+// these sends, so nothing cancels them.
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
-const vayu::http::TransportPolicy& transport);
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel = nullptr);
 
 // The streaming half of the same route (issue #882). `emit` takes one SSE
 // event's name and data and returns false once its listener has gone.
@@ -37,13 +41,15 @@ using ImportFetchEmitter =
 std::function<bool (const std::string& event, const nlohmann::json& data)>;
 std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
 const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel,
 const ImportFetchEmitter& emit);
 
 // The client config both forms build for a body, so the bounds a fetch runs
 // under can be asserted without a test that waits out a 30-second stall
 // window; nullopt for a refused body.
 std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
-const vayu::http::TransportPolicy& transport);
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel = nullptr);
 } // namespace vayu::http::routes
 
 namespace {
@@ -393,7 +399,7 @@ TEST (ImportFetchStream, ReportsProgressAndThenTheResult) {
 
     const auto [status, body] =
     vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/large")),
-    vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::TransportPolicy{}, nullptr, recorder.emitter ());
 
     // Nothing to answer with a status: the outcome went out as an event.
     EXPECT_EQ (status, 200);
@@ -420,7 +426,7 @@ TEST (ImportFetchStream, ReportsNoTotalForAResponseThatDeclaresNoLength) {
     Recorder recorder;
 
     vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
-    vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::TransportPolicy{}, nullptr, recorder.emitter ());
 
     const auto progress = recorder.of ("progress");
     ASSERT_FALSE (progress.empty ());
@@ -438,7 +444,7 @@ TEST (ImportFetchStream, ThrottlesProgressWellBelowOneEventPerWrite) {
     Recorder recorder;
 
     vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
-    vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::TransportPolicy{}, nullptr, recorder.emitter ());
 
     const auto progress = recorder.of ("progress");
     ASSERT_FALSE (progress.empty ());
@@ -450,7 +456,7 @@ TEST (ImportFetchStream, ReportsAFailedFetchAsAnErrorEvent) {
 
     const auto [status, body] = vayu::http::routes::import_fetch_stream (
     fetch_body ("http://127.0.0.1:1/spec.json"), vayu::http::TransportPolicy{},
-    recorder.emitter ());
+    nullptr, recorder.emitter ());
 
     // Still a 200: the response headers went out before the fetch began, so a
     // status is no longer available to say this with. Which is why the event
@@ -470,7 +476,7 @@ TEST (ImportFetchStream, ReportsAnOverBoundResponseAsAnErrorEvent) {
     Recorder recorder;
 
     vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/large"), 1024),
-    vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::TransportPolicy{}, nullptr, recorder.emitter ());
 
     ASSERT_FALSE (recorder.events.empty ());
     EXPECT_EQ (recorder.events.back ().event, "error");
@@ -483,7 +489,7 @@ TEST (ImportFetchStream, RefusesAnInvalidRequestBeforeEmittingAnything) {
 
     const auto [status, body] = vayu::http::routes::import_fetch_stream (
     fetch_body ("ftp://example.com/spec.json"), vayu::http::TransportPolicy{},
-    recorder.emitter ());
+    nullptr, recorder.emitter ());
 
     // Nothing has been written yet, so this is still a status the client reads
     // the same way it reads the buffered route's.
@@ -499,7 +505,7 @@ TEST (ImportFetchStream, StopsFetchingOnceTheListenerHasGone) {
     Recorder recorder (false); // The socket died after the first frame.
 
     vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
-    vayu::http::TransportPolicy{}, recorder.emitter ());
+    vayu::http::TransportPolicy{}, nullptr, recorder.emitter ());
 
     // The 4 MiB body is abandoned rather than read to the end for nobody. One
     // event went out - the one whose write revealed the listener was gone.
@@ -526,6 +532,19 @@ TEST (ImportFetchBounds, AFetchIsBoundedByAStallRatherThanByATotal) {
     // Still bounded in bytes - that is what stands in for the total it replaced,
     // and a fetch with neither bound would be a fetch nothing could stop.
     EXPECT_EQ (config->max_response_bytes, 4096U);
+}
+
+// The route's `server_stopping` reaches the client, so `Server::stop()` can end
+// a fetch that is still trickling in (issue #2683). Asserted on the config for
+// the reason the stall bound above is: the flag is the route's, and the
+// cancel itself is `HttpClientTest`'s to prove.
+TEST (ImportFetchBounds, AFetchCarriesTheCancelFlagTheRouteHandsIt) {
+    const std::atomic<bool> stopping{ false };
+    const auto config = vayu::http::routes::import_fetch_client_config (
+    fetch_body ("http://example.com/spec.json"), vayu::http::TransportPolicy{}, &stopping);
+    ASSERT_HAS_VALUE (config);
+
+    EXPECT_EQ (config->cancel, &stopping);
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +722,7 @@ TEST (ImportFetchReference, RefusesAReferenceOrSourceUrlOfTheWrongShape) {
         // The streamed form reads the same body through the same parser.
         Recorder recorder;
         const auto [streamed, refusal] = vayu::http::routes::import_fetch_stream (
-        body.dump (), direct (), recorder.emitter ());
+        body.dump (), direct (), nullptr, recorder.emitter ());
         EXPECT_EQ (streamed, 400) << body.dump ();
         EXPECT_EQ (refusal, json);
         EXPECT_TRUE (recorder.events.empty ());
@@ -715,7 +734,7 @@ TEST (ImportFetchReference, TheStreamedFormRefusesTheSamePeerAsAnErrorEvent) {
     vayu::tests::EchoServer other;
     Recorder recorder;
     const auto [status, body] = vayu::http::routes::import_fetch_stream (
-    reference_body (other.url (), source.url ()), direct (), recorder.emitter ());
+    reference_body (other.url (), source.url ()), direct (), nullptr, recorder.emitter ());
 
     EXPECT_EQ (status, 200);
     ASSERT_FALSE (recorder.events.empty ());
@@ -733,7 +752,7 @@ TEST (ImportFetchReference, TheStreamedFormFetchesTheSourcesOwnHostAndPort) {
     "http://127.0.0.1:" + std::to_string (source.port ()) + "/spec.yaml";
     Recorder recorder;
     const auto [status, body] = vayu::http::routes::import_fetch_stream (
-    reference_body (source.url (), spec), direct (), recorder.emitter ());
+    reference_body (source.url (), spec), direct (), nullptr, recorder.emitter ());
 
     EXPECT_EQ (status, 200);
     ASSERT_FALSE (recorder.events.empty ());
@@ -749,7 +768,7 @@ TEST (ImportFetchReference, TheStreamedFormDoesNotFollowARedirect) {
     Recorder recorder;
     vayu::http::routes::import_fetch_stream (
     reference_body (origin.redirect_to (target.url ()), origin.url ()),
-    direct (), recorder.emitter ());
+    direct (), nullptr, recorder.emitter ());
 
     ASSERT_FALSE (recorder.events.empty ());
     const Emitted& last = recorder.events.back ();
@@ -768,8 +787,8 @@ TEST (ImportFetchReference, TheStreamedFormRefusesALoopbackNameOnAnotherPortThan
     for (const std::string& url : { "http://localhost:" + port + "/echo",
          "http://vayu-ref.localhost:" + port + "/echo" }) {
         Recorder recorder;
-        vayu::http::routes::import_fetch_stream (
-        reference_body (url, source.url ()), direct (), recorder.emitter ());
+        vayu::http::routes::import_fetch_stream (reference_body (url, source.url ()),
+        direct (), nullptr, recorder.emitter ());
 
         ASSERT_FALSE (recorder.events.empty ()) << url;
         const Emitted& last = recorder.events.back ();
@@ -786,7 +805,8 @@ TEST (ImportFetchReference, TheStreamedFormWithoutTheFieldFollowsARedirect) {
     vayu::tests::EchoServer target;
     Recorder recorder;
     vayu::http::routes::import_fetch_stream (
-    fetch_body (origin.redirect_to (target.url ())), direct (), recorder.emitter ());
+    fetch_body (origin.redirect_to (target.url ())), direct (), nullptr,
+    recorder.emitter ());
 
     ASSERT_FALSE (recorder.events.empty ());
     EXPECT_EQ (recorder.events.back ().event, "result")
@@ -819,6 +839,97 @@ TEST (ImportFetchReference, TheClientCarriesTheRuleOnlyForAReference) {
     fetch_body ("http://example.com/a.json"), direct ());
     ASSERT_HAS_VALUE (typed);
     EXPECT_FALSE (typed->local_peer_rule.has_value ());
+}
+
+// Through a configured proxy (#2605). A loopback proxy (Fiddler, mitmproxy) is
+// the connected peer of every fetch it carries, so the rule passes it and
+// judges the reference's URL instead. `specs.example.test` resolves nowhere;
+// the proxy stands for one that can, forwarding to a local origin.
+//
+// Mutation checks: drop `is_configured_proxy` from `refuses_local_peer` and
+// `AReferenceByNameIsFetchedThroughALoopbackProxy` is refused; drop the
+// `refused_reference_url` call from `Client::send` and the literal references
+// reach the proxy; pass the configured proxy ahead of the reserved-port check
+// in `refuse_forbidden_peer` and the engine-port proxy is sent to.
+
+constexpr const char* NAMED_SOURCE =
+"http://specs.example.test/echo/openapi.yaml";
+
+/// A manual proxy at @p proxy_url, with nothing exempted from it.
+vayu::http::TransportPolicy through (const std::string& proxy_url) {
+    vayu::http::TransportPolicy policy;
+    policy.proxy_mode = vayu::http::ProxyMode::Manual;
+    policy.proxy_url  = proxy_url;
+    return policy;
+}
+
+TEST (ImportFetchReference, AReferenceByNameIsFetchedThroughALoopbackProxy) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::MockProxy proxy;
+    proxy.forward_every_target_to ("http://127.0.0.1:" + std::to_string (origin.port ()));
+    const auto policy = through (proxy.url ());
+
+    const auto [document, top] =
+    vayu::http::routes::import_fetch (fetch_body (NAMED_SOURCE), policy);
+    EXPECT_EQ (document, 200) << top.dump ();
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body ("http://specs.example.test/echo/pet.yaml", NAMED_SOURCE), policy);
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body.value ("content", std::string ()), "{}");
+    EXPECT_EQ (proxy.count (), 2U);
+    EXPECT_EQ (origin.requests_seen (), 2);
+}
+
+// Behind the proxy only the URL says where a reference goes, so one naming a
+// loopback or link-local host is refused before the proxy is dialled.
+TEST (ImportFetchReference, ALiteralLocalReferenceIsRefusedThroughAProxy) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::MockProxy proxy;
+    const auto policy      = through (proxy.url ());
+    const std::string port = std::to_string (origin.port ());
+    for (const std::string& url : { origin.url (), "http://localhost:" + port + "/echo",
+         "http://vayu-ref.localhost:" + port + "/echo", "http://[::1]:" + port + "/echo",
+         std::string ("http://169.254.169.254/latest/meta-data/") }) {
+        const auto [status, body] =
+        vayu::http::routes::import_fetch (reference_body (url, NAMED_SOURCE), policy);
+        EXPECT_EQ (status, 502) << url << ": " << body.dump ();
+        EXPECT_NE (error_message (body).find (LOCAL_PEER_RULE), std::string::npos)
+        << url << ": " << error_message (body);
+    }
+    EXPECT_EQ (proxy.count (), 0U)
+    << "a refused reference was handed to the proxy";
+    EXPECT_EQ (origin.requests_seen (), 0);
+}
+
+// The source's own host and port stay reachable through the proxy, as they
+// are without one.
+TEST (ImportFetchReference, TheSourcesOwnHostAndPortAreFetchedThroughAProxy) {
+    vayu::tests::EchoServer source;
+    vayu::tests::MockProxy proxy;
+    const std::string spec =
+    "http://localhost:" + std::to_string (source.port ()) + "/echo/spec.yaml";
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body (source.url (), spec), through (proxy.url ()));
+
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (proxy.count (), 1U);
+    EXPECT_EQ (source.requests_seen (), 1);
+}
+
+// The exemption is the reference rule's alone: a proxy on Vayu's own port is
+// still the reserved-port refusal, and nothing reaches it.
+TEST (ImportFetchReference, AProxyOnVayusOwnPortIsStillRefused) {
+    const auto& stand_in      = vayu::tests::engine_port_stand_in ();
+    const int seen_before     = stand_in.requests_seen ();
+    const std::string port    = std::to_string (stand_in.port ());
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body ("http://specs.example.test/echo/pet.yaml", NAMED_SOURCE),
+    through ("http://127.0.0.1:" + port));
+
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_NE (error_message (body).find ("own engine port " + port), std::string::npos)
+    << error_message (body);
+    EXPECT_EQ (stand_in.requests_seen (), seen_before);
 }
 
 } // namespace

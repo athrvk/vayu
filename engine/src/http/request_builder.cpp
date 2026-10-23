@@ -16,7 +16,8 @@ namespace vayu::http {
 RequestBuild build_request (const nlohmann::json& config,
 vayu::db::Database* db,
 int timeout_ms,
-AuthResolution auth_resolution) {
+AuthResolution auth_resolution,
+const std::atomic<bool>* cancel) {
     RequestBuild out;
 
     auto parsed = vayu::json::deserialize_request (config);
@@ -43,7 +44,8 @@ AuthResolution auth_resolution) {
         return out;
     }
 
-    auto auth = apply_auth (out.request, config.value ("auth", nlohmann::json ()), db);
+    auto auth =
+    apply_auth (out.request, config.value ("auth", nlohmann::json ()), db, cancel);
     out.auth_fetch_ms = auth.token_fetch_ms;
     if (!auth.ok) {
         out.ok            = false;

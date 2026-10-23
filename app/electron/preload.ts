@@ -247,6 +247,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("update:downloaded", handler);
 		return () => ipcRenderer.removeListener("update:downloaded", handler);
 	},
+	// Sent instead of `update:downloaded` when the installer's attestation does
+	// not verify; shape mirrors `UpdateVerificationFailure` in updater.ts.
+	onUpdateVerificationFailed: (callback: (info: { version: string; reason: string }) => void) => {
+		const handler = (_event: unknown, info: { version: string; reason: string }) =>
+			callback(info);
+		ipcRenderer.on("update:verificationFailed", handler);
+		return () => ipcRenderer.removeListener("update:verificationFailed", handler);
+	},
 	// Silent strategies only (Windows, Linux AppImage) - see updater.ts.
 	onDownloadProgress: (
 		callback: (progress: {
@@ -370,13 +378,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// The system folder picker, for Settings > Files, the body editor's "Allow
 	// folder..." and the import preview. Main allows the chosen folder itself
 	// (`POST /file-roots` with the grant secret, #2356) and answers what the
-	// engine said, so the renderer never names a folder to allow. The shape
-	// mirrors `AllowFolderReply` in electron/file-ipc.ts, inlined because this
-	// file is a CommonJS script and must not grow imports.
-	allowFolder: (options?: {
-		defaultPath?: string;
-		title?: string;
-	}): Promise<
+	// engine said, so the renderer never names a folder to allow. It names the
+	// dialog by key too, not its title or starting folder (#2378). The key and
+	// the shape mirror `FolderDialogKey` and `AllowFolderReply` in
+	// electron/file-ipc.ts, inlined because this file is a CommonJS script and
+	// must not grow imports.
+	allowFolder: (
+		key: "allow-folder"
+	): Promise<
 		| { outcome: "cancelled" }
 		| {
 				outcome: "done";
@@ -385,7 +394,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		  }
 		| { outcome: "refused"; path: string; status: number; code: string; message: string }
 		| { outcome: "unreachable"; path: string; message: string }
-	> => ipcRenderer.invoke("file:allowFolder", options),
+	> => ipcRenderer.invoke("file:allowFolder", key),
 
 	// Stop allowing a folder, by the id the engine gave its row. Same reply
 	// family as `allowFolder` (`RemoveFolderReply` in electron/file-ipc.ts).

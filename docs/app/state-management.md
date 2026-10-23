@@ -1260,6 +1260,26 @@ the dashboard then shows no active test while one streams.
 
 **Non-persisted** (fresh per session).
 
+#### `update-verification-store.ts` - An Installer That Would Not Verify
+
+The downloaded update whose build-provenance attestation did not verify (issue
+#2372), or `null`.
+
+**State:**
+```typescript
+{
+  failure: { version: string; reason: string } | null
+  setFailure: (failure) => void
+  clear: () => void
+}
+```
+
+**Non-persisted.** `useAppUpdate` writes it from `onUpdateVerificationFailed` and
+clears it on the next `update:available` or `update:downloaded`. It is a store
+rather than hook state because the banner receives the event for the whole
+session while `UpdatesCard` mounts only when Settings opens, and a per-instance
+hook would show it nothing. Both read it with a selector.
+
 #### `host-sleep-store.ts` - When The Machine Slept Under A Run
 
 The intervals the host spent asleep while a run was streaming (issue #1357),
@@ -1975,8 +1995,8 @@ click; refetching either removes it or proves it real.
   request-body file may be sent from without a per-file pick, read by Settings >
   Files, the binary body editor and the import preview. The list is a plain
   `GET`; both writes go through the main process, which holds the engine's
-  grant secret (#2356): the allow mutation takes where the folder picker opens,
-  never a folder, and resolves with the engine's answer (`cancelled` included).
+  grant secret (#2356): the allow mutation takes no argument - neither a folder nor a
+  title nor where the picker opens (#2378) - and resolves with the engine's answer (`cancelled` included).
   An allow that lands invalidates rather than appending: the engine stores the
   canonical path, which can differ from the one picked
 

@@ -31,8 +31,12 @@ import type { McpHost } from "./tools/contract.js";
 import { GUARDED_WRITE_SENTENCE, resolveRemedyTokens } from "./remedy.js";
 import type { EngineClient } from "./engine-client.js";
 
-/** What names the other host's remedy: never allowed to reach a CLI session. */
-const APP_ONLY_WORDING = /Settings|Vayu app/;
+/**
+ * What names the other host's remedy: never allowed to reach a CLI session.
+ * `Settings` is a word here, so the `allowNetworkSettings` flag a tool reports
+ * is not mistaken for the app's Settings screen.
+ */
+const APP_ONLY_WORDING = /\bSettings\b|Vayu app/;
 
 function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}): EngineClient {
 	return {
@@ -312,6 +316,11 @@ describe("server instructions, per host", () => {
 		expect(text).toContain("VAYU_MCP_ALLOW_WRITES");
 		expect(text).toContain("VAYU_MCP_REVEAL_SECRETS");
 		expect(text).not.toMatch(APP_ONLY_WORDING);
+	});
+
+	it("names the iterations cap beside the other load caps", async () => {
+		const text = await instructionsFor("app", {});
+		expect(text).toMatch(/RPS, virtual-user, duration and iteration caps/);
 	});
 
 	it("keeps the Settings path for an app session", async () => {

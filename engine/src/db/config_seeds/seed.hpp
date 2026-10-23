@@ -267,7 +267,7 @@ inline std::function<ConfigEntry (ConfigEntry)> unit (const char* symbol) {
 }
 
 // depends_on: this entry means nothing until the named boolean sibling in the
-// same category is switched on ("Header name" without "Correlation Id" being
+// same category is switched on ("Header name" without "Correlation ID" being
 // true). The app nests the entry under its parent, indented and disabled
 // until the parent reads true; `ConfigSeeder::validate_dependencies` refuses
 // a key naming an absent, cross-category, or non-boolean parent.

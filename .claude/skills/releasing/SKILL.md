@@ -309,10 +309,17 @@ Things about it that the code cannot tell you:
   pinned to `release.yml` and to `refs/tags/v<version>`; a `gh` too old to know
   `--source-ref` fails closed). Every `curl` carries `CURL_SAFE` (https-only);
   `VAYU_CURL_PROTO` is the test seam that lets `install_e2e.sh` use `file://`.
-  The `latest*.yml` feeds and the Windows
-  `.exe.blockmap` are excluded: they are electron-updater's own metadata, and
-  what it assembles from them is verified against the sha512 the feed carries,
-  not against a sidecar nothing would fetch.
+  The publish job attests every asset, the `latest*.yml` feeds and the `.blockmap` files
+  included; only the `*.sha256` sidecars are excluded, since each restates the
+  digest of an attested installer. The in-app updater (`electron/update-attestation.ts`,
+  #2372) checks the installer, not the feed: on Windows and the Linux AppImage
+  nothing is installed until the downloaded file's attestation names
+  `release.yml` in `athrvk/vayu` at the exact tag `v<version>`, on top of the
+  sha512 electron-updater checks against the feed. Because that check ships
+  inside the app, **the first release carrying it is still installed by the
+  previous, ungated updater**; only updates from that release onward are
+  verified. Say so in that release's notes. `FIRST_ATTESTED_VERSION` is
+  `install.sh`'s and does not move for it.
 - **Errors go through `die()`, never `step || exit 1` at a call site.** Bash
   disables `errexit` for the whole body of a function invoked in an `||`
   context, so an unchecked command inside it falls through - that is how a failed

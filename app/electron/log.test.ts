@@ -18,8 +18,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import fs from "node:fs";
 import { fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { createLogger, applyFloorFromEngine, type LogLevel } from "./log";
+import { createLogger, applyFloorFromEngine, stripUrlSecretsInText, type LogLevel } from "./log";
 
 const schema = JSON.parse(
 	readFileSync(fromRepoRoot("docs/engine/log-record.schema.json"), "utf8")
@@ -120,6 +121,98 @@ describe("log.ts - redaction", () => {
 		for (const key of ["authorization", "cookie", "apikey", "password", "client_secret"]) {
 			expect(record[key]).toBe("<redacted>");
 		}
+	});
+});
+
+describe("log.ts - owner-only files", () => {
+	const onWindows = process.platform === "win32";
+
+	/** A logs directory that does not exist yet, so the logger creates it. */
+	function freshLogsDir(): string {
+		return path.join(dir, "nested", "logs");
+	}
+
+	// Vitest runs this file in a worker thread, where `process.umask(mask)`
+	// throws, so the umask cannot be pinned. The real-mode case below therefore
+	// runs only where the inherited umask leaves group and other bits to the
+	// request (the usual 022), and the spy case holds the request itself
+	// everywhere else.
+	//
+	// Mutation check: drop `mode: LOG_FILE_MODE` from the appendFileSync (or
+	// `mode: LOG_DIR_MODE` from the mkdirSync) and the matching assertion reds.
+	it("asks for a 0700 directory and a 0600 file", () => {
+		const mkdir = vi.spyOn(fs, "mkdirSync");
+		const append = vi.spyOn(fs, "appendFileSync");
+		const log = createLogger("app", { logsDir: freshLogsDir(), consoleEnabled: false });
+		log.applyFloor("debug");
+		log.info("main", "hello");
+
+		expect(readdirSync(freshLogsDir())).not.toHaveLength(0);
+		expect(mkdir).toHaveBeenCalledWith(freshLogsDir(), { recursive: true, mode: 0o700 });
+		expect(append).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
+			mode: 0o600,
+		});
+	});
+
+	it.skipIf(onWindows || (process.umask() & 0o055) !== 0)(
+		"creates the directory 0700 and the file 0600 on disk",
+		() => {
+			const logsDir = freshLogsDir();
+			const log = createLogger("app", { logsDir, consoleEnabled: false });
+			log.applyFloor("debug");
+			log.info("main", "hello");
+
+			const entries = readdirSync(logsDir);
+			expect(entries).not.toHaveLength(0);
+			expect(statSync(logsDir).mode & 0o777).toBe(0o700);
+			for (const name of entries) {
+				expect(statSync(path.join(logsDir, name)).mode & 0o777).toBe(0o600);
+			}
+		}
+	);
+
+	// Windows ignores `mode`: the file inherits the directory's ACL, so the
+	// only thing to hold there is that the write still lands.
+	it.runIf(onWindows)("still writes the file, whose ACL it inherits", () => {
+		const logsDir = freshLogsDir();
+		const log = createLogger("app", { logsDir, consoleEnabled: false });
+		log.applyFloor("debug");
+		log.info("main", "hello");
+
+		const entries = readdirSync(logsDir);
+		expect(entries).toHaveLength(1);
+		expect(statSync(path.join(logsDir, entries[0])).size).toBeGreaterThan(0);
+	});
+});
+
+describe("log.ts - stripUrlSecretsInText", () => {
+	it("strips every URL in a sentence and leaves the words around them", () => {
+		expect(
+			stripUrlSecretsInText(
+				"from https://u:p@a.example/x?code=1 to http://b.example:8080/y#frag done"
+			)
+		).toBe("from https://a.example/x to http://b.example:8080/y done");
+	});
+
+	it("strips a URL that ends at a closing parenthesis", () => {
+		expect(stripUrlSecretsInText("failed (https://u:p@h/p?state=1) twice")).toBe(
+			"failed (https://h/p) twice"
+		);
+	});
+
+	it("returns text without a URL unchanged", () => {
+		const text = "plain sentence, key=value & a:b";
+		expect(stripUrlSecretsInText(text)).toBe(text);
+	});
+
+	it("leaves a bare path-and-query alone", () => {
+		const text = "GET /items?token=abc failed";
+		expect(stripUrlSecretsInText(text)).toBe(text);
+	});
+
+	it("scans a long run of letters in linear time", () => {
+		const text = "a".repeat(1_000_000);
+		expect(stripUrlSecretsInText(text)).toBe(text);
 	});
 });
 

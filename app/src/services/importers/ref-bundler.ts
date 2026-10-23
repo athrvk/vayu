@@ -69,6 +69,7 @@
 import { asRecord, asStr } from "@/lib/json-node";
 import { apiService } from "@/services/api";
 import { formatBytes } from "@/modules/settings/utils/format-size";
+import { ApiError } from "@/services/http-client";
 import type { ImportFetchOptions } from "@/types/api";
 
 /** Root key the resolved documents are inlined under. */
@@ -124,9 +125,11 @@ export interface RefReport {
 	 */
 	fetched: string[];
 	/**
-	 * Targets this import refused to follow on purpose - a local file outside the
-	 * picked folder, a loopback or link-local address - each with the reason. They
-	 * are also counted in `unresolvedRefs`; this is the part that names them.
+	 * Targets this import did not follow, each with the reason: a local file outside
+	 * the picked folder, a loopback or link-local address, or any answer the engine
+	 * gave for a fetch it would not or could not make. They are also counted in
+	 * `unresolvedRefs`; this is the part that names them. A target that was simply
+	 * unreachable or missing on disk is counted but not listed.
 	 */
 	refused: RefusedRef[];
 }
@@ -171,8 +174,8 @@ export class SpecBundleTooLargeError extends Error {
 	constructor(bytes: number, maxBytes: number, bundled = true) {
 		super(
 			bundled
-				? `The spec and the files it references come to ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI Document Size setting, or import a bundled spec.`
-				: `The spec is ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI Document Size setting.`
+				? `The spec and the files it references come to ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI document size setting, or import a bundled spec.`
+				: `The spec is ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI document size setting.`
 		);
 		this.name = "SpecBundleTooLargeError";
 	}
@@ -516,7 +519,8 @@ export async function bundleExternalRefs(
  * Judged from the text only, as the early refusal that names the ref in the
  * preview. A DNS name that resolves to a local address, and a redirect that
  * lands on one, are caught by the engine, which checks the address it connects
- * to and follows no redirect for a reference (issue #2364).
+ * to and follows no redirect for a reference (issue #2364); its answer is named
+ * in the preview too (issue #2605).
  */
 export function isLocalAddress(url: string): boolean {
 	let host: string;
@@ -581,8 +585,12 @@ async function loadTarget(
 		return { text };
 	} catch (e) {
 		if (e instanceof RefRefusedError) return { refusal: e.message };
-		// Unreachable, refused by a gate, or over the engine's own cap. The count
-		// is what the user sees; the reason belongs to the channel that refused.
+		// The engine answered and said why (a redirect, a refused local peer, a 404,
+		// the size cap), in a sentence written for the person reading the preview.
+		// `readApiError` fills the message from the status when the body had none,
+		// so it is never empty. Anything else - the engine unreachable, a reader
+		// that threw - has no sentence of its own and stays an unnamed skip.
+		if (e instanceof ApiError) return { refusal: e.message };
 		return {};
 	}
 }

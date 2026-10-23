@@ -29,6 +29,21 @@ struct TransferData;
 class DnsCache;
 
 /**
+ * @brief The host and port a URL dials.
+ */
+struct UrlAuthority {
+    /// Hostname, or the address of an IP-literal URL with its brackets removed.
+    /// Empty when the URL names no authority. A non-ASCII name is in its
+    /// punycode form, the one the transfer dials (`ascii_host`).
+    std::string host;
+    /// Explicit port, or the scheme default when the URL names none.
+    int port = 0;
+    /// True when `host` is an address rather than a name, so there is nothing
+    /// to resolve and nothing to pin.
+    bool is_ip_literal = false;
+};
+
+/**
  * @brief One transfer's connect-time state beyond the process-wide reserved
  *        ports: what `apply_transport_policy` hands libcurl as
  *        `CURLOPT_PREREQDATA`, so it must outlive `curl_easy_perform`.
@@ -39,10 +54,25 @@ class DnsCache;
 struct ConnectedPeerCheck {
     /// The rule a reference fetch runs under, or null for none.
     const LocalPeerRule* local_peers = nullptr;
+    /// The proxy the transfer names (`configured_proxy`), written by
+    /// `apply_transport_policy`. `local_peers` does not refuse it (#2605).
+    std::optional<UrlAuthority> proxy;
     /// Set by the callback when `local_peers` refused the connection, so
     /// `curl_to_error` can name that rule rather than libcurl's abort.
     bool refused_local_peer = false;
 };
+
+/**
+ * @brief The proxy @p policy puts on a handle by URL, as the authority
+ *        libcurl dials: `manual`'s, or `system`'s when it resolved one.
+ *
+ * Nullopt for `off`, for an empty URL, and for `environment` (and `system`
+ * with nothing resolved), where libcurl reads the proxy from the process
+ * environment and the engine never learns it. A URL naming no port is dialled
+ * on libcurl's proxy default: 443 for an `https` proxy, 1080 for every other
+ * scheme, which is not the target default `parse_authority` answers.
+ */
+[[nodiscard]] std::optional<UrlAuthority> configured_proxy (const TransportPolicy& policy);
 
 /**
  * @brief Convert CURL error code to vayu Error
@@ -111,7 +141,9 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * `validate_transferable` gives. @p peer_check adds a `LocalPeerRule` on top
  * for one transfer (#2364); `CURLOPT_PREREQDATA` is written on every call,
  * null included, so a pooled handle never keeps a previous transfer's state.
- * With a proxy in force the peer judged is the proxy, for both rules.
+ * With a proxy in force the peer judged is the proxy, for both rules; the
+ * applier records `configured_proxy` on @p peer_check, so the reference rule
+ * passes that proxy while the reserved ports still refuse it.
  *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
@@ -126,7 +158,8 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *            when the registry is non-empty, so the load path pays nothing for
  *            a feature it is not using.
  * @param peer_check This transfer's connect-time state, or null. Must outlive
- *                   the transfer; the callback writes its refusal into it.
+ *                   the transfer; the applier writes its `proxy` and the
+ *                   callback its refusal into it.
  * @return The registry entry whose certificate was put on the handle, or null
  *         when none matched. Points into @p policy and lives exactly as long -
  *         a caller that keeps it (both design funnels record the label on the
@@ -142,21 +175,6 @@ ConnectedPeerCheck* peer_check = nullptr);
  * @brief Get HTTP status text from status code
  */
 const char* status_text (int code);
-
-/**
- * @brief The host and port a URL dials.
- */
-struct UrlAuthority {
-    /// Hostname, or the address of an IP-literal URL with its brackets removed.
-    /// Empty when the URL names no authority. A non-ASCII name is in its
-    /// punycode form, the one the transfer dials (`ascii_host`).
-    std::string host;
-    /// Explicit port, or the scheme default when the URL names none.
-    int port = 0;
-    /// True when `host` is an address rather than a name, so there is nothing
-    /// to resolve and nothing to pin.
-    bool is_ip_literal = false;
-};
 
 /**
  * @brief Parse the authority of a request URL.

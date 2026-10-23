@@ -238,7 +238,7 @@ TEST_F (ConfigRouteTest, OutOfRangeReportsBoundAndValue) {
     vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"999"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
-    EXPECT_NE (message.find ("Worker Threads"), std::string::npos);
+    EXPECT_NE (message.find ("Worker threads"), std::string::npos);
     EXPECT_NE (message.find ("128"), std::string::npos); // the exceeded bound
     EXPECT_NE (message.find ("999"), std::string::npos); // the offending value
 }
@@ -248,7 +248,7 @@ TEST_F (ConfigRouteTest, NonIntegerReportsType) {
     vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"abc"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
-    EXPECT_NE (message.find ("Worker Threads"), std::string::npos);
+    EXPECT_NE (message.find ("Worker threads"), std::string::npos);
     EXPECT_NE (message.find ("integer"), std::string::npos);
 }
 
@@ -266,7 +266,7 @@ TEST_F (ConfigRouteTest, AnIntegerWithTrailingTextOrSpaceIs400AndDoesNotPersist)
         vayu::http::routes::apply_config_update (*db_, update.dump ());
         EXPECT_EQ (status, 400) << "'" << bad << "'";
         const auto message = body["error"]["message"].get<std::string> ();
-        EXPECT_NE (message.find ("Worker Threads"), std::string::npos) << message;
+        EXPECT_NE (message.find ("Worker threads"), std::string::npos) << message;
         EXPECT_NE (message.find ("integer"), std::string::npos) << message;
     }
 
@@ -386,7 +386,7 @@ TEST_F (ConfigRouteTest, EnumUpdateRejectsValueOutsideOptionsWith400) {
     *db_, R"({"entries":{"defaultHttpVersion":"http3"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
-    EXPECT_NE (message.find ("Default HTTP Version"), std::string::npos);
+    EXPECT_NE (message.find ("Default HTTP version"), std::string::npos);
     EXPECT_NE (message.find ("http3"), std::string::npos);
 }
 

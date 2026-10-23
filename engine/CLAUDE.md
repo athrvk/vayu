@@ -706,6 +706,13 @@ logged as a warning: it means a client skipped composition.
   same order (keep the manager in a `unique_ptr` reset first). Waiting on
   `context->closed()` is not draining: it flips before the completion callback
   writes the run row.
+- **A transfer a management-API handler makes carries
+  `RouteContext::server_stopping`** (#2683) as `ClientConfig::cancel`, through
+  `ExchangeInputs::cancel`, `acquire_token`'s `cancel` or the route core's own
+  parameter, and an SSE relay loop ends on it. `Server::stop()` sets it, then
+  joins every handler and never detaches one, because the daemon destroys
+  curl's global state and the database right after; a send that does not carry
+  it holds shutdown open for its whole timeout.
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
   engine-computed `hash`; `collections.openapi` (`{specId, specHash, syncedAt}`,
@@ -966,8 +973,13 @@ logged as a warning: it means a client skipped composition.
   same header on the same callback: `ClientConfig::local_peer_rule` reaches the
   applier as a `ConnectedPeerCheck`, which is `CURLOPT_PREREQDATA` (written on
   every call, null included, because handles are pooled) and records the
-  refusal `curl_to_error` words. A new address class goes into
-  `loopback_guard.cpp`'s one classifier, never a second copy.
+  refusal `curl_to_error` words. The applier also records `configured_proxy`
+  on it, which the rule passes after the reserved ports have judged it (#2605);
+  behind a proxy the reference's URL is what is judged, by
+  `is_refused_reference_url` in `Client::send` before anything is dialled. A
+  proxy from the environment is unknown to the engine and stays refused. A new
+  address class goes into `loopback_guard.cpp`'s one classifier, never a second
+  copy.
 - **Every leg verifies with OpenSSL** (#851): `engine/vcpkg.json` pins curl's
   `openssl` feature with `default-features: false`. That does not make Windows
   a single-backend build: the port's `http2` feature depends on `curl[ssl]`,

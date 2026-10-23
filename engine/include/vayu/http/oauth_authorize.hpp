@@ -9,6 +9,7 @@
 
 #include "vayu/db/database.hpp"
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -68,9 +69,11 @@ class OAuth2AuthorizeManager {
     start (vayu::db::Database& db, const nlohmann::json& config, const std::string& mode);
 
     // Embedded mode: complete the attempt from the captured callback URL.
+    // `cancel` ends its token exchange early (`oauth::acquire_token`, #2683).
     AuthorizeStatus complete (vayu::db::Database& db,
     const std::string& attempt_id,
-    const std::string& callback_url);
+    const std::string& callback_url,
+    const std::atomic<bool>* cancel = nullptr);
 
     AuthorizeStatus status (const std::string& attempt_id);
     void cancel (const std::string& attempt_id);

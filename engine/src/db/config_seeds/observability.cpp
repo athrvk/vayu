@@ -39,7 +39,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     // scraper rather than the target.
     seed (
     unit ("ms") (keywords ({ "prometheus" }) (ConfigEntry{ "monitorIntervalMs",
-    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer", "Server Monitoring Scrape Interval",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_INTERVAL_MS), "integer", "Server monitoring scrape interval",
     "How often a load test scrapes the metrics endpoint it "
     "was pointed at, when the run does not set its own interval. Each scrape "
     "is "
@@ -53,7 +53,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::monitor::MAX_INTERVAL_MS), std::nullopt, now })));
 
     seed (keywords ({ "prometheus" }) (ConfigEntry{ "monitorMaxSeries",
-    std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer", "Server Monitoring Metric Limit",
+    std::to_string (vayu::core::constants::monitor::MAX_SERIES), "integer", "Server monitoring metric limit",
     "How many metric names one run may chart from its monitored endpoint. Each "
     "is a line on a single overlay and a name matched against every line of "
     "the "
@@ -65,7 +65,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (unit ("ms") (
     keywords ({ "prometheus" }) (ConfigEntry{ "monitorScrapeTimeoutMs",
-    std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS), "integer", "Server Monitoring Scrape Timeout",
+    std::to_string (vayu::core::constants::monitor::DEFAULT_SCRAPE_TIMEOUT_MS), "integer", "Server monitoring scrape timeout",
     "How long one scrape of the metrics endpoint may take "
     "before it counts as a gap in the series. 0 derives the budget from the "
     "scrape interval - three quarters of it - which is what most endpoints "
@@ -82,7 +82,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("ms") (
     keywords ({ "refresh rate", "sse" }) (ConfigEntry{ "liveTickIntervalMs",
-    std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS), "integer", "Live Metrics Tick Interval",
+    std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS), "integer", "Live metrics tick interval",
     "How often the engine emits a live-metrics tick into the "
     "in-memory replay topic during a run. A lower value gives smoother live "
     "charts for slightly more CPU; the 1-second ceiling exists because slower "
@@ -93,7 +93,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
 
     seed (
     unit ("ms") (keywords ({ "time range" }) (ConfigEntry{ "liveReplayWindowMs",
-    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS), "integer", "Live Chart Window",
+    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS), "integer", "Live chart window",
     "How much recent live-metrics history to keep: the span the dashboard's "
     "live "
     "charts show, and the span the engine holds in memory per run so the "
@@ -103,7 +103,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "visible; this list deliberately does not offer a second one. Expressed "
     "as elapsed time "
     "rather than a tick count, so it survives a change to the tick interval. 0 "
-    "means the full run (no time limit). Live Metrics Tick Ceiling is the "
+    "means the full run (no time limit). Live metrics tick ceiling is the "
     "memory backstop "
     "either way, so a fast tick interval reaches that ceiling before a long "
     "window does.",
@@ -111,7 +111,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "0", "3600000", std::nullopt, now })));
 
     seed (advanced (ConfigEntry{ "liveMaxRetainedTicks",
-    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS), "integer", "Live Metrics Tick Ceiling",
+    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS), "integer", "Live metrics tick ceiling",
     "Hard ceiling on live-metrics data points held in memory per run, on both "
     "sides - the engine's replay ring and the dashboard's chart history. It is "
     "a memory bound rather than a rendering one, since the charts bucket "
@@ -123,7 +123,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "observability", std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
     "1000", "500000", std::nullopt, now }));
 
-    seed (unit ("ms") (ConfigEntry{ "liveRetentionMs", "60000", "integer", "Live Metrics Retention",
+    seed (unit ("ms") (ConfigEntry{ "liveRetentionMs", "60000", "integer", "Live metrics retention",
     "How long a finished run's in-memory live-metrics topic "
     "is kept so the dashboard can still attach and replay it. After this "
     "window "
@@ -132,7 +132,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "observability", "60000", "0", "600000", std::nullopt, now }));
 
     seed (restart_required (keywords ({ "verbosity", "logging" }) (ConfigEntry{
-    "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Log Level",
+    "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Log level",
     "The lowest severity written to Vayu's log files - the engine's and the "
     "app's, side by side in the logs folder. Debug records everything, which "
     "is what a bug report wants and what fills a disk fastest; Warning and "
@@ -144,7 +144,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
 
     seed (advanced (restart_required (unit ("bytes") (
     keywords ({ "rotation", "retention" }) (ConfigEntry{ "maxLogFileBytes",
-    std::to_string (vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES), "integer", "Max Log File Size",
+    std::to_string (vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES), "integer", "Max log file size",
     "How large one log file may grow before it is rotated once to a '.1' "
     "beside it and writing continues in a fresh one. A start already gets its "
     "own file, and the newest " +
@@ -157,7 +157,7 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
 
     seed (keywords ({ "ttfb", "timings" }) (ConfigEntry{
     "phaseHistograms", vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS ? "true" : "false",
-    "boolean", "Per-Phase Latency Histograms",
+    "boolean", "Per-phase latency histograms",
     "Records DNS, connect, TLS, first-byte and download times for every "
     "load-test completion, so the report gives each phase real percentiles "
     "instead of an average over the few exchanges it stores traces for. This "

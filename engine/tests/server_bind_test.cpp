@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -456,6 +457,153 @@ TEST_F (ServerBindTest, StopAnswersTheRequestInFlightBeforeReturning) {
     EXPECT_FALSE (runs.empty () || db_->get_results (runs.front ().id).empty ())
     << "stop() returned with the /execute handler still running";
     EXPECT_EQ (call.get (), 200);
+}
+
+// `stop()` ends a handler held inside an upstream transfer rather than waiting
+// on it (#2683). The upstream is released only after `stop()` has returned, so
+// the transfer can end only by being cancelled, and the handler still answers
+// and records its row because `stop()` joins it. Healthy: the transfer sees the
+// cancel at its next libcurl progress tick, about a second. Mutation checks:
+// drop `inputs.cancel` from the buffered `/execute`, and `stop()` waits out
+// the send's own 30s timeout and the answer is `TIMEOUT`; restore the timed
+// wait and detach in `stop()`, and the row is missing when it returns.
+TEST_F (ServerBindTest, StopCancelsTheUpstreamTransferAHandlerIsHeldIn) {
+    vayu::tests::SlowMockServer upstream;
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    auto call = std::async (std::launch::async, [port, url = upstream.hang_url ()] () {
+        httplib::Client client ("127.0.0.1", port);
+        client.set_read_timeout (40, 0);
+        const nlohmann::json payload{ { "method", "GET" }, { "url", url } };
+        const auto response = client.Post ("/execute", payload.dump (), "application/json");
+        return response ? std::make_pair (response->status, response->body) :
+                          std::make_pair (-1, httplib::to_string (response.error ()));
+    });
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&upstream] () { return upstream.live_connection_count () > 0; }))
+    << "the /execute handler never reached the upstream";
+
+    server.stop ();
+
+    const auto runs = db_->get_runs_paginated (vayu::db::RunFilter{}, 1, 0);
+    EXPECT_FALSE (runs.empty () || db_->get_results (runs.front ().id).empty ())
+    << "stop() returned with the /execute handler still running";
+    const auto [status, body] = call.get ();
+    upstream.released.store (true);
+    ASSERT_EQ (status, 200) << body;
+    EXPECT_EQ (nlohmann::json::parse (body).value ("errorCode", ""),
+    vayu::to_string (vayu::ErrorCode::Cancelled))
+    << body;
+}
+
+/// Calls `server.stop()` while a client is still reading @p path's event
+/// stream, and answers whether `stop()` returned inside the wait deadline with
+/// the stream closed under the reader - ended, not left running on a detached
+/// thread. @p end_stream is what lets a broken `stop()` return at all, from the
+/// producing side, so a regression fails the test rather than hanging it;
+/// the reader also hangs up on its next frame once that has been called.
+bool stop_returns_while_a_relay_is_read (vayu::http::Server& server,
+int port,
+const std::string& path,
+const std::function<void ()>& end_stream) {
+    std::atomic<bool> read_something{ false };
+    std::atomic<bool> hang_up{ false };
+    auto reader         = std::async (std::launch::async, [&, port, path] () {
+        httplib::Client client ("127.0.0.1", port);
+        client.set_read_timeout (40, 0);
+        return client.Get (path, [&] (const char*, size_t) {
+            read_something.store (true);
+            return !hang_up.load ();
+        });
+    });
+    const bool relaying = vayu::tests::wait_until (
+    [&read_something] () { return read_something.load (); });
+    EXPECT_TRUE (relaying) << path << " never wrote a frame";
+
+    auto stopped =
+    std::async (std::launch::async, [&server] () { server.stop (); });
+    const auto ready = [] (const auto& future) {
+        return future.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    };
+    const bool returned =
+    vayu::tests::wait_until ([&] () { return ready (stopped); });
+    const bool closed =
+    returned && vayu::tests::wait_until ([&] () { return ready (reader); });
+    hang_up.store (true);
+    end_stream ();
+    stopped.get ();
+    reader.get ();
+    return relaying && returned && closed;
+}
+
+// A live relay ends when the server stops instead of holding the join open for
+// as long as its client reads (#2683). An inbox outlives `Server::stop()`, so
+// without the stop flag `/inbox/:id/live` keeps polling it. Healthy: the relay
+// ends within one poll interval (250ms by default). Mutation checks: drop
+// `server_stopping` from `stream_inbox_live`'s loop, and `stop()` returns only
+// once the reader hangs up after the 20s wait; restore the timed wait and
+// detach in `stop()`, and it returns with the relay still writing.
+TEST_F (ServerBindTest, StopEndsAnInboxRelayItsClientIsStillReading) {
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    httplib::Client control ("127.0.0.1", port);
+    const auto started = control.Post ("/inbox/start", R"({"port":0})", "application/json");
+    ASSERT_TRUE (started) << httplib::to_string (started.error ());
+    ASSERT_EQ (started->status, 200) << started->body;
+    const auto inbox_id = nlohmann::json::parse (started->body).value ("inboxId", "");
+
+    // The reader's hang-up is the whole release here: the relay writes a
+    // keep-alive every poll, which is where it learns of it.
+    EXPECT_TRUE (stop_returns_while_a_relay_is_read (
+    server, port, "/inbox/" + inbox_id + "/live", [] () {}))
+    << "stop() did not end an inbox relay whose client was still reading";
+}
+
+// The same for a load run's `/runs/:id/live`, which the daemon stops only after
+// `Server::stop()`. The run here has no worker: it is a registered context
+// with one tick published, so the relay writes that tick and then waits on a
+// run that never ends. Mutation checks: drop `stopping` from
+// `stream_live_metrics`'s loop, and `stop()` returns only once the run is
+// ended after the 20s wait; restore the timed wait and detach in `stop()`, and
+// it returns with the relay still running.
+TEST_F (ServerBindTest, StopEndsALiveMetricsRelayOfARunStillGoing) {
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    const std::string run_id = "run_held_open";
+    auto context = std::make_shared<vayu::core::RunContext> (run_id, nlohmann::json{});
+    context->append_tick ("event: metrics\nid: 0\ndata: {}\n\n");
+    run_manager_.register_run (run_id, context);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    EXPECT_TRUE (stop_returns_while_a_relay_is_read (server, port, "/runs/" + run_id + "/live",
+    [&context] () {
+        context->settled.store (true, std::memory_order_release);
+        context->closed.store (true, std::memory_order_release);
+    }))
+    << "stop() did not end a live relay whose run had not ended";
+    run_manager_.unregister_run (run_id);
 }
 
 #if defined(__linux__)

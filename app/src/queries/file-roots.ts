@@ -29,15 +29,15 @@ export function useFileRootsQuery() {
 
 /**
  * Open the folder picker and allow what the user chooses (#2356): the main
- * process makes the write, so this takes where the picker opens, never a
- * folder. Resolves with the engine's answer, `cancelled` included.
+ * process makes the write, so this takes neither a folder nor a title nor a
+ * starting point (#2378). Resolves with the engine's answer, `cancelled`
+ * included.
  */
 export function useAllowChosenFolderMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (options?: { defaultPath?: string; title?: string }) =>
-			apiService.allowChosenFolder(options),
+		mutationFn: () => apiService.allowChosenFolder(),
 		onSuccess: (reply) => {
 			// Refetched rather than appended: the engine stores the canonical
 			// path, so the row it keeps can differ from the one the user picked.

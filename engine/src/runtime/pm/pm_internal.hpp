@@ -25,6 +25,7 @@
 
 #ifdef VAYU_HAS_QUICKJS
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -203,9 +204,9 @@ struct ContextData {
 
     /**
      * The hosts this execution has addressed through `pm.sendRequest`, in the
-     * form `cookie_scope_host` answers. `pm.cookies.jar()`'s reads may name
-     * these as well as the request's own site (#2358): a script that logged in
-     * somewhere has earned the right to read what that login set. Recorded
+     * form `cookie_scope_host` answers. `pm.cookies.jar()`'s reads and writes may
+     * name these as well as the request's own site (#2358, #2631): a script that
+     * logged in somewhere has earned the right to read what that login set. Recorded
      * when the call is made, so a transfer that fails still counts, and
      * per-execution for the same reason `send_request_count` is.
      */
@@ -241,6 +242,10 @@ struct ContextData {
     /// transfer is refused - see `ScriptContext::max_response_bytes`, which
     /// owns the rationale and the per-path choice.
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /// What ends a `pm.sendRequest` early, or null - see
+    /// `ScriptContext::cancel`.
+    const std::atomic<bool>* cancel = nullptr;
 
     /// Whether `pm.execution` may record an intent at all - see
     /// `ScriptContext::in_scenario`.

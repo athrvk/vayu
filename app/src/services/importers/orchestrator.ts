@@ -23,6 +23,9 @@ import { selectedCertificates } from "./client-certificate-selection";
 import { requestFieldsFromDraft } from "./request-payload";
 import { siblingPositions } from "./draft-siblings";
 
+/** Keeps the logged fields inside the main process's 4000-character budget (`electron/log-ipc.ts`). */
+const UNCREATED_IDS_LOGGED = 20;
+
 /** The subset of the API the orchestrator needs. Injected so it is easy to fake in tests. */
 export interface ImportApi {
 	applyImport(payload: ImportApplyRequest): Promise<ImportApplyResponse>;
@@ -116,7 +119,7 @@ export class ImportOrchestrator {
 			logError(new Error(`Import apply returned no id for: ${missing.join(", ")}`), "high", {
 				component: "renderer",
 				action: "import-apply",
-				metadata: { uncreatedTempIds: missing },
+				metadata: { uncreatedTempIds: missing.slice(0, UNCREATED_IDS_LOGGED) },
 			});
 			throw new Error(
 				`Import incomplete: ${missing.length} ${pluralize(missing.length, "item wasn't", "items weren't")} created.`

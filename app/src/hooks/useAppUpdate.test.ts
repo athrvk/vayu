@@ -21,6 +21,7 @@ vi.mock("@/services/notify", async (importOriginal) => ({
 
 import { useAppUpdate } from "./useAppUpdate";
 import { NOTIFY_KINDS } from "@/services/notify";
+import { useUpdateVerificationStore } from "@/stores/update-verification-store";
 
 type AvailableCb = (info: {
 	version: string;
@@ -36,14 +37,24 @@ type ProgressCb = (progress: {
 	total: number;
 }) => void;
 
+type VerificationFailedCb = (info: { version: string; reason: string }) => void;
+
 let availableCb: AvailableCb | null;
 let downloadedCb: DownloadedCb | null;
 let progressCb: ProgressCb | null;
+let verificationFailedCb: VerificationFailedCb | null;
+
+const FAILURE = {
+	version: "1.2.3",
+	reason: "GitHub has no attestation for this installer (HTTP 404).",
+};
 
 beforeEach(() => {
 	availableCb = null;
 	downloadedCb = null;
 	progressCb = null;
+	verificationFailedCb = null;
+	useUpdateVerificationStore.setState({ failure: null });
 	mockNotifyPost.mockClear();
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		onUpdateAvailable: (cb: AvailableCb) => {
@@ -62,6 +73,12 @@ beforeEach(() => {
 			progressCb = cb;
 			return () => {
 				progressCb = null;
+			};
+		},
+		onUpdateVerificationFailed: (cb: VerificationFailedCb) => {
+			verificationFailedCb = cb;
+			return () => {
+				verificationFailedCb = null;
 			};
 		},
 		restartToInstallUpdate: vi.fn(),
@@ -230,5 +247,108 @@ describe("useAppUpdate", () => {
 		});
 		expect(result.current.update?.version).toBe("1.2.3");
 		expect(result.current.readyToInstall).toBe(true);
+	});
+
+	describe("a download whose attestation did not verify (issue #2372)", () => {
+		const downloadAndFail = (result: { current: ReturnType<typeof useAppUpdate> }) => {
+			act(() => {
+				availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+			});
+			act(() => {
+				progressCb?.({ percent: 100, bytesPerSecond: 1, transferred: 1, total: 1 });
+			});
+			act(() => {
+				verificationFailedCb?.(FAILURE);
+			});
+			expect(result.current.verificationFailure).toEqual(FAILURE);
+		};
+
+		test("clears the progress, is not ready to install, and exposes the failure", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			downloadAndFail(result);
+
+			expect(result.current.readyToInstall).toBe(false);
+			expect(result.current.downloadProgress).toBeNull();
+			// Shown, though the silent path otherwise hides what is not actionable.
+			expect(result.current.update?.version).toBe("1.2.3");
+		});
+
+		test("does not tell the user the update is ready", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			downloadAndFail(result);
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+		});
+
+		test("a failure for a newer version removes the restart offered for the earlier one", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			act(() => {
+				availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+			});
+			act(() => {
+				downloadedCb?.({ version: "1.2.3" });
+			});
+			expect(result.current.readyToInstall).toBe(true);
+
+			act(() => {
+				verificationFailedCb?.({ version: "1.3.0", reason: "r" });
+			});
+			expect(result.current.readyToInstall).toBe(false);
+			expect(result.current.update?.version).toBe("1.3.0");
+			expect(result.current.verificationFailure).toEqual({ version: "1.3.0", reason: "r" });
+		});
+
+		test("brings back a banner dismissed during the download", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			act(() => {
+				availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+			});
+			act(() => {
+				progressCb?.({ percent: 50, bytesPerSecond: 1, transferred: 1, total: 1 });
+			});
+			act(() => {
+				result.current.dismiss();
+			});
+			act(() => {
+				verificationFailedCb?.(FAILURE);
+			});
+			expect(result.current.update?.version).toBe("1.2.3");
+		});
+
+		test("a later verified download clears it", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			downloadAndFail(result);
+
+			act(() => {
+				downloadedCb?.({ version: "1.2.3" });
+			});
+			expect(result.current.verificationFailure).toBeNull();
+			expect(result.current.readyToInstall).toBe(true);
+		});
+
+		test("a later announcement clears it", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			downloadAndFail(result);
+
+			act(() => {
+				availableCb?.({ version: "1.3.0", strategy: "silent", releaseUrl: "u" });
+			});
+			expect(result.current.verificationFailure).toBeNull();
+			expect(result.current.update).toBeNull();
+		});
+
+		test("is kept for a reader that mounts after the event", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			downloadAndFail(result);
+
+			// Settings > Updates opens long after the event arrived.
+			expect(useUpdateVerificationStore.getState().failure).toEqual(FAILURE);
+		});
+
+		test("unsubscribes on unmount", () => {
+			const { unmount } = renderHook(() => useAppUpdate());
+			expect(verificationFailedCb).not.toBeNull();
+			unmount();
+			expect(verificationFailedCb).toBeNull();
+		});
 	});
 });

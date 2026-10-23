@@ -715,8 +715,8 @@ export default function ResponseViewer() {
 										Only the first{" "}
 										{formatSize(shown.size || heldBodySize(shown))} of this
 										response was read - Vayu&apos;s engine stops a Send there,
-										so re-sending reads the same amount. Raise Max Design
-										Response Body in Settings to read more.
+										so re-sending reads the same amount. Raise Max Send response
+										body in Settings to read more.
 									</Callout>
 								</div>
 							)}

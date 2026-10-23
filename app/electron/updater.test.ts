@@ -21,6 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { UPDATE_CHECK_INTERVAL_MS, UPDATE_STARTUP_CHECK_DELAY_MS } from "./constants.js";
 
@@ -33,16 +34,18 @@ const checkForUpdates = vi.fn().mockResolvedValue(null);
 const quit = vi.fn();
 const quitAndInstall = vi.fn();
 const openExternal = vi.fn().mockResolvedValue(undefined);
+const verifyInstallerAttestation = vi.fn();
+const logError = vi.fn();
+
+const USER_DATA = "/tmp/vayu-updater-test";
 
 vi.mock("electron", () => ({
 	app: {
 		getVersion: () => "0.9.0",
 		quit: (...args: unknown[]) => quit(...args),
-		// electron/log.ts's appLogger() reads these through engineDataDirectory();
-		// this test never asserts on the log file, only that a launch failure is
-		// never lost to it.
-		getPath: () => "/tmp/vayu-updater-test",
-		getAppPath: () => "/tmp/vayu-updater-test",
+		// `userData` holds the Sigstore cache the attestation check is handed.
+		getPath: (name: string) => (name === "userData" ? USER_DATA : `/tmp/unexpected-${name}`),
+		getAppPath: () => USER_DATA,
 		isPackaged: false,
 	},
 	dialog: {
@@ -56,19 +59,27 @@ vi.mock("electron", () => ({
 	shell: { openExternal: (...args: unknown[]) => openExternal(...args) },
 }));
 
-vi.mock("electron-updater", () => ({
-	default: {
-		autoUpdater: {
-			autoDownload: false,
-			autoInstallOnAppQuit: false,
-			allowPrerelease: false,
-			on: (event: string, handler: Handler) => {
-				listeners.set(event, handler);
-			},
-			checkForUpdates: () => checkForUpdates(),
-			quitAndInstall: () => quitAndInstall(),
-		},
+/** One object across module resets, so a test reads the flags the updater set. */
+const fakeUpdater = {
+	autoDownload: false,
+	// electron-updater's own default, so a test sees whether the updater lowers it.
+	autoInstallOnAppQuit: true,
+	allowPrerelease: false,
+	on: (event: string, handler: Handler) => {
+		listeners.set(event, handler);
 	},
+	checkForUpdates: () => checkForUpdates(),
+	quitAndInstall: () => quitAndInstall(),
+};
+
+vi.mock("electron-updater", () => ({ default: { autoUpdater: fakeUpdater } }));
+
+vi.mock("./update-attestation.js", () => ({
+	verifyInstallerAttestation: (...args: unknown[]) => verifyInstallerAttestation(...args),
+}));
+
+vi.mock("./app-log.js", () => ({
+	appLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: logError }),
 }));
 
 interface FakeWindow {
@@ -112,9 +123,32 @@ beforeEach(() => {
 	checkForUpdates.mockClear().mockResolvedValue(null);
 	openExternal.mockClear();
 	quitAndInstall.mockClear();
+	verifyInstallerAttestation.mockReset().mockResolvedValue({ ok: true });
+	logError.mockClear();
+	fakeUpdater.autoInstallOnAppQuit = true;
+	quitHandlerRegistered = false;
 	currentWindow = makeWindow();
 	vi.stubEnv("NODE_ENV", "production");
 });
+
+/** Whether BaseUpdater's `addQuitHandler()` would have registered the quit-time install. */
+let quitHandlerRegistered = false;
+
+/**
+ * Finish a download the way BaseUpdater's `executeDownload` does: emit
+ * `update-downloaded`, then, in the same synchronous step, register the
+ * quit-time install only if `autoInstallOnAppQuit` is true right then
+ * (`updater-install-gate.test.ts` pins that against the installed package).
+ */
+function finishDownload(version: string, downloadedFile = `/cache/Vayu-${version}.exe`): void {
+	listeners.get("update-downloaded")?.({ version, downloadedFile });
+	if (fakeUpdater.autoInstallOnAppQuit) quitHandlerRegistered = true;
+}
+
+/** The quit handler's own re-check: what quitting now would do. */
+function wouldInstallOnQuit(): boolean {
+	return quitHandlerRegistered && fakeUpdater.autoInstallOnAppQuit;
+}
 
 /**
  * Fail the attempt in flight the way electron-updater does: the `error` event
@@ -251,11 +285,24 @@ describe("checkForUpdatesNow", () => {
 });
 
 describe("restartToInstall", () => {
-	it("restarts into the downloaded update once the updater is armed", async () => {
+	it("restarts into a verified download once the updater is armed", async () => {
+		const { initAutoUpdater, restartToInstall } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		finishDownload("1.0.0");
+		await vi.waitFor(() =>
+			expect(currentWindow!.webContents.send).toHaveBeenCalledWith("update:downloaded", {
+				version: "1.0.0",
+			})
+		);
+		restartToInstall();
+		expect(quitAndInstall).toHaveBeenCalledTimes(1);
+	});
+
+	it("installs nothing when nothing has been downloaded", async () => {
 		const { initAutoUpdater, restartToInstall } = await loadUpdater();
 		initAutoUpdater(getWindow);
 		restartToInstall();
-		expect(quitAndInstall).toHaveBeenCalledTimes(1);
+		expect(quitAndInstall).not.toHaveBeenCalled();
 	});
 
 	it("does nothing before the updater is armed", async () => {
@@ -722,7 +769,8 @@ describe("which window the update events reach", () => {
 		const win = currentWindow!;
 		win.destroyed = true;
 
-		listeners.get("update-downloaded")?.({ version: "1.0.0" });
+		finishDownload("1.0.0");
+		await vi.waitFor(() => expect(wouldInstallOnQuit()).toBe(true));
 
 		expect(win.webContents.send).not.toHaveBeenCalled();
 	});
@@ -770,4 +818,247 @@ describe("download progress", () => {
 
 		expect(win.webContents.send).not.toHaveBeenCalled();
 	});
+});
+
+describe("a downloaded update installs only once its attestation verifies (#2372)", () => {
+	// The silent platforms used to install whatever the release's latest*.yml
+	// named, from the restart button or silently on quit. Both now wait for
+	// `verifyInstallerAttestation`; the notify platforms never download at all.
+
+	/** Both platforms on the silent strategy, chosen by stubbing the input. */
+	const silentPlatforms: Array<[string, NodeJS.Platform, string | undefined]> = [
+		["Windows", "win32", undefined],
+		["the Linux AppImage", "linux", "/opt/Vayu.AppImage"],
+	];
+
+	async function arm(platform: NodeJS.Platform, appImage: string | undefined) {
+		vi.stubEnv("APPIMAGE", appImage);
+		const updater = await loadUpdater(platform);
+		updater.initAutoUpdater(getWindow);
+		return updater;
+	}
+
+	function sent(channel: string): unknown[] {
+		return currentWindow!.webContents.send.mock.calls
+			.filter(([name]) => name === channel)
+			.map(([, payload]) => payload as unknown);
+	}
+
+	/** A verification the test answers when it chooses. */
+	function holdVerification(): (result: unknown) => void {
+		let answer!: (result: unknown) => void;
+		verifyInstallerAttestation.mockImplementationOnce(
+			() => new Promise((resolve) => (answer = resolve))
+		);
+		return (result) => answer(result);
+	}
+
+	it("keeps the quit-time install off before anything has downloaded", async () => {
+		await arm("win32", undefined);
+		expect(fakeUpdater.autoInstallOnAppQuit).toBe(false);
+	});
+
+	it.each(silentPlatforms)(
+		"on %s, verifies the downloaded file for its release, then offers the restart",
+		async (_name, platform, appImage) => {
+			const { restartToInstall } = await arm(platform, appImage);
+
+			finishDownload("1.0.0", "/cache/pending/Vayu-1.0.0.bin");
+			await vi.waitFor(() =>
+				expect(sent("update:downloaded")).toEqual([{ version: "1.0.0" }])
+			);
+
+			expect(verifyInstallerAttestation).toHaveBeenCalledWith({
+				file: "/cache/pending/Vayu-1.0.0.bin",
+				version: "1.0.0",
+				sigstoreCacheDir: path.join(USER_DATA, "sigstore"),
+			});
+			expect(sent("update:verificationFailed")).toEqual([]);
+			expect(wouldInstallOnQuit()).toBe(true);
+			restartToInstall();
+			expect(quitAndInstall).toHaveBeenCalledTimes(1);
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, refuses an installer whose attestation does not verify",
+		async (_name, platform, appImage) => {
+			verifyInstallerAttestation.mockResolvedValue({
+				ok: false,
+				reason: "GitHub has no attestation for this installer (HTTP 404).",
+			});
+			const { restartToInstall } = await arm(platform, appImage);
+
+			finishDownload("1.0.0");
+			await vi.waitFor(() =>
+				expect(sent("update:verificationFailed")).toEqual([
+					{
+						version: "1.0.0",
+						reason: "GitHub has no attestation for this installer (HTTP 404).",
+					},
+				])
+			);
+
+			expect(sent("update:downloaded")).toEqual([]);
+			expect(logError).toHaveBeenCalledWith(
+				"updater",
+				expect.any(String),
+				expect.objectContaining({
+					version: "1.0.0",
+					reason: "GitHub has no attestation for this installer (HTTP 404).",
+				})
+			);
+			// The handler registered (it has to, to install a later verified
+			// download), and its re-check at quit finds the flag down.
+			expect(quitHandlerRegistered).toBe(true);
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
+	it("installs nothing on a quit that lands while the verification is still running", async () => {
+		const answer = holdVerification();
+		const { restartToInstall } = await arm("win32", undefined);
+
+		finishDownload("1.0.0");
+		// Raised for BaseUpdater's registration, which reads it synchronously...
+		expect(quitHandlerRegistered).toBe(true);
+		await vi.waitFor(() => expect(verifyInstallerAttestation).toHaveBeenCalled());
+		// ...and down again for the whole verification.
+		expect(wouldInstallOnQuit()).toBe(false);
+		restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
+
+		answer({ ok: true });
+		await vi.waitFor(() => expect(wouldInstallOnQuit()).toBe(true));
+	});
+
+	it("does not install a newer download on the strength of an older one's verification", async () => {
+		const { restartToInstall } = await arm("win32", undefined);
+		finishDownload("1.0.0");
+		await vi.waitFor(() => expect(sent("update:downloaded")).toHaveLength(1));
+
+		// electron-updater now holds 1.1.0's file, and that is what it would install.
+		const answer = holdVerification();
+		finishDownload("1.1.0");
+		await vi.waitFor(() => expect(verifyInstallerAttestation).toHaveBeenCalledTimes(2));
+
+		expect(wouldInstallOnQuit()).toBe(false);
+		restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
+
+		answer({ ok: false, reason: "The attestation was not signed by release.yml at v1.1.0." });
+		await vi.waitFor(() => expect(sent("update:verificationFailed")).toHaveLength(1));
+		expect(wouldInstallOnQuit()).toBe(false);
+		restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
+	});
+
+	it("lets the latest download decide when an older verification finishes after it", async () => {
+		const answerOlder = holdVerification();
+		const answerNewer = holdVerification();
+		const { restartToInstall } = await arm("win32", undefined);
+
+		finishDownload("1.0.0");
+		finishDownload("1.1.0");
+		await vi.waitFor(() => expect(verifyInstallerAttestation).toHaveBeenCalledTimes(2));
+
+		answerOlder({ ok: true });
+		answerNewer({ ok: false, reason: "The attestation does not verify (bad signature)." });
+		await vi.waitFor(() => expect(sent("update:verificationFailed")).toHaveLength(1));
+
+		expect(sent("update:downloaded")).toEqual([]);
+		expect(wouldInstallOnQuit()).toBe(false);
+		restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
+	});
+
+	it.each(silentPlatforms)(
+		"on %s, withdraws a verification once a newer release is announced, before its file lands",
+		async (_name, platform, appImage) => {
+			// electron-updater renames the new installer into place and only then
+			// emits `update-downloaded`; a restart or quit in between would install
+			// the new, unverified file on the strength of the old verification.
+			const { restartToInstall } = await arm(platform, appImage);
+			finishDownload("1.0.0");
+			await vi.waitFor(() => expect(sent("update:downloaded")).toHaveLength(1));
+
+			listeners.get("update-available")?.({ version: "1.1.0" });
+
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, drops a verification still running when a newer release is announced",
+		async (_name, platform, appImage) => {
+			const answer = holdVerification();
+			const { restartToInstall } = await arm(platform, appImage);
+			finishDownload("1.0.0");
+			await vi.waitFor(() => expect(verifyInstallerAttestation).toHaveBeenCalledTimes(1));
+			const olderVerification = verifyInstallerAttestation.mock.results[0]
+				.value as Promise<unknown>;
+
+			listeners.get("update-available")?.({ version: "1.1.0" });
+			answer({ ok: true });
+			// The updater's continuation was attached to this promise first, so it
+			// has run by the time this await returns.
+			await olderVerification;
+
+			expect(sent("update:downloaded")).toEqual([]);
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+
+			// The announced release still installs once its own download verifies.
+			finishDownload("1.1.0");
+			await vi.waitFor(() =>
+				expect(sent("update:downloaded")).toEqual([{ version: "1.1.0" }])
+			);
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, refuses the download when telling the window it is ready throws",
+		async (_name, platform, appImage) => {
+			const { restartToInstall } = await arm(platform, appImage);
+			currentWindow!.webContents.send.mockImplementation((channel: string) => {
+				if (channel === "update:downloaded") throw new Error("Render frame was disposed");
+			});
+
+			finishDownload("1.0.0");
+			await vi.waitFor(() =>
+				expect(sent("update:verificationFailed")).toEqual([
+					{
+						version: "1.0.0",
+						reason: "Couldn't verify the update (Render frame was disposed).",
+					},
+				])
+			);
+
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		["macOS", "darwin" as NodeJS.Platform, undefined],
+		["the Linux .deb", "linux" as NodeJS.Platform, undefined],
+	])(
+		"leaves %s on the notify path, which never downloads or verifies",
+		async (_name, platform) => {
+			await arm(platform, undefined);
+
+			expect(fakeUpdater.autoDownload).toBe(false);
+			expect(listeners.has("update-downloaded")).toBe(false);
+			finishDownload("1.0.0");
+			await Promise.resolve();
+			expect(verifyInstallerAttestation).not.toHaveBeenCalled();
+			expect(wouldInstallOnQuit()).toBe(false);
+		}
+	);
 });

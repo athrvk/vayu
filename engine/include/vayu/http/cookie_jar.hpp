@@ -201,6 +201,11 @@ int64_t now_seconds);
  * tab or newline - the separators of the
  * very format this is about to be written in, which would silently corrupt the
  * line and make the cookie vanish on the next read.
+ *
+ * It does not check an explicit domain against @p url's host, so a cookie
+ * with a foreign `domain` comes back as given. Whether a script may store
+ * that is the caller's rule (`pm.cookies.jar()` holds writes to the request's
+ * site, #2631), not this builder's.
  */
 [[nodiscard]] std::optional<JarCookie>
 cookie_for_url (const std::string& url, JarCookie cookie);
@@ -213,7 +218,7 @@ cookie_for_url (const std::string& url, JarCookie cookie);
  * both for a URL that matched nothing and for one it could not parse. A
  * *destructive* call needs the two kept apart: `pm.cookies.jar().clear(url)`
  * on an unparseable URL would otherwise report success for a wipe that never
- * happened, which is the same false success `jar_writes` refuses a jarless
+ * happened, which is the same false success `jar_write_context` refuses a jarless
  * execution over (issue #997).
  */
 [[nodiscard]] bool url_can_scope_cookies (const std::string& url);
