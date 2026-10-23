@@ -142,6 +142,32 @@ void snapshot_histogram (const struct hdr_histogram& live, struct hdr_histogram&
 }
 
 /**
+ * Build the five phase histograms into @p bank and the gate frame's snapshot
+ * of them into @p snapshot, all or none: on false every pointer is null again.
+ * @p bank and @p snapshot start null, and hdr_close takes a null, so closing
+ * every slot after a failure closes exactly what was built.
+ */
+bool allocate_phase_bank (std::array<struct hdr_histogram*, TIMING_PHASE_COUNT>& bank,
+struct hdr_histogram*& snapshot) {
+    const auto build = [] (struct hdr_histogram*& histogram) {
+        return hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+               constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
+               &histogram) == 0 &&
+        histogram != nullptr;
+    };
+    if (build (snapshot) && std::ranges::all_of (bank, build)) {
+        return true;
+    }
+    for (auto*& histogram : bank) {
+        hdr_close (histogram);
+        histogram = nullptr;
+    }
+    hdr_close (snapshot);
+    snapshot = nullptr;
+    return false;
+}
+
+/**
  * The gate frame's `cumulativePhases`, from a bank that is allocated, read
  * through @p scratch one phase at a time while the workers keep recording.
  */
@@ -296,28 +322,13 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     // above.
     if (config_.phase_histograms) {
         struct hdr_histogram* snapshot = nullptr;
-        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
-            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &snapshot) == 0) {
+        if (allocate_phase_bank (phase_histograms_, snapshot)) {
             phase_snapshot_.reset (snapshot);
-        }
-        for (auto*& histogram : phase_histograms_) {
-            if (phase_snapshot_ == nullptr ||
-            hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
-            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &histogram) != 0 ||
-            histogram == nullptr) {
-                // The bank is null-initialised and filled in order, so closing
-                // every non-null slot closes exactly the ones already built.
-                for (auto* built : phase_histograms_) {
-                    hdr_close (built);
-                }
-                phase_histograms_.fill (nullptr);
-                phase_snapshot_.reset ();
-                vayu::utils::log_warning ("run",
-                "Run " + run_id_ +
-                ": failed to initialize per-phase histograms; the report will "
-                "carry averages only");
-                break;
-            }
+        } else {
+            vayu::utils::log_warning ("run",
+            "Run " + run_id_ +
+            ": failed to initialize per-phase histograms; the report will "
+            "carry averages only");
         }
     }
 
