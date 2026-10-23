@@ -131,10 +131,12 @@ export default function ParamsPanel() {
 	// nothing else stable to key on, and the only cost is two blank new tabs
 	// previewing the same generated value.
 	// What the line resolves is `utils/sends-url.ts`'s, shared with the tab
-	// title so the two cannot disagree about path rows or encoding.
+	// title so the two cannot disagree about path rows or encoding. The flag is
+	// part of what it keys on: a request a script runs before keeps its scope
+	// names written, and toggling it must not serve the other line.
 	const resolvedUrl = stableResolvedUrl(
 		request.id ?? "new",
-		sendsCacheInput(request),
+		sendsCacheInput({ ...request, runsPreRequestScript }),
 		sendsResolver(resolveString)
 	);
 	// Masked here, after the cache: the cache keeps the resolved URL (a
@@ -226,9 +228,10 @@ export default function ParamsPanel() {
 							{sendsText || <span className="italic">No URL</span>}
 						</span>
 					</div>
-					{/* The line is the URL as the previews resolve it, which cannot
-					    know what a script will set. The flag is the engine's, so a
-					    folder's or collection's script counts too (#2741). */}
+					{/* The line keeps a scope's {{name}} written for such a request
+					    (sends-url.ts), because a script can set it. The flag is the
+					    engine's, so a folder's or collection's script counts too
+					    (#2741). */}
 					{runsPreRequestScript && (
 						<p className="text-xs text-muted-foreground">
 							A pre-request script can change this URL before it is sent.

@@ -290,7 +290,9 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				if (!request) return { label: "Request", title: "Request" };
 				const row = boundRowFor(bound, tab.entityId);
 				// The URL as the Params panel's "Sends" line draws it (path rows,
-				// encoding), so the tab and the line cannot disagree.
+				// encoding, and a scope's {{name}} kept written when the request's
+				// `runsPreRequestScript` is true), so the tab and the line cannot
+				// disagree. The flag rides on `request`, which the seam reads.
 				// A per-call `row` (Send-with-row) is a one-off preview of a specific
 				// row's bind, not this tab's own steady-state label, so it skips the
 				// cache and always resolves fresh - the same reasoning `resolveString`

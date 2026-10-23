@@ -363,25 +363,30 @@ by the part of the URL it lands in, and `disableUrlEncoding` leaves it as typed.
 The title then shows only the path, through `pathLabel`, which decodes it, so
 `a%20b` still reads `a b`.
 
-**The Sends line says when a pre-request script can change what it states**
-(#2741). The line is the URL as the stored scopes resolve it, and a script can
-set a variable, or rewrite the URL, after that. When the request runs one the
-line stays and a muted note under it reads "A pre-request script can change this
-URL before it is sent." The answer is the engine's `runsPreRequestScript` on
-`GET /requests/:id` (and the `POST`/`PUT` responses): true when the request, a
-folder above it or its collection carries an enabled, non-blank `script.pre`
-that no `inherit.disable` turns off. It is read from the request the builder
-holds (`RequestBuilderProvider`'s `runsPreRequestScript`, from
+**The Sends line does not state a stored value a pre-request script can
+change** (#2741). The line is the URL as the stored scopes resolve it, and a
+script can set a variable, or rewrite the URL, after that. When the engine's
+`runsPreRequestScript` on `GET /requests/:id` (and the `POST`/`PUT` responses)
+is true - the request, a folder above it or its collection carries an enabled,
+non-blank `script.pre` that no `inherit.disable` turns off - the line is built
+the way compose builds that request: `{{$dynamic}}` names still generate and
+every other name stays written as `{{name}}`, with a muted note under it
+reading "A pre-request script can change this URL before it is sent." A bound
+data row is not applied to that line either. The flag is read from the request
+the builder holds (`RequestBuilderProvider`'s `runsPreRequestScript`, from
 `useRequestQuery`), never re-derived in the renderer and never read from the
-compose cache, which is cold unless the Code section is open. An unsaved draft
-has no row and no flag, so no note. The flag is the saved state: a script
-typed into the request shows the note once the autosave lands, and an edit to a
+compose cache, which is cold unless the Code section is open. It is part of the
+Sends cache input (`sendsCacheInput`), so toggling it re-resolves rather than
+serving the line the cache last drew. An unsaved draft has no row and no flag,
+so it resolves as it always did. The flag is the saved state: a script typed
+into the request takes effect once the autosave lands, and an edit to a
 folder's or collection's scripts, or a move, invalidates the request details
-(`invalidateRequestDetails`) so the note follows. **The tab title does not
-carry it**: the title is the URL's path only, and only for a request with no
-name of its own, so it never claims the whole sent URL. The flag has no names
-in it, so painting a `{{token}}` by name is not hedged: a token a script sets is
-painted as the stored scopes answer it.
+(`invalidateRequestDetails`) so the line follows.
+
+**The tab title reads the same resolution.** An unnamed request's title is
+that URL's path, so for a flagged request a `{{token}}` in it stays written;
+`tab-descriptors.ts` passes the request it already holds, flag included, to the
+same `sends-url.ts` seam.
 
 The row crosses that boundary through `bound-row-store.ts`: one slot, holding
 the row the open builder is bound to **and the id of the request it is bound
@@ -638,8 +643,9 @@ ordinary request that has nothing left to resolve. A scripted request's header
 text is checked on this pass by the rule composition uses (the next sections),
 before anything is rewritten. The renderer's previews resolve against the stored
 scopes and cannot know what a script will set, so a preview can show a value
-other than the wire's; the Params panel's Sends line says so for a request the
-engine reports runs a pre-request script (above, #2741); the Code section, which
+other than the wire's; the Sends line and the tab title keep a scope's name
+written for a request the engine reports runs a pre-request script (above,
+#2741); the Code section, which
 composes through the engine, shows `{{token}}` as written and names those tokens
 (below). See [pm API compatibility](./pm-api-compatibility.md) for what that
 changes for a script.

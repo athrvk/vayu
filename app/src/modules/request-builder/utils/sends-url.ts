@@ -16,6 +16,12 @@
  * (#1773, #2465). Two surfaces that resolved this separately disagreed about
  * `a b`: one drew `%20` and the other a space.
  *
+ * A request the engine says runs a pre-request script (`runsPreRequestScript`,
+ * #2741) is resolved the way compose resolves it: `{{$dynamic}}` names are
+ * generated and every other name stays written, because a script can set it
+ * before the send and the stored scopes (or a bound row) cannot say what it
+ * will be. The caller's resolver is not consulted for such a request.
+ *
  * Pure: it takes the resolver rather than reading a hook, so a caller that
  * holds a bound data row passes a resolver closed over it.
  */
@@ -23,9 +29,13 @@
 import type { KeyValueEntry, Request } from "@/types";
 import { composePathParams, substitutePathVariables } from "./path-variables";
 import { resolveUrlTemplate } from "./query-encoding";
+import { resolveTemplate } from "@/lib/variable-resolution";
 
 /** The members of a request the sent URL is a function of. */
-export type SendsUrlInput = Pick<Request, "url" | "params" | "disableUrlEncoding">;
+export type SendsUrlInput = Pick<
+	Request,
+	"url" | "params" | "disableUrlEncoding" | "runsPreRequestScript"
+>;
 
 type Resolve = (input: string) => string;
 
@@ -33,18 +43,24 @@ interface SendsInput {
 	url: string;
 	rows: KeyValueEntry[];
 	encode: boolean;
+	scripted: boolean;
 }
+
+/** No scope answers, so only the generator table does: compose's resolution of a scripted request. */
+const resolveGeneratorsOnly: Resolve = (input) => resolveTemplate(input, () => undefined);
 
 function sendsInput(request: SendsUrlInput): SendsInput {
 	return {
 		url: request.url,
 		rows: composePathParams(request.params),
 		encode: !request.disableUrlEncoding,
+		scripted: request.runsPreRequestScript === true,
 	};
 }
 
-function resolveSends({ url, rows, encode }: SendsInput, resolve: Resolve): string {
-	return resolveUrlTemplate(substitutePathVariables(url, rows, resolve, { encode }), resolve, {
+function resolveSends({ url, rows, encode, scripted }: SendsInput, resolve: Resolve): string {
+	const resolver = scripted ? resolveGeneratorsOnly : resolve;
+	return resolveUrlTemplate(substitutePathVariables(url, rows, resolver, { encode }), resolver, {
 		encode,
 	});
 }

@@ -9,7 +9,13 @@
  * The URL the "Sends" line and the tab title share (#2637). What each rule
  * writes is `path-variables.test.ts`'s and `query-encoding.test.ts`'s claim;
  * this pins the composition - path rows first, then the URL's own tokens - and
- * that the cached form is the same answer as the plain one.
+ * that the cached form is the same answer as the plain one. A request flagged
+ * `runsPreRequestScript` (#2741) keeps its scope names written and still
+ * generates `{{$dynamic}}` ones, as compose does.
+ *
+ * Mutation check: make `resolveSends` always use the caller's `resolve` and
+ * the flagged cases fail (the stored value is drawn); drop `scripted` from
+ * `sendsInput` and the cache-input case fails.
  */
 
 import { describe, it, expect } from "vitest";
@@ -80,6 +86,44 @@ describe("resolveSendsUrl", () => {
 	});
 });
 
+describe("a request a pre-request script runs before", () => {
+	const flagged = (...args: Parameters<typeof sends>) => ({
+		...sends(...args),
+		runsPreRequestScript: true,
+	});
+
+	it("keeps a scope's {{name}} written in the URL, path and path row value", () => {
+		const request = flagged("https://{{host}}/users/:name/{{seg}}", [
+			pathRow("name", "{{tail}}"),
+		]);
+		expect(resolveSendsUrl(request, resolve)).toBe("https://{{host}}/users/{{tail}}/{{seg}}");
+	});
+
+	it("still generates a {{$dynamic}} name", () => {
+		const out = resolveSendsUrl(flagged("https://{{host}}/n/{{$randomInt}}"), resolve);
+		expect(out.startsWith("https://{{host}}/n/")).toBe(true);
+		expect(out.slice("https://{{host}}/n/".length)).toMatch(/^\d+$/);
+	});
+
+	it("leaves an unknown {{$name}} written, as the preview always has", () => {
+		expect(resolveSendsUrl(flagged("https://x/{{$noSuchThing}}"), resolve)).toBe(
+			"https://x/{{$noSuchThing}}"
+		);
+	});
+
+	it.each([[false], [undefined]])("is the stored-scope line when the flag is %s", (flag) => {
+		const request = { ...sends("https://{{host}}/users/{{seg}}"), runsPreRequestScript: flag };
+		expect(resolveSendsUrl(request, resolve)).toBe("https://api.test/users/a%20b");
+	});
+
+	it("answers the same through the cached resolver", () => {
+		const request = flagged("https://{{host}}/u/{{$randomInt}}");
+		const out = sendsResolver(resolve)(sendsCacheInput(request));
+		expect(out.startsWith("https://{{host}}/u/")).toBe(true);
+		expect(out.slice("https://{{host}}/u/".length)).toMatch(/^\d+$/);
+	});
+});
+
 describe("sendsCacheInput", () => {
 	const base = sends("https://api.test/users/:name", [pathRow("name", "ada")]);
 
@@ -88,6 +132,15 @@ describe("sendsCacheInput", () => {
 		expect(sendsCacheInput({ ...base, url: "https://api.test/u/:name" })).not.toBe(input);
 		expect(sendsCacheInput({ ...base, params: [pathRow("name", "bob")] })).not.toBe(input);
 		expect(sendsCacheInput({ ...base, disableUrlEncoding: true })).not.toBe(input);
+		// A stable cache serves the last line while this text is unchanged, so
+		// toggling the flag has to change it.
+		expect(sendsCacheInput({ ...base, runsPreRequestScript: true })).not.toBe(input);
+	});
+
+	it("reads an absent flag as an unset one", () => {
+		expect(sendsCacheInput({ ...base, runsPreRequestScript: false })).toBe(
+			sendsCacheInput(base)
+		);
 	});
 
 	it("ignores what the URL does not depend on", () => {
