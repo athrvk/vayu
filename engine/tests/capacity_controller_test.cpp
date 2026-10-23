@@ -206,6 +206,52 @@ TEST (CapacityControllerTest, LatencyIsTheReasonWhenBothBreach) {
     EXPECT_STREQ (decision.stop_reason, stop::SLO_EXCEEDED);
 }
 
+// #2815, audit S3: a target that answered 94% of requests with a fast error at
+// 33 virtual users under a 200ms budget was reported "Sustained 50". Replays
+// that run's level sequence end to end.
+// Mutation-check: drop the error half of `breaches` and the 33 steps up to 41.
+TEST (CapacityControllerTest, ReplayOfTheAuditRunStopsOnErrorsAndHeadlinesTheLastHealthyLevel) {
+    CapacityConfig config    = search ();
+    config.slo_ms            = 200.0;
+    config.start_concurrency = 1;
+    config.max_concurrency   = 50;
+
+    // +25% per step, at least +1, truncated: 1, 2, 3, ... 22, 27, 33.
+    const std::vector<size_t> healthy_levels{ 1, 2, 3, 4, 5, 6, 7, 8, 10, 12,
+        15, 18, 22, 27 };
+    std::vector<CapacityWindow> history;
+    for (size_t i = 0; i < healthy_levels.size (); ++i) {
+        const size_t level = healthy_levels[i];
+        history.push_back (window (level, 40.0 * static_cast<double> (level), 77.0));
+
+        const auto step = decide_next_level (config, history);
+        EXPECT_EQ (step.action, CapacityAction::StepUp) << "after level " << level;
+        const size_t expected_next =
+        i + 1 < healthy_levels.size () ? healthy_levels[i + 1] : 33u;
+        EXPECT_EQ (step.next_concurrency, expected_next);
+    }
+
+    history.push_back (window (33, 1132.0, 81.0, 94.0));
+    const auto first_breach = decide_next_level (config, history);
+    EXPECT_EQ (first_breach.action, CapacityAction::Hold);
+    EXPECT_EQ (first_breach.next_concurrency, 33u);
+
+    history.push_back (window (33, 1132.0, 81.0, 94.0));
+    const auto decision = decide_next_level (config, history);
+    EXPECT_EQ (decision.action, CapacityAction::Stop);
+    EXPECT_EQ (decision.next_concurrency, 33u);
+    EXPECT_STREQ (decision.stop_reason, stop::ERRORS_EXCEEDED);
+    EXPECT_STRNE (decision.stop_reason, stop::CAP_REACHED);
+
+    const auto summary = summarize_capacity (config, history, decision.stop_reason);
+    ASSERT_HAS_VALUE (summary.max_healthy);
+    EXPECT_EQ (summary.max_healthy->concurrency, 27u);
+    ASSERT_HAS_VALUE (summary.knee);
+    EXPECT_EQ (summary.knee->concurrency, 33u);
+    EXPECT_NEAR (summary.knee->error_pct, 94.0, 1e-9);
+    EXPECT_EQ (summary.stop_reason, stop::ERRORS_EXCEEDED);
+}
+
 // ---------------------------------------------------------------------------
 // Summarizing what the search found
 // ---------------------------------------------------------------------------

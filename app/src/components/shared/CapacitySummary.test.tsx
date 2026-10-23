@@ -253,6 +253,45 @@ describe("CapacitySummary", () => {
 			cleanup();
 		});
 
+		it("headlines the last healthy level of the audit run, never the ceiling", () => {
+			// #2815, audit S3: 94% of requests failed fast at 33 virtual users and
+			// the card read "Sustained 50", the search ceiling it never reached.
+			render(
+				<CapacitySummary
+					capacity={errorsStop({
+						maxHealthyConcurrency: 27,
+						maxHealthyRps: 1080,
+						p99AtMaxHealthyMs: 77,
+						kneeP99Ms: 81,
+						levels: [
+							{ concurrency: 22, rps: 880, p99Ms: 75, errorPct: 0 },
+							{ concurrency: 27, rps: 1080, p99Ms: 77, errorPct: 0 },
+							{ concurrency: 33, rps: 1132, p99Ms: 81, errorPct: 94 },
+							{ concurrency: 33, rps: 1132, p99Ms: 81, errorPct: 94 },
+						],
+					})}
+				/>
+			);
+			const headline = screen.getByText(/Sustained/).textContent ?? "";
+			expect(headline).toContain("27 virtual users");
+			expect(document.body.textContent).not.toContain("Sustained 50");
+			expect(screen.getByText(/It gave out at/).textContent).toContain(
+				"94.0% of requests failed"
+			);
+			cleanup();
+		});
+
+		it("falls back to the p99 sentence when an errors stop carries no error share", () => {
+			// A report written before `kneeErrorPct` existed: the knee still has to
+			// say something, and the latency is the only evidence it holds.
+			render(<CapacitySummary capacity={errorsStop({ kneeErrorPct: undefined })} />);
+			const knee = screen.getByText(/It gave out at/).textContent ?? "";
+			expect(knee).toContain("33 virtual users");
+			expect(knee).toContain("p99 reached 80ms");
+			expect(knee).not.toContain("of requests failed");
+			cleanup();
+		});
+
 		it("tints nothing when the report carries no limit to compare against", () => {
 			const { container } = render(
 				<CapacitySummary capacity={errorsStop({ maxErrorPct: undefined })} />
