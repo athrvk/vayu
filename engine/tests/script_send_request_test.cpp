@@ -31,7 +31,9 @@
 
 #include "echo_server.hpp"
 #include "engine_port_stand_in.hpp"
+#include "optional_assert.hpp"
 #include "task_queue.hpp"
+#include "timed_out_after.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -182,12 +184,16 @@ class SendRequestTest : public ::testing::Test {
     vayu::Request request;
     vayu::Response response;
     vayu::Environment env;
+    /// The enclosing exchange's resolved timeout, as every production caller
+    /// sets it on the context.
+    int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
 
     private:
     vayu::ScriptResult execute (ScriptEngine& engine, const std::string& script) {
-        response.status_code = 200;
-        auto ctx             = ScriptContext::for_test (request, response);
-        ctx.environment      = &env;
+        response.status_code   = 200;
+        auto ctx               = ScriptContext::for_test (request, response);
+        ctx.environment        = &env;
+        ctx.request_timeout_ms = request_timeout_ms;
         return engine.execute (script, ctx);
     }
 };
@@ -1192,6 +1198,61 @@ TEST_F (SendRequestTest, ARequestTimeoutReachesTheCallbackAsAnError) {
     EXPECT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// A script that calls /slow with @p options merged into its options object and
+// stores what came back under `outcome`: the error's code and message, or the
+// status of an answer.
+std::string slow_call_recording_outcome (const SendRequestServer& server,
+const std::string& options = "") {
+    return "pm.sendRequest({ url: '" + server.url ("/slow") + "'" + options +
+    " }, function (err, res) { "
+    "  pm.environment.set('outcome', err ? err.code + ' ' + err.message : "
+    "    'answered ' + res.code); "
+    "});";
+}
+
+// #2833: with no `timeout` option the call takes the enclosing exchange's
+// resolved timeout, not the `Request` struct's 30 s. The script budget is
+// 60 s so the clamp cannot be what ends it. Healthy: a timeout reported at
+// about 500 ms. Broken (the context's value never reaches the request): no
+// timeout at all - /slow answers 200 at SLOW_MS, which is also what bounds
+// how long a broken build takes to report. Mutation check: delete
+// `request.timeout_ms = data->request_timeout_ms` in `js_pm_send_request`.
+TEST_F (SendRequestTest, WithoutATimeoutOptionTheEnclosingRequestsTimeoutApplies) {
+    SendRequestServer server;
+    request_timeout_ms = 500;
+
+    const auto result = run (slow_call_recording_outcome (server), /*timeout_ms=*/60000);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const std::string outcome = env["outcome"].value;
+    EXPECT_EQ (outcome.rfind ("TIMEOUT ", 0), 0u) << outcome;
+    const auto after_ms = vayu::tests::timed_out_after_ms (outcome);
+    ASSERT_HAS_VALUE (after_ms) << outcome;
+    EXPECT_GE (*after_ms, 500) << outcome;
+    // Healthy reads 5xx; the bound leaves a sanitizer leg's late timer check
+    // room and still sits well under SLOW_MS.
+    EXPECT_LT (*after_ms, 1000) << outcome;
+}
+
+// The script's own option still decides when it names one. Healthy: about
+// 150 ms. Broken (the context's value written after the options were read):
+// about 500 ms, so the bound sits between the two.
+TEST_F (SendRequestTest, ATimeoutOptionStillOverridesTheEnclosingRequestsTimeout) {
+    SendRequestServer server;
+    request_timeout_ms = 500;
+
+    const auto result = run (slow_call_recording_outcome (server, ", timeout: 150"),
+    /*timeout_ms=*/60000);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const std::string outcome = env["outcome"].value;
+    EXPECT_EQ (outcome.rfind ("TIMEOUT ", 0), 0u) << outcome;
+    const auto after_ms = vayu::tests::timed_out_after_ms (outcome);
+    ASSERT_HAS_VALUE (after_ms) << outcome;
+    EXPECT_GE (*after_ms, 150) << outcome;
+    EXPECT_LT (*after_ms, 500) << outcome;
 }
 
 // ============================================================================

@@ -6807,7 +6807,10 @@ The same deadline bounds the OAuth 2.0 token request an `auth` block makes
 (issue #2833), a refresh and the fresh grant a rejected refresh falls back to
 counted together: a token endpoint that does not answer within it fails the
 send as `AUTH_FAILED` with `authErrorCode` `oauth2_timeout`, and the request
-itself is never sent.
+itself is never sent. It is also the default timeout of every `pm.sendRequest`
+the send's scripts make, buffered or streamed; a call's own `timeout` option
+replaces it, and the script's remaining budget can only lower either
+([Scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
 
 **`requestId` and `environmentId` must be strings** (issue #1917): an id of any
 other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
@@ -9167,7 +9170,7 @@ default, and whose message names the offending field and why the bound exists:
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
-| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). It also bounds the run's OAuth 2.0 token fetches: the pre-flight's, each step's at plan time, and every mid-run refresh (#2833). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). It also bounds the run's OAuth 2.0 token fetches (the pre-flight's, each step's at plan time, and every mid-run refresh) and is the default timeout of a `pm.sendRequest` from a sequential run's step scripts or a load run's deferred `tests` script (#2833). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |

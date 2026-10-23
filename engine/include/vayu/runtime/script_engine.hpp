@@ -370,6 +370,18 @@ struct ScriptContext {
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 
     /**
+     * @brief The timeout a `pm.sendRequest` takes when its options name none
+     *        (issue #2833): the enclosing exchange's resolved request timeout,
+     *        the payload's `timeout` else the `defaultTimeout` setting.
+     *
+     * Carried in for the reason @ref max_response_bytes is. The script's own
+     * `timeout` option replaces it, and the script's remaining budget can
+     * only lower whichever applies. The default is the compiled-in one, so a
+     * context built by hand is bounded by construction.
+     */
+    int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+
+    /**
      * @brief `ClientConfig::cancel` for every `pm.sendRequest` this script
      *        makes (issue #2683), or null when nothing ends one early.
      *

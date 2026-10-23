@@ -1901,7 +1901,7 @@ given, must be a function.
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
 | `body` | a string, or `{ mode, <mode>: ... }` for `raw` (`raw` string, sent as `text/plain`), `urlencoded` (`urlencoded` rows, sent as `application/x-www-form-urlencoded`) or `formdata` (`formdata` rows, sent as `multipart/form-data`). Rows are Postman's `[{ key, value, disabled? }]` or a `{ name: value }` object; a `disabled` row is skipped, and a `formdata` row may carry a `contentType`. A `type: 'file'` row and the `file` and `graphql` modes throw. A `header` naming a Content-Type wins over the one the mode implies, except for `formdata`, whose type carries the boundary |
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
-| `timeout` | milliseconds, clamped to the script's remaining budget (below) |
+| `timeout` | milliseconds. Absent, the call takes the resolved timeout of the send the script belongs to - the request's or run's `timeout`, else the `defaultTimeout` setting - in a Send's scripts (buffered or streamed), a collection run's step scripts and a load run's deferred `tests` script (issue #2833). Either is clamped to the script's remaining budget (below) |
 
 **Synchronous, in both forms.** The send blocks and the callback runs inline,
 before `pm.sendRequest` returns. Called without a callback, it returns a
@@ -1948,10 +1948,12 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
 
 - *The script's deadline.* The wall-clock limit is enforced by a QuickJS
   interrupt handler, and QuickJS only calls it **between bytecode operations** -
-  a blocking C function never yields to it. So the request's timeout is clamped
-  to whatever is left of the script's budget; without that, a 5s script calling
-  `pm.sendRequest` at the default 30s request timeout would hold its thread for
-  30s with no error and no way to interrupt it. A call made with the budget
+  a blocking C function never yields to it. So the request's timeout - the
+  `timeout` option, else the enclosing send's own resolved timeout (its
+  `timeout`, else `defaultTimeout`) - is clamped to whatever is left of the
+  script's budget; without that, a 5s script calling `pm.sendRequest` under a
+  30s request timeout would hold its thread for 30s with no error and no way to
+  interrupt it. A call made with the budget
   already spent is refused by name - `pm.sendRequest was called with none of
   the script's time budget left` - and that sentence is what the script's error
   reports, since the handler never ran and so never stopped anything.

@@ -2049,6 +2049,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // takes the design bound the buffered path's scripts take - resolved once
     // here for the same reason `transport` is.
     const size_t script_response_bound = design_response_body_bound (ctx.db);
+    // A script's fetch takes the send's resolved timeout (#2833), copied out
+    // here because the stream itself sets no whole-transfer deadline and the
+    // request is moved into it below.
+    const int script_request_timeout_ms = send.request.timeout_ms;
     // `ElementContext::max_body_bytes` for this stream's own elements (issue
     // #1514's reopen), resolved once here for the same reason
     // `script_response_bound` is: the post-request element pass runs on the
@@ -2090,6 +2094,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 pre_ctx.transport          = transport;
                 pre_ctx.default_headers    = default_headers;
                 pre_ctx.max_response_bytes = script_response_bound;
+                pre_ctx.request_timeout_ms = script_request_timeout_ms;
                 pre_ctx.cancel             = &ctx.server_stopping;
                 // The same row the transfer below carries, on the same
                 // terms as the buffered path: a stream is still one send,
@@ -2164,9 +2169,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     run = send.run, script_config = send.script_config, elements = send.elements,
     request_name = send.script_request_name, scopes, iteration_data = send.data_row,
     persist_variables = send.persist_variables, transport, default_headers,
-    script_response_bound, element_body_bytes, pre_script_result,
-    pre_element_outcomes] (const vayu::Request& sent, const vayu::Response& response,
-    const vayu::http::SseStreamContext& context) mutable {
+    script_response_bound, script_request_timeout_ms, element_body_bytes,
+    pre_script_result, pre_element_outcomes] (const vayu::Request& sent,
+    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
         StreamRecord record;
         nlohmann::json scripts = nlohmann::json::object ();
         std::vector<vayu::core::ElementOutcome> element_outcomes =
@@ -2217,6 +2222,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                             post_ctx.transport          = transport;
                             post_ctx.default_headers    = default_headers;
                             post_ctx.max_response_bytes = script_response_bound;
+                            post_ctx.request_timeout_ms = script_request_timeout_ms;
                             if (iteration_data) {
                                 post_ctx.iteration_data = &*iteration_data;
                                 post_ctx.iteration      = 0;
