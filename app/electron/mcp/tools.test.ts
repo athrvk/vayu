@@ -3110,6 +3110,32 @@ describe("run_collection_smoke", () => {
 		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
 	});
 
+	test("skips a request whose host is left as {{baseUrl}} with the gate's remedy as its reason (#2450)", async () => {
+		const client = fakeClient({
+			listRequests: vi
+				.fn()
+				.mockResolvedValue([
+					{ id: "r1", name: "one", method: "GET", url: "{{baseUrl}}/x" },
+				]),
+			composeRequest: vi.fn().mockResolvedValue({ method: "GET", url: "{{baseUrl}}/x" }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const matrix = res.structuredContent as {
+			skipped: number;
+			results: Array<{ reason?: string }>;
+		};
+		expect(matrix.skipped).toBe(1);
+		const reason = matrix.results[0].reason ?? "";
+		expect(reason).toMatch(/^Could not determine the target host/);
+		expect(reason).toContain("{{baseUrl}}");
+		expect(reason).toContain("update_collection");
+		expect(client.executeRequest).not.toHaveBeenCalled();
+	});
+
 	test("does not skip a scheme-less host:port request whose host is allowlisted", async () => {
 		// A collection saved against "localhost:3000/..." had every request
 		// skipped, with a reason blaming unresolved {{variables}} in a URL that
@@ -7656,6 +7682,26 @@ describe("dispatchTool", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
+		expect(client.executeRequest).not.toHaveBeenCalled();
+	});
+
+	test("run_request answers a host left as {{baseUrl}} with the gate's own remedy (#2450)", async () => {
+		// Compose leaves an undefined variable's token in place. The tool must
+		// hand the agent the gate's sentence, not a generic one that drops the
+		// variable's name and the tool that defines it.
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({ method: "GET", url: "{{baseUrl}}/x" }),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "{{baseUrl}}/x" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		const text = firstText(res);
+		expect(text).toMatch(/^Could not determine the target host/);
+		expect(text).toContain("{{baseUrl}}");
+		expect(text).toContain("update_collection");
 		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
