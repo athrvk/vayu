@@ -12,6 +12,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/http/list_page.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -433,22 +434,63 @@ const nlohmann::json& json) {
     return update_collection_response (db, id, json, nullptr);
 }
 
+/**
+ * Testable core of GET /collections, returning {http_status, json_body}: every
+ * live collection in the documented order as a bare array, or, with any of
+ * `q` / `limit` / `offset` in @p page_query, one page of those whose `name`
+ * holds `q` in the `{data, pagination}` envelope (#2443).
+ */
+std::pair<int, nlohmann::json> list_collections_response (vayu::db::Database& db,
+const ListPageQuery& page_query) {
+    const auto serialize = [] (const vayu::db::Collection& c) {
+        return vayu::json::serialize (c);
+    };
+    if (page_query.present ()) {
+        const auto page = parse_list_page (page_query);
+        if (!page) {
+            return as_response (page.error ());
+        }
+        return { 200,
+            list_page_of (
+            *page, db.get_collections (),
+            [&page] (
+            const vayu::db::Collection& c) { return page->matches (c.name); },
+            serialize) };
+    }
+
+    const auto collections = db.get_collections ();
+    nlohmann::json rows    = nlohmann::json::array ();
+    for (const auto& c : collections) {
+        rows.push_back (serialize (c));
+    }
+    vayu::utils::log_debug ("http",
+    "Returning " + std::to_string (collections.size ()) + " collections");
+    return { 200, rows };
+}
+
 void register_collection_routes (RouteContext& ctx) {
     /**
      * GET /collections
      * Retrieves all collections from the database.
      * Collections are folders that organize requests in a hierarchy.
-     * Returns: Array of collection objects with id, name, parentId, order, and timestamps.
+     * Query params: q, limit, offset (optional) - any of them answers one page
+     * of the collections whose name holds `q`, in the `{data, pagination}`
+     * envelope (#2443).
+     * Returns: Array of collection objects with id, name, parentId, order, and
+     * timestamps, or that envelope; 400 for a bad `limit` or `offset`.
      */
-    ctx.server.Get ("/collections", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        auto collections        = ctx.db.get_collections ();
-        nlohmann::json response = nlohmann::json::array ();
-        for (const auto& c : collections) {
-            response.push_back (vayu::json::serialize (c));
+    ctx.server.Get ("/collections",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto [status, body] =
+            list_collections_response (ctx.db, list_page_query (req));
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "http", "GET /collections - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
         }
-        vayu::utils::log_debug ("http",
-        "Returning " + std::to_string (collections.size ()) + " collections");
-        res.set_content (response.dump (), "application/json");
     });
 
     /**

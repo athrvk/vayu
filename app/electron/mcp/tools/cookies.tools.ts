@@ -11,11 +11,24 @@
  */
 
 import { z } from "zod";
-import { secretsShape, withheldPointer, withholdCookieValues } from "../withhold.js";
+import { secretsShape, withheldPointer, withholdCookieValue } from "../withhold.js";
 import type { McpTool } from "./contract.js";
-import { callEngine, callEngineStructured, errorResult, str, writesDisabled } from "./kit.js";
-import { cookiesSchema } from "./output-schemas.js";
+import { callEngine, errorResult, str, writesDisabled } from "./kit.js";
+import {
+	fieldsInput,
+	listPageInputs,
+	listPageQuery,
+	listPageSentence,
+	mapPageRows,
+	projectPageRows,
+	wantsFullRows,
+} from "./list-page.js";
+import { cookiePageSchema } from "./output-schemas.js";
+import { PAGE_CURSOR_SENTENCE, pagedRead } from "./run-housekeeping.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
+
+/** What a `get_cookies` summary row keeps: never the value. */
+const COOKIE_SUMMARY_KEYS = ["environmentId", "name", "domain", "path", "expires"] as const;
 
 export const COOKIE_TOOLS: McpTool[] = [
 	{
@@ -23,7 +36,8 @@ export const COOKIE_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description: (config) =>
-			"Read the design-mode cookie jars - one entry per environment that holds anything, plus the jar used when no environment is selected, each cookie with its name, value, domain, path, secure/httpOnly flags and expiry. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment." +
+			`Read the design-mode cookie jars, one cookie per row across every environment's jar and the jar used when no environment is selected (\`environmentId\` null). ${listPageSentence("cookies", "name or domain")} Each row carries environmentId, name, domain, path and expires; \`fields: "full"\` adds the value and the secure/httpOnly flags. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment. ` +
+			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config),
 		annotations: {
 			title: "Get cookie jars",
@@ -31,14 +45,21 @@ export const COOKIE_TOOLS: McpTool[] = [
 			idempotentHint: true,
 			openWorldHint: false,
 		},
-		inputSchema: {},
-		outputSchema: cookiesSchema,
-		handler: (_args, ctx, signal) =>
-			callEngineStructured(
+		inputSchema: { ...listPageInputs("cookies"), fields: fieldsInput },
+		outputSchema: cookiePageSchema,
+		handler: (args, ctx, signal) => {
+			const query = listPageQuery(args);
+			const full = wantsFullRows(args);
+			return pagedRead(
 				ctx,
-				() => ctx.client.getCookies(signal),
-				secretsShape(ctx, withholdCookieValues)
-			),
+				() => ctx.client.getCookiesPage(query, signal),
+				"cookies",
+				(page) =>
+					full
+						? secretsShape(ctx, (rows) => mapPageRows(rows, withholdCookieValue))(page)
+						: projectPageRows(page, COOKIE_SUMMARY_KEYS)
+			);
+		},
 	},
 	{
 		name: "clear_cookies",

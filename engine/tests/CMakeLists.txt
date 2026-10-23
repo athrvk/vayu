@@ -210,6 +210,7 @@ add_executable(vayu_tests
     vayu_extensions_test.cpp
     workspace_backup_test.cpp
     trash_test.cpp
+    list_page_test.cpp
     spec_coverage_test.cpp
     schema_validation_test.cpp
     elements_registry_test.cpp

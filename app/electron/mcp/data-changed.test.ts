@@ -30,6 +30,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 	return {
 		health: vi.fn().mockResolvedValue({ status: "ok", version: "1.2.3" }),
 		listCollections: vi.fn().mockResolvedValue([]),
+		listCollectionsPage: vi.fn().mockResolvedValue({ data: [], pagination: { total: 0 } }),
 		listRuns: vi.fn().mockResolvedValue([]),
 		listRequests: vi.fn().mockResolvedValue([]),
 		listAllRequests: vi.fn().mockResolvedValue([]),

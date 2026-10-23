@@ -45,7 +45,7 @@ export const environmentIdInput = z
  * The stored field is writable (`create_request` / `update_request`) and a
  * per-call one is not, because the two differ in what survives the call. A
  * stored `verifySSL: false` is a document: the app's Settings tab shows the box
- * unticked and prints a warning under it, `list_requests` reads it back, and a
+ * unticked and prints a warning under it, `get_request` reads it back, and a
  * user can undo it. An argument on one send is visible only inside the agent's
  * own transcript - nothing in Vayu records that a certificate went unchecked,
  * so nobody can find it afterwards or take it back.
@@ -295,7 +295,7 @@ export const scenarioDataInput = z
 	.array(z.record(z.string(), z.unknown()))
 	.optional()
 	.describe(
-		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections. The row set is not persisted - only its count is recorded on the run, with `dataFileName` / `dataFileHash` when given - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
+		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The columns a collection declares for its data file are its `dataSchema.columns` in list_collections with `fields: "full"`. The row set is not persisted - only its count is recorded on the run, with `dataFileName` / `dataFileHash` when given - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
 	);
 
 /**
@@ -311,11 +311,11 @@ export const dataFileNameInput = z
 	.string()
 	.regex(
 		/^[^/\\]*$/,
-		"dataFileName is the file's name, never a path: send list_collections' `dataFile.fileName`, not `dataFile.path`"
+		'dataFileName is the file\'s name, never a path: send `dataFile.fileName` (list_collections, fields "full"), not `dataFile.path`'
 	)
 	.optional()
 	.describe(
-		"The data file's display name (e.g. \"users.csv\", list_collections' `dataFile.fileName`), recorded on the run beside its row count. A name, never a path: one holding a `/` or `\\` is refused - Vayu opens nothing. Only beside data rows; sent alone it is refused."
+		'The data file\'s display name (e.g. "users.csv", `dataFile.fileName` in a full list_collections row), recorded on the run beside its row count. A name, never a path: one holding a `/` or `\\` is refused - Vayu opens nothing. Only beside data rows; sent alone it is refused.'
 	);
 
 /** The SHA-256 of that file's bytes, in the one spelling the engine accepts. */
@@ -324,7 +324,7 @@ export const dataFileHashInput = z
 	.regex(DATA_FILE_HASH_PATTERN, "dataFileHash must be 64 lowercase hex characters (SHA-256)")
 	.optional()
 	.describe(
-		"SHA-256 of the data file's raw bytes as 64 lowercase hex characters, recorded on the run so a later run can be checked against the same content (list_collections' `dataFile.hash` is the declared file's digest as it is on disk now). Only beside data rows; sent alone it is refused."
+		"SHA-256 of the data file's raw bytes as 64 lowercase hex characters, recorded on the run so a later run can be checked against the same content (`dataFile.hash` in a full list_collections row is the declared file's digest as it is on disk now). Only beside data rows; sent alone it is refused."
 	);
 
 /**
@@ -337,7 +337,7 @@ export const dataFileCastNumbersInput = z
 	.boolean()
 	.optional()
 	.describe(
-		"Whether the rows were read from the data file with its unquoted numeric cells typed as numbers (list_collections' `dataFile.castNumbers`), recorded on the run beside the file's name and hash. Vayu never converts the rows you send; this only says how you read them. Absent or false means every cell was read as text. Only beside data rows; sent alone, false included, it is refused."
+		"Whether the rows were read from the data file with its unquoted numeric cells typed as numbers (`dataFile.castNumbers` in a full list_collections row), recorded on the run beside the file's name and hash. Vayu never converts the rows you send; this only says how you read them. Absent or false means every cell was read as text. Only beside data rows; sent alone, false included, it is refused."
 	);
 
 /**
@@ -546,7 +546,7 @@ function authModeError(input: unknown): string {
 
 /**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
- * (read via list_requests). The engine applies it - bearer/basic/apikey and
+ * (read via get_request, or list_requests with `fields: "full"`). The engine applies it - bearer/basic/apikey and
  * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
  * `inherit` resolves against the collection chain (supply collectionId).
  *
@@ -583,7 +583,7 @@ export const authInput = z
  * The same schema `run_request` and `start_load_run` take - one definition, not
  * a copy - because a saved request's auth and an ad-hoc one are the same object
  * in the same shape, and an agent that read a request's `auth` over
- * `list_requests` must be able to write it back verbatim. What differs per
+ * `get_request` must be able to write it back verbatim. What differs per
  * subject is only which modes are meaningful: a request may `inherit` (its
  * default), while a collection is the root of the chain and never does.
  */

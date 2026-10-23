@@ -461,3 +461,56 @@ describe("EngineClient run housekeeping", () => {
 		]);
 	});
 });
+
+/**
+ * The paged whole-list reads (#2443) beside the unpaged ones they leave alone.
+ * The engine answers its legacy body only when a call names none of `q`,
+ * `limit` and `offset`, so the internal callers that need every row (the
+ * delete cascade, the move, the smoke run) depend on the no-argument URLs
+ * staying exactly as they are, and the tools on the paged ones always naming
+ * the page.
+ */
+describe("EngineClient whole-list reads", () => {
+	function recordingFetch() {
+		const urls: string[] = [];
+		const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+			urls.push(String(url));
+			return new Response("[]");
+		}) as unknown as typeof fetch;
+		return { fetchImpl, urls };
+	}
+
+	it("keeps the unpaged reads on the legacy URLs", async () => {
+		const { fetchImpl, urls } = recordingFetch();
+		const engine = new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+		await engine.listCollections();
+		await engine.listRequests("col 1");
+		await engine.getCookies();
+		await engine.listTrash();
+		expect(urls).toEqual([
+			"http://127.0.0.1:9876/collections",
+			"http://127.0.0.1:9876/requests?collectionId=col%201",
+			"http://127.0.0.1:9876/cookies",
+			"http://127.0.0.1:9876/trash",
+		]);
+	});
+
+	it("names the page on every paged read, and q only when stated", async () => {
+		const { fetchImpl, urls } = recordingFetch();
+		const engine = new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+		await engine.listCollectionsPage({});
+		await engine.listRequestsPage("col 1", { q: "user list", limit: 2, offset: 4 });
+		await engine.getCookiesPage({ q: "sid" });
+		await engine.listTrashPage({ offset: 50 });
+		const params = urls.map((url) => {
+			const parsed = new URL(url);
+			return [parsed.pathname, Object.fromEntries(parsed.searchParams)];
+		});
+		expect(params).toEqual([
+			["/collections", { limit: "50", offset: "0" }],
+			["/requests", { limit: "2", offset: "4", q: "user list", collectionId: "col 1" }],
+			["/cookies", { limit: "50", offset: "0", q: "sid" }],
+			["/trash", { limit: "50", offset: "50" }],
+		]);
+	});
+});

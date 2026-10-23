@@ -395,7 +395,7 @@ export const VARIABLE_RESOLUTION_MODEL = {
 			scope: "collection",
 			rank: 2,
 			description:
-				"The collection chain, merged root-first so a child collection's variable outranks an ancestor's of the same name. Each collection in the chain is its own definition, not one merged 'collection' value.",
+				"The collection chain, merged root-first so a child collection's variable outranks an ancestor's of the same name. Each collection in the chain is its own definition, not one merged 'collection' value; list_collections returns its variables with `fields: \"full\"`.",
 			writtenBy: ["create_collection", "update_collection"],
 			readBy: ["list_collections"],
 		},

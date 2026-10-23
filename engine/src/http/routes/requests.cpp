@@ -15,6 +15,7 @@
 #include "vayu/core/json_depth.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/list_page.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
@@ -23,6 +24,7 @@
 #include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -82,11 +84,9 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
  * get_request_response above.
  */
 namespace {
-template <typename Row, typename WriteRow>
-std::string serialize_request_list (const std::vector<Row>& rows, WriteRow write_row) {
-    std::ostringstream out;
-    out << "[";
-    bool is_first = true;
+/// Hands @p on_item the text of every row of @p rows that serialized, in order.
+template <typename Row, typename WriteRow, typename OnItem>
+void serialize_each (const std::vector<Row>& rows, WriteRow write_row, OnItem on_item) {
     for (const auto& r : rows) {
         std::ostringstream item;
         try {
@@ -97,30 +97,81 @@ std::string serialize_request_list (const std::vector<Row>& rows, WriteRow write
             std::string (e.what ()));
             continue;
         }
+        on_item (item.str ());
+    }
+}
+
+template <typename Row, typename WriteRow>
+std::string serialize_request_list (const std::vector<Row>& rows, WriteRow write_row) {
+    std::string out = "[";
+    bool is_first   = true;
+    serialize_each (rows, write_row, [&] (const std::string& item) {
         if (!is_first) {
-            out << ",";
+            out += ",";
         }
         is_first = false;
-        out << item.str ();
-    }
-    out << "]";
-    return out.str ();
+        out += item;
+    });
+    out += "]";
+    return out;
+}
+
+/// One page of @p rows as the `{data, pagination}` envelope. `total` counts
+/// the rows that matched `q` *and* serialized, so it agrees with what the
+/// pages, read end to end, would hold; that means serializing every match,
+/// though only the page's rows are kept.
+template <typename Row, typename WriteRow>
+std::string
+serialize_request_page (std::vector<Row> rows, WriteRow write_row, const ListPage& page) {
+    std::erase_if (
+    rows, [&page] (const Row& r) { return !page.matches (r.name); });
+    std::string data;
+    std::size_t total    = 0;
+    std::size_t returned = 0;
+    serialize_each (rows, write_row, [&] (const std::string& item) {
+        const std::size_t index = total++;
+        if (index < page.offset || returned == page.limit) {
+            return;
+        }
+        if (returned++ > 0) {
+            data += ",";
+        }
+        data += item;
+    });
+    return "{\"data\":[" + data +
+    "],\"pagination\":" + list_pagination (page, total, returned).dump () + "}";
+}
+
+auto full_row_writer (const vayu::http::FileAccessPolicy& files) {
+    return [&files] (const vayu::db::Request& r, std::ostream& item) {
+        vayu::json::serialize_to_stream (r, item, files);
+    };
+}
+
+void write_summary_row (const vayu::db::RequestSummary& s, std::ostream& item) {
+    item << vayu::json::serialize (s).dump ();
 }
 
 std::string serialize_full_rows (vayu::db::Database& db,
 const std::vector<vayu::db::Request>& requests) {
     const auto files = vayu::http::FileAccessPolicy::from_database (db);
-    return serialize_request_list (
-    requests, [&files] (const vayu::db::Request& r, std::ostream& item) {
-        vayu::json::serialize_to_stream (r, item, files);
-    });
+    return serialize_request_list (requests, full_row_writer (files));
 }
 
 std::string serialize_summary_rows (const std::vector<vayu::db::RequestSummary>& summaries) {
-    return serialize_request_list (
-    summaries, [] (const vayu::db::RequestSummary& s, std::ostream& item) {
-        item << vayu::json::serialize (s).dump ();
-    });
+    return serialize_request_list (summaries, write_summary_row);
+}
+
+std::vector<vayu::db::Request> full_rows_of (vayu::db::Database& db,
+const std::optional<std::string>& collection_id) {
+    return collection_id ? db.get_requests_in_collection (*collection_id) :
+                           db.get_requests_in_live_collections ();
+}
+
+std::vector<vayu::db::RequestSummary> summary_rows_of (vayu::db::Database& db,
+const std::optional<std::string>& collection_id) {
+    return collection_id ? db.get_request_summaries_in_collection (*collection_id) :
+                           db.get_request_summaries_in_live_collections ();
 }
 
 /// The row shapes `GET /requests?fields=` can ask for (#2546).
@@ -150,28 +201,48 @@ std::string list_all_requests_body (vayu::db::Database& db) {
     return serialize_full_rows (db, db.get_requests_in_live_collections ());
 }
 
+namespace {
+std::string paged_requests_body (vayu::db::Database& db,
+const std::optional<std::string>& collection_id,
+RequestListFields shape,
+const ListPage& page) {
+    if (shape == RequestListFields::Summary) {
+        return serialize_request_page (
+        summary_rows_of (db, collection_id), write_summary_row, page);
+    }
+    const auto files = vayu::http::FileAccessPolicy::from_database (db);
+    return serialize_request_page (
+    full_rows_of (db, collection_id), full_row_writer (files), page);
+}
+} // namespace
+
 /**
  * Testable core of the whole GET /requests route, returning
  * {http_status, body_text}: one collection's requests when @p collection_id
  * is set, every live collection's otherwise, in the row shape @p fields
- * names.
+ * names. With any of `q` / `limit` / `offset` in @p page_query, one page of
+ * the rows whose `name` matches, in the `{data, pagination}` envelope (#2443);
+ * with none, the bare array the route has always answered.
  */
 std::pair<int, std::string> list_requests_response (vayu::db::Database& db,
 const std::optional<std::string>& collection_id,
-std::string_view fields) {
+std::string_view fields,
+const ListPageQuery& page_query) {
     const auto shape = parse_request_list_fields (fields);
     if (!shape) {
         return { shape.error ().status, shape.error ().body.dump () };
     }
-    if (*shape == RequestListFields::Full) {
-        return { 200,
-            collection_id ? list_requests_body (db, *collection_id) :
-                            list_all_requests_body (db) };
+    if (page_query.present ()) {
+        const auto page = parse_list_page (page_query);
+        if (!page) {
+            return { page.error ().status, page.error ().body.dump () };
+        }
+        return { 200, paged_requests_body (db, collection_id, *shape, *page) };
     }
-    return { 200,
-        serialize_summary_rows (collection_id ?
-        db.get_request_summaries_in_collection (*collection_id) :
-        db.get_request_summaries_in_live_collections ()) };
+    if (*shape == RequestListFields::Full) {
+        return { 200, serialize_full_rows (db, full_rows_of (db, collection_id)) };
+    }
+    return { 200, serialize_summary_rows (summary_rows_of (db, collection_id)) };
 }
 
 /**
@@ -883,7 +954,9 @@ void register_request_routes (RouteContext& ctx) {
      * requests from. Absent, every live request of every live collection,
      * grouped by `collectionId`. fields (optional) - `summary` answers only
      * the columns a tree is built from, which is what the app reads at launch
-     * (#2546); absent, the full request objects.
+     * (#2546); absent, the full request objects. q, limit, offset
+     * (optional) - any of them answers one page of the rows whose name holds
+     * `q`, in the `{data, pagination}` envelope (#2443).
      */
     ctx.server.Get ("/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
@@ -893,9 +966,9 @@ void register_request_routes (RouteContext& ctx) {
                 vayu::utils::log_debug ("http",
                 "GET /requests - Fetching requests for collection: " + *collection_id);
             }
-            auto [status, body] = list_requests_response (
-            ctx.db, collection_id, req.get_param_value ("fields"));
-            res.status = status;
+            auto [status, body] = list_requests_response (ctx.db, collection_id,
+            req.get_param_value ("fields"), list_page_query (req));
+            res.status          = status;
             res.set_content (body, "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (

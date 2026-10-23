@@ -175,7 +175,7 @@ async function callEngineAs(
  * `callEngine`'s `shape` for a write tool that echoes the stored row: withheld
  * exactly as the read of that row is, because writing does not grant reading
  * (#1809). A tool whose answer is a collection row also presents it as
- * `list_collections` does.
+ * `list_collections` does with `fields: "full"`.
  */
 export function echoShape(ctx: ToolContext): (row: unknown) => unknown {
 	return secretsShape(ctx, withholdRowSecrets);

@@ -398,6 +398,47 @@ refused after that first move is already stored, which is the part only a batch
 avoids. The per-row `PUT`s remain correct for a single row - a rename, a move
 that appends - and still carry those caveats when used in a loop.
 
+### Paged lists
+
+[`GET /collections`](#get-collections), [`GET /requests`](#get-requests),
+[`GET /trash`](#get-trash) and [`GET /cookies`](#get-cookies) answer every row
+they hold by default. Three optional query parameters ask for one page of them
+instead, and a page cuts the route's own documented order (the three-key rule
+above for collections and requests, newest first for the trash, scope then jar
+line for cookies), so consecutive pages neither skip nor repeat a row while
+nothing is written between them (#2443):
+
+- `q` - case-insensitive substring of the row's `name` (for a cookie, its
+  `name` or its `domain`). The fold is ASCII only: `A`-`Z` match `a`-`z`, and
+  any other letter matches only as typed, so `É` does not find `é`. Empty
+  matches every row. Rows the route never lists (a request or collection in the
+  trash, a cookie cleared from its jar) never match.
+- `limit` - page size, an integer from `1` to `500`; default `50`. `0`, a value
+  over `500` or anything that is not a whole unsigned integer (`5abc`, `-1`,
+  `+5`, empty) is a `400` with code `invalid_limit`, never a clamp.
+- `offset` - matching rows to skip, a non-negative integer; default `0`.
+  Anything else is a `400` with code `invalid_offset`. An offset past the end
+  is an empty page, not an error.
+
+**Naming any of the three** (`?q=` alone counts) switches the answer to the
+envelope [`GET /runs`](#get-runs) uses:
+
+```json
+{
+  "data": [ ... ],
+  "pagination": { "total": 812, "limit": 50, "offset": 0, "returned": 50, "hasMore": true }
+}
+```
+
+`data` holds the rows the route's own answer would have carried, cut to the
+page; `total` counts the rows matching `q` before the page was cut, read from
+the same fetch as the page; `hasMore` is `offset + returned < total`. **Naming
+none of them** answers exactly what the route answered before paging existed,
+byte for byte: a bare array for `GET /collections` and `GET /requests`,
+`{items, total}` for `GET /trash`, `{scopes}` for `GET /cookies`. Filtering and
+slicing run in memory over the route's ordinary fetch, so a page saves the
+transfer and the client's parse, not the engine's read.
+
 ### Accepted field shapes
 
 A field that is present and not `null` must have the shape below, on both verbs.
@@ -1388,9 +1429,16 @@ Collections are folders that organize requests in a hierarchy.
 
 ### GET /collections
 
-List all collections.
+List all collections, ordered by `order`, then `createdAt`, then `id` (see
+[Ordering](#ordering)); nothing in the trash.
 
-**Response:**
+**Query Parameters:**
+- `q`, `limit`, `offset` (optional): one page of the collections whose `name`
+  holds `q`, in the `{data, pagination}` envelope - see
+  [Paged lists](#paged-lists). A bad `limit` or `offset` is a `400`
+  (`invalid_limit`, `invalid_offset`).
+
+**Response** (none of the three):
 ```json
 [
   {
@@ -1575,6 +1623,13 @@ tiebreak is part of the contract.
   objects. Any other value is a `400` with code `invalid_fields`, never the
   full list. The app builds its whole tree at launch from one
   `GET /requests?fields=summary` call.
+- `q`, `limit`, `offset` (optional): one page of the rows whose `name` holds
+  `q`, in the `{data, pagination}` envelope - see [Paged lists](#paged-lists).
+  Each `data` row is the row the list would have carried, in the shape `fields`
+  names, and `collectionId` scopes it as above. A row that fails to serialize
+  is skipped (as it is in the bare list) and is not counted in `total`. A bad
+  `limit` or `offset` is a `400` (`invalid_limit`, `invalid_offset`); a bad
+  `fields` is refused first.
 
 **Summary response** (`fields=summary`): the same rows in the same order as
 the full form, each carrying exactly `id`, `collectionId`, `name`, `method`,
@@ -2046,7 +2101,14 @@ Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
 `collections` and `requests` count.
 
-**Response:**
+**Query Parameters:**
+- `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
+  `q`, newest first, in the `{data, pagination}` envelope instead of
+  `{items, total}` - see [Paged lists](#paged-lists). A cascaded row is not a
+  root and never matches. A bad `limit` or `offset` is a `400`
+  (`invalid_limit`, `invalid_offset`).
+
+**Response** (none of the three):
 ```json
 {
   "items": [
@@ -4797,9 +4859,19 @@ A storage failure answers `507`, `503` or `500`, never `400` - see
 
 ### GET /cookies
 
-Every jar that holds anything, one entry per scope.
+Every jar that holds anything, one entry per scope, in scope-key order (the
+no-environment jar first), each jar's cookies in its own line order.
 
-**Response:**
+**Query Parameters:**
+- `q`, `limit`, `offset` (optional): one page of the cookies whose `name` or
+  `domain` holds `q`, in the `{data, pagination}` envelope - see
+  [Paged lists](#paged-lists). A page is **flat**: the scopes are walked in
+  the order above and each cookie row carries its scope's `environmentId`
+  beside the cookie fields (`{environmentId, name, value, domain, path,
+  secure, httpOnly, expires}`). A bad `limit` or `offset` is a `400`
+  (`invalid_limit`, `invalid_offset`).
+
+**Response** (none of the three):
 ```json
 {
   "scopes": [

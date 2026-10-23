@@ -25,9 +25,7 @@ const BARE_ARRAY = "answers a bare JSON array; an outputSchema is object-rooted"
 
 /** Read tools that declare no `outputSchema`, each with the reason it cannot. */
 const EXCEPTIONS: Readonly<Record<string, string>> = {
-	list_collections: BARE_ARRAY,
 	list_environments: BARE_ARRAY,
-	list_requests: BARE_ARRAY,
 	list_client_certificates: BARE_ARRAY,
 	get_live_metrics: BARE_ARRAY,
 	export_run_report:

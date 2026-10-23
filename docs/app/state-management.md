@@ -398,7 +398,7 @@ filesystem only and stays here, never reaching the engine or an export. Its one
 reader outside the renderer is the app's own MCP server: `useDataFileLocationMirror`
 (mounted in `App.tsx`) publishes the whole map to the main process over
 `dataFile:locations` on launch and on every change, and `list_collections`
-names a collection's file from that copy (issue #1742). `useAppFocusMirror`
+names a collection's file from that copy (issue #1742; a `fields: "full"` row, the summary names none). `useAppFocusMirror`
 (also mounted in `App.tsx`) does the same for the active tab and environment
 over `app:focus`, publishing only when the snapshot changes, so `get_app_focus`
 can answer "the request I have open" (issue #2045). And

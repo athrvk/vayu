@@ -99,11 +99,41 @@ export const DEFAULT_RUN_PAGE_LIMIT = 100;
 
 /**
  * The engine's page cap, shared by `GET /runs` and `GET /runs/:id/samples`
- * (`std::min<int64_t> (limit, 500)` in both). The engine clamps silently; the
- * tools refuse instead, so an agent that asked for more is told rather than
- * handed a short page it thinks is the whole answer.
+ * (`std::min<int64_t> (limit, 500)` in both) and the paged whole-list routes
+ * (`MAX_LIST_LIMIT`, `http/list_page.hpp`). The run routes clamp silently and
+ * the list routes answer a 400; the tools refuse either way, so an agent that
+ * asked for more is told rather than handed a short page it thinks is the
+ * whole answer.
  */
 export const MAX_ENGINE_PAGE_LIMIT = 500;
+
+/** The paged whole-list routes' own default page (#2443, `http/list_page.hpp`). */
+export const DEFAULT_LIST_PAGE_LIMIT = 50;
+
+/**
+ * One page of a whole-list route - `GET /collections`, `/requests`, `/trash`,
+ * `/cookies` (#2443). `q` is a case-insensitive (ASCII) substring of the row's
+ * name (a cookie's name or domain).
+ */
+export interface ListPageQuery {
+	q?: string;
+	limit?: number;
+	offset?: number;
+}
+
+/**
+ * The query string of a {@link ListPageQuery}. `limit` and `offset` are always
+ * written: naming none of the three keys takes the route's legacy path, which
+ * answers the unpaged body instead of the `{data, pagination}` envelope.
+ */
+function listPageParams(query: ListPageQuery): URLSearchParams {
+	const params = new URLSearchParams({
+		limit: String(query.limit ?? DEFAULT_LIST_PAGE_LIMIT),
+		offset: String(query.offset ?? 0),
+	});
+	if (query.q !== undefined) params.set("q", query.q);
+	return params;
+}
 
 /**
  * The filters `GET /runs` accepts, as the engine spells them.
@@ -264,6 +294,16 @@ export class EngineClient {
 		return this.request("GET", "/collections", undefined, signal);
 	}
 
+	/** One page of {@link listCollections}, in the `{data, pagination}` envelope. */
+	listCollectionsPage(query: ListPageQuery, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/collections?${listPageParams(query).toString()}`,
+			undefined,
+			signal
+		);
+	}
+
 	/**
 	 * Fetch a single collection by id. There is no `GET /collections/:id` route
 	 * either (see {@link getEnvironment}), and the list already answers each
@@ -284,6 +324,17 @@ export class EngineClient {
 			undefined,
 			signal
 		);
+	}
+
+	/** One page of {@link listRequests} (whole rows), in the `{data, pagination}` envelope. */
+	listRequestsPage(
+		collectionId: string,
+		query: ListPageQuery,
+		signal?: AbortSignal
+	): Promise<unknown> {
+		const params = listPageParams(query);
+		params.set("collectionId", collectionId);
+		return this.request("GET", `/requests?${params.toString()}`, undefined, signal);
 	}
 
 	/**
@@ -328,6 +379,19 @@ export class EngineClient {
 	 */
 	getCookies(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/cookies", undefined, signal);
+	}
+
+	/**
+	 * One page of {@link getCookies}. Flat, unlike the unpaged answer: each
+	 * `data` row is one cookie carrying its scope's `environmentId`.
+	 */
+	getCookiesPage(query: ListPageQuery, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/cookies?${listPageParams(query).toString()}`,
+			undefined,
+			signal
+		);
 	}
 
 	/**
@@ -726,6 +790,11 @@ export class EngineClient {
 	 */
 	listTrash(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/trash", undefined, signal);
+	}
+
+	/** One page of {@link listTrash}, in the `{data, pagination}` envelope rather than `{items, total}`. */
+	listTrashPage(query: ListPageQuery, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/trash?${listPageParams(query).toString()}`, undefined, signal);
 	}
 
 	/**

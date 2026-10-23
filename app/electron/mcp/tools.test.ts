@@ -51,6 +51,7 @@ import {
 	VARIABLE_RESOLUTION_URI,
 } from "./variable-origins.js";
 import {
+	DEFAULT_LIST_PAGE_LIMIT,
 	DEFAULT_RUN_PAGE_LIMIT,
 	EngineRequestError,
 	EngineTimeoutError,
@@ -158,7 +159,9 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 	return {
 		health: vi.fn().mockResolvedValue({ status: "ok", version: "1.2.3" }),
 		listCollections: vi.fn().mockResolvedValue([]),
+		listCollectionsPage: vi.fn().mockResolvedValue(emptyPage()),
 		listRequests: vi.fn().mockResolvedValue([]),
+		listRequestsPage: vi.fn().mockResolvedValue(emptyPage()),
 		listAllRequests: vi.fn().mockResolvedValue([]),
 		listEnvironments: vi.fn().mockResolvedValue([]),
 		listRuns: vi.fn().mockResolvedValue(emptyPage()),
@@ -209,6 +212,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		updateRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "Renamed" }),
 		deleteRequest: vi.fn().mockResolvedValue({ message: "Request deleted successfully" }),
 		listTrash: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+		listTrashPage: vi.fn().mockResolvedValue(emptyPage()),
 		restoreTrashEntry: vi
 			.fn()
 			.mockResolvedValue({ id: "col_9", restored: true, reparentedToRoot: false }),
@@ -362,6 +366,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		}),
 		saveGlobals: vi.fn().mockResolvedValue({ id: "globals", updatedAt: 2, variables: {} }),
 		getCookies: vi.fn().mockResolvedValue({ scopes: [] }),
+		getCookiesPage: vi.fn().mockResolvedValue(emptyPage()),
 		clearCookies: vi.fn().mockResolvedValue({ cleared: 4 }),
 		fetchOAuth2Token: vi.fn().mockResolvedValue(OAUTH2_TOKEN_RECORD),
 		getOAuth2TokenStatus: vi
@@ -1730,7 +1735,7 @@ describe("environments, globals and the cookie jar", () => {
 		expect((await dispatchTool("get_globals", {}, ctxWith(client))).isError).toBeFalsy();
 		expect((await dispatchTool("get_cookies", {}, ctxWith(client))).isError).toBeFalsy();
 		expect(client.getGlobals).toHaveBeenCalled();
-		expect(client.getCookies).toHaveBeenCalled();
+		expect(client.getCookiesPage).toHaveBeenCalled();
 	});
 });
 
@@ -1944,13 +1949,17 @@ describe("trash tools", () => {
 		requests: 5,
 	};
 
-	test("list_trash returns the engine's list verbatim", async () => {
-		const client = fakeClient({
-			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
-		});
-		const res = await dispatchTool("list_trash", {}, ctxWith(client));
+	test("list_trash answers one page of entries, each as the engine wrote it", async () => {
+		const client = fakeClient({ listTrashPage: vi.fn().mockResolvedValue(page([TRASH_ITEM])) });
+		const res = await dispatchTool("list_trash", { q: "retired" }, ctxWith(client));
 		expect(res.isError).toBeFalsy();
-		expect(JSON.parse(firstText(res))).toEqual({ items: [TRASH_ITEM], total: 1 });
+		expect(JSON.parse(firstText(res))).toEqual(lastPageAnswer(page([TRASH_ITEM])));
+		expect(client.listTrashPage).toHaveBeenCalledWith(
+			{ q: "retired", limit: DEFAULT_LIST_PAGE_LIMIT, offset: 0 },
+			undefined
+		);
+		// The unpaged read stays the purge prompt's, not the list's.
+		expect(client.listTrash).not.toHaveBeenCalled();
 	});
 
 	test("restore_trash_entry restores and reports a re-parented collection", async () => {
@@ -10142,6 +10151,30 @@ describe("run housekeeping tools", () => {
 				method: "getInboxCaptures",
 				row: { id: 9 },
 			},
+			{
+				tool: "list_collections",
+				args: {},
+				method: "listCollectionsPage",
+				row: { id: "col_1", name: "API", parentId: null },
+			},
+			{
+				tool: "list_requests",
+				args: { collectionId: "col_1" },
+				method: "listRequestsPage",
+				row: { id: "req_1", name: "Get", method: "GET", url: "https://a.test" },
+			},
+			{
+				tool: "get_cookies",
+				args: {},
+				method: "getCookiesPage",
+				row: { environmentId: null, name: "sid", domain: "a.test" },
+			},
+			{
+				tool: "list_trash",
+				args: {},
+				method: "listTrashPage",
+				row: { id: "col_9", kind: "collection" },
+			},
 		] as const;
 
 		/** @p tool's declared outputSchema; its absence fails the case rather than skipping it. */
@@ -13461,6 +13494,171 @@ describe("resolve_variables", () => {
 });
 
 /**
+ * The whole-list reads page through the engine (#2443): `q`, `limit` and
+ * `offset` are forwarded, and a row is a summary unless `fields: "full"` asks
+ * for the whole one. The summary is cut after the withholding pass, because a
+ * request's url is masked by reading its auth.
+ */
+describe("the paged whole-list reads", () => {
+	const REQUEST_ROWS = Array.from({ length: 5 }, (_, i) => ({
+		id: `req_${i + 1}`,
+		collectionId: "col_1",
+		name: `Request ${i + 1}`,
+		method: "POST",
+		url: `https://api.example.com/items/${i + 1}`,
+		order: i,
+		params: [],
+		headers: [{ key: "Accept", value: "application/json", enabled: true }],
+		body: { mode: "raw", raw: "{}" },
+		auth: { mode: "inherit" },
+		elements: [{ kind: "script.pre", config: { source: "pm.environment.set('a', 1)" } }],
+		updatedAt: 1_755_000_000_000,
+		createdAt: 1_755_000_000_000,
+	}));
+
+	/** The engine's paging over @p rows: the slice the query names, with the total behind it. */
+	const pagingEngine = (rows: unknown[]) =>
+		vi.fn(async (_collectionId: string, query: { limit: number; offset: number }) =>
+			page(rows.slice(query.offset, query.offset + query.limit), rows.length, query.offset)
+		);
+
+	const listRequests = async (args: Record<string, unknown>, rows: unknown[] = REQUEST_ROWS) => {
+		const client = fakeClient({ listRequestsPage: pagingEngine(rows) });
+		const res = await dispatchTool(
+			"list_requests",
+			{ collectionId: "col_1", ...args },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		return { client, text: firstText(res), body: JSON.parse(firstText(res)) };
+	};
+
+	test("a summary row carries the request's identity and none of its content", async () => {
+		const { body } = await listRequests({});
+		expect(body.data).toHaveLength(5);
+		expect(body.data[0]).toEqual({
+			id: "req_1",
+			collectionId: "col_1",
+			name: "Request 1",
+			method: "POST",
+			url: "https://api.example.com/items/1",
+			order: 0,
+			updatedAt: 1_755_000_000_000,
+		});
+		for (const row of body.data) {
+			for (const key of ["body", "headers", "params", "auth", "elements"]) {
+				expect(row, key).not.toHaveProperty(key);
+			}
+		}
+	});
+
+	test('fields: "full" answers each whole stored row', async () => {
+		const { body } = await listRequests({ fields: "full" });
+		expect(body.data).toEqual(REQUEST_ROWS);
+	});
+
+	test("q, limit and offset reach the engine, and nothing else is the unpaged read", async () => {
+		const { client } = await listRequests({ q: "request 3", limit: 10, offset: 0 });
+		expect(client.listRequestsPage).toHaveBeenCalledWith(
+			"col_1",
+			{ q: "request 3", limit: 10, offset: 0 },
+			undefined
+		);
+		expect(client.listRequests).not.toHaveBeenCalled();
+	});
+
+	test("an unstated page is the engine's default page", async () => {
+		const { client } = await listRequests({});
+		expect(client.listRequestsPage).toHaveBeenCalledWith(
+			"col_1",
+			{ limit: DEFAULT_LIST_PAGE_LIMIT, offset: 0 },
+			undefined
+		);
+	});
+
+	test("limit: 2 answers two rows and says where the next page starts", async () => {
+		const { body } = await listRequests({ limit: 2 });
+		expect(body.data.map((row: { id: string }) => row.id)).toEqual(["req_1", "req_2"]);
+		expect(body.pagination).toMatchObject({ total: 5, hasMore: true, nextOffset: 2 });
+		expect(body.pagination.note).toMatch(/2 of 5 requests/);
+	});
+
+	// Mutation check: project before withholding and the key reaches the summary,
+	// because the API-key-in-query rule reads the row's auth, which the summary drops.
+	test("a summary row's url is masked as the whole row's is, auth-placed key included", async () => {
+		const secretRow = {
+			...REQUEST_ROWS[0],
+			url: "https://ops:pw-777@api.example.com/v1?tenant-key=tk-999&page=2",
+			auth: { mode: "apikey", key: "tenant-key", value: "tk-999", in: "query" },
+		};
+		const { text, body } = await listRequests({}, [secretRow]);
+		expect(text).not.toContain("tk-999");
+		expect(text).not.toContain("pw-777");
+		expect(body.data[0].url).toBe("https://ops@api.example.com/v1?tenant-key=&page=2");
+	});
+
+	test.each([
+		[{ limit: MAX_ENGINE_PAGE_LIMIT + 1 }, String(MAX_ENGINE_PAGE_LIMIT)],
+		[{ limit: 0 }, "limit"],
+		[{ offset: -1 }, "offset"],
+		[{ fields: "everything" }, '"fields"'],
+	])("%j is refused before the engine is called", async (args, message) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"list_requests",
+			{ collectionId: "col_1", ...args },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(message);
+		expect(client.listRequestsPage).not.toHaveBeenCalled();
+	});
+
+	test("a collection summary row drops its variables, auth and data contract", async () => {
+		const collection = {
+			id: "col_1",
+			name: "API",
+			parentId: null,
+			order: 0,
+			description: "",
+			variables: { token: { value: "v-1", enabled: true } },
+			auth: { mode: "bearer", token: "{{token}}" },
+			dataSchema: { columns: ["id"] },
+			createdAt: 1,
+			updatedAt: 2,
+		};
+		const client = fakeClient({
+			listCollectionsPage: vi.fn().mockResolvedValue(page([collection])),
+		});
+		const summary = await dispatchTool("list_collections", { q: "api" }, ctxWith(client));
+		expect(JSON.parse(firstText(summary)).data).toEqual([
+			{ id: "col_1", name: "API", parentId: null, order: 0 },
+		]);
+		expect(client.listCollectionsPage).toHaveBeenCalledWith(
+			{ q: "api", limit: DEFAULT_LIST_PAGE_LIMIT, offset: 0 },
+			undefined
+		);
+		const full = await dispatchTool("list_collections", { fields: "full" }, ctxWith(client));
+		expect(JSON.parse(firstText(full)).data[0]).toMatchObject({
+			variables: collection.variables,
+			auth: collection.auth,
+			dataSchema: { columns: ["id"] },
+		});
+		expect(client.listCollections).not.toHaveBeenCalled();
+	});
+
+	test("get_cookies forwards its page and filter", async () => {
+		const client = fakeClient();
+		await dispatchTool("get_cookies", { q: "x.test", limit: 5, offset: 10 }, ctxWith(client));
+		expect(client.getCookiesPage).toHaveBeenCalledWith(
+			{ q: "x.test", limit: 5, offset: 10 },
+			undefined
+		);
+		expect(client.getCookies).not.toHaveBeenCalled();
+	});
+});
+
+/**
  * What a read hands an agent in place of a secret (#1805). Every case runs
  * twice: on the default config, where the value must not appear anywhere in
  * the answer, and with `revealSecretsToAgents`, where it must arrive untouched.
@@ -13480,6 +13678,17 @@ describe("secret withholding", () => {
 		const res = await dispatchTool(tool, args, ctxWith(client, safety));
 		expect(res.isError).toBeFalsy();
 		return { text: firstText(res), body: JSON.parse(firstText(res)) };
+	};
+
+	/** A paged list read for whole rows, its `data` as `body`. */
+	const readFull = async (
+		tool: string,
+		client: EngineClient,
+		safety?: Partial<McpSafetyConfig>,
+		args: Record<string, unknown> = {}
+	) => {
+		const { text, body } = await read(tool, client, safety, { ...args, fields: "full" });
+		return { text, body: body.data };
 	};
 
 	const ENVIRONMENTS = [
@@ -13560,8 +13769,8 @@ describe("secret withholding", () => {
 	];
 
 	test("list_requests withholds auth credentials and keeps what describes them", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(REQUESTS) });
-		const { text, body } = await read("list_requests", client, undefined, {
+		const client = fakeClient({ listRequestsPage: vi.fn().mockResolvedValue(page(REQUESTS)) });
+		const { text, body } = await readFull("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
 		for (const secret of ["eyJ.live.token", "cs-123", "k-456"]) {
@@ -13585,8 +13794,8 @@ describe("secret withholding", () => {
 	});
 
 	test("list_requests returns auth whole with reveal on", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(REQUESTS) });
-		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		const client = fakeClient({ listRequestsPage: vi.fn().mockResolvedValue(page(REQUESTS)) });
+		const { body } = await readFull("list_requests", client, REVEAL, { collectionId: "c1" });
 		expect(body).toEqual(REQUESTS);
 	});
 
@@ -13599,9 +13808,9 @@ describe("secret withholding", () => {
 		expect(body.auth.config.clientSecretWithheld).toBe(true);
 		expect(client.getRequest).toHaveBeenCalledWith("req_3", undefined);
 
-		const listed = await read(
+		const listed = await readFull(
 			"list_requests",
-			fakeClient({ listRequests: vi.fn().mockResolvedValue(REQUESTS) }),
+			fakeClient({ listRequestsPage: vi.fn().mockResolvedValue(page(REQUESTS)) }),
 			undefined,
 			{ collectionId: "c1" }
 		);
@@ -13658,8 +13867,10 @@ describe("secret withholding", () => {
 				auth: { mode: "basic", username: "me", password: "hunter2" },
 			},
 		];
-		const client = fakeClient({ listCollections: vi.fn().mockResolvedValue(collections) });
-		const withheld = await read("list_collections", client);
+		const client = fakeClient({
+			listCollectionsPage: vi.fn().mockResolvedValue(page(collections)),
+		});
+		const withheld = await readFull("list_collections", client);
 		expect(withheld.text).not.toContain("p@ss");
 		expect(withheld.text).not.toContain("hunter2");
 		expect(withheld.body[0].auth).toEqual({
@@ -13667,31 +13878,50 @@ describe("secret withholding", () => {
 			username: "me",
 			passwordWithheld: true,
 		});
-		const revealed = await read("list_collections", client, REVEAL);
+		const revealed = await readFull("list_collections", client, REVEAL);
 		expect(revealed.body[0].auth.password).toBe("hunter2");
 		expect(revealed.body[0].variables.pass.value).toBe("p@ss");
 	});
 
-	test("get_cookies withholds every cookie value unless revealed", async () => {
-		const jars = {
-			scopes: [
-				{
-					environmentId: null,
-					cookies: [{ name: "session", value: "abc123", domain: "x.test", path: "/" }],
-				},
-			],
-		};
-		const client = fakeClient({ getCookies: vi.fn().mockResolvedValue(jars) });
-		const withheld = await read("get_cookies", client);
-		expect(withheld.text).not.toContain("abc123");
-		expect(withheld.body.scopes[0].cookies[0]).toEqual({
+	const COOKIES = [
+		{
+			environmentId: null,
 			name: "session",
+			value: "abc123",
 			domain: "x.test",
 			path: "/",
-			valueWithheld: true,
-		});
-		expect((await read("get_cookies", client, REVEAL)).body).toEqual(jars);
+			secure: true,
+			httpOnly: true,
+			expires: 1_900_000_000,
+		},
+	];
+
+	test("get_cookies withholds every cookie value in full rows unless revealed", async () => {
+		const client = fakeClient({ getCookiesPage: vi.fn().mockResolvedValue(page(COOKIES)) });
+		const withheld = await readFull("get_cookies", client);
+		expect(withheld.text).not.toContain("abc123");
+		const { value: _value, ...described } = COOKIES[0];
+		expect(withheld.body[0]).toEqual({ ...described, valueWithheld: true });
+		expect((await readFull("get_cookies", client, REVEAL)).body).toEqual(COOKIES);
 	});
+
+	test.each([{}, REVEAL])(
+		"a get_cookies summary row never carries a value (%j)",
+		async (safety) => {
+			const client = fakeClient({ getCookiesPage: vi.fn().mockResolvedValue(page(COOKIES)) });
+			const { text, body } = await read("get_cookies", client, safety);
+			expect(text).not.toContain("abc123");
+			expect(body.data).toEqual([
+				{
+					environmentId: null,
+					name: "session",
+					domain: "x.test",
+					path: "/",
+					expires: 1_900_000_000,
+				},
+			]);
+		}
+	);
 
 	const CONFIG = {
 		entries: [
@@ -13853,8 +14083,10 @@ describe("secret withholding", () => {
 	];
 
 	test("list_requests withholds the credentials in a Postman import's source", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(POSTMAN_REQUESTS) });
-		const { text, body } = await read("list_requests", client, undefined, {
+		const client = fakeClient({
+			listRequestsPage: vi.fn().mockResolvedValue(page(POSTMAN_REQUESTS)),
+		});
+		const { text, body } = await readFull("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
 		for (const secret of ["pm-bearer-raw", "pm-cs-raw", "pm-param-raw"]) {
@@ -13879,8 +14111,10 @@ describe("secret withholding", () => {
 	});
 
 	test("list_requests returns a Postman import's source whole with reveal on", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(POSTMAN_REQUESTS) });
-		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		const client = fakeClient({
+			listRequestsPage: vi.fn().mockResolvedValue(page(POSTMAN_REQUESTS)),
+		});
+		const { body } = await readFull("list_requests", client, REVEAL, { collectionId: "c1" });
 		expect(body).toEqual(POSTMAN_REQUESTS);
 	});
 
@@ -13903,8 +14137,10 @@ describe("secret withholding", () => {
 				},
 			},
 		];
-		const client = fakeClient({ listCollections: vi.fn().mockResolvedValue(collections) });
-		const withheld = await read("list_collections", client);
+		const client = fakeClient({
+			listCollectionsPage: vi.fn().mockResolvedValue(page(collections)),
+		});
+		const withheld = await readFull("list_collections", client);
 		expect(withheld.text).not.toContain("pm-v20-raw");
 		expect(withheld.text).not.toContain("pm-rt-raw");
 		expect(withheld.body[0].auth.postman).toEqual({
@@ -13915,7 +14151,7 @@ describe("secret withholding", () => {
 				refreshRequestParams: [{ key: "refresh_token", valueWithheld: true }],
 			},
 		});
-		const revealed = await read("list_collections", client, REVEAL);
+		const revealed = await readFull("list_collections", client, REVEAL);
 		expect(revealed.body[0].auth.postman).toEqual(collections[0].auth.postman);
 	});
 
@@ -14000,9 +14236,9 @@ describe("secret withholding", () => {
 
 	test("list_requests withholds a credential-named extra parameter's value, row by row", async () => {
 		const client = fakeClient({
-			listRequests: vi.fn().mockResolvedValue([CONFIG_PARAM_REQUEST]),
+			listRequestsPage: vi.fn().mockResolvedValue(page([CONFIG_PARAM_REQUEST])),
 		});
-		const { text, body } = await read("list_requests", client, undefined, {
+		const { text, body } = await readFull("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
 		for (const secret of ["cfg-q-raw", "cfg-body-raw", "cfg-hdr-raw", "cfg-assert-raw"]) {
@@ -14029,9 +14265,9 @@ describe("secret withholding", () => {
 
 	test("list_requests returns the extra parameter rows whole with reveal on", async () => {
 		const client = fakeClient({
-			listRequests: vi.fn().mockResolvedValue([CONFIG_PARAM_REQUEST]),
+			listRequestsPage: vi.fn().mockResolvedValue(page([CONFIG_PARAM_REQUEST])),
 		});
-		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		const { body } = await readFull("list_requests", client, REVEAL, { collectionId: "c1" });
 		expect(body).toEqual([CONFIG_PARAM_REQUEST]);
 	});
 
@@ -14061,24 +14297,26 @@ describe("secret withholding", () => {
 	// `value` and the secrets below reach the agent.
 	test("list_requests withholds an extra parameter row with no key, or a member no row has", async () => {
 		const client = fakeClient({
-			listRequests: vi.fn().mockResolvedValue([
-				{
-					id: "req_odd",
-					auth: {
-						mode: "oauth2",
-						config: {
-							tokenParams: [
-								{ value: "odd-keyless-raw" },
-								{ keyy: "client_secret", value: "odd-misspelt-raw" },
-								{ key: "audience", value: "api", note: "odd-note-raw" },
-							],
-							refreshParams: "refresh_token=odd-list-raw",
+			listRequestsPage: vi.fn().mockResolvedValue(
+				page([
+					{
+						id: "req_odd",
+						auth: {
+							mode: "oauth2",
+							config: {
+								tokenParams: [
+									{ value: "odd-keyless-raw" },
+									{ keyy: "client_secret", value: "odd-misspelt-raw" },
+									{ key: "audience", value: "api", note: "odd-note-raw" },
+								],
+								refreshParams: "refresh_token=odd-list-raw",
+							},
 						},
 					},
-				},
-			]),
+				])
+			),
 		});
-		const { text, body } = await read("list_requests", client, undefined, {
+		const { text, body } = await readFull("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
 		for (const secret of [
@@ -14154,8 +14392,10 @@ describe("secret withholding", () => {
 	];
 
 	test("list_requests withholds a credential-bearing header's value and keeps the row", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(HEADER_REQUESTS) });
-		const { text, body } = await read("list_requests", client, undefined, {
+		const client = fakeClient({
+			listRequestsPage: vi.fn().mockResolvedValue(page(HEADER_REQUESTS)),
+		});
+		const { text, body } = await readFull("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
 		for (const secret of [
@@ -14186,8 +14426,10 @@ describe("secret withholding", () => {
 	});
 
 	test("list_requests returns every header whole with reveal on", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(HEADER_REQUESTS) });
-		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		const client = fakeClient({
+			listRequestsPage: vi.fn().mockResolvedValue(page(HEADER_REQUESTS)),
+		});
+		const { body } = await readFull("list_requests", client, REVEAL, { collectionId: "c1" });
 		expect(body).toEqual(HEADER_REQUESTS);
 	});
 
@@ -14225,8 +14467,10 @@ describe("secret withholding", () => {
 	];
 
 	test("list_requests drops a URL's password and credential query values and withholds the Params rows", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(URL_REQUESTS) });
-		const { text, body } = await read("list_requests", client, undefined, {
+		const client = fakeClient({
+			listRequestsPage: vi.fn().mockResolvedValue(page(URL_REQUESTS)),
+		});
+		const { text, body } = await readFull("list_requests", client, undefined, {
 			collectionId: "c1",
 		});
 		for (const secret of [
@@ -14258,8 +14502,10 @@ describe("secret withholding", () => {
 	});
 
 	test("list_requests returns every URL and Params row whole with reveal on", async () => {
-		const client = fakeClient({ listRequests: vi.fn().mockResolvedValue(URL_REQUESTS) });
-		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		const client = fakeClient({
+			listRequestsPage: vi.fn().mockResolvedValue(page(URL_REQUESTS)),
+		});
+		const { body } = await readFull("list_requests", client, REVEAL, { collectionId: "c1" });
 		expect(body).toEqual(URL_REQUESTS);
 	});
 
@@ -16415,7 +16661,6 @@ describe("every structured read answers structuredContent its outputSchema accep
 			args: { collectionId: "col_1" },
 			has: ["fileName", "document", "documentTruncated", "contentBytes"],
 		},
-		{ tool: "list_trash", args: {}, has: ["items", "total"], wraps: "listTrash" },
 		{
 			tool: "list_request_examples",
 			has: ["examples", "bodiesOmitted", "bodyBudgetBytes"],
@@ -16430,7 +16675,6 @@ describe("every structured read answers structuredContent its outputSchema accep
 			has: ["id", "variables", "updatedAt"],
 			wraps: "getGlobals",
 		},
-		{ tool: "get_cookies", args: {}, has: ["scopes"], wraps: "getCookies" },
 		{
 			tool: "get_oauth2_token_status",
 			has: ["found"],
@@ -16463,6 +16707,10 @@ describe("every structured read answers structuredContent its outputSchema accep
 		"get_run_timeseries",
 		"get_run_monitor",
 		"get_inbox_captures",
+		"list_collections",
+		"list_requests",
+		"get_cookies",
+		"list_trash",
 	];
 
 	/** @p tool's declared outputSchema; its absence fails the case rather than skipping it. */

@@ -53,12 +53,34 @@ const remembered = (id: string) => (id === "col_data" ? USERS_FILE : undefined);
 const parsed = (r: { content: Array<{ text: string }> }) =>
 	JSON.parse(r.content[0].text) as unknown;
 
+/** `list_collections` asked for whole rows, which is where the data-file fields ride. */
+const FULL = { fields: "full" };
+
+/** The rows of a `list_collections` answer, one `{data, pagination}` page. */
+const rowsOf = (r: { content: Array<{ text: string }> }) =>
+	(parsed(r) as { data: Array<Record<string, unknown>> }).data;
+
+/** An engine holding @p rows: the whole list for the resource, one page of it for the tool. */
+function collectionsClient(rows: unknown[]) {
+	return {
+		listCollections: vi.fn().mockResolvedValue(rows),
+		listCollectionsPage: vi.fn().mockResolvedValue({
+			data: rows,
+			pagination: {
+				total: rows.length,
+				limit: 50,
+				offset: 0,
+				returned: rows.length,
+				hasMore: false,
+			},
+		}),
+	};
+}
+
 describe("a collection's data contract on the MCP surface", () => {
 	test("list_collections states a declared contract and omits an absent one", async () => {
-		const ctx = ctxWith({ listCollections: vi.fn().mockResolvedValue([DECLARED, NONE]) });
-		const rows = parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
-			Record<string, unknown>
-		>;
+		const ctx = ctxWith(collectionsClient([DECLARED, NONE]));
+		const rows = rowsOf(await dispatchTool("list_collections", FULL, ctx));
 		expect(rows[0].dataSchema).toEqual({
 			columns: ["userId", "sku"],
 			fileName: "users.csv",
@@ -71,7 +93,7 @@ describe("a collection's data contract on the MCP surface", () => {
 
 	test("the collections resource answers in the same shape", async () => {
 		const resource = STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!;
-		const ctx = ctxWith({ listCollections: vi.fn().mockResolvedValue([DECLARED, NONE]) });
+		const ctx = ctxWith(collectionsClient([DECLARED, NONE]));
 		const rows = (await resource.read(ctx)) as Array<Record<string, unknown>>;
 		expect(rows[0].dataSchema).toEqual(DECLARED.dataSchema);
 		expect(rows[1]).not.toHaveProperty("dataSchema");
@@ -119,13 +141,8 @@ describe("readDataContract agrees with the renderer's hasDataContract", () => {
 
 describe("the remembered data file on the MCP surface (Part B)", () => {
 	test("list_collections names the file the app remembers, and only for that collection", async () => {
-		const ctx = ctxWith(
-			{ listCollections: vi.fn().mockResolvedValue([DECLARED, NONE]) },
-			{ dataFileLocation: remembered }
-		);
-		const rows = parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
-			Record<string, unknown>
-		>;
+		const ctx = ctxWith(collectionsClient([DECLARED, NONE]), { dataFileLocation: remembered });
+		const rows = rowsOf(await dispatchTool("list_collections", FULL, ctx));
 		// Mutation check: drop the `dataFile` spread in presentCollection and this fails.
 		expect(rows[0].dataFile).toEqual(USERS_FILE);
 		expect(rows[1]).not.toHaveProperty("dataFile");
@@ -133,17 +150,14 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 
 	test("names the hash the app last read the file with, and none before it has (#2051)", async () => {
 		const listed = async (location: Record<string, string>) =>
-			(
-				parsed(
-					await dispatchTool(
-						"list_collections",
-						{},
-						ctxWith(
-							{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
-							{ dataFileLocation: () => location as typeof USERS_FILE }
-						)
-					)
-				) as Array<Record<string, unknown>>
+			rowsOf(
+				await dispatchTool(
+					"list_collections",
+					FULL,
+					ctxWith(collectionsClient([DECLARED]), {
+						dataFileLocation: () => location as typeof USERS_FILE,
+					})
+				)
 			)[0].dataFile;
 
 		// Mutation check: drop the hash from presentLocation and this fails.
@@ -156,17 +170,14 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 
 	test("says the app reads the file's numbers as numbers only when it does (#2540)", async () => {
 		const listed = async (location: Record<string, unknown>) =>
-			(
-				parsed(
-					await dispatchTool(
-						"list_collections",
-						{},
-						ctxWith(
-							{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
-							{ dataFileLocation: () => location as typeof USERS_FILE }
-						)
-					)
-				) as Array<Record<string, unknown>>
+			rowsOf(
+				await dispatchTool(
+					"list_collections",
+					FULL,
+					ctxWith(collectionsClient([DECLARED]), {
+						dataFileLocation: () => location as typeof USERS_FILE,
+					})
+				)
 			)[0].dataFile;
 
 		// Mutation check: drop `castNumbers` from presentLocation and this fails.
@@ -191,16 +202,12 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 			location: Record<string, string>,
 			currentDataFileHash: (filePath: string) => Promise<string>
 		) =>
-			ctxWith(
-				{ listCollections: vi.fn().mockResolvedValue([DECLARED, NONE]) },
-				{ dataFileLocation: () => location as typeof USERS_FILE, currentDataFileHash }
-			);
+			ctxWith(collectionsClient([DECLARED, NONE]), {
+				dataFileLocation: () => location as typeof USERS_FILE,
+				currentDataFileHash,
+			});
 		const viaTool = async (ctx: ToolContext) =>
-			(
-				parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
-					Record<string, unknown>
-				>
-			)[0].dataFile;
+			rowsOf(await dispatchTool("list_collections", FULL, ctx))[0].dataFile;
 		const viaResource = async (ctx: ToolContext) =>
 			(
 				(await STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!.read(
@@ -234,10 +241,19 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 			expect(await list(ctxHashing(unhashed, missing))).toEqual(unhashed);
 		});
 
+		// The summary drops `dataFile`, so hashing for it would read every file for nothing.
+		test("a list_collections summary names no file and hashes none", async () => {
+			const hashOf = vi.fn(async () => FRESH);
+			const ctx = ctxHashing(USERS_FILE, hashOf);
+			const rows = rowsOf(await dispatchTool("list_collections", {}, ctx));
+			expect(rows[0]).toEqual({ id: "col_data", name: "Checkout" });
+			expect(hashOf).not.toHaveBeenCalled();
+		});
+
 		test("a missing file is never an error", async () => {
 			const result = await dispatchTool(
 				"list_collections",
-				{},
+				FULL,
 				ctxHashing(USERS_FILE, () => Promise.reject(new Error("gone")))
 			);
 			expect(result.isError).toBeFalsy();
@@ -247,10 +263,7 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 	test("the resource and the write tools' results carry it the same way", async () => {
 		const resource = STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!;
 		const listed = (await resource.read(
-			ctxWith(
-				{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
-				{ dataFileLocation: remembered }
-			)
+			ctxWith(collectionsClient([DECLARED]), { dataFileLocation: remembered })
 		)) as Array<Record<string, unknown>>;
 		expect(listed[0].dataFile).toEqual(USERS_FILE);
 
@@ -268,10 +281,8 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 	});
 
 	test("a host with no record of paths (the stdio CLI) names none", async () => {
-		const ctx = ctxWith({ listCollections: vi.fn().mockResolvedValue([DECLARED]) });
-		const rows = parsed(await dispatchTool("list_collections", {}, ctx)) as Array<
-			Record<string, unknown>
-		>;
+		const ctx = ctxWith(collectionsClient([DECLARED]));
+		const rows = rowsOf(await dispatchTool("list_collections", FULL, ctx));
 		expect(rows[0]).not.toHaveProperty("dataFile");
 	});
 
@@ -280,18 +291,18 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		expect(tool.category).toBe("read");
 		expect(tool.annotations.readOnlyHint).toBe(true);
 		const ctx: ToolContext = {
-			client: {
-				listCollections: vi.fn().mockResolvedValue([DECLARED]),
-			} as unknown as EngineClient,
+			client: collectionsClient([DECLARED]) as unknown as EngineClient,
 			config: resolveSafetyConfig({ allowWrites: false }),
 			host: "app",
 			dataFileLocation: remembered,
 		};
-		const result = await dispatchTool("list_collections", {}, ctx);
+		const result = await dispatchTool("list_collections", FULL, ctx);
 		expect(result.isError).toBeFalsy();
 		// A path, never contents: nothing in the answer holds a row.
-		expect(
-			Object.keys((parsed(result) as Array<Record<string, unknown>>)[0].dataFile as object)
-		).toEqual(["path", "fileName", "hash"]);
+		expect(Object.keys(rowsOf(result)[0].dataFile as object)).toEqual([
+			"path",
+			"fileName",
+			"hash",
+		]);
 	});
 });
