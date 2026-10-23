@@ -423,7 +423,10 @@ jobs:
             echo "::error::no vcpkg share directory at '$share' (from $cache); the notices would omit the C++ dependencies"
             exit 1
           fi
-          python scripts/generate-third-party-notices.py \
+          # The Linux container installs python3 only; Windows has python only.
+          py=python3
+          if [ "${{ runner.os }}" = "Windows" ]; then py=python; fi
+          "$py" scripts/generate-third-party-notices.py \
             --out app/build/THIRD_PARTY_NOTICES.txt \
             --vcpkg-share "$share" \
             --app-dir app
