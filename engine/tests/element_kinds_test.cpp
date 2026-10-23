@@ -35,9 +35,11 @@
 #include <string_view>
 #include <vector>
 
+#include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/core/schema_error_text.hpp"
 #include "wide_json.hpp"
 
 namespace {
@@ -820,6 +822,49 @@ TEST_F (ElementKindsTest, MetricJsonPathWildcardRecordsTheBodysFirstMember) {
     ASSERT_EQ (sink.size (), 1u);
     EXPECT_EQ (sink[0].status, "ok");
     EXPECT_EQ (recorded, std::vector<double>{ 1.0 });
+}
+
+// #2774: a key the kind never declared is refused with the keys it does, so a
+// caller (an agent writing `expected` for `in`) sees the fix in the 400.
+TEST_F (ElementKindsTest, AnUndeclaredSettingNamesTheKindsOwnSettings) {
+    const auto reason = vayu::core::Registry::instance ().validate (
+    nlohmann::json::array ({ { { "id", "el_1" }, { "kind", "assert.status" },
+    { "config", { { "expected", 200 } } } } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("'expected' is not a setting this element has. "
+                             "Settings: in, range"),
+    std::string::npos)
+    << *reason;
+}
+
+// The pointer names the container, so a nested object lists its own keys.
+TEST_F (ElementKindsTest, ANestedUndeclaredSettingNamesTheNestedSettings) {
+    const auto reason = vayu::core::Registry::instance ().validate (
+    nlohmann::json::array ({ { { "id", "el_1" }, { "kind", "assert.status" },
+    { "config", { { "range", { { "min", 200 }, { "bogus", 1 } } } } } } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find (
+               "'bogus' is not a setting this element has. Settings: max, min"),
+    std::string::npos)
+    << *reason;
+}
+
+// A container the schema walk cannot resolve (a `$ref`, say) or one that
+// declares no `properties` keeps the bare sentence rather than an empty list.
+TEST_F (ElementKindsTest, AnUnresolvableContainerKeepsTheBareSentence) {
+    const std::string description =
+    "Object contains a property that could not be validated using 'properties' "
+    "or "
+    "'additionalProperties' constraints: 'expected'.";
+    const nlohmann::json schema = { { "type", "object" },
+        { "properties", { { "in", { { "type", "array" } } } } } };
+
+    EXPECT_EQ (vayu::core::humanize_schema_error (schema, description, "/via/ref"),
+    "'expected' is not a setting this element has");
+    EXPECT_EQ (vayu::core::humanize_schema_error (schema, description, "/in"),
+    "'expected' is not a setting this element has");
+    EXPECT_EQ (vayu::core::humanize_schema_error (schema, description, ""),
+    "'expected' is not a setting this element has. Settings: in");
 }
 
 } // namespace

@@ -43,7 +43,11 @@ validate against that kind's JSON Schema - both checked by
 `vayu::core::Registry::validate` (`engine/include/vayu/core/elements.hpp`), which every write route
 runs before storing (`400` naming the index, the kind and the field on a violation). A rule the
 schema cannot express (a JSONPath that parses) is the kind's optional `validate_config` hook, run
-after the schema accepts the config and worded the same way. A request
+after the schema accepts the config and worded the same way. A setting the kind does not declare
+is refused with the keys it does (`'expected' is not a setting this element has. Settings: in,
+range`, #2774), listed in the schema's key order (alphabetical) from the object the key sits
+in, so a nested object names its own; a schema node the message cannot resolve (a `$ref`) keeps the
+bare sentence. A request
 disables an element it would otherwise inherit from an ancestor collection with an
 `inherit.disable` entry naming the ancestor's `id` in its own list, rather than by deleting it.
 
