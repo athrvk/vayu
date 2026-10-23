@@ -3786,7 +3786,7 @@ The **language** is current; what is missing is the **host environment**:
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
 - `POST /runs` no longer takes a `tests` field: it is refused with a `400`
-  naming `elements`, like every legacy script field. The collection chain's
+  naming `requestElements`, like every legacy script field. The collection chain's
   test scripts arrive as `script.post` elements in `requestElements`, ahead of
   the request's own, so a collection-level assertion is checked under load, not
   only in design mode. Each element not running inline is folded into the one

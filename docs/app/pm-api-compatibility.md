@@ -707,8 +707,10 @@ and a throwing collection or folder script errors the step with the level
 named ("Collection pre-request script failed - ..."). An entry stored before
 the field carries no `scope` and reads as the request's.
 
-**A load test runs no pre-request script** (only the `tests` one), so there is
-nothing to assert there before the request.
+**A load test runs a pre-request script only when it is opted in inline**
+(`config.inline`, or the run's `elements.scripts` override; see
+[load-test scripts](../engine/scripting.md#load-test-scripts)), so a check
+before the request has nothing to assert on unless the script is inlined.
 
 **It returns `pm`, and a callback that declares a parameter gets a `done`**
 (issue #1004). Both are Postman's contract - postman-sandbox returns `pm` to
@@ -1446,7 +1448,7 @@ it to keep working. The sections after it give each spelling's rules.
 | `postman.setGlobalVariable` / `getGlobalVariable` / `clearGlobalVariable` | `pm.globals.set` / `get` / `unset` |
 | `postman.setNextRequest` | `pm.execution.setNextRequest` |
 | `postman.getResponseHeader` | `pm.response.headers.get` |
-| `postman.getResponseCookie` | `pm.cookies.get` |
+| `postman.getResponseCookie` | `pm.cookies.get(name)` for the value, or `pm.cookies.all()` for the whole cookie object |
 | `tests["name"] = ...` | `pm.test("name", function () { ... })` |
 | `responseBody` | `pm.response.text()`, or `pm.response.json()` for the parsed body |
 | `responseCode` | `pm.response.code` |
@@ -1456,7 +1458,7 @@ it to keep working. The sections after it give each spelling's rules.
 | `environment`, `globals` | `pm.environment.toObject()`, `pm.globals.toObject()` |
 | `data` | `pm.iterationData.toObject()` |
 | `iteration` | `pm.info.iteration` |
-| `request` | `pm.request` |
+| `request` | `pm.request` (a different shape: the legacy `headers` is a lower-cased object and `data` a form object or the body text, see the table below) |
 
 ### The legacy `postman` object
 
@@ -1598,8 +1600,9 @@ accepted as given and not read. `clear()` takes no argument.
 
 ## Not (yet) supported
 
-These Postman APIs are **not** implemented. A script that calls one throws, with
-the exception of the visualizer, which is accepted and warns:
+These Postman APIs are **not** implemented. A script that calls one throws; a
+read of one of the properties returns `undefined`, and the visualizer is
+accepted and warns:
 
 - `replaceIn(...)` on the **scoped** accessors (`pm.environment.replaceIn`,
   `pm.globals.replaceIn`, `pm.collectionVariables.replaceIn`) - only the merged
@@ -1638,6 +1641,10 @@ the exception of the visualizer, which is accepted and warns:
   `CryptoJS` member outside that list is named by the import notice, also when
   it is read through an alias or a destructure of `CryptoJS` or
   `require('crypto-js')`, and one inside it is not
+- The browser and Node globals `fetch`, `XMLHttpRequest`, `process`, `URL`,
+  `URLSearchParams`, `TextEncoder`, `TextDecoder`, `structuredClone`,
+  `localStorage`, `sessionStorage`, `window`, `document` and `alert` - the editor
+  declares each as absent and names the replacement on hover
 - `Buffer` - the sandbox is not Node. Use `btoa` / `atob` for base64 and
   [`pm.crypto`](#hashing-pmcrypto-is-vayus-own-name-and-it-is-synchronous) for
   hashing
