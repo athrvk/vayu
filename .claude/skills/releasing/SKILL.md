@@ -305,8 +305,11 @@ Things about it that the code cannot tell you:
   rather than dead code outside macOS. `install.sh` refuses a missing sidecar for
   any version from `FIRST_CHECKSUMMED_VERSION` (0.33.0) on and warns only for
   older pinned ones; bump `FIRST_ATTESTED_VERSION` to the first release cut with
-  the attestation step (it gates the `gh attestation verify` call). The publish
-  job attests every asset, the `latest*.yml` feeds and the `.blockmap` files
+  the attestation step (it gates the `gh attestation verify` call, which is
+  pinned to `release.yml` and to `refs/tags/v<version>`; a `gh` too old to know
+  `--source-ref` fails closed). Every `curl` carries `CURL_SAFE` (https-only);
+  `VAYU_CURL_PROTO` is the test seam that lets `install_e2e.sh` use `file://`.
+  The publish job attests every asset, the `latest*.yml` feeds and the `.blockmap` files
   included; only the `*.sha256` sidecars are excluded, since each restates the
   digest of an attested installer. The in-app updater (`electron/update-attestation.ts`,
   #2372) checks the installer, not the feed: on Windows and the Linux AppImage

@@ -249,7 +249,8 @@ Releases are built in public on GitHub Actions from tagged source and ship with
 checksums and a build-provenance attestation per asset (from the first release
 after #1779). Check a download with
 `gh attestation verify <asset> --repo athrvk/vayu`; `install.sh` does it for
-you when an authenticated `gh` is present and refuses an asset whose checksum
+you when an authenticated `gh` is present, pinned to the tag it downloads so
+an older release's asset cannot stand in, and refuses an asset whose checksum
 is missing or wrong. Every third-party action in the release workflow is pinned
 to a commit SHA, and only the final publish job can write to the release. They
 are not code-signed, so macOS and Windows will warn on first
