@@ -634,11 +634,11 @@ TEST_F (OAuthClientTest, ATokenEndpointThatNeverAnswersTimesOutAtTheGivenBound) 
     EXPECT_LT (elapsed, std::chrono::seconds (15));
 }
 
-// One deadline covers the whole acquisition: a refresh rejected after 600 ms
-// leaves the fresh grant the remaining 400 ms, not a second full second.
-// Healthy, the call ends at about 1000 ms; with a fresh bound per post it ends
-// at about 1600 ms. The 1400 ms bound sits between: an upper bound, but 400 ms
-// above the healthy reading, and the broken one can only be slower.
+// One deadline covers the whole acquisition: a refresh rejected after 2500 ms
+// leaves the fresh grant the remaining 1500 ms, not a second full 4000 ms.
+// Healthy, the call ends at about 4000 ms; with a fresh bound per post it ends
+// at about 6500 ms. The 5500 ms bound sits 1500 ms from each reading, wide
+// enough that a slow runner cannot push the refresh past the deadline itself.
 TEST_F (OAuthClientTest, ARejectedRefreshLeavesTheFreshGrantOnlyWhatRemains) {
     MockTokenServer idp;
     auto config = cc_config (idp, "/refresh-rejected-then-hang");
@@ -652,16 +652,16 @@ TEST_F (OAuthClientTest, ARejectedRefreshLeavesTheFreshGrantOnlyWhatRemains) {
     db_->save_oauth_token (stale);
 
     const auto started = std::chrono::steady_clock::now ();
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, 1000);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, 4000);
     const auto elapsed = std::chrono::steady_clock::now () - started;
 
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_timeout");
     EXPECT_EQ (idp.hits (), 2)
     << "the rejected refresh must fall through to a grant";
-    static_assert (MockTokenServer::SLOW_REFRESH_REJECT_MS == 600,
-    "the bound below assumes the refresh is rejected 600 ms in");
-    EXPECT_LT (elapsed, std::chrono::milliseconds (1400));
+    static_assert (MockTokenServer::SLOW_REFRESH_REJECT_MS == 2500,
+    "the bound below assumes the refresh is rejected 2500 ms in");
+    EXPECT_LT (elapsed, std::chrono::milliseconds (5500));
 }
 
 TEST_F (OAuthClientTest, AuthCodeWithoutInteractiveIs409) {

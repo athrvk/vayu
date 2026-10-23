@@ -165,8 +165,8 @@ class TokenDeadline {
 
 TokenError token_timeout (const TokenDeadline& deadline) {
     return TokenError{ 504, "oauth2_timeout",
-        "Token request timed out after " + std::to_string (deadline.timeout_ms ()) +
-        " ms (Default request timeout)" };
+        "Token request timed out after " +
+        std::to_string (deadline.timeout_ms ()) + " ms (request timeout)" };
 }
 
 /// A token request that got no answer. Running out of time is reported as the

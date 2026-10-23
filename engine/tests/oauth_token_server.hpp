@@ -153,7 +153,7 @@ class MockTokenServer {
     }
 
     /// How long `/refresh-rejected-then-hang` takes to reject a refresh.
-    static constexpr int SLOW_REFRESH_REJECT_MS = 600;
+    static constexpr int SLOW_REFRESH_REJECT_MS = 2500;
     const std::string& last_body () const {
         return last_body_;
     }
