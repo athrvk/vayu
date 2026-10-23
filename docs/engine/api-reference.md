@@ -6880,11 +6880,15 @@ timeout happened to fire":
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
 | `maxStreamEvents` | The event cap was reached |
 | `maxStreamDurationMs` | The duration cap elapsed |
-| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` |
+| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` after the connection was made |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
-would kill a healthy one mid-flight. The only deadline is the idle one, and the
-two caps above are what bound a stream that talks forever. `maxStreamDurationMs`
+would kill a healthy one mid-flight. Two deadlines apply instead: connecting
+(TCP and the TLS handshake) is bounded by the smaller of `timeout` and 30
+seconds (issue #2835), and once connected the idle one bounds silence; the two
+caps above are what bound a stream that talks forever. A connect that runs out
+ends the stream as `error` with `errorCode` `TIMEOUT`, as a refused connection
+does, never as `idleTimeout`. `maxStreamDurationMs`
 (1000–86400000) and `maxStreamEvents` (1–10000000) override the configured
 defaults per request; sending either **without** `"stream": true` is a **400**,
 since a cap that quietly did not apply is worse than no cap.
