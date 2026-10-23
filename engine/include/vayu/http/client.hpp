@@ -12,6 +12,7 @@
  * @brief HTTP client using libcurl
  */
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -182,6 +183,21 @@ struct ClientConfig {
      * with a proxy in force that address is the proxy's.
      */
     std::optional<LocalPeerRule> local_peer_rule;
+
+    /**
+     * @brief Abort the transfer once this reads true, or null when nothing
+     *        outside the transfer ends it (issue #2683).
+     *
+     * Set by every send a management-API handler makes, from
+     * `RouteContext::server_stopping`, so `Server::stop()` can end those
+     * transfers before it joins the handler threads rather than waiting out
+     * whatever timeout a request typed. The flag must outlive the transfer.
+     *
+     * Read from libcurl's progress callback, which runs about once a second
+     * while a transfer waits on a silent peer, so a cancel lands within about
+     * that. The response reports `ErrorCode::Cancelled`.
+     */
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 /**

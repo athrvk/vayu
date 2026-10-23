@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -25,9 +26,11 @@
 #include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http::routes {
-// Declared in diagnostics.cpp; returns {http_status, json_body}.
+// Declared in diagnostics.cpp; returns {http_status, json_body}. No server
+// owns these sends, so nothing cancels them.
 std::pair<int, nlohmann::json> connection_test (const std::string& request_body,
-const vayu::http::TransportPolicy& transport);
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel = nullptr);
 } // namespace vayu::http::routes
 
 namespace {

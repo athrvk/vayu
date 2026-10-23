@@ -1089,6 +1089,11 @@ stored numeric values are unchanged, but a script that tested
 the new spelling. A load run records them under the error types
 `too_many_redirects` and `bad_content_encoding`.
 
+A send still in flight when the engine shuts down is cancelled rather than
+waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is
+making: the send answers, and its trace records, `CANCELLED` with
+`errorMessage` `Request cancelled`, about a second after the shutdown began.
+
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.
 

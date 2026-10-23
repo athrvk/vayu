@@ -16,6 +16,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <set>
 #include <utility>
@@ -140,7 +141,8 @@ const nlohmann::json& config,
 const std::string& url,
 TokenRequest& req,
 const std::string& key,
-double* network_ms) {
+double* network_ms,
+const std::atomic<bool>* cancel) {
     std::string target = url;
     if (!req.query.empty ()) {
         target.push_back (target.find ('?') == std::string::npos ? '?' : '&');
@@ -153,6 +155,7 @@ double* network_ms) {
     // every authenticated request with an auth error rather than a proxy one.
     vayu::http::ClientConfig client_config;
     client_config.transport = vayu::http::resolve_transport_policy (db);
+    client_config.cancel    = cancel;
     vayu::http::Client client (client_config);
     const auto sent_at = std::chrono::steady_clock::now ();
     auto result = client.post (target, vayu::utils::form_encode (req.form), req.headers);
@@ -369,7 +372,8 @@ const std::string& key,
 const std::string& token_url,
 bool force_refresh,
 int64_t now,
-double* network_ms) {
+double* network_ms,
+const std::atomic<bool>* cancel) {
     // Cache hit
     if (auto cached = db.get_oauth_token (key)) {
         if (!force_refresh && !is_expired (*cached, now)) {
@@ -390,7 +394,7 @@ double* network_ms) {
             vayu::utils::log_info (
             "oauth", "OAuth2: refreshing token", { { "url", refresh_url } });
             auto refreshed =
-            post_token_request (db, config, refresh_url, req, key, network_ms);
+            post_token_request (db, config, refresh_url, req, key, network_ms, cancel);
             if (auto* token = std::get_if<vayu::db::OAuthToken> (&refreshed)) {
                 // Rotation: keep the previous refresh token when the provider
                 // did not issue a new one.
@@ -455,7 +459,8 @@ std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database
 const nlohmann::json& config,
 bool force_refresh,
 const std::optional<InteractiveExchange>& interactive,
-double* network_ms) {
+double* network_ms,
+const std::atomic<bool>* cancel) {
     if (!config.is_object ()) {
         return TokenError{ 400, "oauth2_invalid_config", "Missing OAuth 2.0 config" };
     }
@@ -481,8 +486,8 @@ double* network_ms) {
     // in its place. The row is replaced by the exchange (#2472); `force_refresh`
     // adds nothing here.
     if (!interactive.has_value ()) {
-        if (auto answer = token_from_cache (
-            db, config, key, token_url, force_refresh, now, network_ms)) {
+        if (auto answer = token_from_cache (db, config, key, token_url,
+            force_refresh, now, network_ms, cancel)) {
             return *answer;
         }
     }
@@ -494,7 +499,7 @@ double* network_ms) {
 
     vayu::utils::log_info ("oauth", "OAuth2: requesting token",
     { { "grant", grant }, { "url", token_url } });
-    return post_token_request (db, config, token_url, req, key, network_ms);
+    return post_token_request (db, config, token_url, req, key, network_ms, cancel);
 }
 
 nlohmann::json serialize_token (const vayu::db::OAuthToken& t) {

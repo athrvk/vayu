@@ -25,6 +25,7 @@
 
 #ifdef VAYU_HAS_QUICKJS
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -241,6 +242,10 @@ struct ContextData {
     /// transfer is refused - see `ScriptContext::max_response_bytes`, which
     /// owns the rationale and the per-path choice.
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /// What ends a `pm.sendRequest` early, or null - see
+    /// `ScriptContext::cancel`.
+    const std::atomic<bool>* cancel = nullptr;
 
     /// Whether `pm.execution` may record an intent at all - see
     /// `ScriptContext::in_scenario`.

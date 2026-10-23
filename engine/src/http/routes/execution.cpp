@@ -1717,8 +1717,8 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // bind below applies them once the row has reached them.
     const int request_timeout_ms = resolve_request_timeout_ms (json,
     ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
-    auto built =
-    vayu::http::build_request (json, &ctx.db, request_timeout_ms, row_auth.resolution);
+    auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms,
+    row_auth.resolution, &ctx.server_stopping);
     if (built.parse_failed) {
         vayu::utils::log_warning ("http",
         "POST /execute - Invalid request format: " + built.error_message);
@@ -2061,6 +2061,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 pre_ctx.transport          = transport;
                 pre_ctx.default_headers    = default_headers;
                 pre_ctx.max_response_bytes = script_response_bound;
+                pre_ctx.cancel             = &ctx.server_stopping;
                 // The same row the transfer below carries, on the same
                 // terms as the buffered path: a stream is still one send,
                 // and one send with a row is iteration 0 of 1.
@@ -2316,6 +2317,7 @@ std::chrono::steady_clock::time_point handler_start) {
     ctx.db, vayu::http::DefaultHeaderScope::Design);
     inputs.max_response_bytes     = design_response_body_bound (ctx.db);
     inputs.max_element_body_bytes = element_body_bound (ctx.db);
+    inputs.cancel                 = &ctx.server_stopping;
     // The allowed folders as they stand at this send, read once.
     vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (ctx.db));
     inputs.files = &files;
@@ -2714,6 +2716,7 @@ nlohmann::json& scenario_manifest) {
     if (auto it = json.find ("environmentId"); it != json.end () && it->is_string ()) {
         options.environment_id = it->get<std::string> ();
     }
+    options.cancel           = &ctx.server_stopping;
     options.timeout_ms       = resolve_request_timeout_ms (json,
           ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
     options.limits.max_steps = static_cast<size_t> (ctx.db.get_config_int (
@@ -2801,8 +2804,8 @@ nlohmann::json& scenario_manifest) {
  * resolution with a 400 - so this is the single-request path's check alone.
  */
 std::optional<RouteError> preflight_run_auth (RouteContext& ctx, const nlohmann::json& json) {
-    auto preflight =
-    vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+    auto preflight = vayu::http::preflight_auth (
+    json.value ("auth", nlohmann::json ()), ctx.db, &ctx.server_stopping);
     if (!preflight.ok) {
         vayu::utils::log_warning (
         "http", "POST /runs - Auth pre-flight failed: " + preflight.message);

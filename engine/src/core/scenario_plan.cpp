@@ -406,8 +406,8 @@ nlohmann::json& raw_elements_out) {
     const auto auth_resolution = auth_template.empty () && !auth_after_scripts ?
     vayu::http::AuthResolution::Apply :
     vayu::http::AuthResolution::Defer;
-    auto built =
-    vayu::http::build_request (payload, &db, options.timeout_ms, auth_resolution);
+    auto built                 = vayu::http::build_request (
+    payload, &db, options.timeout_ms, auth_resolution, options.cancel);
     if (!built.ok || built.parse_failed) {
         return ("Cannot compose " + describe_step (index, row) + ": " + built.error_message);
     }

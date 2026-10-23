@@ -898,6 +898,7 @@ ExchangeInputs inputs) {
         ctx.transport          = inputs.transport;
         ctx.default_headers    = inputs.default_headers;
         ctx.max_response_bytes = inputs.max_response_bytes;
+        ctx.cancel             = inputs.cancel;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.
@@ -1037,6 +1038,7 @@ ExchangeInputs inputs) {
         // paid twice.
         config.max_response_bytes  = inputs.max_response_bytes;
         config.truncate_over_limit = true;
+        config.cancel              = inputs.cancel;
         vayu::http::Client client (config);
         outcome.response = client.send (outcome.request).value ();
     }

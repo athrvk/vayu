@@ -29,6 +29,7 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <atomic>
 #include <string>
 #include <utility>
 
@@ -102,13 +103,15 @@ nlohmann::json proxy_node (const TransportPolicy& policy) {
  *                  policy a test constructs, and required rather than defaulted
  *                  so no future caller can test a direct connection while
  *                  believing it tested the configured one.
+ * @param cancel    `ClientConfig::cancel`, as `import_fetch`'s (issue #2683).
  * @return {http_status, json_body}. The status is `200` for every *answered*
  *         question, failures included - a proxy that refused the tunnel is a
  *         successful test with a `proxy_failed` outcome, not a `502`. Only a
  *         malformed request is a `400`.
  */
 std::pair<int, nlohmann::json> connection_test (const std::string& request_body,
-const TransportPolicy& transport) {
+const TransportPolicy& transport,
+const std::atomic<bool>* cancel) {
     const auto parsed = parse_request_json (request_body);
     if (!parsed) {
         return as_response (parsed.error ());
@@ -126,6 +129,7 @@ const TransportPolicy& transport) {
     vayu::http::ClientConfig client_config;
     client_config.transport          = transport;
     client_config.max_response_bytes = CONNECTION_TEST_MAX_BYTES;
+    client_config.cancel             = cancel;
     vayu::http::Client client (client_config);
 
     Request probe;
@@ -192,9 +196,9 @@ void register_diagnostics_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/diagnostics/connection",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        auto [status, body] =
-        connection_test (req.body, vayu::http::resolve_transport_policy (ctx.db));
-        res.status = status;
+        auto [status, body] = connection_test (req.body,
+        vayu::http::resolve_transport_policy (ctx.db), &ctx.server_stopping);
+        res.status          = status;
         res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
     });

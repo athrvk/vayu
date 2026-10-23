@@ -1161,6 +1161,7 @@ class ScriptEngine::Impl {
         ctx_data.transport           = ctx.transport;
         ctx_data.default_headers     = ctx.default_headers;
         ctx_data.max_response_bytes  = ctx.max_response_bytes;
+        ctx_data.cancel              = ctx.cancel;
         ctx_data.in_scenario         = ctx.in_scenario;
         ctx_data.record_metric       = ctx.record_metric;
         // See ScriptContext::local for why an unbound one is not left null.
