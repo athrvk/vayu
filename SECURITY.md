@@ -241,7 +241,8 @@ redirects.
 
 After a download on Windows or the Linux AppImage, the in-app updater contacts
 `api.github.com` for the installer's attestation and `tuf-repo-cdn.sigstore.dev`
-to refresh the Sigstore trusted root it checks that attestation against.
+to refresh the Sigstore trusted root it checks that attestation against. Both go
+through Electron's `net.fetch`, so both follow the system proxy.
 
 ## Releases
 
@@ -275,12 +276,10 @@ attest a malicious file. What the check removes is the cheaper attacks:
 replacing assets on a release with a stolen `contents: write` token, a
 hand-edited release, and a re-uploaded older build.
 
-**Known gap: the trusted-root refresh ignores the system proxy.** The TUF
-client behind `@sigstore/tuf` fetches with Node's global `fetch`, not Electron's
-`net.fetch`, which is what follows the system proxy for the attestation lookup.
-On a network that reaches the internet only through a system proxy, the refresh
-can fail and the update is refused. The check fails closed: it never installs
-because it could not look.
+The check fails closed: it never installs because it could not look. The
+trusted-root refresh follows the system proxy like the attestation lookup does,
+so a network that reaches the internet only through one is not refused for that
+reason.
 If you find a way to break any statement in this document, report it privately
 through GitHub Security Advisories.
 

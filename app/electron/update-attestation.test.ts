@@ -18,9 +18,15 @@
  * written instead, and `node:crypto`'s `createHash` is wrapped so that a digest
  * equal to the stand-in's real SHA-256 reads as the AppImage's. Every other
  * file hashes truly, so the mismatch cases go through the real path.
+ *
+ * The trusted-root refresh (#2738) runs against a signed throwaway TUF
+ * repository (`tuf-repo.testkit.ts`) with the global `fetch` stubbed to throw.
+ * Mutation check: make `InjectedFetcher.fetch` in `sigstore-trusted-root.ts`
+ * call the global `fetch` and the cases under "refreshing the Sigstore trusted
+ * root" fail.
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -28,9 +34,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Verifier, type Signer } from "@sigstore/verify";
 
-const { netFetch, getTrustedRoot, STAND_IN_SHA256, APPIMAGE_SHA256 } = vi.hoisted(() => ({
+const { netFetch, STAND_IN_SHA256, APPIMAGE_SHA256 } = vi.hoisted(() => ({
 	netFetch: vi.fn(),
-	getTrustedRoot: vi.fn(),
 	/** sha256 of `STAND_IN_BYTES` below. */
 	STAND_IN_SHA256: "dcc59f1768c11486293d38fbcc7c1c1d3be6003fa7ce7883e387eda7b61ca030",
 	/** `Vayu-0.44.0-x86_64.AppImage`, as the v0.44.0 release lists it. */
@@ -38,7 +43,6 @@ const { netFetch, getTrustedRoot, STAND_IN_SHA256, APPIMAGE_SHA256 } = vi.hoiste
 }));
 
 vi.mock("electron", () => ({ net: { fetch: netFetch } }));
-vi.mock("@sigstore/tuf", () => ({ getTrustedRoot }));
 vi.mock("node:crypto", async (importOriginal) => {
 	const real = await importOriginal<typeof import("node:crypto")>();
 	return {
@@ -62,6 +66,7 @@ import {
 	type InstallerAttestationCheck,
 	type SigstoreTrustedRoot,
 } from "./update-attestation.js";
+import { buildTufRepo, TUF_MIRROR, type TufRepo } from "./tuf-repo.testkit.js";
 
 const STAND_IN_BYTES = "Vayu-0.44.0-x86_64.AppImage stand-in\n";
 /** sha256("abc"), the FIPS 180-2 example: a file no attestation names. */
@@ -88,6 +93,7 @@ const trustedRoot = TrustedRoot.fromJSON(readFixture("sigstore-trusted-root.json
 
 type AttestationsBody = { attestations: { bundle: Record<string, unknown> }[] };
 const attestationsBody = () => readFixture("vayu-0.44.0-attestations.json") as AttestationsBody;
+const trustedRootBytes = readFileSync(path.join(fixtures, "sigstore-trusted-root.json"));
 const realBundle = () => attestationsBody().attestations[0].bundle;
 
 let scratch: string;
@@ -108,8 +114,8 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	netFetch.mockReset();
-	getTrustedRoot.mockReset();
 });
 
 function json(body: unknown, status = 200): Response {
@@ -180,7 +186,9 @@ describe("verifyInstallerAttestation", () => {
 		expect(new Headers(init.headers).get("Accept")).toBe("application/vnd.github+json");
 		expect(init.signal).toBeInstanceOf(AbortSignal);
 		// An injected root leaves the TUF cache alone.
-		expect(getTrustedRoot).not.toHaveBeenCalled();
+		expect(fetch.mock.calls.map(([requested]) => requested)).not.toContainEqual(
+			expect.stringContaining(TUF_MIRROR)
+		);
 		expect(readdirSync(scratch)).not.toContain("sigstore");
 	});
 
@@ -196,22 +204,120 @@ describe("verifyInstallerAttestation", () => {
 		);
 	});
 
-	it("loads the trusted root through @sigstore/tuf, cached in the directory it is given", async () => {
-		getTrustedRoot.mockResolvedValue(trustedRoot);
+	describe("refreshing the Sigstore trusted root", () => {
+		let repo: TufRepo;
+		let tufCacheDir: string;
 
-		await expect(
-			verifyInstallerAttestation(check({ trustedRoot: undefined }))
-		).resolves.toEqual({ ok: true });
-		expect(getTrustedRoot).toHaveBeenCalledWith({ cachePath: cacheDir });
-	});
+		beforeEach(() => {
+			repo = buildTufRepo({ "trusted_root.json": trustedRootBytes });
+			tufCacheDir = mkdtempSync(path.join(scratch, "tuf-"));
+			repo.seedCache(tufCacheDir);
+			// Node's global fetch ignores the system proxy: nothing here may reach it.
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(() => {
+					throw new Error("the global fetch must not be used");
+				})
+			);
+		});
 
-	it("refuses when the trusted root cannot be refreshed", async () => {
-		getTrustedRoot.mockRejectedValue(new Error("error refreshing TUF metadata"));
+		/** GitHub's lookup answered with the real bundle; the Sigstore mirror by `mirror`. */
+		const serving = (mirror: (url: string) => Response = (url) => repo.respond(url)) =>
+			vi.fn(async (url: string, _init: RequestInit) =>
+				url.startsWith(TUF_MIRROR) ? mirror(url) : json(attestationsBody())
+			);
 
-		const result = await verifyInstallerAttestation(check({ trustedRoot: undefined }));
-		expect(result).toEqual({
-			ok: false,
-			reason: "Couldn't load the Sigstore trusted root (error refreshing TUF metadata).",
+		it("goes through the injected fetch, cached in the directory it is given", async () => {
+			const fetch = serving();
+
+			await expect(
+				verifyInstallerAttestation(
+					check({ trustedRoot: undefined, fetch, sigstoreCacheDir: tufCacheDir })
+				)
+			).resolves.toEqual({ ok: true });
+
+			const requested = fetch.mock.calls.map(([url]) => url);
+			expect(requested).toContain(`${TUF_MIRROR}/timestamp.json`);
+			expect(requested).toContain(`${TUF_MIRROR}/targets/trusted_root.json`);
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+			expect(readdirSync(path.join(tufCacheDir, "tuf-repo-cdn.sigstore.dev"))).toContain(
+				"timestamp.json"
+			);
+		});
+
+		it("follows the system proxy by defaulting to Electron's net.fetch", async () => {
+			netFetch.mockImplementation(serving());
+
+			await expect(
+				verifyInstallerAttestation(
+					check({
+						trustedRoot: undefined,
+						fetch: undefined,
+						sigstoreCacheDir: tufCacheDir,
+					})
+				)
+			).resolves.toEqual({ ok: true });
+
+			const requested: string[] = netFetch.mock.calls.map(([url]) => url as string);
+			expect(requested).toContain(`${TUF_MIRROR}/timestamp.json`);
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+		});
+
+		it("refuses when the mirror cannot be refreshed", async () => {
+			const result = await verifyInstallerAttestation(
+				check({
+					trustedRoot: undefined,
+					sigstoreCacheDir: tufCacheDir,
+					fetch: serving(() => new Response("down", { status: 503 })),
+				})
+			);
+
+			expect(result).toEqual({
+				ok: false,
+				reason:
+					"Couldn't load the Sigstore trusted root (error refreshing the TUF metadata: " +
+					`GET ${TUF_MIRROR}/2.root.json answered HTTP 503).`,
+			});
+		});
+
+		it("refuses when the mirror cannot be reached", async () => {
+			const result = await verifyInstallerAttestation(
+				check({
+					trustedRoot: undefined,
+					sigstoreCacheDir: tufCacheDir,
+					fetch: serving(() => {
+						throw new TypeError("fetch failed");
+					}),
+				})
+			);
+
+			expect(result).toEqual({
+				ok: false,
+				reason: "Couldn't load the Sigstore trusted root (error refreshing the TUF metadata: fetch failed).",
+			});
+		});
+
+		it("refuses a trusted root the signed metadata does not describe", async () => {
+			const result = await verifyInstallerAttestation(
+				check({
+					trustedRoot: undefined,
+					sigstoreCacheDir: tufCacheDir,
+					fetch: serving((url) =>
+						url.endsWith("/targets/trusted_root.json")
+							? new Response(
+									trustedRootBytes
+										.toString("utf8")
+										.replace("sigstore", "tampered")
+								)
+							: repo.respond(url)
+					),
+				})
+			);
+
+			expect(result.ok).toBe(false);
+			expect(!result.ok && result.reason).toMatch(
+				/^Couldn't load the Sigstore trusted root \(error downloading trusted_root\.json: /
+			);
 		});
 	});
 

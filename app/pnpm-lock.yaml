@@ -17,6 +17,9 @@ importers:
       '@sigstore/bundle':
         specifier: ^5.0.0
         version: 5.0.0
+      '@sigstore/protobuf-specs':
+        specifier: ^0.5.2
+        version: 0.5.2
       '@sigstore/tuf':
         specifier: ^5.0.0
         version: 5.0.0(supports-color@10.2.2)
@@ -32,6 +35,9 @@ importers:
       koffi:
         specifier: 3.3.2
         version: 3.3.2
+      tuf-js:
+        specifier: ^6.0.0
+        version: 6.0.0(supports-color@10.2.2)
       zod:
         specifier: ^4.5.4
         version: 4.5.4
