@@ -12,7 +12,9 @@
  * The TUF repository is a signed throwaway (`tuf-repo.testkit.ts`) that
  * `tuf-js` verifies for real. Mutation check: make `InjectedFetcher.fetch`
  * call the global `fetch` instead of the one it was given and the cases that
- * stub the global to throw fail.
+ * stub the global to throw fail. Mutation check for the retries: make
+ * `InjectedFetcher.fetch` make a single attempt and the cases under "when a
+ * request fails" that expect a second or third attempt fail.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -137,6 +139,93 @@ describe("loadTrustedRoot", () => {
 
 			expect(readdirSync(cachePath)).toEqual([TUF_REPO_DIR]);
 			expect(existsSync(path.join(repoDir(), "timestamp.json"))).toBe(false);
+		});
+	});
+
+	describe("when a request fails", () => {
+		const TIMESTAMP = `${TUF_MIRROR}/timestamp.json`;
+		const unavailable = () => new Response("unavailable", { status: 503 });
+		const dropped = () => {
+			throw new TypeError("fetch failed");
+		};
+
+		/** The mirror, except that `url` answers `scripted` in turn before it answers properly. */
+		function flaky(url: string, scripted: (() => Response)[]) {
+			const remaining = [...scripted];
+			return vi.fn(async (requested: string, _init: RequestInit) => {
+				const next = requested === url ? remaining.shift() : undefined;
+				return next ? next() : repo.respond(requested);
+			});
+		}
+		const attemptsAt = (fetch: ReturnType<typeof mirror>, url: string) =>
+			fetch.mock.calls.filter(([requested]) => requested === url);
+
+		it("retries a 5xx answer", async () => {
+			repo.seedCache(cachePath);
+			const fetch = flaky(TIMESTAMP, [unavailable]);
+
+			const root = await loadTrustedRoot(cachePath, fetch);
+
+			expect(root.mediaType).toBe(TARGET_JSON.mediaType);
+			expect(attemptsAt(fetch, TIMESTAMP)).toHaveLength(2);
+		});
+
+		it("retries a network error", async () => {
+			repo.seedCache(cachePath);
+			const fetch = flaky(TIMESTAMP, [dropped, unavailable]);
+
+			await loadTrustedRoot(cachePath, fetch);
+
+			expect(attemptsAt(fetch, TIMESTAMP)).toHaveLength(3);
+		});
+
+		it("gives each attempt a deadline of its own", async () => {
+			repo.seedCache(cachePath);
+			const fetch = flaky(TIMESTAMP, [unavailable, unavailable]);
+
+			await loadTrustedRoot(cachePath, fetch);
+
+			const signals = attemptsAt(fetch, TIMESTAMP).map(([, init]) => init.signal);
+			expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+			expect(new Set(signals).size).toBe(3);
+		});
+
+		it("refuses after three failed attempts at one request", async () => {
+			repo.seedCache(cachePath);
+			const fetch = flaky(TIMESTAMP, [unavailable, unavailable, unavailable]);
+
+			await expect(loadTrustedRoot(cachePath, fetch)).rejects.toThrow(/503/);
+
+			expect(attemptsAt(fetch, TIMESTAMP)).toHaveLength(3);
+		});
+
+		it("refuses with the network error once its retries are spent", async () => {
+			repo.seedCache(cachePath);
+			const fetch = flaky(TIMESTAMP, [dropped, dropped, dropped]);
+
+			await expect(loadTrustedRoot(cachePath, fetch)).rejects.toThrow("fetch failed");
+
+			expect(attemptsAt(fetch, TIMESTAMP)).toHaveLength(3);
+		});
+
+		it("does not retry a 4xx, which is how the probe for a newer root ends", async () => {
+			repo.seedCache(cachePath);
+			const fetch = mirror();
+
+			await loadTrustedRoot(cachePath, fetch);
+
+			// The repository has no 2.root.json and says 404.
+			expect(attemptsAt(fetch, `${TUF_MIRROR}/2.root.json`)).toHaveLength(1);
+		});
+
+		it("does not retry a 403 either", async () => {
+			repo.seedCache(cachePath);
+			const probe = `${TUF_MIRROR}/2.root.json`;
+			const fetch = flaky(probe, [() => new Response("forbidden", { status: 403 })]);
+
+			await loadTrustedRoot(cachePath, fetch);
+
+			expect(attemptsAt(fetch, probe)).toHaveLength(1);
 		});
 	});
 

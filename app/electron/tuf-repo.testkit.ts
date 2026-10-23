@@ -8,6 +8,7 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { SIGSTORE_TUF_MIRROR } from "./sigstore-trusted-root.js";
 
 /**
  * A TUF repository signed with a throwaway key, for tests of the Sigstore
@@ -21,7 +22,7 @@ import path from "node:path";
  * earlier build wrote looks to the new code.
  */
 
-export const TUF_MIRROR = "https://tuf-repo-cdn.sigstore.dev";
+export const TUF_MIRROR = SIGSTORE_TUF_MIRROR;
 /** The directory `@sigstore/tuf` caches this mirror under, inside the cache path. */
 export const TUF_REPO_DIR = "tuf-repo-cdn.sigstore.dev";
 
