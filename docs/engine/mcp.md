@@ -200,7 +200,7 @@ the clients in the ✅ row, so no client waits for a notice that never comes. Se
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
-holds that record. See [Data files](#data-files). `get_app_focus` is the same
+publishes it to the HTTP server. See [Data files](#data-files). `get_app_focus` is the same
 shape: the open tab and environment are renderer state, so it answers an error
 saying the window is not connected on stdio.
 
@@ -1961,8 +1961,9 @@ A collection's declared data file reaches MCP in two parts (issue #1742).
 `dataSchema` is the contract - column names, the file's name, when it was
 declared - and is the same on every machine, so it rides the engine row.
 `dataFile: { path, fileName, hash }` is where that file is **on this machine**,
-and comes from the app's renderer (`stores/data-file-store.ts`), which publishes
-its whole map to the main process over `dataFile:locations`
+and comes from the app's renderer (`stores/data-file-store.ts`, its mirror of
+the collections list's bindings), which publishes its whole map to the main
+process over `dataFile:locations`
 (`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
 keeping only an absolute path with an extension `dataFile:read` would open).
 `hash` (issue #2051) is the SHA-256 of the file's bytes, as 64 lowercase hex.
@@ -2682,7 +2683,7 @@ And two run renderer → main for MCP's sake:
 
 | Channel              | Purpose                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
-| `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
+| `dataFile:locations` | The whole map of bound data-file paths, on launch and on every change (see below). |
 | `app:focus`          | The open tab (type, entity id, label) and active environment (id, name), whole, on launch and on every change; `get_app_focus` reads the copy `electron/app-focus.ts` rebuilds field by field. |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the

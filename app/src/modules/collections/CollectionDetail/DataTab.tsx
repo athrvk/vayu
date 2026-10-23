@@ -20,8 +20,11 @@
  *
  * - **The schema** (`dataSchema` on the collection) is the same on every
  *   machine, so it rides the engine row and travels through import.
- * - **The file's path** is true of one filesystem only, so it lives in
- *   `data-file-store` and never reaches the engine.
+ * - **The file's path** (`dataFile`) rides the row too (#2765), so a backup
+ *   carries it, but it is true of one filesystem only: it never travels
+ *   through an export or an import, and after a restore elsewhere it can name
+ *   a file that is not there - shown, and struck through once the re-read
+ *   fails.
  *
  * And the thing neither half holds: **rows**. The preview below is in memory
  * for as long as the tab is open, and nothing writes it anywhere.
@@ -34,7 +37,7 @@
  * question.
  *
  * The saves are the two gestures that name a file: picking one declares its
- * columns, and Remove clears the contract and the remembered path. Anything
+ * columns and binds the file, and Remove clears the contract and the binding. Anything
  * subtler than a gesture is a button beside the picker - Re-declare when the
  * re-read file has drifted from the contract, or a save failed and the preview
  * is still there to retry from; Clear when the remembered file is gone and the
@@ -47,12 +50,12 @@ import { Check, Loader2, Trash2 } from "lucide-react";
 
 import { Button, Card } from "@/components/ui";
 import { Callout } from "@/components/shared";
-import { useDataFileStore } from "@/stores";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
 import { canReadDeclaredDataFile, readDeclaredDataFile } from "@/services/data-files/read-declared";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
 import { hasDataContract, type Collection } from "@/types";
+import { cn } from "@/lib/utils";
 import DataFilePicker, { type SelectedDataFile } from "../DataFilePicker";
 import ColumnAudit from "./ColumnAudit";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
@@ -62,7 +65,7 @@ interface DataTabProps {
 }
 
 /**
- * Whether opening this collection's tab will re-read a remembered file.
+ * Whether opening this collection's tab will re-read its bound file.
  *
  * Asked *before* the first paint as well as inside the effect, which is the
  * point: the read starts one tick after mount, and a `reading` flag that only
@@ -72,7 +75,7 @@ interface DataTabProps {
 function willReadRemembered(collection: Collection): boolean {
 	return (
 		hasDataContract(collection.dataSchema) &&
-		!!useDataFileStore.getState().locations[collection.id]?.path &&
+		!!collection.dataFile?.path &&
 		// Outside Electron there is no path to re-read and never will be, so the
 		// picker simply stands - a spinner here would never resolve.
 		canReadDeclaredDataFile()
@@ -98,7 +101,7 @@ export default function DataTab({ collection }: DataTabProps) {
 	 */
 	const { maxRows } = useDataFileLimits();
 	const writer = useDataContractWriter(collection.id);
-	const remembered = useDataFileStore((s) => s.locations[collection.id]);
+	const remembered = collection.dataFile;
 
 	const declared = collection.dataSchema?.columns ?? [];
 	const declaredContract = hasDataContract(collection.dataSchema);
@@ -110,22 +113,22 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * `CollectionDetail` makes sufficient: a different collection is a different
 	 * DataTab, so there is no stale file, error or note to clear here.
 	 *
-	 * Deliberately not re-run when the store changes. `remembered` is written by
-	 * declaring and clearing below, and re-reading on it would re-read the file
-	 * the user just declared *from* - and would replace a file they had picked by
-	 * hand since. The store is therefore read here for what it held on mount; the
-	 * reactive value above is for the name the render shows.
+	 * Deliberately not re-run when the binding changes. `remembered` is written
+	 * by declaring and clearing below, and re-reading on it would re-read the
+	 * file the user just declared *from* - and would replace a file they had
+	 * picked by hand since. The binding is therefore read here as it was on
+	 * mount; the reactive value above is for what the render shows.
 	 *
 	 * Preview only: this read goes through `setFile` and never `writer.declare`, so
 	 * reopening the tab to compare a file that drifted writes nothing. Only a
 	 * pick the user made declares.
 	 *
 	 * Only with a contract: without one there is nothing to compare a file
-	 * against, and the store should hold no path either (Clear takes it with it),
-	 * so a read would be work in service of no question.
+	 * against, and the row should hold no binding either (Clear takes it with
+	 * it), so a read would be work in service of no question.
 	 */
 	useEffect(() => {
-		const location = useDataFileStore.getState().locations[collection.id];
+		const location = collection.dataFile;
 		if (!willReadRemembered(collection) || !location?.path) return;
 
 		let cancelled = false;
@@ -217,6 +220,19 @@ export default function DataTab({ collection }: DataTabProps) {
 									{collection.dataSchema.fileName}
 								</span>
 								.{readFailure && ` ${readFailure}`}
+							</p>
+						)}
+						{remembered && (
+							<p className="text-xs text-muted-foreground">
+								Bound to{" "}
+								<span
+									className={cn(
+										"font-mono break-all",
+										readFailure && "line-through"
+									)}
+								>
+									{remembered.path}
+								</span>
 							</p>
 						)}
 					</Card>

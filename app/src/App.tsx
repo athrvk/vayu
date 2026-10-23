@@ -32,6 +32,7 @@ import { useOsIcon } from "./hooks/useOsIcon";
 import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useWindowFileDrop } from "./hooks/useWindowFileDrop";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
+import { useFileBindingMirror } from "./hooks/useFileBindingMirror";
 import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
 import { useAppFocusMirror } from "./hooks/useAppFocusMirror";
 import { useRunWatchers } from "./hooks/useRunWatchers";
@@ -118,8 +119,12 @@ function App() {
 	// no query can see. This is the channel that tells the cache to refetch.
 	useMcpDataInvalidation();
 
-	// The other direction on the same seam: the data-file paths the app
-	// remembers live in renderer storage, and MCP names them (#1742).
+	// Each collection's spec-file and data-file binding rides its engine row
+	// (#2765); the stores that index them by id follow the collections list.
+	useFileBindingMirror();
+
+	// The other direction on the same seam: MCP names a collection's data file
+	// from the main process's copy of that store (#1742).
 	useDataFileLocationMirror();
 
 	// And which tab and environment are open, so an agent can be asked "the

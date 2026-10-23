@@ -12,7 +12,8 @@ import { queryKeys } from "./keys";
 import { assignTempIds } from "@/services/importers/assign-ids";
 import { ImportOrchestrator, type ImportApi } from "@/services/importers/orchestrator";
 import type { ImportApplyOptions, ImportResult } from "@/services/importers/types";
-import { useSpecFileStore, type SpecFileLocation } from "@/stores/spec-file-store";
+import { logError } from "@/errors/error-logger";
+import type { SpecFileLocation } from "@/types";
 
 /** Build an ImportApi backed by the real apiService. */
 export function createImportApi(): ImportApi {
@@ -24,28 +25,38 @@ export function createImportApi(): ImportApi {
 }
 
 /**
- * Remember the picked file for every root the import bound a spec to.
+ * Bind the picked file to every root the import bound a spec to (#2765).
  *
- * After the apply, not before: the store is keyed by collection id, and the
- * collection has no id until the engine answers with the temp-id map. Called
- * only for a file-picked import - a URL-sourced spec records its origin
- * portably, in `spec_documents.source_url`.
+ * After the apply, not inside it: `POST /import/apply` refuses a file binding,
+ * because an import describes a document from elsewhere, and the collection has
+ * no id until the engine answers with the temp-id map. Called only for a
+ * file-picked import - a URL-sourced spec records its origin portably, in
+ * `spec_documents.source_url`.
  *
- * Outside React on purpose: this runs inside the mutation, which is not a
- * component, and the store's setter is the same function `useSpecFileStore`
- * would hand a hook caller.
+ * A write that fails is logged and the import still reports what it committed:
+ * the tree landed, and failing the mutation would invite an import of it all
+ * again. The Spec tab's check then says the binding has no file to re-read.
  */
-function rememberSpecFiles(
+async function bindSpecFiles(
 	result: ImportResult,
 	idMap: Record<string, string>,
 	specFile: SpecFileLocation | undefined
-): void {
+): Promise<void> {
 	if (!specFile?.path) return;
-	const setSpecFile = useSpecFileStore.getState().setSpecFile;
-	for (const root of result.collections) {
-		if (!root.spec || !root.tempId) continue;
-		const collectionId = idMap[root.tempId];
-		if (collectionId) setSpecFile(collectionId, specFile);
+	const ids = result.collections.flatMap((root) => {
+		const id = root.spec && root.tempId ? idMap[root.tempId] : undefined;
+		return id ? [id] : [];
+	});
+	const writes = await Promise.allSettled(
+		ids.map((id) => apiService.updateCollection({ id, specFile }))
+	);
+	for (const write of writes) {
+		if (write.status === "fulfilled") continue;
+		const reason: unknown = write.reason;
+		logError(reason instanceof Error ? reason : new Error(String(reason)), "medium", {
+			component: "renderer",
+			action: "import-bind-spec-file",
+		});
 	}
 }
 
@@ -93,14 +104,14 @@ export function useImportMutation() {
 			/**
 			 * Where the imported document sits on this machine, when it was picked
 			 * as a file. Ignored unless the tree actually carries a spec - every
-			 * other format is a file too, and remembering its path would claim a
-			 * binding that does not exist.
+			 * other format is a file too, and binding its path would claim a spec
+			 * file that does not exist.
 			 */
 			specFile?: SpecFileLocation;
 		}): Promise<ImportApplied> => {
 			const withTempIds = assignTempIds(result);
 			const idMap = await new ImportOrchestrator(createImportApi()).run(withTempIds, opts);
-			rememberSpecFiles(withTempIds, idMap, specFile);
+			await bindSpecFiles(withTempIds, idMap, specFile);
 			return {
 				idMap,
 				rootIds: realIds(withTempIds.collections, idMap),

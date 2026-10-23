@@ -104,6 +104,41 @@ describe("a renderer PUT drops every cached composition (#1877)", () => {
 
 		expectBothInvalidated(client);
 	});
+
+	/*
+	 * A file binding is not composed (#2765), and a data file's re-read writes
+	 * one on every changed hash, so a write of a binding alone keeps every
+	 * composition. Mutation check: drop the `changesOnlyFileBindings` guard and
+	 * the first case fails; widen it to any payload and the second does.
+	 */
+	it("keeps them on a write of the collection's file bindings alone", async () => {
+		updateCollection.mockResolvedValue({ id: "col_a", name: "A", order: 0 });
+		const client = makeClient();
+
+		const { result } = renderHook(() => useUpdateCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync({
+			id: "col_a",
+			dataFile: { path: "/p/u.csv", fileName: "u.csv", castNumbers: true },
+			specFile: null,
+		});
+
+		expect(client.getQueryState(first)?.isInvalidated).toBe(false);
+		expect(client.getQueryState(second)?.isInvalidated).toBe(false);
+	});
+
+	it("drops them when a binding rides with a field that is composed", async () => {
+		updateCollection.mockResolvedValue({ id: "col_a", name: "A", order: 0 });
+		const client = makeClient();
+
+		const { result } = renderHook(() => useUpdateCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync({ id: "col_a", openapi: null, specFile: null });
+
+		expectBothInvalidated(client);
+	});
 });
 
 describe("invalidateCompositions", () => {

@@ -12,11 +12,11 @@
  * Binding stored two different kinds of origin, and they are not
  * interchangeable: a URL is portable and travels with the document
  * (`spec_documents.source_url`), while a picked file's path is true of one
- * machine and lives in `spec-file-store`. A collection bound from a paste, or
- * bound on somebody else's machine from a file, has neither - and that is a
- * state to *say*, not to paper over: there is nothing to compare against, and
- * pretending otherwise would report a spec as unchanged because it was never
- * looked at.
+ * machine (`Collection.specFile`, #2765 - kept by a backup, never by an export
+ * or an import). A collection bound from a paste has neither, and a path
+ * restored from another machine may name no file here - each a state to *say*,
+ * not to paper over: there is nothing to compare against, and pretending
+ * otherwise would report a spec as unchanged because it was never looked at.
  *
  * What comes back goes through the bundler on the way, exactly as import does.
  * The stored document is the bundled one (issue #649), so a comparison against
@@ -39,7 +39,7 @@ import type { ImportFetchOptions } from "@/types/api";
 export interface SpecSource {
 	/** `spec_documents.source_url` - portable, and what a re-fetch prefers. */
 	sourceUrl?: string | null;
-	/** This machine's copy of the picked file, from `spec-file-store`. */
+	/** The picked file the binding names (`Collection.specFile`). */
 	file?: { path: string; fileName: string };
 }
 

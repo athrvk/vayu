@@ -37,6 +37,7 @@ import {
 	LOAD_TEST_DEFAULTS,
 } from "@/constants/load-test";
 import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 
 /**
  * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
@@ -100,11 +101,16 @@ vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => updateCollection,
 }));
 
-/** Land the last contract write the way TanStack would, running its onSuccess. */
-function succeedContractWrite() {
+/**
+ * Land the last contract write: the row it answers carries the file binding
+ * (#2765), which is what the store mirroring the collections list then holds.
+ */
+function landContractWrite() {
 	const calls = updateCollection.mutate.mock.calls;
-	const [, options] = calls[calls.length - 1];
-	act(() => options?.onSuccess?.({}));
+	const [update] = calls[calls.length - 1];
+	act(() => {
+		if (update.dataFile) bindDataFile(update.id, update.dataFile);
+	});
 }
 
 /** Collections the contract walk sees. Mutable, like `configEntries` above. */
@@ -468,9 +474,7 @@ describe("the declared file pre-fills (issue #1039)", () => {
 		// in another pane, another dialog - must not replace what the user
 		// chose in front of them.
 		act(() => {
-			useDataFileStore
-				.getState()
-				.setDataFile("col_1", { path: "/data/second.csv", fileName: "second.csv" });
+			bindDataFile("col_1", { path: "/data/second.csv", fileName: "second.csv" });
 		});
 
 		expect(screen.getByText(/mine\.csv/)).toBeInTheDocument();
@@ -1695,19 +1699,15 @@ describe("a pick declares the contract (issue #2050)", () => {
 		await pick("plans.csv", "plan,price\nfree,0");
 
 		// Mutation check: drop `writer.declare(next)` from the handler and this reds.
-		expect(updateCollection.mutate).toHaveBeenCalledWith(
-			{
-				id: "col_1",
-				dataSchema: {
-					columns: ["plan", "price"],
-					fileName: "plans.csv",
-					declaredAt: expect.any(Number),
-				},
+		expect(updateCollection.mutate).toHaveBeenCalledWith({
+			id: "col_1",
+			dataSchema: {
+				columns: ["plan", "price"],
+				fileName: "plans.csv",
+				declaredAt: expect.any(Number),
 			},
-			expect.anything()
-		);
-		succeedContractWrite();
-		expect(useDataFileStore.getState().locations.col_1?.path).toBe("/home/u/plans.csv");
+			dataFile: expect.objectContaining({ path: "/home/u/plans.csv" }),
+		});
 	});
 
 	it("declares for the ancestor that holds the contract", async () => {
@@ -1721,8 +1721,7 @@ describe("a pick declares the contract (issue #2050)", () => {
 		// Mutation check: declare against the `collectionId` prop instead of
 		// `declaringCollectionId` and this reds.
 		expect(updateCollection.mutate).toHaveBeenCalledWith(
-			expect.objectContaining({ id: "col_p" }),
-			expect.anything()
+			expect.objectContaining({ id: "col_p" })
 		);
 	});
 
@@ -1740,12 +1739,11 @@ describe("a pick declares the contract (issue #2050)", () => {
 		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
 
 		// Mutation check: drop `onRemove={writer.clear}` and this reds.
-		expect(updateCollection.mutate).toHaveBeenCalledWith(
-			{ id: "col_1", dataSchema: null },
-			expect.anything()
-		);
-		succeedContractWrite();
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(updateCollection.mutate).toHaveBeenCalledWith({
+			id: "col_1",
+			dataSchema: null,
+			dataFile: null,
+		});
 		expect(started(onStart)).not.toHaveProperty("data");
 	});
 
@@ -1779,7 +1777,7 @@ describe("a pick declares the contract (issue #2050)", () => {
 	it("Read numbers as numbers re-parses the sent rows and stays with the binding (#2540)", async () => {
 		const { onStart } = open({ collectionId: "col_1" });
 		await pick("plans.csv", "plan,price\nfree,0");
-		succeedContractWrite();
+		landContractWrite();
 		updateCollection.mutate.mockClear();
 
 		fireEvent.click(screen.getByRole("checkbox", { name: /Read numbers as numbers/ }));
@@ -1790,9 +1788,13 @@ describe("a pick declares the contract (issue #2050)", () => {
 		// `dataFileCastNumbers` from `buildLoadTestConfig` and this fails.
 		expect(config.dataFileCastNumbers).toBe(true);
 		// Mutation check: drop `writer.rememberReading` from `changeReading`
-		// and the next pre-fill reads the file as text.
-		expect(useDataFileStore.getState().locations.col_1?.castNumbers).toBe(true);
-		expect(updateCollection.mutate).not.toHaveBeenCalled();
+		// and the next pre-fill reads the file as text. The binding alone, no
+		// `dataSchema`: how a value is read declares nothing.
+		expect(updateCollection.mutate).toHaveBeenCalledTimes(1);
+		expect(updateCollection.mutate.mock.calls[0][0]).toEqual({
+			id: "col_1",
+			dataFile: expect.objectContaining({ path: "/home/u/plans.csv", castNumbers: true }),
+		});
 	});
 
 	it("Read numbers as numbers lives in the selection for a request in no collection", async () => {

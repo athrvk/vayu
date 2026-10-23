@@ -22,8 +22,6 @@ import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { useResponseStore } from "@/stores/response-store";
 import { useToastStore } from "@/stores/toast-store";
-import { useDataFileStore } from "@/stores/data-file-store";
-import { useSpecFileStore } from "@/stores/spec-file-store";
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import { childrenOf } from "@/modules/collections/tree-children";
 import type {
@@ -393,6 +391,32 @@ export function useCreateCollectionMutation() {
 }
 
 /**
+ * Put a row the engine answered for a write into the collections list, in tree
+ * order. Shared by the collection update and the file-binding writes made
+ * outside it (`queries/file-bindings.ts`), so a binding written either way
+ * reaches `useFileBindingMirror` through the one cache write.
+ */
+export function storeUpdatedCollection(queryClient: QueryClient, updated: Collection): void {
+	queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
+		const next = old?.map((c) => (c.id === updated.id ? updated : c)) ?? [];
+		return next.sort(compareTreeOrder);
+	});
+}
+
+/** The fields a collection update can carry that no request composes against. */
+const FILE_BINDING_FIELDS: ReadonlySet<string> = new Set(["id", "specFile", "dataFile"]);
+
+/**
+ * Whether @p update changes only where the collection's files are (#2765). A
+ * binding is read by the Spec and Data tabs and the run dialogs, never by
+ * `POST /compose`, so such a write leaves every composition as it was - and a
+ * re-read of a data file writes one on every changed hash.
+ */
+function changesOnlyFileBindings(update: UpdateCollectionRequest): boolean {
+	return Object.keys(update).every((field) => FILE_BINDING_FIELDS.has(field));
+}
+
+/**
  * Update an existing collection
  */
 export function useUpdateCollectionMutation() {
@@ -400,15 +424,11 @@ export function useUpdateCollectionMutation() {
 
 	return useMutation({
 		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
-		onSuccess: (updatedCollection) => {
-			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
-				const next =
-					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
-				return next.sort(compareTreeOrder);
-			});
+		onSuccess: (updatedCollection, update) => {
+			storeUpdatedCollection(queryClient, updatedCollection);
 			// A collection's auth, headers, scripts and variables are what every
 			// descendant request composes against.
-			invalidateCompositions(queryClient);
+			if (!changesOnlyFileBindings(update)) invalidateCompositions(queryClient);
 		},
 	});
 }
@@ -453,20 +473,9 @@ export function useDeleteCollectionMutation() {
 			 * and does not show what was deleted.
 			 */
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
-			/*
-			 * The remembered data-file and spec-file paths go with the collection
-			 * (issues #599, #1890) - a path kept for a collection that no longer
-			 * exists is a filesystem location persisted for nothing.
-			 *
-			 * The deleted id only, for the same reason the caches above are
-			 * invalidated wholesale rather than patched: which rows the engine's
-			 * cascade took is engine-side knowledge, and re-deriving the subtree
-			 * here would be the second definition of "descendant" that comment
-			 * exists to prevent. A descendant's entry is left behind and is inert
-			 * - it is keyed by an id nothing renders, so nothing reads it.
-			 */
-			useDataFileStore.getState().clearDataFile(deletedId);
-			useSpecFileStore.getState().clearSpecFile(deletedId);
+			// The spec-file and data-file bindings are not cleared: they are
+			// columns of the trashed row (#2765), so a restore brings them back
+			// and a purge takes them, both engine-side.
 		},
 	});
 }

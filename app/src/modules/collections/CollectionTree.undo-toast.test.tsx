@@ -28,7 +28,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useTabsStore, useDataFileStore, useSpecFileStore } from "@/stores";
+import { useTabsStore } from "@/stores";
+import { useUpdateCollectionMutation } from "@/queries";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -53,7 +54,7 @@ vi.mock("@/queries", () => ({
 	}),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: requests }),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useUpdateCollectionMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 	useDeleteCollectionMutation: () => ({ mutateAsync: deleteCollection, isPending: false }),
 	useCreateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteRequestMutation: () => ({ mutateAsync: deleteRequest, isPending: false }),
@@ -123,8 +124,10 @@ beforeEach(() => {
 	showToast.mockReset();
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["root"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
-	useDataFileStore.setState({ locations: {} });
-	useSpecFileStore.setState({ locations: {} });
+	vi.mocked(useUpdateCollectionMutation).mockReturnValue({
+		mutateAsync: vi.fn(),
+		isPending: false,
+	} as never);
 });
 
 describe("deleting from the tree", () => {
@@ -272,56 +275,29 @@ describe("deleting from the tree", () => {
 		expect(useTabsStore.getState().openTabs.some((t) => t.entityId === "r-root")).toBe(false);
 	});
 
-	it("gives the collection back its remembered data file", async () => {
-		/*
-		 * `useDeleteCollectionMutation` clears the path (#599: a filesystem
-		 * location kept for a collection that no longer exists is persisted for
-		 * nothing), which is right for a delete and wrong for one that was
-		 * taken back - and it cannot be read back afterwards, so the undo
-		 * carries it.
-		 */
-		const remembered = {
-			path: "/data/users.csv",
-			fileName: "users.csv",
-			hash: "a".repeat(64),
-			castNumbers: true,
-		};
-		useDataFileStore.setState({ locations: { root: remembered } });
-		renderTree();
-		await askToDeleteCollection("Acme");
-		await waitFor(() => expect(deleteCollection).toHaveBeenCalled());
-		// What the real mutation's clearDataFile does; `@/queries` is mocked here.
-		useDataFileStore.getState().clearDataFile("root");
-
-		lastToast().action.onClick();
-
-		// The whole binding, not a field list: a copy that names fields drops
-		// how the file is read (#2540).
-		await waitFor(() => expect(useDataFileStore.getState().locations.root).toEqual(remembered));
-	});
-
-	it("gives the collection back its remembered spec file", async () => {
-		// The spec-file path (#1890) is cleared by the delete the same way the
-		// data-file path is, and has the same need to come back with an Undo.
-		useSpecFileStore.setState({
-			locations: { root: { path: "/specs/petstore.yaml", fileName: "petstore.yaml" } },
-		});
+	/*
+	 * The spec-file and data-file bindings are columns of the trashed row
+	 * (#2765), so the engine's restore returns them: the delete clears nothing
+	 * client-side and the undo re-applies nothing. A client copy carried across
+	 * the undo would be a second record of the binding that could disagree with
+	 * the row. Mutation check: have `undoDelete` write the binding back with a
+	 * collection update after the restore and this fails.
+	 */
+	it("leaves the file bindings to the restored row, writing none of its own", async () => {
+		const updateCollection = vi.fn();
+		vi.mocked(useUpdateCollectionMutation).mockReturnValue({
+			mutate: updateCollection,
+			mutateAsync: updateCollection,
+			isPending: false,
+		} as never);
 		renderTree();
 		await askToDeleteCollection("Acme");
 		await waitFor(() => expect(showToast).toHaveBeenCalled());
-		// `@/queries` is mocked here, so the real mutation's clearSpecFile never
-		// ran; do what it does, or the entry survives and the assertion proves
-		// nothing about the capture.
-		useSpecFileStore.getState().clearSpecFile("root");
 
 		lastToast().action.onClick();
 
-		await waitFor(() =>
-			expect(useSpecFileStore.getState().locations.root).toEqual({
-				path: "/specs/petstore.yaml",
-				fileName: "petstore.yaml",
-			})
-		);
+		await waitFor(() => expect(restoreTrash).toHaveBeenCalledWith("root"));
+		expect(updateCollection).not.toHaveBeenCalled();
 	});
 
 	it("offers no undo when the delete itself failed", async () => {

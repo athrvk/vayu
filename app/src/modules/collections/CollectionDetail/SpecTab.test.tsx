@@ -21,14 +21,15 @@
  *    the leftovers on both sides are reported and left alone.
  *  - **Unbind sends `null`, not `{}`.** The engine reads absent as "keep"; an
  *    unbind is only expressible as an explicit null that survives to the wire.
- *  - **The path is remembered and the document is not.** The store holds where
- *    the file is; its contents live on the engine, hashed there.
+ *  - **The path is bound and the document is not copied.** The collection row
+ *    holds where the file is (#2765); its contents live on the engine as the
+ *    spec document, hashed there. A path that no longer reads is shown struck
+ *    through, never hidden.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
-import { useSpecFileStore } from "@/stores";
 import type { Collection, Request, RequestSummary, SpecMatchResponse } from "@/types";
 
 const updateCollection = {
@@ -92,6 +93,9 @@ const specDescribeQuery = {
 	error: null as Error | null,
 };
 
+/** Where the Sync section's check finds the bound document came from; pending by default. */
+let readSpecMeta: () => Promise<{ sourceUrl: string | null }> = () => new Promise(() => {});
+
 /** The arguments the tab passed to the match query on its last render. */
 let matchArgs: unknown[] = [];
 
@@ -123,7 +127,7 @@ vi.mock("@/queries/specs", () => ({
 	// pressed, and asks the engine what a re-fetch would change (issue #854).
 	// Stubbed like the queries above - what a check does with either is asserted
 	// in SpecSync.test.tsx.
-	useSpecMetaReader: () => () => new Promise(() => {}),
+	useSpecMetaReader: () => readSpecMeta,
 	useDiffSpecMutation: () => ({ mutateAsync: () => new Promise(() => {}) }),
 	// The Sync section's apply half (issue #655). Stubbed like the two above:
 	// this file renders the tab without a QueryClient, and what a sync writes is
@@ -187,7 +191,10 @@ const POSTMAN = JSON.stringify({
 const LIST_PETS = { operationId: "listPets", method: "GET", path: "/pets" };
 const GET_PET = { operationId: "getPet", method: "GET", path: "/pets/{petId}" };
 
-const collection = (openapi?: Collection["openapi"]): Collection =>
+const collection = (
+	openapi?: Collection["openapi"],
+	specFile?: Collection["specFile"]
+): Collection =>
 	({
 		id: "col_1",
 		name: "Pets",
@@ -197,6 +204,7 @@ const collection = (openapi?: Collection["openapi"]): Collection =>
 		auth: { mode: "none" },
 		elements: [],
 		openapi,
+		...(specFile ? { specFile } : {}),
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
 	}) as Collection;
@@ -265,7 +273,7 @@ beforeEach(() => {
 	requestsLoading = false;
 	importFetch.mockReset();
 	requests = [];
-	useSpecFileStore.setState({ locations: {} });
+	readSpecMeta = () => new Promise(() => {});
 	vi.stubGlobal("electronAPI", { getFilePath: () => "/home/u/petstore.json" });
 });
 
@@ -291,7 +299,7 @@ describe("binding a collection that already has requests", () => {
 		expect(summary.textContent).toContain("1 operation with no request");
 	});
 
-	it("sends the document alone, and remembers where the file is", async () => {
+	it("sends the document alone, and binds where the file is", async () => {
 		requests = [request("r1", "{{baseUrl}}/pets"), request("r2", "{{baseUrl}}/health")];
 		specMatchQuery.data = {
 			matched: [{ requestId: "r1", operation: LIST_PETS }],
@@ -314,10 +322,15 @@ describe("binding a collection that already has requests", () => {
 		// both halves - the matches and the clears - in one transaction. What the
 		// match query gave us paints the summary above the button; it is not a
 		// payload.
-		expect(Object.keys(payload).sort()).toEqual(["collectionId", "content", "sourceUrl"]);
-
-		bindSucceeds();
-		expect(useSpecFileStore.getState().locations.col_1).toEqual({
+		// The file's location rides beside it (#2765), its path and its name and
+		// nothing read out of it.
+		expect(Object.keys(payload).sort()).toEqual([
+			"collectionId",
+			"content",
+			"sourceUrl",
+			"specFile",
+		]);
+		expect(payload.specFile).toEqual({
 			path: "/home/u/petstore.json",
 			fileName: "petstore.json",
 		});
@@ -344,7 +357,7 @@ describe("binding a collection that already has requests", () => {
 		);
 	});
 
-	it("sends the fetched URL as the document's origin, and remembers no path", async () => {
+	it("sends the fetched URL as the document's origin, and binds no path", async () => {
 		importFetch.mockResolvedValue({ content: OPENAPI });
 		specMatchQuery.data = {
 			matched: [],
@@ -364,10 +377,12 @@ describe("binding a collection that already has requests", () => {
 			"https://api.example.com/openapi.json"
 		);
 
-		bindSucceeds();
 		// A URL-sourced document records its origin portably, engine-side; there
-		// is no machine-local path to keep.
-		expect(useSpecFileStore.getState().locations.col_1).toBeUndefined();
+		// is no machine-local path to keep, and an earlier file's is forgotten.
+		// Mutation check: send `undefined` here and a re-bind from a URL keeps
+		// naming the file the previous document came from.
+		expect(bindSpec.mutate.mock.calls[0][0].specFile).toBeNull();
+		bindSucceeds();
 	});
 
 	/*
@@ -543,6 +558,11 @@ describe("binding a collection that already has requests", () => {
 describe("a bound collection", () => {
 	const bound = () =>
 		collection({ specId: "spec_1", specHash: "9f86d081884c7d659a2feaa0c55ad015", syncedAt: 0 });
+	const boundToFile = () =>
+		collection(
+			{ specId: "spec_1", specHash: "9f86d081884c7d659a2feaa0c55ad015", syncedAt: 0 },
+			{ path: "/home/u/petstore.json", fileName: "petstore.json" }
+		);
 
 	it("shows where the document came from, its hash and how much of the tree it covers", () => {
 		specMetaQuery.data = {
@@ -567,30 +587,56 @@ describe("a bound collection", () => {
 		expect(screen.getByText("1 of 2 requests")).toBeTruthy();
 	});
 
-	it("names the picked file when the document has no URL", () => {
+	it("names the bound file's path when the document has no URL", () => {
 		specMetaQuery.data = { sourceUrl: null, fetchedAt: 0, contentBytes: 2048 };
-		useSpecFileStore.setState({
-			locations: { col_1: { path: "/home/u/petstore.json", fileName: "petstore.json" } },
-		});
 
-		render(<SpecTab collection={bound()} />);
+		render(<SpecTab collection={boundToFile()} />);
 
-		expect(screen.getByText("petstore.json")).toBeTruthy();
+		// The path, not only the name: after a restore it says which file on
+		// which disk the binding means (#2765).
+		const source = screen.getByText("/home/u/petstore.json");
+		expect(source.className).not.toContain("line-through");
 	});
 
-	it("unbinds with an explicit null and forgets the remembered file", () => {
-		useSpecFileStore.setState({
-			locations: { col_1: { path: "/home/u/petstore.json", fileName: "petstore.json" } },
+	/*
+	 * A path restored from another machine, or a file since moved (#2765). The
+	 * tab asks nothing up front; the check that fails to read the file is what
+	 * strikes it through, and the path stays on screen. Mutation check: drop
+	 * the `onFileRead(false)` call in SpecSync and the path never strikes.
+	 */
+	it("strikes the path through once a check fails to read the file", async () => {
+		specMetaQuery.data = { sourceUrl: null, fetchedAt: 0, contentBytes: 2048 };
+		readSpecMeta = async () => ({ sourceUrl: null });
+		vi.stubGlobal("electronAPI", {
+			getFilePath: () => "",
+			readSpecFile: () =>
+				Promise.reject(
+					new Error(
+						"The spec references petstore.json, which is not at /home/u/petstore.json."
+					)
+				),
 		});
-		render(<SpecTab collection={bound()} />);
+
+		render(<SpecTab collection={boundToFile()} />);
+		fireEvent.click(screen.getByRole("button", { name: /check for changes/i }));
+
+		await waitFor(() =>
+			expect(screen.getByText("/home/u/petstore.json").className).toContain("line-through")
+		);
+		expect(screen.getByText(/which is not at \/home\/u\/petstore.json/)).toBeTruthy();
+	});
+
+	it("unbinds with an explicit null, and forgets the file in the same write", () => {
+		render(<SpecTab collection={boundToFile()} />);
 
 		fireEvent.click(screen.getByRole("button", { name: /unbind/i }));
 
-		const [payload, options] = updateCollection.mutate.mock.calls[0];
 		// `{}` would read as "keep" to the engine's merge-patch.
-		expect(payload).toEqual({ id: "col_1", openapi: null });
-		options?.onSuccess?.({});
-		expect(useSpecFileStore.getState().locations.col_1).toBeUndefined();
+		expect(updateCollection.mutate.mock.calls[0][0]).toEqual({
+			id: "col_1",
+			openapi: null,
+			specFile: null,
+		});
 	});
 
 	/*

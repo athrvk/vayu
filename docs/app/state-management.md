@@ -368,85 +368,122 @@ whichever one the engine actually holds.
 
 #### `data-file-store.ts` - Where Each Collection's Data File Lives
 
-Remembers **where** a collection's data file is on this machine, so the Run
-dialog can pre-fill it instead of asking for it every run (issue #599).
+Each collection's data-file binding, by collection id, so the Run dialog can
+pre-fill the file instead of asking for it every run (issue #599). Since #2765
+the binding is a column of the collection's engine row (`Collection.dataFile`,
+`{path, fileName, hash?, castNumbers?}`), so a workspace backup carries it, a
+trashed collection keeps it and a restore brings it back. This store is a
+**mirror** of the collections list, not a record: `useFileBindingMirror`
+(mounted in `App.tsx`) subscribes to the query cache
+(`installFileBindingMirror`, `queries/file-bindings.ts`) and rebuilds the map
+from `queryKeys.collections.list()` inside every write to it, before any
+observer re-renders, so a component that reads the contract off the list and
+the file off the store never sees one without the other. An unchanged binding
+keeps its object and an unchanged map keeps its identity, so a refetch
+republishes nothing. A reader that holds the `Collection` (the Data tab) reads
+`collection.dataFile` directly; the store is for readers that hold only an id
+(the run dialogs' pre-fill, Send-with-row, `useDataFileStatus`).
 
 **State:**
 ```typescript
 {
   locations: Record<string, {
     path: string; fileName: string; hash?: string; castNumbers?: boolean
-  }>  // keyed by collection id
+  }>  // keyed by collection id, rebuilt from the collections list
 }
 ```
 
-**Key Methods:**
+**Writes** go through the collection update, never through the store:
 ```typescript
-const { setDataFile, clearDataFile, recordDataFileHash, setDataFileCastNumbers } =
-  useDataFileStore();
-setDataFile(collectionId, { path, fileName, hash, castNumbers });
-recordDataFileHash(path, hash);  // every location at that path
-setDataFileCastNumbers(collectionId, path, true);  // only while the binding names path
+// useDataContractWriter: the binding rides the same PUT as the columns
+mutate({ id, dataSchema: { columns, declaredAt, fileName }, dataFile: { path, fileName, hash, castNumbers } });
+mutate({ id, dataSchema: null, dataFile: null });          // Clear / Remove
+mutate({ id, dataFile: { ...bound, castNumbers } });       // rememberReading
+recordDataFileHash(path, hash);  // queries/file-bindings.ts: every binding at that path whose hash moved
 ```
 
-**Persistence:** `vayu.data-files` (v1)
+**Persistence:** none here; the engine row.
 
-**Two things this store deliberately is not.** It is not the *contract* - the
-declared columns are the same on every machine, so they live on the engine's
-collection row as `dataSchema` and travel through import; a path is true of one
-filesystem only and stays here, never reaching the engine or an export. Its one
-reader outside the renderer is the app's own MCP server: `useDataFileLocationMirror`
-(mounted in `App.tsx`) publishes the whole map to the main process over
+**Two things the binding deliberately is not.** It is not the *contract* - the
+declared columns (`dataSchema`) travel through import and export; a path is
+true of one filesystem only, so `POST /import/apply` refuses one and neither
+export writes one. Its one reader outside the renderer is the app's own MCP
+server: `useDataFileLocationMirror` (mounted in `App.tsx`, after
+`useFileBindingMirror`) publishes the whole map to the main process over
 `dataFile:locations` on launch and on every change, and `list_collections`
-names a collection's file from that copy (issue #1742; a `fields: "full"` row, the summary names none). `useAppFocusMirror`
-(also mounted in `App.tsx`) does the same for the active tab and environment
-over `app:focus`, publishing only when the snapshot changes, so `get_app_focus`
-can answer "the request I have open" (issue #2045). And
-it never holds **rows**: a data file's contents are user data of unknown
-sensitivity and are persisted nowhere in Vayu, which `data-file-store.test.ts`
-asserts against the persisted payload rather than against the store's surface.
+names a collection's file from that copy (issue #1742; a `fields: "full"` row,
+the summary names none). `useAppFocusMirror` (also mounted in `App.tsx`) does
+the same for the active tab and environment over `app:focus`, publishing only
+when the snapshot changes, so `get_app_focus` can answer "the request I have
+open" (issue #2045). And it never holds **rows**: a data file's contents are
+user data of unknown sensitivity and are persisted nowhere in Vayu, which
+`useDataContractWriter.test.tsx` and `DataTab.test.tsx` assert against the
+update payload - what the row stores - rather than against a surface.
 
-The path is written when the user declares a contract by picking a file, on
-the Data tab or in either run dialog (`hooks/useDataContractWriter.ts`), obtained through the preload's
-existing `getFilePath` bridge, and dropped when the collection is deleted or
-purged, its contract cleared (Clear or Remove), or a later pick carries no path. Reading it back needs the gated `dataFile:read` IPC
-(`electron/data-file.ts`), because the renderer otherwise cannot name a path. The gate includes the main process's grant registry (#2357): a path is read only if the user picked, dropped or opened it through the app, which `getFilePath` records with the engine (`file_grants`, so it survives a restart). A data file declared before that registry existed holds no grant and must be picked once more; until then `dataFile:read` rejects with a "pick the file again" message and `dataFile:hash` answers `{ status: "missing" }`. The renderer does not seed grants from its own persisted paths - that is the input being gated.
+The binding is written when the user declares a contract by picking a file, on
+the Data tab or in either run dialog (`hooks/useDataContractWriter.ts`), in
+the same update as the columns, with the path obtained through the preload's
+existing `getFilePath` bridge; and dropped, in the same update, when the
+contract is cleared (Clear or Remove) or a later pick carries no path. A
+delete or a purge writes nothing: the row goes to the trash with its binding
+and the store's entry leaves with the row's place in the list, and a restore's
+refetch brings both back. A write of `specFile` / `dataFile` alone does not
+invalidate cached compositions (`useUpdateCollectionMutation`): nothing
+composes against a file location. Reading the file back needs the gated
+`dataFile:read` IPC (`electron/data-file.ts`), because the renderer otherwise
+cannot name a path. The gate includes the main process's grant registry
+(#2357): a path is read only if the user picked, dropped or opened it through
+the app, which `getFilePath` records with the engine (`file_grants`, so it
+survives a restart). **A stored path is not a grant.** A data file declared
+before that registry existed holds no grant and must be picked once more; a
+path restored from a backup on another machine names a file that is usually not
+there. Either way `dataFile:read` rejects with a "pick the file again" message
+(naming the path when the file is not there), `dataFile:hash` answers
+`{ status: "missing" }`, and the Data tab shows the bound path struck through
+beside the reason. The renderer does not seed grants from stored paths - that
+is the input being gated.
 
 `hash` is the SHA-256 of the file's bytes the last time the app read it (issue
 #2051), the same digest a run records as `dataFileHash`. A pick writes it with
-the path; every re-read through `readDeclaredDataFile` refreshes it, keyed by
-path, so a file edited on disk is not described by the digest it had when it
-was declared. It is optional because a location remembered before hashes were
-recorded has none until its next read. Nothing that only *compares* writes it:
-`useDataFileStatus` and MCP's `list_collections` ask the main process for the
-file's current digest (`dataFile:hash`, which answers `{ status: "found", hash }`
-or `{ status: "missing" }` for a file that has moved or holds no grant) and fall back to this one
-only when they cannot.
+the path; every re-read through `readDeclaredDataFile` calls
+`recordDataFileHash`, which writes the new digest to every binding at that path
+whose hash moved - nothing when it did not, so re-reading an unchanged file
+writes nothing - and logs a failed write rather than failing the read. It is
+optional because a binding written before hashes were recorded has none until
+its next read. Nothing that only *compares* writes it: `useDataFileStatus` and
+MCP's `list_collections` ask the main process for the file's current digest
+(`dataFile:hash`, which answers `{ status: "found", hash }` or
+`{ status: "missing" }` for a file that has moved or holds no grant) and fall
+back to this one only when they cannot.
 
 `castNumbers` is how the file's CSV/TSV values are read (issue #2540), the
 picker's **Read numbers as numbers**: absent or `false` reads every cell as
 text, `true` reads an unquoted integer or decimal as a number. It describes
 *this* file, so a pick writes it as the picker read the file (off for a fresh
 pick) and Remove takes it with the path. Toggling the checkbox writes it
-through `useDataContractWriter`'s `rememberReading`, which changes nothing
-unless the binding still names the toggled file's path; a hash refresh keeps
-it. Every re-read (`readDeclaredDataFile`, which requires the flag) parses
-with it, so the Run dialog's pre-fill, the load dialog's, Send-with-row and
-the Data tab all read the file the way the user last chose. A run sends it
-beside the rows as `dataFileCastNumbers` and its snapshot records it, so a
-re-run that reads the binding reads the file the way the recorded run did.
+through `useDataContractWriter`'s `rememberReading`, a binding-only update
+that is sent only while the binding still names the toggled file's path and
+reads it the other way; a hash refresh keeps it. Every re-read
+(`readDeclaredDataFile`, which requires the flag) parses with it, so the Run
+dialog's pre-fill, the load dialog's, Send-with-row and the Data tab all read
+the file the way the user last chose. A run sends it beside the rows as
+`dataFileCastNumbers` and its snapshot records it, so a re-run that reads the
+binding reads the file the way the recorded run did.
 
-The persisted payload is normalized through **both** `migrate` and `merge`:
-`migrate` runs only on a version mismatch, and the common case is a
-same-version payload, so an entry that is not a `{path, fileName}` pair of
-strings would otherwise reach the read IPC *as a path*. A bad entry is dropped
-(a malformed `hash` drops only the hash) rather than repaired - there is nothing to repair a path to, and the picker is
-one click away.
+A row's binding is normalized in `CollectionTransformer`
+(`toDataFileLocation`): anything but a `{path, fileName}` pair of non-empty
+strings is no binding, so a value that got in another way never reaches the
+read IPC *as a path*; a malformed `hash` drops only the hash, and a
+non-boolean `castNumbers` reads as off. An engine that predates the column, or
+answers `{}`, reads as unbound.
 
 #### `spec-file-store.ts` - Where Each Collection's Spec File Lives
 
-Remembers **where** a collection's bound OpenAPI document is on this machine, for
-the specs that were picked as files rather than fetched from a URL (issue #638).
+Each collection's picked spec file, by collection id, for the specs that were
+picked as files rather than fetched from a URL (issue #638). The binding is
+`Collection.specFile` (`{path, fileName}`) on the engine row (#2765), and this
+store mirrors it the way `data-file-store` above mirrors `dataFile`, from the
+same cache subscription.
 
 **State:**
 ```typescript
@@ -455,37 +492,38 @@ the specs that were picked as files rather than fetched from a URL (issue #638).
 }
 ```
 
-**Key Methods:**
-```typescript
-const { setSpecFile, clearSpecFile } = useSpecFileStore();
-setSpecFile(collectionId, { path, fileName });
-```
+**Writes:** `useBindSpecMutation` writes `specFile` after the bind lands and
+before the collections refetch (`{ specFile: null }` for a URL or a paste, which
+forgets an earlier file); Unbind clears it in the same update as
+`openapi: null`; a file-picked OpenAPI import writes it to each root that bound
+a spec, after the apply (`queries/import.ts`: the collection has no id until
+then, and `POST /import/apply` refuses a file binding), logging a failed write
+rather than failing an import that committed.
 
-**Persistence:** `vayu.spec-files` (v1)
+**Persistence:** none here; the engine row.
 
 The same two-halves law as `data-file-store` above, one contract over: the
 **document** is engine state (`spec_documents.content`, hashed there, bound by
-`collection.openapi.specId`) because it is the same on every machine and travels
-through import; a *path* is true of one filesystem only and stays here. A
-URL-sourced spec has no entry at all - its origin is `spec_documents.source_url`,
-which is portable and is what a re-fetch will use. And it never holds spec
-**content**: a second copy in localStorage could not be hashed and could not be
-told apart from the bound one, which `spec-file-store.test.ts` asserts against
-the persisted payload rather than against the store's surface.
+`collection.openapi.specId`) and travels through import; a *path* is true of
+one filesystem only, so a backup keeps it and no export or import carries it.
+A URL-sourced spec has no binding at all - its origin is
+`spec_documents.source_url`, which is portable and is what a re-fetch will use.
+And it never holds spec **content**, which `spec-bind.test.tsx` and
+`SpecTab.test.tsx` assert against the update payload.
 
-The path is written when an OpenAPI file is imported (`queries/import.ts`, after
-the apply, because the collection has no id until then) or when the Spec tab
-binds a picked file, obtained through the preload's existing `getFilePath`
-bridge, and dropped on unbind. Reading the files a picked document *references*
-needs the gated `specFile:read` IPC (`electron/spec-file.ts`), which takes the
-document's path plus the reference and resolves one against the other in the
-main process. The document path must be one the user picked, dropped or opened
-(the grant registry, #2357) - a path the renderer merely remembers is refused
-with a "pick the file again" message, so a binding made before grants existed
-needs one more pick - and the reference may not leave that document's
-directory. The same grant gate holds `dataFile:read`. It is normalized through **both** `migrate` and
-`merge`, for the reason spelled out for `data-file-store` above. Deleting or
-purging the collection drops its entry (#1890), as for the data-file store.
+The Spec tab reads `collection.specFile` and shows the bound file's path as
+the document's source. Reading the file again (the Sync section's Check) and
+the files a picked document *references* needs the gated `specFile:read` IPC
+(`electron/spec-file.ts`), which takes the document's path plus the reference
+and resolves one against the other in the main process. The document path must
+be one the user picked, dropped or opened (the grant registry, #2357) - a
+stored path is refused with a "pick the file again" message, so a binding made
+before grants existed needs one more pick - and the reference may not leave
+that document's directory. The same grant gate holds `dataFile:read`. A check
+that fails to read the bound file strikes the path through (SpecSync's
+`onFileRead`), learned from the attempted read rather than from an existence
+check of its own. A delete, a restore and a purge write nothing, as for the
+data-file binding.
 
 #### `bound-row-store.ts` - The Row The Open Builder Is Bound To
 
@@ -557,8 +595,9 @@ point - a window reopened against an already-running engine would otherwise
 re-announce a wipe the user had dismissed. A stored value that is not a finite
 number reads as "nothing acknowledged", the safe direction: a notice shown twice
 is an annoyance, one suppressed by a garbage value is silent data loss again. It
-is normalized through **both** `migrate` and `merge`, for the reason spelled out
-for `data-file-store` above.
+is normalized through **both** `migrate` and `merge`: `migrate` runs only on a
+version mismatch, while `merge` runs on every rehydrate, so only the pair reaches
+the same-version payload that is the common case.
 
 #### `engine-store.ts` - Engine Connection & Restart State
 
@@ -1881,13 +1920,18 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
 - **`useCreateCollectionMutation()`** - Create collection: appends the row to
   the collections list and seeds the new collection's request list with `[]`,
   so the tree mounting it makes no list call and no other list refetches
-- **`useUpdateCollectionMutation()`** - Update collection (with cache update)
+- **`useUpdateCollectionMutation()`** - Update collection (with cache update,
+  `storeUpdatedCollection`). Invalidates every cached composition unless the
+  update carries only `specFile` / `dataFile`, which nothing composes against
+  (#2765)
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
-  also invalidates the trash list so the Trash view picks it up. Clears the
-  deleted id's entry in `data-file-store` and `spec-file-store` (the id only;
-  a cascaded descendant's entry is inert), and the tree's Undo puts both back
-  (`captureClientState` in `useTreeCrud.ts`, #1890). Every mutation
+  also invalidates the trash list so the Trash view picks it up. It writes no
+  file binding: the spec-file and data-file bindings stay on the trashed row
+  (#2765), the stores that mirror the list drop the entry with the row, and the
+  tree's Undo - a restore - brings them back with nothing captured
+  client-side (`captureClientState` in `useTreeCrud.ts` keeps only the focused
+  tab). Every mutation
   that invalidates **all** the request lists does it through
   `invalidateAllRequestLists` (`queries/collections.ts`): `prefetch.allRequests()`
   *before* `requests.all`, so the per-collection lists that refetch join the one
@@ -1963,10 +2007,8 @@ are how the app sees what got stamped (`queries/trash.ts`).
 - **`usePurgeTrashMutation()`** - Destroy one deleted root for good
   (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
   already stopped serving these rows when they were stamped, so purging them
-  changes nothing a live read can see. It also clears the purged id's entry in
-  `data-file-store` and `spec-file-store` (#1890), since a path kept for a
-  collection that is gone for good is persisted for nothing; a request's id has
-  no entry, so the same call is a no-op there.
+  changes nothing a live read can see. The purged collection's file bindings go
+  with its row, engine-side (#2765); nothing here holds a copy to clear.
 
 Both mutations also invalidate `trash.all` on **failure** (#1438). The row
 either acted on is one this list said existed, so the likeliest failure is that

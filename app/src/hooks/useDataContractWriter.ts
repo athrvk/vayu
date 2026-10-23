@@ -10,25 +10,25 @@
  * declare it from a file, or clear it - plus the one that changes only how the
  * bound file is read (`rememberReading`, #2540). Shared by every surface where a
  * pick or a Remove names the file a contract comes from, so the rules about
- * *when* the remembered binding is written live once.
+ * *when* the file binding is written live once.
  *
- * Two halves, stored in two places on purpose: the schema rides the engine row
- * (`dataSchema`, the same on every machine), the file's path stays in
- * `data-file-store` (true of one filesystem only). The store is written only
- * after the engine accepts the schema, so it never names a file whose columns
- * were not declared.
+ * The schema and the file it was read from are written together, in one
+ * collection update (`dataSchema` + `dataFile`, #2765), so the engine never
+ * holds a binding to a file whose columns were not declared, nor a contract
+ * whose file belongs to an earlier declare.
  */
 
 import { useCallback } from "react";
 
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useDataFileStore } from "@/stores";
+import type { DataFileLocation } from "@/types";
 import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
 
 export interface DataContractWriter {
-	/** Declare the contract from `file`'s columns, and remember where it is. */
+	/** Declare the contract from `file`'s columns, and bind the file it came from. */
 	declare: (file: SelectedDataFile) => void;
-	/** Drop the contract and the remembered path with it. */
+	/** Drop the contract and the file binding with it. */
 	clear: () => void;
 	/**
 	 * Remember how `file` is read - its `castNumbers` (#2540) - on the binding,
@@ -48,64 +48,62 @@ export interface DataContractWriter {
  */
 export function useDataContractWriter(collectionId: string | null | undefined): DataContractWriter {
 	const { mutate, isPending, isError, error } = useUpdateCollectionMutation();
-	const setDataFile = useDataFileStore((s) => s.setDataFile);
-	const clearDataFile = useDataFileStore((s) => s.clearDataFile);
-	const setDataFileCastNumbers = useDataFileStore((s) => s.setDataFileCastNumbers);
 
 	const declare = useCallback(
 		(file: SelectedDataFile) => {
 			if (!collectionId) return;
-			mutate(
-				{
-					id: collectionId,
-					dataSchema: {
-						columns: file.parsed.columns,
-						declaredAt: Date.now(),
-						fileName: file.fileName,
-					},
+			mutate({
+				id: collectionId,
+				dataSchema: {
+					columns: file.parsed.columns,
+					declaredAt: Date.now(),
+					fileName: file.fileName,
 				},
-				{
-					onSuccess: () => {
-						// A file with no path (a browser, a remote drop) forgets the
-						// previous one instead, so the store never names a file the
-						// contract was not read from.
-						if (file.path) {
-							setDataFile(collectionId, {
-								path: file.path,
-								fileName: file.fileName,
-								hash: file.hash,
-								castNumbers: file.parsed.castNumbers,
-							});
-						} else {
-							clearDataFile(collectionId);
-						}
-					},
-				}
-			);
+				dataFile: fileBinding(file),
+			});
 		},
-		[collectionId, mutate, setDataFile, clearDataFile]
+		[collectionId, mutate]
 	);
 
 	const clear = useCallback(() => {
 		if (!collectionId) return;
 		// `null`, not `{}`: the engine reads absent as "keep" and null as "reset
-		// to the default", and the default is no contract. The remembered path
-		// goes with it - a file remembered for a collection that declares nothing
-		// would pre-fill a run with a file the user has stopped asserting is the
-		// right one.
-		mutate(
-			{ id: collectionId, dataSchema: null },
-			{ onSuccess: () => clearDataFile(collectionId) }
-		);
-	}, [collectionId, mutate, clearDataFile]);
+		// to the default", and the default is no contract. The binding goes with
+		// it - a file bound to a collection that declares nothing would pre-fill
+		// a run with a file the user has stopped asserting is the right one.
+		mutate({ id: collectionId, dataSchema: null, dataFile: null });
+	}, [collectionId, mutate]);
 
 	const rememberReading = useCallback(
 		(file: SelectedDataFile) => {
 			if (!collectionId || !file.path) return;
-			setDataFileCastNumbers(collectionId, file.path, file.parsed.castNumbers);
+			const castNumbers = file.parsed.castNumbers;
+			// Only while the binding still names this file: a toggle on a file
+			// the binding no longer holds (its declare failed, or it had no path)
+			// must not re-describe the file that is bound.
+			const bound = useDataFileStore.getState().locations[collectionId];
+			if (bound?.path !== file.path || (bound.castNumbers ?? false) === castNumbers) return;
+			mutate({ id: collectionId, dataFile: { ...bound, castNumbers } });
 		},
-		[collectionId, setDataFileCastNumbers]
+		[collectionId, mutate]
 	);
 
 	return { declare, clear, rememberReading, isPending, isError, error };
+}
+
+/**
+ * The binding a declare writes beside the columns: where `file` is, the hash of
+ * the bytes the columns were read from, and how its values were read. A file
+ * with no path (a browser, a remote drop) binds nothing and forgets the
+ * previous file, so the binding never names a file the contract was not read
+ * from. Never the rows.
+ */
+function fileBinding(file: SelectedDataFile): DataFileLocation | null {
+	if (!file.path) return null;
+	return {
+		path: file.path,
+		fileName: file.fileName,
+		hash: file.hash,
+		castNumbers: file.parsed.castNumbers,
+	};
 }

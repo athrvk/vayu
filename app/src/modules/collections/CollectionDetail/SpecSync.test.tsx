@@ -32,7 +32,7 @@
  * the wire shape moved.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -47,6 +47,7 @@ import type {
 	SpecDraftRequest,
 	SpecField,
 	SpecFieldDiff,
+	SpecFileLocation,
 	SpecOperation,
 	SpecSyncRequest,
 } from "@/types";
@@ -184,7 +185,13 @@ const collection = (id = "col_1"): Collection =>
  * Renders inside a real query client - the apply path is a mutation, and a
  * stubbed one could not prove that a failed sync leaves the selection alone.
  */
-function renderSync(props: { collections?: Collection[] } = {}) {
+function renderSync(
+	props: {
+		collections?: Collection[];
+		specFile?: SpecFileLocation;
+		onFileRead?: (readable: boolean) => void;
+	} = {}
+) {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	});
@@ -196,7 +203,8 @@ function renderSync(props: { collections?: Collection[] } = {}) {
 			collection={collection()}
 			collections={props.collections ?? [collection()]}
 			specId="spec_1"
-			specFile={undefined}
+			specFile={props.specFile}
+			onFileRead={props.onFileRead}
 		/>,
 		{ wrapper }
 	);
@@ -353,6 +361,63 @@ describe("SpecSync", () => {
 		expect(await screen.findByText(/Bind it again/i)).toBeTruthy();
 		expect(importFetch).not.toHaveBeenCalled();
 		expect(diffSpec).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * The bound file's path rides the row (#2765), so after a restore elsewhere
+	 * it can name a file this machine does not have. The check is the read that
+	 * finds out, and it tells the tab so the path can be shown unresolved.
+	 * Mutation checks: report the outcome for a URL-sourced document, or for a
+	 * build that cannot read files at all, and the last case fails.
+	 */
+	describe("reporting whether the bound file read", () => {
+		const PETS: SpecFileLocation = { path: "/home/u/pets.json", fileName: "pets.json" };
+
+		beforeEach(() => getSpecMeta.mockResolvedValue(meta(null)));
+		afterEach(() => vi.unstubAllGlobals());
+
+		it("says unreadable, and shows why, when the file does not read", async () => {
+			vi.stubGlobal("electronAPI", {
+				readSpecFile: () => Promise.reject(new Error("not at /home/u/pets.json")),
+			});
+			const onFileRead = vi.fn();
+			renderSync({ specFile: PETS, onFileRead });
+
+			check();
+
+			expect(await screen.findByText(/not at \/home\/u\/pets.json/)).toBeTruthy();
+			expect(onFileRead).toHaveBeenCalledWith(false);
+		});
+
+		it("says readable when it does", async () => {
+			vi.stubGlobal("electronAPI", {
+				readSpecFile: async () => ({ bytes: new TextEncoder().encode(NEXT_DOC) }),
+			});
+			const onFileRead = vi.fn();
+			renderSync({ specFile: PETS, onFileRead });
+
+			check();
+
+			await waitFor(() => expect(diffSpec).toHaveBeenCalled());
+			expect(onFileRead.mock.calls).toEqual([[true]]);
+		});
+
+		it("says nothing where no file was read: outside Electron, or a URL-sourced document", async () => {
+			const onFileRead = vi.fn();
+			const view = renderSync({ specFile: PETS, onFileRead });
+			check();
+			// Outside Electron the file cannot be read at all, which says nothing
+			// about the file.
+			expect(await screen.findByText(/only be re-read in the desktop app/)).toBeTruthy();
+			view.unmount();
+
+			getSpecMeta.mockResolvedValue(meta());
+			renderSync({ specFile: PETS, onFileRead });
+			check();
+			await waitFor(() => expect(diffSpec).toHaveBeenCalled());
+
+			expect(onFileRead).not.toHaveBeenCalled();
+		});
 	});
 
 	it("surfaces the engine's message when the re-fetch fails", async () => {

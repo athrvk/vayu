@@ -9,10 +9,11 @@
  * Where each collection's declared data file lives on this machine, as the
  * main process knows it, so the MCP server can name it (issue #1742, Part B).
  *
- * The renderer owns the record (`src/stores/data-file-store.ts`, persisted in
- * its own storage) and publishes the whole map here on launch and on every
- * change; this holds the latest copy. The main process never persists it, so
- * there is still one record and this is a view of it.
+ * The record is each collection's engine row (`dataFile`, #2765); the
+ * renderer mirrors the collections list into `src/stores/data-file-store.ts`
+ * and publishes that whole map here on launch and on every change, and this
+ * holds the latest copy. The main process never persists it, so there is
+ * still one record and this is a view of it.
  *
  * **Why a path may reach MCP at all:** the Electron-hosted MCP server listens
  * on loopback only (`MCP_HOST`), so every client that can read this answer runs

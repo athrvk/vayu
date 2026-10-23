@@ -16,8 +16,9 @@
  *
  * - **the contract in scope** (`useDataContract`, the leaf-to-root chain rule),
  *   which says this request's collection is data-driven at all; and
- * - **the file that contract was declared from** (`data-file-store`), which is
- *   machine-local and therefore the reason this is not simply "any file".
+ * - **the file that contract was declared from** (the declaring collection's
+ *   `dataFile`, read by id from `data-file-store`), which is machine-local and
+ *   therefore the reason this is not simply "any file".
  *
  * The file is read **when the picker opens**, never on mount. A request tab
  * mounting must not touch the filesystem for a Send the user has not asked for,
