@@ -215,8 +215,9 @@ jobs:
       # The notices file electron-builder.json ships beside the app (#2693): a
       # missing `from` file fails packaging, installer or `dir` alike. The
       # engine is the production preset's, so its CMake cache names the vcpkg
-      # tree. Unlike release.yml this does not fail on a missing tree - the
-      # measurement does not publish the file, it only needs it to exist.
+      # tree. Unlike release.yml this does not fail on a missing vcpkg share
+      # directory - the measurement does not publish the file, it only needs it
+      # to exist.
       - name: Stage the third-party notices
         shell: bash
         run: |

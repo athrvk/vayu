@@ -12,6 +12,7 @@ Run: python3 scripts/test/third_party_notices_test.py
 """
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -37,8 +38,12 @@ def check(name: str, condition: bool, detail: str = "") -> None:
         FAILED += 1
 
 
+# The generator's rule, kept as its own copy so a drift between the two fails here.
+LICENSE_FILE = re.compile(r"^(licen[sc]e|copying)([._-].*)?$", re.IGNORECASE)
+
+
 def licence_files(directory: Path) -> List[Path]:
-    return sorted([*directory.glob("LICENSE*"), *directory.glob("COPYING*")])
+    return sorted(p for p in directory.iterdir() if p.is_file() and LICENSE_FILE.match(p.name))
 
 
 def generate(out: Path, *args: str) -> subprocess.CompletedProcess:
