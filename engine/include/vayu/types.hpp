@@ -1614,6 +1614,15 @@ struct Collection {
     // only the edge, so two collections may bind the same spec and unbinding
     // one leaves the document alone.
     std::string openapi{ "{}" };
+    // JSON - the spec file this collection's Spec tab was picked from (issue
+    // #2765): {"path": "...", "fileName": "..."}. `{}` means none. Stored so a
+    // workspace backup carries it; the path is true of one machine, so a
+    // reader treats it as a location to try, never as a file it may read.
+    std::string spec_file{ "{}" };
+    // JSON - the data file a run of this collection reads its rows from (issue
+    // #2765): {"path", "fileName", "hash"?, "castNumbers"?}. `{}` means none.
+    // The location only, never the rows (see `data_schema`).
+    std::string data_file{ "{}" };
     int order          = 0;
     int64_t created_at = 0;
     int64_t updated_at = 0;

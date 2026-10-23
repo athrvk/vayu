@@ -33,8 +33,8 @@
  * Everything here is pure: text in, rows out. Reading the file is the caller's
  * (a `FileReader`, exactly as `ImportModal` does it - no Electron dialog IPC),
  * and turning its bytes into that text is {@link decodeDataFile}'s. The one
- * read this layer does own is the *second* one - re-opening the path
- * `data-file-store` remembered - and it lives apart in `read-declared.ts`
+ * read this layer does own is the *second* one - re-opening the path a
+ * collection's `dataFile` binding names - and it lives apart in `read-declared.ts`
  * precisely so this module stays pure.
  */
 

@@ -8,7 +8,13 @@ vi.mock("@/services/api", () => ({
 		applyImport: vi.fn(async () => ({ idMap: { c1: "col_1" } })),
 		getGlobals: vi.fn(async () => ({ id: "globals", variables: {}, updatedAt: "0" })),
 		updateGlobals: vi.fn(async (variables) => ({ id: "globals", variables, updatedAt: "1" })),
+		updateCollection: vi.fn(async (update) => update),
 	},
+}));
+
+const logError = vi.fn();
+vi.mock("@/errors/error-logger", () => ({
+	logError: (...args: unknown[]) => logError(...args),
 }));
 
 import { renderHook, waitFor } from "@testing-library/react";
@@ -18,7 +24,6 @@ import { apiService } from "@/services/api";
 import { QUERY_CACHE } from "@/config/cache";
 import { createImportApi, useImportMutation } from "./import";
 import { queryKeys } from "./keys";
-import { useSpecFileStore } from "@/stores/spec-file-store";
 import type { ImportResult } from "@/services/importers/types";
 
 describe("createImportApi", () => {
@@ -173,12 +178,13 @@ describe("useImportMutation", () => {
 
 	/**
 	 * A spec import is the one case where the import needs the id-map for
-	 * something other than a completeness check: the file's path is remembered
-	 * per collection, and the collection has no id until the apply answers
-	 * (issue #638).
+	 * something other than a completeness check: the file's path is bound per
+	 * collection (#2765), and the collection has no id until the apply answers
+	 * (issue #638). The apply itself never carries it - the engine refuses a
+	 * file binding in an import - so it is a collection update of its own.
 	 */
-	it("remembers the picked file under the collection the spec landed on", async () => {
-		useSpecFileStore.setState({ locations: {} });
+	it("binds the picked file to the collection the spec landed on, after the apply", async () => {
+		vi.mocked(apiService.updateCollection).mockClear();
 		vi.mocked(apiService.applyImport).mockResolvedValue({
 			idMap: { c1: "col_9", s1: "spec_9" },
 		});
@@ -194,29 +200,60 @@ describe("useImportMutation", () => {
 			specFile: { path: "/home/u/petstore.json", fileName: "petstore.json" },
 		});
 
-		expect(useSpecFileStore.getState().locations.col_9).toEqual({
-			path: "/home/u/petstore.json",
-			fileName: "petstore.json",
-		});
+		expect(vi.mocked(apiService.updateCollection).mock.calls).toEqual([
+			[
+				{
+					id: "col_9",
+					specFile: { path: "/home/u/petstore.json", fileName: "petstore.json" },
+				},
+			],
+		]);
+		expect(JSON.stringify(vi.mocked(apiService.applyImport).mock.calls)).not.toContain(
+			"/home/u/petstore.json"
+		);
 	});
 
-	it("remembers nothing for an import that carried no spec", async () => {
-		useSpecFileStore.setState({ locations: {} });
+	it("still reports the committed import when binding the file fails, and logs it", async () => {
+		vi.mocked(apiService.applyImport).mockResolvedValue({
+			idMap: { c1: "col_9", s1: "spec_9" },
+		});
+		vi.mocked(apiService.updateCollection).mockRejectedValueOnce(new Error("disk full"));
+		logError.mockClear();
 
 		const qc = appDefaultsClient();
 		const wrapper = ({ children }: { children: ReactNode }) =>
 			createElement(QueryClientProvider, { client: qc }, children);
 		const { result } = renderHook(() => useImportMutation(), { wrapper });
 
-		// A Postman export is a picked file too - remembering its path would
-		// claim a spec binding that does not exist.
+		// Mutation check: let the write's rejection escape `bindSpecFiles` and
+		// the import reports failure for a tree it committed.
+		await expect(
+			result.current.mutateAsync({
+				result: specImport(),
+				opts: { importEnvironments: true, importScripts: true },
+				specFile: { path: "/home/u/petstore.json", fileName: "petstore.json" },
+			})
+		).resolves.toMatchObject({ rootIds: { c1: "col_9" } });
+		expect((logError.mock.calls[0][0] as Error).message).toBe("disk full");
+	});
+
+	it("binds nothing for an import that carried no spec", async () => {
+		vi.mocked(apiService.updateCollection).mockClear();
+
+		const qc = appDefaultsClient();
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: qc }, children);
+		const { result } = renderHook(() => useImportMutation(), { wrapper });
+
+		// A Postman export is a picked file too - binding its path would claim
+		// a spec file that does not exist.
 		await result.current.mutateAsync({
 			result: structuredClone(COLLECTION_ONLY),
 			opts: { importEnvironments: true, importScripts: true },
 			specFile: { path: "/home/u/team.postman.json", fileName: "team.postman.json" },
 		});
 
-		expect(useSpecFileStore.getState().locations).toEqual({});
+		expect(apiService.updateCollection).not.toHaveBeenCalled();
 	});
 
 	/**

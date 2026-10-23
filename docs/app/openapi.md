@@ -27,12 +27,17 @@ a document.
 | The operation each request is | Engine, on the request | Yes |
 | What the document declares (the operation index) | Engine, `spec_documents.operations` - read off the document by the engine when it stores it | Yes |
 | The URL it was fetched from | Engine, `spec_documents.source_url` | Yes |
-| A picked file's path on disk | This machine only, renderer storage | No |
+| A picked file's path on disk | Engine, on the collection (`specFile`, with the file's name) | In a workspace backup only - never through an export or an import |
 
 The split is the same one the [data contract](data-driven-runs.md) follows: a
-path is true of one filesystem, so it never reaches the engine, an export or the
-MCP server. Only the path and the file's name are kept locally - the document's
-contents are on the engine, where they can be hashed and compared.
+path is true of one filesystem, so no export carries it, an import cannot set it,
+and the MCP server never names it. Only the path and the file's name are kept -
+the document's contents are the stored spec document, where they can be hashed
+and compared. A backup keeps the path so a restore on the same machine finds the
+file again; restored on another machine, the Spec tab still shows the path, and
+struck through once a check fails to read it there. A stored path is not
+permission to read it: Vayu opens only a file you picked, dropped or opened with
+the app.
 
 Several collections may bind the same document. It is not owned by any of them,
 which is why unbinding one leaves it in place, and why the engine refuses to
@@ -239,8 +244,9 @@ Where it re-reads from is what the binding recorded:
 | The spec was… | Checking re-reads it… |
 |---|---|
 | Fetched from a URL | From that URL |
-| Picked as a file | From that file, in the desktop app, on the machine that picked it |
-| Pasted, or picked on another machine | Not at all - it says so, and offers binding again |
+| Picked as a file | From that file, in the desktop app - where it is still at its path and is a file you picked there |
+| Picked as a file, restored on another machine | Tries the path; a file that is not there, or was never picked on this machine, fails the check with the reason, and the path is struck through until the spec is bound again |
+| Pasted | Not at all - it says so, and offers binding again |
 
 What comes back is bundled exactly as an import bundles it, so a spec written
 across several files is compared as the same one document that was stored. If it

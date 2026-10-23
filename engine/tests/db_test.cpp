@@ -2860,7 +2860,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 7);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 8);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
 
@@ -3615,7 +3615,7 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
 
     Database db (TEST_DB_PATH);
     db.init ();
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 7);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 8);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));
@@ -3624,6 +3624,53 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
     << "a run stored before the columns did not survive";
     EXPECT_EQ (legacy->origin, "other");
     EXPECT_FALSE (legacy->origin_client.has_value ());
+}
+
+// Version 8 added `collections.spec_file` / `data_file` (#2765). A version-7
+// database has neither; `sync_schema ()` adds both, a stored collection keeps
+// its row and reads back bound to no file, and the migration only stamps.
+// Mutation check: drop the `default_value` from `spec_file` in
+// `make_vayu_storage` and the collection does not survive the columns' return.
+TEST_F (DatabaseTest, AVersionSevenDatabaseGainsTheCollectionFileBindingColumns) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_legacy";
+        col.name  = "Legacy";
+        col.order = 0;
+        db.create_collection (col);
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        for (const char* column : { "spec_file", "data_file" }) {
+            const std::string sql =
+            std::string ("ALTER TABLE collections DROP COLUMN ") + column;
+            char* err = nullptr;
+            ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err), SQLITE_OK)
+            << (err != nullptr ? err : "(no message)");
+            sqlite3_free (err);
+        }
+        sqlite3_close (handle);
+    }
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "collections", "spec_file"))
+    << "test setup did not remove the column";
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "collections", "data_file"))
+    << "test setup did not remove the column";
+    set_user_version (TEST_DB_PATH, 7);
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "collections", "spec_file"));
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "collections", "data_file"));
+    const auto legacy = db.get_collection ("col_legacy");
+    ASSERT_HAS_VALUE (legacy)
+    << "a collection stored before the columns did not survive";
+    EXPECT_EQ (legacy->name, "Legacy");
+    EXPECT_EQ (legacy->spec_file, "{}");
+    EXPECT_EQ (legacy->data_file, "{}");
 }
 
 // A database stamped by the next schema is refused before anything writes to

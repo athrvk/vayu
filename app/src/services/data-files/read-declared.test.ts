@@ -26,7 +26,6 @@
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { useDataFileStore } from "@/stores/data-file-store";
 import { DataFileError } from "./errors";
 import {
 	NoDataFileBridgeError,
@@ -68,8 +67,14 @@ function csvOfRows(count: number): string {
 	return `user\n${Array.from({ length: count }, (_, i) => `user-${i}`).join("\n")}`;
 }
 
+/** Which bindings take a hash is `recordDataFileHash`'s (`file-bindings.test.ts`). */
+const recordDataFileHash = vi.fn();
+vi.mock("@/queries/file-bindings", () => ({
+	recordDataFileHash: (...args: unknown[]) => recordDataFileHash(...args),
+}));
+
 beforeEach(() => {
-	useDataFileStore.setState({ locations: {} });
+	recordDataFileHash.mockReset();
 });
 
 afterEach(() => {
@@ -185,7 +190,6 @@ describe("the row cap on a re-read", () => {
 });
 
 describe("the content hash on a re-read (#2051)", () => {
-	const OLD = "a".repeat(64);
 	const NEW = "b".repeat(64);
 
 	it("hands back the bridge's digest beside the rows", async () => {
@@ -196,25 +200,19 @@ describe("the content hash on a re-read (#2051)", () => {
 		expect(file.hash).toBe(NEW);
 	});
 
-	it("refreshes the remembered location's hash, and only the one at that path", async () => {
-		const { setDataFile } = useDataFileStore.getState();
-		setDataFile("col_1", { path: "/home/u/users.csv", fileName: "users.csv", hash: OLD });
-		setDataFile("col_2", { path: "/home/u/plans.csv", fileName: "plans.csv", hash: OLD });
+	it("records the read's hash against the path it read", async () => {
 		vi.stubGlobal("electronAPI", { readDataFile: bridge("id\n1", "users.csv", "utf-8", NEW) });
 
 		await readDeclaredDataFile("/home/u/users.csv", LIMITS);
 
-		const { locations } = useDataFileStore.getState();
-		expect(locations.col_1.hash).toBe(NEW);
-		expect(locations.col_2.hash).toBe(OLD);
+		// Mutation check: drop the `recordDataFileHash` call and the binding
+		// keeps the digest of the file as it was first picked.
+		expect(recordDataFileHash).toHaveBeenCalledWith("/home/u/users.csv", NEW);
 	});
 
 	it("records the bytes' hash even when they no longer parse", async () => {
 		// The digest describes the file on disk; a file that changed into one the
 		// parser refuses has still changed, and a stale hash would say it had not.
-		useDataFileStore
-			.getState()
-			.setDataFile("col_1", { path: "/home/u/dupes.csv", fileName: "dupes.csv", hash: OLD });
 		vi.stubGlobal("electronAPI", {
 			readDataFile: bridge("id,id\n1,2", "dupes.csv", "utf-8", NEW),
 		});
@@ -222,18 +220,15 @@ describe("the content hash on a re-read (#2051)", () => {
 		await expect(readDeclaredDataFile("/home/u/dupes.csv", LIMITS)).rejects.toBeInstanceOf(
 			DataFileError
 		);
-		expect(useDataFileStore.getState().locations.col_1.hash).toBe(NEW);
+		expect(recordDataFileHash).toHaveBeenCalledWith("/home/u/dupes.csv", NEW);
 	});
 
 	it("records nothing when the read itself fails", async () => {
-		useDataFileStore
-			.getState()
-			.setDataFile("col_1", { path: "/home/u/gone.csv", fileName: "gone.csv", hash: OLD });
 		vi.stubGlobal("electronAPI", {
 			readDataFile: () => Promise.reject(new Error("ENOENT: no such file or directory")),
 		});
 
 		await expect(readDeclaredDataFile("/home/u/gone.csv", LIMITS)).rejects.toThrow(/ENOENT/);
-		expect(useDataFileStore.getState().locations.col_1.hash).toBe(OLD);
+		expect(recordDataFileHash).not.toHaveBeenCalled();
 	});
 });

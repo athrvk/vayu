@@ -63,9 +63,11 @@ namespace vayu::db {
  *     past its highest sub-folder `order`, trashed folders included, so the
  *     folders-first display survives. An older engine numbers the two kinds
  *     apart again on its next create or reorder, and nothing would move them
- *     back.
+ *     back;
+ * 8 - `collections.spec_file` and `collections.data_file`, the files a
+ *     collection's Spec and Data tabs are bound to (#2765).
  */
-inline constexpr int SCHEMA_VERSION = 7;
+inline constexpr int SCHEMA_VERSION = 8;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.

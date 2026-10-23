@@ -397,6 +397,16 @@ Json postman_protocol_behavior_node (const std::optional<std::string>& stored) {
     return *stored;
 }
 
+/**
+ * A collection's `specFile` / `dataFile` (issue #2765): the stored object, or
+ * `{}` - "bound to no file" - for an empty column and for a blob that does not
+ * parse as an object, so the read degrades as the `openapi` block does.
+ */
+Json file_binding_node (const std::string& stored) {
+    Json parsed = Json::parse (stored, nullptr, /*allow_exceptions=*/false);
+    return parsed.is_object () ? parsed : Json::object ();
+}
+
 } // namespace
 
 Json serialize (const vayu::db::SpecDocument& s) {
@@ -543,6 +553,9 @@ Json serialize (const vayu::db::Collection& c) {
             json["openapi"] = Json::object ();
         }
     }
+
+    json["specFile"] = file_binding_node (c.spec_file);
+    json["dataFile"] = file_binding_node (c.data_file);
 
     return json;
 }

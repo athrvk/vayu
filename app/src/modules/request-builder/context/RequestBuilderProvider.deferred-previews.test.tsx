@@ -41,6 +41,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 import type { KeyValueItem } from "@/types";
 
 const composeRequest = vi.fn();
@@ -311,9 +312,7 @@ describe("a picked data row beside a name a pre-request script sets", () => {
 
 	beforeEach(() => {
 		useDataFileStore.setState({ locations: {} });
-		useDataFileStore
-			.getState()
-			.setDataFile(COLLECTION_ID, { path: "/data/users.csv", fileName: "users.csv" });
+		bindDataFile(COLLECTION_ID, { path: "/data/users.csv", fileName: "users.csv" });
 		Object.defineProperty(window, "electronAPI", {
 			value: {
 				readDataFile: vi.fn(async () => ({

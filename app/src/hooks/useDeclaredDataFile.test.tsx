@@ -17,11 +17,12 @@
  * that as a remembered file to re-read over the file the user just chose.
  *
  * The other store write the effect sees is the read's own (#2051):
- * `readDeclaredDataFile` records the file's hash against the remembered path,
- * replacing the location object while the read is still pending. The effect
- * depends on the location's path and name, not on the object, or that
- * replacement cancels the read and the dialog opens on an empty picker with no
- * note.
+ * `readDeclaredDataFile` records the file's hash against the bound path, and
+ * the row that write answers replaces the location object in the mirror - at
+ * the earliest while the read is still pending, which is what the stub below
+ * does. The effect depends on the location's path and name, not on the
+ * object, or that replacement cancels the read and the dialog opens on an
+ * empty picker with no note.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -31,6 +32,7 @@ import { useDataFileStore } from "@/stores";
 import { parseDataFile } from "@/services/data-files";
 import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import type { Collection } from "@/types";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 
 const collections: Collection[] = [];
 
@@ -40,6 +42,21 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: [...collections] }),
 	// Read by `useDataFileLimits`; no entries leaves the seeded caps standing.
 	useConfigQuery: () => ({ data: { entries: [] } }),
+}));
+
+/**
+ * The hash write, landing at once: every binding at the path is replaced by
+ * one carrying the new hash, as the mirror does when the engine's row comes
+ * back - and only where the hash moved, as `recordDataFileHash` writes.
+ */
+vi.mock("@/queries/file-bindings", () => ({
+	recordDataFileHash: (path: string, hash: string) => {
+		for (const [id, location] of Object.entries(useDataFileStore.getState().locations)) {
+			if (location.path === path && location.hash !== hash) {
+				bindDataFile(id, { ...location, hash });
+			}
+		}
+	},
 }));
 
 const { useDeclaredDataFile } = await import("./useDeclaredDataFile");
@@ -187,11 +204,7 @@ describe("useDeclaredDataFile", () => {
 		const plans = picked("plans.csv", "plan,price\nfree,0", "/home/u/plans.csv");
 		act(() => result.current.setFile(plans));
 		// What a run dialog's declare does once the mutation lands.
-		act(() =>
-			useDataFileStore
-				.getState()
-				.setDataFile("col_1", { path: "/home/u/plans.csv", fileName: "plans.csv" })
-		);
+		act(() => bindDataFile("col_1", { path: "/home/u/plans.csv", fileName: "plans.csv" }));
 		await act(async () => {});
 
 		// Mutation check: drop the `picked` gate from the pre-fill effect and the
@@ -299,7 +312,7 @@ describe("useDeclaredDataFile: the read's own hash record (#2051)", () => {
 		["no stored hash", undefined],
 		["a stale stored hash", STORED],
 	])("pre-fills the remembered file when the read records a new hash (%s)", async (_, stored) => {
-		useDataFileStore.getState().setDataFile("col_1", {
+		bindDataFile("col_1", {
 			path: "/data/users.csv",
 			fileName: "users.csv",
 			...(stored ? { hash: stored } : {}),
@@ -321,7 +334,7 @@ describe("useDeclaredDataFile: the read's own hash record (#2051)", () => {
 
 	it("pre-fills when the stored hash already matches, leaving the location untouched", async () => {
 		const location = { path: "/data/users.csv", fileName: "users.csv", hash: ON_DISK };
-		useDataFileStore.getState().setDataFile("col_1", location);
+		bindDataFile("col_1", location);
 		stubHashedRead(ON_DISK);
 
 		const { result } = renderHook(() =>

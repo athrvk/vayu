@@ -11,8 +11,10 @@ import type {
 	Collection,
 	CollectionDataSchema,
 	CollectionOpenApiBinding,
+	DataFileLocation,
 	DeclaredOperation,
 	ResponseSchemaIndex,
+	SpecFileLocation,
 	SpecOperation,
 	MethodSource,
 	MockResponseMode,
@@ -118,6 +120,10 @@ export interface CreateCollectionRequest {
 	dataSchema?: CollectionDataSchema;
 	/** The spec document to bind at create time - see {@link Collection.openapi}. */
 	openapi?: CollectionOpenApiBinding;
+	/** See {@link Collection.specFile}. */
+	specFile?: SpecFileLocation;
+	/** See {@link Collection.dataFile}. */
+	dataFile?: DataFileLocation;
 }
 
 export interface UpdateCollectionRequest {
@@ -148,6 +154,13 @@ export interface UpdateCollectionRequest {
 	 * that survives to the wire. There is no unbind verb of its own.
 	 */
 	openapi?: CollectionOpenApiBinding | null;
+	/**
+	 * The picked spec file and the data file, each `| null` for the reason
+	 * `openapi` is: absent keeps the stored location, `null` forgets it. The
+	 * object is replaced whole, never merged member by member.
+	 */
+	specFile?: SpecFileLocation | null;
+	dataFile?: DataFileLocation | null;
 }
 
 // Requests API

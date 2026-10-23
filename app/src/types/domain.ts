@@ -273,10 +273,10 @@ export type RequestAuth =
  * data file is expected to carry, so `{{data.*}}` and `pm.iterationData` have
  * something to be checked against at authoring time.
  *
- * The *schema* is collection state and rides the engine row. The file itself is
- * machine state and lives in `data-file-store`; its **rows** are persisted
- * nowhere at all - they are user data of unknown sensitivity, and that rule is
- * older than this field.
+ * The *schema* rides the engine row, and so does where the file is
+ * (`Collection.dataFile`); the file's **rows** are persisted nowhere at all -
+ * they are user data of unknown sensitivity, and that rule is older than this
+ * field.
  *
  * `{}` - every field absent - is how "declares no contract" is spelled, which
  * is also what the engine stores by default.
@@ -311,6 +311,50 @@ export interface CollectionOpenApiBinding {
 	specHash?: string;
 	/** When the binding was last made or re-synced, epoch ms. */
 	syncedAt?: number;
+}
+
+/**
+ * Where a collection's spec document was picked from (issue #638): a picked
+ * file's location, beside `Collection.openapi`, for the specs that came from a
+ * file rather than a URL. A URL-sourced spec has none; its origin is
+ * `spec_documents.source_url`.
+ *
+ * Stored on the engine row (#2765), so a workspace backup carries it and a
+ * restore names the file again - on another machine, a path that may not
+ * exist there. A stored path grants nothing: the main process reads a file
+ * only if the user picked it (`electron/file-grants.ts`).
+ */
+export interface SpecFileLocation {
+	/** Absolute path, obtained from the preload `getFilePath` bridge at pick time. */
+	path: string;
+	/** The file's own name, which is what the Spec tab shows as the source. */
+	fileName: string;
+}
+
+/**
+ * Where a collection's data file was picked from (issue #599), so a run, the
+ * Data tab and Send-with-row can re-read the file the contract was declared
+ * from. Stored on the engine row like {@link SpecFileLocation}. The file's
+ * **rows** are stored nowhere.
+ */
+export interface DataFileLocation {
+	/** Absolute path, obtained from the preload `getFilePath` bridge at pick time. */
+	path: string;
+	/** The file's own name, for a message about a file that has since moved. */
+	fileName: string;
+	/**
+	 * SHA-256 of the file's bytes the last time the app read it (issue #2051),
+	 * the digest a run records as `dataFileHash`. Absent until the first read
+	 * that recorded one.
+	 */
+	hash?: string;
+	/**
+	 * Read this CSV/TSV file's unquoted numbers as numbers (#2540), the
+	 * picker's "Read numbers as numbers". A fact about how *this* file is read,
+	 * so a pick of a file starts it off; absent means off. Every re-read of the
+	 * path parses with it, so the rows a run sends match the preview.
+	 */
+	castNumbers?: boolean;
 }
 
 /**
@@ -576,6 +620,10 @@ export interface Collection {
 	 * that was bound and then unbound holds `{}`, not `undefined`.
 	 */
 	openapi?: CollectionOpenApiBinding;
+	/** The file the spec was picked from; absent when it was not a file, or unbound. */
+	specFile?: SpecFileLocation;
+	/** The file the data contract was declared from; absent when there is none. */
+	dataFile?: DataFileLocation;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -619,10 +667,9 @@ export interface DataContractScope {
 	 * The id of that collection (issue #601).
 	 *
 	 * Added the day something needed to reach the declaring collection rather
-	 * than name it: Send-with-row looks up the data file `data-file-store`
-	 * remembers, and that entry is keyed by the collection whose Data tab
-	 * declared the contract - which under the chain rule is an ancestor as often
-	 * as it is the request's own parent.
+	 * than name it: Send-with-row looks up that collection's bound data file,
+	 * which belongs to the collection whose Data tab declared the contract -
+	 * under the chain rule an ancestor as often as the request's own parent.
 	 */
 	collectionId: string;
 	/** Declared column names, in the order the contract lists them. */

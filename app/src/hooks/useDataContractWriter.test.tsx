@@ -11,8 +11,10 @@
 /**
  * The shared contract writer (issue #2050). The Data tab's suite pins the
  * gestures; this pins the writer's own rules, which every caller inherits: the
- * remembered path follows a landed write only, a pick with no path forgets the
- * old one, and a caller in no collection writes nothing at all.
+ * file binding rides the same update as the columns (#2765), a pick with no
+ * path forgets the old one, and a caller in no collection writes nothing at
+ * all. The binding is asserted on the payload, since the engine row is the
+ * record: it carries where the file is and never a row of it.
  */
 
 import { act, renderHook } from "@testing-library/react";
@@ -29,8 +31,16 @@ const mutation = {
 	error: null as Error | null,
 };
 
+const reading = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
+
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
+	useDataFileReadingMutation: () => reading,
 }));
 
 const { useDataContractWriter } = await import("./useDataContractWriter");
@@ -47,25 +57,22 @@ function file(path?: string, castNumbers = false): SelectedDataFile {
 	};
 }
 
-/** Resolve the last mutation the way TanStack would, running the caller's onSuccess. */
-function succeed() {
-	const [, options] = mutation.mutate.mock.calls[mutation.mutate.mock.calls.length - 1];
-	act(() => options?.onSuccess?.({}));
-}
-
 beforeEach(() => {
 	mutation.mutate.mockClear();
+	reading.mutate.mockClear();
 	useDataFileStore.setState({
 		locations: { col_1: { path: "/home/u/users.csv", fileName: "users.csv" } },
 	});
 });
 
 describe("useDataContractWriter", () => {
-	it("declares the file's columns, and remembers its path once the write lands", () => {
+	it("declares the file's columns and binds the file in the same update", () => {
 		const { result } = renderHook(() => useDataContractWriter("col_1"));
 
 		result.current.declare(file("/home/u/plans.csv"));
 
+		// Mutation check: drop `hash` from `fileBinding` and MCP's
+		// `list_collections` names the file's path with no content digest (#2051).
 		expect(mutation.mutate.mock.calls[0][0]).toEqual({
 			id: "col_1",
 			dataSchema: {
@@ -73,60 +80,68 @@ describe("useDataContractWriter", () => {
 				fileName: "plans.csv",
 				declaredAt: expect.any(Number),
 			},
+			dataFile: {
+				path: "/home/u/plans.csv",
+				fileName: "plans.csv",
+				hash: HASH,
+				castNumbers: false,
+			},
 		});
-		expect(useDataFileStore.getState().locations.col_1.fileName).toBe("users.csv");
-		succeed();
-		// Mutation check: drop `hash` from the remembered location and MCP's
-		// `list_collections` names the file's path with no content digest (#2051).
-		expect(useDataFileStore.getState().locations.col_1).toEqual({
-			path: "/home/u/plans.csv",
-			fileName: "plans.csv",
-			hash: HASH,
-			castNumbers: false,
-		});
+		// The whole payload, not just the binding: a row that leaked in under
+		// any key would be stored on the engine row and ride every backup.
+		expect(JSON.stringify(mutation.mutate.mock.calls[0][0])).not.toMatch(/rows|parsed|free/);
 	});
 
-	it("remembers how the declared file was read (#2540)", () => {
+	it("binds how the declared file was read (#2540)", () => {
 		const { result } = renderHook(() => useDataContractWriter("col_1"));
 
 		result.current.declare(file("/home/u/plans.csv", true));
-		succeed();
 
-		expect(useDataFileStore.getState().locations.col_1.castNumbers).toBe(true);
+		expect(mutation.mutate.mock.calls[0][0].dataFile.castNumbers).toBe(true);
 	});
 
-	it("changes how the bound file is read without writing the contract", () => {
+	it("changes how the bound file is read with a write of its own, never the contract", () => {
 		const { result } = renderHook(() => useDataContractWriter("col_1"));
 
 		act(() => result.current.rememberReading(file("/home/u/users.csv", true)));
-		expect(useDataFileStore.getState().locations.col_1.castNumbers).toBe(true);
+		// The reading, not a binding: the binding is built when the write is
+		// sent (`rememberDataFileReading`), and no contract is written, since
+		// the columns do not change with how a value is read.
+		expect(reading.mutate.mock.calls).toEqual([
+			[{ id: "col_1", path: "/home/u/users.csv", castNumbers: true }],
+		]);
 		expect(mutation.mutate).not.toHaveBeenCalled();
 
-		// A file the binding does not name, or one with no path, leaves it be.
-		act(() => result.current.rememberReading(file("/home/u/plans.csv", false)));
-		act(() => result.current.rememberReading(file(undefined, false)));
-		expect(useDataFileStore.getState().locations.col_1.castNumbers).toBe(true);
+		// A file the binding does not name, one with no path, or a reading the
+		// binding already has, asks for nothing. Mutation check: drop the path
+		// guard and the plans.csv toggle becomes a pending write.
+		reading.mutate.mockClear();
+		act(() => result.current.rememberReading(file("/home/u/plans.csv", true)));
+		act(() => result.current.rememberReading(file(undefined, true)));
+		act(() => result.current.rememberReading(file("/home/u/users.csv", false)));
+		expect(reading.mutate).not.toHaveBeenCalled();
 	});
 
-	it("forgets the remembered path when the declared file carries none", () => {
+	it("forgets the bound file when the declared file carries no path", () => {
 		const { result } = renderHook(() => useDataContractWriter("col_1"));
 
 		result.current.declare(file());
-		succeed();
 
-		// Mutation check: drop the `clearDataFile` branch and users.csv stays
-		// remembered beside a contract read from another file.
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		// Mutation check: send `undefined` (absent, "keep") instead of `null`
+		// and users.csv stays bound beside a contract read from another file.
+		expect(mutation.mutate.mock.calls[0][0].dataFile).toBeNull();
 	});
 
-	it("clears with an explicit null, then forgets the path", () => {
+	it("clears the contract and the binding with explicit nulls", () => {
 		const { result } = renderHook(() => useDataContractWriter("col_1"));
 
 		result.current.clear();
 
-		expect(mutation.mutate.mock.calls[0][0]).toEqual({ id: "col_1", dataSchema: null });
-		succeed();
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(mutation.mutate.mock.calls[0][0]).toEqual({
+			id: "col_1",
+			dataSchema: null,
+			dataFile: null,
+		});
 	});
 
 	it.each([undefined, null, ""])("writes nothing for a collection id of %j", (id) => {
@@ -134,10 +149,12 @@ describe("useDataContractWriter", () => {
 
 		result.current.declare(file("/home/u/plans.csv"));
 		result.current.clear();
+		act(() => result.current.rememberReading(file("/home/u/users.csv", true)));
 
-		// Mutation check: drop either empty-id guard and an update for an id the
+		// Mutation check: drop any empty-id guard and an update for an id the
 		// engine has no row for goes out.
 		expect(mutation.mutate).not.toHaveBeenCalled();
+		expect(reading.mutate).not.toHaveBeenCalled();
 	});
 
 	it("passes the mutation's state through for SaveFailed", () => {
@@ -147,6 +164,19 @@ describe("useDataContractWriter", () => {
 		mutation.isError = false;
 		mutation.error = null;
 
+		expect(result.current.isError).toBe(true);
+		expect(result.current.error?.message).toBe("engine unreachable");
+	});
+
+	it("passes a failed reading write through the same way", () => {
+		reading.isError = true;
+		reading.error = new Error("engine unreachable");
+		const { result } = renderHook(() => useDataContractWriter("col_1"));
+		reading.isError = false;
+		reading.error = null;
+
+		// Mutation check: answer the contract mutation's state alone and a
+		// refused toggle reads as saved.
 		expect(result.current.isError).toBe(true);
 		expect(result.current.error?.message).toBe("engine unreachable");
 	});

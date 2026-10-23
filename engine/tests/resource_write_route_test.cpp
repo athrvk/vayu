@@ -55,6 +55,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -389,7 +391,7 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     ASSERT_HAS_VALUE (before_row);
     const auto& before = *before_row;
 
-    for (const char* field : { "variables", "auth", "dataSchema" }) {
+    for (const char* field : { "variables", "auth", "dataSchema", "specFile", "dataFile" }) {
         for (const json& bad : wrong_shapes ()) {
             auto [status, body] =
             update_collection_response (*db_, id, json{ { field, bad } });
@@ -408,10 +410,12 @@ TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
     EXPECT_EQ (after.variables, before.variables);
     EXPECT_EQ (after.auth, before.auth);
     EXPECT_EQ (after.data_schema, before.data_schema);
+    EXPECT_EQ (after.spec_file, before.spec_file);
+    EXPECT_EQ (after.data_file, before.data_file);
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionCreateWrongShapeObjectFieldIsRejected) {
-    for (const char* field : { "variables", "auth", "dataSchema" }) {
+    for (const char* field : { "variables", "auth", "dataSchema", "specFile", "dataFile" }) {
         for (const json& bad : wrong_shapes ()) {
             auto [status, body] = create_collection_response (
             *db_, json{ { "name", "N" }, { field, bad } });
@@ -514,6 +518,147 @@ TEST_F (ResourceWriteRouteTest, CollectionDataSchemaAcceptsAContractWithoutOptio
         EXPECT_EQ (status, 200) << fine.dump ();
         EXPECT_EQ (body["dataSchema"], fine);
     }
+}
+
+// --- The spec-file and data-file bindings (issue #2765) -----------------------
+//
+// Mutation checks: drop either `apply_file_binding_field` call from
+// `apply_collection_fields` and the round trip fails on create and on update;
+// drop the `specFile` / `dataFile` lines from `serialize (Collection)` and the
+// echoed and read-back values are missing; drop the `hash` check from
+// `validate_file_binding` and the contents table fails on its hash rows.
+
+/// A data-file digest in its one accepted spelling.
+constexpr std::string_view DIGEST =
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+static_assert (DIGEST.size () == 64);
+
+TEST_F (ResourceWriteRouteTest, CollectionFileBindingsRoundTripAndFollowTheNullRule) {
+    // A Windows path on any host: the binding is a location the machine that
+    // picked it wrote, and a backup restored elsewhere carries it as written.
+    const json spec_file{ { "path", R"(C:\Users\me\specs\pets.yaml)" },
+        { "fileName", "pets.yaml" } };
+    const json data_file{ { "path", "/home/me/data/users.csv" }, { "fileName", "users.csv" },
+        { "hash", std::string (DIGEST) }, { "castNumbers", true } };
+
+    auto [create_status, created] = create_collection_response (*db_,
+    json{ { "name", "N" }, { "specFile", spec_file }, { "dataFile", data_file } });
+    ASSERT_EQ (create_status, 200) << created.dump ();
+    const std::string id = created["id"];
+    EXPECT_EQ (created["specFile"], spec_file);
+    EXPECT_EQ (created["dataFile"], data_file);
+    const auto stored = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->spec_file), spec_file);
+    EXPECT_EQ (json::parse (stored->data_file), data_file);
+
+    // Absent on create is "no file".
+    auto [bare_status, bare] = create_collection_response (*db_, json{ { "name", "B" } });
+    ASSERT_EQ (bare_status, 200);
+    EXPECT_EQ (bare["specFile"], json::object ());
+    EXPECT_EQ (bare["dataFile"], json::object ());
+
+    // Update: a relative path is stored as written too.
+    const json moved{ { "path", "data/users.csv" }, { "fileName", "users.csv" } };
+    auto [set_status, set] =
+    update_collection_response (*db_, id, json{ { "dataFile", moved } });
+    ASSERT_EQ (set_status, 200) << set.dump ();
+    EXPECT_EQ (set["dataFile"], moved);
+    EXPECT_EQ (set["specFile"], spec_file);
+
+    // Absent keeps.
+    auto [keep_status, keep] =
+    update_collection_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (keep_status, 200);
+    EXPECT_EQ (keep["specFile"], spec_file) << "absent means keep";
+    EXPECT_EQ (keep["dataFile"], moved) << "absent means keep";
+
+    // Null resets to the default, which is "bound to no file".
+    auto [clear_status, cleared] = update_collection_response (
+    *db_, id, json{ { "specFile", nullptr }, { "dataFile", nullptr } });
+    ASSERT_EQ (clear_status, 200);
+    EXPECT_EQ (cleared["specFile"], json::object ());
+    EXPECT_EQ (cleared["dataFile"], json::object ());
+    const auto unbound = db_->get_collection (id);
+    ASSERT_HAS_VALUE (unbound);
+    EXPECT_EQ (unbound->spec_file, "{}");
+    EXPECT_EQ (unbound->data_file, "{}");
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionFileBindingContentsAreValidated) {
+    const std::string id = make_collection ();
+    const json file{ { "path", "/data/users.csv" }, { "fileName", "users.csv" } };
+    const auto with = [&file] (const char* member, const json& value) {
+        json binding    = file;
+        binding[member] = value;
+        return binding;
+    };
+
+    // {field, binding, what the 400 must name}
+    const std::vector<std::tuple<const char*, json, const char*>> bad{
+        { "specFile", json{ { "fileName", "pets.yaml" } }, "specFile.path" },
+        { "specFile", with ("path", ""), "specFile.path" },
+        { "specFile", with ("path", 7), "specFile.path" },
+        { "specFile", json{ { "path", "/pets.yaml" } }, "specFile.fileName" },
+        { "specFile", with ("fileName", nullptr), "specFile.fileName" },
+        { "specFile", with ("hash", std::string (DIGEST)), "hash" },
+        { "specFile", with ("extra", 1), "extra" },
+        { "dataFile", with ("hash", "ABC"), "dataFile.hash" },
+        { "dataFile", with ("hash", std::string (64, 'A')), "dataFile.hash" },
+        { "dataFile", with ("hash", 7), "dataFile.hash" },
+        { "dataFile", with ("castNumbers", "yes"), "dataFile.castNumbers" },
+        { "dataFile", with ("rows", json::array ()), "rows" },
+    };
+    for (const auto& [field, binding, names] : bad) {
+        auto [status, body] =
+        update_collection_response (*db_, id, json{ { field, binding } });
+        EXPECT_EQ (status, 400) << field << " = " << binding.dump ();
+        EXPECT_NE (body["error"]["message"].get<std::string> ().find (names), std::string::npos)
+        << body["error"]["message"];
+        const auto stored = db_->get_collection (id);
+        ASSERT_HAS_VALUE (stored);
+        EXPECT_EQ (stored->spec_file, "{}")
+        << "a rejected write stores nothing";
+        EXPECT_EQ (stored->data_file, "{}")
+        << "a rejected write stores nothing";
+    }
+
+    // `{}` is unbound, and the optional members are optional.
+    for (const json& fine : { json::object (), file,
+         with ("hash", std::string (DIGEST)), with ("castNumbers", false) }) {
+        auto [status, body] = create_collection_response (
+        *db_, json{ { "name", "N" }, { "dataFile", fine } });
+        EXPECT_EQ (status, 200) << fine.dump () << " " << body.dump ();
+    }
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionFileBindingOverItsCapIsRejectedWith413) {
+    using vayu::core::constants::file_binding::MAX_FILE_NAME_BYTES;
+    using vayu::core::constants::file_binding::MAX_PATH_BYTES;
+    const std::string id = make_collection ();
+
+    const json at_cap{ { "path", std::string (MAX_PATH_BYTES, 'p') },
+        { "fileName", std::string (MAX_FILE_NAME_BYTES, 'f') } };
+    EXPECT_EQ (
+    update_collection_response (*db_, id, json{ { "specFile", at_cap } }).first, 200)
+    << "the cap itself is accepted";
+
+    const std::vector<std::pair<json, const char*>> over{
+        { json{ { "path", std::string (MAX_PATH_BYTES + 1, 'p') }, { "fileName", "f" } },
+        "dataFile.path" },
+        { json{ { "path", "/p" }, { "fileName", std::string (MAX_FILE_NAME_BYTES + 1, 'f') } },
+        "dataFile.fileName" },
+    };
+    for (const auto& [binding, names] : over) {
+        auto [status, body] =
+        update_collection_response (*db_, id, json{ { "dataFile", binding } });
+        EXPECT_EQ (status, 413) << names;
+        EXPECT_NE (body["error"]["message"].get<std::string> ().find (names), std::string::npos)
+        << body["error"]["message"];
+    }
+    const auto stored = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->data_file, "{}");
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionUpdateKeepsCycleGuard) {

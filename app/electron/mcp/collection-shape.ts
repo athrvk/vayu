@@ -70,12 +70,15 @@ export function readDataContract(schema: unknown): DataContract | null {
 
 /**
  * One collection row with its `dataSchema` stated or dropped, and its
- * remembered `dataFile` added when @p ctx knows one. Anything else passes
+ * remembered `dataFile` added when @p ctx knows one. The engine's own
+ * `specFile` and `dataFile` bindings (#2765) are dropped: an agent has no use
+ * for the spec file, and `dataFile` is named only from @p ctx, so a host with
+ * no record of paths (the stdio CLI) still names none. Anything else passes
  * through.
  */
 export function presentCollection(row: unknown, ctx?: DataFileLookup): unknown {
 	if (!isRecord(row)) return row;
-	const { dataSchema, ...rest } = row;
+	const { dataSchema, specFile: _specFile, dataFile: _storedDataFile, ...rest } = row;
 	const contract = readDataContract(dataSchema);
 	const location = typeof row.id === "string" ? ctx?.dataFileLocation?.(row.id) : undefined;
 	return {
@@ -102,6 +105,15 @@ function presentLocation(location: DataFileLocation): DataFileLocation {
 /** {@link presentCollection} over a list; a non-list answer passes through untouched. */
 export function presentCollections(list: unknown, ctx?: DataFileLookup): unknown {
 	return Array.isArray(list) ? list.map((row) => presentCollection(row, ctx)) : list;
+}
+
+/**
+ * `POST /reorder`'s answer (`{collections, requests}`, the whole rows a move
+ * renumbered) with each collection row presented as its own echo is.
+ */
+export function presentReorderCollections(answer: unknown, ctx?: DataFileLookup): unknown {
+	if (!isRecord(answer) || !("collections" in answer)) return answer;
+	return { ...answer, collections: presentCollections(answer.collections, ctx) };
 }
 
 /**

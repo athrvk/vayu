@@ -115,3 +115,90 @@ describe("CollectionTransformer spec binding", () => {
 		}
 	});
 });
+
+/**
+ * The file bindings (#2765): whatever comes out of here reaches the read IPC
+ * as a path, so a value that is not a `{path, fileName}` pair of non-empty
+ * strings is no binding at all, and an engine that predates the columns (or
+ * answers `{}` for "no file") reads as unbound rather than as a half-location.
+ *
+ * Mutation checks: let `toSpecFileLocation` accept an empty path (one the
+ * engine refuses to store) and the "an empty path" case fails; drop the
+ * `DATA_FILE_HASH_PATTERN` test and the malformed-hash case keeps a digest no
+ * run could have recorded.
+ */
+describe("CollectionTransformer file bindings", () => {
+	const HASH = "c".repeat(64);
+
+	it("carries both bindings through", () => {
+		const collection = CollectionTransformer.toFrontend(
+			row({
+				specFile: { path: "/home/u/pets.yaml", fileName: "pets.yaml" },
+				dataFile: {
+					path: "/home/u/users.csv",
+					fileName: "users.csv",
+					hash: HASH,
+					castNumbers: true,
+				},
+			})
+		);
+		expect(collection.specFile).toEqual({ path: "/home/u/pets.yaml", fileName: "pets.yaml" });
+		expect(collection.dataFile).toEqual({
+			path: "/home/u/users.csv",
+			fileName: "users.csv",
+			hash: HASH,
+			castNumbers: true,
+		});
+	});
+
+	it("reads the engine's {} and an older engine's missing column as no binding", () => {
+		for (const collection of [
+			CollectionTransformer.toFrontend(row({ specFile: {}, dataFile: {} })),
+			CollectionTransformer.toFrontend(row()),
+		]) {
+			expect(collection).not.toHaveProperty("specFile");
+			expect(collection).not.toHaveProperty("dataFile");
+		}
+	});
+
+	it.each([
+		["a non-string path", { path: 42, fileName: "u.csv" }],
+		["no file name", { path: "/p/u.csv" }],
+		["an empty path", { path: "", fileName: "u.csv" }],
+		["null", null],
+		["a string", "/p/u.csv"],
+	])("drops a binding with %s rather than handing it to the reader", (_label, value) => {
+		const collection = CollectionTransformer.toFrontend(
+			row({ specFile: value, dataFile: value })
+		);
+		expect(collection).not.toHaveProperty("specFile");
+		expect(collection).not.toHaveProperty("dataFile");
+	});
+
+	it("drops a malformed hash and a non-boolean castNumbers, not the location", () => {
+		const collection = CollectionTransformer.toFrontend(
+			row({
+				dataFile: {
+					path: "/p/b.csv",
+					fileName: "b.csv",
+					hash: "NOT-A-DIGEST",
+					castNumbers: "yes",
+				},
+			})
+		);
+		expect(collection.dataFile).toEqual({ path: "/p/b.csv", fileName: "b.csv" });
+	});
+
+	it("keeps no member beyond the location's own", () => {
+		// A spec file has no hash, and nothing that could be a row or a document
+		// rides a binding into the app.
+		const collection = CollectionTransformer.toFrontend(
+			row({
+				specFile: { path: "/p/s.yaml", fileName: "s.yaml", hash: HASH, content: "openapi" },
+				dataFile: { path: "/p/u.csv", fileName: "u.csv", rows: [{ id: 1 }] },
+			})
+		);
+		expect(collection.specFile).toEqual({ path: "/p/s.yaml", fileName: "s.yaml" });
+		expect(collection.dataFile).toEqual({ path: "/p/u.csv", fileName: "u.csv" });
+	});
+});

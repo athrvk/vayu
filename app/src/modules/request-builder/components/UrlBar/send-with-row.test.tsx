@@ -39,6 +39,7 @@ import { useDataFileStore, useTabsStore } from "@/stores";
 import type { DataContractScope } from "@/types";
 import { useSendWithRow } from "../../hooks/useSendWithRow";
 import UrlBar from "./index";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 
 vi.mock("./MethodSelector", () => ({ default: () => null }));
 vi.mock("./UrlInput", () => ({ default: () => null }));
@@ -208,9 +209,7 @@ afterEach(() => {
 
 /** A declared file for the collection that declared the contract. */
 function rememberFile(collectionId = CONTRACT.collectionId) {
-	useDataFileStore
-		.getState()
-		.setDataFile(collectionId, { path: "/data/users.csv", fileName: "users.csv" });
+	bindDataFile(collectionId, { path: "/data/users.csv", fileName: "users.csv" });
 }
 
 /** The read IPC, answering with `text` - or rejecting, for the moved-file case. */
