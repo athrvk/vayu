@@ -426,7 +426,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   clamps (`histogram_latency_us` / `clamp_to_histogram_ceiling`, `core/metrics_collector.hpp`), so
   such a completion lands in the top bucket: percentiles and `max` read one hour, and the
   histogram's count is still the number of completions. The mean, a sum rather than a histogram
-  read, keeps the true duration.
+  read, keeps the true duration, so it can exceed `max`.
 - **One reader merges the windows**: each window the metrics thread samples is added, before the
   recorder recycles it, into three more histograms only that thread touches, so they take plain
   calls. One is the open second, which `take_second_percentiles()` reads and resets at the 1 Hz

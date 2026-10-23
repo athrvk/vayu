@@ -13,8 +13,8 @@
 
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <string>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -39,8 +39,8 @@ static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US) / 1
 static_assert (NINETY_MINUTES_MS > CEILING_MS, "the test value must be past the ceiling");
 
 /// A histogram holds a value to 3 significant figures, so the top bucket reads
-/// back within 0.1% of the ceiling it was clamped to - and never past it by
-/// more than that. A dropped completion reads back as the ordinary 20 ms.
+/// back within 0.1% of the ceiling it was clamped to. A dropped completion
+/// would leave the ordinary 20 ms in its place.
 void expect_saturated_at_ceiling (double actual_ms, const std::string& what) {
     EXPECT_NEAR (actual_ms, CEILING_MS, CEILING_MS * 0.001) << what;
 }
@@ -149,7 +149,7 @@ TEST (HistogramCeiling, AStepHistogramKeepsACompletionPastTheCeiling) {
     expect_saturated_at_ceiling (steps.percentiles (1).max, "step 1 max");
 }
 
-TEST (HistogramCeiling, ATransactionHistogramKeepsASumPastTheCeiling) {
+TEST (HistogramCeiling, ATransactionCompletionPastTheCeilingIsCounted) {
     const json transaction = { { "id", "el_txn" }, { "kind", "control.transaction" },
         { "enabled", true }, { "config", { { "name", "checkout" } } } };
     ScenarioPlan plan;

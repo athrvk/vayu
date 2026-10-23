@@ -6755,8 +6755,8 @@ transfer then runs without. `POST /runs` holds the same bound (see its
 transfer (see `stream` below) but refuses a malformed one all the same. In a
 load run the latency histograms hold one hour at most (issue #2790): a
 completion longer than that, a timeout above `3600000` that ran out, is counted
-at one hour, so a percentile or `max` it reaches reads `3600000` ms rather than
-the true duration, and the sample is never left out.
+at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within
+0.1%) rather than the true duration, and the sample is never left out.
 
 **`requestId` and `environmentId` must be strings** (issue #1917): an id of any
 other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
