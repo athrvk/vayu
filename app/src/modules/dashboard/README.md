@@ -121,7 +121,9 @@ consumes it.
   null only when every second in it was empty. A row an older engine stored
   holds `0` for such a second and still reads as `0`: nothing rewrites it.
 - **Row 3 reads the latest gate frame from `historicalMetrics`, never the newest
-  tick** (#2782). The run-so-far latency distribution (`cumulative_latency`)
+  tick** (#2782). The two cards used to be placeholders until the report
+  arrived (#2261); they now draw the run-so-far data. The run-so-far latency
+  distribution (`cumulative_latency`)
   and the per-phase means (`cumulative_phases`) ride the gate frame alone,
   about one frame in ten, so the tick in `metrics` almost never has them and a
   card reading it would flicker to empty nine renders in ten.

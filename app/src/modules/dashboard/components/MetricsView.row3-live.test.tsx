@@ -18,9 +18,9 @@
  * The HDR plot is a uPlot canvas, stubbed to a marker that carries the report
  * it was handed.
  *
- * Mutation-check: feed the waterfall `null` and the waterfall case fails; read
- * the newest tick (`metrics`) instead of the buffer and the non-gate-last case
- * fails.
+ * Mutation-check: feed the waterfall `null`, or one phase's bar another
+ * phase's mean, and the waterfall case fails; read the newest tick (`metrics`)
+ * instead of the buffer and the non-gate-last case fails.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -124,9 +124,14 @@ describe("MetricsView request timing card", () => {
 		renderView([GATE, tick(2.1)]);
 
 		const timing = card(/Avg request timing/);
+		// Each bar its own phase's mean, so a phase fed another's value shows.
+		const bars = { DNS: "0.10", Connect: "0.20", TLS: "0.30", TTFB: "3.10", Download: "0.40" };
+		for (const [label, value] of Object.entries(bars)) {
+			const row = within(timing).getByText(label).parentElement;
+			expect(row?.textContent, label).toContain(`${value}ms`);
+		}
 		// 0.1 + 0.2 + 0.3 + 3.1 + 0.4 = 4.1 ms, so the total is not the empty "-".
 		expect(within(timing).getByText("Avg total").parentElement?.textContent).toContain("4.1");
-		expect(within(timing).getByText("TTFB")).toBeInTheDocument();
 		expect(within(timing).queryByText("Waiting for the first response")).toBeNull();
 	});
 
