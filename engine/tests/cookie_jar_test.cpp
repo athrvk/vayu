@@ -16,6 +16,13 @@
  * the wire - libcurl does that. See cookie_jar.hpp.
  */
 
+// Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
+// `max` macros break `vayu/core/run_manager.hpp`, which `list_page.hpp` pulls
+// in; `request_body_depth_test.cpp` carries the same guard for the same reason.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
