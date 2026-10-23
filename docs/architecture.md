@@ -684,15 +684,17 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   platforms (Windows, Linux AppImage) `electron/updater.ts` holds the
   downloaded file back until `electron/update-attestation.ts` has looked up its
   SHA-256 in GitHub's attestations API, verified each Sigstore bundle against
-  the public-good trusted root (refreshed through `@sigstore/tuf`), and found
+  the public-good trusted root (refreshed over TUF by
+  `electron/sigstore-trusted-root.ts`), and found
   the signer to be `release.yml` in `athrvk/vayu` at the tag `v<version>` with a
   SLSA v1 subject naming that digest. `update:downloaded`, restart-to-install
   and the quit-time install all wait for it; a failure sends
   `update:verificationFailed` instead and the file is never installed. Any
   failure, including a network one, refuses: there is no path that accepts after
-  an error. The check proves the file came out of that workflow run, not that
-  the run was honest, and the trusted-root refresh uses Node's `fetch`, so it
-  does not follow the system proxy; both limits are stated in
+  an error. Both requests, the attestation lookup and the TUF refresh, go
+  through the one injected `fetch` (Electron's `net.fetch`), so both follow the
+  system proxy (#2738). The check proves the file came out of that workflow run,
+  not that the run was honest; that limit is stated in
   [SECURITY.md](https://github.com/athrvk/vayu/blob/master/SECURITY.md#releases).
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth

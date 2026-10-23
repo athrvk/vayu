@@ -352,3 +352,10 @@ export const UPDATE_STARTUP_CHECK_DELAY_MS = 60 * 1000;
  * that never answers would hold the downloaded update forever.
  */
 export const UPDATE_ATTESTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
+/**
+ * Deadline for each request of the Sigstore TUF refresh behind that gate
+ * (#2738), covering the body as well as the headers. The figure
+ * `@sigstore/tuf` used for the same requests; an unanswered one fails the
+ * refresh, and so refuses the update, rather than holding it.
+ */
+export const UPDATE_TUF_REQUEST_TIMEOUT_MS = 5 * 1000;
