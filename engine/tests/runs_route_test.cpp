@@ -2794,8 +2794,9 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
     vayu::core::CapacityConfig search;
     search.slo_ms          = 100.0;
     search.max_concurrency = 256;
-    const std::vector<vayu::core::CapacityWindow> levels{ { 8, 900.0, 12.0 },
-        { 16, 1700.0, 20.0 }, { 32, 1750.0, 180.0 }, { 32, 1720.0, 210.0 } };
+    const std::vector<vayu::core::CapacityWindow> levels{ { 8, 900.0, 12.0, 0.0 },
+        { 16, 1700.0, 20.0, 0.5 }, { 32, 1750.0, 180.0, 2.0 },
+        { 32, 1720.0, 210.0, 3.5 } };
     inputs.capacity = vayu::core::summarize_capacity (
     search, levels, vayu::core::capacity_stop::SLO_EXCEEDED);
     db_->update_run_summary (
@@ -2813,11 +2814,49 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
     EXPECT_DOUBLE_EQ (capacity["p99AtMaxHealthyMs"].get<double> (), 20.0);
     EXPECT_EQ (capacity["kneeConcurrency"].get<size_t> (), 32u);
     EXPECT_DOUBLE_EQ (capacity["kneeP99Ms"].get<double> (), 210.0);
+    EXPECT_DOUBLE_EQ (capacity.at ("kneeErrorPct").get<double> (), 3.5);
+    EXPECT_DOUBLE_EQ (capacity.at ("maxErrorPct").get<double> (), search.max_error_pct);
 
     ASSERT_EQ (capacity["levels"].size (), 4u);
     EXPECT_EQ (capacity["levels"][0]["concurrency"].get<size_t> (), 8u);
     EXPECT_DOUBLE_EQ (capacity["levels"][0]["rps"].get<double> (), 900.0);
     EXPECT_DOUBLE_EQ (capacity["levels"][0]["p99Ms"].get<double> (), 12.0);
+    EXPECT_DOUBLE_EQ (capacity["levels"][1].at ("errorPct").get<double> (), 0.5);
+}
+
+// A summary stored before #2815 measured no error share. The report leaves the
+// three keys out rather than reading them as 0%, which would call every level
+// of an old search clean.
+// Mutation-check: read the keys through `read_number` with a 0 default and the
+// absent keys come back as zeros.
+TEST_F (RunsRouteTest, ReportOmitsTheErrorShareAnOlderSummaryNeverStored) {
+    seed ({ .id = "run_capacity_old", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+
+    vayu::core::CapacityConfig search;
+    search.slo_ms   = 100.0;
+    inputs.capacity = vayu::core::summarize_capacity (search,
+    { { 8, 900.0, 12.0 }, { 16, 1700.0, 180.0 }, { 16, 1690.0, 190.0 } },
+    vayu::core::capacity_stop::SLO_EXCEEDED);
+    auto stored     = vayu::core::build_run_summary_payload (inputs);
+    ASSERT_TRUE (stored.contains ("capacity"));
+    auto& section = stored["capacity"];
+    section.erase ("max_error_pct");
+    section.erase ("knee_error_pct");
+    for (auto& level : section["levels"]) {
+        level.erase ("error_pct");
+    }
+    db_->update_run_summary ("run_capacity_old", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_capacity_old");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("capacity"));
+    const auto& capacity = body["capacity"];
+    EXPECT_EQ (capacity["kneeConcurrency"].get<size_t> (), 16u);
+    EXPECT_FALSE (capacity.contains ("kneeErrorPct"));
+    EXPECT_FALSE (capacity.contains ("maxErrorPct"));
+    ASSERT_EQ (capacity["levels"].size (), 3u);
+    EXPECT_FALSE (capacity["levels"][0].contains ("errorPct"));
 }
 
 // A search that ran out of room never watched the service give out, so the

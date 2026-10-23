@@ -38,6 +38,11 @@ class SlowMockServer {
         svr.Get ("/fast", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("{}", "application/json");
         });
+        // An overloaded target shedding load: it answers at once, with a 503.
+        svr.Get ("/error", [] (const httplib::Request&, httplib::Response& res) {
+            res.status = 503;
+            res.set_content ("{}", "application/json");
+        });
         // Fast, except that its STALL_AT-th request waits STALL_MS: one known
         // stall inside an otherwise quick run.
         svr.Get ("/stall-once", [this] (const httplib::Request&, httplib::Response& res) {
@@ -157,6 +162,10 @@ class SlowMockServer {
 
     std::string hang_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang";
+    }
+
+    std::string error_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/error";
     }
 
     std::string vitals_url () const {

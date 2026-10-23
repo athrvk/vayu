@@ -2835,15 +2835,22 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         size_t requests_expected = context->requests_expected.load ();
         double elapsed_seconds = context->seconds_since_load_start (now_steady_ms);
 
+        // One distribution for the frame's error counts and the level's, so
+        // the capacity search judges a level's errors as the frame reports them.
+        std::map<int, size_t> own_snapshot;
+        const std::map<int, size_t>& statuses = status_snapshot != nullptr ?
+        *status_snapshot :
+        (own_snapshot = mc.status_code_distribution ());
+
         // Before the sample, so a level the capacity search opened since the
         // previous tick starts with this tick's window.
-        mc.adopt_level_epoch (context->requested_level_epoch ());
+        mc.adopt_level_epoch (context->requested_level_epoch (), statuses);
         // Exactly once per tick: it resets the window on read, and folds the
         // window into the open second before that.
         auto window = mc.sample_window_percentiles ();
 
         auto stats = mc.get_current_stats (active_count, elapsed_seconds,
-        requests_sent, requests_expected, status_snapshot, &window);
+        requests_sent, requests_expected, &statuses, &window);
 
         size_t current_total      = stats["totalRequests"].get<size_t> ();
         const WindowReading rates = rate_window.push (
@@ -2886,7 +2893,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Publish the same numbers to the strategies' feedback path, before
         // the SSE payload rather than after: a capacity search polls this every
         // tick, and the serialize-and-append below is the slower half.
-        context->publish_live_tick ({ 0, interval_rps, backpressure, mc.level_latency () });
+        context->publish_live_tick (
+        { 0, interval_rps, backpressure, mc.level_latency (statuses) });
 
         // Framed by the ring, which assigns the id under its own lock: a run
         // with a monitor has a second producer appending to it, and reading the

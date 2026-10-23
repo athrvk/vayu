@@ -87,10 +87,13 @@ json healthy_summary () {
         { { "node_cpu", { { "min", 1.0 }, { "max", 2.0 }, { "avg", 1.5 }, { "count", 10 } } } } } } },
         { "tests", { { "sampled", 10 }, { "passed", 10 }, { "failed", 0 } } },
         { "capacity",
-        { { "slo_ms", 200 }, { "stop_reason", "slo_exceeded" },
-        { "levels", json::array ({ { { "concurrency", 1 }, { "rps", 10 }, { "p99_ms", 5 } } }) },
+        { { "slo_ms", 200 }, { "max_error_pct", 1.0 }, { "stop_reason", "slo_exceeded" },
+        { "levels",
+        json::array ({ { { "concurrency", 1 }, { "rps", 10 }, { "p99_ms", 5 },
+        { "error_pct", 0.0 } } }) },
         { "max_healthy_concurrency", 1 }, { "max_healthy_rps", 10 },
-        { "p99_at_max_healthy_ms", 5 }, { "knee_concurrency", 2 }, { "knee_p99_ms", 300 } } },
+        { "p99_at_max_healthy_ms", 5 }, { "knee_concurrency", 2 },
+        { "knee_p99_ms", 300 }, { "knee_error_pct", 0.5 } } },
         { "phases",
         { { "dns", phase () }, { "connect", phase () }, { "tls", phase () },
         { "firstByte", phase () }, { "download", phase () } } },
@@ -243,6 +246,11 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_TRUE (document["report"]["slowRequests"].contains ("tracesStored"));
     EXPECT_TRUE (
     document["report"]["rateControl"].contains ("requestsExpected"));
+    // The capacity search's error share (#2815), at both levels of the section.
+    const auto& capacity = document["report"]["capacity"];
+    EXPECT_TRUE (capacity.contains ("maxErrorPct"));
+    EXPECT_TRUE (capacity.contains ("kneeErrorPct"));
+    EXPECT_TRUE (capacity["levels"].at (0).contains ("errorPct"));
     // The allowlist has to name it, or the export drops the replays (#2799).
     // Mutation check: drop "connectionReplays" from SUMMARY_KEYS and this fails.
     EXPECT_EQ (document["report"]["summary"].value ("connectionReplays", -1), 2);

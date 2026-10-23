@@ -1536,6 +1536,35 @@ TEST_F (LoadStrategyTest, CapacityStopsOnTheSloAgainstASlowEndpoint) {
     EXPECT_EQ (summary.levels.size (), 2u);
 }
 
+// #2815: an endpoint answering 503 at once is well inside any latency budget
+// and sustains nothing. The search stops at its first level on the errors.
+// Mutation-check: judge `breaches` on the p99 alone and this climbs to the cap.
+TEST_F (LoadStrategyTest, CapacityStopsOnErrorsAgainstAFailingEndpoint) {
+    nlohmann::json config = {
+        { "mode", "capacity" },
+        { "duration", "20s" },
+        { "stepDuration", "1s" },
+        { "sloMs", 2000 }, // far above anything /error can produce
+        { "startConcurrency", 2 },
+        { "concurrency", 8 },
+    };
+
+    vayu::db::Database db (TEST_DB_PATH);
+    const auto summary = run_capacity_search (
+    config, mock_server->error_url (), "test-capacity-errors", db);
+
+    EXPECT_EQ (summary.stop_reason, "errors_exceeded");
+    ASSERT_HAS_VALUE (summary.knee);
+    EXPECT_EQ (summary.knee->concurrency, 2u)
+    << "the search should not have climbed";
+    EXPECT_GT (summary.knee->error_pct, summary.max_error_pct);
+    EXPECT_LT (summary.knee->p99_ms, summary.slo_ms);
+    EXPECT_FALSE (summary.max_healthy.has_value ())
+    << "every level failed, so there is no sustainable capacity to report";
+    // The breach plus the re-measure that confirmed it.
+    EXPECT_EQ (summary.levels.size (), 2u);
+}
+
 // A fast endpoint inside its budget climbs until it runs out of room, and the
 // report says the search ended on the caller's ceiling rather than inventing a
 // knee it never observed.
@@ -1636,10 +1665,11 @@ void record_window (vayu::core::RunContext& context, std::optional<double> laten
 /// below holds the real producer to the same order.
 void produce_tick (vayu::core::RunContext& context, std::optional<double> latency_ms) {
     record_window (context, latency_ms);
-    auto& collector = *context.metrics_collector;
-    collector.adopt_level_epoch (context.requested_level_epoch ());
+    auto& collector     = *context.metrics_collector;
+    const auto statuses = collector.status_code_distribution ();
+    collector.adopt_level_epoch (context.requested_level_epoch (), statuses);
     (void)collector.sample_window_percentiles ();
-    context.publish_live_tick ({ 0, 100.0, 0, collector.level_latency () });
+    context.publish_live_tick ({ 0, 100.0, 0, collector.level_latency (statuses) });
 }
 
 /// A tick the producer sampled before it saw the latest reset request.
@@ -1647,7 +1677,33 @@ void produce_stale_tick (vayu::core::RunContext& context, std::optional<double> 
     record_window (context, latency_ms);
     auto& collector = *context.metrics_collector;
     (void)collector.sample_window_percentiles ();
-    context.publish_live_tick ({ 0, 100.0, 0, collector.level_latency () });
+    context.publish_live_tick (
+    { 0, 100.0, 0, collector.level_latency (collector.status_code_distribution ()) });
+}
+
+/// Record @p count failures into the window the next tick samples: 503s
+/// answered in @p latency_ms, or refused connections, which record no
+/// latency, when it is nullopt.
+void record_failures (vayu::core::RunContext& context, int count, std::optional<double> latency_ms) {
+    for (int i = 0; i < count; ++i) {
+        if (latency_ms) {
+            context.metrics_collector->record_success (503, *latency_ms, 0.0);
+        } else {
+            context.metrics_collector->record_error (
+            vayu::ErrorCode::ConnectionFailed, "Connection refused");
+        }
+    }
+}
+
+/// Feed the open level its settle ticks, at @p settle_ms each.
+void settle_level (vayu::core::CapacitySearch& search,
+vayu::core::RunContext& context,
+std::optional<double> settle_ms,
+int64_t elapsed_ms) {
+    for (size_t i = 0; i < vayu::core::constants::capacity::SETTLE_TICKS; ++i) {
+        produce_tick (context, settle_ms);
+        ASSERT_TRUE (search.advance (elapsed_ms));
+    }
 }
 
 /// Open the first level and feed it its settle ticks, at @p settle_ms each.
@@ -1656,9 +1712,20 @@ vayu::core::RunContext& context,
 std::optional<double> settle_ms) {
     ASSERT_TRUE (search.advance (0));
     ASSERT_EQ (search.level (), SEARCH_START_CONCURRENCY);
-    for (size_t i = 0; i < vayu::core::constants::capacity::SETTLE_TICKS; ++i) {
-        produce_tick (context, settle_ms);
-        ASSERT_TRUE (search.advance (1));
+    settle_level (search, context, settle_ms, 1);
+}
+
+/// Ten counted ticks of the open level, each `SEARCH_SAMPLES_A_TICK` answers at
+/// @p latency_ms plus @p failures 503s answered as fast.
+void feed_level (vayu::core::CapacitySearch& search,
+vayu::core::RunContext& context,
+double latency_ms,
+int failures,
+int64_t elapsed_ms) {
+    for (int window = 0; window < 10; ++window) {
+        record_failures (context, failures, latency_ms);
+        produce_tick (context, latency_ms);
+        ASSERT_TRUE (search.advance (elapsed_ms));
     }
 }
 
@@ -1689,6 +1756,109 @@ TEST (CapacitySearchTest, ABimodalLevelIsJudgedOnItsOwnP99) {
     EXPECT_NEAR (summary.levels.front ().p99_ms, 300.0, 0.3);
     EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY)
     << "a level that breached its SLO once is held and re-measured";
+}
+
+// #2815: a level answering in 20 ms against a 200 ms SLO, with one completion
+// in three a 503, is judged on its errors: held and re-measured.
+// Mutation-check: stop copying the tick's error share in collect_tick and the
+// level reads 0% and steps up.
+TEST (CapacitySearchTest, AFastLevelWithAFailingShareIsJudgedOnItsErrors) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "capacity-search-errors", nlohmann::json::object ());
+    vayu::core::CapacitySearch search (search_config (), context);
+    settle_first_level (search, *context, 20.0);
+
+    feed_level (search, *context, 20.0, SEARCH_SAMPLES_A_TICK / 2, 2);
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS));
+
+    const auto summary = search.finish ();
+    ASSERT_EQ (summary.levels.size (), 1u);
+    EXPECT_NEAR (summary.levels.front ().p99_ms, 20.0, 0.02);
+    EXPECT_NEAR (summary.levels.front ().error_pct, 100.0 / 3.0, 0.01);
+    EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY)
+    << "a level over its error limit once is held and re-measured";
+}
+
+// The re-measure of a held level counts its own failures only: a clean
+// re-measure after a failing window steps up rather than stopping.
+// Mutation-check: drop the baseline in adopt_level_epoch and the re-measure
+// reads the first window's 503s, breaches again and stops errors_exceeded.
+TEST (CapacitySearchTest, APreviousLevelsFailuresDoNotReachTheNext) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "capacity-search-error-baseline", nlohmann::json::object ());
+    vayu::core::CapacitySearch search (search_config (), context);
+    settle_first_level (search, *context, 20.0);
+    feed_level (search, *context, 20.0, SEARCH_SAMPLES_A_TICK / 2, 2);
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS));
+    ASSERT_EQ (search.level (), SEARCH_START_CONCURRENCY);
+
+    settle_level (search, *context, 20.0, SEARCH_STEP_MS + 1);
+    feed_level (search, *context, 20.0, 0, SEARCH_STEP_MS + 2);
+    ASSERT_TRUE (search.advance (2 * SEARCH_STEP_MS));
+
+    const auto summary = search.finish ();
+    ASSERT_EQ (summary.levels.size (), 2u);
+    EXPECT_DOUBLE_EQ (summary.levels.back ().error_pct, 0.0);
+    EXPECT_GT (search.level (), SEARCH_START_CONCURRENCY);
+}
+
+// A level of nothing but refused connections records no latency at all, and
+// is still judged: on its errors, at 100%.
+// Mutation-check: gate judging on `level_samples_ == 0` alone and the level
+// never closes.
+TEST (CapacitySearchTest, ALevelOfOnlyRefusedConnectionsStillCloses) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "capacity-search-refused", nlohmann::json::object ());
+    vayu::core::CapacitySearch search (search_config (), context);
+    settle_first_level (search, *context, std::nullopt);
+
+    for (int window = 0; window < 10; ++window) {
+        record_failures (*context, SEARCH_SAMPLES_A_TICK, std::nullopt);
+        produce_tick (*context, std::nullopt);
+        ASSERT_TRUE (search.advance (2));
+    }
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS));
+
+    const auto summary = search.finish ();
+    ASSERT_EQ (summary.levels.size (), 1u);
+    EXPECT_DOUBLE_EQ (summary.levels.front ().error_pct, 100.0);
+    EXPECT_DOUBLE_EQ (summary.levels.front ().p99_ms, 0.0);
+    EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY);
+}
+
+// #2815: the producer's status snapshot can predate the window it samples, so
+// a tick can carry latency samples while the level has counted no completion.
+// That reads as a 0% error share, and a level failing every request is not
+// judged on it: it stays open until the count arrives, then breaches at 100%.
+// Mutation-check: drop the `level_completed_ == 0` condition in advance and
+// the level is judged at 0% errors and steps up.
+TEST (CapacitySearchTest, ALevelWithSamplesButNoCountedCompletionStaysOpen) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "capacity-search-lagging-count", nlohmann::json::object ());
+    vayu::core::CapacitySearch search (search_config (), context);
+    settle_first_level (search, *context, 20.0);
+
+    auto& collector           = *context->metrics_collector;
+    const auto stale_statuses = collector.status_code_distribution ();
+    record_failures (*context, SEARCH_SAMPLES_A_TICK, 20.0);
+    collector.adopt_level_epoch (context->requested_level_epoch (), stale_statuses);
+    (void)collector.sample_window_percentiles ();
+    const auto lagging = collector.level_latency (stale_statuses);
+    ASSERT_GT (lagging.samples, 0u);
+    ASSERT_EQ (lagging.completed, 0u);
+    context->publish_live_tick ({ 0, 100.0, 0, lagging });
+
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS));
+    EXPECT_TRUE (search.finish ().levels.empty ())
+    << "the level was judged before any completion was counted";
+
+    record_failures (*context, SEARCH_SAMPLES_A_TICK, 20.0);
+    produce_tick (*context, std::nullopt);
+    ASSERT_TRUE (search.advance (SEARCH_STEP_MS + 1));
+    const auto summary = search.finish ();
+    ASSERT_EQ (summary.levels.size (), 1u);
+    EXPECT_DOUBLE_EQ (summary.levels.front ().error_pct, 100.0);
+    EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY);
 }
 
 // The settle ticks measure the transition into the level, so 1000 ms there
@@ -1730,6 +1900,8 @@ TEST (CapacitySearchTest, ATickProducedBeforeTheResetIsNotReadAsTheLevel) {
     EXPECT_TRUE (search.finish ().levels.empty ())
     << "the level was judged on a tick produced before its reset";
 
+    // Two ticks: the first under the new epoch has counted no completion yet.
+    produce_tick (*context, 50.0);
     produce_tick (*context, 50.0);
     ASSERT_TRUE (search.advance (SEARCH_STEP_MS + 1));
     const auto summary = search.finish ();
@@ -1739,7 +1911,7 @@ TEST (CapacitySearchTest, ATickProducedBeforeTheResetIsNotReadAsTheLevel) {
 
 // A level whose histogram holds no completion stays open rather than reading
 // as a service that answered instantly.
-// Mutation-check: drop the `level_samples_ == 0` guard in advance and the
+// Mutation-check: drop the nothing-measured guard in advance and the
 // level is judged at 0 ms.
 TEST (CapacitySearchTest, ALevelWithNoCompletionsStaysOpen) {
     auto context = std::make_shared<vayu::core::RunContext> (
@@ -1760,7 +1932,8 @@ TEST (CapacitySearchTest, ALevelWithNoCompletionsStaysOpen) {
 // samples, and publishes the level under it. Completions recorded before the
 // request belong to the previous level.
 // Mutation-check: drop the `adopt_level_epoch` call in emit_live_tick and the
-// wait for the requested epoch times out.
+// wait for the requested epoch times out; pass it an empty distribution instead
+// of the tick's and the new level counts the previous one's 10 requests.
 TEST_F (LoadStrategyTest, LiveTicksPublishTheLevelEpochTheStrategyRequested) {
     vayu::db::Database db (TEST_DB_PATH);
     auto context = std::make_shared<vayu::core::RunContext> (
@@ -1788,15 +1961,21 @@ TEST_F (LoadStrategyTest, LiveTicksPublishTheLevelEpochTheStrategyRequested) {
     vayu::tests::wait_until ([&] () { return level ().epoch == epoch; }))
     << "the producer never adopted the requested epoch";
     EXPECT_EQ (level ().samples, 0u) << "the new level kept the previous one";
+    EXPECT_EQ (level ().completed, 0u)
+    << "the new level counted the previous one";
 
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 4; ++i) {
         collector.record_success (200, 20.0, 0.0);
     }
-    EXPECT_TRUE (
-    vayu::tests::wait_until ([&] () { return level ().samples == 5; }))
+    collector.record_success (503, 20.0, 0.0);
+    EXPECT_TRUE (vayu::tests::wait_until ([&] () {
+        const auto now = level ();
+        return now.samples == 5 && now.completed == 5;
+    }))
     << "the new level never saw its completions";
     EXPECT_EQ (level ().epoch, epoch);
     EXPECT_NEAR (level ().p99_ms, 20.0, 0.02);
+    EXPECT_EQ (level ().failed, 1u);
 
     context->is_running = false;
     metrics.join ();
