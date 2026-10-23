@@ -165,8 +165,7 @@ void StepHistograms::record_latency (size_t step, double latency_ms) {
     // Microseconds, matching the aggregate histogram's unit. Atomic because
     // every event-loop worker records concurrently - the plain record is a
     // non-atomic read-modify-write on counts[] and loses increments.
-    hdr_record_value_atomic (histograms_[step],
-    static_cast<int64_t> (std::max (0.0, latency_ms) * 1000.0));
+    hdr_record_value_atomic (histograms_[step], histogram_latency_us (latency_ms, 0));
 }
 
 void StepHistograms::record (size_t step, double latency_ms) {

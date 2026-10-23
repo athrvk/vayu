@@ -22,6 +22,7 @@
  * - All errors preserved, success results sampled if memory constrained
  */
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -43,6 +44,26 @@
 #include "vayu/types.hpp"
 
 namespace vayu::core {
+
+/// A duration in microseconds, held to what a latency histogram can record.
+/// `hdr_record_value_atomic` refuses a value above the histogram's ceiling and
+/// counts nothing, so an unclamped completion longer than
+/// `HISTOGRAM_MAX_LATENCY_US` (a request `timeout` may be set to 24 h) would be
+/// absent from every percentile and from max; clamped, it lands in the top
+/// bucket and total_count stays the number of completions (#2790).
+[[nodiscard]] inline int64_t clamp_to_histogram_ceiling (int64_t latency_us) {
+    return std::min (latency_us, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US);
+}
+
+/// @p latency_ms as the histogram's microseconds: at least @p floor_us (a
+/// histogram cannot hold a negative value, and the latency one cannot hold 0),
+/// at most the ceiling. Clamped in double before the cast, so a duration past
+/// int64 range is not undefined behaviour, and a NaN takes the floor.
+[[nodiscard]] inline int64_t histogram_latency_us (double latency_ms, int64_t floor_us) {
+    const double us = std::max (static_cast<double> (floor_us), latency_ms * 1000.0);
+    return static_cast<int64_t> (std::min (us,
+    static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US)));
+}
 
 /**
  * @brief Who sent a sampled response, as the executor knew it at submission.

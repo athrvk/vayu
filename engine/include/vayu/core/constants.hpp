@@ -776,7 +776,8 @@ constexpr size_t EXEMPLARS_PER_STATUS = 3;
 constexpr size_t DEFAULT_MAX_EXEMPLAR_RESULTS = 64;
 /// HdrHistogram significant figures (3 = ~0.1% precision)
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
-/// HdrHistogram max trackable latency in microseconds (1 hour)
+/// HdrHistogram max trackable latency in microseconds (1 hour). A longer
+/// duration is clamped to it at the record site (`histogram_latency_us`).
 constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// Whether a load run feeds the five per-phase histograms (config key
 /// `phaseHistograms`). On by default: the phase values are computed for every
