@@ -26,6 +26,16 @@ import { createDefaultRequestState } from "../../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import ParamsPanel from "./ParamsPanel";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
+
+/*
+ * The panel reads `POST /compose` for the names a pre-request script defers
+ * (#2741), but only for a URL holding a `{{token}}`. This file asks nothing of
+ * the answer, so it is the plain one: nothing deferred.
+ */
+vi.mock("@/services/api", () => ({
+	apiService: { composeRequest: vi.fn().mockResolvedValue({}) },
+}));
 
 afterEach(cleanup);
 
@@ -57,11 +67,13 @@ function renderPanel(
 		dataColumns: undefined,
 	} as unknown as RequestBuilderContextValue;
 	const view = render(
-		<TooltipProvider>
-			<RequestBuilderContext.Provider value={value}>
-				<ParamsPanel />
-			</RequestBuilderContext.Provider>
-		</TooltipProvider>
+		withQueryClient(
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={value}>
+					<ParamsPanel />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		)
 	);
 	const lastWrite = (field: string) => {
 		const writes = updateField.mock.calls.filter(([f]) => f === field);

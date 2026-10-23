@@ -14,7 +14,13 @@
 
 import { describe, it, expect } from "vitest";
 import type { KeyValueEntry } from "@/types";
-import { resolveSendsUrl, sendsCacheInput, sendsResolver } from "./sends-url";
+import {
+	deferredNamesInSends,
+	resolveSendsUrl,
+	sendsCacheInput,
+	sendsHasTokens,
+	sendsResolver,
+} from "./sends-url";
 
 const VARIABLES: Record<string, string> = { seg: "a b", host: "api.test", tail: "x?y" };
 const resolverFor = (vars: Record<string, string>) => (text: string) =>
@@ -80,6 +86,88 @@ describe("resolveSendsUrl", () => {
 	});
 });
 
+describe("resolveSendsUrl with names a pre-request script defers (#2741)", () => {
+	// `token` has a stored value, which is exactly what must not be shown.
+	const stored = resolverFor({ ...VARIABLES, token: "stored-token" });
+
+	it("leaves a deferred name written and resolves the rest", () => {
+		expect(resolveSendsUrl(sends("https://{{host}}/v1?t={{token}}"), stored, ["token"])).toBe(
+			"https://api.test/v1?t={{token}}"
+		);
+	});
+
+	it("leaves it written in the path, where encoding would otherwise reach it", () => {
+		expect(resolveSendsUrl(sends("https://{{host}}/{{token}}/a b"), stored, ["token"])).toBe(
+			"https://api.test/{{token}}/a%20b"
+		);
+	});
+
+	it("leaves it written under disableUrlEncoding, which resolves the whole URL at once", () => {
+		expect(
+			resolveSendsUrl(sends("https://{{host}}/{{token}}?q={{seg}}", [], true), stored, [
+				"token",
+			])
+		).toBe("https://api.test/{{token}}?q=a b");
+	});
+
+	it("leaves it written inside a path row's value, where the segment takes it whole", () => {
+		const request = sends("https://api.test/users/:name", [pathRow("name", "{{token}}")]);
+		expect(resolveSendsUrl(request, stored, ["token"])).toBe(
+			"https://api.test/users/{{token}}"
+		);
+	});
+
+	it("matches a name written with padding, as the resolvers read it", () => {
+		expect(resolveSendsUrl(sends("https://api.test/{{ token }}"), stored, ["token"])).toBe(
+			"https://api.test/{{ token }}"
+		);
+	});
+
+	it("is the plain resolution when nothing is deferred", () => {
+		const request = sends("https://{{host}}/{{token}}");
+		expect(resolveSendsUrl(request, stored, [])).toBe(resolveSendsUrl(request, stored));
+		expect(resolveSendsUrl(request, stored)).toBe("https://api.test/stored-token");
+	});
+});
+
+describe("sendsHasTokens", () => {
+	it("is false for a literal URL, the case that must not pay for a compose", () => {
+		expect(sendsHasTokens(sends("https://api.test/users/:name?page=1"))).toBe(false);
+	});
+
+	it("is true for a token in the URL", () => {
+		expect(sendsHasTokens(sends("https://{{host}}/"))).toBe(true);
+	});
+
+	it("is true for a token only an enabled path row holds", () => {
+		const url = "https://api.test/users/:name";
+		expect(sendsHasTokens(sends(url, [pathRow("name", "{{tail}}")]))).toBe(true);
+		expect(sendsHasTokens(sends(url, [pathRow("name", "{{tail}}", false)]))).toBe(false);
+	});
+});
+
+describe("deferredNamesInSends", () => {
+	it("keeps only the engine's names that the URL uses, once each, in order", () => {
+		const request = sends("https://{{host}}/{{token}}?a={{token}}&b={{ other }}");
+		expect(deferredNamesInSends(request, ["token", "other", "unused", "host"])).toEqual([
+			"host",
+			"token",
+			"other",
+		]);
+	});
+
+	it("finds a name in a path row's value", () => {
+		const request = sends("https://api.test/:name", [pathRow("name", "{{token}}")]);
+		expect(deferredNamesInSends(request, ["token"])).toEqual(["token"]);
+	});
+
+	it("is empty when the engine deferred nothing, or nothing the URL uses", () => {
+		const request = sends("https://{{host}}/");
+		expect(deferredNamesInSends(request, [])).toEqual([]);
+		expect(deferredNamesInSends(request, ["token"])).toEqual([]);
+	});
+});
+
 describe("sendsCacheInput", () => {
 	const base = sends("https://api.test/users/:name", [pathRow("name", "ada")]);
 
@@ -88,6 +176,11 @@ describe("sendsCacheInput", () => {
 		expect(sendsCacheInput({ ...base, url: "https://api.test/u/:name" })).not.toBe(input);
 		expect(sendsCacheInput({ ...base, params: [pathRow("name", "bob")] })).not.toBe(input);
 		expect(sendsCacheInput({ ...base, disableUrlEncoding: true })).not.toBe(input);
+	});
+
+	it("changes with the deferred names, so a changed answer re-resolves", () => {
+		expect(sendsCacheInput(base, ["token"])).not.toBe(sendsCacheInput(base));
+		expect(sendsCacheInput(base, ["token"])).toBe(sendsCacheInput(base, ["token"]));
 	});
 
 	it("ignores what the URL does not depend on", () => {
@@ -108,6 +201,14 @@ describe("sendsResolver", () => {
 		expect(sendsResolver(resolve)(sendsCacheInput(request))).toBe(
 			resolveSendsUrl(request, resolve)
 		);
+	});
+
+	it("answers what resolveSendsUrl does for deferred names too", () => {
+		const request = sends("https://{{host}}/{{seg}}");
+		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"]))).toBe(
+			resolveSendsUrl(request, resolve, ["seg"])
+		);
+		expect(resolveSendsUrl(request, resolve, ["seg"])).toBe("https://api.test/{{seg}}");
 	});
 
 	it("is one wrapper per resolver, so a cache comparing resolvers by identity holds", () => {

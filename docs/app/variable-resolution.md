@@ -618,10 +618,15 @@ ordinary request that has nothing left to resolve. A scripted request's header
 text is checked on this pass by the rule composition uses (the next sections),
 before anything is rewritten. The renderer's previews resolve against the stored
 scopes and cannot know what a script will set, so a preview can show a value
-other than the wire's; the Code section, which composes through the engine,
-shows `{{token}}` as written and names those tokens (below). See
-[pm API compatibility](./pm-api-compatibility.md) for what that changes for a
-script.
+other than the wire's. Two surfaces do not leave it at that: the Code section,
+which composes through the engine, shows `{{token}}` as written and names those
+tokens, and the Params tab's **Sends** line (with an unnamed request's tab
+title) leaves the same names written and names them in the same sentence - see
+[Script composition](#script-composition). The renderer never decides whether a
+script runs; the names are the engine's `deferredVariables`. The other previews
+(variable token painting among them, #2741) still resolve against the stored
+scopes. See [pm API compatibility](./pm-api-compatibility.md) for what that
+changes for a script.
 
 ### One value composition refuses: a header a variable would forge (#738)
 
@@ -870,6 +875,8 @@ Two tools, and which one applies depends on where the resolver comes from:
   holding an identical `{{$guid}}` must still differ, which is rule 2. They are
   invalidated when the text changes or when the resolver changes identity,
   which is exactly a variable edit, an environment switch or a bound-row change.
+  A name the engine reports as deferred ([Script composition](#script-composition)) is part of the Sends cache's
+  input text, so a changed answer re-resolves and nothing else rerolls.
 
 Fresh-per-call stays right where the value is not a preview at all: the send
 path (`POST /compose` resolves engine-side, and `buildExecBody` is handed an
@@ -1063,6 +1070,19 @@ The Code section of the request pane composes through the engine, so for a
 scripted request its Resolved mode shows the names left written, and says so
 under the snippet: "`{{token}}` is set by a pre-request script at send." (or
 "... are set ..." for several). Templated mode shows the request as written.
+
+The Params tab's **Sends** line says the same, in the same words
+(`deferredNote`), for the names its URL and enabled path rows use, and draws
+those names as written instead of as their stored values (#2741). It reads the
+`POST /compose` entry the Code section shares (`compositionOptions` in
+`code-composition.ts`), fetches it only for a URL holding a `{{token}}`, and
+holds no rule of its own for which requests are scripted: a request whose
+folder's pre-request script sets `{{token}}` is scripted because the engine says
+so. An unnamed request's tab title leaves the names written too, but only reads
+the cache and never fetches, so a tab nobody has opened keeps the stored URL.
+A name just typed shows its stored value until the autosave PUT's invalidation
+recomposes. A request with no id yet (an unsaved draft, a past run's detached
+copy) has nothing to compose by and keeps the plain preview.
 
 A script can also change a value composition already resolved (a name no
 pre-request script runs before) by editing `pm.request` directly; the

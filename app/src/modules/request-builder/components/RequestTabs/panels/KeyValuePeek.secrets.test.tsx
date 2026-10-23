@@ -34,6 +34,7 @@ import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { emptyDrafts } from "../../../utils/body-drafts";
 import { fieldResolverOf } from "@/test/variable-support";
+import { withQueryClient } from "@/test/query-wrapper";
 
 // Monaco does not run in jsdom and the GraphQL pane is not what this guards.
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -42,6 +43,11 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 }));
 vi.mock("./body/GraphQLBody", () => ({ default: () => <div data-testid="graphql-body" /> }));
 vi.mock("@/queries", () => ({ useRequestDefaultsQuery: () => ({ data: undefined }) }));
+// The Params panel asks `POST /compose` which names a script defers (#2741),
+// for a URL holding a `{{token}}`; nothing is, here.
+vi.mock("@/services/api", () => ({
+	apiService: { composeRequest: vi.fn().mockResolvedValue({}) },
+}));
 
 const { default: ParamsPanel } = await import("./ParamsPanel");
 const { default: HeadersPanel } = await import("./HeadersPanel");
@@ -90,10 +96,14 @@ function mount(panel: ReactElement, request: Partial<RequestState>) {
 		dataColumns: undefined,
 	} as unknown as RequestBuilderContextValue;
 	return render(
-		// `delayDuration={0}`: the peek is opened below to read it.
-		<TooltipProvider delayDuration={0}>
-			<RequestBuilderContext.Provider value={value}>{panel}</RequestBuilderContext.Provider>
-		</TooltipProvider>
+		withQueryClient(
+			// `delayDuration={0}`: the peek is opened below to read it.
+			<TooltipProvider delayDuration={0}>
+				<RequestBuilderContext.Provider value={value}>
+					{panel}
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		)
 	);
 }
 
