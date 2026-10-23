@@ -355,6 +355,11 @@ existing `scripts` node - one entry per compiled element that ran at `step.befor
 (`step.between` too, for the sequential run), each
 `{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
+A `script.pre` / `script.post` element reports `error` with the thrown message when its script threw
+(or timed out), `failed` with the first failed assertion as its message (`Test failed - <name>:
+<message>`, or `N tests failed - <first name>: <first message>`) when the script ran and only its
+`pm.test` assertions did not hold, and `ok` otherwise (#2663). The message is about that one script;
+the step's own verdict is read from the folded result below, unchanged.
 `origin.scope` (`collection` | `folder` | `request`, #2522) is the level the element was declared at;
 `compile_elements` reads it into `CompiledElement::scope` (falling back to `origin.kind`), and
 `ElementPipeline::run` sets `ElementContext::element_scope` from it before each `apply`.

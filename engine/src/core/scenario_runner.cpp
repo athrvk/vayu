@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/elements.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/script_config.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -48,50 +49,6 @@ int64_t runner_now_ms () {
     .count ();
 }
 
-/// The first failed assertion, phrased for the `results.error` column: a
-/// scenario step's failure has to say *which* expectation broke, because the
-/// step list is all a reader has to go on.
-std::string describe_failed_tests (const vayu::ScriptResult& pre,
-const vayu::ScriptResult& post) {
-    size_t failures = 0;
-    std::string first;
-    for (const auto* result : { &pre, &post }) {
-        for (const auto& test : result->tests) {
-            if (test.passed) {
-                continue;
-            }
-            ++failures;
-            if (first.empty ()) {
-                first = test.name;
-                if (!test.error_message.empty ()) {
-                    first += ": " + test.error_message;
-                }
-            }
-        }
-    }
-    if (failures == 0) {
-        return "";
-    }
-    if (failures == 1) {
-        return "Test failed - " + first;
-    }
-    return std::to_string (failures) + " tests failed - " + first;
-}
-
-/**
- * Whether a script *errored* rather than merely disagreeing with the response.
- *
- * `ScriptResult::success` is also the tests' verdict - `ScriptEngine::execute`
- * clears it when any `pm.test` fails - so it cannot be read as "the script
- * ran". The message is what separates the two: a thrown script, a timeout and a
- * refused `pm.request` write-back all carry one, and a failed expectation
- * carries none. Reading `success` alone would report every failed assertion as
- * a step that never ran.
- */
-bool script_errored (const vayu::ScriptResult& result) {
-    return !result.success && !result.error_message.empty ();
-}
-
 /**
  * Decide what one exchange amounts to, onto @p record's outcome and error.
  *
@@ -108,7 +65,7 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
         record.error   = exchange.response.error_message;
         return;
     }
-    if (script_errored (exchange.pre_script_result)) {
+    if (script_threw (exchange.pre_script_result)) {
         record.outcome = StepOutcome::Errored;
         record.error   = vayu::http::routes::script_failure_text (
         exchange.pre_script_result, "pre-request");
@@ -122,7 +79,7 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
         record.outcome = StepOutcome::Skipped;
         return;
     }
-    if (script_errored (exchange.post_script_result)) {
+    if (script_threw (exchange.post_script_result)) {
         record.outcome = StepOutcome::Errored;
         record.error =
         vayu::http::routes::script_failure_text (exchange.post_script_result, "test");
