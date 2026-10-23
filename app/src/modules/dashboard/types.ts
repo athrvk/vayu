@@ -15,6 +15,7 @@ import type { RunOutcome } from "@/components/shared/run-outcome";
 import type { LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
+import type { DispatchStatus } from "./utils/dispatchLag";
 
 // ============================================================================
 // Dashboard State Types
@@ -119,6 +120,12 @@ export interface DashboardDerived {
 	rateAchievementPct?: number;
 	sendRate?: number;
 	throughput?: number;
+	/**
+	 * Verdict of the Send / Throughput chip, judged by `utils/dispatchLag.ts` on
+	 * the pair its producer chooses (the live windowed rates; a finished run's
+	 * cumulative ones). Absent where either rate is unknown: no chip.
+	 */
+	dispatchStatus?: DispatchStatus;
 	currentRps: number;
 	avgQueueWaitMs: number;
 	// Counts
@@ -176,6 +183,8 @@ export interface DisplayMetrics {
 	// The latest tick's status map.
 	status_codes?: Record<string, number>;
 	current_rps: number;
+	// Dispatches per second over the same trailing window as `current_rps`.
+	current_send_rate?: number;
 	latency_p50_ms?: number | null;
 	latency_p95_ms?: number | null;
 	latency_p99_ms?: number | null;

@@ -50,6 +50,28 @@ function baseReport(overrides: Partial<RunReport> = {}): RunReport {
 }
 
 describe("reportToDerived", () => {
+	describe("dispatch chip (History keeps the cumulative pair)", () => {
+		const withRates = (sendRate?: number, throughput?: number) => {
+			const base = baseReport();
+			return reportToDerived(
+				baseReport({ summary: { ...base.summary, sendRate, throughput } })
+			).dispatchStatus;
+		};
+
+		it("reads kept-pace when the rates are within the tolerance", () => {
+			expect(withRates(198, 190)).toBe("kept-pace");
+		});
+
+		it("reads lagging at once for a gap past it, since a finished run has nothing left to settle", () => {
+			expect(withRates(4500, 3940)).toBe("lagging");
+		});
+
+		it("draws no chip when the report lacks a rate", () => {
+			expect(withRates(undefined, 190)).toBeUndefined();
+			expect(withRates(198, undefined)).toBeUndefined();
+		});
+	});
+
 	it("carries the report's HTTP errors / No response split (issue #2124)", () => {
 		const base = baseReport();
 		const d = reportToDerived(

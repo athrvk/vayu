@@ -159,6 +159,26 @@ consumes it.
   has the figure, and a tick with no window latency (absent or `null`) adds no
   point to the latency chart. The ETA reads the live `current_rps`, so it
   follows the last second rather than the last 100 ms.
+- **The Send / Throughput chip is judged on the windowed pair, held for a few
+  seconds, and is grey until the run has settled** (#2802).
+  `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is
+  handed. The printed rates stay the run-cumulative `send_rate` and `throughput`,
+  and on any healthy open-model run those part by in-flight / elapsed (500
+  req/s against a 100 ms target is a 25 req/s gap at 2 s and still over 1 req/s
+  at 50 s), so judging the printed pair turned the chip red on a healthy run.
+  Live, the verdict reads the tick's `current_send_rate` against `current_rps`
+  (`DisplayMetrics` carries the former): the gap counts only at 1 req/s **and**
+  10% of the send rate (`LAG_TOLERANCE`), turns `lagging` only once it has stayed
+  open for `LAG_HOLD_SECONDS`, and stays `settling` (muted tokens) until a mean
+  latency, and a first full second, has elapsed, because a completion trails its
+  dispatch by one latency. "Held" is `dispatchLagSinceSeconds` in the dashboard
+  store, folded per tick by `foldLagStreak` in `addMetricsBatch` and cleared by
+  `startRun`; `MetricsView`'s derived memo reads that one number, never the
+  history array. A tick with no `current_send_rate` resets the streak and draws
+  no chip, since the cumulative rate must not stand in for it. History feeds
+  the same function the finished report's cumulative `sendRate` / `throughput`
+  with held and settled true (`reportToDerived`), same tolerance; #2800 changes
+  what that pair is, not the rule.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 

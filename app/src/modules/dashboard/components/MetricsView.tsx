@@ -50,6 +50,7 @@ import {
 import { createAnomalyDetector, wholeSecondTicks } from "../utils/detectAnomalies";
 import { cumulativePercentiles, hasSecondPercentiles } from "../utils/tickPercentiles";
 import { errorBreakdown } from "../utils/errorBreakdown";
+import { liveDispatchStatus } from "../utils/dispatchLag";
 import { liveRateFidelity } from "../utils/rateFidelity";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
@@ -165,6 +166,10 @@ function MetricsView({
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
 	const p99AtPeakMs = useDashboardStore((s) => s.p99AtPeakMs);
+	// When the windowed send and completion rates parted, folded per tick in the
+	// store like the aggregates above; the chip needs "for how long" and must not
+	// read the history array to learn it.
+	const dispatchLagSinceSeconds = useDashboardStore((s) => s.dispatchLagSinceSeconds);
 	// Empty for a run that configured no monitor - the row below reads that
 	// rather than the config, so it is right for a replayed run too.
 	const monitorSamples = useDashboardStore((s) => s.monitorSamples);
@@ -211,6 +216,13 @@ function MetricsView({
 			rateAchievementPct: fidelity?.achievementPct,
 			sendRate: metrics.send_rate,
 			throughput: metrics.throughput,
+			// The numbers above are the run's cumulative ones; the verdict is read
+			// off the tick's windowed pair, which a response's latency does not skew.
+			dispatchStatus: liveDispatchStatus(
+				metrics,
+				lastElapsedSeconds,
+				dispatchLagSinceSeconds
+			),
 			currentRps: metrics.current_rps ?? 0,
 			avgQueueWaitMs: metrics.avg_queue_wait_ms ?? 0,
 			totalRequests: metrics.requests_completed,
@@ -252,6 +264,7 @@ function MetricsView({
 		rampOverlay,
 		breakpoint,
 		p99AtPeakMs,
+		dispatchLagSinceSeconds,
 	]);
 
 	if (!derived) {

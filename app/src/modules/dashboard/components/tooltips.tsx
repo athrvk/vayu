@@ -39,8 +39,12 @@ export const TOOLTIPS = {
 	sendThroughput: (
 		<>
 			Twin rates from the open-model load generator. <b>Send</b> = requests dispatched onto
-			the wire; <b>Throughput</b> = responses received. A persistent gap means server-side
-			saturation - the request queue (backpressure) grows.
+			the wire; <b>Throughput</b> = responses received. Both figures are averages over the
+			whole run. The chip beside them reads the last second or more instead, and turns red
+			only when responses fall behind sends by at least 1 req/s and 10% of the send rate for 3
+			seconds running. Responses always trail sends by one response time, so it stays grey
+			until a response time has passed. A finished run's chip compares the two averages. A
+			persistent gap means server-side saturation - the request queue (backpressure) grows.
 		</>
 	),
 	sendThroughputDispatched: (

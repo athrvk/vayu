@@ -14,6 +14,7 @@ import {
 	notCrossed,
 	type Breakpoint,
 } from "@/modules/dashboard/utils/computeBreakpoint";
+import { foldLagStreak } from "@/modules/dashboard/utils/dispatchLag";
 import { foldPeakReading } from "@/modules/dashboard/utils/p99AtPeak";
 import { hasSecondPercentiles } from "@/modules/dashboard/utils/tickPercentiles";
 import { useClientSettingsStore } from "./client-settings-store";
@@ -147,6 +148,13 @@ interface DashboardState {
 	 */
 	p99AtPeakMs: number | undefined;
 	/**
+	 * `elapsed_seconds` at which the windowed send rate began to outrun the
+	 * windowed completion rate (see `foldLagStreak`); `null` while they agree.
+	 * Latched so the Send / Throughput chip can ask "held for how long" without
+	 * reading the retained buffer.
+	 */
+	dispatchLagSinceSeconds: number | null;
+	/**
 	 * Live retention window in seconds (null = full run, bounded by
 	 * {@link maxRetainedTicks}). Drives the time-based trim in
 	 * {@link addMetricsBatch}. Kept in sync by useLiveWindowSync.
@@ -200,6 +208,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	peakConcurrency: 0,
 	breakpoint: notCrossed(null),
 	p99AtPeakMs: undefined,
+	dispatchLagSinceSeconds: null,
 	liveWindowSeconds: initialLiveWindowSeconds(),
 	maxRetainedTicks: DEFAULT_MAX_RETAINED_TICKS,
 
@@ -220,6 +229,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			peakConcurrency: 0,
 			breakpoint: notCrossed(useClientSettingsStore.getState().sloThresholdMs),
 			p99AtPeakMs: undefined,
+			dispatchLagSinceSeconds: null,
 		}),
 
 	setRunConfig: (config, requestInfo) =>
@@ -270,10 +280,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			}
 
 			// Fold the new ticks into the running aggregates: peak only grows,
-			// breakpoint is latched on the first SLO crossing, and the p99 at peak
-			// restarts whenever the peak rises - so we walk each batch entry exactly
+			// breakpoint is latched on the first SLO crossing, the p99 at peak
+			// restarts whenever the peak rises, and the lag streak restarts whenever
+			// the windowed rates agree again - so we walk each batch entry exactly
 			// once, never the full history.
 			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
+			let lagSince = state.dispatchLagSinceSeconds;
 			let peakReading = { peak: state.peakConcurrency, p99Ms: state.p99AtPeakMs };
 			// An uncrossed breakpoint names the SLO it is being judged against, so a
 			// threshold changed mid-run is followed until the first crossing latches.
@@ -286,6 +298,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			let seenReading = !bp.crossed && state.historicalMetrics.some(hasSecondPercentiles);
 			for (const m of batch) {
 				peakReading = foldPeakReading(peakReading, m);
+				lagSince = foldLagStreak(lagSince, m);
 				if (!bp.crossed) bp = breakpointAt(m, sloMs, !seenReading) ?? bp;
 				seenReading ||= hasSecondPercentiles(m);
 			}
@@ -295,6 +308,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 				historicalMetrics: newHistory,
 				peakConcurrency: peakReading.peak,
 				p99AtPeakMs: peakReading.p99Ms,
+				dispatchLagSinceSeconds: lagSince,
 				breakpoint: bp,
 			};
 		}),

@@ -464,3 +464,48 @@ describe("dashboard-store p99 at peak", () => {
 		expect(useDashboardStore.getState().p99AtPeakMs).toBe(20);
 	});
 });
+
+describe("dashboard-store dispatch lag streak", () => {
+	beforeEach(() => {
+		useDashboardStore.getState().startRun("r");
+	});
+
+	const windowed = (elapsed: number, sendRate: number, rps: number): LoadTestMetrics => ({
+		...tick(elapsed),
+		current_send_rate: sendRate,
+		current_rps: rps,
+	});
+
+	it("latches the tick the windowed gap opened at, across batches", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([windowed(1, 100, 100), windowed(2, 100, 60)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(2);
+		s.addMetricsBatch([windowed(3, 100, 55), windowed(4, 100, 60)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(2);
+	});
+
+	it("resets when the rates agree again, so the next gap starts a new streak", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([windowed(2, 100, 60), windowed(3, 100, 100)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBeNull();
+		s.addMetricsBatch([windowed(4, 100, 60)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(4);
+	});
+
+	it("survives the tick it began on rolling out of the retention window", () => {
+		const s = useDashboardStore.getState();
+		s.setLiveWindowSeconds(60);
+		s.addMetricsBatch([windowed(5, 100, 60)]);
+		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => windowed(70 + i * 5, 100, 60)));
+		const state = useDashboardStore.getState();
+		expect(state.historicalMetrics.some((m) => m.elapsed_seconds === 5)).toBe(false);
+		expect(state.dispatchLagSinceSeconds).toBe(5);
+	});
+
+	it("startRun clears it for the next run", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([windowed(2, 100, 60)]);
+		s.startRun("next");
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBeNull();
+	});
+});
