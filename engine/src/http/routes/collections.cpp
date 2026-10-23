@@ -279,19 +279,22 @@ std::span<const std::string_view> members) {
 }
 
 /**
- * Applies one file binding under the null-vs-absent rule (`{}` is its
- * default), then checks the contents of a value the caller actually sent.
+ * Applies an object field whose default is `{}` under the null-vs-absent rule,
+ * then runs @p validate over the contents. Shape is `apply_json_field`'s;
+ * contents are @p validate's, and only a value the caller actually sent is
+ * checked, so a stored one cannot refuse an update that says nothing about it.
  */
-static RouteResult apply_file_binding_field (const nlohmann::json& json,
-const char* field,
+template <typename Validate>
+static RouteResult apply_checked_object_field (const nlohmann::json& json,
+const char* key,
 std::string& out,
-std::span<const std::string_view> members,
-bool is_create) {
-    if (auto outcome = apply_json_field (json, field, out, "{}", is_create); !outcome) {
+bool is_create,
+Validate validate) {
+    if (auto outcome = apply_json_field (json, key, out, "{}", is_create); !outcome) {
         return outcome;
     }
-    if (json.contains (field) && json[field].is_object ()) {
-        return validate_file_binding (json[field], field, members);
+    if (json.contains (key) && json[key].is_object ()) {
+        return validate (json[key]);
     }
     return {};
 }
@@ -368,41 +371,31 @@ bool is_create) {
 
     // The declared data contract (issue #599). `{}` is "no contract", which is
     // what both an absent field on create and an explicit null on update mean.
-    if (auto outcome = apply_json_field (json, "dataSchema", c.data_schema, "{}", is_create);
+    if (auto outcome = apply_checked_object_field (
+        json, "dataSchema", c.data_schema, is_create, validate_data_schema);
     !outcome) {
         return outcome;
     }
-    // Shape is `apply_json_field`'s; contents are this one's. Only a value the
-    // caller actually sent is checked - a stored schema is left alone, so an
-    // update that says nothing about it cannot be refused by it.
-    if (json.contains ("dataSchema") && json["dataSchema"].is_object ()) {
-        if (auto outcome = validate_data_schema (json["dataSchema"]); !outcome) {
-            return outcome;
-        }
-    }
-
-    // The OpenAPI binding (issue #637). `{}` is "bound to nothing", which both
-    // an absent field on create and an explicit null on update mean - so
+    // The OpenAPI binding (issue #637). `{}` is "bound to nothing", so
     // unbinding is `{"openapi": null}` and needs no verb of its own.
-    if (auto outcome = apply_json_field (json, "openapi", c.openapi, "{}", is_create);
+    if (auto outcome = apply_checked_object_field (
+        json, "openapi", c.openapi, is_create, validate_openapi_binding);
     !outcome) {
         return outcome;
     }
-    if (json.contains ("openapi") && json["openapi"].is_object ()) {
-        if (auto outcome = validate_openapi_binding (json["openapi"]); !outcome) {
-            return outcome;
-        }
-    }
-
-    // The files the Spec and Data tabs are bound to (issue #2765): `{}` is
-    // "no file", so `{"specFile": null}` unbinds.
-    if (auto outcome = apply_file_binding_field (
-        json, "specFile", c.spec_file, SPEC_FILE_MEMBERS, is_create);
+    // The files the Spec and Data tabs are bound to (issue #2765), the same
+    // way: `{"specFile": null}` unbinds.
+    if (auto outcome = apply_checked_object_field (json, "specFile", c.spec_file, is_create,
+        [] (const nlohmann::json& binding) {
+            return validate_file_binding (binding, "specFile", SPEC_FILE_MEMBERS);
+        });
     !outcome) {
         return outcome;
     }
-    if (auto outcome = apply_file_binding_field (
-        json, "dataFile", c.data_file, DATA_FILE_MEMBERS, is_create);
+    if (auto outcome = apply_checked_object_field (json, "dataFile", c.data_file, is_create,
+        [] (const nlohmann::json& binding) {
+            return validate_file_binding (binding, "dataFile", DATA_FILE_MEMBERS);
+        });
     !outcome) {
         return outcome;
     }
