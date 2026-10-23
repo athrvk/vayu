@@ -97,7 +97,7 @@ describe("mapSseMetrics", () => {
 			maxMs: 120,
 			count: 600,
 		};
-		const phase = { meanMs: 0.5, p50Ms: 0.4, p95Ms: 1, p99Ms: 2, count: 600 };
+		const phase = { meanMs: 0.5, p50Ms: 0.4, p95Ms: 1, p99Ms: 2, maxMs: 7, count: 600 };
 		const phases = {
 			dns: phase,
 			connect: phase,

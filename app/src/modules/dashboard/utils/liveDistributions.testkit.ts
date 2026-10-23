@@ -21,19 +21,21 @@ export const LATENCY: LiveLatencyDistribution = {
 	count: 600,
 };
 
-const phase = (meanMs: number) => ({
+/** Every figure distinct, so a field read from its neighbour's key shows. */
+const phase = (meanMs: number, p50Ms: number, p95Ms: number, p99Ms: number, maxMs: number) => ({
 	meanMs,
-	p50Ms: meanMs,
-	p95Ms: meanMs,
-	p99Ms: meanMs,
+	p50Ms,
+	p95Ms,
+	p99Ms,
+	maxMs,
 	count: 600,
 });
 export const PHASES: LivePhaseDistributions = {
-	dns: phase(0.1),
-	connect: phase(0.2),
-	tls: phase(0.3),
-	firstByte: phase(3.1),
-	download: phase(0.4),
+	dns: phase(0.1, 0.05, 0.2, 0.3, 0.9),
+	connect: phase(0.2, 0.15, 0.4, 0.6, 1.8),
+	tls: phase(0.3, 0.25, 0.7, 1.2, 4.5),
+	firstByte: phase(3.1, 2.5, 6.5, 8.5, 21),
+	download: phase(0.4, 0.35, 0.8, 1.1, 2.7),
 };
 
 export function tick(elapsed: number, extra: Partial<LoadTestMetrics> = {}): LoadTestMetrics {

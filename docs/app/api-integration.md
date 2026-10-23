@@ -1218,11 +1218,13 @@ collection run's per-step progress.
   own `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` follow the same rule: the engine sends them
   `null` for a window with no completion, and they stay `null` (issue #2386). `latencySamples` is
   not mapped; nothing in the app reads it. A gate frame's `cumulativeLatency` and
-  `cumulativePhases` (the run-so-far latency distribution and the per-phase means, issue #2782)
+  `cumulativePhases` (the run-so-far latency distribution and the per-phase means and percentiles, issue #2782)
   map to `cumulative_latency` / `cumulative_phases` as sent: `null` is "nothing completed yet",
   absent is "not a gate frame" (for the phases also "phase histograms off"). They live on the gate
   frame alone, so the dashboard reads the latest frame carrying the key from its buffer, never the
-  newest tick
+  newest tick. Each phase carries `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`; the live view
+  turns them into the report's `timingBreakdown` shape for the waterfall and the percentile table,
+  and shows the latency distribution's `count` as "N completions so far"
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
   for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
   on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row

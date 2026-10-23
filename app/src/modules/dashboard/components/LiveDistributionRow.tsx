@@ -7,8 +7,8 @@
 
 /**
  * Row 3 of the live view: the run-so-far latency distribution (History's HDR
- * chart) and the average request timing (History's waterfall), drawn from the
- * latest gate frame (issue #2782).
+ * chart) and the request timing (History's waterfall and per-phase percentile
+ * table), drawn from the latest gate frame (issue #2782).
  *
  * Both are read from `history`, not from the newest tick: only the gate frame
  * carries the distributions, and the newest tick usually is not one
@@ -25,8 +25,10 @@ import type { LoadTestMetrics } from "@/types";
 import { InfoChip } from "./shared";
 import { TOOLTIPS } from "./tooltips";
 import { LatencyStat } from "./stats/LatencyStat";
+import { PhasePercentiles } from "./charts/PhasePercentiles";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 import { HdrPercentileChart } from "./charts/uplot";
+import { pluralize } from "../utils/format";
 import { latestGateFrame, liveDistributions } from "../utils/liveDistributions";
 
 /** The HDR chart's own height; the placeholder holds the same space. */
@@ -65,6 +67,9 @@ export function LiveDistributionRow({ history }: { history: LoadTestMetrics[] })
 							<LatencyStat k="p99" v={latency.latency.p99} />
 							<LatencyStat k="max" v={latency.latency.max} />
 						</div>
+						<p className="mt-2 text-label text-muted-foreground">
+							{`${latency.count.toLocaleString()} ${pluralize(latency.count, "completion")} so far`}
+						</p>
 					</>
 				) : (
 					<Placeholder title="Waiting for the first response" />
@@ -79,7 +84,14 @@ export function LiveDistributionRow({ history }: { history: LoadTestMetrics[] })
 						<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 					</h3>
 				</div>
-				{phases.kind === "ready" && <TimingWaterfall report={phases.report} />}
+				{phases.kind === "ready" && (
+					<>
+						<TimingWaterfall report={phases.report} />
+						<div className="mt-3 pt-3 border-t border-rule">
+							<PhasePercentiles report={phases.report} />
+						</div>
+					</>
+				)}
 				{phases.kind === "waiting" && (
 					<Placeholder title="Waiting for the first response" />
 				)}

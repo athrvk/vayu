@@ -48,10 +48,11 @@ describe("liveDistributions", () => {
 				p99: 40,
 				p999: 90,
 			},
+			count: 600,
 		});
 	});
 
-	it("maps each phase's mean onto the average key the waterfall reads", () => {
+	it("maps each phase's mean onto the average key the waterfall reads, and its tail onto the table's", () => {
 		const { phases } = liveDistributions(
 			tick(2, { cumulative_latency: LATENCY, cumulative_phases: PHASES })
 		);
@@ -65,6 +66,13 @@ describe("liveDistributions", () => {
 					avgTlsMs: 0.3,
 					avgFirstByteMs: 3.1,
 					avgDownloadMs: 0.4,
+					phases: {
+						dns: { p50: 0.05, p95: 0.2, p99: 0.3, max: 0.9, count: 600 },
+						connect: { p50: 0.15, p95: 0.4, p99: 0.6, max: 1.8, count: 600 },
+						tls: { p50: 0.25, p95: 0.7, p99: 1.2, max: 4.5, count: 600 },
+						firstByte: { p50: 2.5, p95: 6.5, p99: 8.5, max: 21, count: 600 },
+						download: { p50: 0.35, p95: 0.8, p99: 1.1, max: 2.7, count: 600 },
+					},
 				},
 			},
 		});

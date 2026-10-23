@@ -2394,6 +2394,7 @@ export interface LivePhaseDistribution {
 	p50Ms: number;
 	p95Ms: number;
 	p99Ms: number;
+	maxMs: number;
 	count: number;
 }
 

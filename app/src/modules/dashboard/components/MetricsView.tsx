@@ -16,7 +16,7 @@
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
  *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
- *   Row 3   - HDR percentile plot + Avg request timing waterfall (LiveDistributionRow),
+ *   Row 3   - HDR percentile plot + Request timing waterfall + phase percentiles (LiveDistributionRow),
  *             from the latest gate frame
  *   Row 4   - ModeStatsRow   (mode-adaptive: 3 or 4 stat cards)
  *

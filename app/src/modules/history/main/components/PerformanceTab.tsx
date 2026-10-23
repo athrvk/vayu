@@ -221,9 +221,10 @@ export default function PerformanceTab({
 				</CardContent>
 			</Card>
 
-			{/* Per-phase averages over the retained trace sample - the figure a run
-			    that stored traces but no phase histograms still has. Absent when
-			    the report carries no phase average. */}
+			{/* Per-phase averages: the phase histograms' means (every completion)
+			    when the run kept them, the retained trace sample's otherwise -
+			    which is all a run with them off, or stored before the means,
+			    has. Absent when the report carries no phase average. */}
 			<PhaseAveragesCard timingBreakdown={report.timingBreakdown} />
 
 			{/* Per-phase percentiles. Its own card rather than rows inside Latency
