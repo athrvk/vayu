@@ -32,7 +32,7 @@ import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
 import { PROMPTS } from "./prompts.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
-import type { EngineClient } from "./engine-client.js";
+import { EngineRequestError, type EngineClient } from "./engine-client.js";
 import type { Logger } from "../log.js";
 import { freePort } from "./free-port.testkit.js";
 
@@ -477,6 +477,49 @@ describe("MCP protocol handshake (in-memory)", () => {
 		expect(res.isError).toBe(true);
 		expect(res.structuredContent).toEqual({
 			error: { class: "unreachable", retryable: true, advice: res.content[0].text },
+		});
+		await server.close();
+	});
+
+	/*
+	 * The SDK refuses a wrongly typed argument itself, before dispatch runs, so
+	 * the class comes from the wrapper in front of its handler. An error
+	 * dispatch answered passes that wrapper as it was.
+	 */
+	it("classes an argument the SDK's schema check refused as input", async () => {
+		const { client, server } = await connectClient({ safety: { allowWrites: true } });
+		const res = (await client.callTool({ name: "get_run", arguments: { runId: 5 } })) as {
+			isError?: boolean;
+			content: Array<{ text: string }>;
+			structuredContent?: unknown;
+		};
+		expect(res.isError).toBe(true);
+		expect(res.content[0].text).toMatch(/^Input validation error/);
+		expect(res.structuredContent).toEqual({
+			error: { class: "input", retryable: false, advice: res.content[0].text },
+		});
+		await server.close();
+	});
+
+	it("leaves an error dispatch answered as dispatch answered it", async () => {
+		const { client, server } = await connectClient({
+			client: fakeClient({
+				getRun: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError("Engine responded 404", 404, "no such run")
+					),
+			}),
+		});
+		const res = (await client.callTool({
+			name: "get_run",
+			arguments: { runId: "run_gone" },
+		})) as { content: Array<{ text: string }>; structuredContent?: unknown };
+		// get_run names the id in place of the engine's body.
+		const text = 'Engine error (404): No run with id "run_gone".';
+		expect(res.content).toEqual([{ type: "text", text }]);
+		expect(res.structuredContent).toEqual({
+			error: { class: "not_found", retryable: false, advice: text },
 		});
 		await server.close();
 	});

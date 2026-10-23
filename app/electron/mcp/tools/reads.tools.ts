@@ -190,7 +190,7 @@ export const READ_TOOLS: McpTool[] = [
 				return errorResult(
 					"The Vayu window is not connected, so there is no open tab or environment to report. " +
 						"Ask the user for a Vayu reference line instead.",
-					"unreachable"
+					"policy"
 				);
 			}
 			const { activeTab, activeEnvironment } = focus;

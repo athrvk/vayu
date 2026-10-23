@@ -2031,17 +2031,22 @@ failure for a machine (#2776):
 
 `advice` is the result's text. A tool's `outputSchema` describes its success,
 and the SDK holds only a success to it, so the error shape is the same on every
-tool. `class` is one of five, set where the error is built (`errorResult` in
+tool. That includes the errors the SDK answers before any tool runs: an argument
+its schema check refuses (`Input validation error: ...`) is classed `input`,
+and anything else it catches (an answer its output check refuses) `transient`,
+by the wrapper `server.ts` puts in front of its `tools/call` handler.
+
+`class` is one of five, set where the error is built (`errorResult` in
 `app/electron/mcp/tools/kit.ts`, which requires one) and mapped in
 `app/electron/mcp/tools/failure.ts`:
 
 | `class` | `retryable` | What it means | Raised by |
 |---------|-------------|---------------|-----------|
-| `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection |
-| `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument, an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
+| `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
+| `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
 | `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry |
 | `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says when to check run history first | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
-| `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach, the Vayu window not connected (`get_app_focus`) |
+| `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
 
 ## Resources
 

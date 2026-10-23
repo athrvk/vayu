@@ -9306,6 +9306,12 @@ describe("every error result carries a failure class", () => {
 				),
 		],
 		[
+			// The stdio CLI never has a window, so calling again cannot help.
+			"no Vayu window to ask",
+			"policy",
+			() => dispatchTool("get_app_focus", {}, ctxWith(fakeClient())),
+		],
+		[
 			"a file body sent inline",
 			"policy",
 			() =>

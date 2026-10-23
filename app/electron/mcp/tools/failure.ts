@@ -107,3 +107,19 @@ export function engineRefusalClass(err: EngineRequestError): FailureClass {
 	if (err.status >= 500) return "transient";
 	return "input";
 }
+
+/**
+ * The SDK's refusal of a call's arguments, before any handler runs
+ * (`validateToolInput`, @modelcontextprotocol/server): a schema failure, or
+ * more argument elements than the server accepts.
+ */
+const SDK_INPUT_REFUSAL = /^(Input validation error|Invalid arguments for tool)/;
+
+/**
+ * The class of an error the SDK answered itself, which never reached
+ * `dispatchTool`. Its argument check is `input`; anything else it catches (an
+ * answer its output check refused) is this server's fault, not the call's.
+ */
+export function sdkErrorClass(text: string): FailureClass {
+	return SDK_INPUT_REFUSAL.test(text) ? "input" : "transient";
+}

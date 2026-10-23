@@ -40,13 +40,14 @@ import {
 } from "./tools/contract.js";
 import {
 	errorResult,
+	isRecord,
 	NOTHING_CHANGED,
 	STARTED_RUNS,
 	str,
 	ToolArgError,
 	writesDisabled,
 } from "./tools/kit.js";
-import { describeFailure, FAILURES, type Failure } from "./tools/failure.js";
+import { describeFailure, FAILURES, sdkErrorClass, type Failure } from "./tools/failure.js";
 import { READ_TOOLS } from "./tools/reads.tools.js";
 import { SAFETY_TOOLS } from "./tools/safety.tools.js";
 import { GRAPHQL_SCHEMA_TOOLS } from "./tools/graphql-schema.tools.js";
@@ -231,6 +232,22 @@ function failureAnswer(result: ToolResult, toolName: string, ctx: ToolContext): 
 		},
 		ctx.host
 	);
+}
+
+/**
+ * @p answer, a `tools/call` answer the SDK produced, with a failure class on an
+ * error that has none. The SDK answers some errors without calling any handler
+ * - an argument its schema check refused, an answer its output check refused -
+ * so they never pass {@link dispatchTool}. Every other answer, including an
+ * error dispatch already classed, is returned as it came.
+ */
+export function classifySdkError(answer: unknown, toolName: string, ctx: ToolContext): unknown {
+	if (!isRecord(answer) || answer.isError !== true) return answer;
+	if (isRecord(answer.structuredContent) && "error" in answer.structuredContent) return answer;
+	const content = Array.isArray(answer.content) ? answer.content : [];
+	const first: unknown = content[0];
+	const text = isRecord(first) && typeof first.text === "string" ? first.text : "";
+	return failureAnswer(errorResult(text, sdkErrorClass(text)), toolName, ctx);
 }
 
 /**

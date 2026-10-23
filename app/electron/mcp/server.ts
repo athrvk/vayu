@@ -31,6 +31,7 @@ import {
 	TOOLS,
 	dispatchTool,
 	isListed,
+	classifySdkError,
 	resolveDescription,
 	withheldWriteRefusal,
 	type ToolContext,
@@ -300,7 +301,7 @@ export function createMcpServer(
 
 	const { list: sdkListTools, call: sdkCallTool } = takeToolHandlers();
 	resolveRemedyInToolList(mcp, baseCtx.host, sdkListTools);
-	answerWithheldWriteCalls(mcp, baseCtx, sdkCallTool);
+	answerToolCalls(mcp, baseCtx, sdkCallTool);
 
 	registerResources(mcp, baseCtx);
 	registerPrompts(mcp, baseCtx);
@@ -466,28 +467,34 @@ function resolveRemedyInToolList(
 }
 
 /**
- * Answer a call to a write tool this session withheld with the refusal that
- * names the setting, in place of the SDK's "Tool <name> not found".
+ * Stand in front of the SDK's `tools/call` handler for the two answers it would
+ * otherwise give alone.
  *
- * The withholding (#1429) is what makes this necessary: it took the handlers'
- * refusal off the wire along with the schemas, leaving an agent that guessed a
- * write tool's name - from its own memory, or from a list it fetched while
- * writes were on - with an unknown-tool error and nothing to ask the user for
- * (#1431). Every other name reaches the SDK's handler unchanged, so schema
- * validation and structured output are untouched.
+ * A call to a write tool this session withheld gets the refusal that names the
+ * setting, in place of the SDK's "Tool <name> not found". The withholding
+ * (#1429) is what makes this necessary: it took the handlers' refusal off the
+ * wire along with the schemas, leaving an agent that guessed a write tool's
+ * name - from its own memory, or from a list it fetched while writes were on -
+ * with an unknown-tool error and nothing to ask the user for (#1431).
+ *
+ * An error the SDK answered itself (an argument its schema check refused) gets
+ * the failure class every error carries (#2776), through the same mapping
+ * dispatch uses. Every other answer, schema validation and structured output
+ * included, is the SDK's unchanged.
  */
-function answerWithheldWriteCalls(
+function answerToolCalls(
 	mcp: McpServer,
 	ctx: ToolContext,
 	sdkCallTool: ToolHandler | undefined
 ): void {
-	if (ctx.config.allowWrites || !sdkCallTool) return;
+	if (!sdkCallTool) return;
 	const server = mcp.server as unknown as {
 		setRequestHandler: (method: string, handler: ToolHandler) => void;
 	};
-	server.setRequestHandler("tools/call", (request, callCtx) => {
+	server.setRequestHandler("tools/call", async (request, callCtx) => {
 		const refusal = withheldWriteRefusal(request.params.name, ctx);
-		return refusal ?? sdkCallTool(request, callCtx);
+		if (refusal) return refusal;
+		return classifySdkError(await sdkCallTool(request, callCtx), request.params.name, ctx);
 	});
 }
 
