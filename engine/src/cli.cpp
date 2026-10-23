@@ -230,8 +230,8 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             std::cout << "Run ID: " << run_id << "\n";
             // The live SSE stream (/runs/:id/live). Served
             // from the in-memory collector; a finished run stays readable for
-            // liveRetentionMs (default 60s), then 404s with a hint pointing
-            // at /runs/:id/report.
+            // liveRetentionMs (default 60s), then 404s (code live_expired)
+            // with a hint pointing at /runs/:id/report.
             vayu::utils::log_info ("cli",
             "Monitor status at: " + daemon_url + "/runs/" + run_id + "/live");
             return 0;

@@ -493,6 +493,20 @@ std::chrono::steady_clock::time_point now) {
     return step;
 }
 
+std::pair<int, nlohmann::json>
+live_metrics_unavailable_response (vayu::db::Database& db, const std::string& run_id) {
+    nlohmann::json body;
+    if (db.get_run (run_id)) {
+        body["error"] = "Live metrics for this run are no longer retained";
+        body["code"]  = "live_expired";
+    } else {
+        body["error"] = "Run not found or expired";
+        body["code"]  = "run_not_found";
+    }
+    body["hint"] = "Use /runs/" + run_id + "/report for the stored report";
+    return { 404, std::move (body) };
+}
+
 namespace {
 
 /**
@@ -543,11 +557,9 @@ void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httpli
 
     auto context = ctx.run_manager.get_run_or_retained (run_id);
     if (!context) {
-        res.status = 404;
-        nlohmann::json error;
-        error["error"] = "Run not found or expired";
-        error["hint"] = "Use /runs/" + run_id + "/report for the stored report";
-        res.set_content (error.dump (), "application/json");
+        auto [status, body] = live_metrics_unavailable_response (ctx.db, run_id);
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
         return;
     }
 
