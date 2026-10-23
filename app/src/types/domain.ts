@@ -2421,6 +2421,36 @@ export interface SanityResult extends HttpResponse {
 	validation?: ResponseValidation;
 }
 
+/** A gate frame's run-so-far latency distribution, as the engine sends it (ms). */
+export interface LiveLatencyDistribution {
+	minMs: number;
+	p50Ms: number;
+	p75Ms: number;
+	p90Ms: number;
+	p95Ms: number;
+	p99Ms: number;
+	p999Ms: number;
+	maxMs: number;
+	/** Completions behind the distribution. */
+	count: number;
+}
+
+/** One network phase's run-so-far distribution on a gate frame (ms). */
+export interface LivePhaseDistribution {
+	meanMs: number;
+	p50Ms: number;
+	p95Ms: number;
+	p99Ms: number;
+	maxMs: number;
+	count: number;
+}
+
+/** The five phases keyed by the engine's wire names (TTFB is `firstByte`). */
+export type LivePhaseDistributions = Record<
+	"dns" | "connect" | "tls" | "firstByte" | "download",
+	LivePhaseDistribution
+>;
+
 export interface LoadTestMetrics {
 	timestamp: number;
 	elapsed_seconds: number;
@@ -2489,6 +2519,17 @@ export interface LoadTestMetrics {
 	cumulative_p50_ms?: number | null;
 	cumulative_p95_ms?: number | null;
 	cumulative_p99_ms?: number | null;
+	/**
+	 * The run-so-far latency distribution and per-phase distributions, on a gate
+	 * frame only (about one live frame a second, the final one included; issue
+	 * #2782). Both are `null` until something has completed and absent from every
+	 * other frame, so a reader takes them from the latest frame that carries the
+	 * key (`utils/liveDistributions.ts`), never from the newest tick.
+	 * `cumulative_phases` is also absent when the run has phase histograms off:
+	 * absent means "not measured", `null` means "nothing yet".
+	 */
+	cumulative_latency?: LiveLatencyDistribution | null;
+	cumulative_phases?: LivePhaseDistributions | null;
 	/** Mean latency over the whole run so far, not the tick's window. */
 	avg_latency_ms: number;
 	bytes_sent: number;
@@ -2872,12 +2913,14 @@ export interface RunReport {
 	/**
 	 * Two independent halves, either of which can be present without the other.
 	 *
-	 * The `avg*` fields are means over the run's **retained trace sample** (the
-	 * 1-in-N successes `save_timing_breakdown` stores, plus any slow-request
-	 * outliers), so they are absent for a run that stored no traces. `phases`
-	 * comes from histograms fed by **every** completion, so it is present for
-	 * such a run and absent only when the engine's `phaseHistograms` setting was
-	 * off, nothing succeeded, or the run predates the bank.
+	 * `phases` comes from histograms fed by **every** completion, and is absent
+	 * only when the engine's `phaseHistograms` setting was off, nothing
+	 * succeeded, or the run predates the bank. The `avg*` fields are the means
+	 * of those histograms (issue #2782), so they average the same completions;
+	 * without `phases`, or for a run stored before the means existed, they are
+	 * means over the **retained trace sample** (the 1-in-N successes
+	 * `save_timing_breakdown` stores, plus any slow-request outliers) and are
+	 * absent for a run that stored no traces.
 	 *
 	 * Read each half by its own key. Treating the object's presence as proof of
 	 * either is what makes a phases-only report render as five zeroed averages.

@@ -1038,7 +1038,7 @@ governs what a run measures rather than what it keeps:
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
-| `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
+| `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles and averages over every completion instead of over the retained trace sample, and the live stream's gate frames can carry `cumulativePhases`. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
@@ -9150,7 +9150,7 @@ default, and whose message names the offending field and why the bound exists:
 | `max_sample_body_bytes` | `0`-`104857600` | A captured body is copied on the completion callback, so the cap bounds hot-path work. `0` keeps headers and metadata and no body. Defaults to the `maxSampleBodyBytes` setting. |
 | `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
 | `max_exemplar_results` | `0`-`100000` | Each retained exemplar holds a captured exchange. `0` means unlimited. |
-| `phase_histograms` | boolean | Per-run override for the `phaseHistograms` setting. `false` skips the bank entirely, and the run's report carries no `timingBreakdown.phases`. |
+| `phase_histograms` | boolean | Per-run override for the `phaseHistograms` setting. `false` skips the bank entirely: the run's report carries no `timingBreakdown.phases`, its `avg*Ms` fall back to the retained trace sample, and its live gate frames carry no `cumulativePhases`. |
 | `save_timing_breakdown` | boolean | Read as a bool inside the run-context constructor, which threw on a string *after* the row was written - the same stranded-`pending` failure `duration` had. |
 | `capture_response_bodies` | boolean | Same read, same constructor, same failure. |
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
@@ -9238,9 +9238,9 @@ independent budgets:
 
 None of these budgets bound the report's `timingBreakdown.phases`: the per-phase
 histograms are fed by every completion and hold counts rather than records, so
-the phase distribution is the whole population no matter how hard the stores
-above thin. That is what they are for - the `avg*` fields beside them *are*
-computed over the sampled subset.
+the phase distribution, and the `avg*` fields read from its means, are the
+whole population no matter how hard the stores above thin. Only a run without
+the bank falls back to averaging the sampled subset.
 
 Two properties are worth relying on. An outlier **never consumes a sampling
 slot**: a run whose target degrades does not silently stop sampling ordinary
@@ -9952,7 +9952,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*` keys, which it adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency` and `cumulativePhases` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -9973,6 +9973,8 @@ no frame.
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
+| `cumulativeLatency` | **Gate frames only** (issue #2782), the final frame included: the run-so-far latency distribution, `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms, p999Ms, maxMs, count}`, over the same completions as the `cumulative*Ms` keys. `null` until something has completed, never zeros. The final frame merges the last window after the drain, so its figures are the report's [`latency`](#get-runsrunidreport) block. Absent from every other frame |
+| `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
 | `status2xx`–`status5xx` | Per-class counts |
@@ -10728,14 +10730,14 @@ named it.
     "byStatusCode": [[0, 10], [500, 20]]
   },
   "timingBreakdown": {
-    "avgDnsMs": 5.2, "avgConnectMs": 12.3, "avgTlsMs": 45.1,
-    "avgFirstByteMs": 180.2, "avgDownloadMs": 2.7,
+    "avgDnsMs": 0.15, "avgConnectMs": 0.42, "avgTlsMs": 0.31,
+    "avgFirstByteMs": 3.1, "avgDownloadMs": 0.14,
     "phases": {
-      "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 6000 },
-      "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 6000 },
-      "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 6000 },
-      "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 6000 },
-      "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000 }
+      "dns":       { "p50": 0.1, "p95": 0.2, "p99": 1.4,  "max": 12.0, "count": 6000, "mean": 0.15 },
+      "connect":   { "p50": 0.3, "p95": 0.9, "p99": 8.2,  "max": 40.1, "count": 6000, "mean": 0.42 },
+      "tls":       { "p50": 0.0, "p95": 0.0, "p99": 22.0, "max": 61.0, "count": 6000, "mean": 0.31 },
+      "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 6000, "mean": 3.1 },
+      "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000, "mean": 0.14 }
     }
   },
   "slowRequests": { "count": 12, "thresholdMs": 1000, "tracesStored": 12, "percentage": 0.2 },
@@ -10903,15 +10905,18 @@ a rate's evaluations. A counter's increments are finite and never negative - see
 [`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
 and [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets) reads it for a threshold.
 
-**`timingBreakdown` holds two independently-present halves.** The `avg*` fields
-are means over the run's *retained trace sample* - the 1-in-`success_sample_rate`
-completions stored while `save_timing_breakdown` is on, plus any slow-request
-outliers - so they are absent for a run that stored no traces. `phases` comes
-from five HdrHistograms fed by **every** successful completion, so it is present
-for exactly such a run, and absent only when `phaseHistograms` was off, nothing
-succeeded, or the run predates the bank. Read each half by its own key: the
-object's presence proves neither, and the two are drawn from different
-populations, so a `phases.tls.p50` is not comparable to an `avgTlsMs`.
+**`timingBreakdown` averages every completion.** `phases` comes from five
+HdrHistograms fed by **every** successful completion, and each phase carries its
+`mean` beside its percentiles; the `avg*` fields are those means (issue #2782),
+so `avgTlsMs` and `phases.tls.p99` describe the same completions, and the last
+live gate frame's [`cumulativePhases`](#get-runsrunidlive) means equal them.
+`phases` is absent when `phaseHistograms` was off, nothing succeeded, or the run
+predates the bank. Without it, and for a run stored before the means existed
+(its `phases` carry no `mean`), the `avg*` fields fall back to the run's
+*retained trace sample* - the 1-in-`success_sample_rate` completions stored
+while `save_timing_breakdown` is on, plus any slow-request outliers - and are
+absent for a run that stored no traces. Read each half by its own key: the
+object's presence proves neither.
 
 `phases` is what answers "was the latency the server or the connection path".
 A `tls.p50` of 0 beside a large `tls.p99` is a run re-handshaking under load -

@@ -188,9 +188,10 @@ export function phasesFromAverages(
 /**
  * Whether a `timingBreakdown` carries the averages half at all.
  *
- * `timingBreakdown` holds two independently-present halves - averages over the
- * retained trace sample, and `phases` percentiles over every completion - so
- * the object existing says nothing about the averages. Every renderer of the
+ * `timingBreakdown` holds two independently-present halves - averages (the
+ * phase histograms' means, or the retained trace sample's when the run has none)
+ * and `phases` percentiles over every completion - so the object existing says
+ * nothing about the averages. Every renderer of the
  * averages asks this instead of testing the object, which is what keeps a
  * phases-only report from painting five zeroed bars and a "0 ms" total.
  */

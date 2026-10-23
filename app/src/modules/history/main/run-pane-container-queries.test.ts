@@ -38,7 +38,7 @@ const RUN_PANE_GRID_FILES = [
 	join(here, "components/MonitorSummary.tsx"),
 	join(here, "components/BaselineComparison.tsx"),
 	join(here, "components/RunTrend.tsx"),
-	join(dashboard, "MetricsView.tsx"),
+	join(dashboard, "LiveDistributionRow.tsx"),
 ];
 
 /** `lg:grid-cols-6` but not `@lg:grid-cols-6`. */

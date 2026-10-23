@@ -1317,8 +1317,14 @@ struct RunSummaryInputs {
     // TimingPhase. Absent when the run recorded none (the `phaseHistograms`
     // toggle off, or nothing successful completed), which keeps the report's
     // `timingBreakdown.phases` object out rather than showing five zeroed
-    // distributions - the same absent-not-zeros rule `capacity` follows.
+    // distributions - the same absent-not-zeros rule `capacity` follows - and
+    // leaves its `avg*Ms` to the retained trace sample.
     std::optional<std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>> phases;
+    // Each phase's whole-run mean (`MetricsCollector::phase_means`), stored as
+    // that phase's `mean` beside the percentiles and read back as the report's
+    // `timingBreakdown.avg*Ms` (#2782). Written only inside `phases`, so it is
+    // ignored without it.
+    std::optional<std::array<double, TIMING_PHASE_COUNT>> phase_means;
     // Transfers that asked for HTTP/2 and negotiated something older. The one
     // figure here that is about the report's own validity rather than about
     // performance - see MetricsCollector::record_http_version_downgrade.
