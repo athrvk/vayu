@@ -94,7 +94,8 @@ describe("EngineClient.getEnvironment", () => {
  * `POST /execute` waits on a third-party server, bounded engine-side by the
  * user-configurable `defaultTimeout` (up to 300s). A flat client budget below
  * that aborts a request the engine goes on to complete - side effects sent, run
- * row written - so these pin the budget to the engine's own setting. Driven on
+ * row written - so these pin the budget to the engine's own settings and the payload's OAuth
+ * and script terms. Driven on
  * fake timers: the assertion is which budget was armed, never wall-clock.
  */
 describe("EngineClient /execute abort budget", () => {
