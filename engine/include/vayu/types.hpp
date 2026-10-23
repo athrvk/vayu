@@ -1003,6 +1003,20 @@ struct Response {
     bool http_version_downgraded = false;
 
     /**
+     * @brief How many times libcurl re-sent this request on a new connection
+     *        after the server dropped or refused a reused one before a
+     *        response byte (#2799). 0 when it did not.
+     *
+     * libcurl replays such a request on its own and says nothing, so without
+     * this a run counts one request and one response while the target saw
+     * two, and the latency covers both attempts. Never an error by itself:
+     * the request was answered (or failed) on its last attempt like any
+     * other. Filled by the event loop (`extract_response`) only; a design
+     * send reads 0.
+     */
+    int connection_replays = 0;
+
+    /**
      * @brief Events this transfer delivered, when it was a bounded stream
      *        (`Request::stream_bounds`); absent otherwise (issue #576).
      *

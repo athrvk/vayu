@@ -290,6 +290,7 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.slow_total              = mc.slow_total ();
     inputs.slow_threshold_ms       = context.slow_threshold_ms;
     inputs.http_version_downgraded = mc.http_version_downgraded ();
+    inputs.connection_replays      = mc.connection_replays ();
     // No drain was timed apart here, so the window is the elapsed time.
     inputs.requests_sent      = context.requests_sent.load ();
     inputs.requests_expected  = context.requests_expected.load ();
@@ -1561,6 +1562,28 @@ struct RunTotals {
     MetricsCollector::Percentiles latency;
 };
 
+namespace {
+/**
+ * The warning for @p replays requests libcurl re-sent on a new connection
+ * (#2799). They stay counted as the one request each was, never as errors, so
+ * this is the only place a reader learns the target saw more than the run did.
+ */
+nlohmann::json connection_replayed_warning (size_t replays) {
+    const std::string count = std::to_string (replays);
+    const bool one          = replays == 1;
+    return { { "code", "connection_replayed" },
+        { "message",
+        count + (one ? " request was" : " requests were") +
+        " re-sent on a new connection after the server dropped or refused a "
+        "reused one. The target received " +
+        count + (one ? " more request" : " more requests") +
+        " than were counted, and each of those shows the time of both "
+        "attempts. A non-idempotent request may have run twice at the "
+        "target." },
+        { "count", replays } };
+}
+} // namespace
+
 /**
  * @brief What this run did not do, as the summary's `warnings` array (issue
  *        #1503).
@@ -1573,8 +1596,9 @@ struct RunTotals {
  * every request must still be reported as finished. Also a per-host
  * connection limit the run raised above `eventLoopMaxPerHost` (#2394), so a
  * run that opened more connections than the setting says is not silent about
- * it. Empty for a run with nothing to say, which is what lets the caller omit
- * the key entirely.
+ * it. And requests libcurl re-sent on a new connection (#2799). Empty for a
+ * run with nothing to say, which is what lets the caller omit the key
+ * entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     nlohmann::json warnings = nlohmann::json::array ();
@@ -1603,6 +1627,11 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
         " per worker to cover this run's virtual users" },
         { "configured", context->configured_max_per_host },
         { "effective", context->effective_max_per_host } });
+    }
+
+    if (const size_t replays = context->metrics_collector->connection_replays ();
+    replays > 0) {
+        warnings.push_back (connection_replayed_warning (replays));
     }
 
     if (context->scenario) {
@@ -1661,6 +1690,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.custom_metrics = context->metrics_collector->custom_metric_summaries ();
     inputs.http_version_downgraded =
     context->metrics_collector->http_version_downgraded ();
+    inputs.connection_replays = context->metrics_collector->connection_replays ();
     inputs.tests = validation.run;
     // Written by the capacity strategy before its execute() returned,
     // so it is already final here; absent for every other mode.
@@ -2433,6 +2463,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
                         { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
                         { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
                         { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
+    // Always written, the downgrade's rule: absent is a run stored before
+    // #2799, whose report then omits `connectionReplays`.
+    summary["connection_replays"] = inputs.connection_replays;
     // Always written, `{}` included: an absent key is a run stored before
     // #2400, whose report still counts the stored error records by type.
     summary["error_types"] = nlohmann::json (inputs.error_types);

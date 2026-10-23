@@ -51,8 +51,9 @@ json healthy_summary () {
         { "setup_overhead", 0.1 }, { "requests_sent", 100 },
         { "requests_expected", 100 }, { "sending_duration", 9.8 },
         { "peak_concurrency", 5 }, { "dropped_requests", 0 },
-        { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 }, { "bytes_received", 5000 },
-        { "http_version_downgraded", 0 }, { "status_codes", { { "200", 100 } } },
+        { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
+        { "bytes_received", 5000 }, { "http_version_downgraded", 0 },
+        { "connection_replays", 2 }, { "status_codes", { { "200", 100 } } },
         { "latency",
         { { "min", 1.0 }, { "max", 9.0 }, { "avg", 3.0 }, { "p50", 2.0 }, { "p75", 3.0 },
         { "p90", 4.0 }, { "p95", 5.0 }, { "p99", 8.0 }, { "p999", 9.0 } } },
@@ -120,9 +121,10 @@ json healthy_summary () {
         json::array ({ { { "id", "el_1" }, { "kind", "assert.status" },
         { "passed", 1 }, { "failed", 0 }, { "skipped", 0 }, { "deferred", 0 } } }) },
         { "warnings",
-        json::array ({ { { "code", "unresolved_tokens" },
-        { "message", "1 request sent with an unresolved variable: token" },
-        { "count", 1 }, { "names", { "token" } } } }) },
+        json::array ({ { { "code", "unresolved_tokens" }, { "message", "1 request sent with an unresolved variable: token" },
+                       { "count", 1 }, { "names", { "token" } } },
+        { { "code", "connection_replayed" },
+        { "message", "2 requests were re-sent on a new connection" }, { "count", 2 } } }) },
         { "thresholds",
         { { "checks",
           json::array ({ { { "metric", "latencyP99Ms" }, { "limit", 50 },
@@ -241,6 +243,9 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_TRUE (document["report"]["slowRequests"].contains ("tracesStored"));
     EXPECT_TRUE (
     document["report"]["rateControl"].contains ("requestsExpected"));
+    // The allowlist has to name it, or the export drops the replays (#2799).
+    // Mutation check: drop "connectionReplays" from SUMMARY_KEYS and this fails.
+    EXPECT_EQ (document["report"]["summary"].value ("connectionReplays", -1), 2);
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 
@@ -253,7 +258,10 @@ TEST_F (RunExportSchemaTest, AStoppedRunValidates) {
     seed ("run_stopped", vayu::RunStatus::Stopped,
     json{ { "total_requests", 5 }, { "cancelled", 2 },
     { "status_codes", { { "200", 5 } } } });
+    const json document =
     expect_valid (json{ { "runId", "run_stopped" }, { "series", "none" } });
+    // Stored before #2799: no count, rather than a 0 nobody measured.
+    EXPECT_FALSE (document["report"]["summary"].contains ("connectionReplays"));
 }
 
 TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {
