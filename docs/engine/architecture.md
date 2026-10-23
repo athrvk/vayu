@@ -1184,7 +1184,9 @@ ending the search. The stop reasons are `slo_exceeded` (two consecutive
 breaching windows, the last over `sloMs`), `errors_exceeded` (the same, the last
 inside `sloMs` and over the error limit), `plateau` (two step-ups bought under 5%
 more throughput), `cap_reached`, `deadline` and `stopped`, and the report's
-`capacity` section names which fired.
+`capacity` section names which fired. A `plateau` stop also reports
+`saturation*`, the lowest healthy level within 5% of the best healthy
+throughput: `maxHealthy*` is the last level tried, which overshoots it.
 
 ### Bounded streams under load
 

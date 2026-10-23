@@ -2838,6 +2838,7 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
     EXPECT_DOUBLE_EQ (capacity["kneeP99Ms"].get<double> (), 210.0);
     EXPECT_DOUBLE_EQ (capacity.at ("kneeErrorPct").get<double> (), 3.5);
     EXPECT_DOUBLE_EQ (capacity.at ("maxErrorPct").get<double> (), search.max_error_pct);
+    EXPECT_FALSE (capacity.contains ("saturationConcurrency"));
 
     ASSERT_EQ (capacity["levels"].size (), 4u);
     EXPECT_EQ (capacity["levels"][0]["concurrency"].get<size_t> (), 8u);
@@ -2900,6 +2901,38 @@ TEST_F (RunsRouteTest, ReportOmitsTheKneeWhenNoLevelBreached) {
     ASSERT_TRUE (body.contains ("capacity"));
     EXPECT_FALSE (body["capacity"].contains ("kneeConcurrency"));
     EXPECT_EQ (body["capacity"]["maxHealthyConcurrency"].get<size_t> (), 8u);
+    EXPECT_FALSE (body["capacity"].contains ("saturationConcurrency"));
+    EXPECT_FALSE (body["capacity"].contains ("saturationRps"));
+    EXPECT_FALSE (body["capacity"].contains ("saturationP99Ms"));
+}
+
+// A plateau stop names the level where throughput stopped growing beside the
+// last level tried, which overshoots it (#2817).
+// Mutation-check: leave the three `saturation_*` keys out of
+// `read_capacity_section` and they never reach the report.
+TEST_F (RunsRouteTest, ReportCarriesTheSaturationOfAPlateau) {
+    seed ({ .id = "run_capacity_plateau", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+
+    vayu::core::CapacityConfig search;
+    search.slo_ms   = 200.0;
+    inputs.capacity = vayu::core::summarize_capacity (search,
+    { { 6, 130.0, 31.0, 0.0 }, { 8, 156.0, 52.0, 0.0 },
+    { 10, 156.0, 103.0, 0.0 }, { 12, 156.0, 103.0, 0.0 } },
+    vayu::core::capacity_stop::PLATEAU);
+    db_->update_run_summary ("run_capacity_plateau",
+    vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_capacity_plateau");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("capacity"));
+    const auto& capacity = body["capacity"];
+    EXPECT_EQ (capacity["stopReason"].get<std::string> (), "plateau");
+    EXPECT_EQ (capacity["saturationConcurrency"].get<size_t> (), 8u);
+    EXPECT_DOUBLE_EQ (capacity["saturationRps"].get<double> (), 156.0);
+    EXPECT_DOUBLE_EQ (capacity["saturationP99Ms"].get<double> (), 52.0);
+    EXPECT_EQ (capacity["maxHealthyConcurrency"].get<size_t> (), 12u);
 }
 
 // Per-phase percentiles round-trip from the histogram bank into the report,

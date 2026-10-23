@@ -9380,8 +9380,10 @@ breaching measurement re-measures the same level rather than ending the
 search): `slo_exceeded` when the last one's p99 is over `sloMs`,
 `errors_exceeded` when its p99 is inside `sloMs` and only its error share is
 over the limit. It also stops when two step-ups buy under 5% more throughput
-(`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
-runs out (`deadline`), or when the operator stops the run (`stopped`).
+(`plateau`; the report then names the level where throughput stopped growing as
+`saturation*`, which is lower than `maxHealthy*`, the last level tried), when
+`concurrency` is reached (`cap_reached`), when `duration` runs out
+(`deadline`), or when the operator stops the run (`stopped`).
 
 An **omitted `duration`** on a capacity run defaults to **5 minutes**, not the
 60 seconds every other mode falls back to: this mode walks a level every
@@ -11071,16 +11073,23 @@ event's first byte. A second copy would be a second number to keep true.
 `cap_reached`, `deadline` or `stopped` - see [Capacity semantics](#post-runs).
 `maxErrorPct` is the error-share limit each level was judged against, and
 `errorPct` / `kneeErrorPct` are percentages (0-100) on the same scale, so a
-reader can mark an over-limit level without knowing the constant. The two
-optional halves are **omitted rather than zeroed**, and the distinction carries
+reader can mark an over-limit level without knowing the constant. The optional
+groups are **omitted rather than zeroed**, and the distinction carries
 information:
 
-- `maxHealthy*` is absent when the very first level already breached the budget
-  (on latency or on errors). The search found no sustainable capacity, which is
-  not the same claim as a capacity of zero.
+- `maxHealthy*` is the highest level tried that stayed inside the budget, and
+  is absent when the very first level already breached it (on latency or on
+  errors). The search found no sustainable capacity, which is not the same
+  claim as a capacity of zero. On a `plateau` stop it is the last level tried,
+  which overshoots: read `saturation*` for the plateau.
 - `knee*` is absent unless `stopReason` is `slo_exceeded` or `errors_exceeded`.
   A run that ended at its ceiling, its deadline, or on a plateau inside the
   budget never watched the target give out, so it has no knee to report.
+- `saturation*` (`saturationConcurrency`, `saturationRps`, `saturationP99Ms`) is
+  present only when `stopReason` is `plateau`: the lowest healthy level whose
+  throughput the best healthy level beat by under 5%, i.e. where more
+  concurrency stopped buying work. A run that stopped any other way never
+  observed a plateau and carries none.
 - `maxErrorPct`, `kneeErrorPct` and `levels[].errorPct` are absent from a run
   stored before the search judged errors (#2815): it never measured an error
   share, and a 0 would call every level clean.
