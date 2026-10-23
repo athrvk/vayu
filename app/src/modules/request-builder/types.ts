@@ -588,6 +588,15 @@ export interface RequestBuilderContextValue {
 	legacyPreScript?: string;
 	legacyPostScript?: string;
 
+	/**
+	 * Whether a send of the saved request runs a pre-request script, from the
+	 * engine's `runsPreRequestScript` on the request read (#2741). Previews of
+	 * the URL cannot know what such a script will set, so a surface that states
+	 * one says so. Undefined for a draft with no saved row (a new tab, the
+	 * History run view's detached copy), which reads as no hint.
+	 */
+	runsPreRequestScript?: boolean;
+
 	// UI State
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;

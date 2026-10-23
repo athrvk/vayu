@@ -61,7 +61,8 @@ const PATH_KEY_LOCKED = (_item: KeyValueItem, field: keyof KeyValueItem) => fiel
 const PATH_NOT_REMOVABLE = () => false;
 
 export default function ParamsPanel() {
-	const { request, updateField, resolveString, getAllVariables } = useRequestBuilderContext();
+	const { request, updateField, resolveString, getAllVariables, runsPreRequestScript } =
+		useRequestBuilderContext();
 	const variables = useVariableSupport();
 
 	// Derived, never written by rendering: a `:name` no stored row answers
@@ -225,6 +226,14 @@ export default function ParamsPanel() {
 							{sendsText || <span className="italic">No URL</span>}
 						</span>
 					</div>
+					{/* The line is the URL as the previews resolve it, which cannot
+					    know what a script will set. The flag is the engine's, so a
+					    folder's or collection's script counts too (#2741). */}
+					{runsPreRequestScript && (
+						<p className="text-xs text-muted-foreground">
+							A pre-request script can change this URL before it is sent.
+						</p>
+					)}
 				</>
 			}
 		>

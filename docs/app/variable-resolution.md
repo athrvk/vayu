@@ -363,6 +363,26 @@ by the part of the URL it lands in, and `disableUrlEncoding` leaves it as typed.
 The title then shows only the path, through `pathLabel`, which decodes it, so
 `a%20b` still reads `a b`.
 
+**The Sends line says when a pre-request script can change what it states**
+(#2741). The line is the URL as the stored scopes resolve it, and a script can
+set a variable, or rewrite the URL, after that. When the request runs one the
+line stays and a muted note under it reads "A pre-request script can change this
+URL before it is sent." The answer is the engine's `runsPreRequestScript` on
+`GET /requests/:id` (and the `POST`/`PUT` responses): true when the request, a
+folder above it or its collection carries an enabled, non-blank `script.pre`
+that no `inherit.disable` turns off. It is read from the request the builder
+holds (`RequestBuilderProvider`'s `runsPreRequestScript`, from
+`useRequestQuery`), never re-derived in the renderer and never read from the
+compose cache, which is cold unless the Code section is open. An unsaved draft
+has no row and no flag, so no note. The flag is the saved state: a script
+typed into the request shows the note once the autosave lands, and an edit to a
+folder's or collection's scripts, or a move, invalidates the request details
+(`invalidateRequestDetails`) so the note follows. **The tab title does not
+carry it**: the title is the URL's path only, and only for a request with no
+name of its own, so it never claims the whole sent URL. The flag has no names
+in it, so painting a `{{token}}` by name is not hedged: a token a script sets is
+painted as the stored scopes answer it.
+
 The row crosses that boundary through `bound-row-store.ts`: one slot, holding
 the row the open builder is bound to **and the id of the request it is bound
 for**. One slot rather than a map because the builder binds a row for the
@@ -618,10 +638,11 @@ ordinary request that has nothing left to resolve. A scripted request's header
 text is checked on this pass by the rule composition uses (the next sections),
 before anything is rewritten. The renderer's previews resolve against the stored
 scopes and cannot know what a script will set, so a preview can show a value
-other than the wire's; the Code section, which composes through the engine,
-shows `{{token}}` as written and names those tokens (below). See
-[pm API compatibility](./pm-api-compatibility.md) for what that changes for a
-script.
+other than the wire's; the Params panel's Sends line says so for a request the
+engine reports runs a pre-request script (above, #2741); the Code section, which
+composes through the engine, shows `{{token}}` as written and names those tokens
+(below). See [pm API compatibility](./pm-api-compatibility.md) for what that
+changes for a script.
 
 ### One value composition refuses: a header a variable would forge (#738)
 

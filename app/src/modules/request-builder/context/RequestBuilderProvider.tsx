@@ -134,6 +134,8 @@ interface RequestBuilderProviderProps {
 	 */
 	legacyPreScript?: string;
 	legacyPostScript?: string;
+	/** The saved request's `runsPreRequestScript` - see the context value. */
+	runsPreRequestScript?: boolean;
 	collectionId?: string | null;
 	/**
 	 * Send the request and return the exchange.
@@ -179,6 +181,7 @@ export default function RequestBuilderProvider({
 	inheritedElements,
 	legacyPreScript,
 	legacyPostScript,
+	runsPreRequestScript,
 	collectionId,
 	onExecute,
 	onExecuteStream,
@@ -1251,6 +1254,7 @@ export default function RequestBuilderProvider({
 			inheritedElements,
 			legacyPreScript,
 			legacyPostScript,
+			runsPreRequestScript,
 			activeTab,
 			setActiveTab,
 			isExecuting,
@@ -1294,6 +1298,7 @@ export default function RequestBuilderProvider({
 			inheritedElements,
 			legacyPreScript,
 			legacyPostScript,
+			runsPreRequestScript,
 			activeTab,
 			setActiveTab,
 			isExecuting,

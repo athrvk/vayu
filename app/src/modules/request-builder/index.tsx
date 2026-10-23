@@ -938,6 +938,7 @@ export default function RequestBuilder() {
 		<>
 			<RequestBuilderProvider
 				initialRequest={initialRequest}
+				runsPreRequestScript={fetchedRequest?.runsPreRequestScript}
 				collectionId={fetchedRequest?.collectionId ?? null}
 				onExecute={handleExecute}
 				onExecuteStream={handleExecuteStream}
