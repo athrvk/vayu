@@ -12,7 +12,8 @@
  * Main's half is driven through the module with an in-memory record; the
  * preload's half by running the real preload against a fake `electron` and a
  * fake `localStorage`; and the two together by routing the preload's IPC into
- * the handlers main registers.
+ * the handlers main registers. main.ts itself can only be read, as
+ * `startup-order.test.ts` does.
  *
  * Mutation checks: drop the preload's `getItem(key) !== null` test and the
  * never-overwrite cases go red; move `markDone()` from `taken` into `prepare`
@@ -46,6 +47,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const preloadSource = readFileSync(path.join(here, "preload.ts"), "utf8");
+const mainSource = readFileSync(path.join(here, "main.ts"), "utf8");
 
 /** What a `file:` build left behind, with one key that is not the app's. */
 const OLD_ORIGIN = {
@@ -551,5 +553,61 @@ describe("main and the preload together", () => {
 			"vayu:lastLoadTestConfig": '{"vus":10}',
 		});
 		expect(migration.hasPending()).toBe(false);
+	});
+});
+
+describe("main.ts wiring", () => {
+	it("read the real main.ts", () => {
+		expect(mainSource.length).toBeGreaterThan(1000);
+		expect(mainSource).toContain("app.whenReady().then(");
+	});
+
+	it("reads the old origin before it creates the window, packaged only", () => {
+		const readyAt = mainSource.indexOf("app.whenReady().then(");
+		const prepareAt = mainSource.indexOf(
+			"const legacyStorageRead = isDev ? Promise.resolve() : legacyStorage.prepare();"
+		);
+		const awaitAt = mainSource.indexOf("\n\tawait legacyStorageRead;\n\tcreateWindow();");
+
+		expect(prepareAt).toBeGreaterThan(readyAt);
+		expect(awaitAt).toBeGreaterThan(prepareAt);
+		// The first window is the startup one; the macOS activate rebuild comes later.
+		expect(awaitAt).toBeLessThan(mainSource.indexOf("\n\tcreateWindow();"));
+	});
+
+	it("looks for the old store at module scope, before the profile creates it", () => {
+		// Measured: the directory exists by `whenReady` even on a fresh install,
+		// so a check made there would open the stub on every first launch.
+		const lookAt = mainSource.indexOf(
+			'\nconst hadLocalStorage = existsSync(path.join(app.getPath("userData"), "Local Storage"));'
+		);
+
+		expect(lookAt).toBeGreaterThan(mainSource.indexOf('app.setPath("userData"'));
+		expect(lookAt).toBeLessThan(mainSource.indexOf("app.whenReady().then("));
+		expect(mainSource).toContain("hasLegacyStore: () => hadLocalStorage,");
+	});
+
+	it("registers the channels ahead of the window that sends on them", () => {
+		const setupAt = mainSource.indexOf("\nfunction setupIpcHandlers()");
+		const setupEnd = mainSource.indexOf("\n}\n", setupAt);
+		const setupBody = mainSource.slice(setupAt, setupEnd);
+
+		expect(setupBody).toContain(
+			"registerLegacyStorageIpc(ipcMain, legacyStorage, isAppFrame);"
+		);
+		expect(mainSource.indexOf("\n\tsetupIpcHandlers();")).toBeLessThan(
+			mainSource.indexOf("\n\tcreateWindow();")
+		);
+	});
+
+	it("flags the window only while entries are held", () => {
+		expect(mainSource).toContain(
+			"...(legacyStorage.hasPending() ? [LEGACY_STORAGE_ARG] : []),"
+		);
+	});
+
+	it("reads through a view that is no window, on the stub options", () => {
+		expect(mainSource).toContain("() => new WebContentsView(STUB_VIEW_OPTIONS),");
+		expect(mainSource.split("STUB_VIEW_OPTIONS")).toHaveLength(3);
 	});
 });
