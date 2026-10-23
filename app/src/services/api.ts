@@ -9,7 +9,7 @@
 
 import { httpClient, ApiError, EngineUnreachableError } from "./http-client";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
-import { IMPORT_FETCH_EVENTS } from "@/constants/import";
+import { IMPORT_FETCH_EVENTS, IMPORT_FETCH_STALL_TIMEOUT_MS } from "@/constants/import";
 import type { AllowFolderReply } from "@/types/electron";
 import {
 	RequestTransformer,
@@ -146,8 +146,18 @@ import {
 const APP_ORIGIN: RunOrigin = { kind: "app" };
 
 /**
- * Timeout for engine calls that proxy a remote server (/request,
- * /import/fetch). These block for as long as the target takes, bounded by the
+ * The client's budget for `POST /import/fetch`: the engine's stall bound plus
+ * the grace, not the `defaultTimeout` setting, because the engine does not
+ * bound this route by the setting. A total (the buffered form) or an idle gap
+ * (the streamed form) of this length outlasts the longest silence the engine
+ * allows, so its own error arrives first. A steady download slower than this
+ * still aborts the buffered form client-side while the engine keeps reading.
+ */
+const IMPORT_FETCH_BUDGET_MS = IMPORT_FETCH_STALL_TIMEOUT_MS + PROXIED_TIMEOUT_GRACE_MS;
+
+/**
+ * Timeout for engine calls that proxy a remote server (/execute,
+ * /oauth2/token). These block for as long as the target takes, bounded by the
  * engine's user-configurable `defaultTimeout` setting - so derive the UI
  * timeout from it instead of the flat default, with enough grace that the
  * engine's own TIMEOUT error (proper error code) arrives before the UI aborts.
@@ -1075,7 +1085,7 @@ export const apiService = {
 	 * always been, which is what `ref-bundler` and the spec re-fetch want - they
 	 * have nowhere to draw a bar and no reason to pay for a stream. With it the
 	 * timeout becomes an *idle* one, so an 8 MB document arriving steadily is no
-	 * longer racing `proxiedRequestTimeoutMs`.
+	 * longer racing {@link IMPORT_FETCH_BUDGET_MS}.
 	 * @param options marks the fetch as a `$ref` a document asked for (issue
 	 * #2364), which the engine holds to a stricter rule than a URL a person typed.
 	 * Only `ref-bundler`'s fetches pass it; the body is otherwise exactly
@@ -1096,12 +1106,12 @@ export const apiService = {
 		};
 		if (!onProgress) {
 			return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, body, {
-				timeout: proxiedRequestTimeoutMs(),
+				timeout: IMPORT_FETCH_BUDGET_MS,
 			});
 		}
 
 		for await (const message of httpClient.stream(API_ENDPOINTS.IMPORT_FETCH, body, {
-			idleTimeout: proxiedRequestTimeoutMs(),
+			idleTimeout: IMPORT_FETCH_BUDGET_MS,
 			...(signal ? { signal } : {}),
 		})) {
 			// An engine that has never heard of streaming answered the same request

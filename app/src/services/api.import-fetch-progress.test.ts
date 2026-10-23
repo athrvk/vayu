@@ -24,6 +24,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiService } from "./api";
+import { queryClient } from "@/lib/query-client";
+import { queryKeys } from "@/queries/keys";
 import { httpClient, ApiError } from "./http-client";
 import type { StreamMessage } from "./http-client";
 
@@ -53,6 +55,45 @@ const event = (name: string, data: unknown): StreamMessage => ({
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	queryClient.clear();
+});
+
+describe("apiService.importFetch budget", () => {
+	/** The engine's 30 s stall plus the 10 s grace. */
+	const BUDGET_MS = 40_000;
+
+	// The engine bounds this route by a fixed 30 s stall, never by the setting,
+	// so a short `defaultTimeout` must not shorten the client's budget (it would
+	// abort a download the engine is still reading) nor a long one stretch it.
+	function setDefaultTimeout(value: string) {
+		queryClient.setQueryData(queryKeys.config.all, {
+			entries: [{ key: "defaultTimeout", value }],
+		});
+	}
+
+	it.each(["2500", "300000"])(
+		"arms the stall bound plus grace on the buffered call at defaultTimeout %s",
+		async (setting) => {
+			setDefaultTimeout(setting);
+			post.mockResolvedValue({ content: "{}", contentType: "application/json" });
+
+			await apiService.importFetch("http://x/spec.json");
+
+			expect(post.mock.calls[0][2]).toMatchObject({ timeout: BUDGET_MS });
+		}
+	);
+
+	it.each(["2500", "300000"])(
+		"arms the stall bound plus grace on the stream's idle gap at defaultTimeout %s",
+		async (setting) => {
+			setDefaultTimeout(setting);
+			streaming([event("result", { content: "{}", contentType: "application/json" })]);
+
+			await apiService.importFetch("http://x/spec.json", undefined, () => {});
+
+			expect(stream.mock.calls[0][2]).toMatchObject({ idleTimeout: BUDGET_MS });
+		}
+	);
 });
 
 describe("apiService.importFetch with progress", () => {

@@ -40,3 +40,13 @@ export const IMPORT_FETCH_EVENTS = {
 	RESULT: "result",
 	ERROR: "error",
 } as const;
+
+/**
+ * How long the engine lets `POST /import/fetch` sit below a trickle before it
+ * abandons the download, mirroring `constants::import_fetch::STALL_TIMEOUT_MS`
+ * (`import.engine-parity.test.ts` pins the two). The route is bounded by this
+ * stall, never by the `defaultTimeout` setting, so the renderer's budget for the
+ * call derives from it: a budget derived from the setting aborts a download the
+ * engine is still reading, or a connect the engine is still allowed to wait on.
+ */
+export const IMPORT_FETCH_STALL_TIMEOUT_MS = 30_000;
