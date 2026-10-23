@@ -6997,7 +6997,9 @@ response body and the stored trace both carry an `elements` array beside
 `scripts` - one entry per element that ran, each `{id, kind, origin, outcome,
 message?, waitedMs?}` with `outcome` one of `ok` | `failed` |
 `missing` | `skipped` | `error` (a disabled element reports `skipped` without
-its `apply` ever running) - see [Elements](elements.md#the-step-trace).
+its `apply` ever running; a script element reports `error` with the thrown
+message when its script threw and `failed` with the first failed `pm.test` as
+its message when only assertions did not hold) - see [Elements](elements.md#the-step-trace).
 
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and

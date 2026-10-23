@@ -80,4 +80,19 @@ describe("ElementOutcomes", () => {
 			expect(container.querySelector('[title="boom at the root"]')).not.toBeNull();
 		}
 	);
+
+	// A script whose only problem is a failed pm.test is `failed` with the
+	// first failure as its message, and the row must say which test (issue
+	// #2663); `error` stays for a script that threw.
+	it("prints which assertion a failed script.post element broke", () => {
+		const message = "2 tests failed - status is 201: expected 200 to equal 201";
+		render(
+			<ElementOutcomes
+				outcomes={[row({ kind: "script.post", outcome: "failed", message })]}
+			/>
+		);
+		expect(screen.getByText("script.post")).toBeTruthy();
+		expect(screen.getByText("failed")).toBeTruthy();
+		expect(screen.getByText(message)).toBeTruthy();
+	});
 });
