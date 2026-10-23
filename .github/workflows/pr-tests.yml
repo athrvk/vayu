@@ -379,6 +379,10 @@ jobs:
             build_script:
               - 'build.py'
               - 'scripts/test/vcpkg_baseline_test.py'
+              # The benchmark script's mode names are read out of types.hpp.
+              - 'scripts/test/bench-compare.sh'
+              - 'scripts/test/bench_compare_test.py'
+              - 'engine/include/vayu/types.hpp'
               # The notices generator walks engine/vendor, so a new library
               # (or a removed licence) is what this job exists to catch.
               - 'engine/vendor/**'
@@ -1376,6 +1380,11 @@ jobs:
 
       - name: Test the stale-vcpkg-baseline self-heal
         run: python3 scripts/test/vcpkg_baseline_test.py
+
+      # The script submits a mode the engine parses and holds vegeta at its
+      # headline settings (#2407).
+      - name: Test bench-compare.sh against the engine's load test names
+        run: python3 scripts/test/bench_compare_test.py
 
       # Every engine/vendor directory carries a licence, and the installers'
       # THIRD_PARTY_NOTICES.txt names it (#2693).

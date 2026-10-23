@@ -597,8 +597,8 @@ samples confirm connection reuse is working: the first batch carries a real
 
 Between c=64 and c=128 the app engine sits inside a 0.8% band (51,439 / 51,849 /
 51,743 at c=64 / 96 / 128), and the live-tick rate does not measurably affect
-throughput (`liveTickIntervalMs` 500 vs 1000: 51,518 vs 51,439) - so it can be
-left at 500 ms for a smoother chart.
+throughput (`liveTickIntervalMs` 500 vs 1000: 51,518 vs 51,439, a 0.15%
+difference). The default is 100 ms and was not part of this comparison.
 
 ### The app's memory at idle and in use (2026-09-07, Windows, packaged 0.26.0)
 
@@ -826,7 +826,10 @@ waited out the 2 s token.
 
 These numbers were measured earlier via `scripts/test/bench-compare.sh` on a
 quieter machine. The ceiling agrees with the session above; the **shape of the
-curve does not**, and the discrepancy is not yet explained.
+curve does not**, and the discrepancy is not yet explained. The script then ran
+vegeta at `-rate=0` and submitted Vayu's run as mode `constant`; it now holds
+vegeta at the headline settings and names `constant_concurrency`, so a re-run
+will not reproduce the vegeta column.
 
 ### Throughput vs concurrency (single run each, `/fast`, workers=8)
 
@@ -1071,5 +1074,7 @@ engine/build/vayu-engine --port 9876 --data-dir engine/data
 bash scripts/test/bench-compare.sh            # prints the markdown table
 
 # tunables via env: URL=... DUR=12 CONCS="64 128 256" WORKERS=8
+# CONCS sweeps wrk and Vayu; vegeta always runs at the headline settings
+# (-rate=90000 -max-workers=400).
 ```
 

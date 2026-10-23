@@ -5,6 +5,11 @@
 # with matched concurrency + duration, so the comparison is apples-to-apples.
 # Run the engine daemon and mock-server first. Results print as a markdown table.
 #
+# The concurrency sweep (CONCS) applies to wrk and Vayu only. vegeta is held at
+# its headline settings (-rate=90000 -max-workers=400), the ones
+# docs/engine/benchmarks.md reports, so its column does not vary per row.
+# scripts/test/bench_compare_test.py guards both that and the Vayu mode name.
+#
 #   go run scripts/test/mock-server.go &            # mock on :8080
 #   engine/build/vayu-engine --port 9876 --data-dir engine/data &
 #   bash scripts/test/bench-compare.sh
@@ -24,14 +29,14 @@ setcfg(){ curl -s -X POST "$DAEMON/config" -H 'Content-Type: application/json' \
 
 wrk_rate(){ wrk -t6 -c"$1" -d"${DUR}s" "$URL" 2>/dev/null | awk '/Requests\/sec/{print $2}'; }
 
-veg_rate(){ echo "GET $URL" | vegeta attack -duration="${DUR}s" -rate=0 -max-workers="$1" 2>/dev/null \
+veg_rate(){ echo "GET $URL" | vegeta attack -duration="${DUR}s" -rate=90000 -max-workers=400 2>/dev/null \
   | vegeta report 2>/dev/null | awk '/^Requests/{print $(NF)}'; }   # $(NF)=throughput (req/s over actual time)
 
 # Vayu closed-loop: omit targetRps, set concurrency. Submit via CLI to daemon, read final stats.
 vayu_rate(){
   local cc="$1"
   cat > /tmp/bench_cc.json <<JSON
-{ "method":"GET","url":"$URL","headers":{"Accept":"application/json"},"mode":"constant","duration":"${DUR}s","concurrency":$cc }
+{ "method":"GET","url":"$URL","headers":{"Accept":"application/json"},"mode":"constant_concurrency","duration":"${DUR}s","concurrency":$cc }
 JSON
   local out rid last
   out="$($CLI run /tmp/bench_cc.json 2>&1)"
@@ -55,7 +60,7 @@ echo "| concurrency | wrk (req/s) | vegeta (req/s) | vayu (req/s) | vayu/wrk |"
 echo "|---|---|---|---|---|"
 for c in $CONCS; do
   w="$(wrk_rate "$c")"; sleep "$COOL"
-  v="$(veg_rate "$c")"; sleep "$COOL"
+  v="$(veg_rate)"; sleep "$COOL"
   y="$(vayu_rate "$c")"; sleep "$COOL"
   ratio="$(python3 -c "print(f'{$y/$w*100:.1f}%')" 2>/dev/null || echo '-')"
   printf "| %s | %s | %s | %s | %s |\n" "$c" "$w" "$v" "$y" "$ratio"
