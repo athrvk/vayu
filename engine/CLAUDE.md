@@ -13,7 +13,7 @@ engine/
 ├── src/utils/     # shared primitives (encoding, ascii_case, parse, reentrant)
 ├── include/vayu/  # Public headers
 ├── tests/         # Google Test suite; tests/fixtures/ holds the conformance tables
-└── vendor/        # quickjs-ng, hdrhistogram, and the JS libraries `require()` embeds (uuid, lodash, moment, csv-parse, xml2js, chai, ajv, tv4), accounted for by js-manifest.json
+└── vendor/        # quickjs-ng, hdrhistogram (provenance in vendor/README.md), and the JS libraries `require()` embeds (uuid, lodash, moment, csv-parse, xml2js, chai, ajv, tv4), accounted for by js-manifest.json
 ```
 
 ## Conventions
