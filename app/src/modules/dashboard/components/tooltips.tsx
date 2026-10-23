@@ -39,8 +39,12 @@ export const TOOLTIPS = {
 	sendThroughput: (
 		<>
 			Twin rates from the open-model load generator. <b>Send</b> = requests dispatched onto
-			the wire; <b>Throughput</b> = responses received. A persistent gap means server-side
-			saturation - the request queue (backpressure) grows.
+			the wire; <b>Throughput</b> = responses received. Both figures are averages over the
+			whole run. The chip beside them reads the last second or more instead, and turns red
+			only when responses fall behind sends by at least 1 req/s and 10% of the send rate for 3
+			seconds running. Responses always trail sends by one response time, so it stays grey
+			until a response time has passed. A finished run's chip compares the two averages. A
+			persistent gap means server-side saturation - the request queue (backpressure) grows.
 		</>
 	),
 	sendThroughputDispatched: (
@@ -86,7 +90,7 @@ export const TOOLTIPS = {
 	breakpoint:
 		'The number of virtual users at which p99 latency first crossed the configured SLO threshold (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly. "not crossed" means p99 stayed under the SLO for the whole run, so the ceiling is above the load tested.',
 	p99AtPeak:
-		"Tail latency observed during the held-target portion of the ramp (after the curve flattens). Captures the latency this many virtual users actually produce, not just how it ramped up.",
+		"The worst one-second p99 while the run was at its most virtual users. Unlike the breakpoint, which is read where p99 first crossed the SLO, this is the tail latency the full load produced. Until a second at that peak has a reading, it shows the run's p99 so far.",
 
 	// ---- Chart cards ----
 	throughputOverTime:

@@ -1053,6 +1053,20 @@ constexpr size_t MAX_COLUMN_CHARS = 256;
 } // namespace data_schema
 
 /**
+ * @brief Bounds on a collection's `specFile` / `dataFile` binding (issue
+ * #2765), in UTF-8 bytes. Each sits just above the longest value any of the
+ * three platforms can open, so no real file is refused: a Windows
+ * extended-length path is at most 32,767 UTF-16 units of at most 3 UTF-8
+ * bytes each (98,301; Linux stops at 4,096 and macOS at 1,024), and a file
+ * name at most 255 units or characters (NTFS 765 bytes, APFS 1,020, ext4
+ * 255).
+ */
+namespace file_binding {
+constexpr size_t MAX_PATH_BYTES      = size_t{ 96 } * 1024;
+constexpr size_t MAX_FILE_NAME_BYTES = 1024;
+} // namespace file_binding
+
+/**
  * @brief OpenAPI document bounds (issue #637).
  */
 namespace spec_document {

@@ -118,6 +118,14 @@ export const LATENCY_RECOVERY_FACTOR = 1.5;
 /** Per-tick failures above this share of that tick's completions is a burst. */
 export const ERROR_BURST_RATE = 0.01;
 
+/**
+ * Completions a tick needs before it can start or extend a burst. Below this a
+ * share is arithmetic on a handful of requests: one failure in the last few
+ * requests of a drain is 100%, and a run that is still ending can open a window
+ * out of nothing.
+ */
+export const MIN_BURST_COMPLETIONS = 20;
+
 /** Throughput under this share of its trailing median is a drop. */
 export const THROUGHPUT_DROP_FACTOR = 0.6;
 
@@ -484,64 +492,106 @@ function createSpikeDetector(): RuleDetector {
 /* Error bursts                                                                */
 /* -------------------------------------------------------------------------- */
 
+/** What one tick added to the cumulative counters: its own failures and completions. */
+interface TickCounts {
+	failed: number;
+	completed: number;
+}
+
+/**
+ * Whether a tick can be part of a burst. The floor is on completions: a drain
+ * tail of one to three requests a second all failing is 100% of almost nothing,
+ * and a single failure among a handful is not a rate.
+ */
+function isBurstTick({ failed, completed }: TickCounts): boolean {
+	return completed >= MIN_BURST_COMPLETIONS && failed / completed > ERROR_BURST_RATE;
+}
+
 interface BurstRun extends Run {
-	/** Peak per-tick failure rate over the run. */
+	/** Failures over the run's ticks `[startAbs, endAbs]`. */
+	failed: number;
+	/** Completions over the same ticks; at least {@link MIN_BURST_COMPLETIONS} a tick. */
+	completed: number;
+	/** Highest per-tick failure rate over the run. */
 	peak: number;
 	window: Anomaly | null;
 }
 
 function createBurstDetector(): RuleDetector {
 	/*
-	 * `requests_failed` and `requests_completed` are cumulative counters, so the
-	 * rate that matters is the per-tick delta. Reading them undiffed would report
-	 * a run that failed early and recovered as failing for the rest of its life.
-	 * The delta is a property of a tick and the one before it, so it is cached;
-	 * that the *first* tick in the buffer has no predecessor is a property of the
-	 * buffer, so it is applied on read.
+	 * `requests_failed` and `requests_completed` are cumulative counters, so what
+	 * matters is the per-tick delta. Reading them undiffed would report a run that
+	 * failed early and recovered as failing for the rest of its life. The delta is
+	 * a property of a tick and the one before it, so it is cached - as the pair
+	 * rather than the ratio, because a window's rate is its failures over its
+	 * completions, which no per-tick ratio can be averaged back into. That the
+	 * *first* tick in the buffer has no predecessor is a property of the buffer,
+	 * so it is applied on read.
 	 */
-	const rates = new TickCache<number>();
+	const counts = new TickCache<TickCounts>();
 	const runs: BurstRun[] = [];
 	let clipped = false;
 
-	const rateAt = (abs: number) => rates.at(abs);
+	const rateAt = (abs: number) => {
+		const { failed, completed } = counts.at(abs);
+		return failed / completed;
+	};
 
 	function reseat(run: BurstRun): void {
+		run.failed = 0;
+		run.completed = 0;
 		run.peak = 0;
 		for (let abs = run.startAbs; abs <= run.endAbs; abs++) {
+			const tickCounts = counts.at(abs);
+			run.failed += tickCounts.failed;
+			run.completed += tickCounts.completed;
 			run.peak = Math.max(run.peak, rateAt(abs));
 		}
 		run.window = null;
 	}
 
+	/** The window's own rate leads; the worst tick is shown only when it says more. */
+	function labelOf(run: BurstRun, span: string): string {
+		const rate = formatPercent((run.failed / run.completed) * 100);
+		const worst = formatPercent(run.peak * 100);
+		const secondary = worst === rate ? "" : ` (worst second ${worst}%)`;
+		return `errors ${rate}% of requests over ${span}${secondary}`;
+	}
+
 	return {
 		trim(firstAbs) {
-			rates.dropBefore(firstAbs);
+			counts.dropBefore(firstAbs);
 			// The first tick of the buffer has no predecessor to diff against, so
 			// it is the one position this rule cannot speak for.
 			clipped = clipRunsFront(runs, firstAbs + 1) || clipped;
 		},
 
 		push(history, firstAbs, pos) {
-			if (pos === 0) {
-				rates.push(0);
-			} else {
+			const tickCounts: TickCounts = { failed: 0, completed: 0 };
+			if (pos > 0) {
 				const m = history[pos];
 				const prev = history[pos - 1];
-				const failed = Math.max(0, (m.requests_failed ?? 0) - (prev.requests_failed ?? 0));
-				const completed = Math.max(0, m.requests_completed - prev.requests_completed);
-				rates.push(completed > 0 ? failed / completed : 0);
+				tickCounts.failed = Math.max(
+					0,
+					(m.requests_failed ?? 0) - (prev.requests_failed ?? 0)
+				);
+				tickCounts.completed = Math.max(0, m.requests_completed - prev.requests_completed);
 			}
+			counts.push(tickCounts);
+			if (!isBurstTick(tickCounts)) return;
 
 			const abs = firstAbs + pos;
 			const rate = rateAt(abs);
-			if (rate <= ERROR_BURST_RATE) return;
-
 			const run = extendOrOpen<BurstRun>(runs, abs, () => ({
 				startAbs: abs,
 				endAbs: abs,
+				failed: 0,
+				completed: 0,
 				peak: rate,
 				window: null,
 			}));
+			run.failed += tickCounts.failed;
+			run.completed += tickCounts.completed;
 			run.peak = Math.max(run.peak, rate);
 			run.window = null;
 		},
@@ -554,8 +604,10 @@ function createBurstDetector(): RuleDetector {
 				kind: "error_burst",
 				startSeconds: elapsedAt(history, firstAbs, run.startAbs),
 				endSeconds: elapsedAt(history, firstAbs, run.endAbs),
+				// Ranked by the worst tick, not the window's rate, so the order the cap
+				// triages by is the one a burst's severity always had.
 				magnitude: run.peak / ERROR_BURST_RATE,
-				label: `errors ${formatPercent(run.peak * 100)}% of requests for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
+				label: labelOf(run, spanOf(history, firstAbs, run.startAbs, run.endAbs)),
 			}));
 		},
 	};

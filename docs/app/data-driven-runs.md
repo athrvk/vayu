@@ -108,9 +108,9 @@ picker's preview card, under the file's name, wherever the picker appears: the
 Run collection dialog, the load test dialog and the collection's Data tab. It is
 shown only for a CSV or TSV file. Toggling it re-parses the same file in place -
 the preview, the iteration count and the rows the run sends all follow, and the
-file stays picked. The setting belongs to the collection's remembered file (its
-binding on this machine), so the next Run dialog, load dialog, Send-with-row
-and Data tab read the file the same way. Picking a file starts it off, because
+file stays picked. The setting belongs to the collection's file binding (stored
+on the collection beside the file's path), so the next Run dialog, load dialog,
+Send-with-row and Data tab read the file the same way. Picking a file starts it off, because
 it describes how *that* file is read; Remove (or clearing the contract) forgets
 it with the file. A load test of a request in no collection has no binding, so
 the setting lasts for that run only.
@@ -189,7 +189,7 @@ live values - raise a limit there and the same file is accepted without
 restarting anything. The row limit alone does not bound the payload, since one
 row is free to hold a megabyte in a single cell, which is why there are two.
 
-The caps apply to a file **re-read from a remembered path** exactly as they do
+The caps apply to a file **re-read from its bound path** exactly as they do
 to one picked by hand, and both refusals name the setting. That matters because
 neither side of the comparison holds still: a declared file grows rows after it
 was declared, and the setting itself can be lowered under a file that has not
@@ -400,11 +400,17 @@ The Data tab is the place to do it without starting a run.
 
 What that stores, and what it does not:
 
-|                     | Where it lives                          | Travels with the collection? |
-| ------------------- | --------------------------------------- | ---------------------------- |
-| The **columns**     | On the collection, as `dataSchema`      | Yes - and through import     |
-| The file's **path** | This machine only, in local app storage | No - the app's own MCP server names it to a client on this machine |
-| The file's **rows** | Nowhere                                 | No                           |
+|                     | Where it lives                                        | Travels with the collection? |
+| ------------------- | ----------------------------------------------------- | ---------------------------- |
+| The **columns**     | On the collection, as `dataSchema`                    | Yes - and through import     |
+| The file's **path** | On the collection, as `dataFile` (with its name, the hash of its bytes and how its numbers are read) | Into a workspace backup, yes; through an export or an import, never - and the app's own MCP server names it only to a client on this machine |
+| The file's **rows** | Nowhere                                               | No                           |
+
+The path is the location on the machine that picked the file. A backup restored
+on another machine brings it back as it was written: the Data tab shows it,
+struck through with the reason, until the file is picked again there. A stored
+path is not permission to read it - Vayu opens only a file you picked, dropped or
+opened with the app.
 
 Declaring changes no binding rule - a token still binds from the row the run
 carries. What it buys is everything that needs to know the columns _before_ a
@@ -483,7 +489,7 @@ run:
   `list_collections` (asked for `fields: "full"`) and `vayu://collections`
   carry a declaring collection's `dataSchema` (columns, file name, when it was
   declared), so an agent building the `data` rows for `run_collection` or `start_load_run` knows which columns
-  to supply. Where the app remembers the file, the row also carries
+  to supply. Where the collection is bound to a file, the row also carries
   `dataFile: { path, fileName, hash }`, so an agent on this machine can open the
   file itself, the way you would; `hash` is the SHA-256 of the file's bytes as
   they are on disk when the agent asks (the digest the app last read when the
@@ -504,8 +510,8 @@ A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.
 
 In all three places the two gestures that name a file are the saves:
-**picking** a file declares its columns, and **Remove** clears the contract and
-forgets the remembered path, so removing a file and picking another leaves the
+**picking** a file declares its columns and binds the file, and **Remove** clears
+the contract and the binding, so removing a file and picking another leaves the
 second one's columns declared, not the first's. A file the picker refuses - over
 the row cap, a ragged CSV - changes nothing. A run dialog declares for the
 collection whose contract the run binds against: the nearest declaring
@@ -517,12 +523,12 @@ declare that fails is a warning beside the picker and nothing more: the file
 stays selected, the run still sends its rows, and picking it again retries. On
 the Data tab, the buttons beside the picker cover what a gesture does not: **Re-declare from this file** appears when the re-opened file
 has changed shape on disk (or a save failed and the preview is still there to
-retry from), and **Clear** removes a contract whose remembered file is gone,
+retry from), and **Clear** removes a contract whose bound file is gone,
 where the picker offers no Remove.
 
 Vayu only ever re-opens a file whose extension is one of the formats above, and
-only up to the same `maxScenarioDataBytes` a run may carry - the remembered path
-is not a general licence to read your disk. A re-opened file over
+only up to the same `maxScenarioDataBytes` a run may carry - the bound path is
+not a general licence to read your disk. A re-opened file over
 `maxScenarioDataRows` is refused too, once it has been parsed, so a file that
 outgrew the cap says so here rather than at the next run.
 
@@ -545,7 +551,7 @@ row in it by number; pick one and the request is sent bound to it:
   appears in History like any other design run.
 
 The caret is **absent**, not greyed out, when there is nothing to bind - no
-contract in the collection chain, or no remembered file for the collection that
+contract in the collection chain, or no file bound to the collection that
 declared it. A file that has moved says so when you open the list, and picking
 it again in the Data tab is the fix. So does a file over `maxScenarioDataRows`:
 a single send binds one row, but the file is the collection's data set, and one
@@ -592,7 +598,8 @@ customer records - so neither the app nor the engine keeps the set, and the file
 itself is read fresh every time - whether you pick it or the dialog pre-fills it
 from the declared path. Declaring a contract does not change this: what is saved
 with the collection is the _shape_ of the file - its column names, and its name
-for display - never a cell of it. A run's stored snapshot records the row count
+for display - and where it is (its path, the hash of its bytes and how its
+numbers are read), never a cell of it. A run's stored snapshot records the row count
 plus the file's name and content hash (the SHA-256 of its bytes, so two runs
 can be told apart by the file that drove them) and, when it was on, **Read
 numbers as numbers**, never its path or a row. The

@@ -427,6 +427,21 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   such a completion lands in the top bucket: percentiles and `max` read one hour, and the
   histogram's count is still the number of completions. The mean, a sum rather than a histogram
   read, keeps the true duration, so it can exceed `max`.
+- **Load percentiles and `max` round up, by at most 0.1%** (issue #2791): every latency histogram
+  is kept at `HISTOGRAM_SIGNIFICANT_FIGURES` = 3, so a recorded value shares a bucket with its
+  neighbours, and the library reports a bucket by its **highest** equivalent value
+  (`hdr_value_at_percentile` and `hdr_max` both end in `highest_equivalent_value`,
+  `vendor/hdrhistogram/src/hdr_histogram.c`). A percentile or `max` therefore never reads below
+  the sample it stands for and can read above it by up to one bucket - under 0.1% of the value
+  (the bucket is 512 µs at 1 s, 256 µs at 500 ms). One request of exactly 1000.000 ms reports
+  `max` 1000.447 ms; a p99 of exactly 500 ms reports 500.223 ms. The minimum is the one figure
+  rounded the other way, down to the bucket's lowest value. The rank is
+  `round(p/100 * n)`, at least 1, over the bucket counts. The sequential collection runner does
+  not use the histogram: `percentiles_from_latencies` (`core/scenario_runner.cpp`) sorts the
+  step latencies and reads the exact value at rank `ceil(p/100 * n)`, so its `max` is the true
+  slowest and its percentiles carry no bucket error. The two methods differ in rank as well as
+  in rounding at small `n`: the p95 of 11 samples is rank 10 through the histogram and rank 11
+  in the runner. Compare a collection run with a load run only to that tolerance.
 - **One reader merges the windows**: each window the metrics thread samples is added, before the
   recorder recycles it, into three more histograms only that thread touches, so they take plain
   calls. One is the open second, which `take_second_percentiles()` reads and resets at the 1 Hz
@@ -547,7 +562,10 @@ makes a session survive from one design-mode request to the next.
   plain. The verbose transfer log keeps its redaction (`debug_redact.hpp`): a
   log gets exported and shared, the raw view is read on the machine whose
   Settings already display the same value. A script-written cookie is on that
-  frame too, since it goes out on the same transfer.
+  frame too, since it goes out on the same transfer. A `Cookie` the request
+  types joins that line rather than going out beside it (issue #2788): its rows
+  ride `CURLOPT_COOKIE`, which libcurl writes after the jar's matches on the
+  one line, so a request never carries two `Cookie` headers.
 - **History keeps that frame too, cookies included.** The jar itself is never
   persisted, but a design or scenario run stores the message its transfer sent
   as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the
@@ -1553,11 +1571,19 @@ Restore by hand, with the engine stopped.
    its writes on top of the snapshot.
 4. Start Vayu again.
 
-The tabs and file bindings the app keeps for itself are not in the snapshot.
+The tabs and other state the app keeps for itself are not in the snapshot.
 An in-place restore on the same machine leaves them as they were, and they may
 name rows the snapshot lacks. On a new machine, or after a profile reset, they
 start empty ([below](#what-a-backup-does-not-hold)). The collections, requests
-and environments are all there.
+and environments are all there, and so is each collection's spec-file and
+data-file binding (issue #2765): the Spec and Data tabs show the bound paths as
+they were written. A path names a file on the machine that picked it, so after
+a restore elsewhere the file is usually absent - the tab shows the path struck
+through, with the reason, once it fails to read. The binding is not itself
+permission to read a file: the app opens a path only under a file grant
+(`file_grants`, which the snapshot carries too), so a restored binding opens
+only a file that was picked at that same path, and any other asks to be picked
+again.
 
 **Going back to an older Vayu.** An older engine refuses a workspace a newer
 one migrated. The `vayu-<stamp>-pre-v<N>.db` the update saved is the workspace
@@ -1587,9 +1613,7 @@ the engine never sees, and a restore does not write either:
 
 - **The renderer's `localStorage`** (keys in `app/src/constants/storage-keys.ts`):
   open tabs (`vayu.tabs`), the active environment and collection
-  (`vayu.session`), shell layout (`vayu.layout`), the location of each
-  collection's bound spec document (`vayu.spec-files`) and data file
-  (`vayu.data-files`), the last load-test configuration
+  (`vayu.session`), shell layout (`vayu.layout`), the last load-test configuration
   (`vayu:lastLoadTestConfig`), which inboxes may notify (`vayu.inbox-notify`),
   client settings (`vayu.client-settings`), the host-sleep intervals recorded
   under a run (`vayu.host-sleeps`), the recovery notice already seen
@@ -1603,15 +1627,24 @@ the engine never sees, and a restore does not write either:
   switch).
 
 What that costs depends on where the snapshot is restored. On the same machine
-the app state is untouched: it keeps whatever it held, and a tab or file
-binding may point at a collection the snapshot does not have. On a new machine,
-after a profile reset or after an uninstall with `--purge`, the app state is
-gone: the Spec tab cannot re-read its bound file and the Data tab's file binding
-is gone until each is picked again; saved load-test values, notification
-opt-ins and open tabs are empty; and the MCP allowlist and caps start at their
-locked-down defaults, the safe direction. A spec document's text and a
-collection's binding to it are in the database and survive; only the file
-*location* on a machine does not.
+the app state is untouched: it keeps whatever it held, and a tab may point at a
+collection the snapshot does not have. On a new machine, after a profile reset
+or after an uninstall with `--purge`, the app state is gone: saved load-test
+values, notification opt-ins and open tabs are empty, and the MCP allowlist and
+caps start at their locked-down defaults, the safe direction. A spec document's
+text, a collection's binding to it and the location of each collection's
+picked spec file and data file (`collections.spec_file` / `data_file`, issue
+#2765) are in the database and survive, so the Spec and Data tabs name the same
+files as before; a file that is not at its path on this machine reads as
+unresolved until it is picked again.
+
+Before #2765 the two file bindings were `localStorage` keys
+(`vayu.spec-files`, `vayu.data-files`). The first launch of a release that
+stores them on the row moves each binding onto the collection it named, if the
+engine still lists that collection and it holds no binding yet, and removes the
+key once every move has landed. A binding of a collection that was deleted or
+in the trash at that launch is not moved.
+
 ### Logging
 
 `vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`

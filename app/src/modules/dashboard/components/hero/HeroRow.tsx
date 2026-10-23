@@ -133,11 +133,13 @@ function renderModeCards(d: DashboardDerived) {
 							targetRps={d.targetRps}
 							actualRps={d.actualRps}
 							achievement={d.rateAchievementPct}
+							stoppedAt={d.stoppedAt}
 						/>
 					)}
 					<ThroughputTwinCard
 						sendRate={d.sendRate}
 						throughput={d.throughput}
+						status={d.dispatchStatus}
 						avgQueueWaitMs={d.avgQueueWaitMs}
 					/>
 				</>

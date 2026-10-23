@@ -64,14 +64,14 @@ import {
 	operationKey,
 	type SpecApplySelection,
 } from "@/services/openapi/spec-apply";
-import { refetchSpec } from "@/services/openapi/spec-refetch";
+import { NoSpecSourceError, refetchSpec } from "@/services/openapi/spec-refetch";
 import type { RefReport } from "@/services/importers/ref-bundler";
-import type { SpecFileLocation } from "@/stores";
 import type {
 	Collection,
 	SpecDiffChanged,
 	SpecDiffResponse,
 	SpecField,
+	SpecFileLocation,
 	SpecOperation,
 } from "@/types";
 import { SaveFailed, SectionLabel } from "./shared";
@@ -90,8 +90,17 @@ interface SpecSyncProps {
 	 * that document was fetched from and for nothing else.
 	 */
 	specId: string;
-	/** Where this machine keeps the picked file, when it was this machine that picked it. */
+	/**
+	 * The picked file the binding names (#2765) - which, after a backup is
+	 * restored on another machine, may not exist on this one.
+	 */
 	specFile: SpecFileLocation | undefined;
+	/**
+	 * Told whether a check could read `specFile`, when the check read it (a
+	 * document with a URL is fetched instead). Not told when this build cannot
+	 * read files at all, which says nothing about the file.
+	 */
+	onFileRead?: (readable: boolean) => void;
 }
 
 type CheckState =
@@ -119,7 +128,13 @@ type CheckState =
 	  }
 	| { phase: "applied"; created: number; updated: number; deleted: number };
 
-export default function SpecSync({ collection, collections, specId, specFile }: SpecSyncProps) {
+export default function SpecSync({
+	collection,
+	collections,
+	specId,
+	specFile,
+	onFileRead,
+}: SpecSyncProps) {
 	const { maxBytes } = useSpecDocumentLimit();
 	const [state, setState] = useState<CheckState>({ phase: "idle" });
 	const [confirmingDeletes, setConfirmingDeletes] = useState(false);
@@ -138,6 +153,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 			 * the tab's own card, so this normally costs no request.
 			 */
 			const meta = await readSpecMeta(specId);
+			const readsFile = !meta.sourceUrl && !!specFile;
 
 			const { text, unresolvedRefs, fetched, refused } = await refetchSpec(
 				{
@@ -155,7 +171,11 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 						? { readSpecFile: window.electronAPI.readSpecFile }
 						: {}),
 				}
-			);
+			).catch((e: unknown) => {
+				if (readsFile && !(e instanceof NoSpecSourceError)) onFileRead?.(false);
+				throw e;
+			});
+			if (readsFile) onFileRead?.(true);
 
 			const diff = await diffSpec.mutateAsync({
 				collectionId: collection.id,

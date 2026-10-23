@@ -1,20 +1,19 @@
 /**
  * @file tests/execution_timeout_test.cpp
- * @brief Tests timeout resolution for design-mode POST /request.
+ * @brief Tests the timeout a request or run payload resolves to.
  *
  * Regression: the handler used the compile-time DEFAULT_TIMEOUT_MS (30s)
  * whenever the request body omitted a "timeout" field, ignoring the
- * user-configurable engine `defaultTimeout` setting.
+ * user-configurable engine `defaultTimeout` setting. The setting's key is
+ * pinned by `config_route_test.cpp`, and a load run's use of it by
+ * `run_manager_test.cpp` (#2798).
  */
 
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
 
-namespace vayu::http::routes {
-// Declared in execution.cpp.
-int resolve_request_timeout_ms (const nlohmann::json& json, int configured_default);
-} // namespace vayu::http::routes
+#include "vayu/http/request_exchange.hpp"
 
 namespace {
 
@@ -28,6 +27,11 @@ TEST (ResolveRequestTimeout, ExplicitTimeoutWins) {
 TEST (ResolveRequestTimeout, FallsBackToConfiguredDefaultWhenOmitted) {
     auto json = nlohmann::json::parse (R"({"url":"http://x"})");
     // Must use the configured engine defaultTimeout, NOT the 30s constant.
+    EXPECT_EQ (resolve_request_timeout_ms (json, 120000), 120000);
+}
+
+TEST (ResolveRequestTimeout, NullUsesTheConfiguredDefault) {
+    auto json = nlohmann::json::parse (R"({"timeout":null})");
     EXPECT_EQ (resolve_request_timeout_ms (json, 120000), 120000);
 }
 

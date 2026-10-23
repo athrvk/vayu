@@ -71,9 +71,23 @@ describe("hero cards (characterization)", () => {
 	it("RateFidelityCard", () =>
 		snap(<RateFidelityCard targetRps={100} actualRps={96} achievement={96} />));
 	it("ThroughputTwinCard (no queue chip)", () =>
-		snap(<ThroughputTwinCard sendRate={96} throughput={96} avgQueueWaitMs={0} />));
+		snap(
+			<ThroughputTwinCard
+				sendRate={96}
+				throughput={96}
+				status="kept-pace"
+				avgQueueWaitMs={0}
+			/>
+		));
 	it("ThroughputTwinCard (queue chip)", () =>
-		snap(<ThroughputTwinCard sendRate={120} throughput={80} avgQueueWaitMs={12} />));
+		snap(
+			<ThroughputTwinCard
+				sendRate={120}
+				throughput={80}
+				status="lagging"
+				avgQueueWaitMs={12}
+			/>
+		));
 	it("ErrorRateCard", () =>
 		snap(
 			<ErrorRateCard
@@ -125,7 +139,12 @@ describe("hero throughput reads grouped (Intl), a missing one reads '-'", () => 
 	});
 	it("ThroughputTwinCard, dispatched and received", () => {
 		const out = text(
-			<ThroughputTwinCard sendRate={4500} throughput={3940} avgQueueWaitMs={0} />
+			<ThroughputTwinCard
+				sendRate={4500}
+				throughput={3940}
+				status="lagging"
+				avgQueueWaitMs={0}
+			/>
 		);
 		expect(out).toContain("4,500");
 		expect(out).toContain("3,940");
@@ -182,6 +201,22 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 		},
 	};
 }
+
+describe("HeroRow rate fidelity on a stopped run (#2805)", () => {
+	it("hands the plan share to the Rate fidelity card", () => {
+		const d: DashboardDerived = {
+			...derived("constant_rps"),
+			stoppedAt: { planSharePct: 50, plannedSeconds: 60 },
+		};
+		render(
+			<TooltipProvider>
+				<HeroRow d={d} />
+			</TooltipProvider>
+		);
+
+		expect(screen.getByText("stopped at 50% of the planned 60s")).toBeInTheDocument();
+	});
+});
 
 describe("HeroRow latency card", () => {
 	const renderRow = (mode: DashboardDerived["mode"]) =>

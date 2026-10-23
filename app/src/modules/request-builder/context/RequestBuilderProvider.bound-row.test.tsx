@@ -28,6 +28,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { bindDataFile } from "@/test/file-bindings.testkit";
 
 const globals = { variables: {} as Record<string, unknown> };
 const collections: Array<Record<string, unknown>> = [];
@@ -134,9 +135,7 @@ beforeEach(() => {
 	});
 	session.activeEnvironmentId = "env";
 	useDataFileStore.setState({ locations: {} });
-	useDataFileStore
-		.getState()
-		.setDataFile(COLLECTION_ID, { path: "/data/users.csv", fileName: "users.csv" });
+	bindDataFile(COLLECTION_ID, { path: "/data/users.csv", fileName: "users.csv" });
 	stubReadDataFile();
 });
 

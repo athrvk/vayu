@@ -22,7 +22,8 @@
  * the pairing from the bytes it stores and stamps both halves of it in one
  * transaction, and `spec_bind_route_test.cpp` is where re-binding is pinned
  * now. What is left for the renderer to get wrong is the wiring, and it is
- * exactly what these cases hold: one call, no pairing in it, and both cache
+ * exactly what these cases hold: one call, no pairing in it, the picked file's
+ * location written after it and before the refetch (#2765), and both cache
  * families refreshed however it ended.
  */
 
@@ -65,6 +66,7 @@ const input = (over: Partial<BindSpecInput> = {}): BindSpecInput => ({
 	collectionId: "col_1",
 	content: "openapi: 3.0.0",
 	sourceUrl: null,
+	specFile: { path: "/home/u/petstore.json", fileName: "petstore.json" },
 	...over,
 });
 
@@ -93,7 +95,7 @@ describe("useBindSpecMutation", () => {
 		const { result } = bind();
 
 		const outcome = await result.current.mutateAsync(
-			input({ sourceUrl: "https://example.com/openapi.yaml" })
+			input({ sourceUrl: "https://example.com/openapi.yaml", specFile: null })
 		);
 
 		expect(bindSpec).toHaveBeenCalledTimes(1);
@@ -102,9 +104,10 @@ describe("useBindSpecMutation", () => {
 			spec: { content: "openapi: 3.0.0", sourceUrl: "https://example.com/openapi.yaml" },
 		});
 		// The three writes this replaced. Any of them reappearing here is a bind
-		// that can land in halves again.
+		// that can land in halves again: the one collection update is the file
+		// location (below), never the `openapi` binding.
 		expect(createSpec).not.toHaveBeenCalled();
-		expect(updateCollection).not.toHaveBeenCalled();
+		expect(updateCollection.mock.calls).toEqual([[{ id: "col_1", specFile: null }]]);
 		expect(updateRequest).not.toHaveBeenCalled();
 		expect(outcome.cleared).toBe(1);
 	});
@@ -120,6 +123,46 @@ describe("useBindSpecMutation", () => {
 		const [payload] = bindSpec.mock.calls[0] as [Record<string, unknown>];
 		expect(Object.keys(payload).sort()).toEqual(["collectionId", "spec"]);
 		expect(Object.keys(payload.spec as object)).toEqual(["content"]);
+	});
+
+	/*
+	 * Mutation check: write the location from `onSettled` or the caller's
+	 * `onSuccess` instead - after the refetch has started, where its stale
+	 * answer can land last - and the order assertion fails.
+	 */
+	it("binds the picked file after the document, before anything refetches", async () => {
+		const order: string[] = [];
+		bindSpec.mockImplementation(async () => {
+			order.push("bind");
+			return { specId: "spec_2" };
+		});
+		updateCollection.mockImplementation(async () => {
+			order.push("specFile");
+			return {};
+		});
+		const { result, invalidate } = bind();
+		invalidate.mockImplementation(async () => {
+			order.push("refetch");
+		});
+
+		await result.current.mutateAsync(input());
+
+		expect(updateCollection).toHaveBeenCalledWith({
+			id: "col_1",
+			specFile: { path: "/home/u/petstore.json", fileName: "petstore.json" },
+		});
+		expect(order.slice(0, 3)).toEqual(["bind", "specFile", "refetch"]);
+		// The location and nothing else: no document content rides the row.
+		expect(JSON.stringify(updateCollection.mock.calls)).not.toContain("openapi: 3.0.0");
+	});
+
+	it("writes no file location when the bind itself fails", async () => {
+		bindSpec.mockRejectedValueOnce(new Error("boom"));
+		const { result } = bind();
+
+		await expect(result.current.mutateAsync(input())).rejects.toThrow("boom");
+
+		expect(updateCollection).not.toHaveBeenCalled();
 	});
 
 	it("refreshes the collection and request families however the bind ended", async () => {

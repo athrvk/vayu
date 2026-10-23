@@ -56,6 +56,11 @@ consumes it.
   one memoized `DashboardDerived` bundle (shape in `types.ts`) and passes it to
   `HeroRow` and `ModeStatsRow`, which stay pure presentational components that
   read what they need.
+  A finished report reaches the same bundle through `utils/reportToDerived.ts`,
+  and the Rate fidelity figure means one thing in both: pace over the sending
+  window. A stopped report is therefore judged by `liveRateFidelity` too, with
+  the report's plan share kept apart as `stoppedAt` (#2805); History's
+  Performance tile reads the same `rateAchievementPct`.
 - **An error is counted once, by the engine (#2124).** A response outside
   2xx/3xx, or no response at all; a 3xx is a success. `DashboardDerived`
   carries `failedRequests` and its split `httpErrors` / `noResponse`, read off
@@ -95,6 +100,16 @@ consumes it.
   `iterations`) show three stats: their p99 is in the hero row's
   `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
   the stats row as p99 at peak.
+- **p99 at peak is read at the run's peak load, not at the breakpoint**
+  (#2802). It is the worst whole-second p99 (`secondPercentiles`, the reading
+  `computeBreakpoint` uses) among the ticks whose `current_concurrency` equals
+  the run's peak: `utils/p99AtPeak.ts`. The breakpoint tick is a lighter load
+  than the peak, so reading it understated the stat on any run that crossed the
+  SLO early. The store latches it with `peakConcurrency` (`p99AtPeakMs`),
+  restarting whenever the peak rises, so retention cannot trim it; History
+  derives it over its own series, buckets included. Until a tick at the peak
+  has a whole-second reading the stat shows the run's cumulative p99, as it did
+  before. `Breakpoint.p99Ms` stays the crossing tick's and is not repurposed.
 - **A tick's percentiles mean different things by where it came from** (#2385),
   and `utils/tickPercentiles.ts` is the one place that says which. A stored
   tick's `latency_p*_ms` are its whole second's. A live frame's are only the
@@ -149,6 +164,26 @@ consumes it.
   has the figure, and a tick with no window latency (absent or `null`) adds no
   point to the latency chart. The ETA reads the live `current_rps`, so it
   follows the last second rather than the last 100 ms.
+- **The Send / Throughput chip is judged on the windowed pair, held for a few
+  seconds, and is grey until the run has settled** (#2802).
+  `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is
+  handed. The printed rates stay the run-cumulative `send_rate` and `throughput`,
+  and on any healthy open-model run those part by in-flight / elapsed (500
+  req/s against a 100 ms target is a 25 req/s gap at 2 s and still over 1 req/s
+  at 50 s), so judging the printed pair turned the chip red on a healthy run.
+  Live, the verdict reads the tick's `current_send_rate` against `current_rps`
+  (`DisplayMetrics` carries the former): the gap counts only at 1 req/s **and**
+  10% of the send rate (`LAG_TOLERANCE`), turns `lagging` only once it has stayed
+  open for `LAG_HOLD_SECONDS`, and stays `settling` (muted tokens) until a mean
+  latency, and a first full second, has elapsed, because a completion trails its
+  dispatch by one latency. "Held" is `dispatchLagSinceSeconds` in the dashboard
+  store, folded per tick by `foldLagStreak` in `addMetricsBatch` and cleared by
+  `startRun`; `MetricsView`'s derived memo reads that one number, never the
+  history array. A tick with no `current_send_rate` resets the streak and draws
+  no chip, since the cumulative rate must not stand in for it. History feeds
+  the same function the finished report's cumulative `sendRate` / `throughput`
+  with held and settled true (`reportToDerived`), same tolerance; #2800 changes
+  what that pair is, not the rule.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 
@@ -158,6 +193,15 @@ and the first 5xx - scanned out of the same per-tick series the charts plot
 engine's HTML export draws, #2393), with fixed factors over a trailing median and nothing tunable. Two readings of
 one detection: the charts shade the windows, and the history Overview's
 `RunEvents` card states them in words. Both are absent for a clean run.
+
+An error burst's label states the **window's own rate** - its failures over its
+completions, summed across the window's ticks - with the worst second beside it
+only when that differs: `errors 7.8% of requests over 9.00s (worst second
+10.0%)`. Printing the peak tick as the window's rate overstated a long burst, so
+the peak survives only as the secondary figure and as the `magnitude` the cap
+ranks by. A second needs `MIN_BURST_COMPLETIONS` (20) completions to start or
+extend a burst: one failure among the last few requests of a drain is 100% of
+almost nothing, and it would have opened a window out of a run that was ending.
 
 It has two entry points, and which one a view wants depends on how its series
 arrives:
@@ -211,7 +255,9 @@ the breakpoint and the first 5xx land on the bucket holding them, at most one
 bucket late. The tick counts then count buckets, so the baseline is 15 buckets
 and a window needs 2 hot ones: a slowdown shorter than two buckets goes unnamed
 while the breakpoint still marks it, and an error burst is a share of its
-bucket's completions, diluted by the rest of the bucket. The Performance tab
+bucket's completions, diluted by the rest of the bucket (the completions floor
+is per bucket too, so it only matters on a run quiet enough to complete under
+20 requests a bucket). The Performance tab
 says so in a note above the charts. The scraped server vitals are folded the
 same way when a run scraped more than 2,000 (#2611, each series the bucket's
 max); `joinMonitorToTimeline` needs nothing for it, because its staleness window

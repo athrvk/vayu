@@ -8,95 +8,26 @@
 /**
  * Spec File Store
  *
- * Where a collection's bound OpenAPI document lives on **this machine** - one
- * `{path, fileName}` per collection id, for the specs that were picked as files
- * rather than fetched from a URL (issue #638).
+ * Every collection's picked spec file, keyed by collection id (issue #638) -
+ * a **mirror** of `Collection.specFile` across the collections list, not a
+ * record of its own. The engine row is the record (#2765), so a backup carries
+ * the binding and a trashed collection keeps it; `useFileBindingMirror` copies
+ * the list into this map in the same tick the list's cache is written, and
+ * nothing else writes it. A binding is changed through the collection update
+ * (`specFile` on `PUT /collections/:id`), never here.
  *
- * The same two-halves law `data-file-store` follows, and for the same reason:
- *
- * - **It is not the document.** The spec's bytes are engine state
- *   (`spec_documents.content`, bound by `Collection.openapi.specId`), because
- *   they are the same on every machine and travel through import. A *path* is
- *   true of one filesystem only, so it stays here and never reaches the engine,
- *   an export or MCP.
- * - **It never holds spec content.** Only the path and the file's name are
- *   persisted, and `spec-file-store.test.ts` asserts the persisted payload
- *   against that rule rather than trusting it.
- *
- * A URL-sourced spec has no entry here at all: its origin is
- * `spec_documents.source_url`, which is portable and is what a re-fetch (#627)
- * will use. This store answers the other half of "where did this come from" -
- * the half a URL cannot.
+ * Kept as a store for the readers that hold an id rather than a row. A reader
+ * that holds the `Collection` reads `collection.specFile` directly.
  */
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { STORAGE_KEYS } from "@/constants/storage-keys";
+import type { SpecFileLocation } from "@/types";
 
-/** Where a collection's spec document was last picked from, on this machine. */
-export interface SpecFileLocation {
-	/** Absolute path, obtained from the preload `getFilePath` bridge at pick time. */
-	path: string;
-	/** The file's own name, which is what the Spec tab shows as the source. */
-	fileName: string;
-}
+export type { SpecFileLocation } from "@/types";
 
 interface SpecFileState {
-	/** Keyed by collection id; a collection with no entry has no remembered file. */
-	locations: Record<string, SpecFileLocation>;
-
-	setSpecFile: (collectionId: string, location: SpecFileLocation) => void;
-	clearSpecFile: (collectionId: string) => void;
-}
-
-interface PersistedSpecFiles {
+	/** Keyed by collection id; a collection with no entry has no picked file. */
 	locations: Record<string, SpecFileLocation>;
 }
 
-/**
- * Normalize a persisted payload into locations this app is willing to open.
- *
- * Rebuilt rather than trusted, and wired as **both** `migrate` and `merge`, for
- * the reasons written out in `data-file-store.ts`: `migrate` runs only on a
- * version change, `merge` on every rehydrate, and the same-version payload is
- * the overwhelmingly common case.
- */
-function normalizeSpecFiles(persisted: unknown): PersistedSpecFiles {
-	const stored = (persisted ?? {}) as Partial<PersistedSpecFiles>;
-	const locations: Record<string, SpecFileLocation> = {};
-	if (stored.locations && typeof stored.locations === "object") {
-		for (const [collectionId, value] of Object.entries(stored.locations)) {
-			const entry = value as Partial<SpecFileLocation> | null;
-			if (typeof entry?.path === "string" && typeof entry?.fileName === "string") {
-				locations[collectionId] = { path: entry.path, fileName: entry.fileName };
-			}
-		}
-	}
-	return { locations };
-}
-
-export const useSpecFileStore = create<SpecFileState>()(
-	persist(
-		(set) => ({
-			locations: {},
-			setSpecFile: (collectionId, location) =>
-				set((state) => ({ locations: { ...state.locations, [collectionId]: location } })),
-			clearSpecFile: (collectionId) =>
-				set((state) => {
-					// Rebuilt without the key rather than set to undefined: an
-					// `undefined` value survives `Object.entries` and would be read
-					// back as an entry whose path is not a string.
-					const next = { ...state.locations };
-					delete next[collectionId];
-					return { locations: next };
-				}),
-		}),
-		{
-			name: STORAGE_KEYS.SPEC_FILE_STORE,
-			version: 1,
-			partialize: (state) => ({ locations: state.locations }),
-			migrate: normalizeSpecFiles,
-			merge: (persisted, current) => ({ ...current, ...normalizeSpecFiles(persisted) }),
-		}
-	)
-);
+export const useSpecFileStore = create<SpecFileState>()(() => ({ locations: {} }));

@@ -28,6 +28,7 @@ import type {
 	SpecDiffResponse,
 	SpecDocument,
 	SpecDocumentMeta,
+	SpecFileLocation,
 	SpecOperation,
 	SpecSyncRequest,
 	SpecSyncResponse,
@@ -320,6 +321,11 @@ export interface BindSpecInput {
 	content: string;
 	/** The URL it was fetched from, or `null` for a file or a paste. */
 	sourceUrl?: string | null;
+	/**
+	 * The picked file the document was read from, or `null` for a URL or a
+	 * paste, which also forgets a file bound before (#2765).
+	 */
+	specFile: SpecFileLocation | null;
 }
 
 /**
@@ -342,6 +348,10 @@ export interface BindSpecInput {
  * because a request may have moved in between - what the two share is the rule,
  * not a result carried between them.
  *
+ * The one other write is where the picked file is (`specFile` on the
+ * collection, #2765), made after the bind lands: it binds no document and
+ * stamps no request, so a bind cannot land in halves through it.
+ *
  * Settled rather than success, still: the counts the tab shows are read off the
  * request rows, and a failed bind leaves them where they were - refetching them
  * is how the tab shows that. The request lists go as a family, since a
@@ -351,15 +361,23 @@ export function useBindSpecMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({
+		mutationFn: async ({
 			collectionId,
 			content,
 			sourceUrl,
-		}: BindSpecInput): Promise<SpecBindResponse> =>
-			apiService.bindSpec({
+			specFile,
+		}: BindSpecInput): Promise<SpecBindResponse> => {
+			const bound = await apiService.bindSpec({
 				collectionId,
 				spec: { content, ...(sourceUrl ? { sourceUrl } : {}) },
-			}),
+			});
+			// Where the file is, once the document is bound - a path beside an
+			// unbound collection names a document nothing compares against. Inside
+			// the mutation rather than after it, so the collections refetch below
+			// reads the file binding instead of racing its write.
+			await apiService.updateCollection({ id: collectionId, specFile });
+			return bound;
+		},
 		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			invalidateAllRequestLists(queryClient);

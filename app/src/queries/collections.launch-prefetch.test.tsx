@@ -57,6 +57,7 @@ vi.mock("@/services/api", () => ({
 		getGlobals: vi.fn(async () => ({ id: "globals", variables: {}, updatedAt: "0" })),
 		updateGlobals: vi.fn(async (variables: unknown) => ({ id: "globals", variables })),
 		bindSpec: vi.fn(async () => ({})),
+		updateCollection: vi.fn(async () => collection("c1")),
 		syncSpec: vi.fn(async () => ({})),
 	},
 }));
@@ -289,7 +290,7 @@ describe("a mutation that invalidates every request list", () => {
 		const { result } = renderHook(() => useBindSpecMutation(), { wrapper: wrapper(client) });
 
 		await act(async () => {
-			await result.current.mutateAsync({ collectionId: "c1", content: "{}" });
+			await result.current.mutateAsync({ collectionId: "c1", content: "{}", specFile: null });
 		});
 		await settle(client);
 

@@ -602,7 +602,9 @@ struct Request {
      *
      * Neither half runs: no jar cookie is attached and no `Set-Cookie` is
      * stored. A `Cookie` header the request itself carries still goes out, and
-     * the response still reports what the server set. Read by each driver
+     * the response still reports what the server set. With the jar on, that
+     * typed `Cookie` and the jar's matches go out as one `Cookie` line, the
+     * jar's first (`typed_cookie_value`, issue #2788). Read by each driver
      * where it decides whether a jar rides the transfer - the buffered and
      * streaming design sends and a scenario load run's per-VU session.
      */
@@ -921,6 +923,10 @@ struct Response {
      * @brief Every header line `build_request_header_list` put on the wire, in
      *        order, a repeated name repeated (issue #2466).
      *
+     * A typed `Cookie` row is listed as typed, one entry per row, though
+     * libcurl sends the rows merged with the jar's matches on one line (issue
+     * #2788); that line is `raw_request`'s.
+     *
      * Served as `requestHeaderLines`, and folded to one value per name
      * (`HeaderList::folded`) as `requestHeaders`.
      */
@@ -1001,6 +1007,20 @@ struct Response {
      * naming at all.
      */
     bool http_version_downgraded = false;
+
+    /**
+     * @brief How many times libcurl re-sent this request on a new connection
+     *        after the server dropped or refused a reused one before a
+     *        response byte (#2799). 0 when it did not.
+     *
+     * libcurl replays such a request on its own and says nothing, so without
+     * this a run counts one request and one response while the target saw
+     * two, and the latency covers both attempts. Never an error by itself:
+     * the request was answered (or failed) on its last attempt like any
+     * other. Filled by the event loop (`extract_response`) only; a design
+     * send reads 0.
+     */
+    int connection_replays = 0;
 
     /**
      * @brief Events this transfer delivered, when it was a bounded stream
@@ -1608,6 +1628,15 @@ struct Collection {
     // only the edge, so two collections may bind the same spec and unbinding
     // one leaves the document alone.
     std::string openapi{ "{}" };
+    // JSON - the spec file this collection's Spec tab was picked from (issue
+    // #2765): {"path": "...", "fileName": "..."}. `{}` means none. Stored so a
+    // workspace backup carries it; the path is true of one machine, so a
+    // reader treats it as a location to try, never as a file it may read.
+    std::string spec_file{ "{}" };
+    // JSON - the data file a run of this collection reads its rows from (issue
+    // #2765): {"path", "fileName", "hash"?, "castNumbers"?}. `{}` means none.
+    // The location only, never the rows (see `data_schema`).
+    std::string data_file{ "{}" };
     int order          = 0;
     int64_t created_at = 0;
     int64_t updated_at = 0;

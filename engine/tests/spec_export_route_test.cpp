@@ -900,6 +900,44 @@ TEST_F (SpecExportRouteTest, RefusesRatherThanSubstitutingASkeletonForAMissingDo
     EXPECT_NE (body["error"]["message"].get<std::string> ().find (spec), std::string::npos);
 }
 
+// A collection's spec-file and data-file bindings are paths on one machine
+// (#2765), and an export is a document for elsewhere: neither the skeleton nor
+// a bound export names them, on the root or on a folder. Mutation check: copy
+// `spec_file` into `ExportCollection::data_schema` in `spec_export.cpp` and
+// the path appears.
+TEST_F (SpecExportRouteTest, NamesNoBoundFileInEitherDirection) {
+    const json bindings{ { "specFile",
+                         { { "path", "/home/me/private-dir/pets-local.yaml" },
+                         { "fileName", "pets-local.yaml" } } },
+        { "dataFile",
+        { { "path", "/home/me/private-dir/rows-local.csv" }, { "fileName", "rows-local.csv" } } } };
+    const std::string folder =
+    create_collection (json{ { "name", "Owners" }, { "parentId", root_ } });
+    for (const auto& id : { root_, folder }) {
+        auto [status, body] = routes::update_collection_response (*db_, id, bindings);
+        ASSERT_EQ (status, 200) << body.dump ();
+    }
+    create_request (root_, "GET", "{{baseUrl}}/pets");
+    create_request (folder, "GET", "{{baseUrl}}/owners");
+
+    const auto names_a_file = [] (const json& body) {
+        const std::string text = body.dump ();
+        return text.find ("private-dir") != std::string::npos ||
+        text.find ("pets-local") != std::string::npos ||
+        text.find ("rows-local") != std::string::npos;
+    };
+    const json skeleton = export_collection ();
+    ASSERT_EQ (skeleton["notes"]["direction"], "skeleton");
+    EXPECT_FALSE (names_a_file (skeleton)) << skeleton.dump ();
+
+    bind (root_, store_spec (PETS_DOC));
+    for (const char* mode : { "contract", "full" }) {
+        const json bound =
+        export_ok (json{ { "collectionId", root_ }, { "mode", mode } });
+        EXPECT_FALSE (names_a_file (bound)) << mode << " " << bound.dump ();
+    }
+}
+
 TEST_F (SpecExportRouteTest, LeavesTheCollectionExactlyAsItFoundIt) {
     const std::string spec = store_spec (PETS_DOC);
     bind (root_, spec);

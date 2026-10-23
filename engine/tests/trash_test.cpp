@@ -38,12 +38,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
@@ -490,6 +492,28 @@ TEST_F (TrashTest, RestoreBringsBackTheWholeSubtreeAsItWas) {
     EXPECT_TRUE (db_->get_trash ().empty ());
 }
 
+// The spec-file and data-file bindings ride the row (#2765), so a restore
+// that rewrites nothing but the stamp gives them back unchanged. Mutation
+// check: reset `spec_file` to `{}` on each row `delete_collection` stamps and
+// this fails.
+TEST_F (TrashTest, RestoreBringsBackACollectionsFileBindings) {
+    const json spec_file{ { "path", "/specs/pets.yaml" }, { "fileName", "pets.yaml" } };
+    const json data_file{ { "path", "/data/users.csv" },
+        { "fileName", "users.csv" }, { "castNumbers", true } };
+    auto [status, created] = routes::create_collection_response (*db_,
+    json{ { "name", "API" }, { "specFile", spec_file }, { "dataFile", data_file } });
+    ASSERT_EQ (status, 200) << created.dump ();
+    const std::string id = created["id"];
+
+    db_->delete_collection (id);
+    ASSERT_EQ (routes::trash_restore_response (*db_, id).first, 200);
+
+    const auto restored = db_->get_collection (id);
+    ASSERT_HAS_VALUE (restored);
+    EXPECT_EQ (json::parse (restored->spec_file), spec_file);
+    EXPECT_EQ (json::parse (restored->data_file), data_file);
+}
+
 TEST_F (TrashTest, RestoringACollectionLeavesAnEarlierSeparateDeleteInTheTrash) {
     make_collection ("col_1", "API");
     make_request ("req_1", "col_1");
@@ -632,6 +656,52 @@ TEST_F (TrashTest, PurgeDestroysTheWholeSubtreeIncludingExamples) {
     << "nothing left to restore";
     EXPECT_FALSE (db_->get_request_example ("exa_1").has_value ());
     EXPECT_TRUE (db_->get_request_examples ("req_1").empty ());
+}
+
+/// How many `collections` rows, trashed ones included, mention @p text in
+/// either file binding - read past every filter `Database` applies.
+int64_t rows_binding (const std::string& text) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
+        sqlite3_close (handle);
+        ADD_FAILURE () << "could not open " << TEST_DB_PATH;
+        return -1;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    int64_t count      = -1;
+    if (sqlite3_prepare_v2 (handle,
+        "SELECT COUNT(*) FROM collections WHERE instr(spec_file, ?1) > 0 OR "
+        "instr(data_file, ?1) > 0",
+        -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text (stmt, 1, text.c_str (), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step (stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int64 (stmt, 0);
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return count;
+}
+
+// A purge takes the row and the bindings on it (#2765): nothing is left that
+// names the files. Mutation check: skip the collection rows in
+// `purge_collection_locked` and the counts stay at one.
+TEST_F (TrashTest, PurgeLeavesNoFileBindingBehind) {
+    make_collection ("col_1", "API");
+    auto [status, body] = routes::update_collection_response (*db_, "col_1",
+    json{ { "specFile", { { "path", "/specs/pets.yaml" }, { "fileName", "pets.yaml" } } },
+    { "dataFile", { { "path", "/data/users.csv" }, { "fileName", "users.csv" } } } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    db_->delete_collection ("col_1");
+    ASSERT_EQ (rows_binding ("pets.yaml"), 1)
+    << "the trashed row still holds it";
+    ASSERT_EQ (rows_binding ("users.csv"), 1)
+    << "the trashed row still holds it";
+
+    ASSERT_HAS_VALUE (db_->purge_deleted ("col_1"));
+
+    EXPECT_EQ (rows_binding ("pets.yaml"), 0);
+    EXPECT_EQ (rows_binding ("users.csv"), 0);
 }
 
 TEST_F (TrashTest, PurgeTakesARowAnEarlierDeleteLeftUnderTheSubtree) {

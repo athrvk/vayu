@@ -15,6 +15,7 @@ import type { RunOutcome } from "@/components/shared/run-outcome";
 import type { LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
+import type { DispatchStatus } from "./utils/dispatchLag";
 
 // ============================================================================
 // Dashboard State Types
@@ -101,6 +102,14 @@ export interface MetricsViewProps {
 	};
 }
 
+/** Where a Stop ended a run against its plan; the card states it beside a pace-judged figure (#2805). */
+export interface StoppedAt {
+	/** Percent of the planned requests the run reached: the report's `rateControl.achievement`. */
+	planSharePct: number;
+	/** The configured duration, seconds. */
+	plannedSeconds: number;
+}
+
 /**
  * Single derived-metrics bundle the orchestrator computes once (memoized) and
  * passes to the mode-adaptive HeroRow and ModeStatsRow. Centralizing derivation
@@ -117,8 +126,16 @@ export interface DashboardDerived {
 	actualRps?: number;
 	/** Percent of the requests owed over that window that were sent; the Rate fidelity card's value. */
 	rateAchievementPct?: number;
+	/** Only on a stopped report judged by pace; absent live and when the plan is unknown. */
+	stoppedAt?: StoppedAt;
 	sendRate?: number;
 	throughput?: number;
+	/**
+	 * Verdict of the Send / Throughput chip, judged by `utils/dispatchLag.ts` on
+	 * the pair its producer chooses (the live windowed rates; a finished run's
+	 * cumulative ones). Absent where either rate is unknown: no chip.
+	 */
+	dispatchStatus?: DispatchStatus;
 	currentRps: number;
 	avgQueueWaitMs: number;
 	// Counts
@@ -155,6 +172,12 @@ export interface DashboardDerived {
 	startConcurrency?: number;
 	targetConcurrency?: number;
 	breakpoint: Breakpoint;
+	/**
+	 * Worst whole-second p99 (ms) among the ticks at the run's peak load; absent
+	 * where no per-tick series reached the peak, and the stat falls back to
+	 * `p99Latency`.
+	 */
+	p99AtPeakMs?: number;
 }
 
 // ============================================================================
@@ -170,6 +193,8 @@ export interface DisplayMetrics {
 	// The latest tick's status map.
 	status_codes?: Record<string, number>;
 	current_rps: number;
+	// Dispatches per second over the same trailing window as `current_rps`.
+	current_send_rate?: number;
 	latency_p50_ms?: number | null;
 	latency_p95_ms?: number | null;
 	latency_p99_ms?: number | null;

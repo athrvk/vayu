@@ -119,12 +119,21 @@ jobs:
             brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
           done
 
+      # vcpkg's archives fit only the toolchain that built them; the key
+      # carries it so a new runner image starts a fresh entry instead of
+      # restoring retired archives forever (scripts/vcpkg-toolchain-id.sh).
+      - name: Identify the vcpkg toolchain
+        id: vcpkg-toolchain
+        shell: bash
+        run: echo "id=$(bash scripts/vcpkg-toolchain-id.sh)" >> "$GITHUB_OUTPUT"
+
       - name: Cache vcpkg compiled packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
           restore-keys: |
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
             vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
             vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
 

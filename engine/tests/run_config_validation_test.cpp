@@ -49,6 +49,7 @@
 #include <httplib.h>
 
 #include "echo_server.hpp"
+#include "mock_server.hpp"
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
@@ -62,6 +63,7 @@
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/types.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::http::routes {
 // Declared here rather than in routes.hpp, matching apply_config_update in
@@ -1146,6 +1148,49 @@ TEST_F (RunConfigValidationRouteTest, AnExecuteTimeoutInRangeSends) {
     const json payload{ { "method", "GET" }, { "url", echo.url () }, { "timeout", 5000 } };
     const auto [status, body] = post ("/execute", payload);
     EXPECT_EQ (status, 200) << body.dump ();
+}
+
+// `null` is "use the `defaultTimeout` setting" on a send as on a run (#2798).
+// Mutation check: read `timeout` in `read_request_options` without its
+// `is_null` guard and this answers 400 "type must be number, but is null".
+TEST_F (RunConfigValidationRouteTest, ANullExecuteTimeoutSends) {
+    const vayu::tests::EchoServer echo;
+    const json payload{ { "method", "GET" }, { "url", echo.url () }, { "timeout", nullptr } };
+    const auto [status, body] = post ("/execute", payload);
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (echo.method (), "GET") << "the request was not sent";
+}
+
+// A load run whose `timeout` is `null` sends with the `defaultTimeout` setting
+// (#2798), and the snapshot keeps the run's own config: the resolved value is
+// not written into it, so a replay takes the setting in force then. `/hang`
+// never answers, so at the setting's floor (1000) the run ends in about a
+// second. Mutation check: put `config.value ("timeout", 30000)` back in
+// execute_load_test and the run outlives the wait.
+TEST_F (RunConfigValidationRouteTest, ANullLoadRunTimeoutUsesTheDefaultTimeoutSetting) {
+    const vayu::tests::SlowMockServer target;
+    auto setting = db_->get_config_entry ("defaultTimeout");
+    ASSERT_HAS_VALUE (setting);
+    setting->value = "1000";
+    db_->save_config_entry (*setting);
+
+    const json payload{ { "method", "GET" }, { "url", target.hang_url () },
+        { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 2 },
+        { "timeout", nullptr } };
+    const auto [status, body] = post_run (payload);
+    ASSERT_EQ (status, 202) << body.dump ();
+    const std::string run_id = body.value ("runId", std::string ());
+
+    // Its worker's last act is letting go of the run, after the summary.
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return run_manager_.get_run (run_id) == nullptr; }))
+    << "the run never finished";
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (json::parse (run->summary)["error_types"], (json{ { "timeout", 2 } }))
+    << run->summary;
+    EXPECT_FALSE (json::parse (run->config_snapshot).contains ("timeout"))
+    << run->config_snapshot;
 }
 
 // A header name that is not a token is a `400` naming the rule's code, before any

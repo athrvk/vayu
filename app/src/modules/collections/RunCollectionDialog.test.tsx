@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
 import {
 	useClientSettingsStore,
@@ -80,16 +80,27 @@ const updateCollection = {
 	isError: false,
 	error: null as Error | null,
 };
+/** How the bound file is read: a write of its own, built when it is sent. */
+const readingUpdate = {
+	mutate: vi.fn(),
+	isPending: false,
+	isError: false,
+	error: null as Error | null,
+};
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => updateCollection,
+	useDataFileReadingMutation: () => readingUpdate,
 }));
 
-/** Land the last contract write the way TanStack would, running its onSuccess. */
-function succeedContractWrite() {
-	const calls = updateCollection.mutate.mock.calls;
-	const [, options] = calls[calls.length - 1];
-	act(() => options?.onSuccess?.({}));
-}
+/**
+ * The hash a re-read records against the bound path (#2051). Which bindings
+ * that writes is `file-bindings.test.ts`'s; here it only has to be asked.
+ */
+const recordDataFileHash = vi.fn();
+vi.mock("@/queries/file-bindings", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries/file-bindings")>()),
+	recordDataFileHash: (...args: unknown[]) => recordDataFileHash(...args),
+}));
 
 const startMonitoring = vi.fn();
 const startLoadMonitoring = vi.fn();
@@ -117,6 +128,7 @@ beforeEach(() => {
 	requestsByCollection.clear();
 	mutate.mockClear();
 	updateCollection.mutate.mockReset();
+	readingUpdate.mutate.mockReset();
 	updateCollection.isPending = false;
 	updateCollection.isError = false;
 	updateCollection.error = null;
@@ -1131,9 +1143,9 @@ describe("pre-filling from the declared data file", () => {
 	});
 
 	it("re-reads the remembered file and sends its rows", async () => {
-		// Stored with no hash, read back with one: the read records the hash,
-		// which replaces the stored location while the read is still in flight
-		// (#2051). The pre-fill must land anyway.
+		// Stored with no hash, read back with one: the read records the hash
+		// (#2051), which `useDeclaredDataFile.test.tsx` holds the pre-fill
+		// steady across.
 		remember("/home/u/users.csv", "users.csv");
 		stubReadDataFile(async () => ({
 			bytes: bytesOf("user,id\nada,1\ngrace,2"),
@@ -1153,9 +1165,9 @@ describe("pre-filling from the declared data file", () => {
 			{ user: "ada", id: "1" },
 			{ user: "grace", id: "2" },
 		]);
-		expect(useDataFileStore.getState().locations.col_1?.hash).toBe("a".repeat(64));
+		expect(recordDataFileHash).toHaveBeenCalledWith("/home/u/users.csv", "a".repeat(64));
 		// A read of what was declared, not a pick: reopening the dialog writes
-		// nothing (issue #2050).
+		// no contract (issue #2050).
 		expect(updateCollection.mutate).not.toHaveBeenCalled();
 	});
 
@@ -1189,8 +1201,10 @@ describe("pre-filling from the declared data file", () => {
 
 		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada", id: 1 }]);
 		// Mutation check: drop `writer.rememberReading` and the next pre-fill
-		// reads the file as text again.
-		expect(useDataFileStore.getState().locations.col_1?.castNumbers).toBe(true);
+		// reads the file as text again. The reading alone, no contract write.
+		expect(readingUpdate.mutate.mock.calls).toEqual([
+			[{ id: "col_1", path: "/home/u/users.csv", castNumbers: true }],
+		]);
 		expect(updateCollection.mutate).not.toHaveBeenCalled();
 		// Not a pick: the pre-fill's one-pass-per-row stands.
 		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty("value", "");
@@ -1442,19 +1456,15 @@ describe("a pick declares the contract", () => {
 		await pickFile("plans.csv", "plan,price\nfree,0");
 
 		// Mutation check: drop `writer.declare(next)` from the handler and this reds.
-		expect(updateCollection.mutate).toHaveBeenCalledWith(
-			{
-				id: "col_1",
-				dataSchema: {
-					columns: ["plan", "price"],
-					fileName: "plans.csv",
-					declaredAt: expect.any(Number),
-				},
+		expect(updateCollection.mutate).toHaveBeenCalledWith({
+			id: "col_1",
+			dataSchema: {
+				columns: ["plan", "price"],
+				fileName: "plans.csv",
+				declaredAt: expect.any(Number),
 			},
-			expect.anything()
-		);
-		succeedContractWrite();
-		expect(useDataFileStore.getState().locations.col_1?.path).toBe("/home/u/plans.csv");
+			dataFile: expect.objectContaining({ path: "/home/u/plans.csv" }),
+		});
 	});
 
 	it("declares for the ancestor that holds the contract", async () => {
@@ -1472,8 +1482,7 @@ describe("a pick declares the contract", () => {
 		// Mutation check: declare against `collection.id` instead of
 		// `declaringCollectionId` and this reds.
 		expect(updateCollection.mutate).toHaveBeenCalledWith(
-			expect.objectContaining({ id: "col_p" }),
-			expect.anything()
+			expect.objectContaining({ id: "col_p" })
 		);
 	});
 
@@ -1499,12 +1508,11 @@ describe("a pick declares the contract", () => {
 		fireEvent.click(screen.getByRole("button", { name: /remove/i }));
 
 		// Mutation check: drop `onRemove={writer.clear}` and this reds.
-		expect(updateCollection.mutate).toHaveBeenCalledWith(
-			{ id: "col_1", dataSchema: null },
-			expect.anything()
-		);
-		succeedContractWrite();
-		expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
+		expect(updateCollection.mutate).toHaveBeenCalledWith({
+			id: "col_1",
+			dataSchema: null,
+			dataFile: null,
+		});
 		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty(
 			"value",
 			"1"

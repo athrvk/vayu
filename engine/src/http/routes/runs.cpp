@@ -353,6 +353,11 @@ struct ReportExtras {
     // whether the protocol the report is labelled with is the one the numbers
     // were measured over (issue #215).
     double http_version_downgraded = 0.0;
+    // Requests libcurl re-sent on a new connection after a reused one was
+    // dropped or refused (#2799). Empty for a summary stored before the key
+    // existed, which leaves `summary.connectionReplays` out rather than
+    // claiming an older engine looked and saw none.
+    std::optional<size_t> connection_replays;
     // Requests a user Stop cancelled (#2136): sent, never answered, and in
     // neither `totalRequests` nor any error count. Only the stored summary
     // knows it - the status distribution never held them - so a run stored
@@ -572,6 +577,10 @@ ReportExtras& extras) {
     read_number (summary, "bytes_sent", extras.bytes_sent);
     read_number (summary, "bytes_received", extras.bytes_received);
     read_number (summary, "http_version_downgraded", extras.http_version_downgraded);
+    if (summary.contains ("connection_replays") &&
+    summary["connection_replays"].is_number ()) {
+        extras.connection_replays = summary["connection_replays"].get<size_t> ();
+    }
     // Written together since #2392, so one key stands for the three.
     if (summary.contains ("sending_duration") && summary["sending_duration"].is_number ()) {
         SendingTotals sending;
@@ -1601,6 +1610,9 @@ double target_rps) {
     if (const auto& sending = extras.sending) {
         json_report["summary"]["sendingDurationSeconds"] = sending->sending_duration_s;
     }
+    if (const auto& replays = extras.connection_replays) {
+        json_report["summary"]["connectionReplays"] = *replays;
+    }
     if (extras.latency_measured) {
         json_report["latency"] = { { "min", report.latency_min },
             { "max", report.latency_max }, { "avg", report.latency_avg },
@@ -1779,6 +1791,7 @@ ReportExtras& extras) {
     extras.bytes_received = static_cast<double> (collector.total_bytes_received ());
     extras.http_version_downgraded =
     static_cast<double> (collector.http_version_downgraded ());
+    extras.connection_replays = collector.connection_replays ();
 }
 
 /**

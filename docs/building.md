@@ -407,9 +407,10 @@ The project uses GitHub Actions for automated builds:
     (v0.10.0) over every tracked shell script and ruff (0.15.8) over every
     tracked `.py`, both file lists taken from `git ls-files` so a script added
     later cannot escape them
-  - The frontend suite runs as two vitest shards on two runners per platform;
-    the `CI gate` job proves each platform's pair covered every test file
-    between them
+  - The frontend suite runs as vitest shards on separate runners: two on
+    ubuntu and macOS, three on Windows, the slowest leg. The `CI gate` job
+    proves each platform's shards covered every test file between them, none
+    twice
 
 - **Release Build**: `.github/workflows/release.yml`
   - Triggers on version tags (`v*`)

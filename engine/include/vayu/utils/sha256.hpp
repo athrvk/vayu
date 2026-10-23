@@ -22,7 +22,9 @@
 
 #include <sodium.h>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -62,6 +64,19 @@ inline std::array<uint8_t, 32> hmac_sha256 (std::string_view key, std::string_vi
     std::array<uint8_t, 32> out{};
     crypto_auth_hmacsha256_final (&state, out.data ());
     return out;
+}
+
+/**
+ * @brief Whether @p text is a SHA-256 digest as 64 lowercase hex characters,
+ * the one spelling `hex_encode` writes, so two digests of one file compare as
+ * strings. Read where a client hands a digest back: a run's `dataFileHash`
+ * and a collection's `dataFile.hash`.
+ */
+constexpr bool is_sha256_hex (std::string_view text) {
+    constexpr size_t SHA256_HEX_LENGTH = 64;
+    return text.size () == SHA256_HEX_LENGTH &&
+    std::ranges::all_of (text,
+    [] (char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
 
 /**

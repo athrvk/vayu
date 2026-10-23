@@ -164,6 +164,7 @@ add_executable(vayu_tests
     id_test.cpp
     curl_utils_test.cpp
     curl_transfer_test.cpp
+    connection_replay_test.cpp
     dns_cache_test.cpp
     http_version_support_test.cpp
     http_version_test.cpp
@@ -391,6 +392,7 @@ set(vayu_scratch_database_suites
     ScriptConfigDbTest
     ScriptConfigExecuteTest
     ConfigSnapshotExecuteTest
+    ConnectionReplayRunTest
     ExecuteAuthProvenanceTest
     ExecuteBinaryBodyTest
     ExecuteTransportFailureTest

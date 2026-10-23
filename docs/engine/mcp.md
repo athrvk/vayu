@@ -200,7 +200,7 @@ the clients in the ✅ row, so no client waits for a notice that never comes. Se
 
 The other way round, a collection's remembered data-file path (`dataFile`) is
 answered on **HTTP only**: the stdio CLI runs without the app, whose renderer
-holds that record. See [Data files](#data-files). `get_app_focus` is the same
+publishes it to the HTTP server. See [Data files](#data-files). `get_app_focus` is the same
 shape: the open tab and environment are renderer state, so it answers an error
 saying the window is not connected on stdio.
 
@@ -1524,8 +1524,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
 - **Headers as lines** (issue #2466) - `headers` on `run_request`,
   `start_load_run` and `get_graphql_schema` is an array of `{name, value}`
   lines or a string map. Each line is sent as its own header line, in the order
-  given and in the spelling written, so `Link`, `Forwarded`, two `Cookie` lines
-  or `X-Dup` beside `x-dup` are repeated rather than collapsed; a map holds one
+  given and in the spelling written, so `Link`, `Forwarded` or `X-Dup` beside
+  `x-dup` are repeated rather than collapsed (`Cookie` rows are the exception:
+  they go out as one `; `-joined line with the jar's cookies, issue #2788); a
+  map holds one
   value per name and cannot repeat one. Both go to `POST /compose` as given, which
   answers lines either way, and a line that is not an object with a string
   `name` is refused by its position. The same payload that composes is the one
@@ -1539,7 +1541,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   [default headers](api-reference.md#default-request-headers) a send adds - a
   default `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id
   where one is switched on - and
-  the `Cookie` line the jar matched for the environment. A header the call
+  the `Cookie` line the jar matched for the environment (merged with any
+  `Cookie` the call typed). A header the call
   wrote itself always wins over the default of that name, and
   `disabledDefaultHeaders` on the payload refuses one outright.
   `run_request` and `start_load_run` take that list as an argument
@@ -1963,8 +1966,9 @@ A collection's declared data file reaches MCP in two parts (issue #1742).
 `dataSchema` is the contract - column names, the file's name, when it was
 declared - and is the same on every machine, so it rides the engine row.
 `dataFile: { path, fileName, hash }` is where that file is **on this machine**,
-and comes from the app's renderer (`stores/data-file-store.ts`), which publishes
-its whole map to the main process over `dataFile:locations`
+and comes from the app's renderer (`stores/data-file-store.ts`, its mirror of
+the collections list's bindings), which publishes its whole map to the main
+process over `dataFile:locations`
 (`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
 keeping only an absolute path with an extension `dataFile:read` would open).
 `hash` (issue #2051) is the SHA-256 of the file's bytes, as 64 lowercase hex.
@@ -1990,8 +1994,11 @@ It is absent otherwise, which means every cell is a string. An agent building
 `data` rows from the file reads it the same way, so its rows match the ones the
 app would send, and says so with `dataFileCastNumbers: true` on the run.
 
-A path is true of one filesystem only, which is why it never reaches the engine
-or an export. It may reach MCP because the Electron-hosted server listens on
+A path is true of one filesystem only, which is why it never reaches an export.
+The engine stores each collection's `specFile` and `dataFile` binding on its row
+(issue #2765) so a workspace backup carries them, but MCP drops both from every
+collection row it answers (`move_item`'s renumbered rows included) and names
+`dataFile` from the app's record alone, as above. A path may reach MCP because the Electron-hosted server listens on
 loopback (`MCP_HOST`): every client that can read the answer runs on the machine
 the path names, and can open the file with its own access, the way a person
 would. The stdio CLI runs without the app, so it has no record and never names
@@ -2710,7 +2717,7 @@ And two run renderer → main for MCP's sake:
 
 | Channel              | Purpose                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
-| `dataFile:locations` | The whole map of remembered data-file paths, on launch and on every change (see below). |
+| `dataFile:locations` | The whole map of bound data-file paths, on launch and on every change (see below). |
 | `app:focus`          | The open tab (type, entity id, label) and active environment (id, name), whole, on launch and on every change; `get_app_focus` reads the copy `electron/app-focus.ts` rebuilds field by field. |
 
 **The UI reflects MCP writes live.** An MCP call mutates the engine from the

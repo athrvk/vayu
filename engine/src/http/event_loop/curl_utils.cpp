@@ -482,7 +482,66 @@ bool lists_expect) {
     return !policy.expect_continue || suppresses_default_header (request, "Expect");
 }
 
+/// Append the removal lines that keep libcurl from adding a header of its own.
+/// `Name:` with nothing after the colon is libcurl's spelling of "remove the
+/// line", so each is appended directly - `append` drops a value-less header -
+/// and none is recorded as sent. @p lists_content_type and @p lists_expect say
+/// whether the list already names that header.
+curl_slist* append_removal_lines (curl_slist* list,
+const Request& request,
+const DefaultHeaderPolicy& policy,
+bool lists_content_type,
+bool lists_expect) {
+    if (!lists_content_type && libcurl_defaults_content_type (request)) {
+        // Nothing declared a type: a refused one (issue #1765, Postman's
+        // `disabledSystemHeaders`), a typed row left blank, a bodyless POST.
+        // The engine never leaves libcurl that gap to fill with its form type
+        // (#2464).
+        list = curl_slist_append (list, "Content-Type:");
+    }
+    // libcurl adds `Accept: */*` to every request that names no Accept. A
+    // request that refuses it (issue #1765) gets the removal line instead.
+    if (!request.headers.contains ("Accept") && suppresses_default_header (request, "Accept")) {
+        list = curl_slist_append (list, "Accept:");
+    }
+    if (removes_libcurl_expect (request, policy, lists_expect)) {
+        list = curl_slist_append (list, "Expect:");
+    }
+    return list;
+}
+
+bool is_cookie_header (std::string_view name) {
+    return vayu::utils::ascii_lower_equal (name, "Cookie");
+}
+
+// RFC 9110 section 5.5: the optional whitespace around a field value, space and
+// tab, is not part of it.
+std::string_view trim_optional_whitespace (std::string_view value) {
+    constexpr std::string_view OWS = " \t";
+    const auto first               = value.find_first_not_of (OWS);
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return value.substr (first, value.find_last_not_of (OWS) - first + 1);
+}
+
 } // namespace
+
+std::string typed_cookie_value (const Request& request) {
+    std::string joined;
+    for (const auto& [key, value] : request.headers) {
+        if (!is_cookie_header (key) || !header_value_reaches_wire (value)) {
+            continue;
+        }
+        if (!joined.empty ()) {
+            joined += "; ";
+        }
+        // Trimmed because a row's edge whitespace would otherwise land inside
+        // the joined line, between two cookie-pairs.
+        joined += trim_optional_whitespace (value);
+    }
+    return joined;
+}
 
 curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
@@ -525,6 +584,16 @@ HeaderList* sent) {
             // multipart Content-Type, boundary and all.
             continue;
         }
+        if (is_cookie_header (key)) {
+            // Recorded, not appended: the typed rows ride `CURLOPT_COOKIE`
+            // (see apply_default_header_options), which libcurl ignores while
+            // the list names a Cookie, so a listed row would send a second
+            // line beside the jar's (#2788).
+            if (header_value_reaches_wire (value)) {
+                record (key, value);
+            }
+            continue;
+        }
         if (!append (key, value)) {
             continue;
         }
@@ -540,15 +609,6 @@ HeaderList* sent) {
     append ("Content-Type", body_content_type_value (request))) {
         lists_content_type = true;
     }
-    if (!lists_content_type && libcurl_defaults_content_type (request)) {
-        // Nothing declared a type: a refused one (issue #1765, Postman's
-        // `disabledSystemHeaders`), a typed row left blank, a bodyless POST.
-        // The engine never leaves libcurl that gap to fill with its form type
-        // (#2464). `Content-Type:` with nothing after it is libcurl's spelling
-        // of "remove the line", so it is appended directly - `append` drops a
-        // value-less header - and not recorded as sent.
-        list = curl_slist_append (list, "Content-Type:");
-    }
 
     if (adds_default ("User-Agent")) {
         append ("User-Agent", policy.user_agent);
@@ -561,17 +621,7 @@ HeaderList* sent) {
         append (policy.correlation_header, vayu::utils::generate_id (""));
     }
 
-    // libcurl adds `Accept: */*` to every request that names no Accept. A
-    // request that refuses it (issue #1765) gets libcurl's removal line
-    // instead, appended directly for the reason the Content-Type one is.
-    if (!request.headers.contains ("Accept") && suppresses_default_header (request, "Accept")) {
-        list = curl_slist_append (list, "Accept:");
-    }
-
-    // Appended directly and unrecorded, like the other removal lines above.
-    if (removes_libcurl_expect (request, policy, lists_expect)) {
-        list = curl_slist_append (list, "Expect:");
-    }
+    list = append_removal_lines (list, request, policy, lists_content_type, lists_expect);
 
     if (negotiates_compression (request, policy)) {
         // Recorded, not appended: libcurl writes this line itself from
@@ -593,22 +643,12 @@ const DefaultHeaderPolicy& policy) {
     // option alone would carry the previous transfer's negotiation into one
     // that refused it.
     set_opt<CURLOPT_ACCEPT_ENCODING> (curl, encodings);
+
+    // Set either way for the same reason. Null, never "": libcurl writes an
+    // empty string as a bare `Cookie: ` line (lib/http.c `http_cookies`).
+    const std::string cookies = typed_cookie_value (request);
+    set_opt<CURLOPT_COOKIE> (curl, cookies.empty () ? nullptr : cookies.c_str ());
 }
-
-namespace {
-
-// RFC 9110 section 5.5: the optional whitespace around a field value, space and
-// tab, is not part of it.
-std::string_view trim_optional_whitespace (std::string_view value) {
-    constexpr std::string_view OWS = " \t";
-    const auto first               = value.find_first_not_of (OWS);
-    if (first == std::string_view::npos) {
-        return {};
-    }
-    return value.substr (first, value.find_last_not_of (OWS) - first + 1);
-}
-
-} // namespace
 
 void ingest_header_line (std::string_view line, Headers& headers) {
     ingest_header_line (line, headers, nullptr);
@@ -987,6 +1027,10 @@ bool refuses_local_peer (ConnectedPeerCheck* check, const char* peer_ip, int pee
  * recognises by asking the reserved-port predicate the same question, or by
  * the refusal the check recorded.
  *
+ * Every call is counted on the check, when there is one: libcurl makes it once
+ * per request it is about to write, which is the only place a replay on a new
+ * connection shows (#2799, `connection_replays`).
+ *
  * Fails closed: an exception must not cross libcurl's C frames, and a
  * predicate that could not answer is no reason to send.
  */
@@ -1000,17 +1044,39 @@ char* /*conn_local_ip*/,
 int conn_primary_port,
 int /*conn_local_port*/) {
     try {
+        auto* check = static_cast<ConnectedPeerCheck*> (clientp);
+        if (check != nullptr) {
+            ++check->requests_started;
+        }
         if (conn_primary_ip != nullptr &&
         vayu::http::is_reserved_loopback_target (conn_primary_ip, conn_primary_port)) {
             return CURL_PREREQFUNC_ABORT;
         }
-        return refuses_local_peer (static_cast<ConnectedPeerCheck*> (clientp),
-               conn_primary_ip, conn_primary_port) ?
+        return refuses_local_peer (check, conn_primary_ip, conn_primary_port) ?
         CURL_PREREQFUNC_ABORT :
         CURL_PREREQFUNC_OK;
     } catch (...) {
         return CURL_PREREQFUNC_ABORT;
     }
+}
+
+/**
+ * How many times libcurl re-sent this transfer's request on a new connection
+ * after a reused one was dropped or refused before a response byte (#2799).
+ *
+ * libcurl does that on its own (`Curl_retry_request`, no option turns it off)
+ * and reports nothing; the pre-request callback is the one trace it leaves.
+ * Each request written is one call, and a redirect hop or an auth reload is
+ * the only other reason for a second, which `CURLINFO_REDIRECT_COUNT` counts
+ * and a replay does not. A transfer that never reached the callback reads 0.
+ * `CURLINFO_NUM_CONNECTS` cannot answer this: a fresh request and a replay of
+ * a dead reused connection both open one.
+ */
+int connection_replays (CURL* curl, const ConnectedPeerCheck& check) {
+    long redirects = 0;
+    get_info<CURLINFO_REDIRECT_COUNT> (curl, &redirects);
+    const long replays = check.requests_started - 1L - std::max (0L, redirects);
+    return static_cast<int> (std::max (0L, replays));
 }
 
 } // namespace
@@ -1483,8 +1549,10 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // scoped rather than per-request because libcurl only reuses a cached
     // connection when its proxy and TLS config match, so varying either per
     // transfer would partition every worker's pool and multiply handshakes
-    // (epic decision 3 of #704).
-    apply_transport_policy (curl, config.transport, request.verify_ssl, url);
+    // (epic decision 3 of #704). The transfer's own check carries no rule here;
+    // it is what counts a replay (#2799).
+    apply_transport_policy (
+    curl, config.transport, request.verify_ssl, url, &data->peer_check);
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)
@@ -1575,6 +1643,10 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // downgrades every one of them. The flag rides out on each trace instead.
     response.http_version_downgraded = vayu::http::http_version_downgraded (
     data->request.http_version, response.http_version);
+
+    // Read before the error branch: a replay that then failed still put the
+    // request on the wire twice.
+    response.connection_replays = connection_replays (curl, data->peer_check);
 
     // Perceived latency: wall-clock from submit() to now. steady_clock is
     // monotonic so it's not affected by NTP jumps.

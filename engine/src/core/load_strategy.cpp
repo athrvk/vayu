@@ -257,6 +257,12 @@ const ResultAnnotations& annotations) {
     if (response.http_version_downgraded) {
         context->metrics_collector->record_http_version_downgrade ();
     }
+    // Before the split too: a replay that then failed still reached the
+    // target twice (#2799). Both run shapes complete through here.
+    if (response.connection_replays > 0) {
+        context->metrics_collector->record_connection_replays (
+        static_cast<size_t> (response.connection_replays));
+    }
 
     // Counted here, before the success/error split, for the reason the
     // downgrade above is: a stream the target killed after 30 events delivered

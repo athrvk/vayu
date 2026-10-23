@@ -286,6 +286,74 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		expect(rows[0]).not.toHaveProperty("dataFile");
 	});
 
+	/*
+	 * The engine stores both bindings on the row (#2765) and answers `{}` for
+	 * none. MCP names neither of its own: `specFile` never, `dataFile` only from
+	 * the host's record, as before. Mutation check: drop either key from the
+	 * destructuring in presentCollection and this fails.
+	 */
+	const STORED = {
+		...DECLARED,
+		specFile: { path: "/specs/pets.yaml", fileName: "pets.yaml" },
+		dataFile: { path: "/elsewhere/old.csv", fileName: "old.csv" },
+	};
+
+	test("the engine's stored bindings never reach an agent", async () => {
+		const UNBOUND = { ...NONE, specFile: {}, dataFile: {} };
+		const listed = async (ctx: ToolContext) =>
+			rowsOf(await dispatchTool("list_collections", FULL, ctx));
+
+		const [hosted, unboundHosted] = await listed(
+			ctxWith(collectionsClient([STORED, UNBOUND]), { dataFileLocation: remembered })
+		);
+		expect(hosted).not.toHaveProperty("specFile");
+		expect(hosted.dataFile).toEqual(USERS_FILE);
+		expect(unboundHosted).toEqual({ id: "col_none", name: "Health" });
+
+		const [cli] = await listed(ctxWith(collectionsClient([STORED])));
+		expect(cli).not.toHaveProperty("specFile");
+		expect(cli).not.toHaveProperty("dataFile");
+	});
+
+	/*
+	 * Every write that echoes a collection row: `move_item` answers the
+	 * renumbered rows of `POST /reorder`, not one row, so it needs its own
+	 * presenting. Mutation check: hand `move_item`'s answer to the withholding
+	 * alone (drop `presentReorderCollections`) and its two rows fail.
+	 */
+	const ECHOES = [
+		["create_collection", { name: "Checkout" }],
+		["update_collection", { collectionId: "col_data", name: "Checkout" }],
+		["move_item", { type: "collection", id: "col_data", parentId: null }],
+	] as const;
+	const echoClient = () => ({
+		createCollection: vi.fn().mockResolvedValue(STORED),
+		updateCollection: vi.fn().mockResolvedValue(STORED),
+		listCollections: vi.fn().mockResolvedValue([STORED]),
+		reorder: vi.fn().mockResolvedValue({ collections: [STORED], requests: [] }),
+	});
+	/** The one collection row a write answered, whether bare or in `POST /reorder`'s lists. */
+	const echoedRow = (tool: string, r: { content: Array<{ text: string }> }) => {
+		const answer = parsed(r) as Record<string, unknown>;
+		return (tool === "move_item" ? (answer.collections as unknown[])[0] : answer) as Record<
+			string,
+			unknown
+		>;
+	};
+
+	test.each(ECHOES)("%s echoes no stored binding", async (tool, args) => {
+		const hosted = echoedRow(
+			tool,
+			await dispatchTool(tool, args, ctxWith(echoClient(), { dataFileLocation: remembered }))
+		);
+		expect(hosted).not.toHaveProperty("specFile");
+		expect(hosted.dataFile).toEqual(USERS_FILE);
+
+		const cli = echoedRow(tool, await dispatchTool(tool, args, ctxWith(echoClient())));
+		expect(cli).not.toHaveProperty("specFile");
+		expect(cli).not.toHaveProperty("dataFile");
+	});
+
 	test("it rides a read tool, answered with writes off, and names a path, never contents", async () => {
 		const tool = TOOLS.find((t) => t.name === "list_collections")!;
 		expect(tool.category).toBe("read");

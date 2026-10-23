@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import { presentReorderCollections } from "../collection-shape.js";
 import { secretsShape, withholdReorderRows, withheldPointer } from "../withhold.js";
 import type { McpTool, ToolContext } from "./contract.js";
 import {
@@ -101,10 +102,11 @@ export const MOVE_TOOLS: McpTool[] = [
 				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
+			const withhold = secretsShape(ctx, withholdReorderRows);
 			return callEngine(
 				ctx,
 				() => ctx.client.reorder(batch, signal),
-				secretsShape(ctx, withholdReorderRows)
+				(answer) => withhold(presentReorderCollections(answer, ctx))
 			);
 		},
 	},

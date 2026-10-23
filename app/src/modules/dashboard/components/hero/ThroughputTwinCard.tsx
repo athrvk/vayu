@@ -11,15 +11,35 @@ import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow } from "../shared";
 import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
+import type { DispatchStatus } from "../../utils/dispatchLag";
 
-/** constant_rps hero card #2 - twin send/throughput rates from the open model. */
+const STATUS_CHIP: Record<DispatchStatus, { chip: string; sentence: string }> = {
+	settling: { chip: "bg-muted text-muted-foreground", sentence: "still measuring the gap" },
+	"kept-pace": {
+		chip: "bg-success/10 text-success-text",
+		sentence: "server kept pace with dispatch",
+	},
+	lagging: {
+		chip: "bg-destructive/10 text-destructive-text",
+		sentence: "server is lagging dispatch",
+	},
+};
+
+/**
+ * constant_rps hero card #2 - twin send/throughput rates from the open model.
+ * The chip's verdict arrives decided (`utils/dispatchLag.ts`) on a pair its
+ * producer chose, which is not the pair printed here: the card only draws, and
+ * without a `status` it draws no chip.
+ */
 export function ThroughputTwinCard({
 	sendRate,
 	throughput,
+	status,
 	avgQueueWaitMs,
 }: {
 	sendRate?: number;
 	throughput?: number;
+	status?: DispatchStatus;
 	avgQueueWaitMs?: number;
 }) {
 	const showQueueChip = avgQueueWaitMs !== undefined && avgQueueWaitMs > 5;
@@ -27,7 +47,6 @@ export function ThroughputTwinCard({
 		sendRate !== undefined && throughput !== undefined
 			? Math.max(0, sendRate - throughput)
 			: undefined;
-	const deltaOk = delta !== undefined && delta < 1;
 
 	return (
 		<Card pad="md" className="flex flex-col gap-1.5">
@@ -67,21 +86,17 @@ export function ThroughputTwinCard({
 					</Eyebrow>
 				</div>
 			</div>
-			{delta !== undefined && (
+			{delta !== undefined && status !== undefined && (
 				<p className="text-label text-muted-foreground mt-2 flex items-center gap-2">
 					<span
 						className={cn(
 							"inline-block px-1.5 py-px rounded-sm font-mono text-micro font-semibold transition-colors duration-150",
-							deltaOk
-								? "bg-success/10 text-success-text"
-								: "bg-destructive/10 text-destructive-text"
+							STATUS_CHIP[status].chip
 						)}
 					>
 						Δ {formatRate(delta)} req/s
 					</span>
-					<span>
-						{deltaOk ? "server kept pace with dispatch" : "server is lagging dispatch"}
-					</span>
+					<span>{STATUS_CHIP[status].sentence}</span>
 				</p>
 			)}
 		</Card>

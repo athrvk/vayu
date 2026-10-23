@@ -12,10 +12,19 @@
 import { renderHook, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { mirrorFileBindings } from "@/queries/file-bindings";
 import { useDataFileStore } from "@/stores/data-file-store";
+import type { Collection, DataFileLocation } from "@/types";
 import { useDataFileLocationMirror } from "./useDataFileLocationMirror";
 
 const USERS = { path: "/data/users.csv", fileName: "users.csv" };
+
+/** The collections list as the store's feeder sees it: one row per binding. */
+function listWith(bindings: Record<string, DataFileLocation>): Collection[] {
+	return Object.entries(bindings).map(
+		([id, dataFile]) => ({ id, name: id, order: 0, dataFile }) as unknown as Collection
+	);
+}
 
 describe("useDataFileLocationMirror", () => {
 	let publish: ReturnType<typeof vi.fn>;
@@ -34,26 +43,26 @@ describe("useDataFileLocationMirror", () => {
 		const view = renderHook(() => useDataFileLocationMirror());
 		expect(publish).toHaveBeenLastCalledWith({ col_1: USERS });
 
-		act(() => useDataFileStore.getState().clearDataFile("col_1"));
+		act(() => mirrorFileBindings(listWith({})));
 		// Mutation check: drop the subscription and main keeps a path the user cleared.
 		expect(publish).toHaveBeenLastCalledWith({});
 		expect(publish).toHaveBeenCalledTimes(2);
 
 		view.unmount();
-		act(() => useDataFileStore.getState().setDataFile("col_2", USERS));
+		act(() => mirrorFileBindings(listWith({ col_2: USERS })));
 		expect(publish).toHaveBeenCalledTimes(2);
 	});
 
-	it("republishes when a re-read records a new hash, carrying it to main (#2051)", () => {
+	it("republishes when the engine row records a new hash, carrying it to main (#2051)", () => {
 		renderHook(() => useDataFileLocationMirror());
 		const hash = "9".repeat(64);
 
-		act(() => useDataFileStore.getState().recordDataFileHash(USERS.path, hash));
+		act(() => mirrorFileBindings(listWith({ col_1: { ...USERS, hash } })));
 
 		expect(publish).toHaveBeenLastCalledWith({ col_1: { ...USERS, hash } });
 		expect(publish).toHaveBeenCalledTimes(2);
-		// The same hash again changes nothing, so nothing is sent.
-		act(() => useDataFileStore.getState().recordDataFileHash(USERS.path, hash));
+		// A refetch answering the same binding changes nothing, so nothing is sent.
+		act(() => mirrorFileBindings(listWith({ col_1: { ...USERS, hash } })));
 		expect(publish).toHaveBeenCalledTimes(2);
 	});
 
@@ -62,8 +71,6 @@ describe("useDataFileLocationMirror", () => {
 		// Mutation check: drop the `if (!publish) return` guard and the mount
 		// calls an undefined publisher; subscribe before it and the change does.
 		expect(() => renderHook(() => useDataFileLocationMirror())).not.toThrow();
-		expect(() =>
-			act(() => useDataFileStore.getState().setDataFile("col_2", USERS))
-		).not.toThrow();
+		expect(() => act(() => mirrorFileBindings(listWith({ col_2: USERS })))).not.toThrow();
 	});
 });

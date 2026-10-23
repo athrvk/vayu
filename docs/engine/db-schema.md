@@ -300,7 +300,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `7`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `8`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
    rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
@@ -448,6 +448,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read; [`runs.origin` and `runs.origin_client`](#runs) added (#1817) | none: `sync_schema ()` drops the one column at the constructor's probe and adds the defaulted and nullable two, the migration only stamps |
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
+| `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -476,6 +477,11 @@ the sibling-order shift is a one-time rewrite of stored rows. A development
 database an unreleased build already stamped `6` must still run it, and would
 skip it at `6`. The release that carries `7` says so under Changed, naming
 #2535.
+
+Version `8` is a bump of its own: `0.45.0` released `7`. **Merge gate:** the
+`git grep` against the last tag must show `7`; a column that joins `8` later
+must check the tag the same way. The release that carries `8` says so under
+Changed, naming #2765.
 
 ---
 
@@ -509,6 +515,8 @@ Stores folder/group hierarchy for requests.
 | `elements`           | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
+| `spec_file`          | TEXT    | JSON: the spec file the Spec tab was picked from (issue #2765); default `"{}"` |
+| `data_file`          | TEXT    | JSON: the data file a run reads its rows from (issue #2765); default `"{}"` |
 | `order`              | INTEGER | Position among the parent's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference.md#ordering)); default 0 |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
@@ -548,8 +556,8 @@ user data of unknown sensitivity and are persisted nowhere - not here, not in a
 run snapshot, which records the row count (`dataRowCount`) plus the file's name
 and content hash (`dataFileName`, `dataFileHash`, issue #2051) and whether its
 numbers were read as numbers (`dataFileCastNumbers`, issue #2540), never its
-path or rows. The file's path is not stored engine-side: it is true of one machine,
-so the app keeps it in a local store. See [Data-driven runs](../app/data-driven-runs.md).
+path or rows. The file's location is [`data_file`](#collections), below. See
+[Data-driven runs](../app/data-driven-runs.md).
 
 **openapi** - the OpenAPI document this collection is bound to (issue #637):
 
@@ -585,6 +593,37 @@ bind the same spec, so nothing here owns it: no cascade reaches `spec_documents`
 and `DELETE /specs/:id` is refused while any collection names the row. NOT NULL
 with a `default_value`, the same migration shape as `data_schema` above.
 
+**spec_file** and **data_file** - the files this collection's Spec and Data
+tabs are bound to (issue #2765), stored on the row so a
+[workspace backup](architecture.md#workspace-backups) carries them:
+
+```json
+{"path":"/home/me/specs/pets.yaml","fileName":"pets.yaml"}
+{"path":"/home/me/data/users.csv","fileName":"users.csv","hash":"<hex sha256>","castNumbers":true}
+```
+
+`{}` - the default, and what an explicit `null` on `PUT` resets to - means no
+file. A non-empty binding must carry `path` and `fileName` as non-empty strings
+and nothing beyond its members: `spec_file` holds those two, `data_file` adds an
+optional `hash` (the SHA-256 of the file's bytes as 64 lowercase hex
+characters, the digest a run records as `dataFileHash`) and an optional boolean
+`castNumbers` (how the app reads the file's numbers, issue #2540). Validation
+lives in `apply_collection_fields`, so `POST` and `PUT` enforce it; `POST
+/import/apply` refuses either field on a collection item, because an import
+describes a document from elsewhere.
+
+The path's form is not judged. It is true of the machine that picked the file,
+so a Windows path restored onto Linux is stored and read back as written, and
+the app shows it as a file it cannot find. **A stored path is not a grant**:
+whether a request body may send a file is still the
+[`file_roots`](#file_roots) and [`file_grants`](#file_grants) decision, and
+nothing reads these columns to send one. The engine never opens either file.
+Neither column leaves the machine through an export: `POST /export/postman` and
+`POST /specs/export` copy their own fields off the row and name no binding.
+Deleting the collection keeps both on the trashed row, a restore brings them
+back unchanged and a purge removes them with the row. NOT NULL with a
+`default_value`, the same migration shape as `data_schema` above.
+
 **auth** is a JSON discriminated union: `{"mode":"none"}` | `{"mode":"bearer","token":"..."}` |
 `{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}` |
 `{"mode":"oauth2","config":{…}}` (see [`requests.auth`](#requests) and [`oauth_tokens`](#oauth_tokens)).
@@ -594,11 +633,15 @@ Collections are always auth sources - they never store `{"mode":"inherit"}`. The
 during the inherit walk (`request_composer.cpp`), so neither reaches the engine's `parse_auth` -
 which would treat them as no auth anyway.
 
-**Cap.** (issue #1485) `variables`, `auth`, `data_schema` and `openapi` are each
+**Cap.** (issue #1485) `variables`, `auth`, `data_schema`, `openapi`,
+`spec_file` and `data_file` are each
 refused at write time with a `413` naming the field, its size and the cap, when
 the serialized value is over `json::MAX_FIELD_SIZE` (10 MiB,
 `engine/include/vayu/core/constants.hpp`) - through the same shared
-`apply_json_field` the [`requests`](#requests) columns are capped by. Unlike
+`apply_json_field` the [`requests`](#requests) columns are capped by. A file
+binding's `path` over `file_binding::MAX_PATH_BYTES` (96 KiB) or `fileName` over
+`MAX_FILE_NAME_BYTES` (1 KiB) is a `413` naming the member the same way; both sit
+above the longest path and file name any of the three platforms can open. Unlike
 `requests`, no collection column is ever substituted on read: `GET
 /collections` carries the same whole value `GET /collections/:id` does, so
 there is no `truncatedFields` here.
@@ -1374,6 +1417,7 @@ default, so `sync_schema()` can
   "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
   "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
+  "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
   "error_types": { "timeout": 2, "connection_failed": 1 },
   "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
@@ -1417,6 +1461,14 @@ run over reused connections genuinely has a TLS p50 of 0.
 are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
+
+`connection_replays` (issue #2799) counts the requests libcurl re-sent on a new connection after
+the server dropped or refused a reused one before answering. Each replayed request is still one
+entry in `total_requests` and `status_codes`, by the outcome of its last attempt, so the target
+received `total_requests + connection_replays` requests. Written by the completed and the failed
+run alike, `0` included; a non-zero count also adds a `connection_replayed` entry to `warnings`.
+A summary stored before the issue has no key, and the report then leaves
+`summary.connectionReplays` out rather than reading it as `0`.
 
 `error_types` (issue #2400) is every error the run recorded, by the type name its stored
 error traces carry (`timeout`, `connection_failed`, ...), counted by the collector as it

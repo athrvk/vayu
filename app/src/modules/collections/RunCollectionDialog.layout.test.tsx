@@ -64,6 +64,12 @@ vi.mock("@/queries/collections", () => ({
 		isError: false,
 		error: null,
 	}),
+	useDataFileReadingMutation: () => ({
+		mutate: vi.fn(),
+		isPending: false,
+		isError: false,
+		error: null,
+	}),
 }));
 
 vi.mock("@/services", () => ({

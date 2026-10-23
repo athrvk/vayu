@@ -20,9 +20,10 @@
  * - **The binding and the document** are collection state and ride the engine
  *   (`Collection.openapi` -> `spec_documents`), because they are the same on
  *   every machine and travel through import.
- * - **A picked file's path** is true of one filesystem only, so it lives in
- *   `spec-file-store` and never reaches the engine. A URL-sourced spec keeps its
- *   origin portably instead, in `spec_documents.source_url`.
+ * - **A picked file's path** rides the collection row too (`Collection.specFile`,
+ *   #2765), so a backup carries it - but it is true of one filesystem only, so
+ *   it never travels through an export or an import. A URL-sourced spec keeps
+ *   its origin portably instead, in `spec_documents.source_url`.
  *
  * **Binding** deliberately creates and deletes nothing: it matches what is
  * already there and stamps identity on the matches - the operations with no
@@ -87,7 +88,6 @@ import {
 	useSpecMetaQuery,
 } from "@/queries/specs";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
-import { useSpecFileStore } from "@/stores";
 import SpecCoverageLine from "./SpecCoverageLine";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
@@ -95,6 +95,7 @@ import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import ExportPostmanDialog from "@/modules/collections/ExportPostmanDialog";
 import { hasSpecBinding, type Collection } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
+import { cn } from "@/lib/utils";
 import { InfoBanner, RelativeTime, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -169,9 +170,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		isLoading: specLoading,
 		isError: specFailed,
 	} = useSpecMetaQuery(binding?.specId);
-	const specFile = useSpecFileStore((s) => s.locations[collection.id]);
-	const clearSpecFile = useSpecFileStore((s) => s.clearSpecFile);
-	const setSpecFile = useSpecFileStore((s) => s.setSpecFile);
+	const specFile = collection.specFile;
 
 	const updateCollection = useUpdateCollectionMutation();
 	const bindSpec = useBindSpecMutation();
@@ -187,6 +186,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	// Which export dialog is open, if either. One field: the menu opens one.
 	const [exporting, setExporting] = useState<"openapi" | "postman" | null>(null);
 	const [fetching, setFetching] = useState(false);
+	// The bound path that did not read on the last check: moved, renamed, or
+	// restored from another machine (#2765). Learned from an attempted read,
+	// never asked for up front, and true only while the binding still names it.
+	const [unreadablePath, setUnreadablePath] = useState<string | null>(null);
 	// The bound the fetch below carries: this tab only ever fetches a document
 	// it is about to bind, so it is the same cap the engine will store it under
 	// (issue #784).
@@ -242,8 +245,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				content: String(reader.result),
 				token: nextPickToken(),
 				fileName: file.name,
-				// The path while there is still a `File` to take it from - see
-				// `spec-file-store` for why only the path is kept.
+				// The path while there is still a `File` to take it from: the
+				// binding keeps where the file is, never its contents.
 				path: window.electronAPI?.getFilePath(file) ?? "",
 			});
 		};
@@ -283,27 +286,20 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		// The document and the collection, and nothing else: the engine works
 		// the pairing out from the bytes it stores and stamps both halves of it
 		// in one transaction (issue #862). What `match` gave us above is the
-		// preview the summary is painted from, not a payload.
+		// preview the summary is painted from, not a payload. Where the file is
+		// rides beside it, and a URL or a paste forgets an earlier file.
 		bindSpec.mutate(
 			{
 				collectionId: collection.id,
 				content: picked.content,
 				sourceUrl: picked.sourceUrl ?? null,
+				specFile:
+					picked.path && picked.fileName
+						? { path: picked.path, fileName: picked.fileName }
+						: null,
 			},
 			{
 				onSuccess: () => {
-					// Remembered only after the binding is stored, for the reason
-					// the Data tab remembers a data file only after the contract:
-					// a path for a collection that is bound to nothing points at a
-					// document nothing can be compared against.
-					if (picked.path && picked.fileName) {
-						setSpecFile(collection.id, {
-							path: picked.path,
-							fileName: picked.fileName,
-						});
-					} else {
-						clearSpecFile(collection.id);
-					}
 					setPicked(null);
 					setUrl("");
 				},
@@ -315,26 +311,24 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		// `null`, not `{}`: the engine reads absent as "keep" and null as "reset
 		// to the default", and the default is unbound. The document itself stays -
 		// another collection may bind it, and deleting one out from under a
-		// binding is what the engine refuses.
-		updateCollection.mutate(
-			{ id: collection.id, openapi: null },
-			{ onSuccess: () => clearSpecFile(collection.id) }
-		);
+		// binding is what the engine refuses. The picked file goes in the same
+		// write: a path beside no binding names a document nothing reads.
+		updateCollection.mutate({ id: collection.id, openapi: null, specFile: null });
 	};
 
 	return (
 		<div className="max-w-[720px] flex flex-col gap-4">
 			<InfoBanner>
 				Bind this collection to an OpenAPI document so Vayu knows which operation each
-				request is. The document is stored with the collection; a file picked from this
-				machine is remembered by path only, and its contents are never copied into local
-				storage.
+				request is. The document is stored with the collection, and so is the path of a file
+				picked from this machine, so a backup keeps both. Exports never carry the path.
 			</InfoBanner>
 
 			{bound ? (
 				<BoundSpec
 					sourceUrl={specMeta?.sourceUrl ?? null}
-					fileName={specFile?.fileName}
+					filePath={specFile?.path}
+					fileUnreadable={!!specFile && specFile.path === unreadablePath}
 					specHash={binding?.specHash}
 					fetchedAt={specMeta?.fetchedAt}
 					contentBytes={specMeta?.contentBytes}
@@ -483,6 +477,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					// are not passed either - the engine walks the subtree itself.
 					specId={boundSpecId}
 					specFile={specFile}
+					onFileRead={(readable) =>
+						setUnreadablePath(readable ? null : (specFile?.path ?? null))
+					}
 				/>
 			)}
 
@@ -576,7 +573,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 function BoundSpec({
 	sourceUrl,
-	fileName,
+	filePath,
+	fileUnreadable,
 	specHash,
 	fetchedAt,
 	contentBytes,
@@ -588,7 +586,10 @@ function BoundSpec({
 	requestCount,
 }: {
 	sourceUrl: string | null;
-	fileName: string | undefined;
+	/** The bound file's path, for a document picked as a file. */
+	filePath: string | undefined;
+	/** A check could not read `filePath`. */
+	fileUnreadable: boolean;
 	specHash: string | undefined;
 	fetchedAt: number | undefined;
 	contentBytes: number | undefined;
@@ -603,8 +604,10 @@ function BoundSpec({
 }) {
 	/*
 	 * Three sources, three different truths, and the order matters. A URL is
-	 * portable and is what a re-fetch will use. A file name is machine-local and
-	 * only known if this machine is the one that picked it. Neither means the
+	 * portable and is what a re-fetch will use. A file path is true of the
+	 * machine that picked it: it rides the row (#2765), so a restore elsewhere
+	 * can name a file that is not there - shown, and struck through once a
+	 * check has failed to read it, rather than hidden. Neither means the
 	 * document was pasted - so the third line says where it came from as
 	 * precisely as it can rather than inventing a filename.
 	 *
@@ -614,7 +617,8 @@ function BoundSpec({
 	 * to have come from nowhere in particular right up until the read lands. So
 	 * a pending card renders a skeleton here, never this string.
 	 */
-	const source = sourceUrl ?? fileName ?? "a document stored with this collection";
+	const source = sourceUrl ?? filePath ?? "a document stored with this collection";
+	const struck = !sourceUrl && !!filePath && fileUnreadable;
 
 	return (
 		<div>
@@ -635,7 +639,9 @@ function BoundSpec({
 							) : (
 								<FileJson className="size-icon-sm text-primary shrink-0" />
 							)}
-							<span className="font-mono break-all">{source}</span>
+							<span className={cn("font-mono break-all", struck && "line-through")}>
+								{source}
+							</span>
 						</>
 					)}
 				</div>

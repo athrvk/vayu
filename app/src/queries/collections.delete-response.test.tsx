@@ -27,17 +27,22 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useDeleteCollectionMutation, useDeleteRequestMutation } from "./collections";
+import { installFileBindingMirror } from "./file-bindings";
+import { queryKeys } from "./keys";
 import { useResponseStore } from "@/stores/response-store";
 import { useDataFileStore } from "@/stores/data-file-store";
 import { useSpecFileStore } from "@/stores/spec-file-store";
+import type { Collection } from "@/types";
 
 const deleteRequest = vi.fn();
 const deleteCollection = vi.fn();
+const updateCollection = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
 		deleteRequest: (...a: unknown[]) => deleteRequest(...a),
 		deleteCollection: (...a: unknown[]) => deleteCollection(...a),
+		updateCollection: (...a: unknown[]) => updateCollection(...a),
 	},
 }));
 
@@ -99,47 +104,44 @@ describe("useDeleteRequestMutation", () => {
 	});
 });
 
+/*
+ * A collection's spec-file and data-file bindings are columns of its row
+ * (#2765): a delete moves the row to the trash with them on it, so the client
+ * clears nothing - the stores follow the list, and a restore brings the
+ * bindings back with the row. Mutation check: clear the bindings from the
+ * delete's `onSuccess` with a `specFile: null, dataFile: null` update and this
+ * fails - a restore would bring the row back unbound.
+ */
 describe("useDeleteCollectionMutation", () => {
-	const remember = () => {
-		for (const id of ["col_1", "col_2"]) {
-			useDataFileStore
-				.getState()
-				.setDataFile(id, { path: `/d/${id}.csv`, fileName: `${id}.csv` });
-			useSpecFileStore
-				.getState()
-				.setSpecFile(id, { path: `/s/${id}.yaml`, fileName: `${id}.yaml` });
-		}
-	};
+	const bound = (id: string): Collection =>
+		({
+			id,
+			name: id,
+			order: 0,
+			specFile: { path: `/s/${id}.yaml`, fileName: `${id}.yaml` },
+			dataFile: { path: `/d/${id}.csv`, fileName: `${id}.csv` },
+		}) as Collection;
 
-	it("forgets the deleted collection's data-file and spec-file paths", async () => {
+	it("writes no binding: the row leaves the view with its bindings on it", async () => {
 		deleteCollection.mockResolvedValue(undefined);
-		remember();
-
 		const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+		const uninstall = installFileBindingMirror(client);
+		client.setQueryData(queryKeys.collections.list(), [bound("col_1"), bound("col_2")]);
+
 		const { result } = renderHook(() => useDeleteCollectionMutation(), {
 			wrapper: wrapper(client),
 		});
 		await result.current.mutateAsync("col_1");
 
-		await waitFor(() => {
-			expect(useDataFileStore.getState().locations.col_1).toBeUndefined();
-			expect(useSpecFileStore.getState().locations.col_1).toBeUndefined();
-		});
-		expect(useDataFileStore.getState().locations.col_2).toBeDefined();
-		expect(useSpecFileStore.getState().locations.col_2).toBeDefined();
-	});
+		expect(updateCollection).not.toHaveBeenCalled();
+		expect(Object.keys(useDataFileStore.getState().locations)).toEqual(["col_2"]);
+		expect(Object.keys(useSpecFileStore.getState().locations)).toEqual(["col_2"]);
 
-	it("keeps both paths when the delete fails", async () => {
-		deleteCollection.mockRejectedValue(new Error("database is locked"));
-		remember();
-
-		const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-		const { result } = renderHook(() => useDeleteCollectionMutation(), {
-			wrapper: wrapper(client),
-		});
-		await expect(result.current.mutateAsync("col_1")).rejects.toThrow("database is locked");
-
-		expect(useDataFileStore.getState().locations.col_1).toBeDefined();
-		expect(useSpecFileStore.getState().locations.col_1).toBeDefined();
+		// The restore's refetch answers the row with its bindings, and they are
+		// back - nothing on this side had to remember them.
+		client.setQueryData(queryKeys.collections.list(), [bound("col_1"), bound("col_2")]);
+		expect(useDataFileStore.getState().locations.col_1).toEqual(bound("col_1").dataFile);
+		expect(useSpecFileStore.getState().locations.col_1).toEqual(bound("col_1").specFile);
+		uninstall();
 	});
 });

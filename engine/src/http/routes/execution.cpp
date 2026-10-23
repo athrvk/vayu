@@ -56,19 +56,6 @@
 
 namespace vayu::http::routes {
 
-// Resolve the effective HTTP request timeout for design-mode POST /request.
-// An explicit per-request "timeout" wins; otherwise fall back to the engine's
-// user-configurable `defaultTimeout` setting (passed in by the caller) rather
-// than the compile-time DEFAULT_TIMEOUT_MS, so raising the setting actually
-// extends how long a slow request is allowed to run. Reads, never validates:
-// both routes range-check `timeout` (REQUEST_TIMEOUT_FIELD) before it gets here.
-int resolve_request_timeout_ms (const nlohmann::json& json, int configured_default) {
-    if (json.contains ("timeout") && json["timeout"].is_number ()) {
-        return json["timeout"].get<int> ();
-    }
-    return configured_default;
-}
-
 // Resolve what a script reads as `pm.info.requestName` for a POST /execute
 // payload (issue #300). Two sources, in order:
 //
@@ -1746,8 +1733,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // failure is surfaced after the run exists (below). Credentials
     // carrying a `{{data.*}}` are the one case the build leaves alone - the
     // bind below applies them once the row has reached them.
-    const int request_timeout_ms = resolve_request_timeout_ms (json,
-    ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+    const int request_timeout_ms = resolve_request_timeout_ms (json, ctx.db);
     // An OAuth 2.0 token acquired here has its endpoints judged by the policy
     // before anything is posted (#2521).
     auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms,
@@ -2817,8 +2803,7 @@ nlohmann::json& scenario_manifest) {
         options.environment_id = it->get<std::string> ();
     }
     options.cancel           = &ctx.server_stopping;
-    options.timeout_ms       = resolve_request_timeout_ms (json,
-          ctx.db.get_config_int ("defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+    options.timeout_ms       = resolve_request_timeout_ms (json, ctx.db);
     options.limits.max_steps = static_cast<size_t> (ctx.db.get_config_int (
     "maxScenarioSteps", static_cast<int> (vayu::core::constants::scenario::MAX_STEPS)));
     options.limits.max_data_rows =
