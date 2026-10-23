@@ -97,6 +97,11 @@ export function formatRate(perSecond: number | undefined | null): string {
 
 /** A percentage (0-100) as digits with one decimal, no sign: 99.95 -> "100.0". */
 export function formatPercent(percent: number | undefined | null): string {
-	if (isMissing(percent)) return "0.0";
-	return ONE_DECIMAL.format(percent);
+	return formatOneDecimal(percent);
+}
+
+/** A count that is a mean, as digits with one decimal: 4.2 -> "4.2", 10 -> "10.0". */
+export function formatOneDecimal(value: number | undefined | null): string {
+	if (isMissing(value)) return "0.0";
+	return ONE_DECIMAL.format(value);
 }

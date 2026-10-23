@@ -1717,7 +1717,9 @@ std::optional<int64_t> parse_max_points (std::string_view raw);
  *   the max is an upper bound on the bucket's percentile, never an estimate of
  *   it; `0` is a second with no completion.
  * - `current_concurrency`, `backpressure`: the max.
- * - `current_rps`, `current_send_rate`: the mean of the bucket's ticks.
+ * - `current_rps`, `current_send_rate`, `window_avg_in_flight` (#2821): the
+ *   mean of the bucket's ticks. Each in-flight reading covers about its own
+ *   second, so their mean is the bucket's mean in flight.
  * - `window_avg_latency_ms`, `window_avg_queue_wait_ms` (#2393): the mean over
  *   the ticks that carried a number, `null` when none did (every second idle).
  *   The run's own mean over the bucket would weight each second by its

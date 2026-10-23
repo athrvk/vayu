@@ -99,6 +99,10 @@ TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
     EXPECT_DOUBLE_EQ (collector->average_latency (), 100.0); // 800 / 8 samples
     EXPECT_DOUBLE_EQ (collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (),
     20.0); // 2/10 * 100
+    // #2821: 800 ms on the wire over 0.4 s is two in flight on average; the
+    // timeouts with no transfer add nothing, and no duration reads 0.
+    EXPECT_DOUBLE_EQ (collector->average_in_flight (0.4), 2.0);
+    EXPECT_DOUBLE_EQ (collector->average_in_flight (0.0), 0.0);
 }
 
 // #2384: a failure whose transfer ran is in the latency population at its own

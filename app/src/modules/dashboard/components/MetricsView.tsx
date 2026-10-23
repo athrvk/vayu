@@ -230,6 +230,7 @@ function MetricsView({
 			requestsSent: metrics.requests_sent ?? 0,
 			peakConcurrency,
 			currentConcurrency: metrics.current_concurrency ?? 0,
+			avgInFlight: metrics.window_avg_in_flight ?? undefined,
 			configuredConcurrency: rampConfig?.targetConcurrency ?? concurrency,
 			backpressure: metrics.backpressure ?? 0,
 			p99Latency: cumulative.p99,

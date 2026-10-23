@@ -1415,7 +1415,7 @@ default, so `sync_schema()` can
   "total_requests": 100, "cancelled": 0, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
   "test_duration": 2.0, "setup_overhead": 0.25,
   "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
-  "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
+  "peak_concurrency": 8, "avg_in_flight": 4.2, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
   "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
@@ -1471,6 +1471,13 @@ received `total_requests + connection_replays` requests. Written by the complete
 run alike, `0` included; a non-zero count also adds a `connection_replayed` entry to `warnings`.
 A summary stored before the issue has no key, and the report then leaves
 `summary.connectionReplays` out rather than reading it as `0`.
+
+`avg_in_flight` (issue #2821) is the mean number of requests in flight over the run: the
+collector's latency sum over `test_duration` (`MetricsCollector::average_in_flight`), by Little's
+law, so timer waits between requests count for nothing. Written by the completed and the failed
+run alike, `0` included; the report's `summary.avgInFlight` reads it. A summary stored before the
+issue has no key, and the report leaves `avgInFlight` out rather than reading it as `0`. A
+collection (design-mode) run's summary does not carry it.
 
 `error_types` (issue #2400) is every error the run recorded, by the type name its stored
 error traces carry (`timeout`, `connection_failed`, ...), counted by the collector as it
@@ -1786,7 +1793,7 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
   "timestamp": 1730000001000, "elapsed_seconds": 1.0,
   "requests_completed": 120, "requests_failed": 2,
   "http_errors": 0, "no_response": 2, "cancelled": 0,
-  "current_rps": 118.4, "current_send_rate": 120.2,
+  "current_rps": 118.4, "current_send_rate": 120.2, "window_avg_in_flight": 1.1,
   "window_avg_latency_ms": 8.9, "window_avg_queue_wait_ms": 0.2,
   "current_concurrency": 10, "send_rate": 120.0,
   "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
@@ -1810,6 +1817,13 @@ and one drawn from these rows agree. The two means are `null` for a window in wh
 completed. The three keys besides `current_rps` are absent from a tick stored before that issue,
 whose `current_rps` was the completions since the previous row over the time since it. No schema
 version marks the change: they are keys inside `payload`, which `sync_schema()` never reads.
+
+`window_avg_in_flight` (issue #2821) is the same window's mean requests in flight: the latency its
+completions carried over its span. Always a number, `0` for a window that completed nothing.
+`current_concurrency` and `backpressure` beside it are instantaneous gauges (curl transfers
+active at the tick, and `RunContext::in_flight`), which a virtual user in a timer wait does not
+hold, so a run whose users wait in step aliases them between 0 and the user count. Absent from a
+tick stored before the issue; like the keys above, no schema version marks it.
 
 Two consequences of the row being the tick:
 

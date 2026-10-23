@@ -152,6 +152,13 @@ export interface DashboardDerived {
 	// Concurrency
 	peakConcurrency: number;
 	currentConcurrency: number;
+	/**
+	 * Mean requests on the wire: the trailing window's on a live tick, the whole
+	 * run's on a finished one. The utilisation card reads it instead of
+	 * `currentConcurrency`, which is a 0-and-N square wave for virtual users in a
+	 * timer wait (#2821). Absent for a run stored before the mean existed.
+	 */
+	avgInFlight?: number;
 	configuredConcurrency?: number;
 	backpressure: number;
 	// Latency
@@ -211,6 +218,7 @@ export interface DisplayMetrics {
 	// Connection metrics
 	backpressure?: number; // In flight: sent but not yet answered, plus slots a think timer holds
 	current_concurrency?: number; // Number of concurrent HTTP connections
+	window_avg_in_flight?: number | null; // Mean requests on the wire over the tick's window
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
 	// Run progress - feeds the iterations-mode ETA stat (live only).

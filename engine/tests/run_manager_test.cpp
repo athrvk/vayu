@@ -1168,7 +1168,9 @@ TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
 // the >= 100 ms delta back on the frame's `currentRps`, or store
 // `current_total / run_elapsed_s` as the row's `current_rps`, and the
 // frame/row equality fails; read the run's mean into the window's and the
-// 5 ms assertions fail.
+// 5 ms assertions fail. #2821's mean in flight rides the same reading:
+// store the run-long `average_in_flight` as the row's `window_avg_in_flight`
+// and its frame/row equality fails.
 TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     const std::string db_path = "test_collect_metrics_trailing_window.db";
     vayu::tests::remove_database_files (db_path);
@@ -1214,13 +1216,14 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     EXPECT_GT (stored.at ("current_send_rate").get<double> (), 0.0) << stored.dump ();
     EXPECT_DOUBLE_EQ (stored.at ("window_avg_latency_ms").get<double> (), 5.0);
     EXPECT_DOUBLE_EQ (stored.at ("window_avg_queue_wait_ms").get<double> (), 0.5);
+    EXPECT_GT (stored.at ("window_avg_in_flight").get<double> (), 0.0) << stored.dump ();
 
     const auto batch = ctx->ticks_since (0);
     ASSERT_FALSE (batch.payloads.empty ());
     size_t gate_frames = 0;
     for (const auto& payload : batch.payloads) {
         const auto frame = live_frame_json (payload);
-        for (const auto* key : { "currentRps", "currentSendRate" }) {
+        for (const auto* key : { "currentRps", "currentSendRate", "windowAvgInFlight" }) {
             ASSERT_TRUE (frame.contains (key) && frame.at (key).is_number ())
             << key << ": " << frame.dump ();
         }
@@ -1239,6 +1242,8 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
         stored.at ("current_send_rate").get<double> ());
         EXPECT_EQ (frame.at ("windowAvgLatencyMs"), stored.at ("window_avg_latency_ms"));
         EXPECT_EQ (frame.at ("windowAvgQueueWaitMs"), stored.at ("window_avg_queue_wait_ms"));
+        EXPECT_DOUBLE_EQ (frame.at ("windowAvgInFlight").get<double> (),
+        stored.at ("window_avg_in_flight").get<double> ());
         EXPECT_GT (frame.at ("avgLatencyMs").get<double> (), 5.0)
         << "the run's mean lost the completions before tick 0";
     }

@@ -50,8 +50,8 @@ json healthy_summary () {
         { "send_rate", 10.0 }, { "throughput", 9.9 }, { "test_duration", 10.0 },
         { "setup_overhead", 0.1 }, { "requests_sent", 100 },
         { "requests_expected", 100 }, { "sending_duration", 9.8 },
-        { "peak_concurrency", 5 }, { "dropped_requests", 0 },
-        { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
+        { "peak_concurrency", 5 }, { "avg_in_flight", 4.2 },
+        { "dropped_requests", 0 }, { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
         { "bytes_received", 5000 }, { "http_version_downgraded", 0 },
         { "connection_replays", 2 }, { "status_codes", { { "200", 100 } } },
         { "latency",
@@ -254,6 +254,9 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // The allowlist has to name it, or the export drops the replays (#2799).
     // Mutation check: drop "connectionReplays" from SUMMARY_KEYS and this fails.
     EXPECT_EQ (document["report"]["summary"].value ("connectionReplays", -1), 2);
+    // The same for the mean in flight (#2821). Mutation check: drop
+    // "avgInFlight" from SUMMARY_KEYS and this fails.
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("avgInFlight", -1.0), 4.2);
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 
@@ -270,6 +273,8 @@ TEST_F (RunExportSchemaTest, AStoppedRunValidates) {
     expect_valid (json{ { "runId", "run_stopped" }, { "series", "none" } });
     // Stored before #2799: no count, rather than a 0 nobody measured.
     EXPECT_FALSE (document["report"]["summary"].contains ("connectionReplays"));
+    // Nor a mean in flight, stored before #2821.
+    EXPECT_FALSE (document["report"]["summary"].contains ("avgInFlight"));
 }
 
 TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {

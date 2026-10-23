@@ -9526,7 +9526,8 @@ the same way). The set feeds the report's `latency` block (`p50` to `p999`,
 `latencyP99Ms`, its per-second `secondP*Ms` and cumulative `cumulativeP*Ms`,
 the stored ticks' `latency_p*_ms`, `avgLatencyMs` and `avgQueueWaitMs`, the
 trailing-window means (`windowAvg*Ms` live, `window_avg_*_ms` stored), the
-exports, and the
+mean in flight (`windowAvgInFlight`, `window_avg_in_flight` and the report's
+`avgInFlight`, issue #2821), the exports, and the
 `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
 The mean is the sum over the set divided by the set's size, so it agrees
 with the percentiles and the max. It is not divided by `totalRequests`.
@@ -9624,6 +9625,7 @@ their second instead.
       "cancelled": 0,
       "current_rps": 150.5,
       "current_send_rate": 151.0,
+      "window_avg_in_flight": 6.7,
       "window_avg_latency_ms": 44.8,
       "window_avg_queue_wait_ms": 0.3,
       "current_concurrency": 100,
@@ -9662,14 +9664,26 @@ plus up to one tick interval), and until a run has a second of ticks,
 everything since its first tick. `window_avg_latency_ms` and
 `window_avg_queue_wait_ms` are the mean latency and queue wait of the
 [latency population](#latency-population) that completed in the same window,
-`null` when nothing did. The live frame of the same tick carries the same
-four values as `currentRps`, `currentSendRate`, `windowAvgLatencyMs` and
-`windowAvgQueueWaitMs`. `send_rate` and `throughput` are **cumulative**:
+`null` when nothing did. `window_avg_in_flight` is the mean number of
+requests in flight over the same window (issue #2821), by Little's law the
+latency that population carried divided by the window's span: a request is in
+flight from submission to completion, its queue wait inside the generator or
+libcurl included, and a virtual user in a timer wait (`timer.think`,
+`timer.pacing`, `timer.throughput`) has none. A request cancelled or refused
+before the wire adds nothing. With no think time it equals the virtual user
+count. It is a number, `0` for a window that completed nothing, never `null`.
+The live frame of the same tick carries the same five values as `currentRps`,
+`currentSendRate`, `windowAvgInFlight`, `windowAvgLatencyMs` and
+`windowAvgQueueWaitMs`. `current_concurrency` and `backpressure` are
+instantaneous: see the live frame's `activeConnections` and `backpressure`
+[below](#get-runsrunidlive), which they equal. A run whose virtual users wait
+in step aliases them between 0 and the user count, which is what
+`window_avg_in_flight` answers instead. `send_rate` and `throughput` are **cumulative**:
 requests sent and completed since load start, divided by the time since load
 start, so they flatten a change of rate the window shows within a second. A
 tick stored before issue #2393 has none of the three new keys, and its
 `current_rps` divided the completions since the previous row by the time
-since it.
+since it. A tick stored before issue #2821 has no `window_avg_in_flight`.
 
 A missing run returns `404` with the message `Run not found`.
 
@@ -9724,6 +9738,7 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | `current_concurrency`, `backpressure` | The max over the bucket |
 | `current_rps` | The mean over the bucket's ticks |
 | `current_send_rate` | The mean over the bucket's ticks (#2393) |
+| `window_avg_in_flight` | The mean over the bucket's ticks (#2821): each covers about its own second, so this is the bucket's mean in flight |
 | `window_avg_latency_ms`, `window_avg_queue_wait_ms` | The mean over the bucket's ticks that carried a number, `null` when none did (#2393) |
 | Any other key | The last tick's |
 
@@ -9852,7 +9867,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
-       "windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
+       "windowAvgInFlight":6.7,"windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
        "latencySamples":15,"latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
        "cumulativeP50Ms":36.0,"cumulativeP95Ms":90.2,"cumulativeP99Ms":160.4,
        "bytesSent":48000,"bytesReceived":1920000,
@@ -10001,12 +10016,13 @@ no frame.
 | `currentRps` / `currentSendRate` | Completions / dispatches per second over the **trailing window** (issue #2393): at least the last second (`LIVE_RATE_WINDOW_MS`), divided by its actual span, and everything since the first frame until the stream has a second of frames. `0` for a window with nothing in it. A gate frame's pair is its [stored row](#get-runsrunidmetrics)'s `current_rps` / `current_send_rate` |
 | `sendRate` | Requests dispatched per second, **cumulative**: `requestsSent` over the time since load start |
 | `throughput` | Responses received per second, **cumulative**: `totalRequests` over the time since load start |
-| `activeConnections` | Current in-flight requests |
-| `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
+| `activeConnections` | Transfers active in the curl workers at the sample, the stored tick's `current_concurrency`. Instantaneous: a virtual user in a timer wait holds none, so a run whose users wait in step reads 0 or the user count depending on where the sample lands. `windowAvgInFlight` is the mean |
+| `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight. The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued before the wire, inside the generator or in libcurl waiting for a connection slot (#2394), over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
+| `windowAvgInFlight` | Mean requests in flight over the same trailing window (issue #2821): the latency the window's completions carried divided by its span (Little's law). A request is in flight from submission to completion, queue wait included; a timer wait between requests and a request cancelled or refused before the wire are not. With no think time it equals the virtual user count, and it does not alias the way `activeConnections` does. `0` for a window that completed nothing, never `null`. A gate frame's value is its stored row's `window_avg_in_flight` |
 | `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
@@ -10569,8 +10585,8 @@ run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive)
 `summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
 `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
 `errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
-`bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput` and
-`sendRate` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
+`bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput`,
+`sendRate` and `avgInFlight` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
 still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
 (`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
 `timingBreakdown` and `slowRequests` are absent. In the moment between the summary write and the
@@ -10747,6 +10763,7 @@ named it.
     "peakConcurrency": 100,
     "droppedRequests": 0,
     "avgQueueWaitMs": 0.4,
+    "avgInFlight": 4.2,
     "bytesSent": 192000,
     "bytesReceived": 7680000,
     "throughputBytesPerSec": 127152.32,
@@ -11118,7 +11135,7 @@ neither either.
 never closed. One entry per declared name that closed at least once, in the
 same shape `scenario.transactions` documents elsewhere on this page.
 
-`latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
+`latency.*` and the enriched `summary` fields (`peakConcurrency`, `avgInFlight`, `droppedRequests`,
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
 `summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
 latency.
@@ -11177,6 +11194,21 @@ stored, zero included), and absent is a run stored before the count existed,
 or one reported from its sampled results because its summary was malformed or
 never written. A partial report of a running load run reads it from the live
 counter.
+
+`summary.avgInFlight` is the mean number of requests in flight over the run
+(issue #2821): the latency sum of the [latency population](#latency-population)
+divided by `testDuration`, by Little's law. A request is in flight from
+submission to completion, its queue wait inside the generator or libcurl
+included; a virtual user in a timer wait between requests has none, and a
+request cancelled or refused before the wire adds nothing. With no think time
+it equals the virtual user count, and over that count it is the run's
+utilisation. `peakConcurrency` beside it is the high-water mark of the
+instantaneous in-flight gauge, sampled once a second for a scenario run, so on a
+run whose users wait in step it can read the user count or 0 depending on where
+the samples landed; `avgInFlight` is the figure that does not alias. Present for
+a load run stored since the issue, `0` included; **absent** for a run stored
+before it, a collection (design-mode) run, and a run reported from its sampled
+results, never a `0` nobody measured.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
 error, trace and tested-response sets are complete, and a non-zero count means

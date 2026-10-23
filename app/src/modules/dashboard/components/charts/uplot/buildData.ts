@@ -114,6 +114,14 @@ export const pickSendRate = (m: LoadTestMetrics): Sample => m.current_send_rate 
 export const hasSendRate = (history: LoadTestMetrics[]): boolean =>
 	history.some((m) => m.current_send_rate != null);
 export const pickConcurrency = (m: LoadTestMetrics): number => m.current_concurrency ?? 0;
+/**
+ * The tick's mean requests on the wire over its trailing window. The instant
+ * `current_concurrency` aliases for virtual users that wait in step (a 0 and N
+ * square wave), so the Active virtual users chart plots this and falls back to
+ * the instant only for a tick stored before the mean existed (#2821).
+ */
+export const pickAvgInFlight = (m: LoadTestMetrics): number =>
+	m.window_avg_in_flight ?? m.current_concurrency ?? 0;
 /** The tick's whole-second p99, 0 where it holds none (the scatter drops those ticks first). */
 export const pickLatencyP99 = (m: LoadTestMetrics): number => secondPercentiles(m)?.p99 ?? 0;
 export const pickErrorRate = (m: LoadTestMetrics): number =>

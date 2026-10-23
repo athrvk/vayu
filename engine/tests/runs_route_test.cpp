@@ -1511,6 +1511,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.test_duration_s         = 2.0;
     inputs.setup_overhead_s        = 0.25;
     inputs.peak_concurrency        = 8;
+    inputs.avg_in_flight           = 3.25;
     inputs.dropped_requests        = 2;
     inputs.queue_wait_avg_ms       = 1.5;
     inputs.bytes_sent              = 1024;
@@ -1570,6 +1571,9 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     // Requests libcurl re-sent on a new connection (#2799). Mutation check:
     // drop the `connection_replays` read in runs.cpp and this key is absent.
     EXPECT_EQ (summary.value ("connectionReplays", size_t{ 0 }), 6u);
+    // The run's mean in flight (#2821). Mutation check: drop the
+    // `avg_in_flight` read in runs.cpp and this key is absent.
+    EXPECT_DOUBLE_EQ (summary.value ("avgInFlight", -1.0), 3.25);
 
     // successful/failed are recounted from the stored distribution, so the 3
     // transport errors (code 0) land on the failed side.
@@ -1836,6 +1840,21 @@ TEST_F (RunsRouteTest, ReportFromAnOlderSummaryOmitsConnectionReplays) {
     << body["summary"].dump ();
 }
 
+// A run stored before #2821 has no mean in flight; its report leaves the key
+// out rather than reporting 0 in flight for a run that sent requests.
+TEST_F (RunsRouteTest, ReportFromAnOlderSummaryOmitsAvgInFlight) {
+    seed ({ .id = "run_pre_in_flight", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_TRUE (stored.contains ("avg_in_flight"));
+    stored.erase ("avg_in_flight");
+    db_->update_run_summary ("run_pre_in_flight", stored.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_pre_in_flight");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body["summary"].contains ("avgInFlight")) << body["summary"].dump ();
+}
+
 // Every store a run keeps is bounded, so the report has to say how much each
 // one thinned away - a Samples tab showing 1000 traces from a 3M-request run
 // is honest only if the reader can also see that 29,000 candidates were
@@ -2040,6 +2059,9 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 400u);
     EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 3u);
     EXPECT_GT (summary["avgRps"].get<double> (), 0.0);
+    // The collector's latency sum over the same duration (#2821).
+    ASSERT_TRUE (summary.contains ("avgInFlight")) << summary.dump ();
+    EXPECT_GT (summary["avgInFlight"].get<double> (), 0.0);
     EXPECT_EQ (live["statusCodes"], nlohmann::json::parse ("[[0,1],[200,2],[503,1]]"));
     EXPECT_EQ (live["errors"]["byStatusCode"], nlohmann::json::parse ("[[0,1],[503,1]]"));
     // The percentiles are read from histograms the run is still writing.

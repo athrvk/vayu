@@ -1052,7 +1052,10 @@ struct RunContext {
         size_t base = sent > done ? sent - done : 0;
         // A run with no `timer.think` element (the overwhelming common case)
         // never reserves one, so this is one relaxed load and nothing else -
-        // see `reserve_think_wait`'s doc comment.
+        // see `reserve_think_wait`'s doc comment. Only the single-request path
+        // reserves: a scenario virtual user's timer wait must stay out, because
+        // the scenario dispatcher refills while this is under its target and
+        // counts a deferred user as not in flight (#2821).
         if (think_reservation_count.load (std::memory_order_relaxed) == 0) {
             return base;
         }
@@ -1114,17 +1117,23 @@ struct MetricTickSample {
     size_t cancelled   = 0;     // By a Stop; in none of the above (#2136)
     // The trailing window of the live frame of the same tick (TrailingWindow,
     // #2393): completions and dispatches per second over at least the last
-    // second, and the window's mean latency and queue wait, absent (stored as
-    // null) when the window completed nothing.
-    double current_rps       = 0.0;
-    double current_send_rate = 0.0;
+    // second, the window's mean requests in flight (0 when it completed
+    // nothing, #2821), and its mean latency and queue wait, absent (stored as
+    // null) when it completed nothing.
+    double current_rps          = 0.0;
+    double current_send_rate    = 0.0;
+    double window_avg_in_flight = 0.0;
     std::optional<double> window_avg_latency_ms;
     std::optional<double> window_avg_queue_wait_ms;
+    // Transfers active in the curl workers at the sample; a virtual user in a
+    // timer wait holds none, so a synchronised run aliases this (#2821).
     size_t current_concurrency = 0;
     // Cumulative means since load start, the hero card's figures.
-    double send_rate        = 0.0;
-    double throughput       = 0.0;
-    size_t backpressure     = 0;   // In flight, think-timer slots included
+    double send_rate  = 0.0;
+    double throughput = 0.0;
+    // RunContext::in_flight: sent and not yet settled, plus the slots a
+    // `timer.think` wait holds on a single-request run only.
+    size_t backpressure     = 0;
     double error_rate       = 0.0; // Percent
     size_t dropped_requests = 0;
     size_t bytes_sent       = 0;
@@ -1287,14 +1296,16 @@ struct SamplingRetention {
  * (whole-run) percentiles, never a window.
  */
 struct RunSummaryInputs {
-    size_t total_requests    = 0;
-    size_t cancelled         = 0; // By a Stop; not in total_requests (#2136)
-    double rps               = 0.0;
-    double send_rate         = 0.0;
-    double throughput        = 0.0;
-    double test_duration_s   = 0.0;
-    double setup_overhead_s  = 0.0;
-    size_t peak_concurrency  = 0;
+    size_t total_requests   = 0;
+    size_t cancelled        = 0; // By a Stop; not in total_requests (#2136)
+    double rps              = 0.0;
+    double send_rate        = 0.0;
+    double throughput       = 0.0;
+    double test_duration_s  = 0.0;
+    double setup_overhead_s = 0.0;
+    size_t peak_concurrency = 0;
+    // MetricsCollector::average_in_flight over `test_duration_s` (#2821).
+    double avg_in_flight     = 0.0;
     size_t dropped_requests  = 0;
     double queue_wait_avg_ms = 0.0;
     size_t bytes_sent        = 0;

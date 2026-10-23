@@ -28,6 +28,7 @@ import {
 	formatLatency,
 	formatLatencyParts,
 	formatMs,
+	formatOneDecimal,
 	formatPercent,
 	formatRate,
 	formatSeconds,
@@ -101,6 +102,23 @@ describe("formatPercent: one decimal, always", () => {
 
 	it.each(cases)("%s", (input, expected) => {
 		expect(formatPercent(input)).toBe(expected);
+	});
+});
+
+describe("formatOneDecimal: a mean count with one decimal", () => {
+	const cases: Array<[number | null | undefined, string]> = [
+		[4.2, "4.2"],
+		[10, "10.0"],
+		[0, "0.0"],
+		[4.25, "4.3"],
+		[1234.56, "1,234.6"],
+		[NaN, "0.0"],
+		[null, "0.0"],
+		[undefined, "0.0"],
+	];
+
+	it.each(cases)("%s", (input, expected) => {
+		expect(formatOneDecimal(input)).toBe(expected);
 	});
 });
 

@@ -72,6 +72,27 @@ describe("reportToDerived", () => {
 		});
 	});
 
+	describe("mean requests in flight (#2821)", () => {
+		const withAvgInFlight = (avgInFlight?: number) => {
+			const base = baseReport();
+			return reportToDerived(baseReport({ summary: { ...base.summary, avgInFlight } }));
+		};
+
+		it("carries the report's mean beside the peak, which stays the peak", () => {
+			const d = withAvgInFlight(4.2);
+			expect(d.avgInFlight).toBe(4.2);
+			expect(d.peakConcurrency).toBe(20);
+		});
+
+		it("keeps a measured 0 a 0", () => {
+			expect(withAvgInFlight(0).avgInFlight).toBe(0);
+		});
+
+		it("leaves it absent for a report stored before the mean existed, so the card falls back to the peak", () => {
+			expect(withAvgInFlight(undefined).avgInFlight).toBeUndefined();
+		});
+	});
+
 	it("carries the report's HTTP errors / No response split (issue #2124)", () => {
 		const base = baseReport();
 		const d = reportToDerived(

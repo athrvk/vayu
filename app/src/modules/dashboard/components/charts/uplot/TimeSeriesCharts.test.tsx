@@ -213,6 +213,50 @@ describe("ConnectionsChart - what the series is called", () => {
 	});
 });
 
+describe("ConnectionsChart - what the series plots (#2821)", () => {
+	// An instant of 0 and 10 for users that wait in step; their mean is steady.
+	const aliased = (elapsed: number, mean?: number | null): LoadTestMetrics => {
+		const t = tick(elapsed);
+		t.current_concurrency = elapsed % 2 === 0 ? 0 : 10;
+		if (mean !== undefined) t.window_avg_in_flight = mean;
+		return t;
+	};
+
+	it("plots the window's mean in flight, not the instant that aliases", () => {
+		const history = [0, 1, 2, 3].map((i) => aliased(i, 4.2));
+		render(<ConnectionsChart mode="constant_concurrency" history={history} />);
+		expect(mockState.props.data?.[1]).toEqual([4.2, 4.2, 4.2, 4.2]);
+	});
+
+	it("keeps an idle window's measured 0 rather than falling back to the instant", () => {
+		const history = [0, 1, 2, 3].map((i) => aliased(i + 1, 0));
+		render(<ConnectionsChart mode="constant_concurrency" history={history} />);
+		expect(mockState.props.data?.[1]).toEqual([0, 0, 0, 0]);
+	});
+
+	it.each([
+		["a tick stored before the mean existed", undefined],
+		["a live frame whose mean is null", null],
+	])("falls back to the instant for %s", (_name, mean) => {
+		const history = [0, 1, 2, 3].map((i) => aliased(i, mean));
+		render(<ConnectionsChart mode="constant_concurrency" history={history} />);
+		expect(mockState.props.data?.[1]).toEqual([0, 10, 0, 10]);
+	});
+});
+
+describe("ConnectionsChart - modes that stay on the instant (#2821)", () => {
+	it.each(["ramp_up", "capacity", "constant_rps"])("plots %s's instantaneous count", (mode) => {
+		const history = [0, 1, 2, 3].map((i) => {
+			const t = tick(i);
+			t.current_concurrency = i % 2 === 0 ? 0 : 10;
+			t.window_avg_in_flight = 4.2;
+			return t;
+		});
+		render(<ConnectionsChart mode={mode} history={history} />);
+		expect(mockState.props.data?.[1]).toEqual([0, 10, 0, 10]);
+	});
+});
+
 describe("LatencyBreakdownChart - what the series are called", () => {
 	it("names the average latency as including queue wait, and the other series wire time", () => {
 		render(<LatencyBreakdownChart history={historyOf(4)} />);

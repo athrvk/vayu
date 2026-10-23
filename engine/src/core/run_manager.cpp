@@ -281,6 +281,7 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.throughput              = inputs.rps;
     inputs.test_duration_s         = elapsed_s;
     inputs.peak_concurrency        = context.peak_in_flight.load ();
+    inputs.avg_in_flight           = mc.average_in_flight (elapsed_s);
     inputs.dropped_requests        = mc.dropped_requests ();
     inputs.queue_wait_avg_ms       = mc.average_queue_wait ();
     inputs.bytes_sent              = mc.total_bytes_sent ();
@@ -1683,6 +1684,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.test_duration_s  = totals.total_duration_s;
     inputs.setup_overhead_s = totals.setup_overhead_s;
     inputs.peak_concurrency = context->peak_in_flight.load ();
+    inputs.avg_in_flight =
+    context->metrics_collector->average_in_flight (totals.total_duration_s);
     inputs.dropped_requests = context->metrics_collector->dropped_requests ();
     // Over the window the run sent in, which leaves out the drain (#2392).
     inputs.requests_sent      = context->requests_sent.load ();
@@ -2433,15 +2436,16 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     }
 
     nlohmann::json payload;
-    payload["timestamp"]          = sample.timestamp;
-    payload["elapsed_seconds"]    = sample.elapsed_seconds;
-    payload["requests_completed"] = sample.requests_completed;
-    payload["requests_failed"]    = sample.requests_failed;
-    payload["http_errors"]        = sample.http_errors;
-    payload["no_response"]        = sample.no_response;
-    payload["cancelled"]          = sample.cancelled;
-    payload["current_rps"]        = sample.current_rps;
-    payload["current_send_rate"]  = sample.current_send_rate;
+    payload["timestamp"]            = sample.timestamp;
+    payload["elapsed_seconds"]      = sample.elapsed_seconds;
+    payload["requests_completed"]   = sample.requests_completed;
+    payload["requests_failed"]      = sample.requests_failed;
+    payload["http_errors"]          = sample.http_errors;
+    payload["no_response"]          = sample.no_response;
+    payload["cancelled"]            = sample.cancelled;
+    payload["current_rps"]          = sample.current_rps;
+    payload["current_send_rate"]    = sample.current_send_rate;
+    payload["window_avg_in_flight"] = sample.window_avg_in_flight;
     payload["window_avg_latency_ms"] = mean_or_null (sample.window_avg_latency_ms);
     payload["window_avg_queue_wait_ms"] = mean_or_null (sample.window_avg_queue_wait_ms);
     payload["current_concurrency"] = sample.current_concurrency;
@@ -2480,6 +2484,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     summary["test_duration"]    = inputs.test_duration_s;
     summary["setup_overhead"]   = inputs.setup_overhead_s;
     summary["peak_concurrency"] = inputs.peak_concurrency;
+    // Always written: absent is a run stored before #2821, whose report then
+    // omits `avgInFlight` rather than claiming nothing was in flight.
+    summary["avg_in_flight"]    = inputs.avg_in_flight;
     summary["dropped_requests"] = inputs.dropped_requests;
     summary["queue_wait_avg"]   = inputs.queue_wait_avg_ms;
     summary["bytes_sent"]       = inputs.bytes_sent;
@@ -2657,6 +2664,7 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
 void put_window_reading (nlohmann::json& stats, const WindowReading& window) {
     stats["currentRps"]           = window.completed_per_s;
     stats["currentSendRate"]      = window.sent_per_s;
+    stats["windowAvgInFlight"]    = window.avg_in_flight;
     stats["windowAvgLatencyMs"]   = mean_or_null (window.avg_latency_ms);
     stats["windowAvgQueueWaitMs"] = mean_or_null (window.avg_queue_wait_ms);
 }
@@ -2712,7 +2720,8 @@ int64_t& first_tick_steady_ms) {
     double throughput =
     run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
 
-    // Sent but not yet answered, plus every slot a think timer still holds.
+    // Sent but not yet settled, plus the slots a think timer holds on a
+    // single-request run (a scenario's timer waits are not in it).
     size_t backpressure = context->in_flight ();
 
     // One locked read shared by the debug line and the persisted
@@ -2765,6 +2774,7 @@ int64_t& first_tick_steady_ms) {
         sample.cancelled                = mc.cancelled ();
         sample.current_rps              = gate.window.completed_per_s;
         sample.current_send_rate        = gate.window.sent_per_s;
+        sample.window_avg_in_flight     = gate.window.avg_in_flight;
         sample.window_avg_latency_ms    = gate.window.avg_latency_ms;
         sample.window_avg_queue_wait_ms = gate.window.avg_queue_wait_ms;
         sample.current_concurrency      = active_now;
@@ -2891,9 +2901,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             }
         }
 
-        // One definition with the persisted tick and peak_in_flight, think-timer
-        // reservations included (#1921) and Stop-cancelled requests excluded
-        // (#2136), so it can differ from this frame's
+        // One definition with the persisted tick and peak_in_flight, a
+        // single-request run's think-timer reservations included (#1921; a
+        // scenario's timer waits are not, #2821) and Stop-cancelled requests
+        // excluded (#2136), so it can differ from this frame's
         // `requestsSent - totalRequests`.
         const size_t backpressure = context->in_flight ();
         stats["backpressure"]     = backpressure;

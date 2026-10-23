@@ -359,6 +359,10 @@ struct ReportExtras {
     // existed, which leaves `summary.connectionReplays` out rather than
     // claiming an older engine looked and saw none.
     std::optional<size_t> connection_replays;
+    // Mean requests in flight over the run (#2821). Empty for a summary stored
+    // before the key existed, which leaves `summary.avgInFlight` out rather
+    // than reporting an older run as one that sent nothing.
+    std::optional<double> avg_in_flight;
     // Requests a user Stop cancelled (#2136): sent, never answered, and in
     // neither `totalRequests` nor any error count. Only the stored summary
     // knows it - the status distribution never held them - so a run stored
@@ -571,6 +575,9 @@ ReportExtras& extras) {
     }
 
     read_number (summary, "peak_concurrency", extras.peak_concurrency);
+    if (summary.contains ("avg_in_flight") && summary["avg_in_flight"].is_number ()) {
+        extras.avg_in_flight = summary["avg_in_flight"].get<double> ();
+    }
     read_number (summary, "dropped_requests", extras.dropped_total);
     read_number (summary, "queue_wait_avg", extras.queue_wait_avg);
     read_number (summary, "bytes_sent", extras.bytes_sent);
@@ -1654,6 +1661,9 @@ double target_rps) {
     if (const auto& replays = extras.connection_replays) {
         json_report["summary"]["connectionReplays"] = *replays;
     }
+    if (const auto& avg_in_flight = extras.avg_in_flight) {
+        json_report["summary"]["avgInFlight"] = *avg_in_flight;
+    }
     if (extras.latency_measured) {
         json_report["latency"] = { { "min", report.latency_min },
             { "max", report.latency_max }, { "avg", report.latency_avg },
@@ -1828,6 +1838,7 @@ ReportExtras& extras) {
     }
     extras.cancelled_requests = collector.cancelled ();
     extras.peak_concurrency = static_cast<double> (context->peak_in_flight.load ());
+    extras.avg_in_flight  = collector.average_in_flight (duration_s);
     extras.dropped_total  = static_cast<double> (collector.dropped_requests ());
     extras.queue_wait_avg = collector.average_queue_wait ();
     extras.bytes_sent     = static_cast<double> (collector.total_bytes_sent ());
