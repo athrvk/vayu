@@ -44,10 +44,8 @@ import {
 	sendsHasTokens,
 	sendsResolver,
 } from "../../../utils/sends-url";
-import {
-	deferredNote,
-	useDeferredVariables,
-} from "@/components/layout/context-bar/code-composition";
+import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
+import { deferredNote } from "@/lib/deferred-note";
 import { SECRET_UI_MASK, collectSecrets, createSecretMasker } from "@/services/codegen";
 import { EmptyTableHint } from "./EmptyTableHint";
 

@@ -69,7 +69,8 @@ import {
 } from "@/services/codegen";
 import type { SnippetRequest } from "@/services/codegen";
 import { SectionEmpty, SectionLoading } from "./Section";
-import { compositionOptions, deferredNote, useEditorHeld } from "./code-composition";
+import { compositionOptions, useEditorHeld } from "./code-composition";
+import { deferredNote } from "@/lib/deferred-note";
 import { templatedRequest } from "./templated-request";
 import type { ContextBarSectionProps } from "./types";
 

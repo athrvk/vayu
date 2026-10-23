@@ -31,7 +31,6 @@ import {
 	useLiveCommandSurfaceStore,
 	type EditorDraft,
 } from "@/lib/commands/live-surfaces";
-import { pickByCount } from "@/modules/dashboard/utils/format";
 import { buildComposeBody } from "@/modules/request-builder/utils/compose-body";
 import type { RequestState } from "@/modules/request-builder/types";
 import type { ComposedRequest, ComposeRequestRequest } from "@/types";
@@ -153,18 +152,4 @@ export function useDeferredVariables(requestId: string, enabled: boolean): reado
 		enabled: enabled && !!requestId,
 	});
 	return data?.deferredVariables ?? NO_NAMES;
-}
-
-/**
- * Names the tokens left written because a pre-request script runs before the
- * send (#2521), so a `{{token}}` reads as deliberate rather than as a variable
- * that failed to resolve. The Code section's note and the "Sends" line's hint
- * are this one sentence.
- */
-export function deferredNote(names: readonly string[]): string {
-	const tokens = names.map((name) => `{{${name}}}`).join(", ");
-	return pickByCount(names.length, {
-		one: `${tokens} is set by a pre-request script at send.`,
-		other: `${tokens} are set by a pre-request script at send.`,
-	});
 }

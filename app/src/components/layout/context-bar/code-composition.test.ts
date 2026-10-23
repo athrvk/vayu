@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { queryKeys } from "@/queries/keys";
-import { compositionOptions, composeForCode, deferredNote } from "./code-composition";
+import { compositionOptions, composeForCode } from "./code-composition";
 import { useLiveCommandSurfaceStore, type EditorDraft } from "@/lib/commands/live-surfaces";
 import type { RequestState } from "@/modules/request-builder/types";
 
@@ -101,17 +101,5 @@ describe("compositionOptions", () => {
 
 	it("never refetches on its own", () => {
 		expect(compositionOptions("req_1", null, false).staleTime).toBe(Infinity);
-	});
-});
-
-describe("deferredNote", () => {
-	it("speaks of one name in the singular", () => {
-		expect(deferredNote(["token"])).toBe("{{token}} is set by a pre-request script at send.");
-	});
-
-	it("speaks of several in the plural", () => {
-		expect(deferredNote(["host", "token"])).toBe(
-			"{{host}}, {{token}} are set by a pre-request script at send."
-		);
 	});
 });
