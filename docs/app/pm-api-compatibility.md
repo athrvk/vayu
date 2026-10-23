@@ -1265,7 +1265,9 @@ jar.clear();                                                 // this environment
 Every method names only the request's own site and the hosts the script has
 called through `pm.sendRequest`. `get` and `getAll` answer `undefined` / `[]` for
 any other URL, and `set`, `unset` and `clear(url)` store or remove nothing, each
-with a console warning. See the divergences below.
+with a console warning. See the divergences below. In a pre-request script, where
+the request's URL still holds its `{{name}}`s (#2521), its site is that URL as the
+variables resolve it at the call.
 
 Every method is URL-scoped and takes an optional trailing callback, invoked
 inline, that carries what the call did: `get` the value, `getAll` the array,

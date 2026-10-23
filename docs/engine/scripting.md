@@ -2270,6 +2270,14 @@ trailing dot. For a request to `www.example.com`, `www.example.com` and
 scope only as itself. A non-ASCII host is compared as its punycode name, the one
 the jar keys on.
 
+**The request's site is its URL as the variables resolve it at the call.** A
+request a pre-request script runs before still holds its `{{name}}`s in that
+script (#2521), so its host is read the way `pm.variables.replaceIn` would read
+the URL at that moment: a `{{host}}` the environment stores, or one the script
+set a line earlier, names the site, and a write after the script moves
+`host` is held to the new one. `pm.cookies.get` and its siblings match the
+same resolved URL.
+
 A host the script has called with `pm.sendRequest` joins the allowed set from
 the moment of the call, whether or not the transfer succeeded, so "log in
 through `pm.sendRequest`, then read the session it set" works. The set lasts
