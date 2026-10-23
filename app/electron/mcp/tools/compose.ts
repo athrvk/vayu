@@ -121,16 +121,30 @@ export function readRequestOverrides(args: Record<string, unknown>): Record<stri
 /**
  * The payload as `POST /execute` / `POST /runs` receives it from this server:
  * marked as an MCP-started run, naming the handshake's client when one is
- * known (#1817). Applied at the send, after every argument has been folded in,
- * so nothing a caller passes can claim another origin. The name goes as the
- * client sent it; the engine trims and caps it.
+ * known (#1817), and carrying the session's allowlist as `targetPolicy`, which
+ * the engine applies to the URL it is about to send, after any pre-request
+ * script (#2521). The gate here judges the composed URL; a script can still
+ * move it, and only the engine sees where it moved.
+ *
+ * Applied at the send, after every argument has been folded in, so nothing a
+ * caller passes can claim another origin or a wider policy. The client name
+ * goes as the client sent it; the engine trims and caps it. Every
+ * `executeRequest` / `startRun` call in this server goes through here, which
+ * `tools.test.ts` checks by scanning for one that does not.
  */
-export function withMcpOrigin(
+export function asMcpSend(
 	payload: Record<string, unknown>,
 	ctx: ToolContext
 ): Record<string, unknown> {
 	const client = ctx.clientName?.();
-	return { ...payload, origin: client === undefined ? { kind: "mcp" } : { kind: "mcp", client } };
+	// The composed answer's list of deferred names is for the agent that asked
+	// to compose; the send has no use for it.
+	const { deferredVariables: _deferredVariables, ...sendable } = payload;
+	return {
+		...sendable,
+		origin: client === undefined ? { kind: "mcp" } : { kind: "mcp", client },
+		targetPolicy: { allowAll: ctx.config.allowAll, allowedHosts: [...ctx.config.allowlist] },
+	};
 }
 
 /**
@@ -237,7 +251,7 @@ export async function runStreamingRequest(
 
 	let started: Record<string, unknown>;
 	try {
-		const accepted = await ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal);
+		const accepted = await ctx.client.executeRequest(asMcpSend(payload, ctx), signal);
 		if (!accepted || typeof accepted !== "object" || Array.isArray(accepted)) {
 			return errorResult("Engine returned an unusable answer for a streaming request.");
 		}

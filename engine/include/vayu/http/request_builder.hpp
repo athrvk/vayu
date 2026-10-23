@@ -8,6 +8,7 @@
  */
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/target_policy.hpp"
 #include "vayu/types.hpp"
 
 #include <atomic>
@@ -74,12 +75,16 @@ struct RequestBuild {
  * @param timeout_ms The already-resolved request timeout to apply.
  * @param auth       Whether to resolve `auth` here (default) or leave it to the
  *                   caller - see @ref AuthResolution.
+ * @param target_policy The hosts the caller allows (#2521): an OAuth 2.0
+ *                   token endpoint it refuses fails the build as `apply_auth`
+ *                   describes, before anything is posted. Null for none.
  * @param cancel     Ends an oauth2 token request early - see `apply_auth`.
  */
 RequestBuild build_request (const nlohmann::json& config,
 vayu::db::Database* db,
 int timeout_ms,
-AuthResolution auth             = AuthResolution::Apply,
-const std::atomic<bool>* cancel = nullptr);
+AuthResolution auth               = AuthResolution::Apply,
+const TargetPolicy* target_policy = nullptr,
+const std::atomic<bool>* cancel   = nullptr);
 
 } // namespace vayu::http

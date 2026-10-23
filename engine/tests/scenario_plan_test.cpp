@@ -48,6 +48,7 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -147,6 +148,22 @@ class ScenarioPlanTest : public ::testing::Test {
         r.created_at = created_at;
         r.updated_at = created_at;
         db_->save_request (r);
+    }
+
+    /// Replace the stored `elements` of request @p id.
+    void set_request_elements (const std::string& id, const json& elements) {
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->elements = elements.dump ();
+        db_->save_request (*row);
+    }
+
+    /// Replace the stored `elements` of collection @p id.
+    void set_collection_elements (const std::string& id, const json& elements) {
+        auto row = db_->get_collection (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->elements = elements.dump ();
+        db_->create_collection (*row); // a replace, keyed on the id
     }
 
     void seed_environment (const std::string& id, const std::string& variables) {
@@ -403,13 +420,116 @@ TEST_F (ScenarioPlanTest, StepMatchesWhatComposeReturnsForTheSameRequest) {
     EXPECT_TRUE (saw_pre);
     EXPECT_TRUE (saw_post);
 
-    // Environment variables resolved, and auth applied into the plan.
-    EXPECT_EQ (step.request.url, "https://api.example.test/orders/42");
-    ASSERT_EQ (step.request.headers.count ("Authorization"), 1u);
-    EXPECT_EQ (step.request.headers.at ("Authorization"), "Bearer s3cret");
+    // The collection's pre-request script runs before this step, so its names
+    // wait for the pass after it (#2521) and its credential for the auth
+    // applied after it (#2473) - not written into the plan.
+    EXPECT_EQ (step.request.url, "https://{{host}}/orders/{{id}}");
+    EXPECT_EQ (step.request.headers.count ("Authorization"), 0u);
+    EXPECT_TRUE (step.auth_after_scripts);
 
     EXPECT_EQ (step.name, "Request req");
     EXPECT_EQ (step.stored_url, "https://{{host}}/orders/{{id}}");
+}
+
+// The same request with no pre-request script above it: the plan carries the
+// environment's values and the applied auth, exactly as before #2521.
+TEST_F (ScenarioPlanTest, AnUnscriptedStepResolvesItsNamesAndAuthIntoThePlan) {
+    seed_collection ("col", "");
+    seed_request ("req", "col", /*order=*/0, "https://{{host}}/orders/{{id}}",
+    /*auth=*/R"({"mode":"bearer","token":"{{token}}"})");
+    seed_environment ("env",
+    R"({"host":{"value":"api.example.test","enabled":true},
+        "id":{"value":"42","enabled":true},
+        "token":{"value":"s3cret","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps.at (0);
+    EXPECT_EQ (step.request.url, "https://api.example.test/orders/42");
+    ASSERT_EQ (step.request.headers.count ("Authorization"), 1u);
+    EXPECT_EQ (step.request.headers.at ("Authorization"), "Bearer s3cret");
+    EXPECT_FALSE (step.auth_after_scripts);
+}
+
+// --- A plan with a step that writes a variable (#2521) ------------------------
+//
+// One answer for the whole plan: an earlier step's extractor or test script can
+// set the value a later, element-free step reads, so every step leaves its
+// scope names for the send. Mutation check for the block: make
+// `plan_variable_deferral` (scenario_plan.cpp) answer `WhenScripted` and the
+// first case's later step is resolved into the plan; drop its `run.end`
+// exclusion and the second case's teardown defers every step.
+
+TEST_F (ScenarioPlanTest, AnExtractorOnOneStepLeavesEveryStepsNamesForTheSend) {
+    seed_collection ("col", "");
+    seed_request ("login", "col", 0, "https://api.example.test/login");
+    set_request_elements ("login",
+    json::array ({ { { "id", "el_token" }, { "kind", "extract.json" }, { "enabled", true },
+    { "config", { { "path", "$.token" }, { "variable", "token" }, { "scope", "env" } } } } }));
+    seed_request ("use", "col", 1, "https://{{host}}/me",
+    /*auth=*/R"({"mode":"bearer","token":"{{token}}"})");
+    seed_environment ("env",
+    R"({"host":{"value":"api.example.test","enabled":true},
+        "token":{"value":"old","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& use = resolved.plan.steps.at (1);
+    EXPECT_EQ (use.request.url, "https://{{host}}/me");
+    EXPECT_EQ (use.request.headers.count ("Authorization"), 0u);
+    EXPECT_TRUE (use.auth_after_scripts);
+}
+
+// Elements that write nothing, and a teardown that writes only after the last
+// send, leave the plan resolved at composition exactly as before.
+TEST_F (ScenarioPlanTest, APlanWhoseElementsWriteNoVariableBeforeASendResolvesAtComposition) {
+    seed_collection ("col", "");
+    set_collection_elements ("col",
+    json::array ({ { { "id", "el_down" }, { "kind", "script.teardown" }, { "enabled", true },
+    { "config", { { "script", "pm.environment.set('token', 'after');" } } } } }));
+    seed_request ("check", "col", 0, "https://api.example.test/health");
+    set_request_elements ("check",
+    json::array ({ { { "id", "el_ok" }, { "kind", "assert.status" },
+    { "enabled", true }, { "config", { { "in", json::array ({ 200 }) } } } } }));
+    seed_request ("use", "col", 1, "https://{{host}}/me",
+    /*auth=*/R"({"mode":"bearer","token":"{{token}}"})");
+    seed_environment ("env",
+    R"({"host":{"value":"api.example.test","enabled":true},
+        "token":{"value":"s3cret","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& use = resolved.plan.steps.at (1);
+    EXPECT_EQ (use.request.url, "https://api.example.test/me");
+    ASSERT_EQ (use.request.headers.count ("Authorization"), 1u);
+    EXPECT_EQ (use.request.headers.at ("Authorization"), "Bearer s3cret");
+    EXPECT_FALSE (use.auth_after_scripts);
+}
+
+// A scripted step under the run's deferred generators (#995, #2521): the
+// generator is still split into the per-iteration template, once, and the
+// deferred name is not - the residual pass after the script answers it.
+TEST_F (ScenarioPlanTest, AScriptedStepSplitsItsGeneratorAndLeavesItsNameToThePass) {
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"",
+    /*pre_script=*/"pm.environment.set('id', '9');");
+    seed_request ("req", "col", 0, "https://api.example.test/{{$randomUUID}}/{{id}}");
+    seed_environment ("env", R"({"id":{"value":"42","enabled":true}})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps.at (0);
+
+    EXPECT_EQ (step.request.url, "https://api.example.test/{{$randomUUID}}/{{id}}");
+    ASSERT_EQ (step.data_template.fields.size (), 1u);
+    EXPECT_EQ (step.data_template.fields[0].tokens, std::vector<std::string>{ "$randomUUID" });
 }
 
 // Issue #995. A plan step is composed once and sent per iteration, so its
@@ -523,8 +643,8 @@ TEST_F (ScenarioPlanTest, ManifestRecordsTheDataRowCountAndFileButNeverTheRows) 
     const json manifest =
     vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
     EXPECT_EQ (manifest["dataRowCount"], 2);
-    EXPECT_EQ (manifest.value ("dataFileName", ""), "users.csv");
-    EXPECT_EQ (manifest.value ("dataFileHash", ""), std::string (64, 'a'));
+    EXPECT_EQ (manifest.at ("dataFileName"), "users.csv");
+    EXPECT_EQ (manifest.at ("dataFileHash"), std::string (64, 'a'));
     // Absent `iterations` with a data set means one pass per row.
     EXPECT_EQ (manifest["iterations"], 2);
     EXPECT_EQ (manifest.dump ().find ("alice"), std::string::npos);
@@ -577,7 +697,7 @@ TEST_F (ScenarioPlanTest, ManifestRecordsADataFileReadWithNumbersCastAndOmitsOne
         return vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
     };
 
-    EXPECT_EQ (manifest_for (true).value ("dataFileCastNumbers", false), true);
+    EXPECT_EQ (manifest_for (true).at ("dataFileCastNumbers"), true);
     EXPECT_FALSE (manifest_for (false).contains ("dataFileCastNumbers"));
 }
 
@@ -1435,9 +1555,9 @@ TEST_F (ScenarioPlanTest, ADataTokenInTheCredentialsWithNoDataSetIsRefused) {
 }
 
 TEST_F (ScenarioPlanTest, ADataTokenInAnOAuth2ConfigIsRefusedWithOrWithoutData) {
-    // The one mode deferral cannot serve: the token is acquired here, once, so
-    // no iteration exists for a row to reach. Refused by name rather than sent
-    // to the token endpoint as the literal text.
+    // The one mode the row bind cannot serve: the token is acquired against
+    // the endpoint, never bound per iteration. Refused by name rather than
+    // sent to the token endpoint as the literal text.
     const auto refused = [&] (const json& scenario) {
         const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
         EXPECT_FALSE (resolved.ok);
@@ -1459,6 +1579,71 @@ TEST_F (ScenarioPlanTest, ADataTokenInAnOAuth2ConfigIsRefusedWithOrWithoutData) 
     json with_rows    = block ("col");
     with_rows["data"] = json::array ({ json{ { "secret", "s" } } });
     refused (with_rows);
+}
+
+// #2521: a scripted step's OAuth 2.0 config waits for its script on a
+// sequential plan, whose executor acquires after it; a load plan acquires
+// once, here, from the stored values, keyed by the resolved config. Mutation
+// check: make `resolve_step` compose with `AtComposition` whatever
+// `oauth2_after_scripts` says, and the sequential plan carries the token.
+TEST_F (ScenarioPlanTest, AScriptedOAuth2StepWaitsForItsScriptOnASequentialPlanOnly) {
+    seed_collection ("col", "", /*order=*/0, /*auth=*/"",
+    /*pre_script=*/"pm.environment.set('client', 'new');");
+    seed_request ("oauth_req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"oauth2","config":{"grantType":"client_credentials","autoFetchToken":false,
+        "accessTokenUrl":"https://auth.test/token","clientId":"{{client}}"}})");
+    seed_environment ("env", R"({"client":{"value":"stored","enabled":true}})");
+    // Cached under the stored config's key, so the load plan's acquisition
+    // reads it with no endpoint behind it; non-expiring.
+    vayu::db::OAuthToken token;
+    token.cache_key    = vayu::http::oauth::cache_key (json{
+       { "accessTokenUrl", "https://auth.test/token" }, { "clientId", "stored" } });
+    token.access_token = "AT-stored";
+    token.created_at   = 1;
+    db_->save_oauth_token (token);
+
+    auto sequential                 = options ();
+    sequential.environment_id       = "env";
+    sequential.oauth2_after_scripts = true;
+    const auto waits = vayu::core::resolve_scenario (*db_, block ("col"), sequential);
+    ASSERT_TRUE (waits.ok) << waits.error;
+    const auto& late = waits.plan.steps.at (0);
+    EXPECT_TRUE (late.auth_after_scripts);
+    EXPECT_EQ (late.request.headers.count ("Authorization"), 0u);
+    const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&late.auth);
+    ASSERT_NE (oauth2, nullptr);
+    EXPECT_EQ (oauth2->config.at ("clientId"), "{{client}}");
+
+    auto load           = options ();
+    load.environment_id = "env";
+    const auto planned = vayu::core::resolve_scenario (*db_, block ("col"), load);
+    ASSERT_TRUE (planned.ok) << planned.error;
+    const auto& now = planned.plan.steps.at (0);
+    EXPECT_FALSE (now.auth_after_scripts);
+    ASSERT_EQ (now.request.headers.count ("Authorization"), 1u);
+    EXPECT_EQ (now.request.headers.at ("Authorization"), "Bearer AT-stored");
+}
+
+// A name nothing answers: a load plan, which acquires before any script, has
+// no moment left to resolve it and refuses it by name rather than asking the
+// endpoint with the literal token; a sequential plan leaves it to the send.
+TEST_F (ScenarioPlanTest, ALoadPlanRefusesAnOAuth2NameNothingAnswers) {
+    seed_collection ("col", "");
+    seed_request ("oauth_req", "col", /*order=*/0, "https://example.test/x",
+    R"({"mode":"oauth2","config":{"grantType":"client_credentials",
+        "accessTokenUrl":"https://auth.test/token","clientId":"{{client}}"}})");
+
+    const auto refused = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    EXPECT_FALSE (refused.ok);
+    EXPECT_NE (refused.error.find ("{{client}}"), std::string::npos) << refused.error;
+    EXPECT_NE (refused.error.find ("Request oauth_req"), std::string::npos)
+    << refused.error;
+
+    auto sequential                 = options ();
+    sequential.oauth2_after_scripts = true;
+    const auto waits = vayu::core::resolve_scenario (*db_, block ("col"), sequential);
+    ASSERT_TRUE (waits.ok) << waits.error;
+    EXPECT_TRUE (waits.plan.steps.at (0).auth_after_scripts);
 }
 
 TEST_F (ScenarioPlanTest, CredentialsWithoutADataTokenAreStillResolvedIntoThePlan) {

@@ -475,16 +475,17 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 
 The libraries the script sandbox's `require()` hands out are the real npm
 builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
-beside its licence and a `README.md` naming the package, the exact version,
-the tarball URL and its registry integrity. csv-parse and xml2js ship no
+beside its licence and a `README.md` naming the package and its version; the
+tarball URL, the registry integrity and the file's SHA-256 live in the
+[manifest](#the-vendored-js-manifest). csv-parse and xml2js ship no
 single-file build, and chai's browser build (`chai.js`) carries a dependency set Postman
 does not ship, so each of those three files is an esbuild bundle of the package's own
 sources (xml2js's with the `sax` and `xmlbuilder` it depends on, chai's with
 its seven dependencies, their licences beside it), and its `README.md` also
-carries the command that reproduces it byte for byte. ajv's file is the
+describes what its build does (the exact command is in the manifest). ajv's file is the
 package's own `dist/ajv.min.js` (its browser bundle, which carries four
 dependencies, each licence beside it); tv4 ships no minified build, so its
-file is `tv4.js` minified by esbuild and its `README.md` carries the command. They are
+file is `tv4.js` minified by esbuild. They are
 compiled into `vayu_core` as data and evaluated on a script's first `require`
 of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/issues/2650),
 [#2651](https://github.com/athrvk/vayu/issues/2651),
@@ -530,9 +531,66 @@ where moment read 58 to 80 ms.
 The vendored files are excluded from every formatter and linter
 (`engine/vendor/.clang-format`, the repo-JS ESLint config's ignores) and must
 stay byte-identical to the package (csv-parse's, xml2js's, chai's and tv4's to the
-build each README names; csv-parse's `node-shims.mjs` and xml2js's `shims/` are build
+build the manifest records; csv-parse's `node-shims.mjs` and xml2js's `shims/` are build
 input and are not embedded);
 `.gitattributes`' `eol=lf` is a no-op on them because they hold no CR.
+
+#### The vendored JS manifest
+
+"Byte for byte" is checked, not asserted ([#2750](https://github.com/athrvk/vayu/issues/2750)).
+`engine/vendor/js-manifest.json` has one `files[]` entry per shipped library
+file:
+
+- `path` and `sha256`: the file under `engine/vendor/` and the SHA-256 of its
+  bytes;
+- `packages`: every npm package the file is made from, each with `name`,
+  `version`, the `tarball` URL and the registry's `dist.integrity`;
+- `build`: `{"kind": "verbatim", "source": ...}` for a file copied out of the
+  first package, or `{"kind": "esbuild", "esbuild": "<version>", "args": [...]}`
+  with the esbuild version pinned and the exact arguments, run in a directory
+  holding each package at `node_modules/<name>` (`{vendor}` stands for
+  `engine/vendor` and `{out}` for the output file). An esbuild entry also lists
+  `inputs`, the repo files its command reads and that are never embedded
+  (csv-parse's `node-shims.mjs`, xml2js's `shims/`), each with its own
+  `sha256`.
+
+Two checks hold it, one offline and one on demand:
+
+- **Every test run**: the `VendorJsManifest` suite
+  (`engine/tests/vendor_js_manifest_test.cpp`; `ctest --preset linux-dev -R VendorJs`)
+  hashes each listed file and input and fails, naming the file, on a
+  mismatch. It also fails on a `.js`, `.mjs` or `.cjs` file under
+  `engine/vendor/` (outside `quickjs-ng` and `hdrhistogram`) that the manifest
+  does not list, on a manifest that lists nothing, and on an entry with no
+  source package, no registry integrity or no build. It reads the source tree
+  and the SHA-256 the engine already links (libsodium), so it needs no network
+  and runs the same on all three platforms.
+- **On demand, not in CI**: `scripts/vendor-js/rebuild.sh <lib>` fetches the
+  entry's tarballs, checks each against its `dist.integrity`, runs the build
+  and compares the output's SHA-256 with the manifest's. It needs network,
+  node/npm, curl, tar and openssl. Exit 0 means the committed file is
+  reproducible from the registry; 1 means the rebuilt bytes differ, and the
+  output is left where the message says.
+
+#### Upgrading a vendored library
+
+1. In the library's manifest entry, set the new `version`, `tarball` and
+   `integrity` of each package (`npm view <package>@<version> dist.integrity`),
+   and change `build.source` or `build.args` if the new layout needs it. The
+   esbuild pin changes only on purpose: a new esbuild can change the bytes of
+   every bundle.
+2. Run `scripts/vendor-js/rebuild.sh <lib>`. It checks the integrity of
+   each tarball and builds the file; the hash still being the old one, it exits 1
+   and prints the rebuilt file's path and SHA-256. Copy that file over the
+   vendored one and put its SHA-256 in the entry.
+3. Replace the `LICENSE` files from the new tarballs and update the version
+   and sizes in the library's `README.md` and in the table above.
+4. Run `scripts/vendor-js/rebuild.sh <lib>` again (it must say the file
+   rebuilds byte for byte), then `ctest --preset linux-dev -R VendorJs` and the
+   library's conformance tests.
+
+A new library takes a manifest entry, a `vayu_embed_js` call and a `README.md`;
+the test fails until the entry exists.
 
 #### First-load cost
 

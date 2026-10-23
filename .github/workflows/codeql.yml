@@ -1,9 +1,10 @@
 name: CodeQL
 
-# Two languages on two schedules, because they cost very different amounts.
+# Three jobs on two schedules, because they cost very different amounts.
 #
-# JavaScript/TypeScript analyses from source with no build, so it is cheap
-# enough to run on every pull request alongside the existing checks.
+# JavaScript/TypeScript and the workflows themselves (`actions`) analyse from
+# source with no build, so they are cheap enough to run on every pull request
+# alongside the existing checks. Every job runs the `security-extended` suite.
 #
 # C++ has no source-only mode: CodeQL builds a database by watching the compiler
 # run, so it has to compile the engine. That build cannot use sccache - a cache
@@ -47,6 +48,7 @@ jobs:
         uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: javascript-typescript
+          queries: security-extended
           # `build-mode: none` is the source-only path - no compilation, which
           # is what makes this job cheap. Also the default for this language,
           # stated here so the intent is explicit next to the C++ job that
@@ -79,6 +81,31 @@ jobs:
         uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: /language:javascript-typescript
+
+  actions:
+    name: Analyze actions
+    runs-on: ubuntu-24.04
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Workflow injection, mutable action refs and token misuse in
+      # `.github/workflows` and the composite actions. Source-only, so it
+      # costs seconds.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          languages: actions
+          queries: security-extended
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          category: /language:actions
 
   cpp:
     name: Analyze C++
@@ -134,6 +161,7 @@ jobs:
         uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: c-cpp
+          queries: security-extended
           # Manual, not autobuild: autobuild does not know about the vcpkg
           # toolchain and would fail to configure. The build below runs between
           # init and analyze, under the tracer init installs.

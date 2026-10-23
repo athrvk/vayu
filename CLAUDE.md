@@ -11,7 +11,8 @@ React UI, communicating over HTTP on port 9876.
 - **`scripts/`**: `pre-commit` (clang-format on staged C++), `pre-push`
   (clang-tidy on the C++ a push changes), `install-git-hooks.sh`, `test/`
   (load-test fixtures + mock server, installer and hook suites), `perf/` (the
-  weekly measurement harness), `cxx-feature-probe`
+  weekly measurement harness), `cxx-feature-probe`, `vendor-js/` (rebuilds a
+  vendored script library from its npm tarballs)
 
 This file holds only what applies to *every* session. Deeper material loads on
 demand - see [Where the rest lives](#where-the-rest-lives) at the bottom. Every

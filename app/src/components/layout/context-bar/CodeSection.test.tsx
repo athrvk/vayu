@@ -425,3 +425,59 @@ describe("CodeSection - the fidelity it cannot promise", () => {
 		}
 	});
 });
+
+describe("CodeSection - names a token a pre-request script will set (#2521)", () => {
+	/** A scripted request composes with its templates intact. */
+	function composeDeferred(names?: string[]) {
+		composeRequest.mockResolvedValue({
+			method: "POST",
+			url: "https://{{host}}/v1/users",
+			headers: [{ name: "X-Token", value: "{{token}}" }],
+			...(names ? { deferredVariables: names } : {}),
+		});
+	}
+
+	it("lists the deferred names beside the snippet, in the resolved mode", async () => {
+		composeDeferred(["host", "token"]);
+		renderSection();
+
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		// The braces are in the command because the script runs first; the note
+		// is what says so.
+		expect(snippet()).toContain("{{host}}");
+		expect(
+			screen.getByText("{{host}}, {{token}} are set by a pre-request script at send.")
+		).toBeInTheDocument();
+	});
+
+	it("speaks of one name in the singular", async () => {
+		composeDeferred(["token"]);
+		renderSection();
+
+		expect(
+			await screen.findByText("{{token}} is set by a pre-request script at send.")
+		).toBeInTheDocument();
+	});
+
+	it.each([
+		["omitted", undefined],
+		["empty", []],
+	])("says nothing when the list is %s", async (_, names) => {
+		composeDeferred(names);
+		renderSection();
+
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		expect(screen.queryByText(/pre-request script/)).toBeNull();
+	});
+
+	it("says nothing in the templated mode, which composes nothing", async () => {
+		composeDeferred(["token"]);
+		renderSection();
+		await screen.findByText(/set by a pre-request script/);
+
+		fireEvent.click(screen.getByRole("radio", { name: "Templated" }));
+
+		await waitFor(() => expect(snippet()).toContain("{{host}}"));
+		expect(screen.queryByText(/pre-request script/)).toBeNull();
+	});
+});

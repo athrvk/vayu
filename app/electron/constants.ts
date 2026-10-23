@@ -352,3 +352,19 @@ export const UPDATE_STARTUP_CHECK_DELAY_MS = 60 * 1000;
  * that never answers would hold the downloaded update forever.
  */
 export const UPDATE_ATTESTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
+/**
+ * Deadline for each attempt at a request of the Sigstore TUF refresh behind
+ * that gate (#2738), covering the body as well as the headers. This and
+ * `UPDATE_TUF_REQUEST_RETRIES` are the timeout and retry count `@sigstore/tuf`
+ * defaults to for the same requests; an attempt that goes unanswered counts as
+ * a failed one, and once the retries are spent the refresh fails, and so
+ * refuses the update, rather than holding it.
+ */
+export const UPDATE_TUF_REQUEST_TIMEOUT_MS = 5 * 1000;
+/**
+ * Retries after a failed first attempt at one TUF request (three attempts in
+ * all), for a thrown network error or a 5xx answer. A 4xx is the repository's
+ * verdict and is not retried: `Updater.loadRoot` reads a 403 or 404 on the
+ * next root as "no newer root".
+ */
+export const UPDATE_TUF_REQUEST_RETRIES = 2;

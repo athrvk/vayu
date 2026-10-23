@@ -49,7 +49,10 @@
  * so it spends none of this budget. #2444's `get_safety_config` (a description
  * and a small output schema, about 370 B a row) took the rows to 136,673 /
  * 133,947 B writes off and 204,039 / 199,642 B writes on; the writes-off caps
- * went to 137,100 / 134,400 and the writes-on caps still hold.
+ * went to 137,100 / 134,400 and the writes-on caps still hold. #2451's paged
+ * `run_collection_smoke` and the descriptions merged beside it then measured
+ * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
+ * caps went to 137,900 / 135,200 and 205,300 / 200,900.
  *
  * #2443 (the paged whole-list reads) added the envelope schema and the `q` /
  * `limit` / `offset` / `fields` arguments to four tools; the caps sit about 1%

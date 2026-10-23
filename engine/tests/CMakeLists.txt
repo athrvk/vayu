@@ -168,6 +168,8 @@ add_executable(vayu_tests
     http_version_test.cpp
     request_composer_test.cpp
     residual_token_test.cpp
+    deferred_composition_test.cpp
+    target_policy_test.cpp
     scenario_data_test.cpp
     scenario_load_test.cpp
     scenario_plan_test.cpp
@@ -218,6 +220,7 @@ add_executable(vayu_tests
     element_kinds_test.cpp
     metric_record_test.cpp
     version_isolation_test.cpp
+    vendor_js_manifest_test.cpp
     reentrant_test.cpp
     ascii_case_test.cpp
     logger_test.cpp
@@ -396,6 +399,8 @@ set(vayu_scratch_database_suites
     DefaultHeaderConfigTest
     DatabaseTest
     DbRecoveryTest
+    DeferredCompositionTest
+    TargetPolicyRouteTest
     FileRootsRouteTest
     FileGrantsRouteTest
     DeleteRunTest

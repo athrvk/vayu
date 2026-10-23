@@ -541,6 +541,7 @@ add_library(vayu_core STATIC
     src/http/jsonrpc_body.cpp
     src/http/loopback_guard.cpp
     src/http/list_page.cpp
+    src/http/target_policy.cpp
     src/http/url_parts.cpp
     src/utils/json.cpp
     src/utils/logger.cpp

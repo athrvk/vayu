@@ -63,6 +63,13 @@ in the engine, the app or MCP touched to make the kind exist and validate. `GET 
 serves the same list; the app and MCP render a kind's editor from its schema, with a bespoke form
 only where one is worth writing by hand.
 
+A kind that writes a variable scope sets `ElementKind::writes_variables` (every `script.*` and
+`extract.*` kind today). A collection run's plan reads it through the registry: when any step
+carries such a kind at a phase before some send, every step is composed with its `{{names}}` left
+for the send, so a value an earlier step writes reaches a later one (#2521, see
+[Scenario runs](api-reference.md#scenario-runs)). A new kind that writes a variable sets the flag
+or a plan resolves the value it writes too early.
+
 ## Schema annotations
 
 Every property in a kind's `configSchema` carries two standard JSON Schema keywords (issue
@@ -355,6 +362,11 @@ existing `scripts` node - one entry per compiled element that ran at `step.befor
 (`step.between` too, for the sequential run), each
 `{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
+A `script.pre` / `script.post` element reports `error` with the thrown message when its script threw
+(or timed out), `failed` with the first failed assertion as its message (`Test failed - <name>:
+<message>`, or `N tests failed - <first name>: <first message>`) when the script ran and only its
+`pm.test` assertions did not hold, and `ok` otherwise (#2663). The message is about that one script;
+the step's own verdict is read from the folded result below, unchanged.
 `origin.scope` (`collection` | `folder` | `request`, #2522) is the level the element was declared at;
 `compile_elements` reads it into `CompiledElement::scope` (falling back to `origin.kind`), and
 `ElementPipeline::run` sets `ElementContext::element_scope` from it before each `apply`.

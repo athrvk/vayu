@@ -52,6 +52,12 @@ function parseHostname(candidate: string): string | null {
  * and a gate that guessed would be a gate.
  */
 function authorityHasTemplate(url: string): boolean {
+	const authority = authorityOf(url);
+	return authority.includes("{{") || authority.includes("}}");
+}
+
+/** Everything between the scheme and the first `/`, `?` or `#` of @p url. */
+function authorityOf(url: string): string {
 	const schemeEnd = url.indexOf("://");
 	const authorityStart = schemeEnd === -1 ? 0 : schemeEnd + 3;
 	// The first delimiter after the authority. `Infinity` for a URL that is all
@@ -61,11 +67,37 @@ function authorityHasTemplate(url: string): boolean {
 			.map((delimiter) => url.indexOf(delimiter, authorityStart))
 			.map((index) => (index === -1 ? Infinity : index))
 	);
-	const authority = url.slice(
-		authorityStart,
-		authorityEnd === Infinity ? undefined : authorityEnd
+	return url.slice(authorityStart, authorityEnd === Infinity ? undefined : authorityEnd);
+}
+
+/** The engine's template rule (`token_pattern`, `request_composer.cpp`). */
+const TEMPLATE = /\{\{([^{}]+)\}\}/g;
+
+/**
+ * Whether @p url's authority holds templates and every one of them is a name
+ * composition deferred past a pre-request script (`deferredVariables`, #2521).
+ * Such a host is the script's to choose, so nothing here can know it: the
+ * engine judges it, once resolved, against the `targetPolicy` every send
+ * carries (`asMcpSend`). A template composition could not answer is still
+ * unknown to everyone, and refused here as before.
+ */
+function authorityAwaitsScript(url: string, deferred: ReadonlySet<string>): boolean {
+	const authority = authorityOf(url);
+	let found = false;
+	const rest = authority.replace(TEMPLATE, (whole, name: string) => {
+		if (!deferred.has(name.trim())) return whole;
+		found = true;
+		return "";
+	});
+	return found && !rest.includes("{{") && !rest.includes("}}");
+}
+
+/** A composed payload's `deferredVariables`, as a set of names. */
+function deferredNames(composed: Record<string, unknown>): ReadonlySet<string> {
+	const names = composed.deferredVariables;
+	return new Set(
+		Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : []
 	);
-	return authority.includes("{{") || authority.includes("}}");
 }
 
 /**
@@ -96,6 +128,22 @@ export function extractHost(url: string): string | null {
 }
 
 /**
+ * Why @p url has no host. A host that is a whole `{{token}}` names the variable
+ * and the tools that define it (#2450): "may contain unresolved variables" sent
+ * the user hunting for a variable they could not tell was missing. A stray brace
+ * or an empty URL keeps the generic sentence.
+ */
+function undeterminedHostError(url: string): string {
+	// extractHost tolerates a non-string; so does this.
+	const authority = typeof url === "string" ? authorityOf(url) : "";
+	const unresolved = authority.matchAll(TEMPLATE).next().value;
+	if (unresolved) {
+		return `Could not determine the target host from the request URL: the host is the unresolved variable {{${unresolved[1].trim()}}}. Define it (update_collection variables, or an environment) - resolve_variables shows which names are undefined - then retry.`;
+	}
+	return "Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.";
+}
+
+/**
  * Enforce the target allowlist. An empty allowlist denies everything (safe
  * default). Matching is exact on hostname, case-insensitive. @p host is the
  * session's host, which decides how the refusal tells the user to lift it.
@@ -103,10 +151,7 @@ export function extractHost(url: string): string | null {
 export function checkAllowlist(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
 	const target = extractHost(url);
 	if (!target) {
-		return {
-			ok: false,
-			error: "Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.",
-		};
+		return { ok: false, error: undeterminedHostError(url) };
 	}
 	// "Allow all" bypasses the allowlist entirely (still requires a resolvable host).
 	if (config.allowAll) {
@@ -128,6 +173,76 @@ export function checkAllowlist(url: string, config: McpSafetyConfig, host: McpHo
 		};
 	}
 	return OK;
+}
+
+/**
+ * {@link checkAllowlist} on a payload `POST /compose` answered, before it is
+ * sent. The one difference: an authority whose templates were all deferred
+ * past a pre-request script (#2521) has no host yet, and is left to the engine,
+ * which holds the URL it is about to send to the same rule (`targetPolicy`).
+ * Only an empty allowlist, which no host could pass, is refused for it here.
+ */
+export function checkComposedTarget(
+	composed: Record<string, unknown>,
+	config: McpSafetyConfig,
+	host: McpHost
+): GuardResult {
+	const url = String(composed.url ?? "");
+	if (!authorityAwaitsScript(url, deferredNames(composed))) {
+		return checkAllowlist(url, config, host);
+	}
+	if (config.allowAll || config.allowlist.length > 0) return OK;
+	return {
+		ok: false,
+		error: `The MCP target allowlist is empty, so no outbound requests are permitted. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`,
+	};
+}
+
+/**
+ * What the engine answers when the URL it was about to send failed the
+ * `targetPolicy` this server attached (#2521): the codes `target_not_allowed`
+ * and `target_host_unknown` (`engine/include/vayu/http/target_policy.hpp`),
+ * beside a sentence naming the host. A buffered `POST /execute` answers them as
+ * `refusalCode` / `errorMessage`; a streaming one as a 400's `error`.
+ */
+const TARGET_REFUSAL_CODES: ReadonlySet<string> = new Set([
+	"target_not_allowed",
+	"target_host_unknown",
+]);
+
+/**
+ * The tool error for an engine refusal of @p code with @p message, or
+ * undefined when @p code is not a target refusal. The allowlist remedy is the
+ * one {@link checkAllowlist} gives, since the fix is the same setting.
+ */
+function targetRefusalText(code: unknown, message: unknown, host: McpHost): string | undefined {
+	if (typeof code !== "string" || !TARGET_REFUSAL_CODES.has(code)) return undefined;
+	const said = typeof message === "string" ? message : "The engine refused the target host.";
+	const lead = `The MCP allowlist is applied, after the pre-request script, to the URL a request is about to send and to the host of an OAuth 2.0 token endpoint (accessTokenUrl, refreshTokenUrl) it is about to post to. ${said}`;
+	if (code !== "target_not_allowed") return `${lead} Resolve the URL before sending.`;
+	return `${lead} Ask the user to ${settingRemedy("allowlist", host)} before retrying.`;
+}
+
+/** {@link targetRefusalText} for a buffered `POST /execute` answer. */
+export function targetPolicyRefusal(answer: unknown, host: McpHost): string | undefined {
+	if (answer === null || typeof answer !== "object") return undefined;
+	const { refusalCode, errorMessage } = answer as Record<string, unknown>;
+	return targetRefusalText(refusalCode, errorMessage, host);
+}
+
+/** {@link targetRefusalText} for an engine error body, `{"error": {code, message}}`. */
+export function targetPolicyRefusalOfErrorBody(body: string, host: McpHost): string | undefined {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body);
+	} catch {
+		return undefined;
+	}
+	if (parsed === null || typeof parsed !== "object") return undefined;
+	const error = (parsed as Record<string, unknown>).error;
+	if (error === null || typeof error !== "object") return undefined;
+	const { code, message } = error as Record<string, unknown>;
+	return targetRefusalText(code, message, host);
 }
 
 /**

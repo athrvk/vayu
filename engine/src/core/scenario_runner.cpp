@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/elements.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/script_config.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -48,50 +49,6 @@ int64_t runner_now_ms () {
     .count ();
 }
 
-/// The first failed assertion, phrased for the `results.error` column: a
-/// scenario step's failure has to say *which* expectation broke, because the
-/// step list is all a reader has to go on.
-std::string describe_failed_tests (const vayu::ScriptResult& pre,
-const vayu::ScriptResult& post) {
-    size_t failures = 0;
-    std::string first;
-    for (const auto* result : { &pre, &post }) {
-        for (const auto& test : result->tests) {
-            if (test.passed) {
-                continue;
-            }
-            ++failures;
-            if (first.empty ()) {
-                first = test.name;
-                if (!test.error_message.empty ()) {
-                    first += ": " + test.error_message;
-                }
-            }
-        }
-    }
-    if (failures == 0) {
-        return "";
-    }
-    if (failures == 1) {
-        return "Test failed - " + first;
-    }
-    return std::to_string (failures) + " tests failed - " + first;
-}
-
-/**
- * Whether a script *errored* rather than merely disagreeing with the response.
- *
- * `ScriptResult::success` is also the tests' verdict - `ScriptEngine::execute`
- * clears it when any `pm.test` fails - so it cannot be read as "the script
- * ran". The message is what separates the two: a thrown script, a timeout and a
- * refused `pm.request` write-back all carry one, and a failed expectation
- * carries none. Reading `success` alone would report every failed assertion as
- * a step that never ran.
- */
-bool script_errored (const vayu::ScriptResult& result) {
-    return !result.success && !result.error_message.empty ();
-}
-
 /**
  * Decide what one exchange amounts to, onto @p record's outcome and error.
  *
@@ -108,7 +65,7 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
         record.error   = exchange.response.error_message;
         return;
     }
-    if (script_errored (exchange.pre_script_result)) {
+    if (script_threw (exchange.pre_script_result)) {
         record.outcome = StepOutcome::Errored;
         record.error   = vayu::http::routes::script_failure_text (
         exchange.pre_script_result, "pre-request");
@@ -122,7 +79,7 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
         record.outcome = StepOutcome::Skipped;
         return;
     }
-    if (script_errored (exchange.post_script_result)) {
+    if (script_threw (exchange.post_script_result)) {
         record.outcome = StepOutcome::Errored;
         record.error =
         vayu::http::routes::script_failure_text (exchange.post_script_result, "test");
@@ -637,6 +594,9 @@ struct StepContext {
     /// `StepContext` shares the one map a controller must keep counting
     /// into across iterations, not a fresh one each time.
     std::unordered_map<std::string, int64_t>& controller_state;
+    /// The token cache a step's OAuth 2.0 config acquires through after its
+    /// pre-request script (`ExchangeInputs::token_cache`, #2521).
+    vayu::db::Database* token_cache = nullptr;
 };
 
 /**
@@ -672,10 +632,14 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.controller_state = &ctx.controller_state;
     // One user walking the sequence, which is what a collection run in design
     // mode is - the same number `{{$vu}}` binds into its requests (issue #994).
-    inputs.vu                     = SOLE_VIRTUAL_USER;
-    inputs.iteration_count        = ctx.iteration_count;
-    inputs.transport              = ctx.transport;
-    inputs.default_headers        = ctx.default_headers;
+    inputs.vu              = SOLE_VIRTUAL_USER;
+    inputs.iteration_count = ctx.iteration_count;
+    inputs.transport       = ctx.transport;
+    inputs.default_headers = ctx.default_headers;
+    inputs.token_cache     = ctx.token_cache;
+    // The run's caller's host rule (#2521), judged on each step's final URL.
+    const auto& target_policy     = ctx.context->target_policy;
+    inputs.target_policy          = target_policy ? &*target_policy : nullptr;
     inputs.max_response_bytes     = ctx.max_response_bytes;
     inputs.max_element_body_bytes = ctx.max_element_body_bytes;
     // The files the plan already checked (`ScenarioExecution::files`); a step
@@ -1431,7 +1395,7 @@ RunManager& manager) {
                 transport, default_headers, cookie_scope, data_rows,
                 data_row_index, iteration, asked.iterations, fail_on_schema_error,
                 stop_on_error, max_trace_body_bytes, max_response_bytes,
-                max_element_body_bytes, element_spans, controller_state };
+                max_element_body_bytes, element_spans, controller_state, &db };
             summary.steps_not_run += run_iteration (script_engine, cookie_jar,
             cookie_scope, scopes, step_ctx, plan, step_index,
             max_steps_per_iteration, coverage, summary, store, transactions);

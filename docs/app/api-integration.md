@@ -1030,6 +1030,14 @@ unbounded and are never read for one; once the run is terminal its row carries
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
 unchanged - every send site composes first, so nothing is interpolated twice.
+For a request a pre-request script runs before, the answer keeps the names a
+scope answers written as `{{name}}` and lists them in `deferredVariables`
+(issue #2521; a `ComposedRequest` member, sorted, absent when none): the send
+resolves them after the script. The list describes the composition, not the
+request, so the composing hook drops it from the payload a send posts onward
+to `/execute` or `/runs`, and only the Code section, which calls
+`apiService.composeRequest` itself, reads it. A send also states nothing about
+hosts: only the MCP server attaches a `targetPolicy` to its sends.
 
 **GraphQL schema introspection is a send site too** (`lib/graphql/introspect.ts`,
 issue #228): it composes the endpoint, overlays the introspection query onto the

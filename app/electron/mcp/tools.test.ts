@@ -5,6 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { buildSchema, introspectionFromSchema } from "graphql";
@@ -57,7 +60,7 @@ import {
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
-import { describeImportPreview } from "./tools/spec-bindings.js";
+import { describeImport, describeImportPreview } from "./tools/spec-bindings.js";
 import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
@@ -3116,6 +3119,32 @@ describe("run_collection_smoke", () => {
 		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
 	});
 
+	test("skips a request whose host is left as {{baseUrl}} with the gate's remedy as its reason (#2450)", async () => {
+		const client = fakeClient({
+			listRequests: vi
+				.fn()
+				.mockResolvedValue([
+					{ id: "r1", name: "one", method: "GET", url: "{{baseUrl}}/x" },
+				]),
+			composeRequest: vi.fn().mockResolvedValue({ method: "GET", url: "{{baseUrl}}/x" }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const matrix = res.structuredContent as {
+			skipped: number;
+			results: Array<{ reason?: string }>;
+		};
+		expect(matrix.skipped).toBe(1);
+		const reason = matrix.results[0].reason ?? "";
+		expect(reason).toMatch(/^Could not determine the target host/);
+		expect(reason).toContain("{{baseUrl}}");
+		expect(reason).toContain("update_collection");
+		expect(client.executeRequest).not.toHaveBeenCalled();
+	});
+
 	test("does not skip a scheme-less host:port request whose host is allowlisted", async () => {
 		// A collection saved against "localhost:3000/..." had every request
 		// skipped, with a reason blaming unresolved {{variables}} in a URL that
@@ -3186,9 +3215,13 @@ describe("run_collection_smoke", () => {
 			undefined
 		);
 		// Executed exactly as composed - resolved once, never re-resolved - with
-		// only the run's origin added beside it.
+		// only the run's origin and the session's target policy added beside it.
 		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(outgoing).toEqual({ ...composed, origin: { kind: "mcp" } });
+		expect(outgoing).toEqual({
+			...composed,
+			origin: { kind: "mcp" },
+			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
+		});
 		expect((res.structuredContent as { passed: number }).passed).toBe(1);
 	});
 
@@ -4412,6 +4445,7 @@ describe("run_collection", () => {
 			},
 			environmentId: "env_1",
 			origin: { kind: "mcp" },
+			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
 		});
 		// The absence of `mode` is what makes this a design-mode run: a mode
 		// beside the block would hand the same plan to the load executor.
@@ -4985,6 +5019,7 @@ describe("start_load_run scenario runs", () => {
 			concurrency: 5,
 			duration: "30s",
 			origin: { kind: "mcp" },
+			targetPolicy: { allowAll: false, allowedHosts: ["api.example.com"] },
 		});
 	});
 
@@ -7278,6 +7313,79 @@ describe("dispatchTool", () => {
 			expect((executed(client).elements as unknown[])[4]).toEqual(extractor);
 		});
 
+		test("an ad-hoc preRequestScript is composed with the stored list, so a name it sets waits for it (#2521)", async () => {
+			// Mutation check: append the ad-hoc elements to the by-id composition
+			// instead of composing again, and the engine never sees the script:
+			// `{{token}}` goes out as the stored value it resolved before the
+			// script could set it.
+			const own = {
+				id: "el_own",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('own', function () {});" },
+			};
+			type Element = { id?: string; kind?: string };
+			// The engine's rule in miniature: a `script.pre` among the composed
+			// elements leaves `{{token}}` written and names it; without one the
+			// stored value is resolved in.
+			const composeRequest = vi
+				.fn()
+				.mockImplementation(({ request }: { request?: { elements?: Element[] } }) => {
+					const elements = request?.elements ?? [own];
+					const scripted = elements.some((el) => el.kind === "script.pre");
+					return Promise.resolve({
+						method: "GET",
+						url: "https://api.example.com/users",
+						headers: [
+							{
+								name: "Authorization",
+								value: scripted ? "Bearer {{token}}" : "Bearer stored",
+							},
+						],
+						elements,
+						requestId: "req_1",
+						...(scripted ? { deferredVariables: ["token"] } : {}),
+					});
+				});
+			const client = fakeClient({ listEnvironments: listingEnv1(), composeRequest });
+			const res = await dispatchTool(
+				"run_request",
+				{
+					requestId: "req_1",
+					environmentId: "env_1",
+					preRequestScript: "pm.environment.set('token', 'new');",
+				},
+				ctxWith(client, { ...OFF, revealSecretsToAgents: true })
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeRequest).toHaveBeenCalledTimes(2);
+			const recomposed = composeRequest.mock.calls[1][0] as {
+				requestId?: string;
+				environmentId?: string;
+				request?: { elements?: Element[] };
+			};
+			expect(recomposed).toMatchObject({ requestId: "req_1", environmentId: "env_1" });
+			expect(recomposed.request?.elements?.map((el) => el.id)).toEqual([
+				"el_own",
+				"mcp-script-pre",
+			]);
+			expect(executed(client).headers).toEqual([
+				{ name: "Authorization", value: "Bearer {{token}}" },
+			]);
+			expect(executed(client)).not.toHaveProperty("deferredVariables");
+		});
+
+		test("a by-id send with nothing ad hoc composes once", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.composeRequest).toHaveBeenCalledTimes(1);
+		});
+
 		test("a stored literal credential runs with reveal off and is not echoed", async () => {
 			const KEY = "stored-typed-key";
 			const client = fakeClient({
@@ -7583,6 +7691,26 @@ describe("dispatchTool", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
+		expect(client.executeRequest).not.toHaveBeenCalled();
+	});
+
+	test("run_request answers a host left as {{baseUrl}} with the gate's own remedy (#2450)", async () => {
+		// Compose leaves an undefined variable's token in place. The tool must
+		// hand the agent the gate's sentence, not a generic one that drops the
+		// variable's name and the tool that defines it.
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({ method: "GET", url: "{{baseUrl}}/x" }),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "{{baseUrl}}/x" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		const text = firstText(res);
+		expect(text).toMatch(/^Could not determine the target host/);
+		expect(text).toContain("{{baseUrl}}");
+		expect(text).toContain("update_collection");
 		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
@@ -11077,6 +11205,45 @@ describe("webhook inbox tools", () => {
 	});
 });
 
+/** A tool call that reaches the engine's send routes, and which of the two it calls. */
+interface McpSender {
+	tool: string;
+	args: Record<string, unknown>;
+	sentTo: "executeRequest" | "startRun";
+}
+
+/** Every path that starts a run, each driven by name below. */
+const RUN_STARTERS: McpSender[] = [
+	{
+		tool: "run_request",
+		args: { url: "https://api.example.com/x" },
+		sentTo: "executeRequest",
+	},
+	{
+		tool: "run_request",
+		args: { url: "https://api.example.com/x", stream: true },
+		sentTo: "executeRequest",
+	},
+	{ tool: "run_collection_smoke", args: { collectionId: "c1" }, sentTo: "executeRequest" },
+	{ tool: "run_collection", args: { collectionId: "c1" }, sentTo: "startRun" },
+	{
+		tool: "start_load_run",
+		args: { url: "https://api.example.com/x", confirmed: true },
+		sentTo: "startRun",
+	},
+	{
+		tool: "start_load_run",
+		args: {
+			scenario: { collectionId: "c1" },
+			mode: "constant_concurrency",
+			concurrency: 5,
+			duration: "30s",
+			confirmed: true,
+		},
+		sentTo: "startRun",
+	},
+];
+
 /**
  * Every tool that starts a run says the run is an agent's, and which client's
  * (#1817): History reads `origin` to tell an MCP run from one the user sent.
@@ -11085,41 +11252,7 @@ describe("webhook inbox tools", () => {
  */
 describe("every run an MCP tool starts carries an MCP origin", () => {
 	const allow = { allowlist: ["api.example.com"] };
-	const runStarters: Array<{
-		tool: string;
-		args: Record<string, unknown>;
-		sentTo: "executeRequest" | "startRun";
-	}> = [
-		{
-			tool: "run_request",
-			args: { url: "https://api.example.com/x" },
-			sentTo: "executeRequest",
-		},
-		{
-			tool: "run_request",
-			args: { url: "https://api.example.com/x", stream: true },
-			sentTo: "executeRequest",
-		},
-		{ tool: "run_collection_smoke", args: { collectionId: "c1" }, sentTo: "executeRequest" },
-		{ tool: "run_collection", args: { collectionId: "c1" }, sentTo: "startRun" },
-		{
-			tool: "start_load_run",
-			args: { url: "https://api.example.com/x", confirmed: true },
-			sentTo: "startRun",
-		},
-		{
-			tool: "start_load_run",
-			args: {
-				scenario: { collectionId: "c1" },
-				mode: "constant_concurrency",
-				concurrency: 5,
-				duration: "30s",
-				confirmed: true,
-			},
-			sentTo: "startRun",
-		},
-	];
-	const cases = runStarters.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
+	const cases = RUN_STARTERS.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
 
 	/**
 	 * One saved request in `c1`; an inline request composes to itself. `extra`
@@ -11138,7 +11271,7 @@ describe("every run an MCP tool starts carries an MCP origin", () => {
 	}
 
 	async function originSent(
-		{ tool, args, sentTo }: (typeof runStarters)[number],
+		{ tool, args, sentTo }: McpSender,
 		clientName?: () => string | undefined,
 		composedExtra?: Record<string, unknown>
 	): Promise<unknown> {
@@ -11176,6 +11309,228 @@ describe("every run an MCP tool starts carries an MCP origin", () => {
 			kind: "mcp",
 			client: "cursor",
 		});
+	});
+});
+
+/**
+ * Every send carries the session's allowlist as `targetPolicy` (#2521): the
+ * engine holds the URL it is about to send, after any pre-request script, to
+ * the same rule. A path that forgot it would send wherever a script steered,
+ * and no gate here could see it, so each sending tool is driven by name and the
+ * scan below fails on a send that skips `asMcpSend`.
+ */
+describe("every MCP send carries the session's target policy", () => {
+	const senders: McpSender[] = [
+		...RUN_STARTERS,
+		{
+			tool: "get_graphql_schema",
+			args: { url: "https://api.example.com/graphql" },
+			sentTo: "executeRequest",
+		},
+	];
+	const cases = senders.map((c) => [`${c.tool} ${JSON.stringify(c.args)}`, c] as const);
+
+	/** The payload @p sender's one send carried under @p safety. */
+	async function payloadSent(
+		{ tool, args, sentTo }: McpSender,
+		safety: Partial<McpSafetyConfig>,
+		composedExtra: Record<string, unknown> = {}
+	): Promise<Record<string, unknown>> {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+			composeRequest: vi.fn().mockImplementation((body: { request?: object }) =>
+				Promise.resolve({
+					...(body.request ?? { method: "GET", url: "https://api.example.com/r1" }),
+					...composedExtra,
+				})
+			),
+		});
+		// The outcome after the send is the tool's own business (the GraphQL
+		// tool refuses a fake introspection answer); the payload is the subject.
+		await dispatchTool(tool, args, ctxWith(client, safety));
+		const send = client[sentTo] as ReturnType<typeof vi.fn>;
+		expect(send).toHaveBeenCalledTimes(1);
+		return send.mock.calls[0][0] as Record<string, unknown>;
+	}
+
+	/** The `targetPolicy` @p sender's one send carried under @p safety. */
+	async function policySent(
+		sender: McpSender,
+		safety: Partial<McpSafetyConfig>,
+		composedExtra: Record<string, unknown> = {}
+	): Promise<unknown> {
+		return (await payloadSent(sender, safety, composedExtra)).targetPolicy;
+	}
+
+	// Composition's answer about itself (#2521) is for the agent that composed;
+	// the engine would ignore it on these routes, but it is not part of a send.
+	test.each(cases)("%s does not forward composition's deferredVariables", async (_, sender) => {
+		const sent = await payloadSent(
+			sender,
+			{ allowlist: ["api.example.com"] },
+			{ deferredVariables: ["token"] }
+		);
+		expect(sent).not.toHaveProperty("deferredVariables");
+	});
+
+	test.each(cases)("%s states the session's allowlist", async (_, sender) => {
+		expect(await policySent(sender, { allowlist: ["api.example.com"] })).toStrictEqual({
+			allowAll: false,
+			allowedHosts: ["api.example.com"],
+		});
+	});
+
+	test.each(cases)("%s states Allow all hosts", async (_, sender) => {
+		expect(await policySent(sender, { allowAll: true })).toStrictEqual({
+			allowAll: true,
+			allowedHosts: [],
+		});
+	});
+
+	// Both ways in, as for `origin`: an argument, and a composed payload that
+	// already carries one.
+	test.each(cases)("%s cannot be given a wider policy", async (_, sender) => {
+		const wide = { allowAll: true, allowedHosts: [] };
+		const spoofed = { ...sender, args: { ...sender.args, targetPolicy: wide } };
+		expect(
+			await policySent(spoofed, { allowlist: ["api.example.com"] }, { targetPolicy: wide })
+		).toStrictEqual({ allowAll: false, allowedHosts: ["api.example.com"] });
+	});
+
+	test("no executeRequest or startRun call in the server skips asMcpSend", () => {
+		const here = path.dirname(fileURLToPath(import.meta.url));
+		const sources = readdirSync(here, { recursive: true, encoding: "utf8" }).filter(
+			(file) =>
+				file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.includes("testkit")
+		);
+		const calls: string[] = [];
+		for (const file of sources) {
+			const text = readFileSync(path.join(here, file), "utf8");
+			for (const call of text.matchAll(/\.(executeRequest|startRun)\(\s*([\w.]*)/g)) {
+				calls.push(`${file}: ${call[1]}(${call[2]}`);
+			}
+		}
+		// Seven sends today; a scan that read nothing would pass vacuously.
+		expect(calls.length).toBeGreaterThanOrEqual(7);
+		expect(calls.filter((call) => !call.endsWith("(asMcpSend"))).toEqual([]);
+	});
+});
+
+/**
+ * The engine's refusal of the URL a script left (#2521) reads as the allowlist
+ * gate's own refusal: the host it names, and the same remedy, on each path
+ * whose answer an agent reads at once.
+ */
+describe("an engine target refusal carries the allowlist remedy", () => {
+	const refusalMessage =
+		'Host "evil.example.com", which the URL about to be sent names, is not allowed by this request\'s target policy (allowed hosts: api.example.com). Nothing was sent.';
+	const remedy = "add the host in Vayu Settings → MCP (Target allowlist)";
+
+	// The early gate cannot know a host a pre-request script chooses, so it
+	// sends, policy attached, and the engine judges the host once resolved.
+	test("a saved request whose host waits on its script reaches the engine", async () => {
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: "https://{{host}}/x",
+				deferredVariables: ["host"],
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ requestId: "r1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError, firstText(res)).toBeFalsy();
+		const sent = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(sent.targetPolicy).toStrictEqual({
+			allowAll: false,
+			allowedHosts: ["api.example.com"],
+		});
+	});
+
+	test("a buffered run_request answers an error naming the host and the remedy", async () => {
+		const client = fakeClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 0,
+				errorMessage: refusalMessage,
+				refusalCode: "target_not_allowed",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"evil.example.com"');
+		expect(firstText(res)).toContain(remedy);
+	});
+
+	test("a streaming run_request's 400 answers the same", async () => {
+		const client = fakeClient({
+			executeRequest: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 400",
+						400,
+						engineErrorBody("target_not_allowed", refusalMessage)
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x", stream: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"evil.example.com"');
+		expect(firstText(res)).toContain(remedy);
+		expect(firstText(res)).not.toContain("Engine error (400)");
+	});
+
+	test("a smoke run skips the refused request with the remedy as its reason", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "one" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/r1" }),
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 0,
+				errorMessage: refusalMessage,
+				refusalCode: "target_not_allowed",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		const matrix = res.structuredContent as {
+			skipped: number;
+			results: Array<{ reason?: string }>;
+		};
+		expect(matrix.skipped).toBe(1);
+		expect(matrix.results[0].reason).toContain(remedy);
+	});
+
+	test("an unknown host asks for a resolved URL rather than an allowlist entry", async () => {
+		const client = fakeClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				status: 0,
+				errorMessage: "Could not determine the target host.",
+				refusalCode: "target_host_unknown",
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/x" },
+			ctxWith(client, { allowAll: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("Resolve the URL before sending.");
+		expect(firstText(res)).not.toContain(remedy);
 	});
 });
 
@@ -12264,6 +12619,31 @@ describe("OpenAPI spec binding tools", () => {
 			);
 			expect(describeImportPreview({ meta: { ...meta, folderCount: 0 } })).not.toContain(
 				"recursive"
+			);
+		});
+
+		test("tells the caller how to define {{baseUrl}} when the document named no server (#2450)", () => {
+			const base = { format: "OpenAPI 3.1.0", requestCount: 2, folderCount: 0 };
+			const noServer = { ...base, skipped: [{ kind: "no_server_url", count: 1 }] };
+			const other = { ...base, skipped: [{ kind: "websocket", count: 1 }] };
+			expect(noServer.skipped.map((s) => s.kind)).toContain("no_server_url");
+			const remedy = "{{baseUrl}} is undefined";
+			const imported = { collections: 1, requests: 2, environments: 0, globals: 0 };
+
+			const preview = describeImportPreview({ meta: noServer });
+			expect(preview).toContain(remedy);
+			expect(preview).toContain("update_collection");
+			expect(preview).toContain("update_environment");
+			expect(describeImportPreview({ meta: other })).not.toContain(remedy);
+			expect(describeImportPreview({ meta: { ...base, skipped: [] } })).not.toContain(remedy);
+
+			const done = describeImport({ ...imported, meta: noServer });
+			expect(done).toContain(remedy);
+			expect(done).toContain("update_collection");
+			expect(done).toContain("update_environment");
+			expect(describeImport({ ...imported, meta: other })).not.toContain(remedy);
+			expect(describeImport({ ...imported, meta: { ...base, skipped: [] } })).not.toContain(
+				remedy
 			);
 		});
 

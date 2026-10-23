@@ -11,6 +11,7 @@ import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit
 import {
 	extractHost,
 	checkAllowlist,
+	checkComposedTarget,
 	checkMonitorHost,
 	parseDurationSeconds,
 	checkLoadCaps,
@@ -20,10 +21,13 @@ import {
 	type EngineLoadDefaults,
 	type LoadMode,
 	type LoadRunParams,
+	targetPolicyRefusal,
+	targetPolicyRefusalOfErrorBody,
 } from "./safety.js";
 import { resolveLoadShape } from "./tools/compose.js";
 import { SCENARIO_LOAD_DEFAULTS } from "./tools/scenario-runs.js";
 import { DEFAULT_MCP_SAFETY_CONFIG, normalizeHost, resolveSafetyConfig } from "./config.js";
+import { settingRemedy } from "./remedy.js";
 
 describe("extractHost", () => {
 	test("parses hostname from a full URL, lowercased", () => {
@@ -118,6 +122,31 @@ describe("checkAllowlist", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
 		expect(checkAllowlist("{{baseUrl}}/x", config, "app").ok).toBe(false);
 	});
+	test("names the unresolved variable and the tools that define it (#2450)", () => {
+		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
+		const res = checkAllowlist("{{baseUrl}}/pets", config, "app");
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/^Could not determine the target host/);
+		expect(res.error).toContain("{{baseUrl}}");
+		expect(res.error).toContain("update_collection");
+		expect(res.error).toContain("resolve_variables");
+		// The first of several, trimmed of the spaces the engine's token rule allows.
+		expect(checkAllowlist("https://{{ host }}.{{zone}}/x", config, "app").error).toContain(
+			"{{host}}"
+		);
+		// Repeated calls: the module-level /g regex must not carry state between them.
+		expect(checkAllowlist("{{baseUrl}}/pets", config, "app").error).toContain("{{baseUrl}}");
+	});
+	test("keeps the generic sentence for an empty URL and for a stray brace", () => {
+		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
+		const generic =
+			"Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.";
+		expect(checkAllowlist("", config, "app").error).toBe(generic);
+		expect(checkAllowlist("{{baseUrl/pets", config, "app").error).toBe(generic);
+		expect(checkAllowlist("https://host}}/x", config, "app").error).toBe(generic);
+		// A template in the path leaves the host resolvable, so it is no refusal here.
+		expect(checkAllowlist("https://api.example.com/{{id}}", config, "app").ok).toBe(true);
+	});
 	test("allowAll bypasses the allowlist for any resolvable host", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
 		expect(checkAllowlist("https://anything.example.org/x", config, "app").ok).toBe(true);
@@ -127,6 +156,123 @@ describe("checkAllowlist", () => {
 	test("allowAll still rejects an unresolvable host (unresolved variables)", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
 		expect(checkAllowlist("{{baseUrl}}/x", config, "app").ok).toBe(false);
+	});
+});
+
+/**
+ * The gate on a composed payload (#2521): an authority composition deferred
+ * past a pre-request script has no host yet, and is left to the engine, which
+ * judges the URL it is about to send against the `targetPolicy` every send
+ * carries. Everything else is `checkAllowlist`'s answer.
+ */
+describe("checkComposedTarget", () => {
+	const listed = resolveSafetyConfig({ allowlist: ["api.example.com"] });
+	const composed = (url: string, deferred?: string[]) => ({
+		url,
+		...(deferred ? { deferredVariables: deferred } : {}),
+	});
+
+	test("leaves an authority of deferred names to the engine", () => {
+		expect(
+			checkComposedTarget(composed("https://{{host}}/x", ["host"]), listed, "app").ok
+		).toBe(true);
+		// Spaces inside the braces, as the engine's own token rule reads them.
+		expect(
+			checkComposedTarget(
+				composed("https://{{ host }}:{{port}}/x", ["host", "port"]),
+				listed,
+				"app"
+			).ok
+		).toBe(true);
+	});
+
+	test("still refuses an authority holding a name nothing deferred", () => {
+		const unanswered = checkComposedTarget(composed("https://{{host}}/x"), listed, "app");
+		expect(unanswered.ok).toBe(false);
+		expect(unanswered.error).toMatch(/Could not determine the target host/);
+		// One deferred name beside one composition could not answer is no better.
+		expect(
+			checkComposedTarget(composed("https://{{host}}.{{zone}}/x", ["host"]), listed, "app").ok
+		).toBe(false);
+		// A deferred name in the path says nothing about the host.
+		expect(
+			checkComposedTarget(composed("https://{{base}}/{{id}}", ["id"]), listed, "app").ok
+		).toBe(false);
+	});
+
+	test("checks a resolved authority as checkAllowlist does, deferred names or not", () => {
+		expect(
+			checkComposedTarget(composed("https://evil.test/{{id}}", ["id"]), listed, "app").ok
+		).toBe(false);
+		expect(
+			checkComposedTarget(composed("https://api.example.com/{{id}}", ["id"]), listed, "app")
+				.ok
+		).toBe(true);
+	});
+
+	test("refuses a deferred authority when the allowlist is empty, and passes it under allowAll", () => {
+		const deferred = composed("https://{{host}}/x", ["host"]);
+		const empty = checkComposedTarget(deferred, DEFAULT_MCP_SAFETY_CONFIG, "app");
+		expect(empty.ok).toBe(false);
+		expect(empty.error).toMatch(/allowlist is empty/i);
+		expect(
+			checkComposedTarget(deferred, resolveSafetyConfig({ allowAll: true }), "app").ok
+		).toBe(true);
+	});
+});
+
+/**
+ * The engine's refusal of a host the `targetPolicy` does not list carries the
+ * allowlist remedy for the session's own host, as the early gate's does.
+ */
+describe("targetPolicyRefusal", () => {
+	const sentence = 'Host "evil.test" is not allowed. Nothing was sent.';
+
+	test.each(["app", "cli"] as const)("names the %s remedy for a host not listed", (host) => {
+		const text = targetPolicyRefusal(
+			{ refusalCode: "target_not_allowed", errorMessage: sentence },
+			host
+		);
+		expect(text).toContain(sentence);
+		expect(text).toContain(settingRemedy("allowlist", host));
+	});
+
+	test("covers an OAuth 2.0 token endpoint refusal, not only the request URL", () => {
+		const oauth = 'Host "evil.test" (the OAuth 2.0 accessTokenUrl) is not allowed.';
+		const text = targetPolicyRefusal(
+			{ refusalCode: "target_not_allowed", errorMessage: oauth },
+			"app"
+		);
+		expect(text).toContain(oauth);
+		expect(text).toContain("OAuth 2.0 token endpoint");
+		expect(text).toContain("accessTokenUrl");
+		expect(text).toContain("refreshTokenUrl");
+	});
+
+	test("asks for a resolved URL when the host could not be determined", () => {
+		const text = targetPolicyRefusal(
+			{ refusalCode: "target_host_unknown", errorMessage: "Could not determine." },
+			"app"
+		);
+		expect(text).toContain("Resolve the URL before sending.");
+		expect(text).not.toContain(settingRemedy("allowlist", "app"));
+	});
+
+	test("is nothing for any other answer", () => {
+		expect(targetPolicyRefusal({ status: 200 }, "app")).toBeUndefined();
+		expect(targetPolicyRefusal({ refusalCode: "unsendable_header" }, "app")).toBeUndefined();
+		expect(targetPolicyRefusal(null, "app")).toBeUndefined();
+	});
+
+	test("reads an engine error body the same way", () => {
+		const body = JSON.stringify({ error: { code: "target_not_allowed", message: sentence } });
+		expect(targetPolicyRefusalOfErrorBody(body, "cli")).toContain(
+			settingRemedy("allowlist", "cli")
+		);
+		expect(targetPolicyRefusalOfErrorBody("not json", "app")).toBeUndefined();
+		expect(
+			targetPolicyRefusalOfErrorBody(JSON.stringify({ error: { code: "other" } }), "app")
+		).toBeUndefined();
 	});
 });
 

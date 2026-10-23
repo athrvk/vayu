@@ -22,6 +22,10 @@ interface UseEngineReturn {
 	 * editor state (plus scope ids) in, the execute-ready payload out -
 	 * `{{variables}}` and `inherit` auth resolved by the engine, exactly once.
 	 * Throws on failure; callers surface it the same way as an execute failure.
+	 *
+	 * Without `deferredVariables` (#2521): that answer is for display, and these
+	 * callers spread the result into `/execute` and `/runs` bodies. The Code
+	 * section reads it from `apiService.composeRequest` directly.
 	 */
 	composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>;
 	/**
@@ -42,8 +46,11 @@ export function useEngine(): UseEngineReturn {
 	const [error, setError] = useState<string | null>(null);
 
 	const composeRequest = useCallback(
-		(params: ComposeRequestRequest): Promise<ComposedRequest> =>
-			apiService.composeRequest(params),
+		async (params: ComposeRequestRequest): Promise<ComposedRequest> => {
+			const { deferredVariables: _deferredVariables, ...sendable } =
+				await apiService.composeRequest(params);
+			return sendable;
+		},
 		[]
 	);
 

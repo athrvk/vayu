@@ -19,10 +19,11 @@
  * exact `execute_script` call design mode has always made. That keeps
  * `ScriptEngine`, `ScriptContext` and the cookie-write staging entirely out of
  * `core/elements`, which knows nothing about scripting beyond
- * `vayu::ScriptResult`'s shape. The element's own outcome is about whether the
- * script ran without throwing; a script's own `pm.test` assertions travel
- * inside the step's `ScriptResult`, folded beside every other level's
- * (`fold_script_result`).
+ * `vayu::ScriptResult`'s shape. The element's own outcome is about this one
+ * script: `error` when it threw, `failed` when it ran and only a `pm.test`
+ * assertion did not hold, `ok` otherwise (#2663). The step's verdict is
+ * separate - a script's assertions travel inside the step's `ScriptResult`,
+ * folded beside every other level's (`fold_script_result`).
  *
  * `script.setup` / `script.teardown` are `collection_only`: run once per run
  * rather than once per step, attaching one to a request would run it once per
@@ -31,7 +32,52 @@
 
 #include "vayu/core/elements.hpp"
 
+#include <initializer_list>
+
 namespace vayu::core {
+
+bool script_threw (const vayu::ScriptResult& result) {
+    return !result.success && !result.error_message.empty ();
+}
+
+namespace {
+
+std::string first_failed_test_text (std::initializer_list<const vayu::ScriptResult*> results) {
+    size_t failures = 0;
+    std::string first;
+    for (const auto* result : results) {
+        for (const auto& test : result->tests) {
+            if (test.passed) {
+                continue;
+            }
+            ++failures;
+            if (first.empty ()) {
+                first = test.name;
+                if (!test.error_message.empty ()) {
+                    first += ": " + test.error_message;
+                }
+            }
+        }
+    }
+    if (failures == 0) {
+        return "";
+    }
+    if (failures == 1) {
+        return "Test failed - " + first;
+    }
+    return std::to_string (failures) + " tests failed - " + first;
+}
+
+} // namespace
+
+std::string describe_failed_tests (const vayu::ScriptResult& result) {
+    return first_failed_test_text ({ &result });
+}
+
+std::string describe_failed_tests (const vayu::ScriptResult& pre,
+const vayu::ScriptResult& post) {
+    return first_failed_test_text ({ &pre, &post });
+}
 
 namespace {
 
@@ -48,8 +94,7 @@ namespace {
 void fold_script_result (vayu::ScriptResult& slot,
 vayu::ScriptResult next,
 const std::string& scope) {
-    const bool next_threw = !next.success && !next.error_message.empty ();
-    if (next_threw && slot.error_message.empty ()) {
+    if (script_threw (next) && slot.error_message.empty ()) {
         slot.error_message = std::move (next.error_message);
         slot.error_scope   = scope;
     }
@@ -68,7 +113,10 @@ const std::string& scope) {
 }
 
 /// `script.pre` / `script.post`'s shared `apply`: the element's own outcome
-/// is about this one script, the slot about the whole step.
+/// is about this one script, the slot about the whole step. A thrown script is
+/// `error`; one that ran and failed only assertions is `failed`, with the
+/// first failure as its message, because `success` alone cannot tell the two
+/// apart (#2663).
 void run_step_script (ElementContext& ctx,
 const std::function<vayu::ScriptResult (const std::string&)>& runner,
 vayu::ScriptResult& slot,
@@ -79,10 +127,15 @@ const char* unbound_message) {
         ctx.outcome_message = unbound_message;
         return;
     }
-    auto result        = runner (script);
-    ctx.outcome_status = result.success ? "ok" : "error";
-    if (!result.success) {
+    auto result = runner (script);
+    if (script_threw (result)) {
+        ctx.outcome_status  = "error";
         ctx.outcome_message = result.error_message;
+    } else if (auto failed = describe_failed_tests (result); !failed.empty ()) {
+        ctx.outcome_status  = "failed";
+        ctx.outcome_message = std::move (failed);
+    } else {
+        ctx.outcome_status = "ok";
     }
     fold_script_result (slot, std::move (result), ctx.element_scope);
 }
@@ -198,6 +251,7 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
         { "required", nlohmann::json::array ({ "script" }) },
         { "additionalProperties", false },
     };
+    element_kind.writes_variables = true;
     return element_kind;
 }
 

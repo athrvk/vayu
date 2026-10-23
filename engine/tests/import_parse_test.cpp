@@ -903,6 +903,57 @@ TEST (ImportParse, ResolvesATemplatedServerUrlFromItsOwnDeclaredDefault) {
 }
 
 /**
+ * A document that names no server URL imports with `{{baseUrl}}` undefined, and
+ * says so as `no_server_url` (issue #2450) - every shape of "no server": no
+ * `servers`, an empty array, a first entry with no `url`, an empty `url`, and
+ * Swagger 2.0 with no `host`. Nothing is invented in its place.
+ */
+TEST (ImportParse, CountsADocumentWithNoServerUrlAndCreatesNoBaseUrl) {
+    const std::vector<std::string> documents = {
+        R"({"openapi":"3.0.0","info":{"title":"T"},"paths":{}})",
+        R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[],"paths":{}})",
+        R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{}],"paths":{}})",
+        R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{"url":""}],"paths":{}})",
+        R"({"swagger":"2.0","info":{"title":"T"},"paths":{}})",
+        R"({"swagger":"2.0","info":{"title":"T"},"host":"","paths":{}})",
+    };
+    for (const std::string& document : documents) {
+        SCOPED_TRACE (document);
+        const ImportParse parsed = parse_import (document, {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const json skipped = parsed.result.at ("meta").at ("skipped");
+        ASSERT_FALSE (skipped.empty ());
+        EXPECT_EQ (skip_counts (skipped), (json{ { "no_server_url", 1 } }));
+        EXPECT_FALSE (
+        parsed.result.at ("collections")[0].at ("variables").contains ("baseUrl"));
+    }
+}
+
+/// A server URL the document did write is never `no_server_url`: a complete one
+/// counts nothing, and a templated one with no default stays
+/// `unresolved_base_url` alone.
+TEST (ImportParse, DoesNotCountNoServerUrlWhenTheDocumentWroteOne) {
+    const ImportParse complete = parse_import (
+    R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{"url":"https://x"}],"paths":{}})",
+    {}, {});
+    ASSERT_TRUE (complete.ok ()) << complete.error;
+    EXPECT_TRUE (skip_counts (complete.result.at ("meta").at ("skipped")).empty ());
+
+    const ImportParse templated = parse_import (
+    R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{"url":"{scheme}://api.example.com"}],"paths":{}})",
+    {}, {});
+    ASSERT_TRUE (templated.ok ()) << templated.error;
+    EXPECT_EQ (skip_counts (templated.result.at ("meta").at ("skipped")),
+    (json{ { "unresolved_base_url", 1 } }));
+
+    const ImportParse swagger = parse_import (
+    R"({"swagger":"2.0","info":{"title":"T"},"host":"api.example.com","paths":{}})",
+    {}, {});
+    ASSERT_TRUE (swagger.ok ()) << swagger.error;
+    EXPECT_TRUE (skip_counts (swagger.result.at ("meta").at ("skipped")).empty ());
+}
+
+/**
  * A JSON body's `example` is written as a plain string when the source text
  * is not valid JSON on its own - typically a `{{variable}}` token a JSON
  * parser cannot see through. Reading it back must return that text verbatim,
@@ -1269,6 +1320,7 @@ TEST (ImportParse, PrefixItemsSamplesEachTuplePosition) {
 /// An operation with no `security` key at all keeps today's answer.
 TEST (ImportParse, OperationWithNoSecurityKeyInheritsAndCountsNothing) {
     const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "servers":[{"url":"https://api.example.com"}],
         "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
         "security":[{"bearerAuth":[]}],
         "paths":{"/pets":{"get":{"responses":{}}}}})",
@@ -1436,6 +1488,7 @@ TEST (ImportParse, ReadsRootXVayuElementsIntoTheCollection) {
 /// used to come back as no body at all (`unmapped_body`).
 TEST (ImportParse, ReadsAnXmlRequestBodyAsTheXmlMode) {
     const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
+        "servers":[{"url":"https://api.example.com"}],
         "paths":{"/soap":{"post":{"responses":{},
         "requestBody":{"content":{"application/xml":{"example":"<a>1</a>"}}}}}}})",
     {}, {});

@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { checkAllowlist } from "../safety.js";
+import { checkComposedTarget, targetPolicyRefusal } from "../safety.js";
 import { secretsShape, withheldPointer, withholdRequestUrl } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
@@ -24,7 +24,7 @@ import {
 } from "./kit.js";
 import { graphqlSdlSchema } from "./output-schemas.js";
 import { boundText } from "./inline-body-bounds.js";
-import { composeViaEngine, readAuthArg, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
+import { asMcpSend, composeViaEngine, readAuthArg, resolveEnvironmentId } from "./compose.js";
 import {
 	authInput,
 	collectionIdInput,
@@ -103,16 +103,18 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			const url = String(composed.url ?? "");
-			const gate = checkAllowlist(url, ctx.config, ctx.host);
+			const gate = checkComposedTarget(composed, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 
 			const payload = await introspectionPayload(composed, environmentId);
 			let answer: unknown;
 			try {
-				answer = await ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal);
+				answer = await ctx.client.executeRequest(asMcpSend(payload, ctx), signal);
 			} catch (err) {
 				return engineErrorResult(err, ctx);
 			}
+			const refused = targetPolicyRefusal(answer, ctx.host);
+			if (refused) return errorResult(refused);
 			const read = readIntrospectionAnswer(answer, url);
 			if ("error" in read) return errorResult(read.error);
 

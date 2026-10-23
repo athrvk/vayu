@@ -256,6 +256,20 @@ export function describeSpecDiff(answer: Record<string, unknown>): string {
 }
 
 /**
+ * The remedy for a `no_server_url` skip (#2450): an OpenAPI document with no
+ * `servers` imports requests whose URL starts with `{{baseUrl}}`, which nothing
+ * defines, and the allowlist then refuses every one of them as an unknown host.
+ */
+const NO_SERVER_URL_REMEDY =
+	" The document names no server, so {{baseUrl}} is undefined: set a baseUrl variable on the collection (update_collection) or an environment variable (update_environment) before running.";
+
+/** {@link NO_SERVER_URL_REMEDY} when @p skipped carries the kind, else nothing. */
+function noServerUrlRemedy(skipped: readonly unknown[]): string {
+	const named = skipped.some((entry) => isRecord(entry) && entry.kind === "no_server_url");
+	return named ? NO_SERVER_URL_REMEDY : "";
+}
+
+/**
  * What a sync wrote, and what its policy declined, in a sentence (issue #871).
  *
  * **The declined half is not optional.** An agent reading "3 created, 5
@@ -293,7 +307,7 @@ export function describeImport(answer: unknown): string {
 			.filter(isRecord)
 			.map((entry) => `${num(entry.count)} ${String(entry.kind)}`)
 			.join(", ");
-		text += ` Not everything imported: ${named}.`;
+		text += ` Not everything imported: ${named}.${noServerUrlRemedy(skipped)}`;
 	}
 	// The engine's own count, not a guess from the tree: an importer decides
 	// whether it filed anything under folders, and by what (`meta.folderStrategy`).
@@ -414,7 +428,7 @@ export function describeImportPreview(summary: Record<string, unknown>): string 
 			" To run them all after importing, pass recursive: true to run_collection or run_collection_smoke.";
 	}
 	if (skipped.length > 0) {
-		text += ` It would not carry: ${skipped.map((e) => `${num(e.count)} ${String(e.kind)}`).join(", ")}.`;
+		text += ` It would not carry: ${skipped.map((e) => `${num(e.count)} ${String(e.kind)}`).join(", ")}.${noServerUrlRemedy(skipped)}`;
 	}
 	return text;
 }

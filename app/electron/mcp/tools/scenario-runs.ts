@@ -13,7 +13,7 @@
 
 import type { EngineClient } from "../engine-client.js";
 import {
-	checkAllowlist,
+	checkComposedTarget,
 	checkLoadCaps,
 	checkMonitorHost,
 	checkSampleCap,
@@ -33,6 +33,7 @@ import {
 import { startedRunResult } from "./run-status.js";
 import {
 	applyRecordingKnobs,
+	asMcpSend,
 	composeViaEngine,
 	DEFAULT_LOAD_MODE,
 	describeLoadShape,
@@ -40,7 +41,6 @@ import {
 	readLoadParams,
 	resolveEnvironmentId,
 	resolveLoadShape,
-	withMcpOrigin,
 } from "./compose.js";
 import { collectionParent, type CollectionRow, readCollectionRows } from "./cascade.js";
 import { mergeSiblings, type OrderedRow, readRequestRows } from "./sibling-order.js";
@@ -197,8 +197,7 @@ export async function preflightScenarioSteps(
 					`run, and would refuse it for this reason too.`
 			);
 		}
-		const url = String(composed.url ?? "");
-		const gate = checkAllowlist(url, ctx.config, ctx.host);
+		const gate = checkComposedTarget(composed, ctx.config, ctx.host);
 		if (!gate.ok) {
 			throw new ToolArgError(
 				`Refusing to run this collection: ${step} is not allowed. ${gate.error} ` +
@@ -452,7 +451,7 @@ export async function startScenarioLoadRun(
 	// path states: the run id in the answer is what the renderer watches (#1419).
 	let started: unknown;
 	try {
-		started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
+		started = await ctx.client.startRun(asMcpSend(payload, ctx), signal);
 	} catch (err) {
 		return engineErrorResult(err, ctx);
 	}

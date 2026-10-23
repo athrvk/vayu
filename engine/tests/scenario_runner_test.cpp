@@ -41,6 +41,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "log_capture.hpp"
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -139,6 +140,14 @@ class ScenarioMockServer {
             record (req);
             res.set_content (R"({"token":"secret-abc"})", "application/json");
         });
+        // A new token per login, across runs too, so a later step can prove it
+        // sent this login's token rather than the one an earlier run stored.
+        svr.Get ("/login-n",
+        [this, record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content (R"({"token":"tok-)" + std::to_string (++logins) + "\"}",
+            "application/json");
+        });
         svr.Get ("/echo-auth", [record] (const httplib::Request& req, httplib::Response& res) {
             record (req);
             res.set_content (
@@ -180,6 +189,7 @@ class ScenarioMockServer {
     int port = 0;
     mutable std::mutex mtx;
     std::vector<SeenRequest> seen;
+    std::atomic<int> logins{ 0 };
 };
 
 class ScenarioRunnerTest : public ::testing::Test {
@@ -391,6 +401,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         options.limits.max_steps     = 200;
         options.limits.max_data_rows = 1000;
         options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        // This fixture runs the sequential runner, as `POST /runs` resolves
+        // its plan.
+        options.oauth2_after_scripts = true;
 
         auto resolved = vayu::core::resolve_scenario (*db_, scenario, options);
         EXPECT_TRUE (resolved.ok) << resolved.error;
@@ -419,7 +432,8 @@ class ScenarioRunnerTest : public ::testing::Test {
             config["stopOnError"] = true;
         }
 
-        const std::string run_id = "run_scenario_1";
+        // A new id per start, so a test can run the same collection again.
+        const std::string run_id = "run_scenario_" + std::to_string (++runs_started_);
         vayu::db::Run run;
         run.id     = run_id;
         run.type   = vayu::RunType::Scenario;
@@ -511,10 +525,28 @@ class ScenarioRunnerTest : public ::testing::Test {
         return json::parse (run->summary);
     }
 
+    /// Run the collection @p runs times in `env_1`, each after the last one
+    /// finished and stored what its scripts set, and answer the
+    /// `Authorization` every `/echo-auth` send carried, in order.
+    std::vector<std::string> authorizations_over_runs (int runs) {
+        for (int run = 0; run < runs; ++run) {
+            EXPECT_EQ (await_terminal (start (/*iterations=*/1, "env_1")),
+            vayu::RunStatus::Completed);
+        }
+        std::vector<std::string> sent;
+        for (const auto& hit : server_->requests ()) {
+            if (hit.path == "/echo-auth") {
+                sent.push_back (hit.authorization);
+            }
+        }
+        return sent;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<ScenarioMockServer> server_;
     vayu::core::RunManager manager_;
     vayu::http::CookieJar jar_;
+    size_t runs_started_ = 0;
 };
 
 // ============================================================================
@@ -3064,6 +3096,118 @@ TEST_F (ScenarioRunnerTest, APasswordThePreRequestScriptSetsReachesTheWireThroug
     auto seen = server_->requests ();
     ASSERT_EQ (seen.size (), 1u);
     EXPECT_EQ (vayu::tests::basic_pair_of (seen[0].authorization), "user:s3cret");
+}
+
+// Issue #2521: a client secret the step's script sets reaches the token
+// endpoint, and the token acquired with it reaches the step's wire - the plan
+// no longer acquires before any script. Mutation check: set
+// `oauth2_after_scripts` false in `start_scenario` and the endpoint receives
+// the stored secret.
+TEST_F (ScenarioRunnerTest, AnOAuth2SecretTheStepsScriptSetsReachesTheTokenEndpoint) {
+    const vayu::tests::MockTokenServer tokens;
+    seed_collection ("col_1");
+    seed_environment ("env_1", R"({"secret":{"value":"stored","enabled":true}})");
+    const json auth = { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" },
+        { "accessTokenUrl", tokens.url ("/token") }, { "clientId", "cid" },
+        { "clientSecret", "{{secret}}" }, { "credentialsPlacement", "body" } } } };
+    seed_request ("req_a", 0, "/ok", "pm.environment.set('secret', 'from-script');",
+    "", "", "", "", "", auth.dump ());
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (vayu::tests::parse_form (tokens.last_body ())["client_secret"], "from-script");
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 1u);
+    EXPECT_EQ (seen[0].authorization, "Bearer AT1");
+}
+
+// --- A value an earlier step writes reaches a later step (#2521) --------------
+//
+// The environment holds `token=old`; step 1 ("login") writes a new token and
+// step 2, which carries no element of its own, sends `Bearer {{token}}`. The
+// same collection runs three times against the same environment, so a plan
+// composed with the stored value would send the previous run's token on every
+// run. Mutation check for the block: make `plan_variable_deferral`
+// (scenario_plan.cpp) answer `WhenScripted`, and run N sends run N-1's token
+// (`old` on the first).
+
+// The collection-level variant: one script above both steps, whose run for
+// the first sets the token. Mutation check: also make `runs_a_pre_request_script`
+// (request_composer.cpp) answer false, and the second step sends `Bearer old`.
+TEST_F (ScenarioRunnerTest, AValueAnEarlierStepsScriptReplacesReachesALaterStep) {
+    seed_collection_with_elements ("col_1", "",
+    json::array ({ { { "id", "el_col_pre" }, { "kind", "script.pre" }, { "enabled", true },
+    { "config", { { "script", "if (pm.info.requestName === 'login') { pm.environment.set('token', 'new'); }" } } } } }));
+    seed_environment ("env_1", R"({"token":{"value":"old","enabled":true}})");
+    seed_request ("req_a", 0, "/ok", "", "", "", "login");
+    seed_request ("req_b", 1, "/echo-auth", "", "", "", "use",
+    R"([{"key":"Authorization","value":"Bearer {{token}}","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].path, "/echo-auth");
+    EXPECT_EQ (seen[1].authorization, "Bearer new");
+}
+
+/// What every variant's login script runs: count the runs in the environment
+/// and set this run's token from the count.
+constexpr const char* COUNTING_LOGIN_SCRIPT =
+"const n = Number(pm.environment.get('n')) + 1;"
+"pm.environment.set('n', String(n));"
+"pm.environment.set('token', 'run-' + n);";
+
+constexpr const char* STORED_TOKEN_ENVIRONMENT =
+R"({"token":{"value":"old","enabled":true},"n":{"value":"0","enabled":true}})";
+
+constexpr const char* BEARER_TOKEN_HEADER =
+R"([{"key":"Authorization","value":"Bearer {{token}}","enabled":true}])";
+
+// The usual Postman login: the token is set by the login's test script.
+TEST_F (ScenarioRunnerTest, ATokenAnEarlierStepsTestScriptSetsIsSentByALaterStepOnEveryRun) {
+    seed_collection ("col_1");
+    seed_environment ("env_1", STORED_TOKEN_ENVIRONMENT);
+    seed_request ("req_a", 0, "/ok", "", COUNTING_LOGIN_SCRIPT, "", "login");
+    seed_request ("req_b", 1, "/echo-auth", "", "", "", "use", BEARER_TOKEN_HEADER);
+
+    EXPECT_EQ (authorizations_over_runs (3),
+    (std::vector<std::string>{ "Bearer run-1", "Bearer run-2", "Bearer run-3" }));
+
+    // The step's trace records what was sent, not the template.
+    const auto rows = db_->get_results ("run_scenario_3");
+    ASSERT_EQ (rows.size (), 2u);
+    const auto sent = json::parse (rows[1].trace_data)["request"]["headers"];
+    EXPECT_EQ (sent.value ("Authorization", ""), "Bearer run-3") << sent.dump ();
+}
+
+// The login's own pre-request script sets it: before #2521's plan-wide rule
+// only the login itself waited for the script.
+TEST_F (ScenarioRunnerTest, ATokenAnEarlierStepsPreRequestScriptSetsIsSentByALaterStepOnEveryRun) {
+    seed_collection ("col_1");
+    seed_environment ("env_1", STORED_TOKEN_ENVIRONMENT);
+    seed_request ("req_a", 0, "/ok", COUNTING_LOGIN_SCRIPT, "", "", "login");
+    seed_request ("req_b", 1, "/echo-auth", "", "", "", "use", BEARER_TOKEN_HEADER);
+
+    EXPECT_EQ (authorizations_over_runs (3),
+    (std::vector<std::string>{ "Bearer run-1", "Bearer run-2", "Bearer run-3" }));
+}
+
+// An extractor writes it from the login's response, a new token per login.
+TEST_F (ScenarioRunnerTest, ATokenAnEarlierStepsExtractorWritesIsSentByALaterStepOnEveryRun) {
+    seed_collection ("col_1");
+    seed_environment ("env_1", STORED_TOKEN_ENVIRONMENT);
+    seed_request_with_elements ("req_a", 0, "/login-n",
+    json::array ({ { { "id", "el_token" }, { "kind", "extract.json" }, { "enabled", true },
+    { "config", { { "path", "$.token" }, { "variable", "token" }, { "scope", "env" } } } } }));
+    seed_request ("req_b", 1, "/echo-auth", "", "", "", "use", BEARER_TOKEN_HEADER);
+
+    EXPECT_EQ (authorizations_over_runs (3),
+    (std::vector<std::string>{ "Bearer tok-1", "Bearer tok-2", "Bearer tok-3" }));
 }
 
 // Mixed credentials: the row answers its half at the bind and the script the

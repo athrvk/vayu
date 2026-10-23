@@ -866,6 +866,15 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     // inline-or-deferred fate can depend on it.
     compile_step_elements (config);
 
+    // The route refused a malformed policy before this run existed, so a
+    // reading that fails here means a caller skipped that check: no host is
+    // allowed rather than every one.
+    if (auto policy = vayu::http::read_target_policy (config)) {
+        target_policy = std::move (*policy);
+    } else {
+        target_policy = vayu::http::TargetPolicy{};
+    }
+
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
 }
 
@@ -1385,6 +1394,9 @@ int default_max_per_host) {
     // leave the way the transfers it is asserting on left, and this is the one
     // place a load run resolves that. See `RunContext::transport`.
     context->transport = loop_config.transport;
+    // Every submission of either load shape is judged here, at the one place
+    // all of them pass before the wire (#2521).
+    loop_config.target_policy = context->target_policy;
     loop_config.max_response_body_bytes =
     vayu::http::routes::load_response_body_bound (db);
     // Only enable curl verbose if explicitly requested in config,
@@ -1448,8 +1460,11 @@ vayu::Request& request) {
     // `{{$vu}}` binds off the iteration, so a run sent without `data` at all
     // defers for it too. Keying this on whether the run had rows is what used
     // to send an identity token in a credential base64-encoded as written.
-    auto built = vayu::http::build_request (
-    config, db_ptr, timeout_ms, context->load_auth.auth_resolution ());
+    // The route's pre-flight judged the token endpoints already; judged again
+    // here so no caller of the run reaches one the policy refuses (#2521).
+    const auto& target_policy = context->target_policy;
+    auto built = vayu::http::build_request (config, db_ptr, timeout_ms,
+    context->load_auth.auth_resolution (), target_policy ? &*target_policy : nullptr);
     if (!built.ok) {
         vayu::utils::log_error ("run",
         built.parse_failed ? std::string ("Load test: invalid request format") :

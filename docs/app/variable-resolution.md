@@ -20,6 +20,33 @@ the shared conformance fixture
 (`engine/tests/fixtures/variable-resolution-conformance.json`), which the
 engine's gtest suite and the renderer's vitest suite both drive.
 
+**When a name resolves (decision D1 of #226, as amended by #2521).** A
+`{{name}}` is resolved at compose, **except where a pre-request script can
+change its value**: then it is resolved after that script runs, against the
+scopes as the script left them, and before the send - Postman's order. A
+pre-request script is an enabled, non-blank `script.pre` on the request or on a
+folder or collection above it (`script.pre` only; a `script.setup` does not
+count). `POST /compose` decides that from the composed `elements`, with no flag
+from the caller. For such a request it leaves every name a scope answers
+written as `{{name}}` and lists the names in the response field
+`deferredVariables` (sorted, omitted when empty); the send resolves them in
+`resolve_residual_tokens`, one pass, the same resolver. A request no
+pre-request script runs before is composed exactly as it always was: resolved
+once, at compose, and the value is finished text. **A collection run widens the
+rule to the whole plan**: when any step carries an enabled, non-blank element
+that writes a variable before some send (`script.pre`, `script.post`,
+`script.setup` or any `extract.*`, on the request, a folder or the collection;
+not `script.teardown`, which runs after the last send), every step defers its
+scope names the same way, scripted or not, so a later step's `Bearer {{token}}`
+sends the token an earlier step's test script or extractor stored in this run.
+A plan with no such element resolves at compose. Whatever a script does, these
+resolve at compose exactly once: `{{data.*}}` and a bound row's bare column
+names (the bind owns them), `$` names (a generator is generated once, the
+iteration identity is bound), a name whose value reaches one of those, and a
+file path (a script can never choose which file is sent). The rest of this page
+says what each case means in detail; the engine's `POST /compose` contract is
+[`deferredVariables`](../engine/api-reference.md#deferredvariables).
+
 **A third reader, MCP (issue #1207):** the same rule set is served as the MCP
 resource `vayu://variables/resolution`, and the `resolve_variables` tool
 answers which definition wins for a given collection/environment context and
@@ -195,9 +222,9 @@ each step of a collection run (design or load), and on a single-request load
 run that declares `requestElements` - with any row bound into it first.
 A run does not need a data set for it: the identity comes from the iteration
 rather than from a row, so `user-{{$vu}}` binds on a plain load run exactly as
-it does on a data-driven one. OAuth 2.0 is the exception, and it is refused by
-name rather than sent wrong - its token is acquired once, before any iteration
-exists.
+it does on a data-driven one. OAuth 2.0 is the exception for a row or the
+identity, and it is refused by name rather than sent wrong - its token is
+acquired against the token endpoint, never bound per iteration.
 
 ### D18 - a bound row's bare column names outrank the environment (issue #1007)
 
@@ -575,18 +602,24 @@ token is left written as it stands (`a = "{{b}}"` with `b = "{{a}}"` resolves
 to the literal `{{a}}`), and expansion stops after **8 levels**, keeping what
 it resolved and leaving the rest literal. Text that a substitution did *not*
 put there is never rescanned, and a value holding no `{{` costs one search - so
-everything composition can answer resolves in a single pass, at compose time.
+everything composition resolves does so in a single pass, at compose time.
 
-A name composition could not answer keeps its braces (#1009's rule above) and
-gets one more chance: `vayu::http::routes::resolve_residual_tokens` (#1008)
-runs the *same* resolver again, after the pre-request script and before the
-send, against the scopes as the script left them - so a token only the script
-can answer (a freshly fetched auth token, typically) still reaches the wire.
-It reads the request, not composition's decisions, so a value composition
-already substituted is not touched a second time, and it costs nothing on the
-ordinary request that has nothing left to resolve. The previews on this page
-are unaffected, because they mirror `POST /compose`: a preview can show
-`{{token}}` where the wire will carry the value the script set. See
+A name still written after composition gets one more chance, in two cases: a
+name composition could not answer keeps its braces (#1009's rule above), and so
+does every name a scope answers in a request that a pre-request script runs
+before (D1 above, #2521).
+`vayu::http::routes::resolve_residual_tokens` (#1008) runs the *same* resolver
+again, after the pre-request script and before the send, against the scopes as
+the script left them - so a token only the script can answer (a freshly fetched
+auth token, typically), and a value the script replaced, reach the wire. It
+reads the request, not composition's decisions, so a value composition
+substituted is not touched a second time, and it costs nothing on the
+ordinary request that has nothing left to resolve. A scripted request's header
+text is checked on this pass by the rule composition uses (the next sections),
+before anything is rewritten. The renderer's previews resolve against the stored
+scopes and cannot know what a script will set, so a preview can show a value
+other than the wire's; the Code section, which composes through the engine,
+shows `{{token}}` as written and names those tokens (below). See
 [pm API compatibility](./pm-api-compatibility.md) for what that changes for a
 script.
 
@@ -618,6 +651,14 @@ refused earlier, at bind time, naming the column and the row
 assigning to `pm.request.headers`, an auth credential, an import, a payload
 posted straight to `POST /execute` - is refused before the transfer starts,
 naming the header instead of a variable.
+
+**A scripted request is refused at the send, not at compose** (#2521). A
+request a pre-request script runs before keeps its variables written (D1
+above), so composition has no value to inspect; the pass after the script
+checks the same rule on the value it resolves, refusing in the same words and
+under the same code, before anything is rewritten. The same goes for the three
+header-name rules below. A buffered `POST /execute` answers `statusCode: 0`
+with the code as `refusalCode`; a streaming send answers a `400`.
 
 ### The other one: a header a variable would repeat (#1051)
 
@@ -887,8 +928,9 @@ still generates at composition - `POST /compose` defers only when the caller
 asks. And a generator inside an **auth credential** is still generated once, at
 composition: `apply_auth` encodes a credential when the request is built - basic
 auth collapses into one base64 value - so a token left for the bind would go out
-as base64 of its own text. (A credential still holding a name no scope answered
-is the other deferral: it is applied after the pre-request script, #2473.)
+as base64 of its own text. (A credential still holding a name no scope answered,
+or any name of a request a pre-request script runs before, is the other
+deferral: it is applied after the pre-request script, #2473 and #2521.)
 A `{{$vu}}` in a credential is no longer the same case: a credential carrying
 one defers the build and binds before `apply_auth` runs (issue #1055), where a generator has nothing to wait for - its value is
 knowable at composition, so deferring it would buy a different id per iteration
@@ -947,9 +989,14 @@ directly is treated as no auth and logged as a warning.
 If no ancestor defines auth the request executes without auth.
 
 Auth variable placeholders (e.g. `{{bearer_token}}`) are resolved through the
-same variable map inside the winning block at compose time - deliberately
+same variable map inside the winning block - at compose time, or after the
+pre-request script for a request one runs before (D1 above) - and always
 **before** any OAuth 2.0 token cache key is derived from the config, so two
 environments whose configs differ only through `{{vars}}` never share a token.
+An OAuth 2.0 config on a Send or a sequential collection run's step defers with
+the rest: every string of it is resolved after the script, and then the token is
+acquired, so the key is computed from the resolved config. A load run acquires
+its token once, before any script, and resolves the config at compose.
 
 ---
 
@@ -975,36 +1022,51 @@ composition boundary* for the wire shape.
 
 ### Reading a variable from a script
 
-A script does not see `{{name}}` - those are resolved at compose time,
-strictly **before** any script runs, and that includes the dynamic variables
-above: `pm.variables.get("$guid")` is not a thing Vayu supports. Composition
-still runs first and still owns resolution (#226, decision D1 stands) - but
-since #1008, a name composition could not answer is resolved a second time
-after the pre-request script and before the send, against the scopes as the
-script left them. That works because of #1009: an unknown name keeps its
-braces at compose time instead of becoming `""`, so it survives to be resolved
-later. So the canonical pattern now works: `pm.environment.set("token", …)` in
-a pre-request script **does** reach `Bearer {{token}}` in the same send, as
-long as nothing answered `{{token}}` at compose time - a value composition
-already substituted is finished text, and this second pass does not touch it.
-The same holds when `token` exists as an **unticked** row: composition looks
-past it, and the `set` ticks the row again (#2479), so the second pass finds it.
-An Auth tab credential is covered too (#2473): a basic-auth username or
-password, a bearer token or an api key name or value still holding a name
-composition could not answer is applied **after** the pre-request script rather
-than when the request is built - Postman's order - so
+A script reads variables through the `pm` accessors, and the dynamic variables
+above are not a thing it can ask for: `pm.variables.get("$guid")` is not
+supported. What reaches the request depends on whether a
+pre-request script runs before the send (D1 above, #2521). In a request **with**
+one, composition leaves every name a scope answers written, so the script's
+`pm.environment.set("token", …)` reaches `Bearer {{token}}` in the same send on
+every run, not only the first, and a script that replaces a stored token sends
+the new one. In the script, `pm.request.url`, `pm.request.headers` and the body
+hold the `{{token}}` as written; it resolves when the script ends, and the test
+script reads the request as sent. In a request **without** one, composition
+resolves the name once, as it always did, and a value composition substituted
+is finished text - except in a collection run whose plan holds an element that
+writes a variable, where every step defers (D1 above).
+
+A name nothing answers at compose keeps its braces in either case (#1009) and is
+resolved after the script as well (#1008), so a token only a script can answer
+reaches the wire. The same holds when `token` exists as an **unticked** row:
+composition looks past it, and the `set` ticks the row again (#2479), so the
+pass after the script finds it. An Auth tab credential is covered too (#2473,
+#2521): a basic-auth username or password, a bearer token or an api key name or
+value that holds a name nothing answered, or any name in a request a
+pre-request script runs before, is applied **after** the pre-request script
+rather than when the request is built - Postman's order - so
 `pm.environment.set("password", …)` reaches a basic pair before it is
 base64-encoded. Until then the script's `pm.request.headers` does not hold that
 header, and a header the script sets still wins over it. A credential
 composition fully resolved is applied when the request is built, as before, so
-the script sees it. OAuth 2.0 is never deferred: its token is acquired before
-the send. A collection run's steps take the same order, on the design run and
-under load (where the script is an `inline` `script.pre`), and so does a
-single-request load run that declares `requestElements`; under load a name
-nothing answers is sent as written rather than refused, as every residual token
-there is.
-A script that must change a value composition already resolved still edits
-`pm.request` directly (the write-back is applied to the outgoing request).
+the script sees it. An OAuth 2.0 config follows the same order on a Send and on
+a collection run's steps (design mode): it is resolved after the script and its
+token is acquired then, so a script can set a client id or a scope; the cache
+key comes from the resolved config. A collection run's steps take the same
+order, on the design run and under load (where the script is an `inline`
+`script.pre`), and so does a single-request load run that declares
+`requestElements`; under load a name nothing answers is sent as written rather
+than refused, as every residual token there is, and an OAuth 2.0 token is still
+acquired once, before any script.
+
+The Code section of the request pane composes through the engine, so for a
+scripted request its Resolved mode shows the names left written, and says so
+under the snippet: "`{{token}}` is set by a pre-request script at send." (or
+"... are set ..." for several). Templated mode shows the request as written.
+
+A script can also change a value composition already resolved (a name no
+pre-request script runs before) by editing `pm.request` directly; the
+write-back is applied to the outgoing request.
 
 A script reads a scope by name (`pm.environment.get`,
 `pm.collectionVariables.get`, `pm.globals.get`) or reads across every tier with

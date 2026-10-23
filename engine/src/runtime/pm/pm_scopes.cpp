@@ -689,8 +689,8 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 // Two deliberate differences from compose-time resolution, both consequences
 // of *when* this runs:
 //  - The map is built at call time from the script's scopes, so a variable
-//    set earlier in the same script resolves - unlike `{{}}` in the URL,
-//    which was composed before the script started (D1).
+//    set earlier in the same script resolves here at once; the request's own
+//    `{{}}` waits for the pre-request script to end (#2521).
 //  - The collection scope is the script context's - the request's collection
 //    chain, leaf shadowing ancestor (issue #234) - with pm.variables' own
 //    precedence (local > environment > collection > globals). The raw stored

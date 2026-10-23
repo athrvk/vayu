@@ -62,6 +62,7 @@ class EchoServer {
                 body_         = req.body;
                 content_type_ = req.get_header_value ("Content-Type");
                 parts_.clear ();
+                every_headers_.push_back (req.headers);
                 // httplib splits a multipart body in two: a part that declares
                 // a filename is a *file* and lands in `files`, everything else
                 // in `fields`. Both are parts of the same body here - which
@@ -160,6 +161,19 @@ class EchoServer {
         return found == headers_.end () ? std::string () : found->second;
     }
 
+    /// One request header from every request recorded, in arrival order,
+    /// `""` where one was not sent: what a test of a run asserts per send.
+    std::vector<std::string> header_per_request (const std::string& name) const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        std::vector<std::string> values;
+        values.reserve (every_headers_.size ());
+        for (const auto& headers : every_headers_) {
+            const auto found = headers.find (name);
+            values.push_back (found == headers.end () ? std::string () : found->second);
+        }
+        return values;
+    }
+
     /// Whether the header arrived at all. The distinction {@link header}
     /// cannot make: an empty-valued header and an absent one both read as
     /// `""` there, and telling them apart is the whole question when what is
@@ -206,6 +220,7 @@ class EchoServer {
     std::string path_;
     std::string target_;
     httplib::Headers headers_;
+    std::vector<httplib::Headers> every_headers_;
     std::string body_;
     std::string content_type_;
     std::map<std::string, Part> parts_;

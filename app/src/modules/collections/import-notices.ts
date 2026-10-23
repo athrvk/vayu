@@ -180,6 +180,11 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "Base URL is incomplete - set it in the collection",
 		many: "Base URL is incomplete - set it in the collection",
 	},
+	no_server_url: {
+		tier: "action",
+		one: "No server URL in the document - add a baseUrl variable to the collection before sending",
+		many: "No server URL in the document - add a baseUrl variable to the collection before sending",
+	},
 	servers_dropped: {
 		tier: "note",
 		one: "1 other server URL ignored - only the first is used",

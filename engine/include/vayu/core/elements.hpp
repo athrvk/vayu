@@ -592,6 +592,14 @@ struct ElementKind {
     /// (#1512's extensibility contract, rule 1); the config key itself, not
     /// this flag alone, decides whether a given occurrence actually shares.
     bool supports_shared_state = false;
+    /// Whether this kind can write a variable scope: every `script.*` kind
+    /// (`pm.environment.set` and its kin) and every `extract.*` kind. Read by
+    /// `scenario_plan.cpp` through the registry, never a `kind ==` comparison
+    /// (#1512's extensibility contract, rule 1): a collection-run plan holding
+    /// one, at a phase before some send, composes every step with its
+    /// `{{names}}` left for the send (#2521), since an earlier step may have
+    /// changed the value by then.
+    bool writes_variables = false;
     /// A rule `config_schema` cannot express (a JSONPath that parses), checked
     /// by `Registry::validate` only after the schema accepted the config.
     /// Returns the problem in the wording a client reads after
@@ -777,6 +785,31 @@ struct CompiledElement {
  * check and only ever has the raw text.
  */
 [[nodiscard]] bool is_blank_script_text (const std::string& text);
+
+/**
+ * Whether a script *threw* (or timed out, or had a `pm.request` write-back
+ * refused) rather than merely disagreeing with the response (#2663).
+ *
+ * `ScriptResult::success` is also the tests' verdict - `ScriptEngine::execute`
+ * clears it when any `pm.test` fails - so it cannot be read as "the script
+ * ran". The message is what separates the two: a thrown script carries one and
+ * a failed expectation carries none. The one predicate behind a script
+ * element's `error` outcome, the level fold's "first level that threw", and a
+ * collection step's `Errored` verdict.
+ */
+[[nodiscard]] bool script_threw (const vayu::ScriptResult& result);
+
+/**
+ * The first failed `pm.test`, phrased for one line: `"Test failed - <name>:
+ * <message>"` for a single failure, `"N tests failed - <first name>: <first
+ * message>"` for several, and empty when nothing failed. The one wording behind
+ * a script element's `failed` outcome message and a collection step's
+ * `results.error`; the two-result overload counts a step's pre-request and
+ * post-request scripts together (#2663).
+ */
+[[nodiscard]] std::string describe_failed_tests (const vayu::ScriptResult& result);
+[[nodiscard]] std::string describe_failed_tests (const vayu::ScriptResult& pre,
+const vayu::ScriptResult& post);
 
 /**
  * Whether @p kind is one of the four script kinds (`script.pre`,
