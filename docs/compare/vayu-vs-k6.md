@@ -78,7 +78,9 @@ All three converge on the same **~57k system ceiling** - and at that ceiling the
 machine is still 79% idle, so it is the target saturating, not the client.
 Driven from the app's own UI rather than a standalone daemon, a 60-second run
 sustained **51,922 req/s across 3,115,391 requests with zero errors**, p50
-1.20 ms / p99 1.52 ms, with the charts streaming throughout. A head-to-head
+1.20 ms / p99 1.52 ms, with the charts streaming throughout. Those latencies
+count the time a request waited inside the generator, while `wrk` reports wire
+time, so the two are not like for like. A head-to-head
 against k6 itself is not published here, because it has not been run on this
 hardware - the [benchmarks page](../engine/benchmarks.md) carries the full
 methodology and a one-command reproduction so you can measure your own.

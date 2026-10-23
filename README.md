@@ -59,7 +59,7 @@ The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the E
 
 Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
-**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout. The run and its chart are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
+**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout. Vayu's latency counts the time a request waited inside the generator, while `wrk` reports wire time, so the two are not like for like. The run and its chart are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
 ---
 
