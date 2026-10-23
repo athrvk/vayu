@@ -1662,7 +1662,7 @@ every collection's request list and scanning them for the id.
 - `id` (required): The request ID to fetch
 
 **Response:** The request object, in the same shape as a full `GET /requests`
-list entry.
+list entry, plus `runsPreRequestScript`.
 ```json
 {
   "id": "req_1234567890",
@@ -1684,9 +1684,24 @@ list entry.
   "verifySSL": true,
   "stream": false,
   "createdAt": 1234567890,
-  "updatedAt": 1234567890
+  "updatedAt": 1234567890,
+  "runsPreRequestScript": false
 }
 ```
+
+**`runsPreRequestScript`** (issue #2741) says whether a send of the saved
+request runs a pre-request script: an enabled, non-blank `script.pre` on the
+request, a folder above it or the collection, that no `inherit.disable` turns
+off. A `script.post` or a `script.setup` does not count. It is the rule
+[`POST /compose`](#post-compose) uses to decide whether to defer `{{names}}`
+(see `deferredVariables` there), applied to the stored row, so a client can
+tell that the URL it would resolve may not be the one sent without composing
+first. Derived on every read and never stored: the
+[`POST /requests`](#post-requests) and [`PUT /requests/:id`](#put-requestsid)
+responses carry it too, and a write that sends it is ignored, as `createdAt`
+is. The `GET /requests` lists leave it out, because answering it costs a walk
+of each row's collection chain. A change to a folder's or the collection's
+`elements` changes the answer without changing the request row.
 
 **404** when the request genuinely does not exist. This is distinct from a
 `5xx`: the caller relies on that difference to tell a real deletion from an
@@ -1849,7 +1864,9 @@ levels`); the last two are `413` over the field cap. `POST /import/apply` answer
 the same `400`, with the item's `tempId` under `error.item`, and writes
 nothing.
 
-**Response:** The created request object, carrying the engine-generated `id`.
+**Response:** The created request object, carrying the engine-generated `id`,
+in the shape [`GET /requests/:id`](#get-requestsid) answers (with
+`runsPreRequestScript`).
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if a
@@ -1926,7 +1943,8 @@ stored block, whichever client wrote it, and a save that changed nothing keeps
 it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
 `POST /import/apply` apply the same rule.
 
-**Response:** The updated request object.
+**Response:** The updated request object, in the shape
+[`GET /requests/:id`](#get-requestsid) answers (with `runsPreRequestScript`).
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection

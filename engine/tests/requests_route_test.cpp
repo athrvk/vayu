@@ -12,6 +12,14 @@
  * Covers the route's extracted core in isolation, matching the suite's other
  * route tests (no in-process HTTP server). Deleting the 404 branch, or pointing
  * the route at a different serializer, fails this file.
+ *
+ * `runsPreRequestScript` (#2741) mutation checks: make
+ * `elements_run_a_pre_request_script` (request_composer.cpp) answer false and
+ * the request, folder, collection and write cases red; drop the `enabled`, the
+ * blank-script or the disabled-id test from `is_composed_element`, the rule
+ * `POST /compose` shares, and the disabled, blank or `inherit.disable` case
+ * reds; serialize the `PUT` answer without `single_request_body` and the
+ * write case reds.
  */
 
 #include <gtest/gtest.h>
@@ -381,6 +389,138 @@ TEST_F (RequestsRouteTest, PresentRequestIs200WithSerializedShape) {
     EXPECT_EQ (body["url"], "https://example.test/user");
     EXPECT_TRUE (body["params"].is_array ());
     EXPECT_TRUE (body["headers"].is_array ());
+}
+
+// -- runsPreRequestScript (#2741) ---------------------------------------------
+//
+// The engine's own answer to "does a by-id send of this row run a pre-request
+// script", over the whole collection chain, by the rule `POST /compose` defers
+// by. The chain is root -> folder -> request.
+
+/// A `script.pre` element holding @p script, @p enabled as given.
+json pre_script (const std::string& id, const std::string& script, bool enabled = true) {
+    return { { "id", id }, { "kind", "script.pre" }, { "enabled", enabled },
+        { "config", { { "script", script } } } };
+}
+
+class RunsPreRequestScriptTest : public RequestsRouteTest {
+    protected:
+    static constexpr const char* SCRIPT = "pm.environment.set('token', 'new');";
+
+    /// Seeds `col_root<tag>` -> `col_folder<tag>` -> `req<tag>`, each level
+    /// holding the elements given, and returns the request's id.
+    std::string seed_chain (const json& root_elements,
+    const json& folder_elements,
+    const json& request_elements,
+    const std::string& tag = "") {
+        vayu::db::Collection root;
+        root.id       = "col_root" + tag;
+        root.name     = "root";
+        root.elements = root_elements.dump ();
+        db_->create_collection (root);
+
+        vayu::db::Collection folder;
+        folder.id        = "col_folder" + tag;
+        folder.name      = "folder";
+        folder.parent_id = root.id;
+        folder.elements  = folder_elements.dump ();
+        db_->create_collection (folder);
+
+        vayu::db::Request r;
+        r.id            = "req" + tag;
+        r.collection_id = folder.id;
+        r.name          = "req";
+        r.url           = "https://example.test/{{token}}";
+        r.elements      = request_elements.dump ();
+        db_->save_request (r);
+        return r.id;
+    }
+
+    /// `runsPreRequestScript` as `GET /requests/:id` answers it.
+    json runs_pre_request_script (const std::string& id = "req") {
+        auto [status, body] = vayu::http::routes::get_request_response (*db_, id);
+        if (status != 200) {
+            ADD_FAILURE () << "GET answered " << status << ": " << body.dump ();
+            return nullptr;
+        }
+        return body.value ("runsPreRequestScript", json ());
+    }
+};
+
+TEST_F (RunsPreRequestScriptTest, AnUnscriptedRequestRunsNone) {
+    seed_chain (json::array (), json::array (), json::array ());
+    EXPECT_EQ (runs_pre_request_script (), json (false));
+}
+
+TEST_F (RunsPreRequestScriptTest, ARequestsOwnEnabledScriptRuns) {
+    seed_chain (json::array (), json::array (),
+    json::array ({ pre_script ("el_own", SCRIPT) }));
+    EXPECT_EQ (runs_pre_request_script (), json (true));
+}
+
+TEST_F (RunsPreRequestScriptTest, AFoldersScriptRunsBeforeTheRequest) {
+    seed_chain (json::array (),
+    json::array ({ pre_script ("el_folder", SCRIPT) }), json::array ());
+    EXPECT_EQ (runs_pre_request_script (), json (true));
+}
+
+TEST_F (RunsPreRequestScriptTest, TheCollectionsScriptRunsBeforeTheRequest) {
+    seed_chain (json::array ({ pre_script ("el_root", SCRIPT) }),
+    json::array (), json::array ());
+    EXPECT_EQ (runs_pre_request_script (), json (true));
+}
+
+// Only a script that runs before the send counts: a blank one is inert (#1609),
+// a disabled one and one an `inherit.disable` switches off do not run, and a
+// post-request script runs after the send.
+TEST_F (RunsPreRequestScriptTest, AScriptThatDoesNotRunBeforeTheSendIsNotCounted) {
+    const json post = { { "id", "el_post" }, { "kind", "script.post" },
+        { "enabled", true }, { "config", { { "script", SCRIPT } } } };
+    const json switch_off_root = { { "id", "el_off" }, { "kind", "inherit.disable" },
+        { "enabled", true }, { "config", { { "elementId", "el_root" } } } };
+    struct Case {
+        const char* name;
+        json root;
+        json request;
+    };
+    const std::vector<Case> cases = {
+        { "blank", json::array (), json::array ({ pre_script ("el_own", "  \n\t") }) },
+        { "disabled", json::array (), json::array ({ pre_script ("el_own", SCRIPT, false) }) },
+        { "inherit.disable", json::array ({ pre_script ("el_root", SCRIPT) }),
+        json::array ({ switch_off_root }) },
+        { "post only", json::array ({ post }), json::array ({ post }) },
+    };
+    for (const auto& c : cases) {
+        const auto id =
+        seed_chain (c.root, json::array (), c.request, std::string ("_") + c.name);
+        EXPECT_EQ (runs_pre_request_script (id), json (false)) << c.name;
+    }
+}
+
+// The write answers carry it too, because the app puts them in the same cache
+// the read fills; and it is derived, so a write that sends it is ignored rather
+// than stored or refused.
+TEST_F (RunsPreRequestScriptTest, WritesAnswerItAndNeverStoreIt) {
+    seed_chain (json::array (),
+    json::array ({ pre_script ("el_folder", SCRIPT) }), json::array ());
+
+    json created_body                    = new_request ("col_root");
+    created_body["runsPreRequestScript"] = true;
+    auto [created_status, created] =
+    vayu::http::routes::create_request_response (*db_, created_body);
+    ASSERT_EQ (created_status, 200) << created.dump ();
+    EXPECT_EQ (created["runsPreRequestScript"], false);
+
+    // Moving the unscripted request under the scripted folder is what flips it.
+    const auto id = created["id"].get<std::string> ();
+    auto [moved_status, moved] = vayu::http::routes::update_request_response (*db_,
+    id, json{ { "collectionId", "col_folder" }, { "runsPreRequestScript", false } });
+    ASSERT_EQ (moved_status, 200) << moved.dump ();
+    EXPECT_EQ (moved["runsPreRequestScript"], true);
+
+    auto [status, read] = vayu::http::routes::get_request_response (*db_, id);
+    ASSERT_EQ (status, 200) << read.dump ();
+    EXPECT_EQ (read, moved);
 }
 
 // -- The append rule across kinds (#2535) -----------------------------------

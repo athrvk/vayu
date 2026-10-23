@@ -594,4 +594,23 @@ VariableDeferral deferral              = VariableDeferral::WhenScripted);
 [[nodiscard]] nlohmann::json stored_request_elements (vayu::db::Database& db,
 const vayu::db::Request& request);
 
+/**
+ * Whether a composed @p elements list runs a pre-request script before the
+ * send of the request it belongs to: an enabled, non-blank `script.pre` that
+ * no `inherit.disable` in the list turns off. The one copy of the rule
+ * `POST /compose` defers `{{names}}` by (#2521); anything else that has to
+ * answer the same question calls this rather than restating it.
+ */
+[[nodiscard]] bool elements_run_a_pre_request_script (const nlohmann::json& elements);
+
+/**
+ * `elements_run_a_pre_request_script` over @p request's
+ * `stored_request_elements`: whether a by-id send of the saved row runs a
+ * pre-request script from the request, a folder or the collection. Derived on
+ * every read and never stored; `GET /requests/:id` and the `POST` / `PUT
+ * /requests` responses carry it as `runsPreRequestScript` (#2741).
+ */
+[[nodiscard]] bool stored_request_runs_a_pre_request_script (vayu::db::Database& db,
+const vayu::db::Request& request);
+
 } // namespace vayu::http

@@ -15,6 +15,7 @@
 #include "vayu/core/json_depth.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
@@ -38,6 +39,27 @@
 namespace vayu::http::routes {
 
 /**
+ * The one-row answer of `GET /requests/:id` and the `POST` / `PUT /requests`
+ * responses: the stored row, plus `runsPreRequestScript` (#2741), the engine's
+ * own answer to whether a by-id send runs a pre-request script from anywhere
+ * in the collection chain. The app writes all three answers into one detail
+ * cache, so a save that dropped the key would leave a row that says nothing.
+ * The list routes leave it out: it costs a chain walk per row.
+ *
+ * Derived, never stored: `apply_request_fields` reads no such key, so a write
+ * that sends it back (a Duplicate spreads the record) is ignored like
+ * `createdAt`.
+ */
+static nlohmann::json
+single_request_body (vayu::db::Database& db, const vayu::db::Request& request) {
+    auto body = vayu::json::serialize (
+    request, vayu::http::FileAccessPolicy::from_database (db));
+    body["runsPreRequestScript"] =
+    vayu::http::stored_request_runs_a_pre_request_script (db, request);
+    return body;
+}
+
+/**
  * Testable core of GET /requests/:id, returning {http_status, json_body}.
  *
  * A missing request is a *definitive* 404, never a transport failure. That
@@ -47,10 +69,11 @@ namespace vayu::http::routes {
  * apart, because one swallowed list failure looked identical to "not in any
  * list". Present -> 200 with the same serialized shape a list entry carries
  * (`serialize(const db::Request&)`), so the client transforms it identically -
- * with one deliberate exception (issue #1485): this route never substitutes a
- * default for a column over the field cap, so it carries no `truncatedFields`
- * and answers whatever is stored, whole, even for a row written before the
- * cap existed. Only `serialize_to_stream` (the list) can produce that key.
+ * with two deliberate exceptions. It adds `runsPreRequestScript`
+ * (`single_request_body`). And (issue #1485) it never substitutes a default
+ * for a column over the field cap, so it carries no `truncatedFields` and
+ * answers whatever is stored, whole, even for a row written before the cap
+ * existed. Only `serialize_to_stream` (the list) can produce that key.
  *
  * Extracted so the wiring (404 vs 200 + body) is covered without an in-process
  * HTTP server - see requests_route_test.cpp. The error body is built by
@@ -62,8 +85,7 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
     if (!request) {
         return { 404, error_body (404, "Request not found") };
     }
-    return { 200,
-        vayu::json::serialize (*request, vayu::http::FileAccessPolicy::from_database (db)) };
+    return { 200, single_request_body (db, *request) };
 }
 
 /**
@@ -722,8 +744,7 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
             r.order = append_order (db, r);
         }
         db.save_request (r);
-        result = { 200,
-            vayu::json::serialize (r, vayu::http::FileAccessPolicy::from_database (db)) };
+        result = { 200, single_request_body (db, r) };
     });
     return result;
 }
@@ -769,8 +790,7 @@ const std::function<void ()>& before_write) {
         before_write ();
     }
     db.save_request (r);
-    return { 200,
-        vayu::json::serialize (r, vayu::http::FileAccessPolicy::from_database (db)) };
+    return { 200, single_request_body (db, r) };
 }
 
 /**

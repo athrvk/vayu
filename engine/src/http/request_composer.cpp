@@ -1048,28 +1048,14 @@ const vayu::db::Request& request) {
 
 /**
  * Whether a pre-request script runs before @p payload is sent (#2521): a
- * `script.pre` among its `elements` that `is_composed_element` keeps. Read
- * after the inline overlay, so an editor's unsaved script decides; a folder's
- * or the collection's is there because `compose_elements` (or the renderer's
- * `elementsParts`) folded it in.
- *
- * `script.pre` alone, because it is the one kind that runs between composition
- * and the send of the request it belongs to. `script.setup` runs once before a
- * collection run's first step, which is composed earlier still, at plan time;
- * a plan defers for it, and for every other kind that writes a variable, on
- * its own (`VariableDeferral::Always`).
+ * `script.pre` among its `elements` that `is_composed_element` keeps
+ * (`elements_run_a_pre_request_script`). Read after the inline overlay, so an
+ * editor's unsaved script decides; a folder's or the collection's is there
+ * because `compose_elements` (or the renderer's `elementsParts`) folded it in.
  */
 bool runs_a_pre_request_script (const nlohmann::json& payload) {
     const auto elements = payload.find ("elements");
-    if (elements == payload.end () || !elements->is_array ()) {
-        return false;
-    }
-    const auto disabled = disabled_element_ids ({ *elements });
-    return std::any_of (elements->begin (), elements->end (),
-    [&disabled] (const nlohmann::json& element) {
-        return is_composed_element (element, disabled) &&
-        element.value ("kind", "") == "script.pre";
-    });
+    return elements != payload.end () && elements_run_a_pre_request_script (*elements);
 }
 
 /// Whether this composition leaves the names a scope answers for the send:
@@ -1760,6 +1746,30 @@ read_dynamic_resolution (const nlohmann::json& body, DynamicResolution& out) {
 nlohmann::json stored_request_elements (vayu::db::Database& db,
 const vayu::db::Request& request) {
     return compose_elements (collection_chain (db, request.collection_id), request);
+}
+
+/*
+ * `script.pre` alone, because it is the one kind that runs between composition
+ * and the send of the request it belongs to. `script.setup` runs once before a
+ * collection run's first step, which is composed earlier still, at plan time;
+ * a plan defers for it, and for every other kind that writes a variable, on
+ * its own (`VariableDeferral::Always`).
+ */
+bool elements_run_a_pre_request_script (const nlohmann::json& elements) {
+    if (!elements.is_array ()) {
+        return false;
+    }
+    const auto disabled = disabled_element_ids ({ elements });
+    return std::any_of (elements.begin (), elements.end (),
+    [&disabled] (const nlohmann::json& element) {
+        return is_composed_element (element, disabled) &&
+        element.value ("kind", "") == "script.pre";
+    });
+}
+
+bool stored_request_runs_a_pre_request_script (vayu::db::Database& db,
+const vayu::db::Request& request) {
+    return elements_run_a_pre_request_script (stored_request_elements (db, request));
 }
 
 std::pair<int, nlohmann::json> compose_request_core (vayu::db::Database& db,

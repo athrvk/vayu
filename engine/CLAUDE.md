@@ -673,6 +673,10 @@ logged as a warning: it means a client skipped composition.
   and callers (`DesignRunView`) keep those apart: only a real 404 becomes
   `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's;
   `?fields=summary` answers only the columns a tree is built from (#2546).
+  The single read and the `POST`/`PUT /requests` answers add
+  `runsPreRequestScript` (#2741, `single_request_body`): derived from the
+  chain by `stored_request_runs_a_pre_request_script`, never stored, ignored
+  on a write, absent from the lists.
 - **A streaming request is a different execution model, declared not detected**
   (#573). `POST /execute` with `"stream": true` creates the run row, hands the
   transfer to `SseStreamManager` (declared before `server_`, like the listener
@@ -1162,9 +1166,10 @@ the overlay MCP's `start_load_run` overrides ride on.
 
 **A scripted request composes with its `{{names}}` intact (#2521, Postman's
 order).** Whether a pre-request script runs before the send is read from the
-composed `elements` (`runs_a_pre_request_script`): an enabled, non-blank
-`script.pre` on the request, a folder or the collection, after
-`inherit.disable` and the inline overlay; `script.pre` alone, never
+composed `elements` (`elements_run_a_pre_request_script`, the one public
+copy, which `GET /requests/:id`'s `runsPreRequestScript` reads too): an
+enabled, non-blank `script.pre` on the request, a folder or the collection,
+after `inherit.disable` and the inline overlay; `script.pre` alone, never
 `script.setup`. When one does, every name a scope answers keeps its braces in
 the URL, path rows, headers, body and non-OAuth credentials, and the 200 body
 lists them in `deferredVariables` (sorted, omitted when empty, never an input,
