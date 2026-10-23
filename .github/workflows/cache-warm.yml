@@ -191,6 +191,19 @@ jobs:
               printf '%s\n' "$key" "$commit" >&2
               exit 1
             fi
+            # Every key line names the toolchain through the step that runs
+            # scripts/vcpkg-toolchain-id.sh. Without that step the output is
+            # empty, the key still reads the same as every other file's, and
+            # the cache goes back to restoring archives a new runner image
+            # retired. So each file runs that step once per key line. Whole
+            # trimmed lines are compared, so this text cannot match itself.
+            want='run: echo "id=$(bash scripts/vcpkg-toolchain-id.sh)" >> "$GITHUB_OUTPUT"'
+            nkeys=$(grep -cE '^[[:space:]]*key: vcpkg-' "$p")
+            nids=$(awk -v want="$want" '{ line = $0; sub(/^[[:space:]]+/, "", line) } line == want { n++ } END { print n + 0 }' "$p")
+            if [ "$nids" -ne "$nkeys" ]; then
+              echo "::error::$p has $nkeys vcpkg cache key line(s) but runs the toolchain-id step $nids time(s); a key without it restores archives built for another runner image." >&2
+              exit 1
+            fi
             keys+=("$key"); commits+=("$commit")
             echo "  $f"
             echo "      $key"
