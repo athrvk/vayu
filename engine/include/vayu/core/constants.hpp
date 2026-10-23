@@ -787,7 +787,8 @@ constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// missing from every percentile, the max and the histogram's count. The
 /// percentiles saturate at one hour; sums and means stay unclamped.
 constexpr int64_t clamp_to_latency_ceiling (int64_t latency_us) {
-    return std::min (latency_us, HISTOGRAM_MAX_LATENCY_US);
+    // Parenthesised against the windows.h `min` macro, as in `spin_tail_us`.
+    return (std::min) (latency_us, HISTOGRAM_MAX_LATENCY_US);
 }
 /// Whether a load run feeds the five per-phase histograms (config key
 /// `phaseHistograms`). On by default: the phase values are computed for every
