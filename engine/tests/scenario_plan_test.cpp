@@ -643,8 +643,8 @@ TEST_F (ScenarioPlanTest, ManifestRecordsTheDataRowCountAndFileButNeverTheRows) 
     const json manifest =
     vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
     EXPECT_EQ (manifest["dataRowCount"], 2);
-    EXPECT_EQ (manifest.value ("dataFileName", ""), "users.csv");
-    EXPECT_EQ (manifest.value ("dataFileHash", ""), std::string (64, 'a'));
+    EXPECT_EQ (manifest.at ("dataFileName"), "users.csv");
+    EXPECT_EQ (manifest.at ("dataFileHash"), std::string (64, 'a'));
     // Absent `iterations` with a data set means one pass per row.
     EXPECT_EQ (manifest["iterations"], 2);
     EXPECT_EQ (manifest.dump ().find ("alice"), std::string::npos);
@@ -697,7 +697,7 @@ TEST_F (ScenarioPlanTest, ManifestRecordsADataFileReadWithNumbersCastAndOmitsOne
         return vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
     };
 
-    EXPECT_EQ (manifest_for (true).value ("dataFileCastNumbers", false), true);
+    EXPECT_EQ (manifest_for (true).at ("dataFileCastNumbers"), true);
     EXPECT_FALSE (manifest_for (false).contains ("dataFileCastNumbers"));
 }
 
@@ -1612,7 +1612,7 @@ TEST_F (ScenarioPlanTest, AScriptedOAuth2StepWaitsForItsScriptOnASequentialPlanO
     EXPECT_EQ (late.request.headers.count ("Authorization"), 0u);
     const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&late.auth);
     ASSERT_NE (oauth2, nullptr);
-    EXPECT_EQ (oauth2->config.value ("clientId", ""), "{{client}}");
+    EXPECT_EQ (oauth2->config.at ("clientId"), "{{client}}");
 
     auto load           = options ();
     load.environment_id = "env";
