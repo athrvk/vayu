@@ -58,6 +58,9 @@ export const TOOLTIPS = {
 	queueChip:
 		"Average time requests spent waiting in the generator's in-flight queue before being sent. Non-zero values mean the generator is queueing - usually because the server is slow to respond.",
 	concurrencyUtil:
+		"Of your configured N virtual users, how many had a request on the wire on average: the time the requests spent in flight divided by the time that passed. A virtual user waiting out a think or pacing timer, or between iterations, counts as idle for that time. Live it covers the last second or more; a finished run shows the whole run. Below 100% describes the run's shape, not a failure.",
+	// Capacity discovery still shows the instant (#2818).
+	concurrencyUtilInstant:
 		"Of your configured N virtual users, how many were actually active on average. Below 100% means some virtual users were idle - usually because the load test was completing requests faster than it could re-fire (rare) or because the server occasionally returned errors that aborted iterations.",
 	throughput:
 		"Responses received per second since load started: so far while the run is live, the whole run once it has finished, including the wait for the last responses. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",

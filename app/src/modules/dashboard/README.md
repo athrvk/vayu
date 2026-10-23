@@ -187,6 +187,23 @@ consumes it.
   has the figure, and a tick with no window latency (absent or `null`) adds no
   point to the latency chart. The ETA reads the live `current_rps`, so it
   follows the last second rather than the last 100 ms.
+- **Virtual user utilisation and the Active virtual users chart read the mean on
+  the wire, not the instant** (#2821). `current_concurrency` counts the curl
+  workers' active transfers at the sample, and a virtual user in a timer wait
+  (`timer.think`, `timer.pacing`) holds none, so users that wait in step read 0
+  and N alternately however fast the sample. The engine adds the mean by Little's
+  law: `window_avg_in_flight` on a live frame (`windowAvgInFlight`) and a stored
+  tick over the same trailing window as the means above (`0` for a window with no
+  completion), and `summary.avgInFlight` on the report. `MetricsView` and
+  `reportToDerived` fill `DashboardDerived.avgInFlight` from them, and
+  `ConcurrencyUtilCard` shows it in `constant_concurrency` ("4.2 of 10 on the
+  wire", 42.0%). `ConnectionsChart` plots `pickAvgInFlight`. A key the engine
+  did not send (a run stored before it) is absent, never `0`: the card falls back
+  to `currentConcurrency` live and `peakConcurrency` once finished, and the chart
+  to `current_concurrency` per tick, so such a run reads as it always did. The
+  chart keeps the last tick of a bucket like the other windowed series (a mean
+  is not a maximum). `capacity` and `ramp_up` stay on the instant, and the "Peak
+  virtual users" stat and `p99AtPeak` stay on the peak.
 - **The Send / Throughput chip is judged on the windowed pair, held for a few
   seconds, and is grey until the run has settled** (#2802).
   `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is

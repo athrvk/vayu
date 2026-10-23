@@ -2483,6 +2483,14 @@ export interface LoadTestMetrics {
 	 */
 	window_avg_latency_ms?: number | null;
 	window_avg_queue_wait_ms?: number | null;
+	/**
+	 * Mean requests on the wire over the same window (Little's law: the latency
+	 * that completed in it over its span), `0` for a window with no completion.
+	 * `current_concurrency` is the instant a virtual user in a timer wait holds
+	 * nothing at, so it reads 0-and-N for users that never stopped (#2821).
+	 * Absent on a tick stored before the window mean existed.
+	 */
+	window_avg_in_flight?: number | null;
 	current_concurrency: number;
 	/**
 	 * Latency percentiles of the tick. A stored tick's are its whole second's,
@@ -2844,6 +2852,8 @@ export interface RunReport {
 		sendingDurationSeconds?: number;
 		setupOverhead?: number;
 		peakConcurrency?: number;
+		/** Mean requests on the wire over `testDuration`; absent from a run stored before it (#2821). */
+		avgInFlight?: number;
 		droppedRequests?: number;
 		avgQueueWaitMs?: number;
 		bytesSent?: number;

@@ -37,7 +37,7 @@ import {
 	pickSendRate,
 	hasSendRate,
 	type Sample,
-	pickConcurrency,
+	pickAvgInFlight,
 	pickErrorRate,
 } from "./buildData";
 import {
@@ -371,7 +371,7 @@ export function ConnectionsChart({
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const data = useMemo<uPlot.AlignedData>(() => {
-		const { times, cols } = bucketColumns(history, [pickConcurrency], bucketSeconds);
+		const { times, cols } = bucketColumns(history, [pickAvgInFlight], bucketSeconds);
 		return [times, cols[0]];
 	}, [history, bucketSeconds]);
 	const series: UPlotSeriesSpec[] = [

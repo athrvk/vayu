@@ -34,6 +34,8 @@ interface RawSseMetrics {
 	currentSendRate?: number;
 	windowAvgLatencyMs?: number | null;
 	windowAvgQueueWaitMs?: number | null;
+	/** Mean requests on the wire over the window; `0` for one with no completion (issue #2821). */
+	windowAvgInFlight?: number | null;
 	activeConnections?: number;
 	/** The tick's window; `null` for a window with no completion (issue #2386). */
 	latencyP50Ms?: number | null;
@@ -82,6 +84,7 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		current_send_rate: m.currentSendRate,
 		window_avg_latency_ms: m.windowAvgLatencyMs,
 		window_avg_queue_wait_ms: m.windowAvgQueueWaitMs,
+		window_avg_in_flight: m.windowAvgInFlight,
 		current_concurrency: m.activeConnections || 0,
 		live: true,
 		// Every percentile is passed through as sent, never `|| 0`: a null is an

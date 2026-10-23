@@ -199,6 +199,23 @@ describe("mapSseMetrics", () => {
 		expect(m.window_avg_queue_wait_ms).toBeNull();
 	});
 
+	it("maps the window's mean requests in flight as sent (issue #2821)", () => {
+		expect(mapSseMetrics({ timestamp: 1, windowAvgInFlight: 4.2 }).window_avg_in_flight).toBe(
+			4.2
+		);
+		// An idle window's measured 0 stays a 0, and a null stays null.
+		expect(mapSseMetrics({ timestamp: 1, windowAvgInFlight: 0 }).window_avg_in_flight).toBe(0);
+		expect(
+			mapSseMetrics({ timestamp: 1, windowAvgInFlight: null }).window_avg_in_flight
+		).toBeNull();
+	});
+
+	it("leaves the mean in flight absent for a frame without it, never 0 (issue #2821)", () => {
+		const m = mapSseMetrics({ timestamp: 1, activeConnections: 10 });
+		expect(m.window_avg_in_flight).toBeUndefined();
+		expect(m.current_concurrency).toBe(10);
+	});
+
 	it("maps the error count and its HTTP errors / No response split (issue #2124)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,

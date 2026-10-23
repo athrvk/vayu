@@ -64,7 +64,9 @@ function LatencyCard({ d }: { d: DashboardDerived }) {
 function renderModeCards(d: DashboardDerived) {
 	// "Active virtual users" is an instantaneous metric - it's 0 once the run
 	// ends. On completed runs show the peak reached instead, so the live-only
-	// concurrency cards stay meaningful in the historical view.
+	// concurrency cards stay meaningful in the historical view. The utilisation
+	// card in constant_concurrency prefers the mean on the wire (`avgInFlight`)
+	// and uses this only for a run stored before the mean existed.
 	const activeConcurrency = d.isCompleted ? d.peakConcurrency : d.currentConcurrency;
 	switch (d.mode) {
 		case "constant_concurrency":
@@ -77,6 +79,7 @@ function renderModeCards(d: DashboardDerived) {
 					<ConcurrencyUtilCard
 						currentConcurrency={activeConcurrency}
 						configuredConcurrency={d.configuredConcurrency}
+						meanInFlight={d.avgInFlight}
 					/>
 				</>
 			);

@@ -103,6 +103,14 @@ describe("hero cards (characterization)", () => {
 		snap(<AchievedThroughputCard throughput={3940} configuredConcurrency={50} />));
 	it("ConcurrencyUtilCard", () =>
 		snap(<ConcurrencyUtilCard currentConcurrency={47} configuredConcurrency={50} />));
+	it("ConcurrencyUtilCard (mean on the wire)", () =>
+		snap(
+			<ConcurrencyUtilCard
+				currentConcurrency={10}
+				configuredConcurrency={10}
+				meanInFlight={4.2}
+			/>
+		));
 	it("ProgressCard", () =>
 		snap(<ProgressCard requestsSent={1500} requestsExpected={4000} currentRps={500} />));
 	it("ThroughputCard", () => snap(<ThroughputCard throughput={1284} meanLatency={204} />));
@@ -278,6 +286,117 @@ describe("ConcurrencyUtilCard carries no verdict colour (#2245)", () => {
 			"text-foreground"
 		);
 		expect(container.querySelector<HTMLElement>("[style*='width: 40%']")).not.toBeNull();
+	});
+});
+
+describe("ConcurrencyUtilCard reads the mean on the wire, not the instant (#2821)", () => {
+	const text = (ui: React.ReactElement) =>
+		render(<TooltipProvider>{ui}</TooltipProvider>).container.textContent;
+
+	it("shows 4.2 of 10 on the wire and 42.0% utilisation for virtual users that wait in step", () => {
+		// The instant reads 10 (or 0) for users that never stopped; the mean is the truth.
+		const out = text(
+			<ConcurrencyUtilCard
+				currentConcurrency={10}
+				configuredConcurrency={10}
+				meanInFlight={4.2}
+			/>
+		);
+		expect(out).toContain("4.2of 10 on the wire");
+		expect(out).toContain("42.0% utilisation");
+		expect(out).not.toContain("active");
+	});
+
+	it("keeps a measured idle window as 0.0, not the instant", () => {
+		const out = text(
+			<ConcurrencyUtilCard
+				currentConcurrency={10}
+				configuredConcurrency={10}
+				meanInFlight={0}
+			/>
+		);
+		expect(out).toContain("0.0of 10 on the wire");
+		expect(out).toContain("0.0% utilisation");
+	});
+
+	it("draws the instant as active users when no mean is supplied", () => {
+		const out = text(<ConcurrencyUtilCard currentConcurrency={7} configuredConcurrency={10} />);
+		expect(out).toContain("7of 10 active");
+		expect(out).toContain("70.0% utilisation");
+	});
+
+	it("carries no verdict colour, as the instant card does (#2245)", () => {
+		const { container } = render(
+			<TooltipProvider>
+				<ConcurrencyUtilCard
+					currentConcurrency={10}
+					configuredConcurrency={10}
+					meanInFlight={4.2}
+				/>
+			</TooltipProvider>
+		);
+		expect(container.textContent).toContain("42.0% utilisation");
+		expect(container.innerHTML).not.toMatch(/--(success|warning|destructive)/);
+		expect(container.innerHTML).not.toMatch(/text-(success|warning|destructive)/);
+		expect(container.querySelector<HTMLElement>("[style*='width: 42.']")).not.toBeNull();
+	});
+});
+
+describe("HeroRow utilisation card per mode and run state (#2821)", () => {
+	const cardText = (d: DashboardDerived) =>
+		render(
+			<TooltipProvider>
+				<HeroRow d={d} />
+			</TooltipProvider>
+		).container.textContent ?? "";
+
+	const wave = (over: Partial<DashboardDerived>): DashboardDerived => ({
+		...derived("constant_concurrency"),
+		currentConcurrency: 10,
+		peakConcurrency: 10,
+		configuredConcurrency: 10,
+		...over,
+	});
+
+	it("shows a live run's windowed mean, not the aliasing instant", () => {
+		const out = cardText(wave({ currentConcurrency: 0, avgInFlight: 4.2 }));
+		expect(out).toContain("4.2of 10 on the wire");
+		expect(out).toContain("42.0% utilisation");
+	});
+
+	it("shows a finished run's mean, not the peak that makes History read 100%", () => {
+		const out = cardText(wave({ isCompleted: true, avgInFlight: 4.2 }));
+		expect(out).toContain("4.2of 10 on the wire");
+		expect(out).toContain("42.0% utilisation");
+		expect(out).not.toContain("100.0% utilisation");
+	});
+
+	it("falls back to the peak for a finished run stored before the mean existed", () => {
+		const out = cardText(wave({ isCompleted: true, avgInFlight: undefined }));
+		expect(out).toContain("10of 10 active");
+	});
+
+	it("falls back to the instant for a live frame without the mean", () => {
+		const out = cardText(wave({ currentConcurrency: 6, avgInFlight: undefined }));
+		expect(out).toContain("6of 10 active");
+	});
+
+	it("leaves capacity's card on the instant, whatever the mean says", () => {
+		const out = cardText({
+			...wave({ currentConcurrency: 6, avgInFlight: 4.2 }),
+			mode: "capacity",
+		});
+		expect(out).toContain("6of 10 active");
+		expect(out).not.toContain("on the wire");
+	});
+
+	it("leaves ramp_up's card on the instant", () => {
+		const out = cardText({
+			...wave({ currentConcurrency: 6, avgInFlight: 4.2 }),
+			mode: "ramp_up",
+		});
+		expect(out).toContain("6active");
+		expect(out).not.toContain("on the wire");
 	});
 });
 

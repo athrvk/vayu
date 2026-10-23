@@ -102,6 +102,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		requestsSent: s.totalRequests,
 		peakConcurrency: peak,
 		currentConcurrency: peak, // completed → HeroRow reads peak anyway
+		avgInFlight: s.avgInFlight,
 		configuredConcurrency: cfg.concurrency,
 		backpressure: 0,
 		p99Latency: lat.p99,
