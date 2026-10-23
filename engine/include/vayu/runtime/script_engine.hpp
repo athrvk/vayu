@@ -356,8 +356,10 @@ struct ScriptContext {
      * `script.teardown`) takes `maxResponseBodyBytes`, because a script that
      * runs once per submission or per sampled response belongs to the load
      * path's memory budget and not to the one sized for a body a person is
-     * about to look at. A load run sets this field and the three beside it
-     * through one `ScriptSendInputs` (issue #2841).
+     * about to look at. A run's scripts outside an exchange (a load run's,
+     * a collection run's `script.setup` and `script.teardown`) get this
+     * field and the three beside it through one `ScriptSendInputs` (issue
+     * #2841).
      *
      * Reaching it **refuses** the transfer - `ErrorCode::ResponseTooLarge`
      * reaches the callback as its `err` - rather than handing the script a

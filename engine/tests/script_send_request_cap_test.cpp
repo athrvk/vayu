@@ -8,23 +8,25 @@
 /**
  * @file tests/script_send_request_cap_test.cpp
  * @brief What a script's own fetch inherits: the byte bound (issue #1188), the
- *        request timeout (issue #2833) and, for every load-run context, the
- *        run's default headers too (issue #2841).
+ *        request timeout (issue #2833) and, for every run context, the run's
+ *        default headers too (issue #2841).
  *
  * `pm.sendRequest` builds its own `ClientConfig`, so nothing the enclosing
  * exchange sets on its send reaches it by default - which is how it stayed the
  * one read with no byte bound at all after issue #1157 bounded every other
- * one, and how every load-run script but the deferred replay kept waiting the
- * compiled-in 30 s after #2833. The failure mode is silent in exactly the way
- * `design_read_cap_test.cpp` describes: a caller that forgets to carry a value
- * down sends with the default, and every unit test on either side of the gap
- * still passes.
+ * one, and how every run script no exchange carries, the deferred replay aside,
+ * kept waiting the compiled-in 30 s after #2833. The failure mode is silent in
+ * exactly the way `design_read_cap_test.cpp` describes: a caller that forgets
+ * to carry a value down sends with the default, and every unit test on either
+ * side of the gap still passes.
  *
  * So these drive the production paths rather than the sandbox: an exchange
  * (`POST /execute` and every collection-run step), the deferred `tests` pass
- * of a load run, and whole load runs for the rest of a load run's scripts
+ * of a load run, whole load runs for the rest of a load run's scripts
  * (`script.setup` / `script.teardown` and the inline step scripts of both run
- * shapes). Which *setting* each path resolves is `config_route_test.cpp`'s
+ * shapes), and whole sequential collection runs for that run's
+ * `script.setup` / `script.teardown`, which no exchange carries the inputs to.
+ * Which *setting* each path resolves is `config_route_test.cpp`'s
  * `design_response_body_bound` / `load_response_body_bound` cases; what is
  * under test here is that the value reaches the script's transfer at all.
  */
@@ -567,8 +569,11 @@ TEST (ScriptSendInputs, DefaultInputsChangeNothing) {
  * script from `configure_event_loop` the way production carries them: a
  * single-request run's `lifecycleElements` (`script.setup` / `.teardown`) and
  * `requestElements`, and a scenario step's own elements, each `script.*`
- * marked inline. Every script reports its fetch to `/report`, because a load
- * run stores no inline script's output.
+ * marked inline; and sequential collection runs through
+ * `RunManager::start_scenario_run`, whose lifecycle scripts take the inputs
+ * `execute_scenario_run` resolves. Every script reports its fetch to
+ * `/report`, because a load run stores no inline script's output and a
+ * lifecycle outcome keeps no fetch's.
  */
 class ScriptSendRequestRunTest : public ::testing::Test {
     protected:
@@ -637,6 +642,55 @@ class ScriptSendRequestRunTest : public ::testing::Test {
         start_and_await (config, execution);
     }
 
+    /**
+     * A sequential collection run of `col_1`, one step against `/ok`, with
+     * @p collection_elements stored as the collection's own (where
+     * `script.setup` / `script.teardown` live) and @p payload_members added to
+     * a payload that allows script requests and names no `timeout`.
+     */
+    void run_sequential_collection (const json& collection_elements,
+    const json& payload_members = json::object ()) {
+        vayu::db::Collection collection;
+        collection.id         = "col_1";
+        collection.name       = "Collection col_1";
+        collection.elements   = collection_elements.dump ();
+        collection.created_at = 1;
+        collection.updated_at = 1;
+        db_->create_collection (collection);
+
+        auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
+        execution->request.source        = "collection";
+        execution->request.collection_id = "col_1";
+        execution->request.iterations    = 1;
+
+        vayu::core::ScenarioStep step;
+        step.index          = 0;
+        step.request_id     = "req_1";
+        step.name           = "Step";
+        step.request.method = vayu::HttpMethod::GET;
+        step.request.url    = server_->ok_url ();
+        step.stored_url     = step.request.url;
+        execution->plan.steps.push_back (std::move (step));
+
+        json config = { { "scenario",
+                        { { "source", "collection" },
+                        { "collectionId", "col_1" }, { "iterations", 1 } } },
+            { "allowScriptRequests", true } };
+        config.update (payload_members);
+
+        vayu::db::Run run;
+        run.id              = RUN_ID;
+        run.type            = vayu::RunType::Scenario;
+        run.status          = vayu::RunStatus::Pending;
+        run.config_snapshot = config.dump ();
+        run.start_time      = now_ms ();
+        run.end_time        = run.start_time;
+        db_->create_run (run);
+
+        ASSERT_TRUE (manager_.start_scenario_run (RUN_ID, config, execution, *db_, jar_));
+        await_finish ();
+    }
+
     /// The fetch-and-report script as an inline element of @p kind.
     [[nodiscard]] json
     reporting_element (const std::string& kind, const std::string& url) const {
@@ -646,9 +700,18 @@ class ScriptSendRequestRunTest : public ::testing::Test {
 
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<BigBodyServer> server_;
+    /// The sequential run's jar; declared before the manager it must outlive.
+    vayu::http::CookieJar jar_;
     vayu::core::RunManager manager_;
 
     private:
+    /// A real stamp: a run dated 1970 is pruned the moment it finishes.
+    static int64_t now_ms () {
+        return std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+        .count ();
+    }
+
     void start_and_await (const json& config,
     std::shared_ptr<const vayu::core::ScenarioExecution> execution) {
         vayu::db::Run run;
@@ -656,14 +719,15 @@ class ScriptSendRequestRunTest : public ::testing::Test {
         run.type            = vayu::RunType::Load;
         run.status          = vayu::RunStatus::Pending;
         run.config_snapshot = config.dump ();
-        // A real stamp: a run dated 1970 is pruned the moment it finishes.
-        run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
-        std::chrono::system_clock::now ().time_since_epoch ())
-                         .count ();
-        run.end_time = run.start_time;
+        run.start_time      = now_ms ();
+        run.end_time        = run.start_time;
         db_->create_run (run);
 
         ASSERT_TRUE (manager_.start_run (RUN_ID, config, *db_, std::move (execution)));
+        await_finish ();
+    }
+
+    void await_finish () {
         // `retain_run` is the worker's last act, after teardown.
         ASSERT_TRUE (vayu::tests::wait_until (
         [this] () { return manager_.get_run (RUN_ID) == nullptr; }))
@@ -672,16 +736,17 @@ class ScriptSendRequestRunTest : public ::testing::Test {
 };
 
 /**
- * The one report a run's script sent took the run's `timeout`. Healthy: about
- * `RUN_TIMEOUT_MS`. Broken: the compiled-in 30 s clamped to the 5 s script
- * budget, about 5,000 ms, which leaves the report itself almost no budget, so
- * a broken build reads as a missing report or a reading over the ceiling.
+ * The one report a run's script sent took the run's timeout, @p timeout_ms.
+ * Healthy: about @p timeout_ms (500 or the 1,000 `defaultTimeout` floor).
+ * Broken: the compiled-in 30 s clamped to the 5 s script budget, about
+ * 5,000 ms, which leaves the report itself almost no budget, so a broken build
+ * reads as a missing report or a reading over the ceiling.
  */
-void expect_run_timeout (const std::vector<Report>& reports) {
+void expect_run_timeout (const std::vector<Report>& reports, int64_t timeout_ms = RUN_TIMEOUT_MS) {
     ASSERT_EQ (reports.size (), 1u) << "the script's report never arrived";
     const auto after_ms = vayu::tests::timed_out_after_ms (reports[0].body);
     ASSERT_HAS_VALUE (after_ms) << reports[0].body;
-    EXPECT_GE (*after_ms, RUN_TIMEOUT_MS) << reports[0].body;
+    EXPECT_GE (*after_ms, timeout_ms) << reports[0].body;
     EXPECT_LT (*after_ms, RUN_TIMEOUT_CEILING_MS) << reports[0].body;
 }
 
@@ -758,6 +823,60 @@ TEST_F (ScriptSendRequestRunTest, ASetupScriptFetchCarriesTheRunsDefaultHeaders)
 
     run_single_request ({ { "lifecycleElements",
     json::array ({ reporting_element ("script.setup", server_->ok_url ()) }) } });
+
+    const auto reports = server_->reports ();
+    ASSERT_EQ (reports.size (), 1u);
+    EXPECT_FALSE (reports[0].correlation_id.empty ()) << reports[0].body;
+}
+
+// ============================================================================
+// The sequential collection run's script.setup / script.teardown (issue #2841)
+// ============================================================================
+
+// Mutation-check: drop `script_send.apply (script_ctx)` from
+// `run_scenario_setup`'s `run_setup_script` (scenario_runner.cpp).
+TEST_F (ScriptSendRequestRunTest, ASequentialSetupScriptFetchTakesTheRunsTimeout) {
+    run_sequential_collection (
+    json::array ({ reporting_element ("script.setup", server_->hang_url ()) }),
+    { { "timeout", RUN_TIMEOUT_MS } });
+
+    expect_run_timeout (server_->reports ());
+}
+
+// With no `timeout` in the payload the run's timeout is the `defaultTimeout`
+// setting, the precedence `POST /execute` resolves. Mutation-check: drop the
+// apply from `run_scenario_teardown`'s `run_teardown_script`.
+TEST_F (ScriptSendRequestRunTest, ASequentialTeardownScriptFetchTakesTheDefaultTimeoutSetting) {
+    apply_setting (*db_, "defaultTimeout", "1000");
+
+    run_sequential_collection (
+    json::array ({ reporting_element ("script.teardown", server_->hang_url ()) }));
+
+    expect_run_timeout (server_->reports (), 1000);
+}
+
+// A collection run is the design path, so its lifecycle scripts take the design
+// bound. Broken: the compiled-in 32 MiB, so the fetch reads all 65536 bytes.
+// Mutation-check: drop the apply from `run_setup_script`.
+TEST_F (ScriptSendRequestRunTest, ASequentialSetupScriptFetchIsRefusedPastTheDesignBound) {
+    apply_setting (*db_, "maxDesignResponseBodyBytes", std::to_string (READ_BOUND));
+
+    run_sequential_collection (
+    json::array ({ reporting_element ("script.setup", server_->url ()) }));
+
+    const auto reports = server_->reports ();
+    ASSERT_EQ (reports.size (), 1u);
+    EXPECT_NE (reports[0].body.find (refusal_of (READ_BOUND)), std::string::npos)
+    << reports[0].body;
+}
+
+// Mutation-check: drop the apply from `run_setup_script` and the correlation
+// id is missing.
+TEST_F (ScriptSendRequestRunTest, ASequentialSetupScriptFetchCarriesTheRunsDefaultHeaders) {
+    apply_setting (*db_, "correlationIdEnabled", "true");
+
+    run_sequential_collection (
+    json::array ({ reporting_element ("script.setup", server_->ok_url ()) }));
 
     const auto reports = server_->reports ();
     ASSERT_EQ (reports.size (), 1u);

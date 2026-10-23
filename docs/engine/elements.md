@@ -292,7 +292,12 @@ the one that runs after there is one. Neither kind gets a per-element `allowRequ
 inside either script is gated by the run's own `allowScriptRequests` (`ScriptConfig::allow_send_request`,
 baked into the `ScriptEngine` instance every script of the run already shares) and capped at the same
 10 calls per script every other script gets - a second, per-element gate would be dead configuration
-next to a run-wide one that already decides the question.
+next to a run-wide one that already decides the question. What such a fetch sends under is the run's
+too, resolved once before setup runs and applied as one `vayu::runtime::ScriptSendInputs` (issue
+#2841): the run's `timeout`, else `defaultTimeout`, when the call names no `timeout` of its own; the
+run's response byte bound, `maxDesignResponseBodyBytes` on a sequential collection run (a design-mode
+path) and `maxResponseBodyBytes` on a load run; and the transport policy and default headers the
+run's own transfers carry.
 
 ### Controllers
 
