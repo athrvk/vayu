@@ -59,7 +59,7 @@ import {
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
-import { describeImportPreview } from "./tools/spec-bindings.js";
+import { describeImport, describeImportPreview } from "./tools/spec-bindings.js";
 import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
 import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
@@ -12540,6 +12540,31 @@ describe("OpenAPI spec binding tools", () => {
 			);
 			expect(describeImportPreview({ meta: { ...meta, folderCount: 0 } })).not.toContain(
 				"recursive"
+			);
+		});
+
+		test("tells the caller how to define {{baseUrl}} when the document named no server (#2450)", () => {
+			const base = { format: "OpenAPI 3.1.0", requestCount: 2, folderCount: 0 };
+			const noServer = { ...base, skipped: [{ kind: "no_server_url", count: 1 }] };
+			const other = { ...base, skipped: [{ kind: "websocket", count: 1 }] };
+			expect(noServer.skipped.map((s) => s.kind)).toContain("no_server_url");
+			const remedy = "{{baseUrl}} is undefined";
+			const imported = { collections: 1, requests: 2, environments: 0, globals: 0 };
+
+			const preview = describeImportPreview({ meta: noServer });
+			expect(preview).toContain(remedy);
+			expect(preview).toContain("update_collection");
+			expect(preview).toContain("update_environment");
+			expect(describeImportPreview({ meta: other })).not.toContain(remedy);
+			expect(describeImportPreview({ meta: { ...base, skipped: [] } })).not.toContain(remedy);
+
+			const done = describeImport({ ...imported, meta: noServer });
+			expect(done).toContain(remedy);
+			expect(done).toContain("update_collection");
+			expect(done).toContain("update_environment");
+			expect(describeImport({ ...imported, meta: other })).not.toContain(remedy);
+			expect(describeImport({ ...imported, meta: { ...base, skipped: [] } })).not.toContain(
+				remedy
 			);
 		});
 
