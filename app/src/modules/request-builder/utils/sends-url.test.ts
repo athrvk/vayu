@@ -144,6 +144,21 @@ describe("sendsHasTokens", () => {
 		expect(sendsHasTokens(sends(url, [pathRow("name", "{{tail}}")]))).toBe(true);
 		expect(sendsHasTokens(sends(url, [pathRow("name", "{{tail}}", false)]))).toBe(false);
 	});
+
+	it("is false for a path row whose `:name` the URL does not hold", () => {
+		const request = sends("https://api.test/users/:name", [pathRow("stale", "{{tail}}")]);
+		expect(sendsHasTokens(request)).toBe(false);
+	});
+
+	it("reads only the row that answers a name, the last enabled one", () => {
+		const url = "https://api.test/users/:id";
+		expect(sendsHasTokens(sends(url, [pathRow("id", "{{tail}}"), pathRow("id", "7")]))).toBe(
+			false
+		);
+		expect(sendsHasTokens(sends(url, [pathRow("id", "7"), pathRow("id", "{{tail}}")]))).toBe(
+			true
+		);
+	});
 });
 
 describe("deferredNamesInSends", () => {
@@ -159,6 +174,19 @@ describe("deferredNamesInSends", () => {
 	it("finds a name in a path row's value", () => {
 		const request = sends("https://api.test/:name", [pathRow("name", "{{token}}")]);
 		expect(deferredNamesInSends(request, ["token"])).toEqual(["token"]);
+	});
+
+	it("ignores a row for a `:name` the URL does not hold", () => {
+		const request = sends("https://api.test/users/:name", [pathRow("foo", "{{token}}")]);
+		expect(deferredNamesInSends(request, ["token"])).toEqual([]);
+	});
+
+	it("ignores a row a later enabled row for the same name shadows", () => {
+		const request = sends("https://api.test/users/:id", [
+			pathRow("id", "{{token}}"),
+			pathRow("id", "7"),
+		]);
+		expect(deferredNamesInSends(request, ["token"])).toEqual([]);
 	});
 
 	it("is empty when the engine deferred nothing, or nothing the URL uses", () => {

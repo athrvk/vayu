@@ -32,7 +32,7 @@ import {
 	containsVariableToken,
 } from "@/constants/variables";
 import type { KeyValueEntry, Request } from "@/types";
-import { composePathParams, substitutePathVariables } from "./path-variables";
+import { answeringPathRows, composePathParams, substitutePathVariables } from "./path-variables";
 import { resolveUrlTemplate } from "./query-encoding";
 
 /** The members of a request the sent URL is a function of. */
@@ -100,11 +100,14 @@ export function resolveSendsUrl(
 	return resolveSends(sendsInput(request, deferred), resolve);
 }
 
-/** The text the sent URL is built from that can hold a `{{token}}`. */
+/**
+ * The text the sent URL is built from that can hold a `{{token}}`: the URL and
+ * the values of the path rows the line substitutes, no others.
+ */
 function sendsTemplates(request: SendsUrlInput): string[] {
-	const pathValues = composePathParams(request.params)
-		.filter((row) => row.enabled !== false && typeof row.value === "string")
-		.map((row) => row.value);
+	const pathValues = answeringPathRows(request.url, composePathParams(request.params)).flatMap(
+		(row) => (typeof row.value === "string" ? [row.value] : [])
+	);
 	return [request.url, ...pathValues];
 }
 

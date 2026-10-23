@@ -183,6 +183,15 @@ function answeringRow<T extends KeyValueEntry>(rows: readonly T[], name: string)
 	return undefined;
 }
 
+/**
+ * The rows `substitutePathVariables` can write into `url`: for each `:name` the
+ * URL holds, the one row that answers it. A row for a name the URL does not
+ * hold, a disabled row and a shadowed duplicate are not among them.
+ */
+export function answeringPathRows<T extends KeyValueEntry>(url: string, rows: readonly T[]): T[] {
+	return pathVariableNames(url).flatMap((name) => answeringRow(rows, name) ?? []);
+}
+
 /** Two name lists as the same `:name` segments, in the same order. */
 function sameNames(a: readonly string[], b: readonly string[]): boolean {
 	return a.length === b.length && a.every((name, i) => name === b[i]);
