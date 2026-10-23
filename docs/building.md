@@ -420,8 +420,9 @@ The project uses GitHub Actions for automated builds:
   - Runs weekly on `master` (Monday 09:00 UTC) and on demand
   - ASan on Linux/Windows/macOS and TSan on Linux/macOS - five jobs, because
     ThreadSanitizer has no Windows implementation
-  - A red leg files or updates a `sanitizer-failure` issue by itself, from the
-    runner through `GITHUB_TOKEN`, with the run link and the sanitizer report
+  - A red leg files or updates a `sanitizer-failure` issue by itself, from a
+    separate `report` job through `GITHUB_TOKEN` (the only job with
+    `issues: write`), with the run link and the sanitizer report
   - See [Engine building - Sanitizers](engine/building.md#sanitizers)
 
 - **Warm build cache**: `.github/workflows/cache-warm.yml`
