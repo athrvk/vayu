@@ -275,6 +275,18 @@ std::optional<std::string> ascii_host (std::string_view host) {
     return url->get_hostname ();
 }
 
+std::optional<std::string> canonical_host (std::string_view host) {
+    std::string text (host);
+    if (text.find (':') != std::string::npos && !text.starts_with ('[')) {
+        text = "[" + text + "]";
+    }
+    auto url = ada::parse<ada::url> ("http://x");
+    if (!url || !url->set_hostname (text)) {
+        return std::nullopt;
+    }
+    return url->get_hostname ();
+}
+
 std::optional<UrlHostSpan> url_host_span (std::string_view url) {
     std::size_t begin = 0;
     // A "://" after a path separator belongs to the path, not to a scheme.

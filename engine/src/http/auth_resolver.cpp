@@ -107,7 +107,16 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
 AuthApplyResult resolve_oauth2 (vayu::Request* req,
 const nlohmann::json& config,
 vayu::db::Database* db,
+const TargetPolicy* target_policy,
 const std::atomic<bool>* cancel) {
+    // Before the cache is read, so a token endpoint the policy refuses is
+    // refused whether or not an earlier send left its token cached (#2521).
+    if (target_policy != nullptr) {
+        if (auto refusal = refuse_token_endpoints (*target_policy, config)) {
+            return { false, vayu::ErrorCode::InvalidUrl,
+                std::move (refusal->message), std::string (refusal->code) };
+        }
+    }
     if (db == nullptr) {
         return { false, vayu::ErrorCode::AuthFailed,
             "OAuth 2.0 requires database access for the token cache", "oauth2_no_database" };
@@ -255,6 +264,7 @@ Auth parse_auth (const nlohmann::json& auth) {
 AuthApplyResult apply_auth (vayu::Request& req,
 const Auth& auth,
 vayu::db::Database* db,
+const TargetPolicy* target_policy,
 const std::atomic<bool>* cancel) {
     return std::visit (
     [&] (const auto& a) -> AuthApplyResult {
@@ -277,7 +287,7 @@ const std::atomic<bool>* cancel) {
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
             return apply_api_key (req, a);
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
-            return resolve_oauth2 (&req, a.config, db, cancel);
+            return resolve_oauth2 (&req, a.config, db, target_policy, cancel);
         } else {
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
             vayu::utils::log_debug ("http",
@@ -294,18 +304,20 @@ const std::atomic<bool>* cancel) {
 AuthApplyResult apply_auth (vayu::Request& req,
 const nlohmann::json& auth,
 vayu::db::Database* db,
+const TargetPolicy* target_policy,
 const std::atomic<bool>* cancel) {
-    return apply_auth (req, parse_auth (auth), db, cancel);
+    return apply_auth (req, parse_auth (auth), db, target_policy, cancel);
 }
 
 AuthApplyResult preflight_auth (const nlohmann::json& auth,
 vayu::db::Database& db,
+const TargetPolicy* target_policy,
 const std::atomic<bool>* cancel) {
     const Auth parsed = parse_auth (auth);
     if (const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed)) {
         // Acquire (cache-aware) without touching any request - warms the token
         // cache so the run worker's apply_auth is a cache hit.
-        return resolve_oauth2 (nullptr, oauth2->config, &db, cancel);
+        return resolve_oauth2 (nullptr, oauth2->config, &db, target_policy, cancel);
     }
     return {};
 }
