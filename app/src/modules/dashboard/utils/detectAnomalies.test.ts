@@ -23,10 +23,11 @@ import {
 	MIN_CONSECUTIVE_TICKS,
 	MAX_ANOMALIES,
 	ERROR_BURST_RATE,
+	MIN_BURST_COMPLETIONS,
 	THROUGHPUT_DROP_FACTOR,
 	wholeSecondTicks,
 } from "./detectAnomalies";
-import { detectAnomaliesFromScratch } from "./detectAnomalies.testkit";
+import { countedTicks, detectAnomaliesFromScratch } from "./detectAnomalies.testkit";
 
 function tick(elapsed: number, partial: Partial<LoadTestMetrics> = {}): LoadTestMetrics {
 	return {
@@ -212,6 +213,7 @@ describe("detectAnomalies - error bursts", () => {
 
 	it("reports a burst that exceeds the threshold for two consecutive ticks", () => {
 		expect(ERROR_BURST_RATE).toBe(0.01);
+		expect(MIN_BURST_COMPLETIONS).toBe(20);
 		// 25 of each tick's 500 completions fail across ticks 10 and 11 - 5%.
 		const run = healthyRun(40, (i) => ({
 			requests_failed: i < 10 ? 0 : i === 10 ? 25 : 50,
@@ -222,7 +224,91 @@ describe("detectAnomalies - error bursts", () => {
 		expect(found[0].startSeconds).toBe(10);
 		expect(found[0].endSeconds).toBe(11);
 		expect(found[0].magnitude).toBeCloseTo(5, 1);
-		expect(found[0].label).toMatch(/errors 5\.0% of requests for 1.00s/);
+		// Every tick is 5%, so the worst second says nothing the window's rate has not.
+		expect(found[0].label).toBe("errors 5.0% of requests over 1.00s");
+	});
+});
+
+describe("detectAnomalies - error bursts count a window's requests, not its ticks", () => {
+	const burstSeconds = (failed: number[]) => failed.map((f) => ({ completed: 50, failed: f }));
+	const steady = (seconds: number) => burstSeconds(Array<number>(seconds).fill(0));
+	/** Ticks 10-19 fail 39 of 500: 7.8% over the window, with a 10% tick and an 8% one in it. */
+	const SEVEN_POINT_EIGHT = [5, 4, 4, 4, 4, 4, 4, 4, 3, 3];
+	const bursting = () => {
+		const perSecond = steady(30);
+		SEVEN_POINT_EIGHT.forEach((failed, k) => (perSecond[10 + k].failed = failed));
+		return countedTicks(perSecond);
+	};
+	const bursts = (run: LoadTestMetrics[]) =>
+		detectAnomalies(run).filter((a) => a.kind === "error_burst");
+
+	it("labels the window's own rate and shows the worst second beside it", () => {
+		const found = bursts(bursting());
+		expect(found).toHaveLength(1);
+		expect(found[0]).toMatchObject({ startSeconds: 10, endSeconds: 19 });
+		expect(found[0].label).toBe("errors 7.8% of requests over 9.00s (worst second 10.0%)");
+		// The cap ranks by the worst tick, so the order a burst sorts into is unchanged.
+		expect(found[0].magnitude).toBeCloseTo(10);
+	});
+
+	it("re-sums the window after a trim clips its front", () => {
+		const run = bursting();
+		const detector = createAnomalyDetector();
+		expect(detector.detect(run).filter((a) => a.kind === "error_burst")[0].label).toContain(
+			"7.8%"
+		);
+
+		// Ticks 10-12 roll out and the buffer's new first tick has no delta, so the
+		// window is ticks 13-19: 26 failures in 350 completions, its worst tick 8%.
+		const trimmed = run.slice(12);
+		const found = detector.detect(trimmed);
+		expect(found).toEqual(detectAnomaliesFromScratch(trimmed));
+		const burst = found.filter((a) => a.kind === "error_burst");
+		expect(burst).toHaveLength(1);
+		expect(burst[0]).toMatchObject({ startSeconds: 13, endSeconds: 19 });
+		expect(burst[0].label).toBe("errors 7.4% of requests over 6.00s (worst second 8.0%)");
+		expect(burst[0].magnitude).toBeCloseTo(8);
+	});
+
+	it("opens nothing for one failure in a hundred completions", () => {
+		const perSecond = steady(30).map((s) => ({ ...s, completed: 100 }));
+		perSecond[12].failed = 1;
+		perSecond[13].failed = 1;
+
+		expect(bursts(countedTicks(perSecond))).toEqual([]);
+	});
+
+	it("sets the floor at MIN_BURST_COMPLETIONS: a second under it cannot open a window", () => {
+		const second = (completed: number) => {
+			const perSecond = steady(30);
+			perSecond[12] = { completed, failed: completed };
+			perSecond[13] = { completed, failed: completed };
+			return countedTicks(perSecond);
+		};
+
+		expect(bursts(second(MIN_BURST_COMPLETIONS - 1))).toEqual([]);
+		expect(bursts(second(MIN_BURST_COMPLETIONS))).toHaveLength(1);
+	});
+
+	it("does not read a drain tail of failing trickles as a burst", () => {
+		// The run is winding down: one to three requests a second, every one failing.
+		const drain = Array.from({ length: 10 }, (_, k) => ({
+			completed: 1 + (k % 3),
+			failed: 1 + (k % 3),
+		}));
+
+		expect(bursts(countedTicks([...steady(30), ...drain]))).toEqual([]);
+	});
+
+	it("ends a burst at its last real tick instead of extending it through the drain", () => {
+		const perSecond = steady(30);
+		for (const k of [10, 11, 12]) perSecond[k].failed = 5;
+		const drain = [1, 2, 3].map((n) => ({ completed: n, failed: n }));
+
+		const found = bursts(countedTicks([...perSecond, ...drain]));
+		expect(found).toHaveLength(1);
+		expect(found[0]).toMatchObject({ startSeconds: 10, endSeconds: 12 });
+		expect(found[0].label).toBe("errors 10.0% of requests over 2.00s");
 	});
 });
 
