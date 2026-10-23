@@ -158,7 +158,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				environmentId = await resolveEnvironmentId(args, ctx, signal);
 				targets = await smokeTargets(ctx.client, collectionId, recursive, signal);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			// Read before any traffic flows: after the loop this call competes with
@@ -452,7 +452,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					signal
 				);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 

@@ -28,9 +28,16 @@ import {
 import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
 import { presentCollection } from "../collection-shape.js";
 import { engineDownRemedy, settingRemedy } from "../remedy.js";
-import { targetPolicyRefusalOfErrorBody } from "../safety.js";
+import { targetPolicyRefusalOfErrorBody, type GuardResult } from "../safety.js";
 import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
+import {
+	engineRefusalClass,
+	FAILURES,
+	isBusyDatabase,
+	type Failure,
+	type FailureClass,
+} from "./failure.js";
 
 // --- Result helpers ----------------------------------------------------------
 
@@ -60,8 +67,23 @@ export function textResult(text: string): ToolResult {
 	return { content: [{ type: "text", text }] };
 }
 
-export function errorResult(message: string): ToolResult {
-	return { content: [{ type: "text", text: message }], isError: true };
+/**
+ * The one builder of an error result. @p failureClass is required rather than
+ * guessed from the wording: the class is what an agent acts on, and a default
+ * would hand every site that forgot one a class it did not choose.
+ */
+export function errorResult(message: string, failureClass: FailureClass): ToolResult {
+	const result: ToolResult = { content: [{ type: "text", text: message }], isError: true };
+	FAILURES.set(result, { failureClass, message });
+	return result;
+}
+
+/**
+ * The tool error for a guard that refused, in the class the guard gave it. A
+ * guard that named none is a safety rule, which is what a guard is for.
+ */
+export function guardErrorResult(gate: GuardResult, lead = ""): ToolResult {
+	return errorResult(`${lead}${gate.error ?? ""}`, gate.failureClass ?? "policy");
 }
 
 /**
@@ -71,18 +93,14 @@ export function errorResult(message: string): ToolResult {
  */
 export function withCaveat(result: ToolResult, caveat: string): ToolResult {
 	if (!caveat) return result;
-	return {
+	const noted = {
 		...result,
 		content: [...result.content, { type: "text" as const, text: caveat.trimStart() }],
 	};
+	const failure = FAILURES.get(result);
+	if (failure) FAILURES.set(noted, failure);
+	return noted;
 }
-
-/**
- * The engine's busy-database sentence (`send_exception`, `routes.hpp`). A 503
- * is not enough to match on: the engine also answers 503 while it is shutting
- * down, where a retry is wrong, and both carry the code `unavailable`.
- */
-const BUSY_DATABASE = /database is busy/i;
 
 /**
  * What an agent should do about the two answers the engine gives a storage
@@ -92,43 +110,63 @@ const BUSY_DATABASE = /database is busy/i;
  */
 function retryHint(err: EngineRequestError): string {
 	if (err.status === 507) return " Retry the call after space is freed.";
-	if (err.status === 503 && BUSY_DATABASE.test(err.body)) return " Retry the call in a moment.";
+	if (isBusyDatabase(err)) return " Retry the call in a moment.";
 	return "";
 }
 
 export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
-	if (err instanceof EngineRequestError) {
-		// A streaming send refuses its final URL before the stream opens (#2521).
-		const refused = targetPolicyRefusalOfErrorBody(err.body, ctx.host);
-		if (refused) return errorResult(refused);
-		return errorResult(
-			`Engine error (${err.status}): ${err.body || err.message}${retryHint(err)}`
-		);
-	}
+	const { message, failureClass } = engineFailure(err, ctx);
+	return errorResult(message, failureClass);
+}
+
+/**
+ * What a failed engine call says and how it is classed, for a site that words
+ * its own error around the cause but keeps the cause's class.
+ */
+export function engineFailure(err: unknown, ctx: ToolContext): Failure {
+	if (err instanceof EngineRequestError) return engineRefusal(err, ctx);
 	const msg = err instanceof Error ? err.message : String(err);
 	// An abort means the engine was reachable and working - the opposite of the
 	// "not running, retry" advice below. Whatever was in flight may well have
 	// completed engine-side, so say so instead of inviting a second send.
 	if (err instanceof EngineTimeoutError) {
-		return errorResult(
-			`The engine did not answer within this client's ${Math.round(err.timeoutMs / 1000)}s budget. ` +
+		return {
+			message:
+				`The engine did not answer within this client's ${Math.round(err.timeoutMs / 1000)}s budget. ` +
 				`It may still have completed the call - check run history (list_runs) before retrying. ` +
 				`For a target that is legitimately this slow, raise the engine's "defaultTimeout" ` +
-				`with update_engine_config.`
-		);
+				`with update_engine_config.`,
+			failureClass: "transient",
+		};
 	}
 	if (err instanceof Error && (err.name === "AbortError" || /abort/i.test(msg))) {
-		return errorResult(
-			`The call was cancelled before the engine answered. It may still have completed - ` +
-				`check run history (list_runs) before retrying. (${msg})`
-		);
+		return {
+			message:
+				`The call was cancelled before the engine answered. It may still have completed - ` +
+				`check run history (list_runs) before retrying. (${msg})`,
+			failureClass: "transient",
+		};
 	}
 	if (/ECONNREFUSED|fetch failed/i.test(msg)) {
-		return errorResult(
-			`Could not reach the Vayu engine. ${engineDownRemedy(ctx.host)}, then retry. (${msg})`
-		);
+		return {
+			message: `Could not reach the Vayu engine. ${engineDownRemedy(ctx.host)}, then retry. (${msg})`,
+			failureClass: "unreachable",
+		};
 	}
-	return errorResult(`Unexpected error: ${msg}`);
+	// Nothing above names it (a reset socket, a body that would not parse), and
+	// nothing says the call was wrong, so it is worth one more try.
+	return { message: `Unexpected error: ${msg}`, failureClass: "transient" };
+}
+
+/** An HTTP refusal the engine answered. */
+function engineRefusal(err: EngineRequestError, ctx: ToolContext): Failure {
+	// A streaming send refuses its final URL before the stream opens (#2521).
+	const refused = targetPolicyRefusalOfErrorBody(err.body, ctx.host);
+	if (refused) return { message: refused, failureClass: "policy" };
+	return {
+		message: `Engine error (${err.status}): ${err.body || err.message}${retryHint(err)}`,
+		failureClass: engineRefusalClass(err),
+	};
 }
 
 /**
@@ -221,7 +259,8 @@ interface RunOutputOptions {
 	bound?: (value: unknown) => unknown;
 	/**
 	 * The tool error an answer stands for, or undefined to render it: an
-	 * engine refusal this server has a remedy for (`targetPolicyRefusal`).
+	 * engine target-policy refusal this server has a remedy for
+	 * (`targetPolicyRefusal`), answered as a `policy` failure.
 	 */
 	refusal?: (answer: unknown) => string | undefined;
 	/** The tool declares an `outputSchema`: answer as {@link callEngineStructured} does. */
@@ -244,7 +283,7 @@ async function withheldRunAnswer(
 		return engineErrorResult(err, ctx);
 	}
 	const refused = options.refusal?.(answer);
-	if (refused) return errorResult(refused);
+	if (refused) return errorResult(refused, "policy");
 	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
 	return render(withhold(answer));
 }
@@ -293,7 +332,20 @@ export function stringArray(args: Record<string, unknown>, key: string): string[
 	return v as string[];
 }
 
-export class ToolArgError extends Error {}
+/**
+ * An argument the handler refused, thrown from wherever it was read and
+ * answered by `dispatchTool` as an error result of @p failureClass. Most are
+ * `input`; a lookup helper that finds no such id throws `not_found`, and a
+ * refusal a setting decides throws `policy`.
+ */
+export class ToolArgError extends Error {
+	constructor(
+		message: string,
+		readonly failureClass: FailureClass = "input"
+	) {
+		super(message);
+	}
+}
 
 /**
  * An optional `elements` argument: an array of `{ id?, kind, enabled?, name?,
@@ -388,7 +440,8 @@ export function optionalOffset(args: Record<string, unknown>, key: string): numb
 export function writesDisabled(ctx: ToolContext): ToolResult | null {
 	if (ctx.config.allowWrites) return null;
 	return errorResult(
-		`Writes are disabled. To allow this, ask the user to ${settingRemedy("allowWrites", ctx.host)}.`
+		`Writes are disabled. To allow this, ask the user to ${settingRemedy("allowWrites", ctx.host)}.`,
+		"policy"
 	);
 }
 

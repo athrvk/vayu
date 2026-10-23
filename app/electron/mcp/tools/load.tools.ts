@@ -29,6 +29,7 @@ import {
 	confirmedInput,
 	engineErrorResult,
 	errorResult,
+	guardErrorResult,
 	num,
 	str,
 	ToolArgError,
@@ -468,10 +469,10 @@ export const LOAD_TOOLS: McpTool[] = [
 			// shape of the target: no load path reads the flag, so a single-target
 			// run would swallow it exactly as a scenario one would.
 			if (args.failOnSchemaError !== undefined) {
-				return errorResult(LOAD_RUN_SCHEMA_GATE_REFUSAL);
+				return errorResult(LOAD_RUN_SCHEMA_GATE_REFUSAL, "input");
 			}
 			if (args.stopOnError !== undefined) {
-				return errorResult(LOAD_RUN_STOP_ON_ERROR_REFUSAL);
+				return errorResult(LOAD_RUN_STOP_ON_ERROR_REFUSAL, "input");
 			}
 
 			// A scenario replaces the single target wholesale - there is nothing to
@@ -484,17 +485,18 @@ export const LOAD_TOOLS: McpTool[] = [
 			try {
 				composed = await composeLoadRunRequest(args, ctx, signal);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			const url = String(composed.payload.url ?? "");
 			if (!url) {
 				return errorResult(
-					`Saved request "${str(args, "requestId")}" has no URL to load-test.`
+					`Saved request "${str(args, "requestId")}" has no URL to load-test.`,
+					"input"
 				);
 			}
 			const gate = checkComposedTarget(composed.payload, ctx.config, ctx.host);
-			if (!gate.ok) return errorResult(gate.error!);
+			if (!gate.ok) return guardErrorResult(gate);
 
 			// A monitored run contacts a second host, so it gets a second gate.
 			// The scrape needs no duration cap of its own: the monitor thread is
@@ -506,7 +508,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					ctx.config,
 					ctx.host
 				);
-				if (!monitorGate.ok) return errorResult(monitorGate.error!);
+				if (!monitorGate.ok) return guardErrorResult(monitorGate);
 			}
 
 			// One shape for the guard, the preview and the payload: the caps judge
@@ -516,9 +518,9 @@ export const LOAD_TOOLS: McpTool[] = [
 				ctx.config
 			);
 			const caps = checkLoadCaps(shape, ctx.config, ctx.host);
-			if (!caps.ok) return errorResult(caps.error!);
+			if (!caps.ok) return guardErrorResult(caps);
 			const sampleCap = checkSampleCap(num(args, "maxResponseSamples"), ctx.config, ctx.host);
-			if (!sampleCap.ok) return errorResult(sampleCap.error!);
+			if (!sampleCap.ok) return guardErrorResult(sampleCap);
 
 			const payload: Record<string, unknown> = {
 				...composed.payload,

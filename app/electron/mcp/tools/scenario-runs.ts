@@ -23,7 +23,9 @@ import type { ToolContext, ToolResult } from "./contract.js";
 import {
 	confirmDestructive,
 	engineErrorResult,
+	engineFailure,
 	errorResult,
+	guardErrorResult,
 	num,
 	str,
 	ToolArgError,
@@ -194,7 +196,10 @@ export async function preflightScenarioSteps(
 			throw new ToolArgError(
 				`Cannot compose ${step}: ${err instanceof Error ? err.message : String(err)}. ` +
 					`Nothing was started - the engine resolves this same plan before it creates the ` +
-					`run, and would refuse it for this reason too.`
+					`run, and would refuse it for this reason too.`,
+				err instanceof ToolArgError
+					? err.failureClass
+					: engineFailure(err, ctx).failureClass
 			);
 		}
 		const gate = checkComposedTarget(composed, ctx.config, ctx.host);
@@ -202,7 +207,8 @@ export async function preflightScenarioSteps(
 			throw new ToolArgError(
 				`Refusing to run this collection: ${step} is not allowed. ${gate.error} ` +
 					`Nothing was started - a scenario runs as one sequence, so a single step the ` +
-					`allowlist does not cover refuses all ${rows.length} of them.`
+					`allowlist does not cover refuses all ${rows.length} of them.`,
+				gate.failureClass ?? "policy"
 			);
 		}
 	}
@@ -359,27 +365,29 @@ export async function startScenarioLoadRun(
 			`These arguments do not apply to a scenario load run: ` +
 				inapplicable.map(([key, why]) => `"${key}" (${why})`).join("; ") +
 				`. Nothing was started - each of them would have been read as shaping this run ` +
-				`while the scenario executor never looks at it. Remove them and retry.`
+				`while the scenario executor never looks at it. Remove them and retry.`,
+			"input"
 		);
 	}
 
 	const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
 	const modeRefusal = scenarioModeRefusal(mode);
-	if (modeRefusal) return errorResult(modeRefusal);
+	if (modeRefusal) return errorResult(modeRefusal, "input");
 	// The engine's scenario validator refuses a rate on either spelling, on any
 	// mode: a scenario has no open-loop executor.
 	if (typeof args.targetRps === "number" && args.targetRps > 0) {
 		return errorResult(
 			`"targetRps" is not available for scenario runs: it selects an open-loop arrival rate, ` +
 				`and a scenario run is closed-loop by design. Set "concurrency" - the number of ` +
-				`virtual users - instead.`
+				`virtual users - instead.`,
+			"input"
 		);
 	}
 
 	const monitor = args.monitor as { url?: unknown } | undefined;
 	if (monitor && typeof monitor === "object") {
 		const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config, ctx.host);
-		if (!monitorGate.ok) return errorResult(monitorGate.error!);
+		if (!monitorGate.ok) return guardErrorResult(monitorGate);
 	}
 
 	// No `targetRps`: refused above, so the run is closed-loop at whatever
@@ -390,9 +398,9 @@ export async function startScenarioLoadRun(
 		SCENARIO_LOAD_DEFAULTS
 	);
 	const caps = checkLoadCaps(shape, ctx.config, ctx.host);
-	if (!caps.ok) return errorResult(caps.error!);
+	if (!caps.ok) return guardErrorResult(caps);
 	const sampleCap = checkSampleCap(num(args, "maxResponseSamples"), ctx.config, ctx.host);
-	if (!sampleCap.ok) return errorResult(sampleCap.error!);
+	if (!sampleCap.ok) return guardErrorResult(sampleCap);
 
 	const recursive = scenario.recursive === true;
 	let environmentId: string | undefined;
@@ -405,7 +413,7 @@ export async function startScenarioLoadRun(
 			signal
 		);
 	} catch (err) {
-		if (err instanceof ToolArgError) return errorResult(err.message);
+		if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 		return engineErrorResult(err, ctx);
 	}
 

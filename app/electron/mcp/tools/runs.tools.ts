@@ -155,11 +155,11 @@ export const RUN_TOOLS: McpTool[] = [
 			let stored: Record<string, unknown>;
 			try {
 				const value = await ctx.client.getRun(runId, signal);
-				if (!isRecord(value)) return errorResult(`No run with id "${runId}".`);
+				if (!isRecord(value)) return errorResult(`No run with id "${runId}".`, "not_found");
 				stored = value;
 			} catch (err) {
 				if (err instanceof EngineRequestError && err.status === 404) {
-					return errorResult(`No run with id "${runId}".`);
+					return errorResult(`No run with id "${runId}".`, "not_found");
 				}
 				return engineErrorResult(err, ctx);
 			}
@@ -186,7 +186,8 @@ export const RUN_TOOLS: McpTool[] = [
 				// failure of the request - say which one it is.
 				if (err instanceof EngineRequestError && err.status === 409) {
 					return errorResult(
-						`Run ${runId} is still stopping and was NOT deleted. It has been asked to stop - call delete_run again once it reports a terminal status (check with list_runs).`
+						`Run ${runId} is still stopping and was NOT deleted. It has been asked to stop - call delete_run again once it reports a terminal status (check with list_runs).`,
+						"transient"
 					);
 				}
 				return engineErrorResult(err, ctx);
@@ -265,13 +266,13 @@ export const RUN_TOOLS: McpTool[] = [
 					target as Record<string, unknown>
 				);
 				const refusal = runTypeRefusal(comparison);
-				if (refusal) return errorResult(refusal);
+				if (refusal) return errorResult(refusal, "input");
 				return structuredResult(comparison as unknown as Record<string, unknown>);
 			} catch (err) {
 				// A baseline that could not be resolved is an argument problem the
 				// caller can fix, not an engine failure - it must not be reported
 				// as one.
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 		},
@@ -320,7 +321,8 @@ export const RUN_TOOLS: McpTool[] = [
 				try {
 					baseRunId = await resolveBaseline(runId, ctx, signal);
 				} catch (err) {
-					if (err instanceof ToolArgError) return errorResult(err.message);
+					if (err instanceof ToolArgError)
+						return errorResult(err.message, err.failureClass);
 					return engineErrorResult(err, ctx);
 				}
 			}

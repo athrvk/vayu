@@ -15,14 +15,30 @@
 import type { McpSafetyConfig } from "./config.js";
 import { settingRemedy } from "./remedy.js";
 import type { McpHost } from "./tools/contract.js";
+import type { FailureClass } from "./tools/failure.js";
 
-/** Result of a guard check. `ok: false` carries a message meant for the agent. */
+/**
+ * Result of a guard check. `ok: false` carries a message meant for the agent
+ * and the class its error result answers with (#2776): `policy` for what a
+ * setting decides, `input` for a value no setting would let through.
+ */
 export interface GuardResult {
 	ok: boolean;
 	error?: string;
+	failureClass?: FailureClass;
 }
 
 const OK: GuardResult = { ok: true };
+
+/** A refusal the safety settings decide: lifting the setting would let it through. */
+function policyRefusal(error: string): GuardResult {
+	return { ok: false, error, failureClass: "policy" };
+}
+
+/** A refusal of a value no setting would let through: the caller has to change it. */
+function inputRefusal(error: string): GuardResult {
+	return { ok: false, error, failureClass: "input" };
+}
 
 /** The lowercased hostname `candidate` parses to, or null if it yields none. */
 function parseHostname(candidate: string): string | null {
@@ -151,26 +167,24 @@ function undeterminedHostError(url: string): string {
 export function checkAllowlist(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
 	const target = extractHost(url);
 	if (!target) {
-		return { ok: false, error: undeterminedHostError(url) };
+		return inputRefusal(undeterminedHostError(url));
 	}
 	// "Allow all" bypasses the allowlist entirely (still requires a resolvable host).
 	if (config.allowAll) {
 		return OK;
 	}
 	if (config.allowlist.length === 0) {
-		return {
-			ok: false,
-			error: `The MCP target allowlist is empty, so no outbound requests are permitted, "${target}" included. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`,
-		};
+		return policyRefusal(
+			`The MCP target allowlist is empty, so no outbound requests are permitted, "${target}" included. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`
+		);
 	}
 	const allowed = config.allowlist.some((h) => h.trim().toLowerCase() === target);
 	if (!allowed) {
-		return {
-			ok: false,
-			error: `Host "${target}" is not on the MCP allowlist. Allowed hosts: ${config.allowlist.join(
+		return policyRefusal(
+			`Host "${target}" is not on the MCP allowlist. Allowed hosts: ${config.allowlist.join(
 				", "
-			)}. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`,
-		};
+			)}. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`
+		);
 	}
 	return OK;
 }
@@ -192,10 +206,9 @@ export function checkComposedTarget(
 		return checkAllowlist(url, config, host);
 	}
 	if (config.allowAll || config.allowlist.length > 0) return OK;
-	return {
-		ok: false,
-		error: `The MCP target allowlist is empty, so no outbound requests are permitted. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`,
-	};
+	return policyRefusal(
+		`The MCP target allowlist is empty, so no outbound requests are permitted. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`
+	);
 }
 
 /**
@@ -352,16 +365,15 @@ export function isLinkLocalHost(host: string): boolean {
 export function checkMonitorHost(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
 	const monitorHost = extractHost(url);
 	if (!monitorHost) {
-		return {
-			ok: false,
-			error: "Could not determine the host of `monitor.url` (it may be empty or contain unresolved {{variables}}). Resolve it before retrying.",
-		};
+		return inputRefusal(
+			"Could not determine the host of `monitor.url` (it may be empty or contain unresolved {{variables}}). Resolve it before retrying."
+		);
 	}
 	if (isPrivateHost(monitorHost) && !isLinkLocalHost(monitorHost)) return OK;
 	const gate = checkAllowlist(url, config, host);
 	if (gate.ok) return OK;
 	return {
-		ok: false,
+		...gate,
 		error: `The monitor endpoint is a second host this run would contact, once per scrape: ${gate.error} (A loopback or private-network monitor URL needs no allowlist entry, except link-local and cloud-metadata addresses, which do.)`,
 	};
 }
@@ -521,10 +533,9 @@ export function checkLoadCaps(
 	host: McpHost
 ): GuardResult {
 	if (typeof params.targetRps === "number" && params.targetRps > config.maxRps) {
-		return {
-			ok: false,
-			error: `targetRps ${params.targetRps} exceeds the MCP cap of ${config.maxRps}. Lower it, or ask the user to ${settingRemedy("maxRps", host)}.`,
-		};
+		return policyRefusal(
+			`targetRps ${params.targetRps} exceeds the MCP cap of ${config.maxRps}. Lower it, or ask the user to ${settingRemedy("maxRps", host)}.`
+		);
 	}
 	// `startConcurrency` rides the same ceiling as `concurrency`: `ramp_up` seeds
 	// the run with it (`RampUpLoadStrategy`, `target_fn(0) = startConcurrency`),
@@ -535,10 +546,9 @@ export function checkLoadCaps(
 	for (const field of ["concurrency", "startConcurrency"] as const) {
 		const value = params[field];
 		if (typeof value === "number" && value > config.maxConcurrency) {
-			return {
-				ok: false,
-				error: `${field} ${value} exceeds the MCP cap of ${config.maxConcurrency} virtual users. Lower it, or ask the user to ${settingRemedy("maxConcurrency", host)}.`,
-			};
+			return policyRefusal(
+				`${field} ${value} exceeds the MCP cap of ${config.maxConcurrency} virtual users. Lower it, or ask the user to ${settingRemedy("maxConcurrency", host)}.`
+			);
 		}
 	}
 	// A duration the engine cannot read now fails the run rather than quietly
@@ -546,10 +556,9 @@ export function checkLoadCaps(
 	for (const field of ["duration", "rampUpDuration", "stepDuration"] as const) {
 		const value = params[field];
 		if (value !== undefined && parseDurationGrammar(value) === null) {
-			return {
-				ok: false,
-				error: `${field} ${JSON.stringify(value)} is not a duration. Use a non-negative number with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h".`,
-			};
+			return inputRefusal(
+				`${field} ${JSON.stringify(value)} is not a duration. Use a non-negative number with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h".`
+			);
 		}
 	}
 	// Past the grammar, `duration` still has a range rule `rampUpDuration` does
@@ -559,30 +568,26 @@ export function checkLoadCaps(
 	// stricter parse, and a null here can only mean zero.
 	const durationSeconds = parseDurationSeconds(params.duration);
 	if (params.duration !== undefined && durationSeconds === null) {
-		return {
-			ok: false,
-			error: `duration ${JSON.stringify(params.duration)} must be greater than zero - the engine refuses a run with no time to run in.`,
-		};
+		return inputRefusal(
+			`duration ${JSON.stringify(params.duration)} must be greater than zero - the engine refuses a run with no time to run in.`
+		);
 	}
 	if (durationSeconds !== null && durationSeconds > config.maxDurationSeconds) {
-		return {
-			ok: false,
-			error: `duration ${params.duration} (${durationSeconds}s) exceeds the MCP cap of ${config.maxDurationSeconds}s. Shorten it, or ask the user to ${settingRemedy("maxDurationSeconds", host)}.`,
-		};
+		return policyRefusal(
+			`duration ${params.duration} (${durationSeconds}s) exceeds the MCP cap of ${config.maxDurationSeconds}s. Shorten it, or ask the user to ${settingRemedy("maxDurationSeconds", host)}.`
+		);
 	}
 	if (engineLoadMode(params) === "iterations") {
 		const iterations = params.iterations ?? ENGINE_LOAD_DEFAULTS.iterations.iterations;
 		if (!Number.isFinite(iterations) || iterations <= 0) {
-			return {
-				ok: false,
-				error: `iterations ${JSON.stringify(params.iterations)} must be a positive whole number of requests.`,
-			};
+			return inputRefusal(
+				`iterations ${JSON.stringify(params.iterations)} must be a positive whole number of requests.`
+			);
 		}
 		if (iterations > config.maxIterations) {
-			return {
-				ok: false,
-				error: `iterations ${iterations} exceeds the MCP cap of ${config.maxIterations}. An iterations run stops on request count rather than time, so the duration cap cannot bound it - lower iterations, use a duration-bounded mode, or ask the user to ${settingRemedy("maxIterations", host)}.`,
-			};
+			return policyRefusal(
+				`iterations ${iterations} exceeds the MCP cap of ${config.maxIterations}. An iterations run stops on request count rather than time, so the duration cap cannot bound it - lower iterations, use a duration-bounded mode, or ask the user to ${settingRemedy("maxIterations", host)}.`
+			);
 		}
 	}
 	return OK;
@@ -611,8 +616,7 @@ export function checkSampleCap(
 		maxResponseSamples === undefined
 			? `maxResponseSamples ${samples} (the engine's default, as none was stated)`
 			: `maxResponseSamples ${samples}`;
-	return {
-		ok: false,
-		error: `${stated} exceeds the MCP cap of ${config.maxResponseSamples}. Each sample holds a full response body in memory. Lower it, or ask the user to ${settingRemedy("maxResponseSamples", host)}.`,
-	};
+	return policyRefusal(
+		`${stated} exceeds the MCP cap of ${config.maxResponseSamples}. Each sample holds a full response body in memory. Lower it, or ask the user to ${settingRemedy("maxResponseSamples", host)}.`
+	);
 }

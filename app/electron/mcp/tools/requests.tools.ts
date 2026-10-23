@@ -119,7 +119,8 @@ export const REQUEST_TOOLS: McpTool[] = [
 			const scriptEdits = readScriptEdits(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
 				return errorResult(
-					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.',
+					"input"
 				);
 			}
 			if (elementsGiven !== undefined) {
@@ -234,7 +235,8 @@ export const REQUEST_TOOLS: McpTool[] = [
 			}
 			if (mockResponseMode === "fixed" && !payload.mockExampleId) {
 				return errorResult(
-					'"mockResponseMode": "fixed" needs "mockExampleId" - pass the example it should serve.'
+					'"mockResponseMode": "fixed" needs "mockExampleId" - pass the example it should serve.',
+					"input"
 				);
 			}
 			if (mockResponseMode !== undefined) payload.mockResponseMode = mockResponseMode;
@@ -252,7 +254,8 @@ export const REQUEST_TOOLS: McpTool[] = [
 			const elementsGiven = elementsArg(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
 				return errorResult(
-					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.',
+					"input"
 				);
 			}
 			if (
@@ -261,7 +264,8 @@ export const REQUEST_TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript)."
+					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
+					"input"
 				);
 			}
 			// Scripts are `elements` now (issue #1514), and `PUT /requests/:id`
@@ -329,7 +333,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 					value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 			} catch (err) {
 				if (err instanceof EngineRequestError && err.status === 404) {
-					return errorResult(`No saved request with id "${requestId}".`);
+					return errorResult(`No saved request with id "${requestId}".`, "not_found");
 				}
 				return engineErrorResult(err, ctx);
 			}

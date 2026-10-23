@@ -18,7 +18,7 @@ import type { McpTool } from "./contract.js";
 import {
 	callEngine,
 	engineErrorResult,
-	errorResult,
+	guardErrorResult,
 	jsonResult,
 	requireStr,
 	withCaveat,
@@ -65,7 +65,7 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const url = requireStr(args, "url");
 			const gate = checkAllowlist(url, ctx.config, ctx.host);
-			if (!gate.ok) return errorResult(gate.error!);
+			if (!gate.ok) return guardErrorResult(gate);
 			let answer: unknown;
 			try {
 				answer = await ctx.client.diagnoseConnection(url, signal);

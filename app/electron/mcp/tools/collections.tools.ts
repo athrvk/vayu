@@ -96,7 +96,8 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			const scriptEdits = readScriptEdits(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
 				return errorResult(
-					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.',
+					"input"
 				);
 			}
 			if (elementsGiven !== undefined) {
@@ -170,7 +171,8 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			const elementsGiven = elementsArg(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
 				return errorResult(
-					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.',
+					"input"
 				);
 			}
 			if (
@@ -181,7 +183,8 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				removals.length === 0
 			) {
 				return errorResult(
-					'Pass at least one field to change ("name", "description", "variables", "removeVariables", "auth", "elements", "preRequestScript" or "postRequestScript").'
+					'Pass at least one field to change ("name", "description", "variables", "removeVariables", "auth", "elements", "preRequestScript" or "postRequestScript").',
+					"input"
 				);
 			}
 			let absentRemovals: string[] = [];
@@ -256,7 +259,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			try {
 				scope = await readCascadeScope(ctx.client, collectionId, signal);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			const cascade = describeCascade(scope);

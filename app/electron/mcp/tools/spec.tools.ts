@@ -94,7 +94,8 @@ export const SPEC_TOOLS: McpTool[] = [
 			const specIdArg = str(args, "specId");
 			if (collectionId && specIdArg) {
 				return errorResult(
-					'Pass either "collectionId" or "specId", not both - they would have to agree, and this tool cannot say which one you meant if they do not.'
+					'Pass either "collectionId" or "specId", not both - they would have to agree, and this tool cannot say which one you meant if they do not.',
+					"input"
 				);
 			}
 			const includeContent = args.includeContent === true;
@@ -116,7 +117,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					return engineErrorResult(err, ctx);
 				}
 				if (collection === null) {
-					return errorResult(`No collection with id "${collectionId}".`);
+					return errorResult(`No collection with id "${collectionId}".`, "not_found");
 				}
 				binding = readSpecBinding(collection);
 				// Unbound is an answer, not a failure: "which spec does this
@@ -132,7 +133,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			} else if (specIdArg) {
 				specId = specIdArg;
 			} else {
-				return errorResult('Pass either "collectionId" or "specId".');
+				return errorResult('Pass either "collectionId" or "specId".', "input");
 			}
 
 			try {
@@ -643,7 +644,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			if (collection === null) {
-				return errorResult(`No collection with id "${collectionId}".`);
+				return errorResult(`No collection with id "${collectionId}".`, "not_found");
 			}
 			const binding = readSpecBinding(collection);
 			// Read first so an unbound collection is reported as already unbound

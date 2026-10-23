@@ -94,7 +94,8 @@ export const COOKIE_TOOLS: McpTool[] = [
 			const stated = args.environmentId;
 			if (stated !== undefined && stated !== null && typeof stated !== "string") {
 				return errorResult(
-					'"environmentId" must be an environment ID, null for the no-environment jar, or omitted for every jar.'
+					'"environmentId" must be an environment ID, null for the no-environment jar, or omitted for every jar.',
+					"input"
 				);
 			}
 			const scope: string | null | undefined =

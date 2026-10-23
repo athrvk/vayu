@@ -92,7 +92,7 @@ export function readRequestOverrides(args: Record<string, unknown>): Record<stri
 	// Before anything is composed: an inline body is never a file, because
 	// nothing here can stand for the person who has to choose it.
 	if (str(args, "bodyType") === "binary" || args.file !== undefined) {
-		throw new ToolArgError(INLINE_FILE_REFUSAL);
+		throw new ToolArgError(INLINE_FILE_REFUSAL, "policy");
 	}
 	const bodyContent = str(args, "body");
 	if (bodyContent !== undefined) {
@@ -172,12 +172,15 @@ export async function composeViaEngine(
 	try {
 		const composed = await client.composeRequest(body, signal);
 		if (!composed || typeof composed !== "object" || Array.isArray(composed)) {
-			throw new ToolArgError("Engine returned an unusable composed request.");
+			throw new ToolArgError("Engine returned an unusable composed request.", "transient");
 		}
 		return composed as Record<string, unknown>;
 	} catch (err) {
 		if (err instanceof EngineRequestError && err.status === 404 && body.requestId) {
-			throw new ToolArgError(`No saved request with id "${String(body.requestId)}".`);
+			throw new ToolArgError(
+				`No saved request with id "${String(body.requestId)}".`,
+				"not_found"
+			);
 		}
 		throw err;
 	}
@@ -245,7 +248,8 @@ export async function runStreamingRequest(
 	const budgetMs = optionalPositiveInt(args, "streamBudgetMs", DEFAULT_STREAM_BUDGET_MS);
 	if (budgetMs > MAX_STREAM_BUDGET_MS) {
 		return errorResult(
-			`"streamBudgetMs" must be ${MAX_STREAM_BUDGET_MS} or less - a tool call cannot hold the session longer. Start the stream, then follow it with get_run and read it with get_run_report.`
+			`"streamBudgetMs" must be ${MAX_STREAM_BUDGET_MS} or less - a tool call cannot hold the session longer. Start the stream, then follow it with get_run and read it with get_run_report.`,
+			"input"
 		);
 	}
 
@@ -253,7 +257,10 @@ export async function runStreamingRequest(
 	try {
 		const accepted = await ctx.client.executeRequest(asMcpSend(payload, ctx), signal);
 		if (!accepted || typeof accepted !== "object" || Array.isArray(accepted)) {
-			return errorResult("Engine returned an unusable answer for a streaming request.");
+			return errorResult(
+				"Engine returned an unusable answer for a streaming request.",
+				"transient"
+			);
 		}
 		started = accepted as Record<string, unknown>;
 	} catch (err) {
@@ -395,7 +402,8 @@ export function refuseAgentScripts(
 	if (elements.some(carriesScript)) named.push("elements");
 	if (named.length === 0) return;
 	throw new ToolArgError(
-		`${named.map((key) => `"${key}"`).join(", ")} carries a script, and agents cannot send one while Reveal secrets to agents is off: a script reads every variable, secret ones included, and could write the value into its output or the request it sends. Nothing was sent. Leave the script out, or ask the user to ${settingRemedy("revealSecretsToAgents", ctx.host)}.`
+		`${named.map((key) => `"${key}"`).join(", ")} carries a script, and agents cannot send one while Reveal secrets to agents is off: a script reads every variable, secret ones included, and could write the value into its output or the request it sends. Nothing was sent. Leave the script out, or ask the user to ${settingRemedy("revealSecretsToAgents", ctx.host)}.`,
+		"policy"
 	);
 }
 
