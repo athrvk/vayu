@@ -129,6 +129,23 @@ ConfigBodyBoundTest,
     return std::string (info.param.name);
 });
 
+// The same one-spelling rule for `defaultTimeout`, read by `POST /execute`, a
+// scenario plan and a load run through one resolver (#2798). Mutation check:
+// misspell the key in `resolve_request_timeout_ms` and
+// `RequestTimeoutFollowsTheSetting` reds at the compiled-in 30000.
+TEST_F (ConfigRouteTest, RequestTimeoutDefaultsToTheCompiledInTimeout) {
+    EXPECT_EQ (vayu::http::routes::resolve_request_timeout_ms (json::object (), *db_),
+    vayu::core::constants::server::DEFAULT_TIMEOUT_MS);
+}
+
+TEST_F (ConfigRouteTest, RequestTimeoutFollowsTheSetting) {
+    const json update{ { "entries", { { "defaultTimeout", "4096" } } } };
+    auto [status, body] = vayu::http::routes::apply_config_update (*db_, update.dump ());
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    EXPECT_EQ (vayu::http::routes::resolve_request_timeout_ms (json::object (), *db_), 4096);
+}
+
 TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
     auto [status, body] = vayu::http::routes::apply_config_update (*db_, "not json");
     EXPECT_EQ (status, 400);
