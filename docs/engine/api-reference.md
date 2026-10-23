@@ -1378,7 +1378,7 @@ unchanged rather than the ones written before it.
 
 ### POST /workspace/backup
 
-Write one complete, compacted snapshot of the workspace database into
+Write one compacted snapshot of the workspace database into
 `backups/` beside it, then prune older snapshots to `maxBackupsRetained`
 (issue #987). Takes no body.
 

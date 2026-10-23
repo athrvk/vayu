@@ -60,6 +60,18 @@ function backUp() {
 }
 
 describe("WorkspaceBackupCard", () => {
+	it("says the copy is the database and that tabs and file locations are not in it", () => {
+		render(<WorkspaceBackupCard />);
+
+		// The card used to read as "a complete copy"; the Spec and Data tabs'
+		// bound file locations and the open tabs are app-side state it never held.
+		const description = screen.getByText(/a compacted copy of the database/i);
+		expect(description).toHaveTextContent(
+			/tabs, bound spec and data file locations, saved load-test values and MCP settings live in the app and are not in it/i
+		);
+		expect(description).not.toHaveTextContent(/complete|workspace/i);
+	});
+
 	it("shows the path, size and what retention removed", async () => {
 		backupWorkspace.mockResolvedValue(SNAPSHOT);
 		render(<WorkspaceBackupCard />);
