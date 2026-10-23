@@ -285,6 +285,7 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.latency                 = mc.calculate_percentiles ();
     inputs.latency_avg_ms          = mc.average_latency ();
     inputs.phases                  = mc.phase_percentiles ();
+    inputs.phase_means             = mc.phase_means ();
     inputs.stream                  = mc.stream_totals ();
     inputs.retention               = read_retention (mc);
     inputs.slow_total              = mc.slow_total ();
@@ -1686,6 +1687,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.latency        = totals.latency;
     inputs.latency_avg_ms = totals.latency_avg_ms;
     inputs.phases         = context->metrics_collector->phase_percentiles ();
+    inputs.phase_means    = context->metrics_collector->phase_means ();
     inputs.stream         = context->metrics_collector->stream_totals ();
     inputs.custom_metrics = context->metrics_collector->custom_metric_summaries ();
     inputs.http_version_downgraded =
@@ -2390,6 +2392,26 @@ nlohmann::json mean_or_null (const std::optional<double>& mean) {
     return mean ? nlohmann::json (*mean) : nlohmann::json (nullptr);
 }
 
+/// The summary's `phases`, keyed by wire name so a reader does not have to
+/// know the enum's order. Each phase's `mean` is what the report's `avg*Ms`
+/// read (#2782); a summary without it is an older run's, whose averages stay
+/// the trace sample's.
+nlohmann::json build_phases_summary_payload (
+const std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>& measured,
+const std::optional<std::array<double, TIMING_PHASE_COUNT>>& means) {
+    nlohmann::json phases = nlohmann::json::object ();
+    for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
+        const auto& p        = measured.at (i);
+        nlohmann::json phase = { { "p50", p.p50 }, { "p95", p.p95 },
+            { "p99", p.p99 }, { "max", p.max }, { "count", p.count } };
+        if (means) {
+            phase["mean"] = means->at (i);
+        }
+        phases[TIMING_PHASE_KEYS.at (i)] = std::move (phase);
+    }
+    return phases;
+}
+
 } // namespace
 
 nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
@@ -2520,19 +2542,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (inputs.custom_metrics.has_value ()) {
         summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
     }
-    // Per-phase latency distributions, keyed by wire name so a reader does not
-    // have to know the enum's order. Omitted when the run recorded none - a
+    // Per-phase latency distributions. Omitted when the run recorded none - a
     // reader that finds no `phases` key is looking at a run whose phase data
     // was never collected, not at a target with a free TLS handshake.
     if (inputs.phases.has_value ()) {
-        nlohmann::json phases      = nlohmann::json::object ();
-        const auto& phase_measured = *inputs.phases;
-        for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-            const auto& p = phase_measured.at (i);
-            phases[TIMING_PHASE_KEYS.at (i)] = { { "p50", p.p50 }, { "p95", p.p95 },
-                { "p99", p.p99 }, { "max", p.max }, { "count", p.count } };
-        }
-        summary["phases"] = phases;
+        summary["phases"] =
+        build_phases_summary_payload (*inputs.phases, inputs.phase_means);
     }
     // What a capacity run's search found, level by level. Omitted for every
     // other mode - a fixed-target run measured a point, not a curve, and has
@@ -2808,8 +2823,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // A tick that `closes_second` is a gate: it takes the second's merged
     // percentiles, puts them on its own frame and returns them, with the
     // trailing window the frame carries, for the stored row, so the frame and
-    // the row of one tick cannot disagree. Every other tick returns nullopt
-    // and leaves the second open.
+    // the row of one tick cannot disagree. Only a gate frame carries the
+    // run-so-far distributions (#2782), so the 100 ms frames stay their size.
+    // Every other tick returns nullopt and leaves the second open.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
                           int64_t now_wall_ms, int64_t now_steady_ms,
                           bool closes_second) -> std::optional<GateReadings> {
@@ -2845,6 +2861,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         if (closes_second) {
             gate = GateReadings{ mc.take_second_percentiles (), rates };
             put_interval_percentiles (stats, "second", gate->second);
+            mc.put_gate_distributions (stats);
         }
 
         auto now_steady = std::chrono::steady_clock::now ();

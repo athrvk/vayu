@@ -24,6 +24,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 	{
 		name: "start_mock_issuer",
 		category: "execute",
+		retry: { check: "list_mock_issuers", noun: "mock issuer" },
 		// #502's Services drawer reads the issuer list and #756 added the
 		// `service` entity; #757 is where the issuer tools take it, so an
 		// MCP-started issuer appears without waiting out the drawer's poll.

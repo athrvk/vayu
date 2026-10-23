@@ -41,7 +41,7 @@ constexpr int64_t START_MS = 1791187800000;
 
 json phase () {
     return json{ { "p50", 0.1 }, { "p95", 0.2 }, { "p99", 0.3 }, { "max", 1.0 },
-        { "count", 100 } };
+        { "count", 100 }, { "mean", 0.15 } };
 }
 
 /// A stored summary with every section the report can carry.

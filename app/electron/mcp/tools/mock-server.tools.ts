@@ -28,6 +28,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 	{
 		name: "start_mock_server",
 		category: "execute",
+		retry: { check: "list_mock_servers", noun: "mock server" },
 		invalidates: ["service"],
 		description:
 			"Start a local mock server that answers a collection's saved examples, and return its id and base URL. Use it to stand up the API a client under test expects without that API existing: point the client at the returned url and every request whose method and path match a saved request in the collection gets that request's example back - status, headers and body. A route whose request has no saved example answers 501, and a path that matches nothing answers 404, so the returned routeCount and routesWithoutExample are what say whether the mock is usable; get_mock_routes lists them. latencyMs and errorRatePct are how a client's timeout and retry handling get exercised - errorRatePct injects synthesized 500s at that rate. It needs no allowlist entry: the engine binds every mock to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. Which browser pages may read its answers is separate: by default any page can, without credentials, and allowedOrigins narrows that to the listed origins, with credentials. Stop it with stop_mock_server when you are done; a mock keeps its port until then.",
@@ -134,6 +135,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 	{
 		name: "get_mock_activity",
 		category: "read",
+		retry: "safe",
 		invalidates: [],
 		description: (config) =>
 			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty." +

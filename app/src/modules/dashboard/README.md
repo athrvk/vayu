@@ -45,9 +45,8 @@ consumes it.
   name (#2392), so `tooltips.tsx` is where wording is decided, and editing an
   entry there updates every card that shows it.
 - **No chart geometry constants in component files.** `utils/chartGeometry.ts`
-  owns `TIME_SERIES_DIMS` and `HDR_DIMS`. The full-width time-series charts must
-  stay dimensionally identical or the dashboard rows stop lining up, and the HDR
-  plot and the live view's skeleton of it hold one height.
+  owns `TIME_SERIES_DIMS`. The full-width time-series charts must
+  stay dimensionally identical or the dashboard rows stop lining up.
 - **The mode mapping lives in exactly one place.** `hooks/useMode.ts` is the only
   interpreter of the freeform engine `mode` string. Mode-adaptive components take
   the discriminator from it instead of re-parsing the raw value, and the mode
@@ -136,6 +135,30 @@ consumes it.
   `buildPercentileChartData` and `rebucket(..., "max")` use, keeps a bucket
   null only when every second in it was empty. A row an older engine stored
   holds `0` for such a second and still reads as `0`: nothing rewrites it.
+- **Row 3 reads the latest gate frame from `historicalMetrics`, never the newest
+  tick** (#2782). The two cards used to be placeholders until the report
+  arrived (#2261); they now draw the run-so-far data. The run-so-far latency
+  distribution (`cumulative_latency`)
+  and the per-phase means and percentiles (`cumulative_phases`) ride the gate
+  frame alone,
+  about one frame in ten, so the tick in `metrics` almost never has them and a
+  card reading it would flicker to empty nine renders in ten.
+  `utils/liveDistributions.ts` scans the buffer backwards for the latest frame
+  carrying the key (`!== undefined`: a `null` is a gate frame with nothing
+  completed yet) and adapts it to what History's cards take, so the live view
+  draws the same `HdrPercentileChart`, `TimingWaterfall` and
+  `PhasePercentiles` (the phases rebuilt in the report's `timingBreakdown`
+  shape, `maxMs` as `max`), and `LiveDistributionRow` memoises on the frame's
+  identity. A gate frame without
+  `cumulative_phases` is a run with phase histograms off, and the timing card
+  says so; before the first completion each card holds one "Waiting for the
+  first response" line, sized to the HDR plot so it does not pop (the timing
+  card then grows by the percentile table; the grid stretches the HDR card to
+  match). The footer's mean is that
+  frame's `avg_latency_ms` (the distribution carries none), so the footer and
+  the curve are one instant; the "N completions so far" caption under it is
+  the distribution's own `count`. The hero card keeps `cumulativePercentiles`, which
+  is on every frame.
 - **The dashed vertical line marks where p99 first crossed the SLO, and the
   horizontal one is the SLO itself** (#2698). The vertical line is labelled
   `p99 > SLO <threshold>`, never the observed p99, which is in its hover with the

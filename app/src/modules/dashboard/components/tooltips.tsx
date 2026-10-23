@@ -116,7 +116,7 @@ export const TOOLTIPS = {
 	latencyDistribution:
 		"HDR percentile plot. X is percentile (log-scaled so the tail dominates); Y is latency. The curve's steepness from p95 → p99 is the tail story. Drawn through the min, p50, p75, p90, p95, p99, p99.9 and max points of the run's HdrHistogram, not a curve fitted to every sample.",
 	avgRequestTiming:
-		"Average breakdown of where each HTTP request spent time, in flight order. Computed across the timing-sampled subset of requests (enable save_timing_breakdown to populate). Helps isolate whether latency lives in DNS, network setup, or the server.",
+		"Average breakdown of where each HTTP request spent time, in flight order. Averaged over every completion so far, which needs the phaseHistograms setting of Vayu's engine (on by default). Helps isolate whether latency lives in DNS, network setup, or the server.",
 	phasePercentiles:
 		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 is one a minority of requests paid: TLS or Connect behaving that way is connection churn under load, which an average hides. Requires the phaseHistograms setting of Vayu's engine.",
 	streamEvents:

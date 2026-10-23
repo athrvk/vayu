@@ -447,15 +447,21 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   calls. One is the open second, which `take_second_percentiles()` reads and resets at the 1 Hz
   gate for the stored row and the gate frame's `second*` keys (issue #2385): percentiles cannot
   be merged after the fact, so a row built from the last 100 ms window held a tenth of its
-  second. Another is the run so far, behind the live `cumulativeP*Ms`; reading the cumulative
+  second. Another is the run so far, behind the live `cumulativeP*Ms` and the gate frame's
+  `cumulativeLatency` (issue #2782); reading the cumulative
   histogram itself mid-run would be a plain read racing the workers' atomic writes. The third is
   the capacity level (issue #2388), restarted by `adopt_level_epoch()` when the capacity search
   asks and read by `level_latency()` for the published tick; see the capacity feedback path below.
 - **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
-  fed by every successful completion and read once after the drain, behind the report's
-  `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
-  averages beside them are computed over the ~1% of completions a trace is stored for, and
-  escaping that biased sample is the whole point. Off - `phaseHistograms`, or a run's own
+  fed by every successful completion and read after the drain, behind the report's
+  `timingBreakdown.phases` and, through each phase's mean, its `avg*Ms` (issue #2782).
+  Deliberately **not** gated on the trace-retention decision: a trace is stored for about 1% of
+  completions, and escaping that biased sample is the whole point. The gate frame also reads the
+  bank once a second for its `cumulativePhases`, while the workers still write. It copies each
+  phase's counts with atomic loads into one reader-owned histogram and runs hdr's plain readers
+  on the copy, recounting its total from what was copied, so a phase's figures and its count are
+  one reading; hdr's readers on the live bank would be plain reads racing the workers' atomic
+  adds. Off - `phaseHistograms`, or a run's own
   `phase_histograms` - leaves the bank unallocated, so the cost on the completion path is one null
   check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
