@@ -10,8 +10,8 @@ import { buildRendererCsp, inlineScriptBodies } from "../electron/renderer-csp";
 
 /**
  * Stamp the renderer's Content-Security-Policy into the built `index.html` as a
- * `<meta>` (#1780). A packaged app loads the document from `file://`, where no
- * response header exists to carry it.
+ * `<meta>` (#1780), so the policy ships inside the document whose inline script
+ * it hashes; `electron/renderer-csp.ts` says why it is not a header.
  *
  * Build only: the dev server injects its own inline React-refresh preamble,
  * which a hash-only policy would block. The policy hashes whatever inline

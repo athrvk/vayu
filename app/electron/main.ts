@@ -18,15 +18,17 @@ import {
 	nativeTheme,
 	systemPreferences,
 	Menu,
+	net,
 	Notification,
 	powerMonitor,
 	powerSaveBlocker,
+	protocol,
 	session,
 	shell,
 } from "electron";
 import os from "os";
 import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 import {
 	EngineSidecar,
 	EngineNotReadyError,
@@ -67,6 +69,7 @@ import {
 	registerRunningServicesIpc,
 } from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
+import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
 import { installEngineOriginBridge } from "./engine-origin.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -141,6 +144,8 @@ import {
 	SCRIPTING_DOCS_URL,
 	ISSUES_URL,
 	DEV_SERVER_URL,
+	APP_SCHEME,
+	APP_ENTRY_URL,
 	WINDOW_DEFAULT_WIDTH,
 	WINDOW_DEFAULT_HEIGHT,
 	WINDOW_MIN_WIDTH,
@@ -201,6 +206,11 @@ app.setName(APP_NAME);
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// The packaged renderer's origin (#2380). Electron accepts a privileged scheme
+// only before `ready`; the handler that answers it is installed once ready,
+// ahead of the window. See app-protocol.ts.
+protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: APP_SCHEME_PRIVILEGES }]);
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
@@ -603,20 +613,16 @@ function createWindow() {
 
 	// The preload re-runs on whatever this window navigates to, so a navigation
 	// off the app hands `window.electronAPI` to that origin. Installed before the
-	// load, so no navigation can land ahead of the guard. See
-	// window-navigation.ts.
-	const rendererEntry = path.join(__dirname, "../dist/index.html");
-	installWindowNavigationGuard(
-		mainWindow.webContents,
-		isDev ? DEV_SERVER_URL : pathToFileURL(rendererEntry).toString()
-	);
-
-	if (isDev) {
-		mainWindow.loadURL(DEV_SERVER_URL);
-		// mainWindow.webContents.openDevTools();
-	} else {
-		mainWindow.loadFile(rendererEntry);
-	}
+	// load, so no navigation can land ahead of the guard, and handed the URL the
+	// window loads, so the two cannot drift. See window-navigation.ts.
+	//
+	// Packaged, that is the app scheme rather than `file:` (#2380). localStorage
+	// is per origin, so what a `file:` build persisted is not visible to it until
+	// the one-time hand-off from that origin lands here, ahead of this load
+	// (#2380, slice 2).
+	const rendererUrl = isDev ? DEV_SERVER_URL : APP_ENTRY_URL;
+	installWindowNavigationGuard(mainWindow.webContents, rendererUrl);
+	mainWindow.loadURL(rendererUrl);
 
 	mainWindow.on("page-title-updated", (event) => {
 		event.preventDefault();
@@ -1745,6 +1751,13 @@ app.whenReady().then(async () => {
 	// on the main window's session before that window exists. See engine-origin.ts.
 	installEngineOriginBridge(session.defaultSession);
 	denyDevicePermissions(session.defaultSession);
+
+	// Answers the app scheme the window loads from, so it precedes the window.
+	// Installed in development too, where nothing loads it.
+	protocol.handle(
+		APP_SCHEME,
+		createAppProtocolHandler(path.join(__dirname, "../dist"), (fileUrl) => net.fetch(fileUrl))
+	);
 
 	// Populate the native About panel (used by Help → About Vayu on
 	// Windows/Linux, and the macOS app menu's About item).

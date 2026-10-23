@@ -100,7 +100,7 @@ The env switcher's menu is controlled by `env-switcher-store` (issue #2115) rath
 
 `NavigationControls` puts Back and Forward at the leading edge, each a `TooltipIconButton` with its own `no-drag`, disabled when its half of `navHistory` is empty (`canGoBack` / `canGoForward`), and a tooltip naming its chord (`GO_BACK_CHORD` / `GO_FORWARD_CHORD`).
 
-The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load - it only appears to work in dev, where Vite serves it over HTTP.
+The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`: the import is what puts the file through the build and into `dist/`. The packaged document is served from `vayu-app://app/` (#2380), so a root-absolute path now resolves against `dist/` rather than the filesystem root, but it still names a file the build never emits.
 
 ### `CommandSearchBar` (`components/layout/CommandSearchBar.tsx`)
 

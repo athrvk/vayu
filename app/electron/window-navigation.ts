@@ -49,13 +49,14 @@ function parseUrl(value: string): URL | null {
  * Whether a navigation target is the app itself rather than somewhere else.
  *
  * The two builds are the app in two different forms, and the identity that
- * distinguishes them is not the same one:
+ * distinguishes them is not spelled the same way:
  *
- * - **Production is a `file:` load, where an origin cannot be the test.** Every
- *   `file:` URL has the opaque origin `"null"`, so comparing origins would
- *   accept `file:///etc/passwd` as the app's own. The document is the identity
- *   there, which also costs nothing the app wants: it never navigates between
- *   local files.
+ * - **Production is the app scheme, `vayu-app://app/` (#2380), where `origin`
+ *   cannot be the test.** Node gives a URL on a scheme it does not know the
+ *   opaque origin `"null"`, the same one every `file:` URL has, so comparing
+ *   origins would accept `file:///etc/passwd` as the app's own. The scheme and
+ *   the host are compared instead, which is what Chromium's origin for the
+ *   registered scheme is made of.
  * - **Development is the Vite dev server, where the origin is exactly the
  *   test.** A full reload (an HMR update the client cannot apply in place) is
  *   page-initiated, so it arrives here as a real navigation, and it may land on
@@ -69,17 +70,19 @@ export function isAppOwnUrl(target: string, appUrl: string): boolean {
 	const to = parseUrl(target);
 	const app = parseUrl(appUrl);
 	if (!to || !app) return false;
-	if (app.protocol === "file:") {
-		return to.protocol === "file:" && to.pathname === app.pathname;
+	if (app.protocol === "http:" || app.protocol === "https:") {
+		return to.origin === app.origin;
 	}
-	return to.origin === app.origin;
+	// A host is required: without one (a `file:` URL) every local document would
+	// share the app's identity.
+	return app.host !== "" && to.protocol === app.protocol && to.host === app.host;
 }
 
 /**
  * Refuse every navigation that is not the app itself, and deny `window.open`.
  *
  * `appUrl` is the URL the window is loading - the dev server in development, the
- * bundled entry as a `file:` URL in production. It is passed in rather than
+ * app scheme's entry (`APP_ENTRY_URL`) in production. It is passed in rather than
  * derived here so the caller cannot drift from what it actually loads.
  *
  * The deny is unconditional because nothing in this app calls `window.open`: an

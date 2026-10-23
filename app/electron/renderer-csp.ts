@@ -11,9 +11,15 @@
  * is text rather than code with the renderer's privileges (#1780).
  *
  * Delivered one way: `vite-plugins/csp-meta.ts` stamps it into the built
- * `index.html` as a `<meta>`. A packaged `file://` load has no response to carry
- * a header, and `engine-origin.ts` owns the session's single
+ * `index.html` as a `<meta>`. The policy hashes that document's inline script,
+ * a fact of the build, so it travels inside the document it describes rather
+ * than in a header the app scheme's handler (`app-protocol.ts`) would have to
+ * re-derive; and `engine-origin.ts` owns the session's single
  * `onHeadersReceived` listener (Electron keeps one per event per session).
+ *
+ * The packaged document is `vayu-app://app/index.html` (#2380), so every
+ * `'self'` below names that one origin. Under the old `file:` load Chromium
+ * matched `'self'` by scheme, which admitted any local file.
  *
  * Pure on purpose: the Vite config imports it, and it must not pull in Electron.
  */
@@ -54,5 +60,8 @@ export function buildRendererCsp(inlineScripts: readonly string[]): string {
 		"frame-src 'self'",
 		"object-src 'none'",
 		"base-uri 'none'",
+		// `default-src` does not cover form submission; the navigation guard
+		// refuses the result too, and this is the layer in front of it.
+		"form-action 'none'",
 	].join("; ");
 }

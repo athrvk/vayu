@@ -77,6 +77,7 @@ describe("the filter is the engine and nothing else", () => {
 		`https://evil.example/?next=${ENGINE}/health`,
 		"http://localhost:5173/src/main.tsx",
 		"file:///opt/Vayu/resources/app.asar/dist/index.html",
+		"vayu-app://app/index.html",
 	];
 
 	it("is one pattern per candidate port, the renderer's own spelling of each", () => {

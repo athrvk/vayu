@@ -46,16 +46,18 @@ into a collection you mock.
 
 The UI window runs with `nodeIntegration` off, `contextIsolation` and the
 sandbox on, and a preload that exposes named methods only. Behind that: a
-Content-Security-Policy on the app document (no `unsafe-eval`; the renderer may
-connect only to itself and the engine on `127.0.0.1:9876`), all device
-permissions denied for the app and for OAuth sign-in windows, a chart tooltip
-built from text rather than markup, an HTML response preview in a `sandbox=""`
-frame that runs no script and loads nothing from the network, and Electron
-fuses that disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` on
-packaged builds. The channels that read a file by a path the window names read
-only files you picked, dropped or opened through the app, and the one that
-reports a file's size answers only for those or for files under a folder you
-allowed.
+Content-Security-Policy on the app document (no `unsafe-eval`, no form
+submission; the renderer may connect only to itself and the engine on
+`127.0.0.1:9876`), all device permissions denied for the app and for OAuth
+sign-in windows, a chart tooltip built from text rather than markup, an HTML
+response preview in a `sandbox=""` frame that runs no script and loads nothing
+from the network, and Electron fuses that disable `ELECTRON_RUN_AS_NODE`,
+`NODE_OPTIONS` and `--inspect` on packaged builds. The app document is served
+from an origin of its own, `vayu-app://app`, rather than from a local file, so
+the policy's `self` means that origin and no file on disk. The channels that
+read a file by a path the window names read only files you picked, dropped or
+opened through the app, and the one that reports a file's size answers only for
+those or for files under a folder you allowed.
 
 ## Data at rest
 

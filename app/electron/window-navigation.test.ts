@@ -20,6 +20,10 @@
  *
  * These drive a fake `webContents` rather than Electron, which is the whole
  * reason the module lives outside main.ts.
+ *
+ * Mutation check: compare `origin` instead of scheme and host in the
+ * production branch of `isAppOwnUrl` and the `file:///etc/passwd` refusal goes
+ * red - both origins are the opaque "null".
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -31,6 +35,7 @@ import {
 	isAppOwnUrl,
 	type NavigableContents,
 } from "./window-navigation.js";
+import { APP_ENTRY_URL } from "./constants.js";
 
 // main.ts creates windows and starts the engine at import time, so the wiring
 // itself can only be read. Everything above this line would still pass with the
@@ -38,7 +43,7 @@ import {
 const mainSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "main.ts"), "utf8");
 
 const DEV_URL = "http://localhost:5173";
-const PROD_URL = "file:///opt/Vayu/resources/app.asar/dist/index.html";
+const PROD_URL = APP_ENTRY_URL;
 
 /** A WebContents that never existed: records the listener so a test can fire it. */
 function fakeContents() {
@@ -75,13 +80,18 @@ function allows(appUrl: string, url: string): boolean {
 	return !w.attempt(url);
 }
 
-describe("a production window goes nowhere but its own document", () => {
+describe("a production window goes nowhere but the app scheme's own host", () => {
+	it("loads the app scheme's entry document", () => {
+		expect(PROD_URL).toBe("vayu-app://app/index.html");
+	});
+
 	it("refuses an external https target", () => {
 		expect(allows(PROD_URL, "https://evil.example.com/")).toBe(false);
 	});
 
 	it("allows the entry document it was loaded with, so an in-page reload works", () => {
 		expect(allows(PROD_URL, PROD_URL)).toBe(true);
+		expect(isAppOwnUrl("vayu-app://app/index.html#x", PROD_URL)).toBe(true);
 	});
 
 	it("allows a hash route on that document", () => {
@@ -89,11 +99,22 @@ describe("a production window goes nowhere but its own document", () => {
 		expect(allows(PROD_URL, `${PROD_URL}#/collections/1`)).toBe(true);
 	});
 
-	it("refuses another local file, which sharing a scheme is not permission for", () => {
-		// The reason the production branch cannot compare origins: every file:
-		// URL has the opaque origin "null", so an origin test passes this.
+	it("refuses a local file, which a shared opaque origin is not permission for", () => {
+		// The reason the production branch cannot compare origins: Node gives a
+		// custom scheme and every file: URL the same opaque origin "null", so an
+		// origin test passes this.
 		expect(new URL(PROD_URL).origin).toBe(new URL("file:///etc/passwd").origin);
+		expect(isAppOwnUrl("file:///etc/passwd", PROD_URL)).toBe(false);
 		expect(allows(PROD_URL, "file:///etc/passwd")).toBe(false);
+	});
+
+	it("refuses another host on the app scheme", () => {
+		expect(isAppOwnUrl("vayu-app://evil/index.html", PROD_URL)).toBe(false);
+		expect(isAppOwnUrl("vayu-app:///index.html", PROD_URL)).toBe(false);
+	});
+
+	it("refuses the app's host on another scheme", () => {
+		expect(isAppOwnUrl("http://app/", PROD_URL)).toBe(false);
 	});
 });
 
@@ -127,6 +148,12 @@ describe("the predicate itself", () => {
 	it("refuses when the app's own URL is unparseable, rather than allowing everything", () => {
 		expect(isAppOwnUrl("https://evil.example.com/", "")).toBe(false);
 	});
+
+	it("refuses everything against a host-less app URL, where every file would match", () => {
+		const fileApp = "file:///opt/Vayu/resources/app.asar/dist/index.html";
+		expect(isAppOwnUrl(fileApp, fileApp)).toBe(false);
+		expect(isAppOwnUrl("file:///etc/passwd", fileApp)).toBe(false);
+	});
 });
 
 describe("window.open", () => {
@@ -148,22 +175,23 @@ describe("main.ts wiring", () => {
 	});
 
 	it("installs the guard on the main window", () => {
-		expect(mainSource).toContain("installWindowNavigationGuard(\n\t\tmainWindow.webContents,");
+		expect(mainSource).toContain("installWindowNavigationGuard(mainWindow.webContents,");
 	});
 
 	it("installs it before the load, so no navigation lands ahead of it", () => {
-		const install = mainSource.indexOf("installWindowNavigationGuard(\n");
-		const load = mainSource.indexOf("mainWindow.loadURL(DEV_SERVER_URL)");
+		const install = mainSource.indexOf("installWindowNavigationGuard(mainWindow.webContents,");
+		const load = mainSource.indexOf("mainWindow.loadURL(rendererUrl);");
 		expect(install).toBeGreaterThan(-1);
 		expect(load).toBeGreaterThan(install);
 	});
 
 	it("passes the URL it actually loads, in both builds", () => {
-		// The predicate is only as good as the URL it is compared against, and a
-		// second spelling of the entry path here would drift from `loadFile`'s.
+		// The predicate is only as good as the URL it is compared against, so the
+		// guard and the load read one variable rather than two spellings of it.
+		expect(mainSource).toContain("const rendererUrl = isDev ? DEV_SERVER_URL : APP_ENTRY_URL;");
 		expect(mainSource).toContain(
-			"isDev ? DEV_SERVER_URL : pathToFileURL(rendererEntry).toString()"
+			"installWindowNavigationGuard(mainWindow.webContents, rendererUrl);"
 		);
-		expect(mainSource).toContain("mainWindow.loadFile(rendererEntry)");
+		expect(mainSource).not.toContain("loadFile(");
 	});
 });

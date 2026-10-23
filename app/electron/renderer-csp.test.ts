@@ -62,6 +62,36 @@ describe("buildRendererCsp", () => {
 		expect(directive("object-src")).toEqual(["'none'"]);
 		expect(directive("base-uri")).toEqual(["'none'"]);
 	});
+
+	it("submits no form anywhere, which default-src does not cover", () => {
+		// Mutation check: drop `form-action 'none'` from buildRendererCsp and
+		// this reddens.
+		expect(directive("form-action")).toEqual(["'none'"]);
+	});
+
+	it("leaves every directive that names 'self' as it was", () => {
+		// The app scheme (#2380) changed what 'self' means, one origin instead of
+		// any file: URL, and nothing about which directives grant it.
+		const naming = policy
+			.split("; ")
+			.filter((d) => d.split(" ").includes("'self'"))
+			.map((d) => d.split(" ")[0]);
+		expect(naming).toEqual([
+			"default-src",
+			"script-src",
+			"style-src",
+			"connect-src",
+			"img-src",
+			"font-src",
+			"worker-src",
+			"frame-src",
+		]);
+		expect(directive("default-src")).toEqual(["'self'"]);
+		expect(directive("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
+		expect(directive("img-src")).toEqual(["'self'", "data:", "blob:"]);
+		expect(directive("font-src")).toEqual(["'self'", "data:"]);
+		expect(directive("frame-src")).toEqual(["'self'"]);
+	});
 });
 
 describe("cspMeta", () => {

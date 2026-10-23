@@ -27,4 +27,10 @@ describe("electron-builder electronFuses (#1780)", () => {
 	it("keeps cookie encryption off while the mock keychain is set", () => {
 		expect(config.electronFuses?.enableCookieEncryption).toBe(false);
 	});
+
+	it("gives file: pages no privileges beyond a browser's, since the app loads none (#2380)", () => {
+		// The renderer is served from the app scheme (app-protocol.ts); the key is
+		// electron-builder 26's name for Electron's GrantFileProtocolExtraPrivileges.
+		expect(config.electronFuses?.grantFileProtocolExtraPrivileges).toBe(false);
+	});
 });

@@ -31,7 +31,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler, resolveAppFile } from "./app-protocol.js";
 import { APP_ENTRY_URL, APP_HOST, APP_SCHEME } from "./constants.js";
 
@@ -189,4 +189,42 @@ describe("the scheme's registration", () => {
 		expect(APP_SCHEME).not.toBe("vayu");
 		expect(APP_ENTRY_URL).toBe(`${APP_SCHEME}://${APP_HOST}/index.html`);
 	});
+});
+
+describe("main.ts wiring", () => {
+	// main.ts creates windows and starts the engine at import time, so the
+	// wiring can only be read.
+	const main = readFileSync(
+		path.join(path.dirname(fileURLToPath(import.meta.url)), "main.ts"),
+		"utf8"
+	);
+	const readyAt = main.indexOf("app.whenReady().then(");
+
+	it("read the real main.ts", () => {
+		expect(main.length).toBeGreaterThan(1000);
+		expect(readyAt).toBeGreaterThan(-1);
+	});
+
+	it("registers the scheme as privileged at module scope, before the app is ready", () => {
+		// Electron accepts the registration only before `ready`. Column 0 is
+		// module scope, not a function body that might run later.
+		const register = main.match(
+			/\nprotocol\.registerSchemesAsPrivileged\(\[\s*\{ scheme: APP_SCHEME, privileges: APP_SCHEME_PRIVILEGES \},?\s*\]\);/
+		);
+		expect(register?.index).toBeGreaterThan(-1);
+		expect(register?.index).toBeLessThan(readyAt);
+	});
+
+	it("handles the scheme once ready, before the window that loads from it exists", () => {
+		const handleAt = main.search(
+			/\n\tprotocol\.handle\(\s*APP_SCHEME,\s*createAppProtocolHandler\(/
+		);
+		const windowAt = main.indexOf("\n\tcreateWindow();");
+		expect(handleAt).toBeGreaterThan(readyAt);
+		expect(handleAt).toBeLessThan(windowAt);
+		expect(main).toContain("(fileUrl) => net.fetch(fileUrl)");
+	});
+
+	// What the window loads is asserted beside the navigation guard that is
+	// handed the same URL, in window-navigation.test.ts.
 });

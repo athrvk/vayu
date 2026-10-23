@@ -671,14 +671,18 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 - **Second layer behind it (#1780)**: the built `index.html` carries a
   Content-Security-Policy `<meta>` (stamped by `vite-plugins/csp-meta.ts` from
   `electron/renderer-csp.ts`, hashing the one inline pre-paint script, no
-  `unsafe-eval`, `connect-src` limited to the app and the engine origin);
-  a packaged `file://` load has no response header to carry it, and the dev
-  server is exempt because its React-refresh preamble is inline. Device
+  `unsafe-eval`, `connect-src` limited to the app and the engine origin,
+  `form-action 'none'`), a `<meta>` so it ships inside the document whose
+  script it hashes; the dev server is exempt because its React-refresh
+  preamble is inline. The packaged document is served from the privileged
+  `vayu-app://app/` scheme (`electron/app-protocol.ts`, #2380), not `file:`,
+  so `'self'` names that one origin rather than every local file. Device
   permissions (camera, microphone, geolocation, notifications) are denied on
   the default session and on every OAuth partition (`electron/permissions.ts`).
   `update:openReleasePage` takes no argument and opens only the release page
   the updater offered. Electron fuses turn off `ELECTRON_RUN_AS_NODE`,
-  `NODE_OPTIONS`, `--inspect` and non-ASAR loads in a packaged build, and
+  `NODE_OPTIONS`, `--inspect`, non-ASAR loads and the extra privileges
+  Electron grants a `file:` page in a packaged build, and
   `isDevelopmentBuild()` (`electron/dev-mode.ts`) requires `!app.isPackaged`.
 - **The updater installs only a verified installer (#2372)**: on the silent
   platforms (Windows, Linux AppImage) `electron/updater.ts` holds the
