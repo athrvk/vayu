@@ -1610,6 +1610,7 @@ stores them on the row moves each binding onto the collection it named, if the
 engine still lists that collection and it holds no binding yet, and removes the
 key once every move has landed. A binding of a collection that was deleted or
 in the trash at that launch is not moved.
+
 ### Logging
 
 `vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`
