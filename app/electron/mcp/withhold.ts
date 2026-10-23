@@ -741,23 +741,11 @@ export function withholdReorderRows(answer: unknown): unknown {
 
 // --- Cookies ------------------------------------------------------------------
 
-function withholdCookie(cookie: unknown): unknown {
+/** One cookie, as a paged `GET /cookies` row carries it, with its value withheld. */
+export function withholdCookieValue(cookie: unknown): unknown {
 	if (!isRecord(cookie) || !("value" in cookie)) return cookie;
 	const { value, ...rest } = cookie;
 	return { ...rest, ...withValue(value, true) };
-}
-
-/** `GET /cookies` (`{scopes: [{environmentId, cookies}]}`) with every cookie value withheld. */
-export function withholdCookieValues(answer: unknown): unknown {
-	if (!isRecord(answer) || !Array.isArray(answer.scopes)) return answer;
-	return {
-		...answer,
-		scopes: answer.scopes.map((scope) =>
-			isRecord(scope) && Array.isArray(scope.cookies)
-				? { ...scope, cookies: scope.cookies.map(withholdCookie) }
-				: scope
-		),
-	};
 }
 
 // --- Engine config ------------------------------------------------------------

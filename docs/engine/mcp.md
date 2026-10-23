@@ -245,9 +245,9 @@ Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
 `openWorldHint` + a display title), and a **Zod** input schema (arguments are
 validated by the SDK). Every **read** tool declares an `outputSchema` and
 returns validated `structuredContent` alongside the text rendering, except the
-six whose answer is not an object: `list_collections`, `list_environments`,
-`list_requests`, `list_client_certificates` and `get_live_metrics` answer a bare
-JSON array, and `export_run_report` answers the document's own text. An
+four whose answer is not an object: `list_environments`,
+`list_client_certificates` and `get_live_metrics` answer a bare JSON array, and
+`export_run_report` answers the document's own text. An
 `outputSchema` is object-rooted, and reshaping those answers would break every
 agent that reads them. The read schemas are loose and name only the stable
 keys, so a field the engine adds still arrives; a non-object engine answer is
@@ -271,9 +271,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
 | `get_app_focus`        | read     | The renderer's last snapshot over `app:focus` (app window only; no engine call) | - (names and ids only: the open tab's type, entity id and label, and the active environment's id and name; an error saying the window is not connected from the stdio CLI or before a window has published) |
 | `get_safety_config`    | read     | The session's `McpSafetyConfig` (no engine call, answers on HTTP and stdio alike) | - (`allowlist: { allowAll, hosts }` with the hosts in full, `caps: { maxRps, maxConcurrency, maxDurationSeconds, maxIterations }`, `gates: { allowWrites, allowNetworkSettings, revealSecretsToAgents }` as booleans, and `disabledToolCount`; a count, never the names; no secret value, since none is part of the config; #2444) |
-| `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files)) |
-| `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
-| `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
+| `list_collections`     | read     | `GET /collections?q=&limit=&offset=`         | - (a page of the `{data, pagination}` envelope with `pagination.nextOffset` / `note` as `list_runs`, `q` matching the name; 50 rows by default, 500 max, refused above; each row a summary - `id`, `name`, `parentId`, `order` - unless `fields: "full"`, whose whole rows have secret variables and auth credentials withheld unless revealed; a full row's declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files); a summary hashes no file) |
+| `list_requests`        | read     | `GET /requests?collectionId=&q=&limit=&offset=` | - (paged as `list_collections`; each row a summary - `id`, `collectionId`, `name`, `method`, `url`, `order`, `updatedAt` - unless `fields: "full"` asks for the whole stored row; auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed, on the whole row *before* the summary is cut, so a summary's `url` is masked by the row's API-key auth too) |
+| `get_request`          | read     | `GET /requests/:id`                          | - (the whole row, withheld as `list_requests` withholds a full row; an unknown id is a 404 error) |
 | `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
@@ -307,7 +307,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
-| `list_trash`           | read     | `GET /trash`                                 | -                          |
+| `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it) |
 | `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); a restored row is withheld as the read of it is |
 | `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm     |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
@@ -322,7 +322,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
 | `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused, the rule every send follows; secret values withheld unless revealed) |
 | `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
-| `get_cookies`          | read     | `GET /cookies`                               | - (values withheld unless revealed) |
+| `get_cookies`          | read     | `GET /cookies?q=&limit=&offset=`             | - (paged as `list_collections`, one cookie a row with its jar's `environmentId`, `q` matching the name or domain; a summary row is `environmentId`, `name`, `domain`, `path`, `expires` and never the value; `fields: "full"` adds the flags and the value, withheld unless revealed) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
@@ -677,6 +677,20 @@ Notes:
   words, present only while `hasMore` is true. The same holds for `list_runs`
   and `get_inbox_captures`, and all five declare the envelope as their
   `outputSchema`.
+- **The whole-list reads page in the engine and summarise here** (#2443).
+  `list_collections`, `list_requests`, `get_cookies` and `list_trash` forward
+  `q` / `limit` / `offset` to the engine's paged list routes (50 rows by
+  default, 500 max, refused above) and answer the same envelope, with the same
+  `nextOffset` / `note`. The first three answer a summary row by default and the
+  whole row with `fields: "full"`. The summary is cut on this side rather than
+  by the engine's `GET /requests?fields=summary`, because withholding must see
+  the whole row first: a request's `url` is masked by reading its `auth` (an API
+  key placed in the query), which a summary does not carry. Paging and filtering
+  stay in the engine, so the rows a call reads are still bounded by `limit`.
+  The engine client's unpaged reads (`listCollections`, `listRequests`,
+  `getCookies`, `listTrash`) are unchanged, and the internal readers that need
+  every row - a delete's cascade, `move_item`, the collection runs, the spec
+  tools and `vayu://collections` - keep calling them.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
   `restartRequired` in its structured result (read from each entry's typed
@@ -706,9 +720,9 @@ Notes:
   a number nobody verified. `delete_request` reads the row the same way, so the
   prompt names the request and its URL rather than an opaque id.
 - **The Trash tools (issue #1071) close the loop those two deletes open.**
-  `list_trash` answers `GET /trash` unchanged - roots only, with `collections` /
-  `requests` counting what each entry's delete took, exactly as the route
-  documents. `restore_trash_entry` is the one write tool here that is **not**
+  `list_trash` answers a page of `GET /trash` (#2443), each entry unchanged -
+  roots only, with `collections` / `requests` counting what each entry's delete
+  took, exactly as the route documents. `restore_trash_entry` is the one write tool here that is **not**
   destructive - it puts a row back rather than removing one - so it carries the
   write toggle alone, with no confirmation step; it surfaces the engine's own
   404/409 text verbatim instead of writing a second sentence that could
@@ -726,7 +740,8 @@ Notes:
   both scripts, so an agent that can send an authenticated request can now save
   one. The `auth` input is the *same schema* `run_request` takes rather than a
   copy of it - one definition, four descriptions - which is what lets an agent
-  read a request's `auth` over `list_requests` and write it back verbatim. Its
+  read a request's `auth` over `get_request` (or `list_requests` with
+  `fields: "full"`) and write it back verbatim. Its
   `mode` is a closed set (`bearer`, `basic`, `apikey`, `oauth2`, `inherit`,
   `none`, `noauth`): the engine sends a request with an unknown mode and no auth
   at all, so a misspelling (`Bearer`, `api-key`) or a mode Vayu does not execute
@@ -760,7 +775,7 @@ Notes:
   `run_collection` and `run_collection_smoke` take no such argument at all; they
   compose saved requests, so the stored field is what they honour. The difference
   is what survives the call: a stored value is a document the app's Settings tab
-  shows unticked with a warning under it, `list_requests` reads back and the user
+  shows unticked with a warning under it, `get_request` reads back and the user
   can undo, while an argument on one send is visible only inside the agent's own
   transcript. The `allowInsecureTls` safety toggle #795 sketched was rejected for
   the same reason it would have been convenient - it is a global permission,
@@ -997,7 +1012,7 @@ Notes:
   caches it engine-side, `get_oauth2_token_status` says whether an entry exists
   and whether it has expired, and `clear_oauth2_token` drops one. The config is
   the same block a saved request's `auth` carries, so it can be copied out of
-  `list_requests` verbatim; the **cache key is the engine's**
+  `get_request` verbatim; the **cache key is the engine's**
   (`accessTokenUrl` + `clientId` + `credentialsId` + username + the extra
   parameter rows the engine would send, a credential-named row such as
   `client_assertion` by its name alone, so the key never carries a secret),
@@ -1908,8 +1923,9 @@ its whole map to the main process over `dataFile:locations`
 (`electron/data-file-locations.ts` holds the copy and rebuilds each payload,
 keeping only an absolute path with an extension `dataFile:read` would open).
 `hash` (issue #2051) is the SHA-256 of the file's bytes, as 64 lowercase hex.
-`list_collections` and `vayu://collections` hash the file as it is **at call
-time** (`hashDataFile` in `electron/data-file.ts`, behind the same path gates
+`list_collections` (its `fields: "full"` rows; a summary carries no
+`dataFile` and hashes nothing) and `vayu://collections` hash the file as it is
+**at call time** (`hashDataFile` in `electron/data-file.ts`, behind the same path gates
 as `dataFile:read`, streamed and never returned), so an edit made after a run
 shows up without the app re-reading anything. One of those gates is the grant
 registry (#2357): only a file the user picked, dropped or opened through the
@@ -1945,8 +1961,8 @@ numbers): `list_runs` carries `summary.dataFileName` / `summary.dataFileHash` /
 `summary.scenario.dataFileName` / `dataFileHash` / `dataFileCastNumbers` on a
 collection run, and `get_run_report` carries all three under
 `metadata.configuration`. To repeat such a
-run, read the run row for the file's name and hash, then `list_collections` for
-the file's current `dataFile.path` and `hash`, and compare the two hashes
+run, read the run row for the file's name and hash, then `list_collections`
+with `fields: "full"` for the file's current `dataFile.path` and `hash`, and compare the two hashes
 *before* reading the file and sending its rows - a mismatch means the file has
 changed since that run (hash the bytes you read yourself to be certain they are
 the ones you send). Read the file the way the run did - numbers as numbers when
@@ -1967,7 +1983,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
 | `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. Masked as `list_runs` is. |
-| `vayu://collections`        | All request collections, shaped as `list_collections` answers them (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`; secrets withheld the same way). |
+| `vayu://collections`        | All request collections as a bare array, unpaged, each shaped as a `list_collections` full row (a declared data-file contract as `dataSchema`, none as no key; a remembered file as `dataFile`; secrets withheld the same way). |
 | `vayu://environments`       | All environments, secret values withheld as `list_environments` withholds them. |
 | `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
 | `vayu://config`             | Engine configuration entries, a URL entry's credentials withheld as `get_engine_config` withholds them. |
@@ -2371,13 +2387,13 @@ cannot read a missing value as an empty one.
 
 | What | Withheld as | Read by |
 | ---- | ----------- | ------- |
-| A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
-| An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
-| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion`, or a header or query name from the `params` row below (`Authorization`, `X-Api-Key`, `api_key`, and the rest: a row can be sent as a header) | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
-| A credential in an OAuth 2.0 `config`'s extra request parameter rows (`authorizationParams`, `tokenParams`, `refreshParams`, #2536), by the same key names as the Postman rows above; and, as the export's `redact_config_param_rows` treats them, a row with no non-empty string `key`, a row member other than `key`, `value`, `enabled` and `sendAs`, or a list that is not an array, each when it holds a non-empty string that is not a pure `{{variable}}` reference | the row's `value` dropped, `valueWithheld: true` on the row; `key`, `enabled` and `sendAs` stay. A keyless row becomes `{valueWithheld: true}`, another member `<member>Withheld: true`, a list that is not one `<list>Withheld: true` on the `config` | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
-| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `list_request_examples` |
-| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks), `get_graphql_schema`'s `endpoint` (the composed URL; the SDL is never withheld) |
-| A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
+| A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections` (full rows), `resolve_variables`, `vayu://environments`, `vayu://collections` |
+| An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests` (full rows), `get_request`, `list_collections` (full rows), `vayu://collections` |
+| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion`, or a header or query name from the `params` row below (`Authorization`, `X-Api-Key`, `api_key`, and the rest: a row can be sent as a header) | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests` (full rows), `get_request`, `list_collections` (full rows), `vayu://collections` |
+| A credential in an OAuth 2.0 `config`'s extra request parameter rows (`authorizationParams`, `tokenParams`, `refreshParams`, #2536), by the same key names as the Postman rows above; and, as the export's `redact_config_param_rows` treats them, a row with no non-empty string `key`, a row member other than `key`, `value`, `enabled` and `sendAs`, or a list that is not an array, each when it holds a non-empty string that is not a pure `{{variable}}` reference | the row's `value` dropped, `valueWithheld: true` on the row; `key`, `enabled` and `sendAs` stay. A keyless row becomes `{valueWithheld: true}`, another member `<member>Withheld: true`, a list that is not one `<list>Withheld: true` on the `config` | `list_requests` (full rows), `get_request`, `list_collections` (full rows), `vayu://collections` |
+| The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests` (full rows), `get_request`, `list_request_examples` |
+| A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests` (a summary's `url` too, masked on the whole row before the summary is cut), `get_request`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks), `get_graphql_schema`'s `endpoint` (the composed URL; the SDL is never withheld) |
+| A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` (full rows; a summary row has no `value`) |
 | The userinfo of a config entry whose key ends in `url` (`proxyUrl`, `proxySystemUrl`) | stripped from `value`, the host kept, `credentialsWithheld: true` on the entry | `get_engine_config`, `update_engine_config`'s `updated` echo, `vayu://config` |
 | The userinfo of `proxy.url` in a connection diagnosis | stripped from `url`, the host kept, `credentialsWithheld: true` on `proxy` | `diagnose_connection` |
 | The current side of a spec drift entry's `headers`, `url` or `params` change when it could carry a credential: a header row with a value named by the shared sensitive list or by the request's own API-key auth, whatever its `in`; a `url` the saved-request rule above would change, or one the engine's 120-character cut ended before its host did (a cut password has no `@` left to find); a `params` row with a value named by `SENSITIVE_PARAM_NAMES` or by the request's own API-key-in-query auth (the tool reads the stored request's `auth` for each entry with a `headers`, `url` or `params` change, only while reveal is off; a request it cannot read has those fields withheld whole when non-empty rather than judged). The engine's line is lossy, so it is withheld whole, and an ordinary change passes as written | `current` dropped, `currentWithheld: true` | `diff_spec` |
@@ -2830,7 +2846,12 @@ a tool: 134,925 / 132,199 with writes off and 202,291 / 197,894 with writes on,
 under caps of 136,300 / 133,600 and 204,400 / 199,900. `get_safety_config`
 (#2444) added about 370 bytes a row: 136,673 / 133,947 with writes off and
 204,039 / 199,642 with writes on, and the writes-off caps went to 137,100 /
-134,400.
+134,400. Master then drifted past every cap (137,599 / 134,873 and 204,965 /
+200,568), and the paged whole-list reads (#2443) - the envelope schema on
+`list_collections` and `list_requests`, `q` / `limit` / `offset` and `fields`
+on the four lists, and their page and summary sentences - added about 4,590
+bytes a row: 142,190 / 139,464 with writes off and 209,556 / 205,159 with
+writes on, under caps of 143,600 / 140,900 and 211,700 / 207,200.
 The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the

@@ -25,10 +25,11 @@
  * (the Electron-hosted server; never the stdio CLI). `hash` is the SHA-256 of
  * the file's bytes (issue #2051), the digest a run records as `dataFileHash`,
  * so an agent can tell whether the file still is the one a past run used. A
- * list read (`list_collections`, `vayu://collections`) hashes the file as it
- * is at call time through {@link withCurrentDataFileHashes}; when the file
- * cannot be read, or on a single-row echo, it is the hash the app last read it
- * with, absent until the app has read the file once. `castNumbers: true` says
+ * list read (`list_collections` with `fields: "full"`, `vayu://collections`)
+ * hashes the file as it is at call time through
+ * {@link withCurrentDataFileHashes}; when the file cannot be read, or on a
+ * single-row echo, it is the hash the app last read it with, absent until the
+ * app has read the file once. `castNumbers: true` says
  * the app reads the file's unquoted CSV/TSV numbers as numbers (#2540); absent,
  * it reads every cell as text. Why a path may be named at all is in
  * `data-file-locations.ts`. The rows are never read here.
@@ -131,5 +132,5 @@ async function withCurrentHash(
 	}
 }
 
-/** What list_collections and `vayu://collections` say about the field. */
+/** What list_collections (its full rows) and `vayu://collections` say about the field. */
 export const DATA_CONTRACT_SENTENCE = `A collection with a declared data-file contract (the Data tab) carries \`dataSchema: { columns, fileName, declaredAt }\` - the columns each row of a run's \`data\` is expected to supply; a collection with none has no \`dataSchema\` key. When ${DATA_FILE_LOCATION_TOKEN}, the row also carries \`dataFile: { path, fileName, hash }\`, \`hash\` being the SHA-256 of the file's bytes as they are on disk now (the hash the app last read it with when the file cannot be read; never an error): read the file yourself to build the \`data\` rows, and send its name and hash with them as \`dataFileName\` / \`dataFileHash\`. A past run names the file it used the same way (list_runs), so comparing the hashes tells you whether the file is still the same. A \`dataFile\` with \`castNumbers: true\` is one the app reads with unquoted CSV/TSV integers and decimals as numbers and quoted cells as text; without it every cell is a string, so build the rows to match. Vayu never returns the file's rows.`;

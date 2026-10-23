@@ -137,6 +137,14 @@ export const requestRowSchema = z.looseObject({
 	url: optStr,
 });
 
+/** `list_requests`: each row's identity, summary and full alike. */
+export const requestPageSchema = pagedEnvelopeSchema(requestRowSchema);
+
+/** `list_collections`: `parentId` is null at the tree root. */
+export const collectionPageSchema = pagedEnvelopeSchema(
+	z.looseObject({ id: optStr, name: optStr, parentId: nullStr })
+);
+
 /** `get_run_report`: `partial` and `note` appear only while the run is unfinished. */
 export const runReportSchema = z.looseObject({
 	metadata: z.looseObject({ runId: optStr, runType: optStr, status: optStr }).optional(),
@@ -216,10 +224,8 @@ export const exportDocumentSchema = z.looseObject({
 	contentBytes: optNum,
 });
 
-export const trashListSchema = z.looseObject({
-	items: rowsOf(z.looseObject({ id: optStr, kind: optStr })),
-	total: optNum,
-});
+/** `list_trash`: a root's id and whether it is a collection or a request. */
+export const trashPageSchema = pagedEnvelopeSchema(z.looseObject({ id: optStr, kind: optStr }));
 
 export const requestExamplesSchema = z.looseObject({
 	examples: rowsOf(z.looseObject({ id: optStr })),
@@ -233,9 +239,10 @@ export const globalsSchema = z.looseObject({
 	updatedAt: optNum,
 });
 
-export const cookiesSchema = z.looseObject({
-	scopes: rowsOf(z.looseObject({ environmentId: nullStr, cookies: anyList })),
-});
+/** `get_cookies`: one cookie a row, null `environmentId` for the no-environment jar. */
+export const cookiePageSchema = pagedEnvelopeSchema(
+	z.looseObject({ environmentId: nullStr, name: optStr, domain: optStr })
+);
 
 export const oauthStatusSchema = z.looseObject({
 	found: optBool,

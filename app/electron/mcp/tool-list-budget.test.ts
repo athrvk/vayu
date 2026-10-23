@@ -50,6 +50,14 @@
  * and a small output schema, about 370 B a row) took the rows to 136,673 /
  * 133,947 B writes off and 204,039 / 199,642 B writes on; the writes-off caps
  * went to 137,100 / 134,400 and the writes-on caps still hold.
+ *
+ * Master had since drifted past every cap (137,599 / 134,873 B writes off,
+ * 204,965 / 200,568 B writes on). #2443's paged whole-list reads then gave
+ * `list_collections` and `list_requests` the envelope schema, the four lists
+ * their `q` / `limit` / `offset` (and `fields`) arguments, and the descriptions
+ * their page and summary sentences, about 4,590 B a row: 142,190 / 139,464 B
+ * writes off and 209,556 / 205,159 B writes on, under caps of 143,600 /
+ * 140,900 and 211,700 / 207,200 (about 1% above each).
  */
 
 import { describe, it, expect } from "vitest";
@@ -69,10 +77,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 137_100 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 134_400 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 204_400 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 199_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 143_600 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 140_900 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 211_700 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_200 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

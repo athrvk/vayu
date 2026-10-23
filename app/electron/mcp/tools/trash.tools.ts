@@ -15,7 +15,6 @@ import { EngineRequestError } from "../engine-client.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
-	callEngineStructured,
 	confirmDestructive,
 	confirmedInput,
 	echoShape,
@@ -28,7 +27,9 @@ import {
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
-import { trashListSchema } from "./output-schemas.js";
+import { listPageInputs, listPageQuery, listPageSentence } from "./list-page.js";
+import { trashPageSchema } from "./output-schemas.js";
+import { PAGE_CURSOR_SENTENCE, pagedRead } from "./run-housekeeping.js";
 import { describeTrashEntry, readTrashEntry, trashRefusalMessage, type TrashRow } from "./trash.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
@@ -38,17 +39,22 @@ export const TRASH_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List what delete_collection / delete_request have sent to Vayu's Trash and can still be restored, newest first. Answers ROOTS ONLY - the row a delete actually targeted, never what its cascade took with it: a deleted collection's whole subtree is one entry here, with `collections` and `requests` counting the sub-collections and saved requests that same delete took (always 0 for a request). Each entry also carries `kind` ('collection' | 'request'), `name`, `deletedAt` (Unix ms) and `parentId` (the collection's old parent, or the request's owning collection). Put one back with restore_trash_entry, or destroy it for good with purge_trash_entry. Rows are also purged automatically once older than the `trashRetentionDays` config entry (30 days by default; `0` keeps them forever - see get_engine_config).",
+			"List what delete_collection / delete_request have sent to Vayu's Trash and can still be restored, newest first. " +
+			listPageSentence("entries", "name") +
+			" Answers ROOTS ONLY - the row a delete actually targeted, never what its cascade took with it: a deleted collection's whole subtree is one entry here, with `collections` and `requests` counting the sub-collections and saved requests that same delete took (always 0 for a request). Each entry also carries `kind` ('collection' | 'request'), `name`, `deletedAt` (Unix ms) and `parentId` (the collection's old parent, or the request's owning collection). Put one back with restore_trash_entry, or destroy it for good with purge_trash_entry. Rows are also purged automatically once older than the `trashRetentionDays` config entry (30 days by default; `0` keeps them forever - see get_engine_config). " +
+			PAGE_CURSOR_SENTENCE,
 		annotations: {
 			title: "List trash",
 			readOnlyHint: true,
 			idempotentHint: true,
 			openWorldHint: false,
 		},
-		inputSchema: {},
-		outputSchema: trashListSchema,
-		handler: (_args, ctx, signal) =>
-			callEngineStructured(ctx, () => ctx.client.listTrash(signal)),
+		inputSchema: listPageInputs("entries"),
+		outputSchema: trashPageSchema,
+		handler: (args, ctx, signal) => {
+			const query = listPageQuery(args);
+			return pagedRead(ctx, () => ctx.client.listTrashPage(query, signal), "trash entries");
+		},
 	},
 	{
 		name: "restore_trash_entry",

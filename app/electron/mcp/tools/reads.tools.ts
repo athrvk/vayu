@@ -42,6 +42,7 @@ import {
 	callEngineStructured,
 	engineErrorResult,
 	errorResult,
+	isRecord,
 	optionalOffset,
 	optionalPageLimit,
 	requireStr,
@@ -64,10 +65,21 @@ import {
 } from "./run-housekeeping.js";
 import { markPartialReport, projectRunStatus } from "./run-status.js";
 import {
+	fieldsInput,
+	listPageInputs,
+	listPageQuery,
+	listPageSentence,
+	mapPageRows,
+	projectPageRows,
+	wantsFullRows,
+} from "./list-page.js";
+import {
 	appFocusSchema,
+	collectionPageSchema,
 	engineConfigSchema,
 	engineHealthSchema,
 	isEngineHealthShape,
+	requestPageSchema,
 	requestRowSchema,
 	runPageSchema,
 	runReportSchema,
@@ -75,6 +87,36 @@ import {
 	runSeriesPageSchema,
 	runStatusSchema,
 } from "./output-schemas.js";
+
+/** What a `list_requests` summary row keeps of the stored request. */
+const REQUEST_SUMMARY_KEYS = [
+	"id",
+	"collectionId",
+	"name",
+	"method",
+	"url",
+	"order",
+	"updatedAt",
+] as const;
+
+/** What a `list_collections` summary row keeps: no variables, auth or data contract. */
+const COLLECTION_SUMMARY_KEYS = ["id", "name", "parentId", "order"] as const;
+
+/** A paged list of stored rows, each withheld as {@link withholdRowSecrets} withholds one. */
+function withholdRowPage(page: unknown): unknown {
+	return mapPageRows(page, withholdRowSecrets);
+}
+
+/**
+ * A page of collections presented as `vayu://collections` presents the whole
+ * list, `dataFile.hash` read from the file as it is now. Full rows only: the
+ * summary drops what this adds, so it would hash every data file for nothing.
+ */
+async function presentCollectionPage(page: unknown, ctx: ToolContext): Promise<unknown> {
+	if (!isRecord(page) || !Array.isArray(page.data)) return page;
+	const data = await withCurrentDataFileHashes(presentCollections(page.data, ctx), ctx);
+	return { ...page, data };
+}
 
 /**
  * One run's row, with the engine's bare "Run not found" 404 made to name the id
@@ -164,12 +206,14 @@ export const READ_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description: (config) =>
-			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob and `auth` block; a request resolves against the whole chain from the root down, not just its own collection. " +
+			`List request collections (folders that organize saved requests). ${listPageSentence("collections", "name")} Each row is a summary (${COLLECTION_SUMMARY_KEYS.join(", ")}); \`fields: "full"\` returns whole rows, adding the collection's own \`variables\` blob and \`auth\` block (a request resolves against the whole chain from the root down) and the data-file fields below. ` +
 			DATA_CONTRACT_SENTENCE +
 			" " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment, and a nested collection outranks its ancestors."
 			) +
+			" " +
+			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config),
 		annotations: {
 			title: "List collections",
@@ -177,24 +221,32 @@ export const READ_TOOLS: McpTool[] = [
 			idempotentHint: true,
 			openWorldHint: false,
 		},
-		inputSchema: {},
-		handler: (_args, ctx, signal) =>
-			callEngine(
+		inputSchema: { ...listPageInputs("collections"), fields: fieldsInput },
+		outputSchema: collectionPageSchema,
+		handler: (args, ctx, signal) => {
+			const query = listPageQuery(args);
+			const full = wantsFullRows(args);
+			return pagedRead(
 				ctx,
-				async () =>
-					withCurrentDataFileHashes(
-						presentCollections(await ctx.client.listCollections(signal), ctx),
-						ctx
-					),
-				secretsShape(ctx, withholdRowListSecrets)
-			),
+				async () => {
+					const page = await ctx.client.listCollectionsPage(query, signal);
+					return full ? presentCollectionPage(page, ctx) : page;
+				},
+				"collections",
+				(page) => {
+					const withheld = secretsShape(ctx, withholdRowPage)(page);
+					return full ? withheld : projectPageRows(withheld, COLLECTION_SUMMARY_KEYS);
+				}
+			);
+		},
 	},
 	{
 		name: "list_requests",
 		category: "read",
 		invalidates: [],
 		description: (config) =>
-			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small." +
+			`List the saved requests directly inside one collection. ${listPageSentence("requests", "name")} Each row is a summary (${REQUEST_SUMMARY_KEYS.join(", ")}); \`fields: "full"\` returns each whole stored request (headers, params, body, auth, elements...); get_request reads one. In a full row a stored column the engine cannot hand back - one that will not parse, or one past its 10 MB field cap - comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted and not counted, so a short list is not proof the collection is small. ` +
+			PAGE_CURSOR_SENTENCE +
 			withheldPointer(config),
 		annotations: {
 			title: "List requests",
@@ -202,20 +254,34 @@ export const READ_TOOLS: McpTool[] = [
 			idempotentHint: true,
 			openWorldHint: false,
 		},
-		inputSchema: { collectionId: z.string().describe("Collection ID to list.") },
-		handler: (args, ctx, signal) =>
-			callEngine(
+		inputSchema: {
+			collectionId: z.string().describe("Collection ID to list."),
+			...listPageInputs("requests"),
+			fields: fieldsInput,
+		},
+		outputSchema: requestPageSchema,
+		handler: (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			const query = listPageQuery(args);
+			const full = wantsFullRows(args);
+			return pagedRead(
 				ctx,
-				() => ctx.client.listRequests(requireStr(args, "collectionId"), signal),
-				secretsShape(ctx, withholdRowListSecrets)
-			),
+				() => ctx.client.listRequestsPage(collectionId, query, signal),
+				"requests",
+				(page) => {
+					// Withheld whole, then projected: the url's masking reads the row's auth.
+					const withheld = secretsShape(ctx, withholdRowPage)(page);
+					return full ? withheld : projectPageRows(withheld, REQUEST_SUMMARY_KEYS);
+				}
+			);
+		},
 	},
 	{
 		name: "get_request",
 		category: "read",
 		invalidates: [],
 		description: (config) =>
-			"Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the same shape list_requests returns for each of its rows. An id that names no saved request is an error naming 404." +
+			'Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the shape list_requests returns with `fields: "full"`. An id that names no saved request is an error naming 404.' +
 			withheldPointer(config),
 		annotations: {
 			title: "Get a request",
@@ -266,7 +332,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description: (config) =>
 			"List past runs (single Design-mode requests, collection runs and load tests), " +
-			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. A finished load test's row also carries \`resultSummary\` {rps, p95Ms, errorRate, verdict}: errorRate is a percentage 0-100, verdict is "passed" or "failed" and absent when the run declared no budgets, and any key the run did not record is absent; a design run's row carries {statusCode, latencyMs} there instead. verdict is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and errorRate is computed over the status-code distribution so it can differ slightly from the report's summary.errorRate. A data-driven run's summary names the file its rows came from, never its path: \`dataFileName\`, \`dataFileHash\` (SHA-256 of its bytes) and \`dataFileCastNumbers\` (true only when the file was read with 'Read numbers as numbers') on a single-request run, \`summary.scenario.dataFileName\` / \`dataFileHash\` / \`dataFileCastNumbers\` on a collection run - compare the hash with list_collections' \`dataFile.hash\` before re-running with the same file. ` +
+			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot. A finished load test's row also carries \`resultSummary\` {rps, p95Ms, errorRate, verdict}: errorRate is a percentage 0-100, verdict is "passed" or "failed" and absent when the run declared no budgets, and any key the run did not record is absent; a design run's row carries {statusCode, latencyMs} there instead. verdict is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and errorRate is computed over the status-code distribution so it can differ slightly from the report's summary.errorRate. A data-driven run's summary names the file its rows came from, never its path: \`dataFileName\`, \`dataFileHash\` (SHA-256 of its bytes) and \`dataFileCastNumbers\` (true only when the file was read with 'Read numbers as numbers') on a single-request run, \`summary.scenario.dataFileName\` / \`dataFileHash\` / \`dataFileCastNumbers\` on a collection run - compare the hash with \`dataFile.hash\` in a full list_collections row before re-running with the same file. ` +
 			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
 			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is. " +
 			PAGE_CURSOR_SENTENCE +
