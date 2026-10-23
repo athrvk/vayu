@@ -258,8 +258,8 @@ describe("detectAnomalies - error bursts count a window's requests, not its tick
 			"7.8%"
 		);
 
-		// Ticks 10-12 roll out and the buffer's new first tick has no delta, so the
-		// window is ticks 13-19: 26 failures in 350 completions, its worst tick 8%.
+		// Ticks 0-11 roll out; tick 12 stays as the buffer's first and has no delta,
+		// so the window is ticks 13-19: 26 failures in 350 completions, its worst tick 8%.
 		const trimmed = run.slice(12);
 		const found = detector.detect(trimmed);
 		expect(found).toEqual(detectAnomaliesFromScratch(trimmed));
@@ -305,7 +305,11 @@ describe("detectAnomalies - error bursts count a window's requests, not its tick
 		for (const k of [10, 11, 12]) perSecond[k].failed = 5;
 		const drain = [1, 2, 3].map((n) => ({ completed: n, failed: n }));
 
-		const found = bursts(countedTicks([...perSecond, ...drain]));
+		// The drain follows the last burst tick directly, so a missing floor would
+		// stretch the window to 5.00s.
+		const found = bursts(
+			countedTicks([...perSecond.slice(0, 13), ...drain, ...perSecond.slice(13)])
+		);
 		expect(found).toHaveLength(1);
 		expect(found[0]).toMatchObject({ startSeconds: 10, endSeconds: 12 });
 		expect(found[0].label).toBe("errors 10.0% of requests over 2.00s");
