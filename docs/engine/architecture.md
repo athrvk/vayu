@@ -427,6 +427,21 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   such a completion lands in the top bucket: percentiles and `max` read one hour, and the
   histogram's count is still the number of completions. The mean, a sum rather than a histogram
   read, keeps the true duration, so it can exceed `max`.
+- **Load percentiles and `max` round up, by at most 0.1%** (issue #2791): every latency histogram
+  is kept at `HISTOGRAM_SIGNIFICANT_FIGURES` = 3, so a recorded value shares a bucket with its
+  neighbours, and the library reports a bucket by its **highest** equivalent value
+  (`hdr_value_at_percentile` and `hdr_max` both end in `highest_equivalent_value`,
+  `vendor/hdrhistogram/src/hdr_histogram.c`). A percentile or `max` therefore never reads below
+  the sample it stands for and can read above it by up to one bucket - under 0.1% of the value
+  (the bucket is 512 µs at 1 s, 256 µs at 500 ms). One request of exactly 1000.000 ms reports
+  `max` 1000.447 ms; a p99 of exactly 500 ms reports 500.223 ms. The minimum is the one figure
+  rounded the other way, down to the bucket's lowest value. The rank is
+  `round(p/100 * n)`, at least 1, over the bucket counts. The sequential collection runner does
+  not use the histogram: `percentiles_from_latencies` (`core/scenario_runner.cpp`) sorts the
+  step latencies and reads the exact value at rank `ceil(p/100 * n)`, so its `max` is the true
+  slowest and its percentiles carry no bucket error. The two methods differ in rank as well as
+  in rounding at small `n`: the p95 of 11 samples is rank 10 through the histogram and rank 11
+  in the runner. Compare a collection run with a load run only to that tolerance.
 - **One reader merges the windows**: each window the metrics thread samples is added, before the
   recorder recycles it, into three more histograms only that thread touches, so they take plain
   calls. One is the open second, which `take_second_percentiles()` reads and resets at the 1 Hz
