@@ -13,7 +13,7 @@ engine/
 ├── src/utils/     # shared primitives (encoding, ascii_case, parse, reentrant)
 ├── include/vayu/  # Public headers
 ├── tests/         # Google Test suite; tests/fixtures/ holds the conformance tables
-└── vendor/        # quickjs-ng, hdrhistogram, and the JS libraries `require()` embeds (uuid, lodash, moment, csv-parse, xml2js, chai, ajv, tv4)
+└── vendor/        # quickjs-ng, hdrhistogram, and the JS libraries `require()` embeds (uuid, lodash, moment, csv-parse, xml2js, chai, ajv, tv4), accounted for by js-manifest.json
 ```
 
 ## Conventions
@@ -222,6 +222,14 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   without the flag reports nothing in headers. Deduplicate by
   (file, line, column, check): a header finding repeats per including
   translation unit. `docs/engine/building.md` carries the command.
+- **A vendored script library is listed in `engine/vendor/js-manifest.json`**
+  (#2750): each shipped file's SHA-256, its npm tarballs with their registry
+  `dist.integrity`, and `verbatim` or the pinned esbuild command that built
+  it. `tests/vendor_js_manifest_test.cpp` (`ctest -R VendorJs`) fails on a
+  changed byte, on a `.js`/`.mjs`/`.cjs` under `engine/vendor/` the manifest
+  does not list (the `quickjs-ng` and `hdrhistogram` trees aside) and on an
+  empty manifest; `scripts/vendor-js/rebuild.sh <lib>` is the online proof.
+  Upgrade recipe: `docs/engine/building.md#upgrading-a-vendored-library`.
 - **A new `tests/*_test.cpp` is listed in `add_executable(vayu_tests ...)`**
   in `engine/tests/CMakeLists.txt`; the list is explicit, never a glob, and a
   guard beside it fails configure naming any unregistered file, because an
@@ -1304,4 +1312,4 @@ fields too. Add a script destination to `compose_elements` /
 | `docs/engine/cli.md` | Flags or subcommands |
 | `docs/engine/logging.md` | The log record, categories, redaction, file names |
 | `docs/engine/benchmarks.md` | Load generation or measurement |
-| `docs/engine/building.md` | CMake presets, vcpkg deps, the lint and format gates |
+| `docs/engine/building.md` | CMake presets, vcpkg deps, the lint and format gates, the vendored JS libraries and their manifest |
