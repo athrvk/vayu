@@ -288,7 +288,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
+| `run_collection_smoke` | execute  | `GET /requests?…` (+ `GET /collections` when `recursive`) + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | runs one page of the list, `limit` (default 25, max 100, a larger value refused) from `offset`, and the result's `requestTotal`, `hasMore`, `next.offset` and `note` say what is left; allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed; sends a progress notification per row when the client sent a `progressToken` (index and status word only, never a name or URL) |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
@@ -940,8 +940,57 @@ Notes:
   files its operations under sub-collections (grouped by tag or by path, per
   `meta.folderStrategy`), so a direct-only smoke of its root answers `total: 0`;
   `import_document`'s caveat says how many sub-collections hold the requests and
-  names the recursive path. Requests run serially, so a large collection takes as
-  long as its requests do added together.
+  names the recursive path. Requests run serially, so a collection takes as long
+  as its requests do added together, and each one is real traffic: past about 25
+  requests or against a slow API the description steers an agent to
+  `run_collection` (one stored run with a run id, read with `get_run_report`),
+  leaving the smoke for a bounded pass/fail matrix.
+  **A call runs one page** (#2451): `limit` requests (default 25, max 100; a
+  larger value is refused, not clamped, like every bound in this registry)
+  starting at `offset`. The list - the direct requests, or the whole expansion of
+  a `recursive` run - is read once in the engine's stable order and then sliced
+  `[offset, offset + limit)`, so a collection edited between two calls shifts the
+  window under the second one (the description says so). `total`, `passed`,
+  `failed` and `skipped` keep their meaning as the counts of the rows run **in
+  this call**; the result adds `requestTotal` (the list's size, before the cut),
+  `hasMore`, and - only while `hasMore` is true - `next: {offset}`, the `offset`
+  that resumes. Whenever the call did not run everything in scope the result's
+  own `note` field says so in a sentence (`Ran 25 of 140 requests, starting at
+  offset 0; call again with offset: 25 for the rest.`), in the structured
+  content and so in the JSON text block alike: a default of 25 that cut a
+  collection quietly would read as a whole-collection pass. An `offset` at or
+  past `requestTotal` runs nothing and the note says so (`hasMore` false). A
+  call that ran everything carries `requestTotal` and `hasMore: false` and no
+  note. Progress (below) counts the page, not the collection.
+  **A cancellation returns what finished.** When the call's signal aborts
+  mid-run the loop stops and the result carries the rows completed so far with
+  `cancelled: true`, `hasMore: true` and `next.offset` set to `offset` plus the
+  rows returned. The abort is told from a row's own send error by the signal, not
+  by the error: an aborted fetch rejects like any other failure, but a send that
+  fails with the signal still live stays a failed row and the run goes on. The
+  request in flight at the abort is not a row, and `next.offset` points at it, so
+  resuming sends it again; the note warns it may already have reached the API.
+  The masking reads that follow the loop run without the aborted signal, since
+  one that fails closes the call and would discard the rows. The SDK itself
+  sends no response to a request whose signal aborted (a `notifications/cancelled`
+  for it, or the connection closing), so the partial result is what a caller
+  that reads the handler's return value gets - the tests, `dispatchTool` - and
+  what the cancelled loop no longer does is walk the remaining rows, each a
+  failed fetch the instant after the abort.
+  When the client sent a `progressToken` (#2451) the call reports
+  `notifications/progress` - `0/total` before the first request, then one per
+  row on every path (sent, skipped off the allowlist or failed to compose), with
+  a message of the form `3/40 ok` / `3/40 skipped` / `3/40 failed`. The message is
+  an index and a status word and nothing the request resolved to: the masking
+  that covers a row's `url`, `error` and test lines runs on the finished matrix
+  (it needs the secrets a script set along the way), so a mid-run string has no
+  such cover and carries none of that data. The notification goes out on the
+  request's own stream (`mcpReq.notify`), not the session's, and a failed or
+  post-cancellation send is dropped. A client with a short request timeout only
+  benefits if it resets that timeout on progress (the TypeScript SDK's
+  `resetTimeoutOnProgress`): a single `POST /execute` may take up to 310 s (the engine's 300 s ceiling plus
+  the client's grace), so without it the client can give up on a run still working. A call with no
+  token sends nothing.
 - **The OAuth 2.0 token tools** (issue #760) are how an agent gets a token
   problem named instead of discovering it as a wall of 401s inside a run:
   `fetch_oauth2_token` acquires (or force-refreshes) a token for a config and
@@ -1084,7 +1133,12 @@ Notes:
   run row, arrives before this client gives up. If the budget does expire, the
   tool says the call may still have completed and points at `list_runs`; it is
   never reported as an unreachable engine, because a retry could re-send a
-  request that already went out.
+  request that already went out. `run_collection_smoke` bounds the other side of
+  this: a call runs at most `limit` requests (25 by default), so one call stays
+  inside a typical client budget and a longer collection is resumed by `offset`
+  rather than lost to a timeout. It also sends a progress notification per row
+  when the client asks, which a client that resets its timeout on progress
+  (`resetTimeoutOnProgress`) can use to outlast a slow API.
 
 ### Naming what the user means
 
@@ -2505,12 +2559,12 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
-| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host` and the optional `progress` a call gets only when the client sent a `progressToken`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
-| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`). |
+| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`, including `progress` when the call carries a `progressToken`). |
 | `server-icon.ts`   | The server's icon, `shared/icon_png`'s 48px rendering inlined as a data URI. |
 | `http.ts`          | Streamable HTTP host over `createMcpHandler`, both eras (Host/Origin checks in front). |
 | `client-sessions.ts` | The bounded `Mcp-Session-Id` → client-name record that carries the handshake's name across the HTTP host's requests. |

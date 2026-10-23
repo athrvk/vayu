@@ -337,6 +337,36 @@ function callContext(
 		...(canAskForm(capabilities)
 			? { userInput: { responses: sdkCtx.mcpReq.inputResponses } }
 			: {}),
+		...progressReporter(sdkCtx),
+	};
+}
+
+/**
+ * `{ progress }` for a call whose client sent a `progressToken`, else nothing.
+ *
+ * Sent through `mcpReq.notify`, which ties the notification to this request;
+ * `mcp.server.notification` would go out on the session instead. A failed or
+ * aborted send is dropped: progress is a courtesy and must never fail the run
+ * it describes.
+ */
+function progressReporter(sdkCtx: ServerContext): Pick<ToolContext, "progress"> {
+	const progressToken = sdkCtx.mcpReq._meta?.progressToken;
+	if (progressToken === undefined) return {};
+	return {
+		progress: (done, total, message) => {
+			if (sdkCtx.mcpReq.signal.aborted) return;
+			sdkCtx.mcpReq
+				.notify({
+					method: "notifications/progress",
+					params: {
+						progressToken,
+						progress: done,
+						total,
+						...(message !== undefined ? { message } : {}),
+					},
+				})
+				.catch(() => undefined);
+		},
 	};
 }
 
