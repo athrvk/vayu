@@ -7,16 +7,21 @@
  *
  * That is the shape libcurl re-sends on its own when it meets it on a reused
  * connection, and httplib cannot produce it: a handler always answers. So this
- * is a blocking raw-socket listener on port 0, one thread per connection,
- * counting every request head it reads. It reads heads only, which is all the
- * tests that use it send (a GET); a body would be read as the next request.
+ * is a raw-socket listener on port 0, one thread per connection, counting
+ * every request head it reads. It reads heads only, which is all the tests
+ * that use it send (a GET); a body would be read as the next request.
+ *
+ * Every thread polls and reads the stop flag rather than blocking: neither a
+ * blocking accept nor a blocking recv is reliably woken from another thread
+ * on every platform. The destructor used to shut down each open socket to wake
+ * its recv; on Windows a client still holding an idle keep-alive connection
+ * hung it until CTest's 60s timeout in 3 of 4 runs.
  */
 
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <functional>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -82,14 +87,8 @@ class ConnectionDropServer {
         if (listener_ != NO_SOCKET) {
             close_socket (listener_);
         }
-        {
-            // Wakes every connection thread blocked reading an idle
-            // keep-alive connection; each then closes its own socket.
-            const std::lock_guard<std::mutex> lock (mutex_);
-            for (const Socket open : open_) {
-                shutdown_socket (open);
-            }
-        }
+        // Each connection thread sees the flag within one poll and closes its
+        // own socket, an idle keep-alive one included.
         for (auto& connection : connections_) {
             connection.join ();
         }
@@ -130,9 +129,6 @@ class ConnectionDropServer {
     static void close_socket (Socket socket) {
         closesocket (socket);
     }
-    static void shutdown_socket (Socket socket) {
-        shutdown (socket, SD_BOTH);
-    }
     static int poll_one (pollfd* fd, int timeout_ms) {
         return WSAPoll (fd, 1, timeout_ms);
     }
@@ -143,9 +139,6 @@ class ConnectionDropServer {
     static constexpr Socket NO_SOCKET = -1;
     static void close_socket (Socket socket) {
         ::close (socket);
-    }
-    static void shutdown_socket (Socket socket) {
-        ::shutdown (socket, SHUT_RDWR);
     }
     static int poll_one (pollfd* fd, int timeout_ms) {
         return ::poll (fd, 1, timeout_ms);
@@ -161,12 +154,12 @@ class ConnectionDropServer {
     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
     "2\r\n\r\nok";
     static constexpr std::string_view HEAD_END = "\r\n\r\n";
+    /// How often a waiting thread reads the stop flag; it bounds how long the
+    /// destructor waits, and nothing else.
+    static constexpr int STOP_POLL_MS = 20;
 
-    /// Accepts until the destructor stops it. The poll's timeout is only how
-    /// often the stop flag is read: a blocking accept is not woken by closing
-    /// the listener on every platform.
+    /// Accepts until the destructor stops it.
     void accept_loop () {
-        constexpr int STOP_POLL_MS = 20;
         while (!stopping_.load ()) {
             pollfd ready{};
             ready.fd     = listener_;
@@ -182,10 +175,6 @@ class ConnectionDropServer {
             const int on = 1;
             setsockopt (client, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof (on));
 #endif
-            {
-                const std::lock_guard<std::mutex> lock (mutex_);
-                open_.push_back (client);
-            }
             connections_.emplace_back ([this, client] () { serve (client); });
         }
     }
@@ -198,6 +187,19 @@ class ConnectionDropServer {
         for (;;) {
             const auto head_end = pending.find (HEAD_END);
             if (head_end == std::string::npos) {
+                if (stopping_.load ()) {
+                    break;
+                }
+                pollfd readable{};
+                readable.fd      = client;
+                readable.events  = POLLIN;
+                const int polled = poll_one (&readable, STOP_POLL_MS);
+                if (polled < 0) {
+                    break;
+                }
+                if (polled == 0) {
+                    continue;
+                }
                 const auto got = ::recv (
                 client, chunk.data (), static_cast<IoLength> (chunk.size ()), 0);
                 if (got <= 0) {
@@ -216,7 +218,7 @@ class ConnectionDropServer {
                 break;
             }
         }
-        release (client);
+        close_socket (client);
     }
 
     static bool send_all (Socket client, std::string_view bytes) {
@@ -231,14 +233,6 @@ class ConnectionDropServer {
         return true;
     }
 
-    /// Closes @p client under the lock the destructor's shutdown takes, so it
-    /// never shuts down a descriptor that has been closed and reused.
-    void release (Socket client) {
-        const std::lock_guard<std::mutex> lock (mutex_);
-        close_socket (client);
-        std::erase (open_, client);
-    }
-
     AnswerRule rule_;
     Socket listener_ = NO_SOCKET;
     int port_        = 0;
@@ -248,8 +242,6 @@ class ConnectionDropServer {
     std::thread acceptor_;
     // Written by the accept thread alone, joined after it.
     std::vector<std::thread> connections_;
-    std::mutex mutex_;
-    std::vector<Socket> open_;
 };
 
 } // namespace vayu::tests
