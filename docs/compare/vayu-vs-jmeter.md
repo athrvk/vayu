@@ -56,7 +56,7 @@ element model, and so do:
   `GaussianRandomTimer`, `ConstantThroughputTimer`). JMeter ships more, among
   them the Precise Throughput, Synchronizing and Poisson Random timers and the
   JSR223 and BeanShell timers, and none of those is mapped.
-- **Five of the six logic controllers** (`LoopController`, `IfController`,
+- **Five logic controllers** (`LoopController`, `IfController`,
   `OnceOnlyController`, `TransactionController`, `ThroughputController`).
   `SwitchController` imports as a plain folder, with its members and without a
   `control.switch`, because JMeter selects by list index or variable value and

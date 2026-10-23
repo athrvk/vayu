@@ -172,6 +172,15 @@ export const DOC_READING_GUARDS = {
 		],
 	},
 	/*
+	 * The JMeter comparison page's claim about which logic controllers the
+	 * importer translates (#2406): it said "six" while `SwitchController` stayed
+	 * a plain folder, and nothing re-read the sentence against the importer.
+	 */
+	jmeterCompareControllers: {
+		reader: "app/src/services/importers/jmeter-compare-doc.test.ts",
+		paths: ["docs/compare/vayu-vs-jmeter.md"],
+	},
+	/*
 	 * The reference lines the app copies for an agent (#2046): the page prints
 	 * one example per kind, and the guard holds each to what the formatters
 	 * produce, so a separator changed in `agent-reference.ts` or a line edited
@@ -275,6 +284,12 @@ export const ENGINE_READING_GUARDS = {
 			"engine/include/vayu/core/constants.hpp",
 			"engine/include/vayu/http/curl_version_map.hpp",
 		],
+	},
+	/* The importer's controller table, the other input of the page guard in the
+	   registry above (#2406). */
+	jmeterCompareControllers: {
+		reader: "app/src/services/importers/jmeter-compare-doc.test.ts",
+		paths: ["engine/src/core/jmeter_import.cpp"],
 	},
 	scriptTypedefs: {
 		reader: "app/src/hooks/script-typedefs.docs-compile.test.ts",
