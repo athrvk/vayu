@@ -75,7 +75,10 @@ export function windowedGapOpen(m: LoadTestMetrics): boolean | undefined {
  * trimming and costs nothing per render.
  */
 export function foldLagStreak(since: number | null, m: LoadTestMetrics): number | null {
-	if (!windowedGapOpen(m)) return null;
+	// A gap before the run has settled is the in-flight backlog, not lag: the
+	// streak starts at the first settled tick so a slow target cannot arrive
+	// already "held".
+	if (!isSettled(m.elapsed_seconds, m.avg_latency_ms) || !windowedGapOpen(m)) return null;
 	return since ?? m.elapsed_seconds;
 }
 

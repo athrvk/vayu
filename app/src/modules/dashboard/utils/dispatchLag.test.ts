@@ -121,14 +121,35 @@ describe("isSettled", () => {
 
 describe("foldLagStreak", () => {
 	const apart = (elapsed: number) =>
-		tick({ elapsed_seconds: elapsed, current_send_rate: 100, current_rps: 50 });
+		tick({
+			elapsed_seconds: elapsed,
+			avg_latency_ms: 100,
+			current_send_rate: 100,
+			current_rps: 50,
+		});
 	const together = (elapsed: number) =>
-		tick({ elapsed_seconds: elapsed, current_send_rate: 100, current_rps: 100 });
+		tick({
+			elapsed_seconds: elapsed,
+			avg_latency_ms: 100,
+			current_send_rate: 100,
+			current_rps: 100,
+		});
 
 	it("starts at the tick the gap opened and keeps that start", () => {
 		const first = foldLagStreak(null, apart(2));
 		expect(first).toBe(2);
 		expect(foldLagStreak(first, apart(5))).toBe(2);
+	});
+
+	it("does not start before the run has settled", () => {
+		const early = tick({
+			elapsed_seconds: 1,
+			avg_latency_ms: 3000,
+			current_send_rate: 100,
+			current_rps: 50,
+		});
+		expect(foldLagStreak(null, early)).toBeNull();
+		expect(foldLagStreak(null, { ...early, elapsed_seconds: 3.5 })).toBe(3.5);
 	});
 
 	it("resets when the rates agree again", () => {
