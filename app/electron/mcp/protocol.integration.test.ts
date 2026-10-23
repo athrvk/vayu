@@ -456,6 +456,41 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await server.close();
 	});
 
+	/*
+	 * An error's `structuredContent` is `{ error }`, which no tool's
+	 * outputSchema describes: it reaches the client only because the SDK holds
+	 * a success, not an error, to that schema (#2776).
+	 */
+	it("delivers an error's failure class through an outputSchema tool", async () => {
+		const { client, server } = await connectClient({
+			client: fakeClient({
+				getRunReport: vi
+					.fn()
+					.mockRejectedValue(new TypeError("fetch failed: connect ECONNREFUSED")),
+			}),
+		});
+		await client.listTools();
+		const res = (await client.callTool({
+			name: "compare_runs",
+			arguments: { baseRunId: "a", targetRunId: "b" },
+		})) as { isError?: boolean; content: Array<{ text: string }>; structuredContent?: unknown };
+		expect(res.isError).toBe(true);
+		expect(res.structuredContent).toEqual({
+			error: { class: "unreachable", retryable: true, advice: res.content[0].text },
+		});
+		await server.close();
+	});
+
+	it("classes the refusal of a withheld write tool as policy", async () => {
+		const { client, server } = await connectClient();
+		const res = (await client.callTool({
+			name: "create_collection",
+			arguments: { name: "API" },
+		})) as { structuredContent?: { error?: { class?: string } } };
+		expect(res.structuredContent?.error?.class).toBe("policy");
+		await server.close();
+	});
+
 	it("omits a disabled tool from tools/list and rejects calling it", async () => {
 		const { client, server } = await connectClient({
 			safety: { disabledTools: ["get_engine_health"] },

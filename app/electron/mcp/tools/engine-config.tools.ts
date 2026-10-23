@@ -53,17 +53,22 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			if (!ctx.config.allowWrites) {
 				return errorResult(
-					`Config writes are disabled. To allow this, ask the user to ${settingRemedy("allowWrites", ctx.host)}.`
+					`Config writes are disabled. To allow this, ask the user to ${settingRemedy("allowWrites", ctx.host)}.`,
+					"policy"
 				);
 			}
 			const entries = args.entries;
 			if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
-				return errorResult('"entries" must be an object mapping config keys to values.');
+				return errorResult(
+					'"entries" must be an object mapping config keys to values.',
+					"input"
+				);
 			}
 			const network = Object.keys(entries).filter(isNetworkConfigKey);
 			if (network.length > 0 && !ctx.config.allowNetworkSettings) {
 				return errorResult(
-					`Network settings are not open to agents: ${network.join(", ")} decide where every request goes and which certificate authorities Vayu trusts, so they need Network settings turned on as well as write access: ask the user to ${settingRemedy("allowNetworkSettings", ctx.host)}. Nothing was changed.`
+					`Network settings are not open to agents: ${network.join(", ")} decide where every request goes and which certificate authorities Vayu trusts, so they need Network settings turned on as well as write access: ask the user to ${settingRemedy("allowNetworkSettings", ctx.host)}. Nothing was changed.`,
+					"policy"
 				);
 			}
 			try {

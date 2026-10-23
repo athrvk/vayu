@@ -18,6 +18,7 @@ import type { McpTool } from "./contract.js";
 import {
 	engineErrorResult,
 	errorResult,
+	guardErrorResult,
 	stringArray,
 	structuredResult,
 	ToolArgError,
@@ -99,12 +100,12 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 					signal
 				);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			const url = String(composed.url ?? "");
 			const gate = checkComposedTarget(composed, ctx.config, ctx.host);
-			if (!gate.ok) return errorResult(gate.error!);
+			if (!gate.ok) return guardErrorResult(gate);
 
 			const payload = await introspectionPayload(composed, environmentId);
 			let answer: unknown;
@@ -114,9 +115,9 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			const refused = targetPolicyRefusal(answer, ctx.host);
-			if (refused) return errorResult(refused);
+			if (refused) return errorResult(refused, "policy");
 			const read = readIntrospectionAnswer(answer, url);
-			if ("error" in read) return errorResult(read.error);
+			if ("error" in read) return errorResult(read.error, read.failureClass);
 
 			let printed;
 			try {
@@ -125,7 +126,8 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				// graphql's own message inspects the value it refused, which is
 				// the endpoint's body.
 				return errorResult(
-					"The endpoint's answer is not an introspection result - it may not be a GraphQL endpoint."
+					"The endpoint's answer is not an introspection result - it may not be a GraphQL endpoint.",
+					"input"
 				);
 			}
 			const sdl = boundText(printed.sdl, MAX_SCHEMA_SDL_BYTES);

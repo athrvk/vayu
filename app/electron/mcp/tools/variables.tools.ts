@@ -123,7 +123,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			} catch (err) {
 				// A bad id is the caller's mistake and must not be reported as an
 				// engine failure - the same split `pagedRead`'s callers keep.
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 
@@ -170,11 +170,17 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			if (refused) return refused;
 			const patch = isRecord(args.variables) ? args.variables : undefined;
 			if (args.variables !== undefined && patch === undefined) {
-				return errorResult('"variables" must be an object mapping names to values.');
+				return errorResult(
+					'"variables" must be an object mapping names to values.',
+					"input"
+				);
 			}
 			const removals = removalNames(args);
 			if (patch === undefined && removals.length === 0) {
-				return errorResult('Pass at least one change: "variables" or "removeVariables".');
+				return errorResult(
+					'Pass at least one change: "variables" or "removeVariables".',
+					"input"
+				);
 			}
 			// `POST /globals` saves the singleton whole - it is the one resource
 			// with no create/update split, so an absent `variables` there means

@@ -27,6 +27,7 @@ import {
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
+import { engineRefusalClass } from "./failure.js";
 import { listPageInputs, listPageQuery, listPageSentence } from "./list-page.js";
 import { trashPageSchema } from "./output-schemas.js";
 import { PAGE_CURSOR_SENTENCE, pagedRead } from "./run-housekeeping.js";
@@ -93,7 +94,7 @@ export const TRASH_TOOLS: McpTool[] = [
 					err instanceof EngineRequestError &&
 					(err.status === 404 || err.status === 409)
 				) {
-					return errorResult(trashRefusalMessage(err));
+					return errorResult(trashRefusalMessage(err), engineRefusalClass(err));
 				}
 				return engineErrorResult(err, ctx);
 			}
@@ -138,7 +139,7 @@ export const TRASH_TOOLS: McpTool[] = [
 			try {
 				entry = await readTrashEntry(ctx.client, id, signal);
 			} catch (err) {
-				if (err instanceof ToolArgError) return errorResult(err.message);
+				if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
 				return engineErrorResult(err, ctx);
 			}
 			const subject = describeTrashEntry(entry);

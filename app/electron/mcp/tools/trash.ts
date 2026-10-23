@@ -41,7 +41,7 @@ export async function readTrashEntry(
 	const items = isRecord(payload) && Array.isArray(payload.items) ? payload.items : [];
 	const row = items.find((item) => isRecord(item) && item.id === id) as
 		Record<string, unknown> | undefined;
-	if (!row) throw new ToolArgError(`Nothing in the trash with id "${id}".`);
+	if (!row) throw new ToolArgError(`Nothing in the trash with id "${id}".`, "not_found");
 	return {
 		kind: row.kind === "request" ? "request" : "collection",
 		name: typeof row.name === "string" && row.name !== "" ? row.name : id,
