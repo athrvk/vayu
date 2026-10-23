@@ -24,6 +24,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -34,6 +35,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/mock_issuer.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::core::auth_refresh_delay_ms;
@@ -648,6 +650,60 @@ TEST_F (MidRunRefreshTest, ARefreshIsStampedFromLoadStartNotFromTheWatchdogStart
 
     ASSERT_FALSE (refreshes.empty ()) << "the watchdog never refreshed";
     EXPECT_GT (refreshes[0]["atSeconds"].get<double> (), 9.0);
+}
+
+// A refresh is bounded by the run's request timeout (#2833), which the plan
+// takes from the built request. Against a refresh endpoint that never answers,
+// the watchdog records `oauth2_timeout` after about 1 s; on the compiled-in
+// 30 s it records nothing before `wait_until`'s 20 s deadline. Mutation check:
+// pass `DEFAULT_TIMEOUT_MS` instead of `state->timeout_ms ()` in
+// `run_auth_refresh`.
+TEST_F (MidRunRefreshTest, ARefreshIsBoundedByTheRunsRequestTimeout) {
+    const vayu::tests::MockTokenServer idp;
+    const json config = oauth2_config (idp.url ("/token-hang"));
+
+    vayu::db::OAuthToken token;
+    token.cache_key     = vayu::http::oauth::cache_key (config);
+    token.access_token  = "AT1";
+    token.token_type    = "Bearer";
+    token.refresh_token = "RT1";
+    token.expires_in    = 1;
+    token.created_at    = now_ms () - 2'000;
+    db->save_oauth_token (token);
+
+    vayu::Request request;
+    request.url                      = "https://example.test/api";
+    request.timeout_ms               = 1000;
+    request.headers["Authorization"] = "Bearer AT1";
+    auto plan                        = vayu::http::plan_auth_refresh (
+    request, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+    ASSERT_HAS_VALUE (plan);
+    EXPECT_EQ (plan->timeout_ms, 1000);
+
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run-auth-refresh-timeout", json::object ());
+    context->is_running = true;
+    context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
+
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms          = 0;
+    tuning.min_interval_ms  = 20;
+    tuning.retry_ms         = 60'000; // one attempt is the subject
+    tuning.poll_interval_ms = 10;
+    std::thread watchdog (
+    [&] () { vayu::core::run_auth_refresh (context, db.get (), tuning); });
+
+    const bool failed   = vayu::tests::wait_until ([&] {
+        return context->auth_refresh->summary ()["refreshFailures"].get<size_t> () > 0;
+    });
+    context->is_running = false;
+    watchdog.join ();
+
+    ASSERT_TRUE (failed) << "the refresh never gave up on the hung endpoint";
+    const auto summary = context->auth_refresh->summary ();
+    EXPECT_EQ (
+    summary["lastError"].get<std::string> ().rfind ("oauth2_timeout: ", 0), 0u)
+    << summary.dump ();
 }
 
 // A token endpoint that stops answering must not fail the run: the target's own

@@ -50,6 +50,7 @@
 #include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
@@ -72,6 +73,10 @@ const std::atomic<bool>* cancel = nullptr);
 
 namespace vayu::http {
 namespace {
+
+/// The bound every token request here is given: the engine's own default, so
+/// none of these tests is about the timeout.
+constexpr int TOKEN_TIMEOUT_MS = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
 
 using vayu::tests::MockProxy;
 using vayu::tests::ScopedEnv;
@@ -939,7 +944,8 @@ TEST_F (TransportPolicyDbTest, OAuthTokenFetchTraversesManualProxy) {
         { "accessTokenUrl", upstream.url ("/token") }, { "clientId", "cid" },
         { "clientSecret", "secret" } };
 
-    const auto result = oauth::acquire_token (*db_, config, false, std::nullopt);
+    const auto result =
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result))
     << std::get<oauth::TokenError> (result).message;
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "AT-PROXIED");

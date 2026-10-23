@@ -15,6 +15,7 @@
 
 #include <httplib.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <map>
@@ -55,12 +56,15 @@ inline std::string token_body_nested_to (size_t depth) {
 /// `/token` answers `AT<hits>` with refresh token `RT1`, so every exchange
 /// yields an access token no earlier row can share. `/token-at-depth-bound` and
 /// `/token-past-depth-bound` answer a body nested to `MAX_BODY_DEPTH` and one
-/// level past it.
+/// level past it. `/token-hang` never answers on its own (#2833), and
+/// `/refresh-rejected-then-hang` rejects a refresh after
+/// `SLOW_REFRESH_REJECT_MS` and then hangs the fresh grant; a hung handler
+/// returns once the fixture is torn down.
 class MockTokenServer {
     public:
     MockTokenServer () {
         svr_.Post (".*", [this] (const httplib::Request& req, httplib::Response& res) {
-            ++hits_;
+            const int hit      = ++hits_;
             last_path_         = req.path;
             last_target_       = req.target;
             last_headers_      = req.headers;
@@ -72,7 +76,7 @@ class MockTokenServer {
             form.count ("grant_type") ? form.at ("grant_type") : "";
 
             if (req.path == "/token") {
-                res.set_content (R"({"access_token":"AT)" + std::to_string (hits_) +
+                res.set_content (R"({"access_token":"AT)" + std::to_string (hit) +
                 R"(","token_type":"Bearer","expires_in":3600,"refresh_token":"RT1","scope":"s1"})",
                 "application/json");
             } else if (req.path == "/token-plain") {
@@ -105,6 +109,17 @@ class MockTokenServer {
                     res.set_content (R"({"access_token":"FRESH-AFTER-REJECT","expires_in":3600})",
                     "application/json");
                 }
+            } else if (req.path == "/token-hang") {
+                hang ();
+            } else if (req.path == "/refresh-rejected-then-hang") {
+                if (grant == "refresh_token") {
+                    std::this_thread::sleep_for (
+                    std::chrono::milliseconds (SLOW_REFRESH_REJECT_MS));
+                    res.status = 400;
+                    res.set_content (R"({"error":"invalid_grant"})", "application/json");
+                } else {
+                    hang ();
+                }
             } else if (req.path == "/token-fail") {
                 res.status = 400;
                 res.set_content (R"({"error":"invalid_client","error_description":"bad secret"})",
@@ -119,6 +134,8 @@ class MockTokenServer {
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
     }
     ~MockTokenServer () {
+        // Release a hung handler first: httplib's stop() waits for it.
+        released_.store (true, std::memory_order_relaxed);
         svr_.stop ();
         if (thread_.joinable ())
             thread_.join ();
@@ -132,8 +149,11 @@ class MockTokenServer {
         return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
     int hits () const {
-        return hits_;
+        return hits_.load ();
     }
+
+    /// How long `/refresh-rejected-then-hang` takes to reject a refresh.
+    static constexpr int SLOW_REFRESH_REJECT_MS = 600;
     const std::string& last_body () const {
         return last_body_;
     }
@@ -157,9 +177,20 @@ class MockTokenServer {
     }
 
     private:
+    /// Holds the handler until teardown, or a hard cap past any client's
+    /// bound, so a leaked handler cannot wedge the test binary.
+    void hang () const {
+        const auto cap = std::chrono::steady_clock::now () + std::chrono::seconds (40);
+        while (!released_.load (std::memory_order_relaxed) &&
+        std::chrono::steady_clock::now () < cap) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+    }
+
     httplib::Server svr_;
     int port_ = 0;
-    int hits_ = 0;
+    std::atomic<int> hits_{ 0 };
+    std::atomic<bool> released_{ false };
     std::string last_path_, last_target_, last_body_, last_auth_, last_content_type_;
     httplib::Headers last_headers_;
     std::thread thread_;

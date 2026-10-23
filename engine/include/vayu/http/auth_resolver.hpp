@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/target_policy.hpp"
 #include "vayu/types.hpp"
@@ -154,7 +155,8 @@ struct AuthApplyResult {
  * header already exists - matched case-insensitively). `db` is reserved for
  * oauth2 token lookup and may be null; `cancel` is the token request's
  * `ClientConfig::cancel` (issue #2683), set only inside a management-API
- * handler.
+ * handler. The token request is bounded by `req.timeout_ms`, so set the
+ * resolved request timeout on @p req before applying (#2833).
  *
  * `target_policy`, when the caller states one (#2521), judges an OAuth 2.0
  * config's token endpoints (`refuse_token_endpoints`) before the token cache
@@ -189,10 +191,13 @@ const std::atomic<bool>* cancel   = nullptr);
  * @brief Route-level pre-flight for POST /run: for oauth2 configs, acquire the
  *        token now (cache-aware, warming the cache for the run worker) so an
  *        unauthorizable run is rejected before it is created. No-op for every
- *        other mode. `target_policy` and `cancel` as `apply_auth`'s.
+ *        other mode. `timeout_ms` is the run's resolved request timeout,
+ *        which bounds the token request (#2833); `target_policy` and `cancel`
+ *        as `apply_auth`'s.
  */
 AuthApplyResult preflight_auth (const nlohmann::json& auth,
 vayu::db::Database& db,
+int timeout_ms,
 const TargetPolicy* target_policy = nullptr,
 const std::atomic<bool>* cancel   = nullptr);
 
@@ -219,6 +224,9 @@ struct AuthRefreshPlan {
     std::string header_name;  ///< Header the token was placed on.
     std::string header_value; ///< Value currently on the built request.
     int64_t expires_at_ms = 0; ///< Absolute expiry (ms since epoch) of that token.
+    /// The run's resolved request timeout, which bounds every refresh (#2833).
+    /// Taken from the built request, which carries it.
+    int timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
 };
 
 /**

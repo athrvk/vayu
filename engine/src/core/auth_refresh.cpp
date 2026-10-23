@@ -163,7 +163,7 @@ const AuthRefreshTuning& tuning) {
         }
 
         auto result = vayu::http::oauth::acquire_token (db, state->config (),
-        /*force_refresh=*/true, std::nullopt);
+        /*force_refresh=*/true, std::nullopt, state->timeout_ms ());
 
         if (const auto* err = std::get_if<vayu::http::oauth::TokenError> (&result)) {
             // Reported, never fatal: the run keeps sending the credential it

@@ -2896,8 +2896,9 @@ nlohmann::json& scenario_manifest) {
 std::optional<RouteError> preflight_run_auth (RouteContext& ctx,
 const nlohmann::json& json,
 const vayu::http::TargetPolicy* target_policy) {
-    auto preflight = vayu::http::preflight_auth (
-    json.value ("auth", nlohmann::json ()), ctx.db, target_policy, &ctx.server_stopping);
+    auto preflight =
+    vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db,
+    resolve_request_timeout_ms (json, ctx.db), target_policy, &ctx.server_stopping);
     if (!preflight.ok) {
         vayu::utils::log_warning (
         "http", "POST /runs - Auth pre-flight failed: " + preflight.message);

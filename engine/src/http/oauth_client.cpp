@@ -136,13 +136,64 @@ void apply_client_auth (TokenRequest& req, const nlohmann::json& config) {
     vayu::utils::url_encode (client_secret));
 }
 
+/// One bound across every post an acquisition makes (#2833): a refresh the
+/// provider rejects falls through to a fresh grant, and the grant gets what
+/// the refresh left, never a second full timeout.
+class TokenDeadline {
+    public:
+    explicit TokenDeadline (int timeout_ms)
+    : timeout_ms_ (timeout_ms),
+      at_ (std::chrono::steady_clock::now () + std::chrono::milliseconds (timeout_ms)) {
+    }
+
+    [[nodiscard]] int timeout_ms () const {
+        return timeout_ms_;
+    }
+
+    /// What is left of the bound, never negative.
+    [[nodiscard]] int remaining_ms () const {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds> (
+        at_ - std::chrono::steady_clock::now ())
+                          .count ();
+        return static_cast<int> (std::max<int64_t> (left, 0));
+    }
+
+    private:
+    int timeout_ms_;
+    std::chrono::steady_clock::time_point at_;
+};
+
+TokenError token_timeout (const TokenDeadline& deadline) {
+    return TokenError{ 504, "oauth2_timeout",
+        "Token request timed out after " + std::to_string (deadline.timeout_ms ()) +
+        " ms (Default request timeout)" };
+}
+
+/// A token request that got no answer. Running out of time is reported as the
+/// timeout it is; anything else, a cancel from `Server::stop()` included,
+/// stays a network error.
+TokenError transport_failure (vayu::ErrorCode code,
+const std::string& detail,
+const TokenDeadline& deadline) {
+    if (code == vayu::ErrorCode::Timeout) {
+        return token_timeout (deadline);
+    }
+    return TokenError{ 502, "oauth2_network_error", "Token request failed: " + detail };
+}
+
 std::variant<vayu::db::OAuthToken, TokenError> post_token_request (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& url,
 TokenRequest& req,
 const std::string& key,
+const TokenDeadline& deadline,
 double* network_ms,
 const std::atomic<bool>* cancel) {
+    const int remaining_ms = deadline.remaining_ms ();
+    if (remaining_ms <= 0) {
+        // Never handed to curl, which reads a zero timeout as no bound at all.
+        return token_timeout (deadline);
+    }
     std::string target = url;
     if (!req.query.empty ()) {
         target.push_back (target.find ('?') == std::string::npos ? '?' : '&');
@@ -158,21 +209,20 @@ const std::atomic<bool>* cancel) {
     client_config.cancel    = cancel;
     vayu::http::Client client (client_config);
     const auto sent_at = std::chrono::steady_clock::now ();
-    auto result = client.post (target, vayu::utils::form_encode (req.form), req.headers);
+    auto result        = client.post (
+    target, vayu::utils::form_encode (req.form), remaining_ms, req.headers);
     if (network_ms != nullptr) {
         *network_ms += std::chrono::duration<double, std::milli> (
         std::chrono::steady_clock::now () - sent_at)
                        .count ();
     }
     if (!result.is_ok ()) {
-        return TokenError{ 502, "oauth2_network_error",
-            "Token request failed: " + client.last_error () };
+        return transport_failure (result.error ().code, client.last_error (), deadline);
     }
     const auto& resp = result.value ();
     if (resp.has_error ()) {
-        return TokenError{ 502, "oauth2_network_error",
-            "Token request failed: " +
-            (resp.error_message.empty () ? "connection error" : resp.error_message) };
+        return transport_failure (resp.error_code,
+        resp.error_message.empty () ? "connection error" : resp.error_message, deadline);
     }
 
     auto body = parse_token_body (resp.body);
@@ -372,6 +422,7 @@ const std::string& key,
 const std::string& token_url,
 bool force_refresh,
 int64_t now,
+const TokenDeadline& deadline,
 double* network_ms,
 const std::atomic<bool>* cancel) {
     // Cache hit
@@ -393,8 +444,8 @@ const std::atomic<bool>* cancel) {
 
             vayu::utils::log_info (
             "oauth", "OAuth2: refreshing token", { { "url", refresh_url } });
-            auto refreshed =
-            post_token_request (db, config, refresh_url, req, key, network_ms, cancel);
+            auto refreshed = post_token_request (
+            db, config, refresh_url, req, key, deadline, network_ms, cancel);
             if (auto* token = std::get_if<vayu::db::OAuthToken> (&refreshed)) {
                 // Rotation: keep the previous refresh token when the provider
                 // did not issue a new one.
@@ -459,6 +510,7 @@ std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database
 const nlohmann::json& config,
 bool force_refresh,
 const std::optional<InteractiveExchange>& interactive,
+int timeout_ms,
 double* network_ms,
 const std::atomic<bool>* cancel) {
     if (!config.is_object ()) {
@@ -480,6 +532,7 @@ const std::atomic<bool>* cancel) {
 
     const std::string key = cache_key (config);
     const int64_t now     = now_ms ();
+    const TokenDeadline deadline (timeout_ms);
 
     // An interactive call carries an authorization code that only the exchange
     // can spend, so no cached token (fresh, expired or refreshable) may answer
@@ -487,7 +540,7 @@ const std::atomic<bool>* cancel) {
     // adds nothing here.
     if (!interactive.has_value ()) {
         if (auto answer = token_from_cache (db, config, key, token_url,
-            force_refresh, now, network_ms, cancel)) {
+            force_refresh, now, deadline, network_ms, cancel)) {
             return *answer;
         }
     }
@@ -499,7 +552,7 @@ const std::atomic<bool>* cancel) {
 
     vayu::utils::log_info ("oauth", "OAuth2: requesting token",
     { { "grant", grant }, { "url", token_url } });
-    return post_token_request (db, config, token_url, req, key, network_ms, cancel);
+    return post_token_request (db, config, token_url, req, key, deadline, network_ms, cancel);
 }
 
 nlohmann::json serialize_token (const vayu::db::OAuthToken& t) {

@@ -244,9 +244,15 @@ class Client {
 
     /**
      * @brief Convenience method for POST requests
+     *
+     * @param timeout_ms The transfer's whole bound. Required, with no default,
+     *        so a caller states the resolved request timeout rather than
+     *        inheriting `Request::timeout_ms`'s compiled-in one (#2833).
      */
-    [[nodiscard]] Result<Response>
-    post (const std::string& url, const std::string& body, const Headers& headers = {});
+    [[nodiscard]] Result<Response> post (const std::string& url,
+    const std::string& body,
+    int timeout_ms,
+    const Headers& headers = {});
 
     /**
      * @brief Get the last error message from curl

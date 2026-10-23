@@ -15,6 +15,7 @@
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/oauth_client.hpp"
 
 using nlohmann::json;
@@ -23,6 +24,10 @@ using vayu::tests::MockTokenServer;
 using vayu::tests::parse_form;
 
 namespace {
+
+/// The bound every token request here is given: the engine's own default, so
+/// none of these tests is about the timeout.
+constexpr int TOKEN_TIMEOUT_MS = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
 
 int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -83,7 +88,7 @@ class OAuthClientTest : public ::testing::Test {
         const oauth::InteractiveExchange exchange{ "CODE123", "VERIFIER456",
             "http://127.0.0.1:9999/callback" };
 
-        auto result = oauth::acquire_token (*db_, config, force, exchange);
+        auto result = oauth::acquire_token (*db_, config, force, exchange, TOKEN_TIMEOUT_MS);
 
         ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
         EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "AT-PLAIN");
@@ -255,7 +260,7 @@ TEST (OAuthExpiry, SkewAndNonExpiring) {
 
 TEST_F (OAuthClientTest, FetchesPersistsAndCaches) {
     MockTokenServer idp;
-    auto r1 = oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt);
+    auto r1 = oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r1));
     const auto& t1 = std::get<vayu::db::OAuthToken> (r1);
     EXPECT_EQ (t1.access_token, "AT1");
@@ -265,7 +270,7 @@ TEST_F (OAuthClientTest, FetchesPersistsAndCaches) {
     EXPECT_EQ (idp.hits (), 1);
 
     // Second acquisition is a cache hit - no extra IdP call.
-    auto r2 = oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt);
+    auto r2 = oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r2));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (r2).access_token, "AT1");
     EXPECT_EQ (idp.hits (), 1);
@@ -281,19 +286,21 @@ TEST_F (OAuthClientTest, FetchesPersistsAndCaches) {
 TEST_F (OAuthClientTest, NetworkMsCountsTheProviderRoundTripAndNotACacheHit) {
     MockTokenServer idp;
     double network_ms = 0.0;
-    oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, &network_ms);
+    oauth::acquire_token (
+    *db_, cc_config (idp), false, std::nullopt, TOKEN_TIMEOUT_MS, &network_ms);
     ASSERT_EQ (idp.hits (), 1);
     EXPECT_GT (network_ms, 0.0);
 
     const double after_fetch = network_ms;
-    oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, &network_ms);
+    oauth::acquire_token (
+    *db_, cc_config (idp), false, std::nullopt, TOKEN_TIMEOUT_MS, &network_ms);
     ASSERT_EQ (idp.hits (), 1) << "the second call must be a cache hit";
     EXPECT_EQ (network_ms, after_fetch);
 }
 
 TEST_F (OAuthClientTest, BasicHeaderClientAuthIsDefault) {
     MockTokenServer idp;
-    oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt);
+    oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt, TOKEN_TIMEOUT_MS);
     // base64("cid:sec")
     EXPECT_EQ (idp.last_auth (), "Basic Y2lkOnNlYw==");
     auto form = parse_form (idp.last_body ());
@@ -304,7 +311,7 @@ TEST_F (OAuthClientTest, BodyPlacementPutsCredsInForm) {
     MockTokenServer idp;
     auto config                    = cc_config (idp);
     config["credentialsPlacement"] = "body";
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     EXPECT_TRUE (idp.last_auth ().empty ());
     auto form = parse_form (idp.last_body ());
     EXPECT_EQ (form["client_id"], "cid");
@@ -317,7 +324,7 @@ TEST_F (OAuthClientTest, BasicHeaderFormEncodesReservedCharactersInTheSecret) {
     MockTokenServer idp;
     auto config            = cc_config (idp);
     config["clientSecret"] = "a+b/c=";
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     // base64("cid:a%2Bb%2Fc%3D")
     EXPECT_EQ (idp.last_auth (), "Basic Y2lkOmElMkJiJTJGYyUzRA==");
 }
@@ -328,7 +335,7 @@ TEST_F (OAuthClientTest, BodyPlacementFormEncodesReservedCharactersInTheSecret) 
     auto config                    = cc_config (idp);
     config["clientSecret"]         = "a+b/c=";
     config["credentialsPlacement"] = "body";
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     EXPECT_TRUE (idp.last_auth ().empty ());
     EXPECT_EQ (parse_form (idp.last_body ())["client_secret"], "a%2Bb%2Fc%3D");
 }
@@ -337,7 +344,7 @@ TEST_F (OAuthClientTest, PublicClientSendsClientIdInBody) {
     MockTokenServer idp;
     auto config = cc_config (idp);
     config.erase ("clientSecret");
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     EXPECT_TRUE (idp.last_auth ().empty ());
     EXPECT_EQ (parse_form (idp.last_body ())["client_id"], "cid");
 }
@@ -347,7 +354,7 @@ TEST_F (OAuthClientTest, PasswordGrantSendsUserCredsAndScope) {
     json config = { { "grantType", "password" }, { "accessTokenUrl", idp.url ("/token") },
         { "clientId", "cid" }, { "clientSecret", "sec" }, { "username", "u" },
         { "password", "p w" }, { "scope", "read write" } };
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     auto form = parse_form (idp.last_body ());
     EXPECT_EQ (form["grant_type"], "password");
@@ -381,7 +388,7 @@ TEST_F (OAuthClientTest, TokenParamsRideWhereSendAsSays) {
     { { "key", "X-Trace" }, { "value", "abc" }, { "sendAs", "header" } },
     });
 
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
 
     const auto form = parse_form (idp.last_body ());
     EXPECT_EQ (form.at ("audience"), "https%3A%2F%2Fapi.example");
@@ -412,7 +419,7 @@ TEST_F (OAuthClientTest, TokenParamsNeverRepeatWhatTheEngineWrote) {
     { { "key", "off" }, { "value", "1" }, { "enabled", false } },
     });
 
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
 
     const std::string& body = idp.last_body ();
     EXPECT_EQ (form_occurrences (body, "audience"), 1u);
@@ -437,7 +444,7 @@ TEST_F (OAuthClientTest, ADisabledTokenParamIsNotSent) {
     config["tokenParams"] = json::array (
     { { { "key", "audience" }, { "value", "api" }, { "enabled", false } } });
 
-    oauth::acquire_token (*db_, config, false, std::nullopt);
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
 
     EXPECT_EQ (parse_form (idp.last_body ()).count ("audience"), 0u);
 }
@@ -458,7 +465,7 @@ TEST_F (OAuthClientTest, RefreshSendsRefreshParamsOnly) {
     });
     db_->save_oauth_token (seeded_row (config, 7'200'000));
 
-    auto result = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto result = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
 
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "REFRESHED");
@@ -483,8 +490,8 @@ TEST_F (OAuthClientTest, AnAudienceRowSeparatesCachedTokens) {
     second["tokenParams"] =
     json::array ({ { { "key", "audience" }, { "value", "b" } } });
 
-    auto r1 = oauth::acquire_token (*db_, first, false, std::nullopt);
-    auto r2 = oauth::acquire_token (*db_, second, false, std::nullopt);
+    auto r1 = oauth::acquire_token (*db_, first, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    auto r2 = oauth::acquire_token (*db_, second, false, std::nullopt, TOKEN_TIMEOUT_MS);
 
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r1));
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r2));
@@ -495,20 +502,22 @@ TEST_F (OAuthClientTest, AnAudienceRowSeparatesCachedTokens) {
 
 TEST_F (OAuthClientTest, MissingExpiresInMeansNonExpiring) {
     MockTokenServer idp;
-    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-plain"), false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-plain"), false,
+    std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     const auto& t = std::get<vayu::db::OAuthToken> (r);
     EXPECT_EQ (t.expires_in, 0);
     EXPECT_EQ (t.token_type, "Bearer"); // defaulted
     // Cache hit on re-acquire (never expires)
-    oauth::acquire_token (*db_, cc_config (idp, "/token-plain"), false, std::nullopt);
+    oauth::acquire_token (*db_, cc_config (idp, "/token-plain"), false,
+    std::nullopt, TOKEN_TIMEOUT_MS);
     EXPECT_EQ (idp.hits (), 1);
 }
 
 TEST_F (OAuthClientTest, FormEncodedResponseAndStringExpiresIn) {
     MockTokenServer idp;
-    auto r =
-    oauth::acquire_token (*db_, cc_config (idp, "/token-legacy"), false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-legacy"),
+    false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     const auto& t = std::get<vayu::db::OAuthToken> (r);
     EXPECT_EQ (t.access_token, "legacy");
@@ -528,7 +537,7 @@ TEST_F (OAuthClientTest, ExpiredTokenRefreshesAndKeepsOldRefreshToken) {
     stale.created_at    = now_ms () - 3'600'000;
     db_->save_oauth_token (stale);
 
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     const auto& t = std::get<vayu::db::OAuthToken> (r);
     EXPECT_EQ (t.access_token, "REFRESHED");
@@ -555,7 +564,7 @@ TEST_F (OAuthClientTest, RejectedRefreshFallsBackToFreshGrant) {
     stale.created_at    = now_ms () - 3'600'000;
     db_->save_oauth_token (stale);
 
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (r).access_token, "FRESH-AFTER-REJECT");
     EXPECT_EQ (idp.hits (), 2); // failed refresh + fresh grant
@@ -563,7 +572,8 @@ TEST_F (OAuthClientTest, RejectedRefreshFallsBackToFreshGrant) {
 
 TEST_F (OAuthClientTest, ProviderErrorIsStructured) {
     MockTokenServer idp;
-    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-fail"), false, std::nullopt);
+    auto r = oauth::acquire_token (
+    *db_, cc_config (idp, "/token-fail"), false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     const auto& err = std::get<oauth::TokenError> (r);
     EXPECT_EQ (err.http_status, 401);
@@ -576,8 +586,8 @@ TEST_F (OAuthClientTest, ProviderErrorIsStructured) {
 // The bound is inclusive: a token body nested exactly to it still parses.
 TEST_F (OAuthClientTest, ATokenBodyAtTheDepthBoundIsAccepted) {
     MockTokenServer idp;
-    auto r = oauth::acquire_token (
-    *db_, cc_config (idp, "/token-at-depth-bound"), false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-at-depth-bound"),
+    false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (r).access_token, "AT-DEEP");
 }
@@ -588,7 +598,7 @@ TEST_F (OAuthClientTest, ATokenBodyAtTheDepthBoundIsAccepted) {
 TEST_F (OAuthClientTest, ATokenBodyPastTheDepthBoundFailsCleanly) {
     MockTokenServer idp;
     const auto config = cc_config (idp, "/token-past-depth-bound");
-    auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     const auto& err = std::get<oauth::TokenError> (r);
     EXPECT_EQ (err.code, "oauth2_provider_error");
@@ -599,16 +609,65 @@ TEST_F (OAuthClientTest, ATokenBodyPastTheDepthBoundFailsCleanly) {
 TEST_F (OAuthClientTest, ConnectionFailureIsNetworkError) {
     json config = { { "grantType", "client_credentials" },
         { "accessTokenUrl", "http://127.0.0.1:1/token" }, { "clientId", "cid" } };
-    auto r      = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     EXPECT_EQ (std::get<oauth::TokenError> (r).http_status, 502);
     EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_network_error");
 }
 
+// A token endpoint that never answers is a timeout at the bound the caller
+// passed (#2833), not the compiled-in 30 s a bare `Request` carries: healthy,
+// this gives up after about 1 s; with `Client::post` ignoring its timeout it
+// waits 30 s. The 15 s bound sits between the two.
+TEST_F (OAuthClientTest, ATokenEndpointThatNeverAnswersTimesOutAtTheGivenBound) {
+    MockTokenServer idp;
+    const auto started = std::chrono::steady_clock::now ();
+    auto r             = oauth::acquire_token (
+    *db_, cc_config (idp, "/token-hang"), false, std::nullopt, 1000);
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
+    const auto& err = std::get<oauth::TokenError> (r);
+    EXPECT_EQ (err.http_status, 504);
+    EXPECT_EQ (err.code, "oauth2_timeout");
+    EXPECT_NE (err.message.find ("1000 ms"), std::string::npos) << err.message;
+    EXPECT_LT (elapsed, std::chrono::seconds (15));
+}
+
+// One deadline covers the whole acquisition: a refresh rejected after 600 ms
+// leaves the fresh grant the remaining 400 ms, not a second full second.
+// Healthy, the call ends at about 1000 ms; with a fresh bound per post it ends
+// at about 1600 ms. The 1400 ms bound sits between: an upper bound, but 400 ms
+// above the healthy reading, and the broken one can only be slower.
+TEST_F (OAuthClientTest, ARejectedRefreshLeavesTheFreshGrantOnlyWhatRemains) {
+    MockTokenServer idp;
+    auto config = cc_config (idp, "/refresh-rejected-then-hang");
+
+    vayu::db::OAuthToken stale;
+    stale.cache_key     = oauth::cache_key (config);
+    stale.access_token  = "OLD";
+    stale.refresh_token = "RT_DEAD";
+    stale.expires_in    = 60;
+    stale.created_at    = now_ms () - 3'600'000;
+    db_->save_oauth_token (stale);
+
+    const auto started = std::chrono::steady_clock::now ();
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, 1000);
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
+    EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_timeout");
+    EXPECT_EQ (idp.hits (), 2)
+    << "the rejected refresh must fall through to a grant";
+    static_assert (MockTokenServer::SLOW_REFRESH_REJECT_MS == 600,
+    "the bound below assumes the refresh is rejected 600 ms in");
+    EXPECT_LT (elapsed, std::chrono::milliseconds (1400));
+}
+
 TEST_F (OAuthClientTest, AuthCodeWithoutInteractiveIs409) {
     json config = { { "grantType", "authorization_code" },
         { "accessTokenUrl", "https://idp.example/token" }, { "clientId", "cid" } };
-    auto r      = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
     EXPECT_EQ (std::get<oauth::TokenError> (r).http_status, 409);
     EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_interactive_required");
@@ -620,7 +679,7 @@ TEST_F (OAuthClientTest, AuthCodeExchangeSendsCodeVerifierAndRedirect) {
         { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
         { "clientSecret", "sec" } };
     oauth::InteractiveExchange ex{ "CODE123", "VERIFIER456", "http://127.0.0.1:9999/callback" };
-    auto r = oauth::acquire_token (*db_, config, false, ex);
+    auto r = oauth::acquire_token (*db_, config, false, ex, TOKEN_TIMEOUT_MS);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
     auto form = parse_form (idp.last_body ());
     EXPECT_EQ (form["grant_type"], "authorization_code");
@@ -656,7 +715,7 @@ TEST_F (OAuthClientTest, NonInteractiveStillAnswersFromTheCache) {
     const auto config = auth_code_config (idp);
     db_->save_oauth_token (seeded_row (config, 0));
 
-    auto result = oauth::acquire_token (*db_, config, false, std::nullopt);
+    auto result = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
 
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "OLD");
@@ -671,7 +730,7 @@ TEST_F (OAuthClientTest, InvalidConfigsAre400) {
     json{ { "grantType", "client_credentials" }, { "accessTokenUrl", "https://x" } },
     json{ { "grantType", "implicit" }, { "accessTokenUrl", "https://x" },
     { "clientId", "c" } } }) {
-        auto r = oauth::acquire_token (*db_, config, false, std::nullopt);
+        auto r = oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
         ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
         EXPECT_EQ (std::get<oauth::TokenError> (r).http_status, 400);
         EXPECT_EQ (std::get<oauth::TokenError> (r).code, "oauth2_invalid_config");
