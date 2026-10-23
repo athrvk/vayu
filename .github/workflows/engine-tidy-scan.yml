@@ -328,11 +328,9 @@ jobs:
   # never reach it. The artifact and summary stay ungated - they are what
   # that reviewer needs, and they file nothing.
   #
-  # **A leg that ends `cancelled` files nothing** - a superseded run, or a
-  # `timeout-minutes` expiry - because `needs.scan.result` is `failure` only
-  # where the in-job `failure()` this replaced was true, and only a failed leg
-  # writes the `tidy-scan-failed` marker the script looks for. Unchanged by the
-  # move.
+  # **A cancelled leg (a superseded run) files nothing**: `needs.scan.result` is
+  # `failure` only when a leg failed, and only a failed leg writes the
+  # `tidy-scan-failed` marker the script looks for.
   #
   # The body is the report itself rather than a log excerpt: unlike a
   # sanitizer log, this scan's output is already the deduplicated finding

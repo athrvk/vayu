@@ -398,9 +398,8 @@ jobs:
   # from a fork regardless of the `permissions:` block, so filing would have
   # failed there. It no longer runs there at all.
   #
-  # **A leg that ends `cancelled` files nothing** - a superseded run, or a
-  # `timeout-minutes` expiry - because `needs.sanitize.result` is `failure` only
-  # where the in-job `failure()` this replaced was true. Unchanged by the move.
+  # **A cancelled leg (a superseded run) files nothing**: `needs.sanitize.result`
+  # is `failure` only when a leg failed, and only a failed leg uploads.
   report:
     name: File or update the sanitizer-failure issues
     needs: sanitize

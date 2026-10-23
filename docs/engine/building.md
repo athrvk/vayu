@@ -352,9 +352,7 @@ exist on `master` yet, and had to be verified and closed by hand once the pull
 request merged green. The log and the artifact are still uploaded on a pull
 request, because those are what the reviewer needs and they file nothing.
 
-A leg that is cancelled (a superseded run, or a `timeout-minutes` expiry) is
-not a `failure` and files nothing, as it did when the filing step ran inside
-the leg.
+A cancelled leg (a superseded run) is not a `failure` and files nothing.
 
 ### What the matrix found, and where it stands
 
