@@ -36,6 +36,7 @@ import {
 	ToolArgError,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { describeRun, resolveBaseline, runTypeRefusal } from "./run-housekeeping.js";
 import { runComparisonSchema } from "./output-schemas.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
@@ -76,6 +77,7 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "stop_run",
 		category: "load",
 		invalidates: ["run"],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description:
 			"Stop a run that is still in progress: a load test, or a streaming Design-mode send that is holding its connection open. The run ends where it is and keeps what it already recorded rather than being discarded, so get_run_report and get_run_samples still answer for it afterwards. Read the status in the result: a stream that closes within the engine's 5 s settle budget comes back `stopped`, and one that has not settled yet comes back `running` with a message saying the stop was signalled - it is not a failure, and re-reading the run reports the end state. Calling it on a run that has already finished is not an error: the result reports the status it was already in. A run id the engine does not know is an error.",
 		annotations: {
@@ -93,6 +95,7 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "set_run_baseline",
 		category: "write",
 		invalidates: ["run"],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
 			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. " +
 			GUARDED_WRITE_SENTENCE +
@@ -131,6 +134,7 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "delete_run",
 		category: "write",
 		invalidates: ["run"],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description:
 			"Delete a run and everything recorded against it - its report, metrics, captured samples and step traces. " +
 			GUARDED_WRITE_SENTENCE +
@@ -155,12 +159,11 @@ export const RUN_TOOLS: McpTool[] = [
 			let stored: Record<string, unknown>;
 			try {
 				const value = await ctx.client.getRun(runId, signal);
-				if (!isRecord(value)) return errorResult(`No run with id "${runId}".`, "not_found");
+				if (!isRecord(value)) {
+					return errorResult(unknownIdText(ID_KINDS.run, runId), "not_found");
+				}
 				stored = value;
 			} catch (err) {
-				if (err instanceof EngineRequestError && err.status === 404) {
-					return errorResult(`No run with id "${runId}".`, "not_found");
-				}
 				return engineErrorResult(err, ctx);
 			}
 			// The run row is run output: its snapshot `url` can carry a credential,
@@ -199,6 +202,7 @@ export const RUN_TOOLS: McpTool[] = [
 		category: "read",
 		retry: "safe",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. " +
 			RUN_ERROR_DEFINITION_POINTER,
@@ -232,6 +236,7 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "compare_runs",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: ["baseRunId", "targetRunId"] },
 		description:
 			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. Two runs of different types (list_runs' type) are refused, not compared. Read comparability before the deltas: each entry (code, message, base, target) is a way the two runs were not the same experiment - run type, mode, virtual users, target rate, duration (more than 2x apart), status (a stopped run against a completed one), HTTP version, data file, request, compression negotiation, or whether Expect: 100-continue was allowed (expect_continue). An empty list means like for like. When it is not empty, say so before calling anything a regression: a short stopped run always looks slower and lower-throughput than a long one. compressionNegotiationDiffers is the compression entry on its own. " +
 			RUN_ERROR_DEFINITION_POINTER,
@@ -282,6 +287,7 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "export_run_report",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: ["runId", "baseRunId"] },
 		description: (config) =>
 			"Export a finished load run as one self-contained document: the same report the Export menu in Vayu's History saves, returned as its text (Markdown as Markdown, JSON as JSON) rather than wrapped in a result object. It holds the run's aggregates (latency percentiles, throughput, error rate, status-code mix), its budgets and their verdicts, the configuration it ran under and, with `baseRunId` or `baseline: true`, a comparison against a second run. It does NOT hold traces, captured samples, per-tick series or request values - call get_run_samples for the samples and get_run_report for the live report data. Not offered for Design-mode or collection-sequence runs, and refused while the run is still executing. The `html` format is the Export menu's alone and is refused here. " +
 			RUN_ERROR_DEFINITION_POINTER +

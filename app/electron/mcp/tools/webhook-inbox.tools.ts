@@ -28,6 +28,7 @@ import {
 	ToolArgError,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
 import { describeInbox, PAGE_CURSOR_SENTENCE, pagedRead } from "./run-housekeeping.js";
 import { inboxCapturePageSchema, inboxListSchema } from "./output-schemas.js";
@@ -127,6 +128,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		name: "stop_webhook_inbox",
 		category: "execute",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.inbox, idArg: "inboxId" },
 		description:
 			"Stop a webhook inbox's listener and free its port. This is NOT a delete: the inbox stays listed and everything it captured stays readable with get_inbox_captures - use delete_webhook_inbox to remove the record and its captures. Requests sent to the URL after this are refused by the machine, not recorded. An unknown id is an error, not a silent success.",
 		annotations: {
@@ -147,6 +149,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		name: "delete_webhook_inbox",
 		category: "write",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.inbox, idArg: "inboxId" },
 		description:
 			"Delete a webhook inbox: stop its listener if it is still running, drop the record, and destroy every request it captured. " +
 			GUARDED_WRITE_SENTENCE +
@@ -175,8 +178,9 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				const listed = await ctx.client.listInboxes(signal);
 				const rows = isRecord(listed) && Array.isArray(listed.data) ? listed.data : [];
 				const found = rows.find((row) => isRecord(row) && row.inboxId === inboxId);
-				if (!isRecord(found))
-					return errorResult(`No webhook inbox with id "${inboxId}".`, "not_found");
+				if (!isRecord(found)) {
+					return errorResult(unknownIdText(ID_KINDS.inbox, inboxId), "not_found");
+				}
 				inbox = found;
 			} catch (err) {
 				return engineErrorResult(err, ctx);
@@ -201,6 +205,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		category: "read",
 		retry: "safe",
 		invalidates: [],
+		notFound: { ...ID_KINDS.inbox, idArg: "inboxId" },
 		description: (config) =>
 			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +
 			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. ` +
@@ -256,6 +261,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		name: "clear_inbox_captures",
 		category: "write",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.inbox, idArg: "inboxId" },
 		description:
 			"Delete every request a webhook inbox has captured, keeping the listener running on the same URL. Use it to start a fresh assertion window between triggers. " +
 			GUARDED_WRITE_SENTENCE +
@@ -283,6 +289,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		name: "update_inbox_response",
 		category: "execute",
 		invalidates: ["service"],
+		notFound: { ...ID_KINDS.inbox, idArg: "inboxId" },
 		description:
 			"Change what a running webhook inbox answers, live: status, body, headers or delay. The next request to arrive gets the new reply - nothing restarts and no captures are lost - so one inbox can answer 200 for the first trigger and 500 for the next, which is how a sender's retry or error handling gets exercised. This is a merge-patch: fields you omit keep their current value, and `headers` replaces the whole header set rather than merging into it.",
 		annotations: {

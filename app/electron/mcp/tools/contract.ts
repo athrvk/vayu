@@ -273,6 +273,27 @@ export type ToolDescription = string | ((config: McpSafetyConfig) => string);
  */
 export type RetryAdvice = "safe" | "never-blind" | { check: string; noun: string };
 
+/**
+ * A kind of stored object an id argument names, as an unknown-id answer words
+ * it (#2778): `No <noun> with id "..."`, then the tool that lists them.
+ */
+export interface IdKind {
+	/** What the engine's 404 sentence calls it ("Run not found"), lower case. */
+	noun: string;
+	/** The `list_*` tool that shows the ids that do exist. Absent where none does. */
+	list?: string;
+}
+
+/** An {@link IdKind} and the argument that carries its id. */
+export interface NotFoundDeclaration extends IdKind {
+	/**
+	 * The argument holding the id. An array names a tool taking several of one
+	 * kind (`baseRunId`, `targetRunId`): the answer then names an id only when
+	 * the engine's sentence does, since nothing else says which one was missing.
+	 */
+	idArg: string | readonly string[];
+}
+
 export interface McpTool {
 	name: string;
 	description: ToolDescription;
@@ -311,6 +332,16 @@ export interface McpTool {
 	 * tool that declares none gets the generic "check run history" wording.
 	 */
 	retry?: RetryAdvice;
+	/**
+	 * The objects an id argument of this tool names, so an engine 404 reads
+	 * `No run with id "..."` and the list tool instead of the engine's JSON
+	 * (#2778). Declared on every tool with a `<kind>Id` argument; one entry per
+	 * kind when the tool takes several, the entry chosen being the one whose
+	 * `noun` the engine's sentence contains. A tool that does not declare it
+	 * answers `Engine error (404): <body>` on one line. `tools.test.ts` scans
+	 * the registry.
+	 */
+	notFound?: NotFoundDeclaration | readonly NotFoundDeclaration[];
 	handler: (
 		args: Record<string, unknown>,
 		ctx: ToolContext,

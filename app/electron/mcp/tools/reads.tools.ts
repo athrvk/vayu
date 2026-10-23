@@ -12,11 +12,7 @@
  */
 
 import { z } from "zod";
-import {
-	DEFAULT_RUN_PAGE_LIMIT,
-	EngineRequestError,
-	MAX_ENGINE_PAGE_LIMIT,
-} from "../engine-client.js";
+import { DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT } from "../engine-client.js";
 import {
 	RUN_ERROR_DEFINITION_POINTER,
 	RUN_ERROR_DEFINITION_SENTENCE,
@@ -48,6 +44,7 @@ import {
 	requireStr,
 	structuredResult,
 } from "./kit.js";
+import { ID_KINDS } from "./failure.js";
 import {
 	boundRunReport,
 	MAX_INLINE_BODY_BYTES,
@@ -116,24 +113,6 @@ async function presentCollectionPage(page: unknown, ctx: ToolContext): Promise<u
 	if (!isRecord(page) || !Array.isArray(page.data)) return page;
 	const data = await withCurrentDataFileHashes(presentCollections(page.data, ctx), ctx);
 	return { ...page, data };
-}
-
-/**
- * One run's row, with the engine's bare "Run not found" 404 made to name the id
- * the caller asked for: an agent polling several runs cannot tell which one the
- * answer is about otherwise.
- */
-async function readRunRow(
-	ctx: ToolContext,
-	runId: string,
-	signal: AbortSignal | undefined
-): Promise<unknown> {
-	try {
-		return await ctx.client.getRun(runId, signal);
-	} catch (err) {
-		if (!(err instanceof EngineRequestError) || err.status !== 404) throw err;
-		throw new EngineRequestError(err.message, 404, `No run with id "${runId}".`);
-	}
 }
 
 export const READ_TOOLS: McpTool[] = [
@@ -281,6 +260,7 @@ export const READ_TOOLS: McpTool[] = [
 		name: "get_request",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.request, idArg: "requestId" },
 		description: (config) =>
 			'Read one saved request by its id, the (req_...) of a Vayu reference line, without walking list_collections and list_requests. The row is the *whole* stored request, the shape list_requests returns with `fields: "full"`. An id that names no saved request is an error naming 404.' +
 			withheldPointer(config),
@@ -410,6 +390,7 @@ export const READ_TOOLS: McpTool[] = [
 		name: "get_run_report",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
 			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. `metadata.status` is the run's state; while it is `pending` or `running`, the report also carries `partial: true` and a `note`, `summary` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. Read get_run(runId) for whether it is done. " +
 			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
@@ -441,6 +422,7 @@ export const READ_TOOLS: McpTool[] = [
 		name: "get_run",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
 			"Read a run's state: whether it is still going, how far along it is, and what to do next. Returns `id`, `type`, `status` (pending, running, completed, failed or stopped), `terminal` (true once the status is completed, failed or stopped), `startTime`, `endTime` (null while the run is not terminal), `elapsedMs`, `mode`, `concurrency`, `targetRps`, `duration`, `requestId`, `baseline` and `nextStep`. A duration-bound run also carries `plannedDurationMs` and `progress` (0 to 1, elapsed over planned); both are null for an iterations run, a design run or a duration that does not parse, never an estimate. `nextStep` names the poll interval for a run in progress. A stopped run carries no budget verdict. Cheap enough to poll: it never carries the trace, results or the rest of the stored config - get_run_report has those. An id that names no run is an error naming it." +
 			withheldPointer(config, "recorded"),
@@ -454,7 +436,7 @@ export const READ_TOOLS: McpTool[] = [
 		outputSchema: runStatusSchema,
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
-			return callEngineForRunOutput(ctx, () => readRunRow(ctx, runId, signal), {
+			return callEngineForRunOutput(ctx, () => ctx.client.getRun(runId, signal), {
 				bound: (row) => projectRunStatus(row),
 				structured: true,
 				signal,
@@ -465,6 +447,7 @@ export const READ_TOOLS: McpTool[] = [
 		name: "get_run_samples",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
 			"Get the response samples a load run captured - the actual headers and bodies of individual exchanges, which the report's aggregates do not carry. A load run keeps 1 in 100 responses, up to 1000 per run, unless `start_load_run` set `responseSamplePeriod` (1 keeps every response) or `maxResponseSamples` (0 keeps none); a run that captured nothing returns an empty page, not an error. " +
 			`Each sample carries \`resultId\`, so it joins against the report's \`results[].id\`. A binary body is reported as \`binary: true\` rather than as text, and a body the engine cut at its own capture cap carries \`bodyTruncated\`. BOUNDED: ${DEFAULT_RUN_SAMPLE_LIMIT} samples per call by default, ${MAX_ENGINE_PAGE_LIMIT} at most - a larger \`limit\` is refused, not clamped. ` +
@@ -516,6 +499,7 @@ export const READ_TOOLS: McpTool[] = [
 		name: "get_run_timeseries",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description:
 			"Get a completed run's per-tick time series: RPS, latency percentiles, error rate and status mix, one row per tick, oldest first. This is the stored history the app's charts are drawn from - use it to see how a run behaved over time, where get_run_report gives the totals and get_live_metrics the last few ticks of a run still going. A run with no ticks (a design run, or a load run that never started) returns an empty page, not an error. A tick's latency_p50_ms / latency_p95_ms / latency_p99_ms cover its second, and are absent from a second in which nothing completed: a stall, not a 0 ms answer. A run stored by an older engine has 0 there instead. " +
 			`${RUN_ERROR_DEFINITION_POINTER} ` +
@@ -566,6 +550,7 @@ export const READ_TOOLS: McpTool[] = [
 		name: "get_run_monitor",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description:
 			"Get the server vitals scraped during a run - the target's own CPU, memory and load, sampled on the monitor's cadence rather than the tick cadence, so these rows do not line up with get_run_timeseries row for row. Answers 'was the target saturated?' beside the client-side latency the report shows. Only a run started with a `monitor` block has any; any other run returns an empty page, not an error. " +
 			`BOUNDED the same way as get_run_timeseries: ${DEFAULT_RUN_SERIES_LIMIT} samples by default, ${MAX_RUN_SERIES_LIMIT} at most, refused above that. ` +

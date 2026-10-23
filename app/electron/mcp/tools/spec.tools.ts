@@ -27,6 +27,7 @@ import {
 	withCaveat,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { boundText } from "./inline-body-bounds.js";
 import {
 	bindPreviewSchema,
@@ -62,6 +63,10 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "get_spec",
 		category: "read",
 		invalidates: [],
+		notFound: [
+			{ ...ID_KINDS.collection, idArg: "collectionId" },
+			{ ...ID_KINDS.spec, idArg: "specId" },
+		],
 		description:
 			"Read the OpenAPI document a collection is bound to - where it came from, when it was fetched, its content hash and its size - by `collectionId` (resolving the collection's binding) or by `specId` directly. The document text is NOT included by default: a real spec runs to megabytes, so pass includeContent: true to get it, capped at 32 KB with `contentBytes` reporting the true size. A collection that binds nothing answers `bound: false` rather than failing.",
 		annotations: {
@@ -117,7 +122,10 @@ export const SPEC_TOOLS: McpTool[] = [
 					return engineErrorResult(err, ctx);
 				}
 				if (collection === null) {
-					return errorResult(`No collection with id "${collectionId}".`, "not_found");
+					return errorResult(
+						unknownIdText(ID_KINDS.collection, collectionId),
+						"not_found"
+					);
 				}
 				binding = readSpecBinding(collection);
 				// Unbound is an answer, not a failure: "which spec does this
@@ -172,6 +180,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "diff_spec",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description: (config) =>
 			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. This tool is the read half: `sync_spec` applies the safe half of a drift." +
 			withheldPointer(config),
@@ -267,6 +276,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		// declaring one would leave an open request list showing rows this call
 		// has already rewritten.
 		invalidates: ["collection", "request"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Apply a drifted OpenAPI contract to the collection bound to it - the safe half of it. " +
 			GUARDED_WRITE_SENTENCE +
@@ -409,6 +419,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "preview_spec_bind",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Say what bind_spec would do with a document, and store nothing: how many of the collection's requests it would record an operation on, which requests would LOSE the operation they carry today because this document does not declare it (`wouldClear`), which requests match no operation, and which operations match no request. Uses the engine's own reader and matching rule, the ones bind_spec uses, over the collection's whole subtree. Lists are capped at " +
 			MAX_SPEC_DIFF_ENTRIES +
@@ -456,6 +467,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		// immutable under its id, and this creates a new one rather than
 		// changing any cached row.
 		invalidates: ["collection", "request"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Bind a collection to an OpenAPI document, so its runs report contract coverage and its responses are schema-checked. " +
 			GUARDED_WRITE_SENTENCE +
@@ -519,6 +531,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "export_spec",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Export a collection as an OpenAPI document - its own bound document updated, or a skeleton describing its requests when it binds none. Reads only: nothing is stored, and the collection is left exactly as it is. A bound export patches the stored document, so everything Vayu does not model (vendor extensions, security schemes, unreferenced components) survives and operations no request claims are removed; a skeleton is a starting point rather than a contract, with no schema Vayu did not read off a stored example body. A bound export keeps the contract by default (examples and parameter values only); `mode` set to `full` writes every edit the collection holds into the document instead - names, new rows, bodies, auth, and new operations for requests the document never declared. Everything OpenAPI has no member for (folders, scripts, settings, variables) travels as `x-vayu-*` extensions Vayu reads back, and credentials are always written empty - auth secrets, variables marked secret, and by name the header, parameter and URL values and a saved example's response headers; bodies, examples and scripts are not judged and are written as stored. `notes` says what the export could not carry - a request with no operation identity, an example whose media type nobody recorded, how many credentials it left out (`secretsOmitted`) - and the document text is capped at 32 KB with `contentBytes` reporting the true size, so a large spec comes back described rather than whole.",
 		annotations: {
@@ -577,6 +590,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "export_postman",
 		category: "read",
 		invalidates: [],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description:
 			"Export a collection as a Postman Collection v2.1 document - its folders, requests, variables, auth and scripts, in the JSON Postman imports. Reads only: nothing is stored, and the collection is left exactly as it is. Credentials are always written empty here - auth secrets, variables marked secret, and by name the header, parameter and URL values, a saved example's recorded request and response headers, and cookie values - and `notes.secretsOmitted` counts them; bodies and scripts are not judged and are written as stored; the app's export dialog is where a person can choose to include them. `notes` also lists what Postman has no place for (`notCarried`, one entry per kind with a count and the engine's sentence), so nothing is dropped without saying so. The document text is capped at 32 KB, with `contentBytes` reporting the true size.",
 		annotations: {
@@ -620,6 +634,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "unbind_spec",
 		category: "write",
 		invalidates: ["collectionRow"],
+		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description: (config) =>
 			"Detach a collection from the OpenAPI document it is bound to. " +
 			GUARDED_WRITE_SENTENCE +
@@ -649,7 +664,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			if (collection === null) {
-				return errorResult(`No collection with id "${collectionId}".`, "not_found");
+				return errorResult(unknownIdText(ID_KINDS.collection, collectionId), "not_found");
 			}
 			const binding = readSpecBinding(collection);
 			// Read first so an unbound collection is reported as already unbound

@@ -1917,7 +1917,7 @@ describe("destructive deletes ask first", () => {
 			getRequest: vi
 				.fn()
 				.mockRejectedValue(
-					new EngineRequestError("Engine responded 404", 404, "not found")
+					new EngineRequestError("Engine responded 404", 404, "Request not found")
 				),
 		});
 		const res = await dispatchTool(
@@ -1926,7 +1926,7 @@ describe("destructive deletes ask first", () => {
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toContain("req_gone");
+		expect(firstText(res)).toContain('No request with id "req_gone"');
 		expect(client.deleteRequest).not.toHaveBeenCalled();
 	});
 });
@@ -7473,7 +7473,8 @@ describe("dispatchTool", () => {
 				ctxWith(client, OFF)
 			);
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toContain('No saved request with id "nope"');
+			expect(firstText(res)).toContain('No request with id "nope"');
+			expect(firstText(res)).toContain("list_requests");
 			expect(client.executeRequest).not.toHaveBeenCalled();
 		});
 
@@ -9643,6 +9644,206 @@ describe("every error result carries a failure class", () => {
 });
 
 /*
+ * An id the engine does not hold reads as the missing object and the tool that
+ * lists them, never as the engine's JSON or the HTTP path it was asked for
+ * (#2778).
+ */
+describe("an unknown id names the object and its list tool", () => {
+	const notFoundBody = (noun: string) => engineErrorBody("not_found", `${noun} not found`);
+	const engine404 = (body: string, path = "/runs/run_x/report") =>
+		new EngineRequestError(`Engine responded 404 for GET ${path}`, 404, body);
+
+	test("a 404 on get_run_report names the run and list_runs, with no path and no JSON", async () => {
+		const client = fakeClient({
+			getRunReport: vi.fn().mockRejectedValue(engine404(notFoundBody("Run"))),
+		});
+		const res = await dispatchTool("get_run_report", { runId: "run_x" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		const text = firstText(res);
+		expect(text).toBe(
+			'No run with id "run_x" (it may have been deleted or the id is mistyped). ' +
+				"List runs with list_runs."
+		);
+		expect(text).not.toContain("/runs/");
+		expect(text).not.toContain("{");
+		expect(res.structuredContent).toEqual({
+			error: { class: "not_found", retryable: false, advice: text },
+		});
+	});
+
+	test.each([
+		["request", "Request not found", 'No request with id "req_1"'],
+		["example", "Example not found", 'No example with id "ex_1"'],
+	])(
+		"a tool taking two ids names the %s the engine's sentence says is missing",
+		async (_kind, sentence, expected) => {
+			const client = fakeClient({
+				updateRequestExample: vi.fn().mockRejectedValue(engine404(notFoundBody(sentence))),
+			});
+			const res = await dispatchTool(
+				"update_request_example",
+				{ requestId: "req_1", exampleId: "ex_1", name: "renamed" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(firstText(res)).toContain(expected);
+		}
+	);
+
+	test("two ids of one kind with nothing to say which, name neither", async () => {
+		const client = fakeClient({
+			getRunReport: vi.fn().mockRejectedValue(engine404(notFoundBody("Run"))),
+		});
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_a", targetRunId: "run_b" },
+			ctxWith(client)
+		);
+		expect(firstText(res)).toMatch(/^No run matches the id given \(/);
+		expect(firstText(res)).not.toContain("run_a");
+		expect(firstText(res)).not.toContain("run_b");
+	});
+
+	test("two ids of one kind name the one the engine's sentence carries", async () => {
+		const client = fakeClient({
+			getRunReport: vi.fn().mockRejectedValue(engine404(notFoundBody("Run run_b"))),
+		});
+		const res = await dispatchTool(
+			"compare_runs",
+			{ baseRunId: "run_a", targetRunId: "run_b" },
+			ctxWith(client)
+		);
+		expect(firstText(res)).toMatch(/^No run with id "run_b" \(/);
+	});
+
+	test("a spec has no list tool, so the sentence stops at the cause", async () => {
+		const client = fakeClient({
+			getSpecMeta: vi
+				.fn()
+				.mockRejectedValue(engine404(notFoundBody("Spec"), "/specs/s/meta")),
+		});
+		const res = await dispatchTool("get_spec", { specId: "spec_1" }, ctxWith(client));
+		expect(firstText(res)).toBe(
+			'No spec with id "spec_1" (it may have been deleted or the id is mistyped).'
+		);
+	});
+
+	test("a 404 the declared noun does not describe stays the engine's compact sentence", async () => {
+		const client = fakeClient({
+			getRun: vi.fn().mockRejectedValue(engine404(engineErrorBody("not_found", "Gone"))),
+		});
+		const res = await dispatchTool("get_run", { runId: "run_x" }, ctxWith(client));
+		expect(firstText(res)).toBe(
+			'Engine error (404): {"error":{"code":"not_found","message":"Gone"}}'
+		);
+	});
+
+	test("a tool that declares nothing keeps a one-line engine error for a 404", async () => {
+		const pretty = JSON.stringify({ error: { code: "not_found", message: "Gone" } }, null, 2);
+		const client = fakeClient({ listRuns: vi.fn().mockRejectedValue(engine404(pretty)) });
+		const res = await dispatchTool("list_runs", { requestId: "req_1" }, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toBe(
+			'Engine error (404): {"error":{"code":"not_found","message":"Gone"}}'
+		);
+		expect(res.structuredContent).toMatchObject({ error: { class: "not_found" } });
+	});
+
+	test("engine bodies formatted differently come out on one line", async () => {
+		const bodies = [
+			JSON.stringify({ error: { code: "bad_request", message: "no good" } }, null, 2),
+			JSON.stringify({ error: { code: "bad_request", message: "no good" } }),
+			"no good\n  at\tsome\n  place",
+		];
+		const texts: string[] = [];
+		for (const body of bodies) {
+			const client = fakeClient({
+				listRuns: vi.fn().mockRejectedValue(new EngineRequestError("400", 400, body)),
+			});
+			texts.push(firstText(await dispatchTool("list_runs", {}, ctxWith(client))));
+		}
+		for (const text of texts) expect(text).not.toMatch(/\n/);
+		expect(texts[0]).toBe(texts[1]);
+		expect(texts[2]).toBe("Engine error (400): no good at some place");
+	});
+
+	test("the retry hint still follows a compacted body", async () => {
+		const body = JSON.stringify(
+			{ error: { code: "insufficient_storage", message: "full" } },
+			null,
+			2
+		);
+		const client = fakeClient({
+			listRuns: vi.fn().mockRejectedValue(new EngineRequestError("507", 507, body)),
+		});
+		const res = await dispatchTool("list_runs", {}, ctxWith(client));
+		expect(firstText(res)).toBe(
+			'Engine error (507): {"error":{"code":"insufficient_storage","message":"full"}} ' +
+				"Retry the call after space is freed."
+		);
+	});
+
+	/*
+	 * A tool with a `<kind>Id` argument either declares what the id names or
+	 * says here why an unknown one cannot be worded by the 404 layer.
+	 */
+	const EXEMPT: Readonly<Record<string, string>> = {
+		list_requests: "filters a list: an unknown collection lists nothing, it is not a 404",
+		list_runs: "filters a list: an unknown request or collection lists nothing",
+		get_graphql_schema: "composes the send; composeViaEngine and selectEnvironment word the id",
+		run_request: "composes the send; composeViaEngine and selectEnvironment word the id",
+		run_collection_smoke:
+			"composes each send; composeViaEngine and selectEnvironment word the id",
+		start_load_run: "composes the send; composeViaEngine and selectEnvironment word the id",
+		resolve_variables: "gatherVariableScopes and selectEnvironment word the id",
+		create_collection: "the engine does not check that parentId exists",
+		create_request: "an unknown collectionId is a 400 that names it, not a 404",
+		move_item: "reads the collection list first and words an unknown id itself (move.tools.ts)",
+		clear_cookies:
+			"environmentId names a jar, which need not exist; clearing an empty one is 0",
+	};
+	const idKeys = (tool: (typeof TOOLS)[number]) =>
+		Object.keys(tool.inputSchema).filter((key) => /[a-z]Id$/.test(key));
+	const scanned = TOOLS.filter((tool) => idKeys(tool).length > 0);
+
+	test("every tool with a <kind>Id argument declares notFound or is exempt with a reason", () => {
+		expect(scanned.length).toBeGreaterThan(0);
+		const unaccounted = scanned
+			.filter((tool) => tool.notFound === undefined && !(tool.name in EXEMPT))
+			.map((tool) => tool.name);
+		expect(unaccounted).toEqual([]);
+	});
+
+	test("an exemption is for a tool that exists, has an id, and declares nothing", () => {
+		for (const name of Object.keys(EXEMPT)) {
+			const tool = TOOLS.find((t) => t.name === name);
+			expect(tool, name).toBeDefined();
+			expect(idKeys(tool!), name).not.toEqual([]);
+			expect(tool!.notFound, name).toBeUndefined();
+		}
+	});
+
+	test("a declaration names arguments the tool takes and a list tool that is a read", () => {
+		const declared = scanned.flatMap((tool) =>
+			tool.notFound === undefined ? [] : [{ tool, notFound: tool.notFound }]
+		);
+		expect(declared.length).toBeGreaterThan(0);
+		for (const { tool, notFound } of declared) {
+			const entries = "idArg" in notFound ? [notFound] : notFound;
+			for (const entry of entries) {
+				const args = typeof entry.idArg === "string" ? [entry.idArg] : entry.idArg;
+				for (const arg of args)
+					expect(tool.inputSchema, `${tool.name}.${arg}`).toHaveProperty(arg);
+				if (entry.list === undefined) continue;
+				const list = TOOLS.find((t) => t.name === entry.list);
+				expect(list, `${tool.name} -> ${entry.list}`).toBeDefined();
+				expect(list?.category).toBe("read");
+				expect(entry.list).toMatch(/^list_/);
+			}
+		}
+	});
+});
+
+/*
  * The local OAuth 2.0 mock issuer (#509). The engine has served
  * `/mock-issuer/*` since #479; these three tools are what let an agent asked to
  * "test this auth flow" mint its own tokens instead of having a human curl the
@@ -9760,7 +9961,8 @@ describe("mock issuer tools", () => {
 		});
 		const res = await dispatchTool("stop_mock_issuer", { issuerId: "issuer_9" }, ctxWith(gone));
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/404/);
+		expect(firstText(res)).toContain('No mock issuer with id "issuer_9"');
+		expect(firstText(res)).toContain("list_mock_issuers");
 	});
 
 	test("stop refuses an empty id before the engine is called", async () => {
@@ -9848,7 +10050,7 @@ describe("mock issuer tools", () => {
 			ctxWith(gone)
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/404/);
+		expect(firstText(res)).toContain('No mock issuer with id "issuer_9"');
 	});
 
 	/*
@@ -10184,7 +10386,7 @@ describe("mock server tools", () => {
 		});
 		const res = await dispatchTool("get_mock_activity", { mockId: "mock_9" }, ctxWith(gone));
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/404/);
+		expect(firstText(res)).toContain('No mock server with id "mock_9"');
 	});
 
 	test("stop names the mock, and an unknown id is an error rather than a shrug", async () => {
@@ -10202,7 +10404,8 @@ describe("mock server tools", () => {
 		});
 		const res = await dispatchTool("stop_mock_server", { mockId: "mock_9" }, ctxWith(gone));
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toMatch(/404/);
+		expect(firstText(res)).toContain('No mock server with id "mock_9"');
+		expect(firstText(res)).toContain("list_mock_servers");
 	});
 
 	test("the schema refuses a malformed knob before the engine sees it", () => {
@@ -10522,7 +10725,7 @@ describe("run housekeeping tools", () => {
 				ctxWith(client)
 			);
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toMatch(/404/);
+			expect(firstText(res)).toContain('No run with id "gone"');
 		});
 	});
 
@@ -11009,8 +11212,7 @@ describe("run status reads (#2436)", () => {
 			});
 			const res = await dispatchTool("get_run", { runId: "run_missing" }, ctxWith(client));
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toContain("run_missing");
-			expect(firstText(res)).toContain("404");
+			expect(firstText(res)).toContain('No run with id "run_missing"');
 		});
 
 		test("any other engine failure is reported as the engine's", async () => {
@@ -11429,7 +11631,7 @@ describe("webhook inbox tools", () => {
 				ctxWith(client)
 			);
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toMatch(/404/);
+			expect(firstText(res)).toContain('No inbox with id "gone"');
 		});
 	});
 
@@ -14225,7 +14427,7 @@ describe("secret withholding", () => {
 		expect(body).toEqual(REQUESTS[0]);
 	});
 
-	test("get_request answers an unknown id as an error naming 404", async () => {
+	test("get_request answers an unknown id as an error naming the id", async () => {
 		const client = fakeClient({
 			getRequest: vi
 				.fn()
@@ -14235,7 +14437,7 @@ describe("secret withholding", () => {
 		});
 		const res = await dispatchTool("get_request", { requestId: "req_gone" }, ctxWith(client));
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toContain("404");
+		expect(firstText(res)).toContain('No request with id "req_gone"');
 	});
 
 	test.each([{}, { requestId: "" }])(

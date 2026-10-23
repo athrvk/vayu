@@ -23,6 +23,7 @@ import {
 	ToolArgError,
 	writesDisabled,
 } from "./kit.js";
+import { ID_KINDS, unknownIdText } from "./failure.js";
 import { collectionSubtree, readCollectionRows } from "./cascade.js";
 import { destinationSiblings, MOVE_POSITIONS, moveBatch } from "./move.js";
 import { readRequestRows } from "./sibling-order.js";
@@ -137,7 +138,9 @@ async function planCollectionMove(
 	}
 	const rows = readCollectionRows(await ctx.client.listCollections(signal));
 	const subtree = collectionSubtree(rows, id);
-	if (subtree === null) throw new ToolArgError(`No collection with id "${id}".`, "not_found");
+	if (subtree === null) {
+		throw new ToolArgError(unknownIdText(ID_KINDS.collection, id), "not_found");
+	}
 	// The UI's own refusal set, walked here so the answer names the problem.
 	// The engine rejects the same batch under its lock - that check is the one
 	// that is race-free and stays the authority; this one exists so an agent is
@@ -150,7 +153,7 @@ async function planCollectionMove(
 		);
 	}
 	if (parentId !== null && !rows.some((row) => row.id === parentId)) {
-		throw new ToolArgError(`No collection with id "${parentId}".`, "not_found");
+		throw new ToolArgError(unknownIdText(ID_KINDS.collection, parentId), "not_found");
 	}
 	// The top level holds collections only, so there is no request list to read.
 	const requests =
