@@ -1826,7 +1826,9 @@ nlohmann::json get_script_completions () {
     "clear() with no URL empties this environment's jar.\n\nget and getAll "
     "answer only for this request's own site and for hosts this script has "
     "called through pm.sendRequest; any other URL gives undefined or [] and "
-    "a console warning. Writes are not limited this way.\n\nA "
+    "a console warning. set, unset and clear(url) are limited the same way, "
+    "and a set whose cookie domain is outside that site too: a refused write "
+    "stores or removes nothing and logs a console warning.\n\nA "
     "write is applied after the transfer it was made before, so the request "
     "that follows carries it and the jar keeps it.\n\nExample:\n"
     "pm.cookies.jar().set(pm.request.url, { name: 'session', value: token "
@@ -1873,7 +1875,10 @@ nlohmann::json get_script_completions () {
     "domain, path, secure, httpOnly and expires are optional and default from "
     "the URL. expires takes a Date, a date string Date.parse accepts, or a "
     "whole number of seconds since the epoch - 0 for a session cookie. "
-    "set(url, name, value) is accepted too.\n\nThe stored cookie is returned "
+    "set(url, name, value) is accepted too. The URL and the cookie's domain "
+    "must be this request's site or a host this script has called through "
+    "pm.sendRequest; otherwise nothing is stored and a console warning is "
+    "logged.\n\nThe stored cookie is returned "
     "and handed to the optional callback as (null, cookie), carrying the "
     "domain and path it took from the URL.\n\nThe cookie is matched by the "
     "same rules a received one is, so setting it for one host does not send "
@@ -1886,7 +1891,10 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.cookies.jar().unset(url: string, name: string, callback?: Function): string" },
     { "documentation",
     "Remove the cookies of that name the URL would have carried. Cookies of "
-    "the same name stored for another host or path are left alone. The removed "
+    "the same name stored for another host or path are left alone. Limited to "
+    "this request's site and the hosts this script has called through "
+    "pm.sendRequest: any other URL removes nothing and logs a console "
+    "warning. The removed "
     "name is returned and handed to the optional callback as (null, name)." },
     { "sortText", "1_pm_cookies_jar_unset" } });
 
@@ -1895,7 +1903,9 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.cookies.jar().clear(url?: string, callback?: Function): void" },
     { "documentation",
     "clear(url) removes every cookie that URL would have carried - unset "
-    "without a name to narrow it. clear() with no URL empties this "
+    "without a name to narrow it, and limited to this request's site and the "
+    "hosts this script has called through pm.sendRequest like unset. clear() "
+    "with no URL empties this "
     "environment's jar: a session reset, and nothing wider, since other "
     "environments' jars are untouched. Nothing is on disk either way, so "
     "this costs a re-login and no more." },

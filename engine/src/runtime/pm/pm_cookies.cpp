@@ -486,11 +486,11 @@ JSValue js_jar_cookies_each (JSContext* ctx, JSValueConst this_val, int argc, JS
 // pm.cookies.jar() - the write half (issue #337)
 // ----------------------------------------------------------------------------
 
-// Where a jar write is staged, or nullptr having thrown. A jar with nowhere to
-// apply writes is refused rather than silently accepted: a call that reported
-// success for a cookie that went nowhere is the failure this whole surface
-// exists to avoid.
-std::vector<vayu::http::CookieWrite>* jar_writes (JSContext* ctx, const char* member) {
+// The context of a script that may stage a jar write, or nullptr having
+// thrown. A jar with nowhere to apply writes is refused rather than silently
+// accepted: a call that reported success for a cookie that went nowhere is the
+// failure this whole surface exists to avoid.
+ContextData* jar_write_context (JSContext* ctx, const char* member) {
     auto* data = jar_context (ctx, member);
     if (!data) {
         return nullptr;
@@ -503,7 +503,7 @@ std::vector<vayu::http::CookieWrite>* jar_writes (JSContext* ctx, const char* me
         member);
         return nullptr;
     }
-    return data->cookie_writes;
+    return data;
 }
 
 // One required string argument of a jar() method. Every one of them is
@@ -777,38 +777,113 @@ JSValue finish_jar_call (JSContext* ctx, int argc, JSValueConst* argv, int callb
     return result;
 }
 
-// Whether a jar read of @p url stays inside the sites this script may read
-// (#2358): the request's own, and any host it has addressed through
+// The one definition of the sites a script's jar access may name (#2358,
+// #2631): the request's own, and any host it has addressed through
 // pm.sendRequest, each matched in both directions (`hosts_domain_related`) so a
 // `Domain=` cookie is reachable from a subdomain and a subdomain's from the
-// apex. Without the limit a script could name any host and read the session
-// the environment's jar holds for it. Only the request URL and the
+// apex. Reads and writes both ask it, so they cannot drift. Without the limit
+// a script could read the session the environment's jar holds for any host, or
+// plant and delete a cookie for one. Only the request URL and the
 // pm.sendRequest URLs are seen: a redirect's target is not, so a redirect does
 // not widen the scope.
-//
-// A URL libcurl reads no host from is let through, as there is nothing to
-// match and `matching_in` answers empty for it anyway. A refusal leaves one
-// console warning naming the host - never the URL, which may carry a secret.
-bool jar_read_in_scope (ContextData& data, const char* member, const std::string& url) {
-    const auto host = vayu::http::cookie_scope_host (url);
-    if (!host) {
-        return true;
+std::optional<std::string> jar_request_host (const ContextData& data) {
+    if (!data.request) {
+        return std::nullopt;
     }
+    return vayu::http::cookie_scope_host (data.request->url);
+}
+
+bool jar_host_in_scope (const ContextData& data, const std::string& host) {
     const auto related = [&host] (const std::string& allowed) {
-        return vayu::http::hosts_domain_related (*host, allowed);
+        return vayu::http::hosts_domain_related (host, allowed);
     };
-    const auto request_host =
-    data.request ? vayu::http::cookie_scope_host (data.request->url) : std::nullopt;
-    if ((request_host && related (*request_host)) ||
-    std::ranges::any_of (data.addressed_hosts, related)) {
-        return true;
-    }
+    const auto request_host = jar_request_host (data);
+    return (request_host && related (*request_host)) ||
+    std::ranges::any_of (data.addressed_hosts, related);
+}
+
+// One console warning for a refusal: @p outcome says what did not happen, the
+// rest names the scope. It names hosts, never a URL (which may carry a secret)
+// or a cookie value.
+void warn_out_of_jar_scope (ContextData& data, const char* access, const std::string& outcome) {
+    const auto request_host = jar_request_host (data);
     data.console_output.push_back ({ ConsoleLevel::Warn,
-    std::string ("pm.cookies.") + member + " read nothing for " + *host +
-    ": a jar read is limited to the request's own site" +
+    outcome + ": a jar " + access + " is limited to the request's own site" +
     (request_host ? " (" + *request_host + ")" : std::string{}) +
     " and to hosts this script has called through pm.sendRequest. See "
     "docs/engine/scripting.md." });
+}
+
+// Whether a jar read of @p url stays inside the scope. A URL libcurl reads no
+// host from is let through, as there is nothing to match and `matching_in`
+// answers empty for it anyway. A refusal leaves one console warning.
+bool jar_read_in_scope (ContextData& data, const char* member, const std::string& url) {
+    const auto host = vayu::http::cookie_scope_host (url);
+    if (!host || jar_host_in_scope (data, *host)) {
+        return true;
+    }
+    warn_out_of_jar_scope (data, "read",
+    std::string ("pm.cookies.") + member + " read nothing for " + *host);
+    return false;
+}
+
+// Whether a jar write naming @p url stays inside the scope: the same rule a
+// read of it is held to, so `unset` and `clear(url)` cannot delete what `get`
+// cannot see. A refused write stages nothing.
+bool jar_write_in_scope (ContextData& data, const char* member, const std::string& url) {
+    const auto host = vayu::http::cookie_scope_host (url);
+    if (!host || jar_host_in_scope (data, *host)) {
+        return true;
+    }
+    warn_out_of_jar_scope (data, "write",
+    std::string ("pm.cookies.") + member + " wrote nothing for " + *host);
+    return false;
+}
+
+// Whether @p host is, spelled exactly, the request's host or one this script
+// has addressed: the one case a single-label domain may be written for.
+bool jar_host_is_scope_host (const ContextData& data, const std::string& host) {
+    const auto request_host = jar_request_host (data);
+    const auto same         = [&host] (const std::string& allowed) {
+        return vayu::utils::ascii_lower_equal (host, allowed);
+    };
+    return (request_host && same (*request_host)) ||
+    std::ranges::any_of (data.addressed_hosts, same);
+}
+
+// A domain with no interior dot (`com`, `test`) is a top-level domain, and a
+// cookie for one is carried to every site under it. There is no public-suffix
+// list to tell `co.uk` from `example.co.uk`, so this is the cheap half of the
+// rule; an IPv6 literal is exact by nature and exempt.
+bool is_single_label_domain (const std::string& host) {
+    return !host.starts_with ("[") && host.find ('.') == std::string::npos;
+}
+
+// Whether a cookie about to be stored for @p domain (as `cookie_for_url`
+// settled it: punycode, a leading dot for "subdomains too") stays inside the
+// scope. This is the half `jar_write_in_scope` cannot see: a cookie whose
+// Domain differs from the URL's host is sent to that domain's hosts, so the
+// URL being in scope proves nothing about where the cookie goes. The scope
+// relates a host to its parents, so a single-label domain is held to the exact
+// host (`localhost` writing `localhost`) rather than to the parent test.
+bool jar_cookie_domain_in_scope (ContextData& data, const char* member, const std::string& domain) {
+    const std::string host = domain.starts_with (".") ? domain.substr (1) : domain;
+    const bool suffix_like =
+    is_single_label_domain (host) && !jar_host_is_scope_host (data, host);
+    if (!suffix_like && jar_host_in_scope (data, host)) {
+        return true;
+    }
+    const std::string outcome =
+    std::string ("pm.cookies.") + member + " wrote nothing for the domain " + host;
+    if (suffix_like) {
+        data.console_output.push_back ({ ConsoleLevel::Warn,
+        outcome +
+        ": a single-label domain is refused unless it is the request's "
+        "own host, as it would reach every site under it. See "
+        "docs/engine/scripting.md." });
+    } else {
+        warn_out_of_jar_scope (data, "write", outcome);
+    }
     return false;
 }
 
@@ -898,8 +973,8 @@ JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         return JS_EXCEPTION;
     }
 
-    auto* writes = jar_writes (ctx, "jar().set");
-    if (!writes) {
+    auto* data = jar_write_context (ctx, "jar().set");
+    if (!data) {
         return JS_EXCEPTION;
     }
 
@@ -914,8 +989,13 @@ JSValue js_jar_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         "a tab or newline",
         cookie.name.c_str (), url->c_str ());
     }
-    writes->push_back ({ vayu::http::CookieWrite::Kind::Set,
-    vayu::http::format_cookie_line (*stored), {}, {} });
+    // Refused after validation, so a bad argument is still the error it was; a
+    // refusal is a warning and the call completes as a stored write would.
+    if (jar_write_in_scope (*data, "jar().set", *url) &&
+    jar_cookie_domain_in_scope (*data, "jar().set", stored->domain)) {
+        data->cookie_writes->push_back ({ vayu::http::CookieWrite::Kind::Set,
+        vayu::http::format_cookie_line (*stored), {}, {} });
+    }
     // Postman hands the callback the cookie it stored, which is the one thing
     // this call knows and the script does not: the domain and path it took
     // from the URL, where the object left them out.
@@ -936,12 +1016,14 @@ JSValue js_jar_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     if (classify_jar_callback (ctx, argc, argv, 2) == JarCallbackArg::Invalid) {
         return JS_EXCEPTION;
     }
-    auto* writes = jar_writes (ctx, "jar().unset");
-    if (!writes) {
+    auto* data = jar_write_context (ctx, "jar().unset");
+    if (!data) {
         return JS_EXCEPTION;
     }
-    writes->push_back (
-    { vayu::http::CookieWrite::Kind::Unset, {}, std::move (*url), *name });
+    if (jar_write_in_scope (*data, "jar().unset", *url)) {
+        data->cookie_writes->push_back (
+        { vayu::http::CookieWrite::Kind::Unset, {}, std::move (*url), *name });
+    }
     // The removed name, where set hands back the stored cookie. There is no
     // cookie left to describe, and Postman's own callback carries nothing at
     // all here - a name is the most this can honestly report.
@@ -978,16 +1060,19 @@ JSValue js_jar_clear (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_EXCEPTION;
     }
 
-    auto* writes = jar_writes (ctx, "jar().clear");
-    if (!writes) {
+    auto* data = jar_write_context (ctx, "jar().clear");
+    if (!data) {
         return JS_EXCEPTION;
     }
+    auto* writes = data->cookie_writes;
     if (url) {
         // Scoped exactly as unset is - the cookies a request to this URL would
         // have carried - so the two spellings cannot disagree about what "this
-        // URL's cookies" are.
-        writes->push_back (
-        { vayu::http::CookieWrite::Kind::ClearUrl, {}, std::move (*url), {} });
+        // URL's cookies" are, nor about which sites a script may clear.
+        if (jar_write_in_scope (*data, "jar().clear", *url)) {
+            writes->push_back (
+            { vayu::http::CookieWrite::Kind::ClearUrl, {}, std::move (*url), {} });
+        }
     } else {
         // The current environment's jar, and no other - decision 2 of #337. The
         // blast radius is a session reset, which Settings shows and a script can
