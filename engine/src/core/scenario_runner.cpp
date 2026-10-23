@@ -1127,13 +1127,15 @@ TransactionHistograms& transactions) {
  * shares. Extracted out of `execute_scenario_run` (whose cognitive
  * complexity this loop and its lambdas would otherwise push over the lint
  * threshold), mirroring `run_manager.cpp`'s `run_collection_setup` for the
- * load path.
+ * load path. A `pm.sendRequest` there takes @p script_send, the run's own
+ * (issue #2841).
  *
  * @return the failed outcome's message, or `nullopt` on success - the
  *         caller throws to fail the run before any step runs.
  */
 std::optional<std::string> run_scenario_setup (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
 const std::vector<vayu::core::CompiledElement>& collection_elements,
 std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
     vayu::Request lifecycle_request;
@@ -1155,6 +1157,7 @@ std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            script_send.apply (script_ctx);
             return vayu::http::routes::execute_script (
             script_engine, script, script_ctx, "Setup");
         },
@@ -1174,11 +1177,13 @@ std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
  * dispatched, run with @p run_summary_info as `pm.info.run`. Never throws out
  * - `ElementPipeline::run` already turns one into this element's own
  * `"error"` outcome rather than propagating - so a failing teardown is
- * recorded, not fatal.
+ * recorded, not fatal. A `pm.sendRequest` there takes @p script_send, as
+ * setup's does.
  */
 std::vector<vayu::core::ElementOutcome> run_scenario_teardown (
 vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
 const std::vector<vayu::core::CompiledElement>& collection_elements,
 const vayu::runtime::RunSummaryInfo& run_summary_info) {
     std::vector<vayu::core::ElementOutcome> teardown_outcomes;
@@ -1201,6 +1206,7 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            script_send.apply (script_ctx);
             return vayu::http::routes::execute_script (
             script_engine, script, script_ctx, "Teardown");
         },
@@ -1256,17 +1262,6 @@ RunManager& manager) {
     const bool stop_on_error     = read_stop_on_error (context->config);
     summary.stop_on_error        = stop_on_error;
 
-    // Run-scoped, like every other read-once property above: a collection run
-    // is one run, and steps that left the machine by different routes because
-    // Settings changed mid-sequence would make its results unreproducible
-    // (issue #705, epic decision 3 of #704).
-    const auto transport = vayu::http::resolve_transport_policy (db);
-    // The defaults every step's send adds, read once for the same reason
-    // (issue #1229). A collection run is a design-mode send per step, so it
-    // reads the design scope's compression setting rather than the load one's.
-    const auto default_headers = vayu::http::resolve_default_header_policy (
-    db, vayu::http::DefaultHeaderScope::Design);
-
     // The one parse of the document's schema index this run pays for, before
     // the first send rather than per step. `std::nullopt` - an unbound
     // collection, a document with no index, one that will not parse - is "not
@@ -1308,12 +1303,23 @@ RunManager& manager) {
 
         const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
         "maxTraceBodyBytes", static_cast<int> (constants::json::MAX_TRACE_BODY_BYTES)));
-        // Run-scoped for the reason `transport` is: a step that read a
-        // different bound because Settings changed mid-sequence would make the
-        // run unreproducible. A step of a collection run is a design-mode send,
-        // so it reads the design-mode bound (issue #1157).
-        const auto max_response_bytes =
-        vayu::http::routes::design_response_body_bound (db);
+        // Run-scoped, like every other read-once property above: a collection
+        // run is one run, and steps that left by different routes (issue #705,
+        // epic decision 3 of #704), added different headers (#1229) or read a
+        // different bound (#1157) because Settings changed mid-sequence would
+        // make its results unreproducible. A step is a design-mode send, so
+        // the headers take the design scope's compression setting and the
+        // bound is the design one. Every step's send reads these, and so does
+        // a `script.setup` / `script.teardown` `pm.sendRequest`, with the
+        // run's timeout as the steps' own requests carry it (#2841).
+        const vayu::runtime::ScriptSendInputs script_send{
+            .transport       = vayu::http::resolve_transport_policy (db),
+            .default_headers = vayu::http::resolve_default_header_policy (
+            db, vayu::http::DefaultHeaderScope::Design),
+            .max_response_bytes = vayu::http::routes::design_response_body_bound (db),
+            .request_timeout_ms =
+            vayu::http::routes::resolve_request_timeout_ms (context->config, db),
+        };
         // Same reason, same read-once-for-the-run rule (issue #1514's
         // reopen): a step's `extract.json` / `assert.jsonpath` must not read
         // a different bound because Settings changed mid-sequence.
@@ -1369,8 +1375,8 @@ RunManager& manager) {
         }
 
         std::vector<vayu::core::ElementOutcome> setup_outcomes;
-        if (auto setup_failure = run_scenario_setup (
-            script_engine, scopes, collection_elements, setup_outcomes)) {
+        if (auto setup_failure = run_scenario_setup (script_engine, scopes,
+            script_send, collection_elements, setup_outcomes)) {
             throw std::runtime_error ("script.setup failed: " + *setup_failure);
         }
 
@@ -1392,9 +1398,9 @@ RunManager& manager) {
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
             const StepContext step_ctx{ context, execution, schema_index,
-                transport, default_headers, cookie_scope, data_rows,
-                data_row_index, iteration, asked.iterations, fail_on_schema_error,
-                stop_on_error, max_trace_body_bytes, max_response_bytes,
+                script_send.transport, script_send.default_headers, cookie_scope,
+                data_rows, data_row_index, iteration, asked.iterations, fail_on_schema_error,
+                stop_on_error, max_trace_body_bytes, script_send.max_response_bytes,
                 max_element_body_bytes, element_spans, controller_state, &db };
             summary.steps_not_run += run_iteration (script_engine, cookie_jar,
             cookie_scope, scopes, step_ctx, plan, step_index,
@@ -1438,8 +1444,8 @@ RunManager& manager) {
         run_summary_info.assertions_passed = summary.passed;
         run_summary_info.assertions_failed = summary.failed;
 
-        auto teardown_outcomes = run_scenario_teardown (
-        script_engine, scopes, collection_elements, run_summary_info);
+        auto teardown_outcomes = run_scenario_teardown (script_engine, scopes,
+        script_send, collection_elements, run_summary_info);
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
     } catch (const std::exception& e) {

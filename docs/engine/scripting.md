@@ -1516,7 +1516,11 @@ by default (see [Sending a request from a script](#sending-a-request-from-a-scri
 setup or teardown script is bound to the same `ScriptEngine` instance, and
 therefore the same `allowScriptRequests` decision, every other script of the
 run already answers to - there is no `script.setup`-only opt-in to reach for,
-and the same **10 requests per script** cap applies.
+and the same **10 requests per script** cap applies. The fetch also inherits
+what every other script of the run sends under (issue #2841): the run's
+`timeout` (else `defaultTimeout`) when it names none of its own, the run's
+response byte bound, transport policy and default headers - see the
+[bounds](#sending-a-request-from-a-script-pmsendrequest) below.
 
 ## Environment Variables (`pm.environment`)
 
@@ -1901,7 +1905,7 @@ given, must be a function.
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
 | `body` | a string, or `{ mode, <mode>: ... }` for `raw` (`raw` string, sent as `text/plain`), `urlencoded` (`urlencoded` rows, sent as `application/x-www-form-urlencoded`) or `formdata` (`formdata` rows, sent as `multipart/form-data`). Rows are Postman's `[{ key, value, disabled? }]` or a `{ name: value }` object; a `disabled` row is skipped, and a `formdata` row may carry a `contentType`. A `type: 'file'` row and the `file` and `graphql` modes throw. A `header` naming a Content-Type wins over the one the mode implies, except for `formdata`, whose type carries the boundary |
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
-| `timeout` | milliseconds. Absent, the call takes the resolved timeout of the send the script belongs to - the request's or run's `timeout`, else the `defaultTimeout` setting - in a Send's scripts (buffered or streamed), a collection run's step scripts and a load run's deferred `tests` script (issue #2833). Either is clamped to the script's remaining budget (below) |
+| `timeout` | milliseconds. Absent, the call takes the resolved timeout of the send or run the script belongs to - the request's or run's `timeout`, else the `defaultTimeout` setting - in every script that may send: a Send's scripts (buffered or streamed), a collection run's step, `script.setup` and `script.teardown` scripts, and every script of a load run, its inline step scripts, `script.setup` / `script.teardown` and the deferred `tests` script (issues #2833, #2841). Either is clamped to the script's remaining budget (below) |
 
 **Synchronous, in both forms.** The send blocks and the callback runs inline,
 before `pm.sendRequest` returns. Called without a callback, it returns a
@@ -1964,10 +1968,12 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
 - *A response byte bound.* The fetch reads at most what the enclosing execution
   reads, and **refuses** past it - the callback's `err` says
   `Response is N bytes, over the M byte limit`, and `res` is null. Which
-  setting supplies `M` follows the path: a design-mode send's scripts (Send, a
-  collection-run step) take `maxDesignResponseBodyBytes`, a load run's deferred
-  `tests` script takes `maxResponseBodyBytes`, because a script that runs once
-  per sampled response belongs to the run's memory budget rather than to the one
+  setting supplies `M` follows the path: a design-mode send's scripts (Send, and
+  a collection run's step, setup and teardown scripts) take
+  `maxDesignResponseBodyBytes`; every script of a load run (an inline step
+  script, `script.setup` / `script.teardown`, the deferred `tests` script) takes
+  `maxResponseBodyBytes`, because a script that runs once per submission or per
+  sampled response belongs to the run's memory budget rather than to the one
   sized for a body a person is about to look at. Refusing rather than handing
   over a prefix is the deliberate half: `res` has no truncation flag - nor does
   `pm.response` - so a cut body would reach `JSON.parse` as corrupt input with
@@ -1982,10 +1988,14 @@ daemon's own environment would pick up. A script that authenticates through
 same route out of the machine, or one of the two is unreachable behind a
 corporate proxy (issue #705). Which policy that is follows the path, as the byte
 bound above does: a design-mode send's scripts take the one resolved for that
-send, and a load run's deferred `tests` script takes the one the run's own
-transfers left by - resolved once when the run starts and kept for it, so a
-Settings edit made while the run was in flight cannot send an assertion by a
-route the responses it is asserting on never took (issue #1256).
+send (a collection run's, for every script of that run), and every script of a
+load run takes the one the run's own transfers left by - resolved once when the
+run starts and kept for it, so a Settings edit made while the run was in flight
+cannot send an assertion by a route the responses it is asserting on never took
+(issues #1256, #2841). The [default headers](api-reference.md#default-request-headers)
+the engine adds follow the same rule: a load run's scripts send the load
+scope's set its transfers carried, a design-mode send's scripts the design
+scope's.
 
 **Not available to agents.** Vayu's MCP target allowlist is checked in the MCP
 server, against the composed URL, before it calls the engine - so a script-issued

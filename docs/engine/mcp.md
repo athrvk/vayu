@@ -398,8 +398,8 @@ Notes:
   **There is no per-run timeout, and that is not an omission**: the engine has
   no such field - every transfer is bounded by the `defaultTimeout` setting
   (`resolve_request_timeout_ms`), which `update_engine_config` changes, the run's
-  OAuth 2.0 token fetches and its deferred `tests` script's `pm.sendRequest`
-  included (issue #2833). Four transfers keep bounds of their own: a stream
+  OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
+  included (issues #2833, #2841). Four transfers keep bounds of their own: a stream
   ends on its idle timeout and its duration and event caps, never a
   whole-transfer deadline; the import fetch has its own 30 s and stall timeout;
   the connection test its 10 s; and the server-vitals monitor its scrape

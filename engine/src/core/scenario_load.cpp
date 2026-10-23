@@ -532,6 +532,7 @@ const nlohmann::json* data_row) {
             auto scopes = vu.scope_overlay.materialize (state.base_scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            context->script_send.apply (script_ctx);
             script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, iteration, vu_index);
             script_ctx.record_metric = [&context] (const std::string& name,
@@ -655,6 +656,7 @@ const nlohmann::json* data_row) {
             auto scopes = vu.scope_overlay.materialize (state.base_scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            context->script_send.apply (script_ctx);
             script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, vu.iteration, vu.index);
             script_ctx.record_metric = [&context] (const std::string& name,

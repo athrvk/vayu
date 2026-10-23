@@ -351,10 +351,15 @@ struct ScriptContext {
      * script engine holds no `Database`, and the caller has already resolved
      * the bound its own send reads. Which bound that is differs by path, and
      * the difference is deliberate - a design-mode send's scripts take
-     * `maxDesignResponseBodyBytes`, a load run's deferred `tests` script takes
-     * `maxResponseBodyBytes`, because a script that runs once per sampled
-     * response belongs to the load path's memory budget and not to the one
-     * sized for a body a person is about to look at.
+     * `maxDesignResponseBodyBytes`, every script of a load run (the deferred
+     * `tests` replay, an inline step script, `script.setup` and
+     * `script.teardown`) takes `maxResponseBodyBytes`, because a script that
+     * runs once per submission or per sampled response belongs to the load
+     * path's memory budget and not to the one sized for a body a person is
+     * about to look at. A run's scripts outside an exchange (a load run's,
+     * a collection run's `script.setup` and `script.teardown`) get this
+     * field and the three beside it through one `ScriptSendInputs` (issue
+     * #2841).
      *
      * Reaching it **refuses** the transfer - `ErrorCode::ResponseTooLarge`
      * reaches the callback as its `err` - rather than handing the script a
@@ -371,8 +376,9 @@ struct ScriptContext {
 
     /**
      * @brief The timeout a `pm.sendRequest` takes when its options name none
-     *        (issue #2833): the enclosing exchange's resolved request timeout,
-     *        the payload's `timeout` else the `defaultTimeout` setting.
+     *        (issue #2833): the enclosing exchange's or run's resolved request
+     *        timeout, the payload's `timeout` else the `defaultTimeout`
+     *        setting.
      *
      * Carried in for the reason @ref max_response_bytes is. The script's own
      * `timeout` option replaces it, and the script's remaining budget can
@@ -459,6 +465,38 @@ struct ScriptContext {
         ctx.event       = ScriptEvent::Teardown;
         ctx.run_summary = summary;
         return ctx;
+    }
+};
+
+/**
+ * @brief What a `pm.sendRequest` inherits from the run it runs inside
+ *        (issue #2841): the four `ScriptContext` fields a script cannot set
+ *        for itself, resolved once by the run and applied together.
+ *
+ * One value rather than four assignments per call site, because every site
+ * that left one out sent with the compiled-in default for it: a script that
+ * waited 30 s on a run whose `timeout` was 500 ms, or left by another route
+ * than the run's own transfers.
+ *
+ * Default-constructed it holds a fresh `ScriptContext`'s own values, so
+ * applying one changes nothing; a `RunContext` built by hand keeps the
+ * compiled-in bounds.
+ */
+struct ScriptSendInputs {
+    /// `ScriptContext::transport`.
+    vayu::http::TransportPolicy transport;
+    /// `ScriptContext::default_headers`.
+    vayu::http::DefaultHeaderPolicy default_headers;
+    /// `ScriptContext::max_response_bytes`.
+    size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+    /// `ScriptContext::request_timeout_ms`.
+    int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+
+    void apply (ScriptContext& ctx) const {
+        ctx.transport          = transport;
+        ctx.default_headers    = default_headers;
+        ctx.max_response_bytes = max_response_bytes;
+        ctx.request_timeout_ms = request_timeout_ms;
     }
 };
 
