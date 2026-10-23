@@ -10770,9 +10770,13 @@ submitting, before the drain. `rateControl.achievement` is
 the same name. A shortfall there is not only a slow generator: a request
 dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, and a Stop
 ends the sending early, so a stopped run's achievement is the share of its plan
-it reached. The app's live Rate fidelity card instead divides by what the
-target owed up to now (`targetRps` times the time spent sending, capped at the
-duration), so on a Stop it reads the pace and the stored report reads the plan.
+it reached. The app's Rate fidelity card instead divides by what the target
+owed up to now (`targetRps` times the time spent sending, capped at the
+duration), so on a Stop it reads the pace. It does so live, and for a stopped
+run in History from `requestsSent`, `sendingDurationSeconds` and the configured
+duration (issue #2805), while the stored `rateControl.achievement` stays the
+plan share and the card states it beside the figure ("stopped at 50% of the
+planned 60s"). A stopped report without the counts keeps its stored value.
 
 An `iterations` run, single-request or scenario, is the one exception: its
 loop returns on its last submission with the batch before it still in flight,

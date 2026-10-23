@@ -5,7 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatPercent, formatRate } from "@/lib/format-number";
+import { formatNumber, formatPercent, formatRate, formatSeconds } from "@/lib/format-number";
+import type { StoppedAt } from "../../types";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
@@ -37,15 +38,20 @@ function fidelityFillColor(achievement: number | undefined): string {
  * RPS over the sending window. The percentage arrives derived (live from
  * `liveRateFidelity`, finished from the report), so a run's drain never reads
  * as a missed rate.
+ * A stopped run's figure is its pace, so `stoppedAt` states the share of the
+ * plan it reached (#2805).
  */
 export function RateFidelityCard({
 	targetRps,
 	actualRps,
 	achievement,
+	stoppedAt,
 }: {
 	targetRps?: number;
 	actualRps?: number;
 	achievement?: number;
+	/** A stopped run's share of its plan; the figure above is its pace. */
+	stoppedAt?: StoppedAt;
 }) {
 	const textColor = fidelityTextColor(achievement);
 	const fillColor = fidelityFillColor(achievement);
@@ -59,6 +65,12 @@ export function RateFidelityCard({
 				actual{" "}
 				<span className="text-foreground font-semibold">{formatRate(actualRps)}</span> req/s
 			</p>
+			{stoppedAt && (
+				<p className="text-label text-muted-foreground font-mono mt-0.5">
+					stopped at {formatNumber(Math.round(stoppedAt.planSharePct))}% of the planned{" "}
+					{formatSeconds(stoppedAt.plannedSeconds)}
+				</p>
+			)}
 			{achievement !== undefined && targetRps && (
 				<MiniBar pct={Math.min(100, achievement)} color={fillColor} showTarget />
 			)}

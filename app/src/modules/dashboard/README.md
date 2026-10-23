@@ -56,6 +56,11 @@ consumes it.
   one memoized `DashboardDerived` bundle (shape in `types.ts`) and passes it to
   `HeroRow` and `ModeStatsRow`, which stay pure presentational components that
   read what they need.
+  A finished report reaches the same bundle through `utils/reportToDerived.ts`,
+  and the Rate fidelity figure means one thing in both: pace over the sending
+  window. A stopped report is therefore judged by `liveRateFidelity` too, with
+  the report's plan share kept apart as `stoppedAt` (#2805); History's
+  Performance tile reads the same `rateAchievementPct`.
 - **An error is counted once, by the engine (#2124).** A response outside
   2xx/3xx, or no response at all; a 3xx is a success. `DashboardDerived`
   carries `failedRequests` and its split `httpErrors` / `noResponse`, read off

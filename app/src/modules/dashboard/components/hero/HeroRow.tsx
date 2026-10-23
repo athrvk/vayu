@@ -133,6 +133,7 @@ function renderModeCards(d: DashboardDerived) {
 							targetRps={d.targetRps}
 							actualRps={d.actualRps}
 							achievement={d.rateAchievementPct}
+							stoppedAt={d.stoppedAt}
 						/>
 					)}
 					<ThroughputTwinCard

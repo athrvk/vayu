@@ -101,6 +101,14 @@ export interface MetricsViewProps {
 	};
 }
 
+/** Where a Stop ended a run against its plan; the card states it beside a pace-judged figure (#2805). */
+export interface StoppedAt {
+	/** Percent of the planned requests the run reached: the report's `rateControl.achievement`. */
+	planSharePct: number;
+	/** The configured duration, seconds. */
+	plannedSeconds: number;
+}
+
 /**
  * Single derived-metrics bundle the orchestrator computes once (memoized) and
  * passes to the mode-adaptive HeroRow and ModeStatsRow. Centralizing derivation
@@ -117,6 +125,8 @@ export interface DashboardDerived {
 	actualRps?: number;
 	/** Percent of the requests owed over that window that were sent; the Rate fidelity card's value. */
 	rateAchievementPct?: number;
+	/** Only on a stopped report judged by pace; absent live and when the plan is unknown. */
+	stoppedAt?: StoppedAt;
 	sendRate?: number;
 	throughput?: number;
 	currentRps: number;

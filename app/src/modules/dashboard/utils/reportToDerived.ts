@@ -7,11 +7,46 @@
 
 import type { RunReport } from "@/types";
 import { durationSeconds } from "@/constants/load-test";
-import type { DashboardDerived } from "../types";
+import type { DashboardDerived, StoppedAt } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
 import { notCrossed } from "./computeBreakpoint";
 import { isRateLimitedRun } from "./metricsTransforms";
+import { liveRateFidelity } from "./rateFidelity";
+
+/**
+ * A Stop ends the sending early, so the report's `achievement` is the share of
+ * the whole plan the run reached (about 50% for a Stop at the halfway mark),
+ * while the live card judged the same run by pace (#2805). A stopped run is
+ * read by pace here too, with the plan share kept apart as `stoppedAt`.
+ * `undefined` when the report lacks a count, a window or a target (a run stored
+ * before #2392): the stored achievement stands and no plan line is drawn.
+ */
+function stoppedRunFidelity(
+	report: RunReport,
+	targetRps: number | undefined
+): { achievementPct: number; stoppedAt?: StoppedAt } | undefined {
+	if (report.metadata?.status !== "stopped") return undefined;
+	const requestsSent = report.rateControl?.requestsSent;
+	const elapsedSeconds = report.summary.sendingDurationSeconds;
+	if (requestsSent === undefined || elapsedSeconds === undefined) return undefined;
+
+	const plannedSeconds = durationSeconds(report.metadata.configuration?.duration);
+	const pace = liveRateFidelity({
+		targetRps,
+		requestsSent,
+		elapsedSeconds,
+		durationSeconds: plannedSeconds ?? undefined,
+	});
+	if (pace?.achievementPct === undefined) return undefined;
+
+	const planSharePct = report.rateControl?.achievement;
+	const stoppedAt =
+		plannedSeconds !== null && planSharePct !== undefined
+			? { planSharePct, plannedSeconds }
+			: undefined;
+	return { achievementPct: pace.achievementPct, stoppedAt };
+}
 
 /**
  * Adapt a completed-run RunReport into the DashboardDerived bundle the live
@@ -26,10 +61,12 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 	const mode = resolveMode(cfg.mode);
 	const targetRps = report.rateControl?.targetRps ?? cfg.targetRps;
 	const actualRps = report.rateControl?.actualRps ?? s.avgRps;
+	const stopped = stoppedRunFidelity(report, targetRps);
 	// The report's own percentage when it has one, so this card and the History
 	// tile state one definition (#2392); a report without `rateControl` is
 	// judged by the ratio the card always drew.
 	const rateAchievementPct =
+		stopped?.achievementPct ??
 		report.rateControl?.achievement ??
 		(targetRps && targetRps > 0 && actualRps !== undefined
 			? (actualRps / targetRps) * 100
@@ -43,6 +80,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		targetRps,
 		actualRps,
 		rateAchievementPct,
+		stoppedAt: stopped?.stoppedAt,
 		sendRate: s.sendRate,
 		throughput: s.throughput,
 		currentRps: actualRps ?? 0,

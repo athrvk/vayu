@@ -131,4 +131,22 @@ describe("RateFidelityCard", () => {
 		expect(out.textContent).toContain("0.0");
 		expect(out.querySelector("[style*='width']")).toBeNull();
 	});
+
+	it("states where a Stop ended the run beside the pace it is judged by", () => {
+		const out = renderCard({
+			targetRps: 50,
+			actualRps: 50,
+			achievement: 99.9,
+			stoppedAt: { planSharePct: 50.067, plannedSeconds: 60 },
+		});
+
+		expect(screen.getByText("stopped at 50% of the planned 60s")).toBeInTheDocument();
+		expect(out.querySelector("[style*='success-text']")?.textContent).toContain("99.9");
+	});
+
+	it("draws no stopped line without a Stop", () => {
+		renderCard({ targetRps: 50, actualRps: 50, achievement: 99.9 });
+
+		expect(screen.queryByText(/stopped at/)).toBeNull();
+	});
 });
