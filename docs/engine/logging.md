@@ -159,6 +159,11 @@ port. Neither app-side file sets `tid`: the main process has no per-connection
 worker threads the way the engine does, so the field would name nothing a
 reader could use.
 
+The app creates `logs/` `0700` and each file `0600` on Linux and macOS (the
+engine's own rule, `SECURITY.md`, "Data at rest"), subject to the process
+`umask` and applied when the directory or file is created. Windows ignores the
+mode, so a new file inherits the directory's ACL.
+
 **One floor for both files.** The engine's `logLevel` config entry governs
 `app_<stamp>.log` too - the app introduces no setting of its own. `log.ts`
 buffers every record in memory until the sidecar answers `GET /config` once
@@ -185,6 +190,22 @@ cannot fill the disk with either the records or the warnings about them.
 Settings,
 General's **Open logs folder** button (`app:openLogsFolder`) opens
 `<data-dir>/logs/` in the OS file manager.
+
+The renderer chooses nothing about a line's size or ownership, so `log-ipc.ts`
+bounds what it sends. `msg` is cut at 2000 characters; `err` is kept only as an
+object with a string `name` and `message` (and an optional string `stack`), cut
+at 200, 2000 and 8000; `fields` is kept only as a plain object (an array or a
+string is dropped), at most 20 keys, each string value cut at 500, and a
+`fields` that still serialises past 4000 characters becomes `{"truncated":
+true}`. Every cut appends `...[truncated]`. The renderer's `ts`, `level`,
+`src`, `cat`, `msg` and `tid` fields are discarded so they cannot overwrite
+the record's own, and control characters in `msg` become spaces so a newline
+cannot forge a second console line. Unlike the engine, which never scans text,
+the URLs inside `msg`, `err.message`, `err.stack` and each string field value
+go through the same URL rule as a `url` field (userinfo, query and fragment
+dropped) before they are cut - the renderer is where a page's own errors quote
+the URL they failed on. This applies at that boundary only; a record the main
+process logs itself is redacted by field name alone, as above.
 
 ## Reading the files
 

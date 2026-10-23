@@ -193,7 +193,9 @@ lives in a localStorage-backed store main cannot see - over `notify:show`
 (`services/notify.ts`); `electron/notify.ts` decides *whether and how*, from the
 window's focus and the platform's support, and answers `notify:availability`
 for the settings row. Nothing is posted while the window is focused - the toast
-already said it. A run an agent started over MCP notifies like any other: the
+already said it. Main treats the request as untrusted: it accepts only the ten
+kinds it lists itself, caps the title at 80 and the body at 240 characters, and
+drops control characters (issue #2378). A run an agent started over MCP notifies like any other: the
 renderer is told the run began and watches it from that moment, so its end
 reaches the user who handed it over and walked away - which is the case the
 setting exists for (issue #1419). Windows shows nothing at all unless

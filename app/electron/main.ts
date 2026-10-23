@@ -1216,7 +1216,7 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 // IPC Handlers
 function setupIpcHandlers() {
 	// OAuth 2.0 interactive flow (system browser / embedded window)
-	setupOAuthIpcHandlers();
+	setupOAuthIpcHandlers({ isFocused: () => liveWindow()?.isFocused() ?? false });
 
 	// The wake lock a streaming run holds, so the OS does not suspend the machine
 	// under a test the user walked away from (#1357). Built here rather than at

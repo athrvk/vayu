@@ -3516,10 +3516,25 @@ and is fetched exactly as before, loopback and redirects included.
   Vayu does not fetch a reference from a loopback or link-local address other
   than its source document's own host and port - not when the URL names one and
   not when a host name resolves to one`, on both forms of the route.
-- **With a proxy in force the connected peer is the proxy**, so the rule judges
-  the proxy's address and the proxy decides where the request goes next. A
-  proxy listening on loopback is therefore refused for a reference unless it
-  is the source's host and port.
+- **The URL is judged before anything is dialled**, by the same source rule: a
+  reference whose host names a loopback or link-local address in any spelling,
+  `localhost` or a `*.localhost` name is refused with the same `502`, and the
+  source's own host and port stay allowed (issue
+  [#2605](https://github.com/athrvk/vayu/issues/2605)).
+- **A proxy you configured is not refused.** With a proxy in force the
+  connected peer is the proxy, so the rule passes the one the transport names
+  (`manual`, or `system` when it resolved one; matched on its address and port,
+  a `localhost` proxy URL meeting any loopback address) and the URL check above
+  is what judges the reference. Behind a proxy the engine cannot see where the
+  proxy sends the request next, so a host *name* the proxy resolves to loopback
+  is the proxy's to answer. A proxy URL with no port is dialled on libcurl's
+  proxy default, `1080` (`443` for an `https` proxy).
+- **`environment` mode stays uncovered**, as does `system` when it resolved
+  nothing and falls back to it. There libcurl reads the proxy from
+  the process environment (`http_proxy`, `https_proxy`) and the engine never
+  learns it, so a proxy on loopback picked up that way is still refused for
+  every reference unless it is the source's host and port. Set it as `manual`
+  to fetch references through it.
 - Vayu's own engine and MCP ports stay refused whatever the source
   ([Reserved local ports](#reserved-local-ports)); this rule is added to that
   one, never in place of it.
@@ -6326,7 +6341,10 @@ wider rule on the same connected-address check: every loopback and link-local
 peer is refused unless it is the source document's own host and port (issue
 [#2364](https://github.com/athrvk/vayu/issues/2364), see
 [POST /import/fetch](#post-importfetch)). It is added to the reserved ports,
-so a source on one of them does not open it.
+so a source on one of them does not open it. The rule passes the proxy the
+transport names and judges the reference's URL instead (issue
+[#2605](https://github.com/athrvk/vayu/issues/2605)); the reserved ports do
+not: a proxy on one of them is still refused.
 
 #### Path variables
 

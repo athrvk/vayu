@@ -125,7 +125,12 @@ host and port.
 Vayu reads the address as written first, so the preview can name the reference
 it refused. The engine then checks the address it actually connects to and
 follows no redirect for a reference, so a DNS name that resolves to a local
-address, and a redirect that lands on one, are refused as well.
+address, and a redirect that lands on one, are refused as well. The preview
+names those too, with the engine's own words as the reason (`Reference not
+followed: <url> (The server answered HTTP 302)`), as it does any reference the
+engine answered no for. A proxy you set in Settings that listens on loopback does
+not make every reference a refusal; one picked up from the process environment
+still does.
 
 References are followed through the files they lead to, so a file that refers to
 a third is resolved too, and a cycle stops rather than looping. Each file is read

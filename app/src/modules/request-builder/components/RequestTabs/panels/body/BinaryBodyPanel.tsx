@@ -42,7 +42,7 @@ import { Callout } from "@/components/shared/Callout";
 import VariableInput from "@/components/shared/VariableInput";
 import { useFilePick, pickedFileOf, type PickedFile } from "@/components/shared/file-pick";
 import { containsVariableToken } from "@/constants/variables";
-import { fileBaseName, isUnderFolder, parentFolder } from "@/lib/file-path";
+import { fileBaseName, isUnderFolder } from "@/lib/file-path";
 import { flagAfterPick, isUnresolved, noFile } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
 import { formatSize } from "@/components/shared/response-viewer/utils";
@@ -144,7 +144,6 @@ export default function BinaryBodyPanel() {
 	const resolvedPath = useResolvedPath(src, resolveString);
 	const size = useFileSize(resolvedPath);
 	const name = file.fileName?.trim() || fileBaseName(resolvedPath || src);
-	const folder = parentFolder(resolvedPath);
 	const coveringRoot = resolvedPath
 		? roots.find((root) => isUnderFolder(resolvedPath, root.path))
 		: undefined;
@@ -229,7 +228,7 @@ export default function BinaryBodyPanel() {
 										type="button"
 										size="sm"
 										variant="ghost"
-										onClick={() => void chooseAndAllow(folder || undefined)}
+										onClick={() => void chooseAndAllow()}
 										disabled={allowing}
 									>
 										Allow folder…

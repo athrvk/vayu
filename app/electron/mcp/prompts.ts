@@ -183,7 +183,8 @@ export const PROMPTS: McpPromptDef[] = [
 							"'how much can it take' rather than a verdict at one load level. Then a " +
 							"starting RPS or virtual-user count, a duration, and how to iterate (e.g. ramp until p99 " +
 							"exceeds an SLO). Explain the reasoning, then propose the exact start_load_run " +
-							"arguments. Respect Vayu's configured caps and the host allowlist."
+							"arguments. Read the session's safety limits with get_safety_config before proposing " +
+							"a profile, and respect the caps and the host allowlist it reports."
 					),
 				],
 			};

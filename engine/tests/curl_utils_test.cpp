@@ -12,6 +12,7 @@
 // MSVC, whose `max` macro turns the call into a syntax error under /WX.
 #include <climits>
 #include <string>
+#include <utility>
 
 #include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
@@ -737,4 +738,64 @@ TEST_F (WireAuthorityTransfer, AStreamMatchesTheCertificateOnThePortTheWireDials
     vayu::http::SseStreamContext context (spec.run_id, spec.limits);
     const vayu::Response response = vayu::http::consume_sse_stream (spec, context);
     EXPECT_EQ (response.client_certificate, "localhost:443") << response.error_message;
+}
+
+// ============================================================================
+// configured_proxy: the proxy a policy names, as libcurl dials it (#2605)
+// ============================================================================
+
+namespace {
+
+vayu::http::TransportPolicy
+proxy_policy (vayu::http::ProxyMode mode, const std::string& url) {
+    vayu::http::TransportPolicy policy;
+    policy.proxy_mode = mode;
+    policy.proxy_url  = url;
+    return policy;
+}
+
+/// The authority `configured_proxy` answers for a manual @p url, or a
+/// sentinel that fails the comparison when it answers none.
+std::pair<std::string, int> manual_proxy (const std::string& url) {
+    const auto proxy = vayu::http::detail::configured_proxy (
+    proxy_policy (vayu::http::ProxyMode::Manual, url));
+    if (!proxy) {
+        return { "<none>", 0 };
+    }
+    return { proxy->host, proxy->port };
+}
+
+} // namespace
+
+TEST (ConfiguredProxy, ReadsTheHostAndPortAManualProxyNames) {
+    using Authority = std::pair<std::string, int>;
+    EXPECT_EQ (manual_proxy ("http://127.0.0.1:8888"), Authority ("127.0.0.1", 8888));
+    EXPECT_EQ (manual_proxy ("127.0.0.1:8888"), Authority ("127.0.0.1", 8888));
+    EXPECT_EQ (manual_proxy ("http://user:pw@[::1]:8080/"), Authority ("::1", 8080));
+    EXPECT_EQ (manual_proxy ("socks5h://localhost:1086"), Authority ("localhost", 1086));
+}
+
+// libcurl's proxy default is not the target's: 1080 for every scheme but
+// https, whose default is 443.
+TEST (ConfiguredProxy, AProxyNamingNoPortIsDialledOnLibcurlsProxyDefault) {
+    using Authority = std::pair<std::string, int>;
+    EXPECT_EQ (manual_proxy ("http://127.0.0.1"), Authority ("127.0.0.1", 1080));
+    EXPECT_EQ (manual_proxy ("localhost"), Authority ("localhost", 1080));
+    EXPECT_EQ (manual_proxy ("socks5://127.0.0.1/"), Authority ("127.0.0.1", 1080));
+    EXPECT_EQ (manual_proxy ("HTTPS://127.0.0.1"), Authority ("127.0.0.1", 443));
+}
+
+// Only a proxy the engine hands libcurl by URL is known to it: `environment`
+// (and `system` with nothing resolved) leaves libcurl reading the environment.
+TEST (ConfiguredProxy, OnlyAManualOrResolvedSystemProxyIsKnown) {
+    using vayu::http::ProxyMode;
+    using vayu::http::detail::configured_proxy;
+    const std::string url = "http://127.0.0.1:8888";
+    EXPECT_TRUE (configured_proxy (proxy_policy (ProxyMode::Manual, url)).has_value ());
+    EXPECT_TRUE (configured_proxy (proxy_policy (ProxyMode::System, url)).has_value ());
+    EXPECT_FALSE (configured_proxy (proxy_policy (ProxyMode::System, "")).has_value ());
+    EXPECT_FALSE (configured_proxy (proxy_policy (ProxyMode::Manual, "")).has_value ());
+    EXPECT_FALSE (
+    configured_proxy (proxy_policy (ProxyMode::Environment, url)).has_value ());
+    EXPECT_FALSE (configured_proxy (proxy_policy (ProxyMode::Off, url)).has_value ());
 }

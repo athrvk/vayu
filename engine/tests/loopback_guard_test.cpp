@@ -195,6 +195,65 @@ TEST (LocalPeerRulePredicate, ASourceUrlNamingNoHostHasNoRule) {
     EXPECT_FALSE (vayu::http::local_peer_rule_for_source ("").has_value ());
 }
 
+// The URL half (#2605), which is all a proxied reference has: what the text
+// names, in the spellings a URL parser reads, judged by the same source rule.
+using vayu::http::is_refused_reference_url;
+
+constexpr auto LOCAL_REFERENCE_URLS = std::to_array<const char*> (
+{ "http://127.0.0.1:3000/a", "http://127.1/a", "http://0x7f.0.0.1/a", "http://2130706433/a",
+"http://localhost/a", "http://LOCALHOST.:3000/a", "http://dev.localhost/a",
+"http://[::1]/a", "http://[::ffff:127.0.0.1]/a", "http://0.0.0.0/a", "http://[::]/a",
+"http://169.254.169.254/latest", "http://[fe80::1]:8080/a", "https://user:pw@localhost/a",
+"http://[::1%25lo]:5000/a", "http://[fe80::1%25eth0]/a" });
+
+constexpr auto ELSEWHERE_REFERENCE_URLS = std::to_array<const char*> (
+{ "http://example.com/a", "http://10.0.0.1/a", "http://localhost.example.com/a",
+"http://127.example/a", "http://specs.example.test:3000/a", "http://[::2]/a" });
+
+TEST (LocalPeerRulePredicate, AReferenceUrlNamingALocalHostIsRefusedByItsText) {
+    for (const char* url : LOCAL_REFERENCE_URLS) {
+        EXPECT_TRUE (is_refused_reference_url (url, LocalPeerRule{})) << url;
+        EXPECT_TRUE (is_refused_reference_url (url, rule_for ("http://specs.example.test/")))
+        << url;
+    }
+    for (const char* url : ELSEWHERE_REFERENCE_URLS) {
+        EXPECT_FALSE (is_refused_reference_url (url, LocalPeerRule{})) << url;
+    }
+}
+
+TEST (LocalPeerRulePredicate, AReferenceUrlNamingTheSourceIsNotRefused) {
+    const LocalPeerRule loopback = rule_for ("http://localhost:3000/spec.json");
+    for (const char* url : { "http://localhost:3000/a", "http://127.0.0.1:3000/a",
+         "http://dev.localhost:3000/a", "http://[::1]:3000/a" }) {
+        EXPECT_FALSE (is_refused_reference_url (url, loopback)) << url;
+    }
+    EXPECT_TRUE (is_refused_reference_url ("http://localhost:3001/a", loopback));
+    EXPECT_TRUE (is_refused_reference_url ("http://169.254.1.1:3000/a", loopback));
+
+    const LocalPeerRule link_local =
+    rule_for ("http://169.254.10.20:8080/spec.json");
+    EXPECT_FALSE (is_refused_reference_url ("http://169.254.10.20:8080/a", link_local));
+    EXPECT_TRUE (is_refused_reference_url ("http://169.254.10.21:8080/a", link_local));
+
+    EXPECT_TRUE (is_refused_reference_url ("http://127.0.0.1:3000/a",
+    rule_for ("http://specs.example.com:3000/spec.json")))
+    << "a source named by a host name earns nothing on loopback";
+}
+
+// How the rule recognises a configured proxy: by what its URL names, a
+// loopback name meeting any loopback address and nothing else meeting a name.
+TEST (LocalPeerRulePredicate, APeerIsNamedByItsAddressOrALoopbackName) {
+    using vayu::http::is_peer_named_by;
+    EXPECT_TRUE (is_peer_named_by ("127.0.0.1", 8888, "127.0.0.1", 8888));
+    EXPECT_TRUE (is_peer_named_by ("127.0.0.1", 8888, "localhost", 8888));
+    EXPECT_TRUE (is_peer_named_by ("::1", 8888, "localhost", 8888));
+    EXPECT_TRUE (is_peer_named_by ("10.0.0.5", 3128, "10.0.0.5", 3128));
+    EXPECT_FALSE (is_peer_named_by ("127.0.0.1", 8889, "127.0.0.1", 8888));
+    EXPECT_FALSE (is_peer_named_by ("127.0.0.1", 8888, "proxy.example.com", 8888));
+    EXPECT_FALSE (is_peer_named_by ("127.0.0.1", 8888, "", 8888));
+    EXPECT_FALSE (is_peer_named_by ("", 8888, "localhost", 8888));
+}
+
 // ============================================================================
 // The registry
 // ============================================================================

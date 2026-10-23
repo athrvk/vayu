@@ -223,6 +223,14 @@ export interface ToolContext {
 	 * undefined when no handshake is known for this request.
 	 */
 	clientName?: () => string | undefined;
+	/**
+	 * Reports @p done of @p total steps finished, for a call that runs long.
+	 * Absent unless the client sent a `progressToken` (#2451), so a tool calls
+	 * it as `ctx.progress?.(...)`. Fire-and-forget, with `done` never going
+	 * backwards. @p message reaches the client unmasked, before the result's
+	 * withholding runs: carry counts and a status word, never request data.
+	 */
+	progress?: (done: number, total: number, message?: string) => void;
 }
 
 export interface ToolResult {

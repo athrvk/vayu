@@ -188,27 +188,77 @@ function readTarget(value: unknown): NotifyTarget {
 }
 
 /**
+ * The kinds the renderer may send over `notify:show` (#2378). Main cannot import
+ * `NOTIFY_KINDS` from `src/services/notify.ts`, so the list is spelled here and
+ * `notify.test.ts` fails if either side changes alone.
+ */
+export const NOTIFY_KINDS: readonly string[] = [
+	"load-run-finished",
+	"load-run-stopped",
+	"load-run-failed",
+	"collection-run-finished",
+	"collection-run-failed",
+	"engine-lost",
+	"engine-restart-failed",
+	"update-ready",
+	"signed-in",
+	"inbox-captured",
+];
+
+/** Longest title and body, in characters, that reach the OS (#2378). */
+export const NOTIFY_TITLE_MAX = 80;
+export const NOTIFY_BODY_MAX = 240;
+
+/*
+ * Tab, CR and LF become a space - a newline inside a title would draw as a
+ * second line on some platforms and a glyph on others, and "a\nb" should still
+ * read as two words. Every other control character is removed outright.
+ */
+const WHITESPACE_CONTROLS = /[\t\n\r]/g;
+const OTHER_CONTROLS = /\p{Cc}/gu;
+
+/** `text` without control characters and at most `max` characters, ending in `…` when cut. */
+function sanitizeNotifyText(text: string, max: number): string {
+	const clean = text.replace(WHITESPACE_CONTROLS, " ").replace(OTHER_CONTROLS, "");
+	// Code points, not UTF-16 units: a cut must not split a surrogate pair.
+	const characters = Array.from(clean);
+	if (characters.length <= max) return clean;
+	return `${characters.slice(0, max - 1).join("")}…`;
+}
+
+/**
  * Read one request off the wire.
  *
  * Throws rather than dropping: a malformed request is a bug in the renderer's
  * call site, and an invoke that rejects says so at the line that made it. A
- * notification the user never sees would not.
+ * notification the user never sees would not. Text is the exception - an
+ * overlong or control-laden title is cleaned, not refused, since the event it
+ * announces still happened.
  */
 export function readNotifyRequest(value: unknown): NotifyRequest {
 	if (!value || typeof value !== "object") {
 		throw new TypeError("notify: expected a request object");
 	}
 	const { kind, title, body, target } = value as Record<string, unknown>;
-	if (typeof kind !== "string" || kind.length === 0) {
-		throw new TypeError("notify: `kind` must be a non-empty string");
+	if (typeof kind !== "string" || !NOTIFY_KINDS.includes(kind)) {
+		throw new TypeError("notify: `kind` must be one of the known notification kinds");
 	}
-	if (typeof title !== "string" || title.length === 0) {
+	if (typeof title !== "string") {
 		throw new TypeError("notify: `title` must be a non-empty string");
 	}
 	if (typeof body !== "string") {
 		throw new TypeError("notify: `body` must be a string");
 	}
-	return { kind, title, body, target: readTarget(target) };
+	const cleanTitle = sanitizeNotifyText(title, NOTIFY_TITLE_MAX);
+	if (cleanTitle.trim().length === 0) {
+		throw new TypeError("notify: `title` must be a non-empty string");
+	}
+	return {
+		kind,
+		title: cleanTitle,
+		body: sanitizeNotifyText(body, NOTIFY_BODY_MAX),
+		target: readTarget(target),
+	};
 }
 
 export function createNotifier(deps: NotifyDeps): Notifier {

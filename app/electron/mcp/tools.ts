@@ -48,6 +48,7 @@ import {
 	writesDisabled,
 } from "./tools/kit.js";
 import { READ_TOOLS } from "./tools/reads.tools.js";
+import { SAFETY_TOOLS } from "./tools/safety.tools.js";
 import { GRAPHQL_SCHEMA_TOOLS } from "./tools/graphql-schema.tools.js";
 import { RUN_REQUEST_TOOLS } from "./tools/run-request.tools.js";
 import { ENGINE_CONFIG_TOOLS } from "./tools/engine-config.tools.js";
@@ -165,6 +166,7 @@ export function withheldWriteRefusal(name: string, ctx: ToolContext): ToolResult
 
 export const TOOLS: McpTool[] = [
 	...READ_TOOLS,
+	...SAFETY_TOOLS,
 	...GRAPHQL_SCHEMA_TOOLS,
 	...RUN_REQUEST_TOOLS,
 	...ENGINE_CONFIG_TOOLS,

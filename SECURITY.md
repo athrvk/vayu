@@ -73,6 +73,8 @@ else (symlinks are skipped). The data directory is `chmod`ed `0700` whatever
 `--data-dir` names, so point it at a folder of its own, not at one you share.
 The `umask` of `077` the engine sets covers the whole process, so a file it
 creates anywhere else, including a path you chose, is `0600` too.
+The app's own log files (`app_*.log`, and `mcp_*.log` from the standalone MCP
+server) are created the same way, `0600` in a `0700` folder.
 On Windows the data directory gets a protected ACL for your account, SYSTEM and
 Administrators, which files created afterwards inherit; files that already
 existed keep their old ACL. A user who can act as you, or read your disk
@@ -161,7 +163,9 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   (`169.254.169.254`, `fd00:ec2::254`) do, like any public host.
 - **Hard load caps (enforcement).** `start_load_run` rejects requests whose RPS,
   concurrency, or duration exceed configured ceilings. Together with the
-  allowlist, these are the real limits on what load an agent can generate.
+  allowlist, these are the real limits on what load an agent can generate. An
+  agent can read the caps, the allowlisted hosts and the on/off state of the
+  gates (`get_safety_config`); it never receives a secret value through it.
 - **Confirmation gate (anti-accident, not anti-adversary).** `start_load_run`
   and the destructive deletes start or remove nothing on a first call. Where the
   client and transport let Vayu ask (a 2026-07-28 client, or stdio), the
@@ -245,7 +249,8 @@ Releases are built in public on GitHub Actions from tagged source and ship with
 checksums and a build-provenance attestation per asset (from the first release
 after #1779). Check a download with
 `gh attestation verify <asset> --repo athrvk/vayu`; `install.sh` does it for
-you when an authenticated `gh` is present and refuses an asset whose checksum
+you when an authenticated `gh` is present, pinned to the tag it downloads so
+an older release's asset cannot stand in, and refuses an asset whose checksum
 is missing or wrong. Every third-party action in the release workflow is pinned
 to a commit SHA, and only the final publish job can write to the release. They
 are not code-signed, so macOS and Windows will warn on first

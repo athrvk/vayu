@@ -80,7 +80,7 @@ const INSTRUCTIONS_HEAD =
 	"real traffic to a target), write (mutate saved data or engine config), and " +
 	"load (start and stop load tests). " +
 	"Every tool that puts traffic on the network is restricted to an allowlist, " +
-	"and load runs additionally enforce hard RPS, virtual-user and duration caps. Write " +
+	"and load runs additionally enforce hard RPS, virtual-user, duration and iteration caps. Write " +
 	"tools require write access, and the destructive ones ask " +
 	"for confirmation - via elicitation where the client supports it, otherwise by " +
 	"returning what the call would destroy and waiting for a `confirmed: true` " +
@@ -337,6 +337,36 @@ function callContext(
 		...(canAskForm(capabilities)
 			? { userInput: { responses: sdkCtx.mcpReq.inputResponses } }
 			: {}),
+		...progressReporter(sdkCtx),
+	};
+}
+
+/**
+ * `{ progress }` for a call whose client sent a `progressToken`, else nothing.
+ *
+ * Sent through `mcpReq.notify`, which ties the notification to this request;
+ * `mcp.server.notification` would go out on the session instead. A failed or
+ * aborted send is dropped: progress is a courtesy and must never fail the run
+ * it describes.
+ */
+function progressReporter(sdkCtx: ServerContext): Pick<ToolContext, "progress"> {
+	const progressToken = sdkCtx.mcpReq._meta?.progressToken;
+	if (progressToken === undefined) return {};
+	return {
+		progress: (done, total, message) => {
+			if (sdkCtx.mcpReq.signal.aborted) return;
+			sdkCtx.mcpReq
+				.notify({
+					method: "notifications/progress",
+					params: {
+						progressToken,
+						progress: done,
+						total,
+						...(message !== undefined ? { message } : {}),
+					},
+				})
+				.catch(() => undefined);
+		},
 	};
 }
 
