@@ -11,6 +11,7 @@
 #include "vayu/types.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -145,12 +146,16 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * @param network_ms When non-null, the milliseconds this call spent waiting on
  *        the provider's token endpoint are added to it (a refresh and the fresh
  *        grant after a rejected refresh both count); a cache hit adds nothing.
+ * @param cancel `ClientConfig::cancel` for the token request (issue #2683):
+ *        a management-API handler's `RouteContext::server_stopping`, null
+ *        everywhere else. A cancelled request is an `oauth2_network_error`.
  */
 std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
 const nlohmann::json& config,
 bool force_refresh,
 const std::optional<InteractiveExchange>& interactive,
-double* network_ms = nullptr);
+double* network_ms              = nullptr,
+const std::atomic<bool>* cancel = nullptr);
 
 /**
  * @brief Public JSON shape of a cached token (never includes the refresh token

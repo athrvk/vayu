@@ -139,7 +139,7 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 		pointer: {
 			category: NETWORK,
 			anchor: "customCaCertificates",
-			label: "Custom CA Certificates",
+			label: "Custom CA certificates",
 		},
 	},
 	"--cert": {

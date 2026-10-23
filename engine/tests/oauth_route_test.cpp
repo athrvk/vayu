@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <string>
 #include <utility>
 
@@ -21,9 +22,11 @@
 using nlohmann::json;
 
 namespace vayu::http::routes {
-// Declared in oauth.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json>
-oauth2_token_post (vayu::db::Database& db, const std::string& body);
+// Declared in oauth.cpp; returns {http_status, json_body}. No server owns
+// these token requests, so nothing cancels them.
+std::pair<int, nlohmann::json> oauth2_token_post (vayu::db::Database& db,
+const std::string& body,
+const std::atomic<bool>* cancel = nullptr);
 std::pair<int, nlohmann::json>
 oauth2_token_get (vayu::db::Database& db, const std::string& key);
 std::pair<int, nlohmann::json>

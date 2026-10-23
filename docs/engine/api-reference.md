@@ -843,7 +843,7 @@ min/max/options):
       "key": "workers",
       "value": "8",
       "type": "integer",
-      "label": "Worker Threads",
+      "label": "Worker threads",
       "description": "Number of background worker threads. Higher values improve throughput on multi-core systems but increase RAM usage. Default equals CPU core count.",
       "category": "general_engine",
       "default": "8",
@@ -858,7 +858,7 @@ min/max/options):
       "key": "defaultHttpVersion",
       "value": "auto",
       "type": "enum",
-      "label": "Default HTTP Version",
+      "label": "Default HTTP version",
       "description": "Protocol a newly created request starts with...",
       "category": "network_performance",
       "default": "auto",
@@ -876,7 +876,7 @@ min/max/options):
       "key": "dbCacheSize",
       "value": "67108864",
       "type": "integer",
-      "label": "Database Cache Size",
+      "label": "Database cache size",
       "description": "Memory SQLite keeps per connection for recently used database pages...",
       "category": "general_engine",
       "default": "67108864",
@@ -960,8 +960,9 @@ never declare one.
 The app renders it as the suffix inside the input, which is where a unit is
 stated **once** - so a seeded description never spells the same unit out as an
 "in milliseconds" clause, and a label never carries a `(ms)` suffix; a test
-over the catalogue enforces both. `bytes` additionally selects human-readable
-formatting for the value, the range hint and the default line (`104857600`
+over the catalogue enforces both. Labels are sentence case ("Default request
+timeout", "Correlation ID"), enforced by a second catalogue test. `bytes`
+additionally selects human-readable formatting for the value, the range hint and the default line (`104857600`
 reads as `100.0 MB`), which the app used to select from a hardcoded list of
 three keys - so a byte-valued entry added engine-side was formatted as a raw
 number until someone edited a TypeScript array. A client that meets a unit it
@@ -1087,6 +1088,11 @@ stored numeric values are unchanged, but a script that tested
 `pm.response.errorCode === 'CONNECTION_FAILED'` for these two failures now sees
 the new spelling. A load run records them under the error types
 `too_many_redirects` and `bad_content_encoding`.
+
+A send still in flight when the engine shuts down is cancelled rather than
+waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is
+making: the send answers, and its trace records, `CANCELLED` with
+`errorMessage` `Request cancelled`, about a second after the shutdown began.
 
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.

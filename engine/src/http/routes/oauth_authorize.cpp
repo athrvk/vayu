@@ -369,7 +369,8 @@ const std::string& mode) {
 
 AuthorizeStatus OAuth2AuthorizeManager::complete (vayu::db::Database& db,
 const std::string& attempt_id,
-const std::string& callback_url) {
+const std::string& callback_url,
+const std::atomic<bool>* cancel) {
     // Snapshot what the exchange needs under the lock, then release it: the token
     // exchange is a network round-trip and must not stall status() polls for
     // other attempts (the manager is shared across all in-flight authorizations).
@@ -414,7 +415,7 @@ const std::string& callback_url) {
     } else {
         const std::string code = params.count ("code") ? params.at ("code") : "";
         oauth::InteractiveExchange ex{ code, code_verifier, redirect_uri };
-        auto result = oauth::acquire_token (db, config, false, ex); // no lock held
+        auto result = oauth::acquire_token (db, config, false, ex, nullptr, cancel); // no lock held
         if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
             result_state = kCompleted;
             cache_key    = oauth::cache_key (config);

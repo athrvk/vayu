@@ -1837,7 +1837,7 @@ describe("the timeout and think-time hint (issue #2229)", () => {
 	it("names where the per-request timeout and the pacing live", () => {
 		open();
 
-		const hint = screen.getByText(/times out after Default Request Timeout/);
+		const hint = screen.getByText(/times out after Default request timeout/);
 		expect(hint).toHaveTextContent("Settings › Network & connectivity");
 		expect(hint).toHaveTextContent("Think time element");
 		expect(hint).toHaveTextContent("Elements tab");
@@ -1847,7 +1847,7 @@ describe("the timeout and think-time hint (issue #2229)", () => {
 	it("sits under the target line, in the header", () => {
 		open({ url: "https://api.example.com/" });
 
-		const hint = screen.getByText(/times out after Default Request Timeout/);
+		const hint = screen.getByText(/times out after Default request timeout/);
 		expect(hint.parentElement).toHaveAttribute("data-slot", "dialog-header");
 	});
 });

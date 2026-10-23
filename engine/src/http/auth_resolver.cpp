@@ -13,6 +13,7 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <type_traits>
@@ -106,7 +107,8 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
 AuthApplyResult resolve_oauth2 (vayu::Request* req,
 const nlohmann::json& config,
 vayu::db::Database* db,
-const TargetPolicy* target_policy) {
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     // Before the cache is read, so a token endpoint the policy refuses is
     // refused whether or not an earlier send left its token cached (#2521).
     if (target_policy != nullptr) {
@@ -131,7 +133,8 @@ const TargetPolicy* target_policy) {
     oauth::TokenError{ 409, "oauth2_interactive_required",
         "OAuth 2.0 token required (auto-fetch is disabled)" };
     if (auto_fetch) {
-        result = oauth::acquire_token (*db, config, false, std::nullopt, &token_fetch_ms);
+        result = oauth::acquire_token (
+        *db, config, false, std::nullopt, &token_fetch_ms, cancel);
     } else if (auto cached = db->get_oauth_token (oauth::cache_key (config))) {
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
@@ -261,7 +264,8 @@ Auth parse_auth (const nlohmann::json& auth) {
 AuthApplyResult apply_auth (vayu::Request& req,
 const Auth& auth,
 vayu::db::Database* db,
-const TargetPolicy* target_policy) {
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     return std::visit (
     [&] (const auto& a) -> AuthApplyResult {
         using T = std::decay_t<decltype (a)>;
@@ -283,7 +287,7 @@ const TargetPolicy* target_policy) {
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
             return apply_api_key (req, a);
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
-            return resolve_oauth2 (&req, a.config, db, target_policy);
+            return resolve_oauth2 (&req, a.config, db, target_policy, cancel);
         } else {
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
             vayu::utils::log_debug ("http",
@@ -300,18 +304,20 @@ const TargetPolicy* target_policy) {
 AuthApplyResult apply_auth (vayu::Request& req,
 const nlohmann::json& auth,
 vayu::db::Database* db,
-const TargetPolicy* target_policy) {
-    return apply_auth (req, parse_auth (auth), db, target_policy);
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
+    return apply_auth (req, parse_auth (auth), db, target_policy, cancel);
 }
 
 AuthApplyResult preflight_auth (const nlohmann::json& auth,
 vayu::db::Database& db,
-const TargetPolicy* target_policy) {
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     const Auth parsed = parse_auth (auth);
     if (const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed)) {
         // Acquire (cache-aware) without touching any request - warms the token
         // cache so the run worker's apply_auth is a cache hit.
-        return resolve_oauth2 (nullptr, oauth2->config, &db, target_policy);
+        return resolve_oauth2 (nullptr, oauth2->config, &db, target_policy, cancel);
     }
     return {};
 }

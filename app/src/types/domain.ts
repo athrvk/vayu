@@ -881,7 +881,7 @@ export interface Request {
 	 *
 	 * Per-request, not app-wide: it describes the one internal host with the
 	 * self-signed certificate. Trusting an authority everywhere is the other
-	 * control, Settings > Network & connectivity > Custom CA Certificates, and
+	 * control, Settings > Network & connectivity > Custom CA certificates, and
 	 * it is the one to reach for first.
 	 */
 	verifySSL: boolean;

@@ -93,7 +93,7 @@ const isRestartRequired = (entry: ConfigEntry): boolean => entry.requiresRestart
 /**
  * Places each entry that names a `dependsOn` immediately after the entry it
  * names, indented in the render below - so "Header name" always sits under
- * "Correlation Id" regardless of where its own label would otherwise sort.
+ * "Correlation ID" regardless of where its own label would otherwise sort.
  *
  * Every other entry keeps the existing alphabetical-by-label order (issue
  * #1610): only entries with no `dependsOn`, or whose named parent is not in

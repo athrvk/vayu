@@ -27,7 +27,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
-| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads limited to the request's site), see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
@@ -621,7 +621,6 @@ are the answers recorded as different, and the reason for each:
 | `{"format": "time"}`, `"25:00:00Z"` | passes | fails | `fast` takes any two digits for an hour |
 | `{"format": "time"}`, `"03:04:05"` | passes | fails | ajv leaves the offset optional; `jsonSchema` follows RFC 3339, which requires it |
 | `{"multipleOf": 0.01}`, `0.07` or `19.99` | fails | passes | ajv divides in binary floating point unless `multipleOfPrecision` is set |
-| `{"propertyNames": {"pattern": "^[a-z]+$"}}`, `{"aB": 1}` | fails | passes | a bug in `jsonSchema`, tracked as [#2719](https://github.com/athrvk/vayu/issues/2719) |
 
 A keyword `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) is one ajv 6 ignores, so the same schema passes
@@ -1263,9 +1262,10 @@ jar.clear('https://api.example.com/');                       // that URL's cooki
 jar.clear();                                                 // this environment's jar
 ```
 
-`get` and `getAll` read only the request's own site and the hosts the script has
-called through `pm.sendRequest`; any other URL answers `undefined` / `[]` with a
-console warning. See the divergences below.
+Every method names only the request's own site and the hosts the script has
+called through `pm.sendRequest`. `get` and `getAll` answer `undefined` / `[]` for
+any other URL, and `set`, `unset` and `clear(url)` store or remove nothing, each
+with a console warning. See the divergences below.
 
 Every method is URL-scoped and takes an optional trailing callback, invoked
 inline, that carries what the call did: `get` the value, `getAll` the array,
@@ -1286,9 +1286,21 @@ Divergences from Postman:
   `undefined` / `[]` plus a console warning naming the host. The jar holds the
   sessions of every host the environment has talked to, and a collection's
   script should not be able to read them all. A redirect's target is not seen,
-  so it does not widen the scope. **Writes are not limited this way**: `set`,
-  `unset` and `clear` stay scoped by the URL they are given. Details in
+  so it does not widen the scope. Details in
   [scripting.md](../engine/scripting.md#reads-are-limited-to-the-requests-site).
+- **`jar.set`, `jar.unset` and `jar.clear(url)` are limited to the same site**
+  (#2631). A write whose URL is outside it is refused with a console warning and
+  stores or removes nothing, and so is a `set` whose cookie `domain` is outside
+  it. RFC 6265 section 5.3 has a user agent ignore a `Domain` that does not
+  domain-match the request host; Postman's own jar does not apply that rule to
+  a script's write, and here it is checked in both directions like the read
+  scope. A single-label domain (`.com`, `test`) is also refused unless it is the
+  request's own host, because it would reach every site under it; no
+  public-suffix list is applied (#2731), so `co.uk` still passes. The call still
+  returns and calls its callback as a stored write would. **A script that logs in
+  across hosts by `set`ting a cookie with a foreign `domain` stops working**:
+  call the other host through `pm.sendRequest` first and it is in scope. Details
+  in [scripting.md](../engine/scripting.md#writes-are-limited-the-same-way).
 - **A write is applied after the transfer it was made before**, not the moment
   it is called - so it rides that request and cannot be lost when the response's
   cookies are captured. Details in

@@ -103,11 +103,11 @@ const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }
 	},
 	maxStreamEvents: {
 		title: "Event limit reached",
-		detail: "The stream hit its event cap and was closed. Raise Stream Event Limit in Settings, or set a higher cap on this request.",
+		detail: "The stream hit its event cap and was closed. Raise Stream event limit in Settings, or set a higher cap on this request.",
 	},
 	maxStreamDurationMs: {
 		title: "Duration limit reached",
-		detail: "The stream ran for its maximum duration and was closed. Raise Stream Duration Limit in Settings, or set a higher cap on this request.",
+		detail: "The stream ran for its maximum duration and was closed. Raise Stream duration limit in Settings, or set a higher cap on this request.",
 	},
 	idleTimeout: {
 		title: "Stream went quiet",
@@ -209,7 +209,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 							<p className="pb-2 text-xs text-warning-text">
 								Only the first {event.data.length.toLocaleString()} bytes of{" "}
 								{(event.dataBytes ?? event.data.length).toLocaleString()} were kept
-								- raise Stream Event Size Limit in Settings to keep more.
+								- raise Stream event size limit in Settings to keep more.
 							</p>
 						)}
 						<pre className="max-h-64 overflow-auto rounded-md surface-sunken border border-rule p-3 font-mono text-xs whitespace-pre-wrap break-all">
@@ -299,8 +299,8 @@ export default function ResponseEvents({
 						{eventsTruncated && (
 							<Callout severity="warning" title="Events truncated for storage">
 								{received.toLocaleString()} events were received and the first{" "}
-								{events.length.toLocaleString()} were kept. Raise Stream Events
-								Stored Per Run in Settings to keep more.
+								{events.length.toLocaleString()} were kept. Raise Stream events
+								stored per run in Settings to keep more.
 							</Callout>
 						)}
 					</div>

@@ -171,8 +171,8 @@ export class SpecBundleTooLargeError extends Error {
 	constructor(bytes: number, maxBytes: number, bundled = true) {
 		super(
 			bundled
-				? `The spec and the files it references come to ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI Document Size setting, or import a bundled spec.`
-				: `The spec is ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI Document Size setting.`
+				? `The spec and the files it references come to ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI document size setting, or import a bundled spec.`
+				: `The spec is ${formatBytes(bytes)}, over the ${formatBytes(maxBytes)} one document may hold. Raise the Max OpenAPI document size setting.`
 		);
 		this.name = "SpecBundleTooLargeError";
 	}

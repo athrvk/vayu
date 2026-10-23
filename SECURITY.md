@@ -235,6 +235,10 @@ says so; turn off follow-redirects on a request whose key must stay on one host.
 The MCP host allowlist is checked against the URL you send, not against where it
 redirects.
 
+After a download on Windows or the Linux AppImage, the in-app updater contacts
+`api.github.com` for the installer's attestation and `tuf-repo-cdn.sigstore.dev`
+to refresh the Sigstore trusted root it checks that attestation against.
+
 ## Releases
 
 Releases are built in public on GitHub Actions from tagged source and ship with
@@ -246,6 +250,32 @@ is missing or wrong. Every third-party action in the release workflow is pinned
 to a commit SHA, and only the final publish job can write to the release. They
 are not code-signed, so macOS and Windows will warn on first
 launch, and `install.sh` strips the macOS quarantine attribute for that reason.
+
+**The in-app updater checks the attestation too.** On Windows and the Linux
+AppImage the updater downloads in the background and installs nothing until the
+installer's build-provenance attestation verifies against Sigstore's public-good
+trusted root and names `release.yml` in `athrvk/vayu` at the exact tag of the
+release being installed. Otherwise it refuses, tells you why, and offers the
+release page. Pinning the tag, not just the workflow, is what refuses an older
+genuine installer re-uploaded under a newer release. The `latest*.yml` update
+feeds are attested like every other asset, so
+`gh attestation verify latest.yml --repo athrvk/vayu` covers them as well. On
+macOS and the Linux `.deb` the app downloads nothing and only points to the
+release page.
+
+**What this does not stop.** An attestation proves a file came out of that
+workflow run, not that the run was honest. An attacker who can run code inside
+the publish job, through a compromised pinned action for instance, can have it
+attest a malicious file. What the check removes is the cheaper attacks:
+replacing assets on a release with a stolen `contents: write` token, a
+hand-edited release, and a re-uploaded older build.
+
+**Known gap: the trusted-root refresh ignores the system proxy.** The TUF
+client behind `@sigstore/tuf` fetches with Node's global `fetch`, not Electron's
+`net.fetch`, which is what follows the system proxy for the attestation lookup.
+On a network that reaches the internet only through a system proxy, the refresh
+can fail and the update is refused. The check fails closed: it never installs
+because it could not look.
 If you find a way to break any statement in this document, report it privately
 through GitHub Security Advisories.
 

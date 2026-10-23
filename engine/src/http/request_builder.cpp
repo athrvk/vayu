@@ -17,7 +17,8 @@ RequestBuild build_request (const nlohmann::json& config,
 vayu::db::Database* db,
 int timeout_ms,
 AuthResolution auth_resolution,
-const TargetPolicy* target_policy) {
+const TargetPolicy* target_policy,
+const std::atomic<bool>* cancel) {
     RequestBuild out;
 
     auto parsed = vayu::json::deserialize_request (config);
@@ -44,8 +45,8 @@ const TargetPolicy* target_policy) {
         return out;
     }
 
-    auto auth = apply_auth (
-    out.request, config.value ("auth", nlohmann::json ()), db, target_policy);
+    auto auth         = apply_auth (out.request,
+            config.value ("auth", nlohmann::json ()), db, target_policy, cancel);
     out.auth_fetch_ms = auth.token_fetch_ms;
     if (!auth.ok) {
         out.ok            = false;

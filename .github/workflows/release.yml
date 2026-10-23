@@ -659,15 +659,16 @@ jobs:
           merge-multiple: true
 
       - name: Attest build provenance
-        # The .sha256 sidecars and the electron-updater feeds are derived from
-        # the installers; the installers, zips and blockmaps are the assets a
-        # user runs or the updater assembles.
+        # Everything the updater or a user fetches from the release: the
+        # installers, zips and blockmaps, and the latest*.yml feeds that name
+        # them. A feed edited by hand then fails `gh attestation verify` like
+        # any other asset. The .sha256 sidecars are the one exclusion: each only
+        # restates the digest of an installer that is itself attested.
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             artifacts/*
             !artifacts/*.sha256
-            !artifacts/*.yml
 
       # Prefer the curated, hand-written notes committed at .github/release-notes/<tag>.md
       # (Keep a Changelog format, see CLAUDE.md). If that file is absent for this tag,
@@ -693,7 +694,7 @@ jobs:
           fi
           # Either way the body names how to check the download. For the
           # auto-generated fallback this footer is followed by GitHub's notes.
-          printf '\n\nEvery asset carries a build-provenance attestation: `gh attestation verify <asset> --repo %s`.\n' \
+          printf '\n\nEvery asset except the `.sha256` checksums carries a build-provenance attestation: `gh attestation verify <asset> --repo %s`.\n' \
             "$GITHUB_REPOSITORY" >> "$notes"
           # Which file each platform takes, ahead of the unsigned-download
           # block. The install command matches docs/index.md; the file names

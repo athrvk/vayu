@@ -15,6 +15,7 @@
  * and access to request/response data.
  */
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -367,6 +368,16 @@ struct ScriptContext {
      * unbounded, which is the state issue #1188 exists to end.
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /**
+     * @brief `ClientConfig::cancel` for every `pm.sendRequest` this script
+     *        makes (issue #2683), or null when nothing ends one early.
+     *
+     * The enclosing exchange's own (`ExchangeInputs::cancel`), so a script
+     * send inside `POST /execute` ends with the server the way the request's
+     * own send does.
+     */
+    const std::atomic<bool>* cancel = nullptr;
 
     /**
      * @brief `pm.metrics`'s write destination (issue #1500), or null to

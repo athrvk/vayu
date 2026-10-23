@@ -17,6 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useUpdateVerificationStore } from "@/stores/update-verification-store";
 import { UpdatesCard } from "./UpdatesCard";
 
 const checkForUpdates = vi.fn();
@@ -27,6 +28,7 @@ beforeEach(() => {
 	checkForUpdates.mockReset();
 	openReleasePage.mockReset();
 	quitForUpdate.mockReset();
+	useUpdateVerificationStore.setState({ failure: null });
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		checkForUpdates,
 		openReleasePage,
@@ -180,5 +182,42 @@ describe("UpdatesCard", () => {
 		render(<UpdatesCard />);
 		expect(screen.getByText(/available in the desktop app/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /check for updates/i })).toBeDisabled();
+	});
+
+	describe("a downloaded installer that did not verify (issue #2372)", () => {
+		const REASON = "GitHub has no attestation for this installer (HTTP 404).";
+
+		it("shows it on mount, though the event arrived before the panel did", () => {
+			useUpdateVerificationStore.getState().setFailure({ version: "1.2.3", reason: REASON });
+			render(<UpdatesCard />);
+			expect(screen.getByText(/Couldn't verify Vayu 1\.2\.3\./)).toHaveTextContent(REASON);
+		});
+
+		it("offers the release notes beside it", () => {
+			useUpdateVerificationStore.getState().setFailure({ version: "1.2.3", reason: REASON });
+			render(<UpdatesCard />);
+			fireEvent.click(screen.getByRole("button", { name: /release notes/i }));
+			expect(openReleasePage).toHaveBeenCalledWith();
+		});
+
+		it("stays ahead of an older check answer", async () => {
+			checkForUpdates.mockResolvedValue({ status: "up-to-date", version: "0.9.0" });
+			render(<UpdatesCard />);
+			await clickCheck();
+			expect(await screen.findByText(/up to date/i)).toBeInTheDocument();
+
+			act(() => {
+				useUpdateVerificationStore
+					.getState()
+					.setFailure({ version: "1.2.3", reason: REASON });
+			});
+			expect(await screen.findByText(/Couldn't verify/)).toBeInTheDocument();
+			expect(screen.queryByText(/up to date/i)).toBeNull();
+		});
+
+		it("says nothing when nothing failed", () => {
+			render(<UpdatesCard />);
+			expect(screen.queryByText(/Couldn't verify/)).toBeNull();
+		});
 	});
 });

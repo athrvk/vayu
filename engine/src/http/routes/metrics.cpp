@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <optional>
 #include <string_view>
 #include <thread>
@@ -499,15 +500,18 @@ namespace {
  * @p start_offset on, then its completion event.
  *
  * Always answers `false` - the provider is done when this returns, whether the
- * run ended or the client went away.
+ * run ended, the client went away or the server is stopping (@p stopping,
+ * #2683), which ends it with no completion event because the run has not
+ * completed.
  */
 bool stream_live_metrics (vayu::db::Database& db,
 const std::string& run_id,
 const std::shared_ptr<vayu::core::RunContext>& context,
 size_t start_offset,
+const std::atomic<bool>& stopping,
 httplib::DataSink& sink) {
     LiveMetricsCursor cursor{ start_offset, std::nullopt };
-    while (sink.is_writable ()) {
+    while (sink.is_writable () && !stopping) {
         const auto step = live_metrics_step (
         db, run_id, *context, cursor, std::chrono::steady_clock::now ());
         for (const auto& payload : step.ticks) {
@@ -559,8 +563,9 @@ void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httpli
     }
 
     res.set_content_provider ("text/event-stream",
-    [&db = ctx.db, run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
-        return stream_live_metrics (db, run_id, context, start_offset, sink);
+    [&ctx, run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
+        return stream_live_metrics (
+        ctx.db, run_id, context, start_offset, ctx.server_stopping, sink);
     });
 }
 

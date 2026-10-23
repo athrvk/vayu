@@ -136,6 +136,83 @@ TEST_F (ConfigSeedTest, AReseedOverAnUnchangedCatalogueWritesNothing) {
     EXPECT_TRUE (replaced.empty ()) << "rewrote unchanged entries: " << joined;
 }
 
+// The first word that breaks sentence case, or "" when the label holds it
+// (docs/ux-writing.md, "Case"). The Settings page renders `label` verbatim, so
+// this is the engine's half of the app's sentence-case scan (#2293). A later
+// word may start with a capital only when it is all capitals (DNS, CA, URL,
+// ID) or a name written that way: OAuth, OpenAPI, the header name Expect, and the glossary's Send.
+std::string first_non_sentence_case_word (const std::string& label) {
+    static const std::unordered_set<std::string> capitalised_names = { "OAuth",
+        "OpenAPI", "Send", "Sends", "Expect" };
+    const auto is_upper = [] (char c) { return c >= 'A' && c <= 'Z'; };
+    const auto is_lower = [] (char c) { return c >= 'a' && c <= 'z'; };
+
+    std::string word;
+    bool first_word = true;
+    std::string offender;
+    const auto judge = [&] {
+        std::string bare = word;
+        word.clear ();
+        const auto begin = bare.find_first_not_of ('(');
+        bare.erase (0, begin == std::string::npos ? bare.size () : begin);
+        const auto end = bare.find_last_not_of ("):,");
+        bare.erase (end == std::string::npos ? 0 : end + 1);
+        if (bare.empty () || !offender.empty ())
+            return;
+        if (first_word) {
+            first_word = false;
+            return;
+        }
+        const bool all_caps = std::none_of (bare.begin (), bare.end (), is_lower);
+        if (is_upper (bare.front ()) && !all_caps && !capitalised_names.contains (bare)) {
+            offender = bare;
+        }
+    };
+    for (const char c : label) {
+        if (c == ' ' || c == '-') {
+            judge ();
+        } else {
+            word += c;
+        }
+    }
+    judge ();
+    return offender;
+}
+
+TEST (ConfigSeederTest, TheSentenceCaseRuleFlagsATitleCaseWordAndAllowsNamesAndAcronyms) {
+    for (const char* label :
+    { "Default request timeout", "Max concurrent requests (per worker)", "Correlation ID",
+    "Custom CA certificates", "Per-phase latency histograms", "OAuth 2.0 refresh lead time",
+    "Max OpenAPI document size", "Max Send response body", "Max Sends retained",
+    "Send Expect: 100-continue on large bodies", "Proxy URL", "Header name" }) {
+        EXPECT_EQ (first_non_sentence_case_word (label), "") << label;
+    }
+    EXPECT_EQ (first_non_sentence_case_word ("Default Request Timeout"), "Request");
+    EXPECT_EQ (first_non_sentence_case_word ("Correlation Id"), "Id");
+    EXPECT_EQ (first_non_sentence_case_word ("Per-Phase latency histograms"), "Phase");
+    EXPECT_EQ (first_non_sentence_case_word ("Max requests (Per worker)"), "Per");
+}
+
+// The Settings page renders every engine entry's label as written, so a label
+// that reads as Title Case is a wording defect in the product. Mutation check:
+// restore "Default Request Timeout" in `config_seeds/network.cpp` and this
+// names it.
+TEST_F (ConfigSeedTest, EveryEngineSettingLabelIsSentenceCase) {
+    vayu::db::Database db (TEST_DB_PATH);
+    db.init ();
+
+    const auto entries = db.get_all_config_entries ();
+    ASSERT_GE (entries.size (), 64u)
+    << "catalogue empty or unseeded - nothing was scanned";
+
+    for (const auto& entry : entries) {
+        const std::string offender = first_non_sentence_case_word (entry.label);
+        EXPECT_EQ (offender, "")
+        << entry.key << ": label \"" << entry.label << "\" capitalises \""
+        << offender << "\" - write it in sentence case (docs/ux-writing.md)";
+    }
+}
+
 TEST (ConfigSeederTest, RewritesAnEntryWhoseMetadataChangedAndKeepsTheUsersValue) {
     vayu::db::ConfigEntry stored;
     stored.key           = "someLimit";

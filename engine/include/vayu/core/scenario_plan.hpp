@@ -42,6 +42,7 @@
  * what the earlier steps set. A plan with none resolves them here.
  */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -393,6 +394,9 @@ struct ScenarioResolveOptions {
     /// The run's caller's host rule (#2521), judged on the token endpoints of
     /// every OAuth 2.0 token acquired here, before any is posted. Null for none.
     const vayu::http::TargetPolicy* target_policy = nullptr;
+    /// Ends an oauth2 token request a step's auth makes while resolving
+    /// (`build_request`): `POST /runs` passes its `server_stopping` (#2683).
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 /**

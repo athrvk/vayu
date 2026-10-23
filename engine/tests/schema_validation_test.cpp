@@ -513,6 +513,109 @@ TEST (SchemaValidationBoundsTest, AScriptSchemaTheValidatorRefusesNamesWhy) {
     EXPECT_FALSE (judged->valid);
 }
 
+// ─── Validity is the validator's verdict (issue #2719) ──────────────────────
+
+namespace {
+
+/// The verdict of @p schema_text against @p value_text, or unchecked after a
+/// failure when the validator refused the schema.
+ValidationVerdict judge (const char* schema_text, const char* value_text) {
+    const auto verdict = validate_document_against_schema (
+    json::parse (schema_text), json::parse (value_text));
+    if (!verdict.has_value ()) {
+        ADD_FAILURE () << schema_text << " was refused: " << verdict.error ();
+        return {};
+    }
+    return *verdict;
+}
+
+/// A rejection that also leaves a reason a reader can show: a verdict that says
+/// "invalid" with an empty failure list is the shape this guards against.
+void expect_rejected (const char* schema_text, const char* value_text) {
+    const auto verdict = judge (schema_text, value_text);
+    EXPECT_TRUE (verdict.checked) << schema_text << " vs " << value_text;
+    EXPECT_FALSE (verdict.valid) << schema_text << " vs " << value_text;
+    EXPECT_GE (verdict.failures_total, 1u) << schema_text << " vs " << value_text;
+    EXPECT_FALSE (verdict.failures.empty ()) << schema_text << " vs " << value_text;
+}
+
+void expect_accepted (const char* schema_text, const char* value_text) {
+    const auto verdict = judge (schema_text, value_text);
+    EXPECT_TRUE (verdict.checked) << schema_text << " vs " << value_text;
+    EXPECT_TRUE (verdict.valid) << schema_text << " vs " << value_text;
+    EXPECT_EQ (verdict.failures_total, 0u) << schema_text << " vs " << value_text;
+}
+
+} // namespace
+
+// valijson's `propertyNames` returns false and records no error, so a verdict
+// read from the recorded errors alone passed `{"aB": 1}`.
+TEST (SchemaKeywordVerdictTest, PropertyNamesRejectsANameThatFailsItsSchema) {
+    const char* const schema = R"({"propertyNames": {"pattern": "^[a-z]+$"}})";
+    expect_accepted (schema, R"({"ab": 1})");
+    expect_rejected (schema, R"({"ab": 1, "aB": 2})");
+
+    const auto verdict = judge (schema, R"({"aB": 1})");
+    EXPECT_FALSE (verdict.valid);
+    EXPECT_EQ (verdict.failures_total, 1u);
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    // No context survives a constraint that records nothing: the body is the
+    // data path, and the schema path is what the message can still name.
+    EXPECT_EQ (verdict.failures.front ().path, "");
+    EXPECT_NE (verdict.failures.front ().message.find (
+               "'propertyNames' at /propertyNames,"),
+    std::string::npos)
+    << verdict.failures.front ().message;
+}
+
+TEST (SchemaKeywordVerdictTest, AFalseSchemaRejectsWithoutClaimingAKeyword) {
+    expect_accepted ("true", "1");
+    expect_rejected ("false", "1");
+    expect_rejected (R"({"properties": {"a": false}})", R"({"a": 1})");
+
+    const auto verdict = judge ("false", "1");
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    EXPECT_EQ (verdict.failures.front ().message.find ("propertyNames"), std::string::npos)
+    << verdict.failures.front ().message;
+}
+
+// The message lists every occurrence in the schema's text, not only the one that
+// refused: valijson ignores a `propertyNames` beside a `$ref` or nested in a
+// subschema, so the refusing one cannot be told apart from the rest.
+TEST (SchemaKeywordVerdictTest, ASilentRefusalListsEachPropertyNamesPathOnce) {
+    // A property literally called "propertyNames" is a name, not the keyword.
+    const char* const schema = R"({
+        "propertyNames": {"minLength": 1},
+        "properties": {"propertyNames": {"type": "object"}},
+        "$ref": "#/definitions/named",
+        "definitions": {"named": {"propertyNames": {"maxLength": 1}}}
+    })";
+    const auto verdict       = judge (schema, R"({"ab": 1})");
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    const std::string& message = verdict.failures.front ().message;
+    EXPECT_NE (
+    message.find ("at /definitions/named/propertyNames, /propertyNames,"), std::string::npos)
+    << message;
+    EXPECT_EQ (message.find ("/properties"), std::string::npos) << message;
+}
+
+TEST (SchemaKeywordVerdictTest, ASilentRefusalNamesAtMostThreePaths) {
+    const char* const schema = R"({
+        "propertyNames": {"maxLength": 1},
+        "definitions": {
+            "a": {"propertyNames": {}}, "b": {"propertyNames": {}},
+            "c": {"propertyNames": {}}, "d": {"propertyNames": {}}
+        }
+    })";
+    const auto verdict       = judge (schema, R"({"ab": 1})");
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    EXPECT_NE (verdict.failures.front ().message.find (
+               "/definitions/a/propertyNames, /definitions/b/propertyNames, "
+               "/definitions/c/propertyNames and 2 more,"),
+    std::string::npos)
+    << verdict.failures.front ().message;
+}
+
 // ─── `format` (issue #2581) ─────────────────────────────────────────────────
 
 namespace {

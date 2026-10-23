@@ -359,7 +359,9 @@ Notes on the edges:
   it, so `.an('array').that.includes(1)` does too.
 - **`jsonSchema(schema[, options])` is draft-07** and runs on the engine's
   validator rather than ajv. A failure names the first path that broke the
-  schema. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
+  schema; a constraint that records no detail (`propertyNames`, a `false`
+  schema) yields one failure at the body root that names the schema path
+  instead. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
   such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
   in **both** polarities and is named, because ignoring it would make the schema
   looser (or, under `not`, stricter) and neither verdict could be trusted.
@@ -2207,7 +2209,9 @@ is a much worse afternoon than a thrown error.
 **A written cookie is matched by the same rules a received one is.** Setting it
 for one host does not send it to another, `/admin` does not reach `/`, and the
 jar's per-environment isolation holds - the write half is not a way around the
-matching the read half respects.
+matching the read half respects. Nor is it a way around the site limit: a write
+is held to the request's site and the hosts the script called, like a read (see
+[Writes are limited the same way](#writes-are-limited-the-same-way)).
 
 **When the write takes effect.** A write is *staged*, not applied where it is
 made, and the next transfer of that execution carries it:
@@ -2284,9 +2288,50 @@ pm.cookies.jar().get read nothing for b.example: a jar read is limited to the re
 to `b.example` does not put `b.example` in scope, so a script cannot read the
 redirect's cookies unless it called that host itself.
 
-**Writes are not limited this way.** `set`, `unset` and `clear` stay scoped by
-the URL they are given (decision 1 of #337), not by the request: a script may
-still write a cookie for another host. Only the read half is held to the site.
+#### Writes are limited the same way
+
+`set`, `unset` and `clear(url)` are held to the same allowed set as reads: the
+request's own site plus the hosts this script has addressed through
+`pm.sendRequest`, compared by the same rule (the two share one definition, so
+they cannot drift). A script - an imported collection's, say - therefore cannot
+plant a cookie for another site, nor delete that site's session.
+
+- **The URL** a write names must be in scope, for all three methods.
+- **For `set`, the cookie's `domain` must be in scope too.** Without the check a
+  cookie `{ domain: 'victim.example', path: '/' }` set through a URL of
+  `a.example` would be stored for `victim.example` and sent on the next transfer
+  to it (cookie fixation). RFC 6265 section 5.3 has a user agent ignore a
+  `Domain` that does not domain-match the request host; the jar does not apply
+  that rule itself, so the engine checks it here, and it reads the match in both
+  directions like the rest of the scope. A leading dot is ignored for the
+  comparison and the domain is compared as punycode, as the jar keys on it.
+  `Domain=example.com` set from a request to `www.example.com` is in scope and
+  still stores.
+- **A single-label domain is refused** (`.com`, `test`) unless it is exactly the
+  request's host or one the script called (a request to `localhost` may write
+  `domain: 'localhost'`). A top-level domain is a parent of every host under it,
+  so the site rule alone would admit it, and the cookie would then be sent to
+  every site there. **No public-suffix list is applied** (#2731): `co.uk` or
+  `github.io` still passes as a domain, because telling it from `example.co.uk`
+  needs the list.
+- `clear()` with no URL empties this environment's jar and is not subject to the
+  site limit (see above).
+
+A refused write does not throw and stages nothing. The call completes as an
+accepted write would - `set` returns (and passes the callback) the cookie it
+would have stored, `unset` the name - and the script's console gets one warning
+naming the host or domain, never the full URL:
+
+```
+pm.cookies.jar().set wrote nothing for the domain victim.example: a jar write is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting.md.
+```
+
+A bad argument is still the error it was; the site check runs after the
+arguments are validated. A redirect target is not in scope for writes either.
+A Postman script that logs in across hosts by `set`ting a cookie with a foreign
+`domain` stops working here; call the other host through `pm.sendRequest` first
+and its jar entries, and writes naming it, are in scope.
+
 The flat `pm.cookies` reads need no such rule - they only ever read the
 request's own URL.
 
@@ -3302,9 +3347,6 @@ moves into the agreed cases:
 - `multipleOf` with a decimal: ajv divides in binary floating point, so
   `{"multipleOf": 0.01}` rejects `0.07` and `19.99` unless `multipleOfPrecision`
   is set. `jsonSchema` answers the decimal question and passes both.
-- `propertyNames`: `jsonSchema` passes `{"aB": 1}` against
-  `{"propertyNames": {"pattern": "^[a-z]+$"}}` and ajv rejects it. The native
-  verdict is the wrong one (a bug, [#2719](https://github.com/athrvk/vayu/issues/2719)).
 
 The keywords `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) are the ones ajv 6 ignores, so a schema that

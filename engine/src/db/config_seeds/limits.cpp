@@ -27,7 +27,7 @@ namespace vayu::db::config_seeds {
 // =============================================================================
 void seed_limits (ConfigSeeder& seed, int64_t now) {
     seed (ConfigEntry{ "maxScenarioSteps",
-    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer", "Max Scenario Steps",
+    std::to_string (vayu::core::constants::scenario::MAX_STEPS), "integer", "Max scenario steps",
     "Largest number of requests one collection run may resolve to. The whole "
     "sequence is composed before the first send and held in memory for the "
     "run, and a load-mode scenario allocates a latency histogram per step, so "
@@ -37,7 +37,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     "10000", std::nullopt, now });
 
     seed (ConfigEntry{ "maxScenarioDataRows",
-    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer", "Max Scenario Data Rows",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_ROWS), "integer", "Max scenario data rows",
     "Largest data set one collection run may carry. The app parses the CSV or "
     "JSON file and sends the rows on the run payload - the engine never reads "
     "a file from disk - so this bounds how big that payload may get. A larger "
@@ -46,7 +46,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     "1", "1000000", std::nullopt, now });
 
     seed (unit ("bytes") (ConfigEntry{ "maxScenarioDataBytes",
-    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer", "Max Scenario Data Size",
+    std::to_string (vayu::core::constants::scenario::MAX_DATA_BYTES), "integer", "Max scenario data size",
     "Largest data set one collection run may carry, measured over its JSON. "
     "The row limit alone does not bound the payload - one row is free to hold "
     "a megabyte in a single cell - and the engine's HTTP body cap, far above "
@@ -58,7 +58,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (
     keywords ({ "swagger" }) (ConfigEntry{ "maxSpecDocumentBytes",
-    std::to_string (vayu::core::constants::spec_document::MAX_BYTES), "integer", "Max OpenAPI Document Size",
+    std::to_string (vayu::core::constants::spec_document::MAX_BYTES), "integer", "Max OpenAPI document size",
     "Largest OpenAPI document one collection may bind. The document is stored "
     "verbatim and parsed back by every feature that reads it, so this bounds "
     "both the row and that parse. A larger document is rejected with a message "
@@ -69,13 +69,13 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (ConfigEntry{ "maxResponseBodyBytes",
     std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
-    "integer", "Max Load-Test Response Body",
+    "integer", "Max load-test response body",
     "Largest response body a single load-test request will read into "
     "memory. A larger response fails that request with an error instead of "
     "being buffered, so load testing a big download or a streaming endpoint "
     "cannot exhaust memory - every in-flight request holds its own body. "
-    "Design-mode sends are not affected: they read their own bound, "
-    "Max Design Response Body, and keep what they read instead of failing.",
+    "Sends are not affected: they read their own bound, "
+    "Max Send response body, and keep what they read instead of failing.",
     "limits", std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
     "1024",       // 1KB
     "1073741824", // 1GB
@@ -83,7 +83,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("bytes") (ConfigEntry{ "maxDesignResponseBodyBytes",
     std::to_string (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES),
-    "integer", "Max Design Response Body",
+    "integer", "Max Send response body",
     "Largest response body a single Send - or one step of a collection "
     "run - reads into memory. A larger response stops being read at this "
     "point: the response viewer shows what arrived and says the rest was "
@@ -96,7 +96,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now }));
 
     seed (unit ("bytes") (ConfigEntry{ "maxElementBodyBytes",
-    std::to_string (vayu::core::constants::elements::MAX_BODY_BYTES), "integer", "Max Element Body",
+    std::to_string (vayu::core::constants::elements::MAX_BODY_BYTES), "integer", "Max element body",
     "Largest response body an extract.json or assert.jsonpath element will "
     "parse as JSON. A larger response is not parsed at all: every "
     "JSON-reading element on that step reports skipped, with the reason, "
@@ -109,7 +109,7 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     std::nullopt, now }));
 
     seed (advanced (keywords ({ "infinite loop" }) (
-    ConfigEntry{ "maxStepsPerIteration", "0", "integer", "Max Steps Per Iteration",
+    ConfigEntry{ "maxStepsPerIteration", "0", "integer", "Max steps per iteration",
     "How many requests one iteration of a collection run may send before it is "
     "stopped. It exists because a script can redirect the sequence with "
     "pm.execution.setNextRequest, and two steps pointing at each other would "
