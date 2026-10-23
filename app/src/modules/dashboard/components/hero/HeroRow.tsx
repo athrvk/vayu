@@ -139,6 +139,7 @@ function renderModeCards(d: DashboardDerived) {
 					<ThroughputTwinCard
 						sendRate={d.sendRate}
 						throughput={d.throughput}
+						status={d.dispatchStatus}
 						avgQueueWaitMs={d.avgQueueWaitMs}
 					/>
 				</>

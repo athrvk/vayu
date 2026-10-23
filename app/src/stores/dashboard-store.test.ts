@@ -407,3 +407,105 @@ describe("dashboard-store setRunConfig", () => {
 		});
 	});
 });
+
+describe("dashboard-store p99 at peak", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
+		useDashboardStore.getState().startRun("r");
+	});
+
+	const at = (elapsed: number, vu: number, p99: number): LoadTestMetrics => ({
+		...tick(elapsed, p99),
+		current_concurrency: vu,
+	});
+
+	it("latches the peak-load reading, not the breakpoint tick's", () => {
+		const s = useDashboardStore.getState();
+		// Crosses the SLO at 19 virtual users (203 ms), then keeps climbing to 30.
+		s.addMetricsBatch([at(1, 10, 60), at(2, 19, 203), at(3, 30, 292)]);
+		const state = useDashboardStore.getState();
+		expect(state.breakpoint.p99Ms).toBe(203);
+		expect(state.p99AtPeakMs).toBe(292);
+	});
+
+	it("restarts when the peak rises, across batches", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([at(1, 10, 500)]);
+		expect(useDashboardStore.getState().p99AtPeakMs).toBe(500);
+		s.addMetricsBatch([at(2, 20, 100)]);
+		expect(useDashboardStore.getState().p99AtPeakMs).toBe(100);
+		s.addMetricsBatch([at(3, 20, 140), at(4, 15, 900)]);
+		expect(useDashboardStore.getState().p99AtPeakMs).toBe(140);
+	});
+
+	it("stays undefined while no tick at the peak has a whole-second p99", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([{ ...at(0.5, 30, 900), live: true }]);
+		expect(useDashboardStore.getState().peakConcurrency).toBe(30);
+		expect(useDashboardStore.getState().p99AtPeakMs).toBeUndefined();
+	});
+
+	it("survives the peak tick rolling out of the retention window", () => {
+		const s = useDashboardStore.getState();
+		s.setLiveWindowSeconds(60);
+		s.addMetricsBatch([at(5, 30, 292)]);
+		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => at(70 + i * 5, 12, 40)));
+		const state = useDashboardStore.getState();
+		expect(state.historicalMetrics.some((m) => m.elapsed_seconds === 5)).toBe(false);
+		expect(state.p99AtPeakMs).toBe(292);
+	});
+
+	it("startRun clears it for the next run", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([at(1, 30, 292)]);
+		s.startRun("next");
+		expect(useDashboardStore.getState().p99AtPeakMs).toBeUndefined();
+		s.addMetricsBatch([at(1, 5, 20)]);
+		expect(useDashboardStore.getState().p99AtPeakMs).toBe(20);
+	});
+});
+
+describe("dashboard-store dispatch lag streak", () => {
+	beforeEach(() => {
+		useDashboardStore.getState().startRun("r");
+	});
+
+	const windowed = (elapsed: number, sendRate: number, rps: number): LoadTestMetrics => ({
+		...tick(elapsed),
+		current_send_rate: sendRate,
+		current_rps: rps,
+	});
+
+	it("latches the tick the windowed gap opened at, across batches", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([windowed(1, 100, 100), windowed(2, 100, 60)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(2);
+		s.addMetricsBatch([windowed(3, 100, 55), windowed(4, 100, 60)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(2);
+	});
+
+	it("resets when the rates agree again, so the next gap starts a new streak", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([windowed(2, 100, 60), windowed(3, 100, 100)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBeNull();
+		s.addMetricsBatch([windowed(4, 100, 60)]);
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(4);
+	});
+
+	it("survives the tick it began on rolling out of the retention window", () => {
+		const s = useDashboardStore.getState();
+		s.setLiveWindowSeconds(60);
+		s.addMetricsBatch([windowed(5, 100, 60)]);
+		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => windowed(70 + i * 5, 100, 60)));
+		const state = useDashboardStore.getState();
+		expect(state.historicalMetrics.some((m) => m.elapsed_seconds === 5)).toBe(false);
+		expect(state.dispatchLagSinceSeconds).toBe(5);
+	});
+
+	it("startRun clears it for the next run", () => {
+		const s = useDashboardStore.getState();
+		s.addMetricsBatch([windowed(2, 100, 60)]);
+		s.startRun("next");
+		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBeNull();
+	});
+});

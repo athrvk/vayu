@@ -71,9 +71,23 @@ describe("hero cards (characterization)", () => {
 	it("RateFidelityCard", () =>
 		snap(<RateFidelityCard targetRps={100} actualRps={96} achievement={96} />));
 	it("ThroughputTwinCard (no queue chip)", () =>
-		snap(<ThroughputTwinCard sendRate={96} throughput={96} avgQueueWaitMs={0} />));
+		snap(
+			<ThroughputTwinCard
+				sendRate={96}
+				throughput={96}
+				status="kept-pace"
+				avgQueueWaitMs={0}
+			/>
+		));
 	it("ThroughputTwinCard (queue chip)", () =>
-		snap(<ThroughputTwinCard sendRate={120} throughput={80} avgQueueWaitMs={12} />));
+		snap(
+			<ThroughputTwinCard
+				sendRate={120}
+				throughput={80}
+				status="lagging"
+				avgQueueWaitMs={12}
+			/>
+		));
 	it("ErrorRateCard", () =>
 		snap(
 			<ErrorRateCard
@@ -125,7 +139,12 @@ describe("hero throughput reads grouped (Intl), a missing one reads '-'", () => 
 	});
 	it("ThroughputTwinCard, dispatched and received", () => {
 		const out = text(
-			<ThroughputTwinCard sendRate={4500} throughput={3940} avgQueueWaitMs={0} />
+			<ThroughputTwinCard
+				sendRate={4500}
+				throughput={3940}
+				status="lagging"
+				avgQueueWaitMs={0}
+			/>
 		);
 		expect(out).toContain("4,500");
 		expect(out).toContain("3,940");

@@ -11,6 +11,7 @@ import type { DashboardDerived, StoppedAt } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
 import { notCrossed } from "./computeBreakpoint";
+import { dispatchStatus } from "./dispatchLag";
 import { isRateLimitedRun } from "./metricsTransforms";
 import { liveRateFidelity } from "./rateFidelity";
 
@@ -83,6 +84,14 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		stoppedAt: stopped?.stoppedAt,
 		sendRate: s.sendRate,
 		throughput: s.throughput,
+		// A finished run has nothing in flight and no clock left to wait on, so the
+		// cumulative pair is judged as held and settled (#2800 changes what it is fed).
+		dispatchStatus: dispatchStatus({
+			sendRate: s.sendRate,
+			receivedRate: s.throughput,
+			held: true,
+			settled: true,
+		}),
 		currentRps: actualRps ?? 0,
 		avgQueueWaitMs: s.avgQueueWaitMs ?? 0,
 		totalRequests: s.totalRequests,

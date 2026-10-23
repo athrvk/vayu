@@ -14,6 +14,8 @@ import {
 	notCrossed,
 	type Breakpoint,
 } from "@/modules/dashboard/utils/computeBreakpoint";
+import { foldLagStreak } from "@/modules/dashboard/utils/dispatchLag";
+import { foldPeakReading } from "@/modules/dashboard/utils/p99AtPeak";
 import { hasSecondPercentiles } from "@/modules/dashboard/utils/tickPercentiles";
 import { useClientSettingsStore } from "./client-settings-store";
 import {
@@ -140,6 +142,19 @@ interface DashboardState {
 	peakConcurrency: number;
 	breakpoint: Breakpoint;
 	/**
+	 * Worst whole-second p99 (ms) at {@link peakConcurrency}, reset whenever the
+	 * peak rises (see `foldPeakReading`); `undefined` until a tick at the peak
+	 * held a reading. Latched like the two above so retention cannot trim it.
+	 */
+	p99AtPeakMs: number | undefined;
+	/**
+	 * `elapsed_seconds` at which the windowed send rate began to outrun the
+	 * windowed completion rate (see `foldLagStreak`); `null` while they agree.
+	 * Latched so the Send / Throughput chip can ask "held for how long" without
+	 * reading the retained buffer.
+	 */
+	dispatchLagSinceSeconds: number | null;
+	/**
 	 * Live retention window in seconds (null = full run, bounded by
 	 * {@link maxRetainedTicks}). Drives the time-based trim in
 	 * {@link addMetricsBatch}. Kept in sync by useLiveWindowSync.
@@ -192,6 +207,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	sourceRequestId: null,
 	peakConcurrency: 0,
 	breakpoint: notCrossed(null),
+	p99AtPeakMs: undefined,
+	dispatchLagSinceSeconds: null,
 	liveWindowSeconds: initialLiveWindowSeconds(),
 	maxRetainedTicks: DEFAULT_MAX_RETAINED_TICKS,
 
@@ -211,6 +228,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			sourceRequestId: sourceRequestId ?? null,
 			peakConcurrency: 0,
 			breakpoint: notCrossed(useClientSettingsStore.getState().sloThresholdMs),
+			p99AtPeakMs: undefined,
+			dispatchLagSinceSeconds: null,
 		}),
 
 	setRunConfig: (config, requestInfo) =>
@@ -260,11 +279,14 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 				newHistory = newHistory.slice(-cap);
 			}
 
-			// Fold the new ticks into the running aggregates. Both are monotone:
-			// peak only grows, breakpoint is latched on the first SLO crossing -
-			// so we walk each batch entry exactly once, never the full history.
+			// Fold the new ticks into the running aggregates: peak only grows,
+			// breakpoint is latched on the first SLO crossing, the p99 at peak
+			// restarts whenever the peak rises, and the lag streak restarts whenever
+			// the windowed rates agree again - so we walk each batch entry exactly
+			// once, never the full history.
 			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
-			let peak = state.peakConcurrency;
+			let lagSince = state.dispatchLagSinceSeconds;
+			let peakReading = { peak: state.peakConcurrency, p99Ms: state.p99AtPeakMs };
 			// An uncrossed breakpoint names the SLO it is being judged against, so a
 			// threshold changed mid-run is followed until the first crossing latches.
 			let bp =
@@ -275,7 +297,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			// within its opening ticks - this is not a scan of the retained buffer.
 			let seenReading = !bp.crossed && state.historicalMetrics.some(hasSecondPercentiles);
 			for (const m of batch) {
-				if (m.current_concurrency > peak) peak = m.current_concurrency;
+				peakReading = foldPeakReading(peakReading, m);
+				lagSince = foldLagStreak(lagSince, m);
 				if (!bp.crossed) bp = breakpointAt(m, sloMs, !seenReading) ?? bp;
 				seenReading ||= hasSecondPercentiles(m);
 			}
@@ -283,7 +306,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			return {
 				currentMetrics: batch[batch.length - 1],
 				historicalMetrics: newHistory,
-				peakConcurrency: peak,
+				peakConcurrency: peakReading.peak,
+				p99AtPeakMs: peakReading.p99Ms,
+				dispatchLagSinceSeconds: lagSince,
 				breakpoint: bp,
 			};
 		}),

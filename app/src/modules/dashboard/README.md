@@ -100,6 +100,16 @@ consumes it.
   `iterations`) show three stats: their p99 is in the hero row's
   `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
   the stats row as p99 at peak.
+- **p99 at peak is read at the run's peak load, not at the breakpoint**
+  (#2802). It is the worst whole-second p99 (`secondPercentiles`, the reading
+  `computeBreakpoint` uses) among the ticks whose `current_concurrency` equals
+  the run's peak: `utils/p99AtPeak.ts`. The breakpoint tick is a lighter load
+  than the peak, so reading it understated the stat on any run that crossed the
+  SLO early. The store latches it with `peakConcurrency` (`p99AtPeakMs`),
+  restarting whenever the peak rises, so retention cannot trim it; History
+  derives it over its own series, buckets included. Until a tick at the peak
+  has a whole-second reading the stat shows the run's cumulative p99, as it did
+  before. `Breakpoint.p99Ms` stays the crossing tick's and is not repurposed.
 - **A tick's percentiles mean different things by where it came from** (#2385),
   and `utils/tickPercentiles.ts` is the one place that says which. A stored
   tick's `latency_p*_ms` are its whole second's. A live frame's are only the
@@ -154,6 +164,26 @@ consumes it.
   has the figure, and a tick with no window latency (absent or `null`) adds no
   point to the latency chart. The ETA reads the live `current_rps`, so it
   follows the last second rather than the last 100 ms.
+- **The Send / Throughput chip is judged on the windowed pair, held for a few
+  seconds, and is grey until the run has settled** (#2802).
+  `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is
+  handed. The printed rates stay the run-cumulative `send_rate` and `throughput`,
+  and on any healthy open-model run those part by in-flight / elapsed (500
+  req/s against a 100 ms target is a 25 req/s gap at 2 s and still over 1 req/s
+  at 50 s), so judging the printed pair turned the chip red on a healthy run.
+  Live, the verdict reads the tick's `current_send_rate` against `current_rps`
+  (`DisplayMetrics` carries the former): the gap counts only at 1 req/s **and**
+  10% of the send rate (`LAG_TOLERANCE`), turns `lagging` only once it has stayed
+  open for `LAG_HOLD_SECONDS`, and stays `settling` (muted tokens) until a mean
+  latency, and a first full second, has elapsed, because a completion trails its
+  dispatch by one latency. "Held" is `dispatchLagSinceSeconds` in the dashboard
+  store, folded per tick by `foldLagStreak` in `addMetricsBatch` and cleared by
+  `startRun`; `MetricsView`'s derived memo reads that one number, never the
+  history array. A tick with no `current_send_rate` resets the streak and draws
+  no chip, since the cumulative rate must not stand in for it. History feeds
+  the same function the finished report's cumulative `sendRate` / `throughput`
+  with held and settled true (`reportToDerived`), same tolerance; #2800 changes
+  what that pair is, not the rule.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 
