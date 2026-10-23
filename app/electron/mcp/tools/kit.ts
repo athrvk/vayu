@@ -33,6 +33,7 @@ import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 import {
 	compactBody,
+	engineCode,
 	engineRefusalClass,
 	engineSentence,
 	FAILURES,
@@ -173,7 +174,11 @@ function engineRefusal(err: EngineRequestError, ctx: ToolContext): Failure {
 	// Kept apart from the message so the one words layer can name the missing
 	// object for a tool that declared what its ids are (#2778).
 	if (err.status !== 404) return failure;
-	return { ...failure, engineNotFound: engineSentence(err.body) ?? err.body };
+	return {
+		...failure,
+		engineNotFound: engineSentence(err.body) ?? err.body,
+		engineCode: engineCode(err.body),
+	};
 }
 
 /**

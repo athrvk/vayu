@@ -10092,8 +10092,10 @@ run end). This is the pattern the bundled app uses.
   Both hint `Use /runs/:runId/report for the stored report`, and a client
   should fall back to the stored report in either case (for `run_not_found` the
   report then answers its own `404`). `code` is for clients to branch on; the
-  bundled app has no reader for it yet, and the MCP wording lands separately
-  (#2779).
+  bundled app has no reader for it yet. MCP's `get_live_metrics` reads it
+  (#2779): `live_expired` answers that the buffer expired and the run still
+  exists, naming `get_run_report`, and `run_not_found` keeps the unknown-id
+  text.
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
 `liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,

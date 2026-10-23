@@ -72,6 +72,15 @@ function exportedDocument(answer: unknown): string {
 	return answer.text;
 }
 
+/**
+ * The answer to the engine's `live_expired` 404 (#2779): the run is stored and
+ * only its live buffer is gone, which the engine's own sentence and its HTTP
+ * path hint do not say in a form an agent can act on. The 60 s is the engine's
+ * `liveRetentionMs` default (`run_manager.cpp`), which a user can change.
+ */
+const LIVE_EXPIRED_TEXT =
+	"The live buffer for this run expired (kept 60 s after it ends); the run still exists - read get_run_report(runId).";
+
 export const RUN_TOOLS: McpTool[] = [
 	{
 		name: "stop_run",
@@ -203,8 +212,9 @@ export const RUN_TOOLS: McpTool[] = [
 		retry: "safe",
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
+		notFoundByCode: { live_expired: LIVE_EXPIRED_TEXT },
 		description:
-			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. " +
+			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. The live buffer is kept 60 s after a run ends (by default); after that the call is refused as expired, and get_run_report holds the run's numbers. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. " +
 			RUN_ERROR_DEFINITION_POINTER,
 		annotations: {
 			title: "Get live metrics",
