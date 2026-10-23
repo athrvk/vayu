@@ -256,6 +256,7 @@ jobs:
               - 'docs/engine/mcp.md'
               - 'docs/compare/vayu-vs-bruno.md'
               - 'docs/compare/vayu-vs-postman.md'
+              - 'docs/compare/vayu-vs-jmeter.md'
               - 'docs/engine/log-record.schema.json'
             # The files under `engine/` that a suite in `app/` reads: engine
             # headers and sources a parity guard pins a value against, and the
@@ -302,6 +303,7 @@ jobs:
               - 'engine/include/vayu/http/grant_secret.hpp'
               - 'engine/src/http/routes/execution.cpp'
               - 'engine/src/core/scenario_load.cpp'
+              - 'engine/src/core/jmeter_import.cpp'
               - 'engine/src/db/config_seeds/general.cpp'
               - 'engine/src/db/config_seeds/network.cpp'
               - 'engine/src/db/config_seeds/services.cpp'

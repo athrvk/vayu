@@ -59,7 +59,7 @@ The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the E
 
 Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
-**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout. The run and its chart are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
+**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout. Vayu's latency counts the time a request waited inside the generator, while `wrk` reports wire time, so the two are not like for like. The run and its chart are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
 ---
 
@@ -78,7 +78,7 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 | **Mock servers** | Collection mock + OAuth issuer + webhook inbox | No | No | No | Yes (cloud tier) |
 | **Data-driven runs** | CSV / TSV / JSON / JSONL | CSV / JSON | Yes (in script) | CSV | CSV / JSON |
 | **Postman Collection Import** | Yes (v2.0 + v2.1) | Yes (via converter) | Limited | No | Native |
-| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | Yes (2.0 / 3.x) | No | No | Yes |
+| **OpenAPI Import** | Yes (2.0 / 3.0 / 3.1) | Yes (2.0 / 3.x) | Via generator (`openapi-to-k6`) | No | Yes |
 | **Open Source** | Yes (dual-license) | Yes (MIT) | Yes (AGPL v3) | Yes (Apache 2.0) | Partial |
 
 ---

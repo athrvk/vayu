@@ -110,7 +110,7 @@ export const TOOLTIPS = {
 	rampDeviation:
 		"Mean absolute gap between achieved (measured) and configured virtual users, as a percent of target. Counts both undershoot and overshoot, so a ramp that runs over target reads high.",
 	latencyDistribution:
-		"HDR percentile plot. X is percentile (log-scaled so the tail dominates); Y is latency. The curve's steepness from p95 → p99 is the tail story. Sourced from Vayu's HdrHistogram.",
+		"HDR percentile plot. X is percentile (log-scaled so the tail dominates); Y is latency. The curve's steepness from p95 → p99 is the tail story. Drawn through the min, p50, p75, p90, p95, p99, p99.9 and max points of the run's HdrHistogram, not a curve fitted to every sample.",
 	avgRequestTiming:
 		"Average breakdown of where each HTTP request spent time, in flight order. Computed across the timing-sampled subset of requests (enable save_timing_breakdown to populate). Helps isolate whether latency lives in DNS, network setup, or the server.",
 	phasePercentiles:

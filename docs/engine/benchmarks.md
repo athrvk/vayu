@@ -80,6 +80,13 @@ sits at the top of that band when measured the same way `wrk` is.**
 | `wrk` | `-t6 -c256 -d8s` | 53,059 req/s, p50 4.70 ms |
 | `vegeta` | `-rate=90000 -max-workers=400 -duration=8s` | 51,847 achieved of 90,000 requested, 100% success, mean 7.66 ms |
 
+**The latency columns are not like for like.** `wrk` times a request on the wire.
+Vayu reports *perceived* latency, completion minus submission, so the time a
+request waited inside the generator is part of its figure
+([how it is measured](architecture.md#metrics-collector)). Compare
+Vayu's p50 and p99 with `wrk`'s as an upper bound on the same quantity, not as
+the same one; the throughput ratios above are unaffected.
+
 ### Concurrency sweep (app engine, workers=12, 9 s per point)
 
 | concurrency | 32 | 64 | 128 | 192 | 256 |
@@ -577,6 +584,9 @@ constant concurrency 64, against a saved request:
 | p999 | 6.455 ms | **2.819 ms** |
 | max | 37.983 ms | **16.319 ms** |
 | setup overhead | 0.508 s | 0.119 s |
+
+These percentiles are Vayu's perceived latency (generator queue wait included),
+so set beside `wrk`'s wire-time figures above they are not like for like.
 
 **Use 60 s for any headline figure.** The tail improves markedly with the longer
 window because the fixed cost of opening 64 connections is amortised over 4x the
