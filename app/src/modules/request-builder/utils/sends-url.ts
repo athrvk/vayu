@@ -24,6 +24,10 @@
  *
  * Pure: it takes the resolver rather than reading a hook, so a caller that
  * holds a bound data row passes a resolver closed over it.
+ *
+ * The same rule serves the field previews that resolve a whole field rather
+ * than a URL - the key/value rows' sigma peek and the Body tab's Resolved pane
+ * (`leaveDeferredField`, and `deferredNamesIn` in `lib/deferred-note`).
  */
 
 import {
@@ -31,6 +35,8 @@ import {
 	VARIABLE_SPLIT_PATTERN,
 	containsVariableToken,
 } from "@/constants/variables";
+import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
+import { deferredNamesIn, tokenName } from "@/lib/deferred-note";
 import type { KeyValueEntry, Request } from "@/types";
 import { answeringPathRows, composePathParams, substitutePathVariables } from "./path-variables";
 import { resolveUrlTemplate } from "./query-encoding";
@@ -56,11 +62,6 @@ function sendsInput(request: SendsUrlInput, deferred: readonly string[]): SendsI
 	};
 }
 
-/** The name inside a `{{name}}` token, trimmed the way the resolvers read it. */
-function tokenName(token: string): string {
-	return token.slice(2, -2).trim();
-}
-
 /**
  * @p resolve, except that a `{{name}}` token naming one of @p deferred is
  * returned as written. It works on the text it is given, whether that is one
@@ -79,6 +80,65 @@ function leaveDeferred(resolve: Resolve, deferred: readonly string[]): Resolve {
 				return isToken && !names.has(tokenName(part)) ? resolve(part) : part;
 			})
 			.join("");
+}
+
+type ResolveField = (input: string, context?: DataFieldContext) => BoundField;
+
+/*
+ * A deferred token is swapped for a stand-in, `{{NUL<index>}}`, that no resolver
+ * answers while the field resolves, then swapped back. The field is resolved
+ * whole because a picked data row escapes a cell by what surrounds the token
+ * (inside a JSON string, in an XML attribute): resolving the pieces apart would
+ * lose that scan state. NUL cannot be typed into a token name, so the stand-in
+ * cannot collide with one.
+ */
+const NUL = "\u0000";
+
+const fieldResolvers = new WeakMap<ResolveField, Map<string, ResolveField>>();
+
+/**
+ * @p resolve for a whole field, except that a `{{name}}` token naming one of
+ * @p deferred is left as written. The rule is `leaveDeferred`'s, shaped for
+ * `resolveField`: the context and the refusals pass through untouched.
+ *
+ * One wrapper per resolver and set of names, so a cache comparing resolvers by
+ * identity (`stableRowField`, which keeps a `{{$randomInt}}` from rerolling) is
+ * not defeated by the wrapping.
+ */
+export function leaveDeferredField(
+	resolve: ResolveField,
+	deferred: readonly string[]
+): ResolveField {
+	if (deferred.length === 0) return resolve;
+	let byNames = fieldResolvers.get(resolve);
+	if (!byNames) {
+		byNames = new Map();
+		fieldResolvers.set(resolve, byNames);
+	}
+	const key = deferred.join(NUL);
+	let wrapped = byNames.get(key);
+	if (!wrapped) {
+		wrapped = fieldResolverLeaving(resolve, new Set(deferred));
+		byNames.set(key, wrapped);
+	}
+	return wrapped;
+}
+
+function fieldResolverLeaving(resolve: ResolveField, names: ReadonlySet<string>): ResolveField {
+	return (input, context) => {
+		const held: string[] = [];
+		const masked = input.replace(VARIABLE_PATTERN, (token) =>
+			names.has(tokenName(token)) ? `{{${NUL}${held.push(token) - 1}}}` : token
+		);
+		if (held.length === 0) return resolve(input, context);
+		const bound = resolve(masked, context);
+		return {
+			text: bound.text.replace(VARIABLE_PATTERN, (token, name: string) =>
+				name.startsWith(NUL) ? (held[Number(name.slice(1))] ?? token) : token
+			),
+			refusals: bound.refusals,
+		};
+	};
 }
 
 function resolveSends({ url, rows, encode, deferred }: SendsInput, resolveAll: Resolve): string {
@@ -119,25 +179,12 @@ export function sendsHasTokens(request: SendsUrlInput): boolean {
 	return sendsTemplates(request).some((text) => containsVariableToken(text));
 }
 
-/**
- * The names in @p deferred that the sent URL actually uses, in order of first
- * appearance. The engine lists every name a scope answers for the whole
- * request, not the ones this line holds.
- */
+/** The names in @p deferred that the sent URL actually uses. */
 export function deferredNamesInSends(
 	request: SendsUrlInput,
 	deferred: readonly string[]
 ): string[] {
-	if (deferred.length === 0) return [];
-	const answered = new Set(deferred);
-	const used = new Set<string>();
-	for (const text of sendsTemplates(request)) {
-		for (const [token] of text.matchAll(VARIABLE_PATTERN)) {
-			const name = tokenName(token);
-			if (answered.has(name)) used.add(name);
-		}
-	}
-	return [...used];
+	return deferredNamesIn(deferred, sendsTemplates(request));
 }
 
 /**

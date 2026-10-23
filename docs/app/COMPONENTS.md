@@ -2498,6 +2498,21 @@ the row's unresolved key, so it never carried one. A scope without `maskSecrets`
 (a surface with no variables) shows the text as is. `KeyValuePeek.secrets.test.tsx`
 renders each table through its real panel.
 
+**The Σ peek leaves a deferred name written** (#2762). A name `POST /compose`
+lists in `deferredVariables` is set by a pre-request script at send, so the
+stored value is not what the row sends. `RequestBuilderProvider` hands the table
+a `resolveField` that leaves such a `{{name}}` as written (`leaveDeferredField`,
+`utils/sends-url.ts`, memoised per resolver and set of names so
+`stableRowField`'s identity check still holds and a `{{$randomInt}}` does not
+reroll), and `KeyValueRow` reads `variables.deferredVariables` itself for the
+names its key and value use (`deferredNamesIn`): `hasVariables` stays true for a
+row whose only token is deferred, so it keeps its marker, and `ResolvedPeek`
+puts `deferredNote` in the tooltip's `hint` slot, on a line of its own beneath
+any refusal. Every table behind `variables` gets it with no per-table code,
+OAuth 2.0 token-request rows included; the Body tab's Resolved pane reads the
+same `resolveField` and puts the sentence under its text
+(`KeyValueRow.deferred.test.tsx`, `RequestBuilderProvider.deferred-previews.test.tsx`).
+
 **`fieldContext` says what kind of field the rows are** (issue #2639): `header`
 for the Headers tab, `plain` (the default) for every other table, as the
 engine's bind treats them. Each row resolves its key and value through
@@ -2585,7 +2600,10 @@ would say the opposite of the Code section and the Params tab's Sends line.
 while the request holds a `{{token}}` anywhere a painter draws one
 (`requestHasTokens`), and hands them down as `VariableSupport.deferredVariables`;
 `classifyVariableToken` takes them as an input and puts a listed name first among
-the scope rungs, so it decides nothing about which requests are scripted. Until
+the scope rungs, so it decides nothing about which requests are scripted. The
+resolved views read the same names: the provider's `resolveField` leaves them
+written, so the key/value rows' Σ peek and the Body tab's Resolved pane print
+`{{token}}` with the sentence rather than the stored value (#2762). Until
 the answer lands, and when it is empty, every token paints as it always did. A
 script editor never paints a deferred token: the pre-request script is what sets
 the name, and a post-request script reads it after that has run, so
