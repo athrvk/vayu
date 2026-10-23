@@ -518,11 +518,12 @@ TEST (ScriptApiScan, PmVisualizerIsNotNamed) {
 }
 
 TEST (ScriptApiScan, NamesThePmMembersVayuDoesNotHave) {
-    EXPECT_EQ (names_in ("pm.variables.set('a', 1);"), Names{ "pm.variables.set" });
+    // Implemented (#2564), so no longer named.
+    EXPECT_EQ (names_in ("pm.variables.set('a', 'b');"), Names{});
     EXPECT_EQ (names_in ("pm.test.skip('later', () => {});"), Names{ "pm.test.skip" });
     EXPECT_EQ (names_in ("await pm.execution.runRequest('uid');"),
     Names{ "pm.execution.runRequest" });
-    EXPECT_EQ (names_in ("pm . variables\n  .set('a', 1);"), Names{ "pm.variables.set" });
+    EXPECT_EQ (names_in ("pm . variables\n  .set('a', 1);"), Names{});
     EXPECT_EQ (names_in ("pm.variables.get('a'); pm.test('t', f);"), Names{});
 }
 
