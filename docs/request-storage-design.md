@@ -279,6 +279,13 @@ still binds its OpenAPI document, so the orphan sweep leaves that document alone
 until the collection is purged. Reclaiming it earlier would restore a binding
 that points at nothing.
 
+A collection's spec-file and data-file bindings (`collections.spec_file` /
+`data_file`, issue #2765: the path and name of the file its Spec and Data tabs
+read) are columns of the row, so they need no step of their own: a delete
+leaves them on the stamped row, a restore brings them back unchanged, and a
+purge removes them with it. A stored path grants nothing and is never exported
+or imported; it is a location on the machine that picked it.
+
 **One delete path stays hard, by decision** (issue #1046): the requests a
 `POST /specs/sync` removes because the re-fetched document no longer declares
 their operation. A sync is a reconciliation to a document rather than a person

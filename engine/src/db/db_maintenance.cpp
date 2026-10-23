@@ -1529,7 +1529,9 @@ const std::function<void (sqlite3*)>& on_connection) {
         // protocol-setting columns of #1765, nullable or NOT NULL with a
         // default, which `sync_schema ()` adds by itself; 2 -> 3 is the new
         // `file_roots` table and 5 -> 6 the new `file_grants`, which
-        // `sync_schema ()` creates outright. A chosen file that is gone
+        // `sync_schema ()` creates outright; 7 -> 8 is `collections.spec_file`
+        // and `data_file`, NOT NULL with a default, which it adds and
+        // backfills to `{}`. A chosen file that is gone
         // changes nothing stored, but is still reported.
         stamp_schema_version (connection.get (), path);
         log_file_trust_plan (trust_plan);

@@ -17,10 +17,16 @@
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/sha256.hpp"
 
+#include <algorithm>
+#include <array>
+#include <format>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -192,6 +198,104 @@ static RouteResult validate_openapi_binding (const nlohmann::json& binding) {
     return {};
 }
 
+using vayu::core::constants::file_binding::MAX_FILE_NAME_BYTES;
+using vayu::core::constants::file_binding::MAX_PATH_BYTES;
+
+/// The members a `specFile` binding may carry (issue #2765).
+constexpr auto SPEC_FILE_MEMBERS =
+std::to_array<std::string_view> ({ "path", "fileName" });
+/// The members a `dataFile` binding may carry: `hash` and `castNumbers` are
+/// how the app last read the file (issues #2051, #2540).
+constexpr auto DATA_FILE_MEMBERS =
+std::to_array<std::string_view> ({ "path", "fileName", "hash", "castNumbers" });
+
+/**
+ * One of a file binding's two required strings: present, non-empty and within
+ * @p cap bytes. Its form is not judged: the path is true of the machine that
+ * picked it, so a Windows path restored onto Linux is stored as written and
+ * the app shows it as a file it cannot find.
+ */
+static RouteResult validate_binding_string (const nlohmann::json& binding,
+std::string_view field,
+std::string_view member,
+size_t cap) {
+    const auto found = binding.find (member);
+    if (found == binding.end () || !found->is_string () ||
+    found->get_ref<const std::string&> ().empty ()) {
+        return route_error (400,
+        std::format ("Invalid '{0}.{1}': a binding must name the file as a "
+                     "non-empty string (send {0}: {{}} or null to unbind)",
+        field, member));
+    }
+    const size_t bytes = found->get_ref<const std::string&> ().size ();
+    if (bytes > cap) {
+        return route_error (413,
+        std::format ("'{}.{}' is {} bytes, over the limit of {}", field, member, bytes, cap));
+    }
+    return {};
+}
+
+/**
+ * Contents-validation for a `specFile` / `dataFile` binding (issue #2765), run
+ * after `apply_json_field` has settled the shape, on the `openapi` split
+ * above. `{}` is unbound and always legal. A binding holds only @p members, so
+ * a reader never meets a stored member nothing writes or reads.
+ */
+static RouteResult validate_file_binding (const nlohmann::json& binding,
+std::string_view field,
+std::span<const std::string_view> members) {
+    if (binding.empty ()) {
+        return {};
+    }
+    for (const auto& entry : binding.items ()) {
+        if (std::ranges::find (members, entry.key ()) == members.end ()) {
+            return route_error (400,
+            std::format ("Invalid '{}': unknown member '{}'", field, entry.key ()));
+        }
+    }
+    if (auto outcome = validate_binding_string (binding, field, "path", MAX_PATH_BYTES);
+    !outcome) {
+        return outcome;
+    }
+    if (auto outcome = validate_binding_string (binding, field, "fileName", MAX_FILE_NAME_BYTES);
+    !outcome) {
+        return outcome;
+    }
+    // The same digest a run records as `dataFileHash`, in its one spelling.
+    if (const auto hash = binding.find ("hash"); hash != binding.end () &&
+    !(hash->is_string () &&
+    vayu::utils::is_sha256_hex (hash->get_ref<const std::string&> ()))) {
+        return route_error (400,
+        std::format ("Invalid '{}.hash': must be the SHA-256 of the file's "
+                     "bytes as 64 lowercase hex characters",
+        field));
+    }
+    if (const auto cast = binding.find ("castNumbers");
+    cast != binding.end () && !cast->is_boolean ()) {
+        return route_error (
+        400, std::format ("Invalid '{}.castNumbers': must be a boolean", field));
+    }
+    return {};
+}
+
+/**
+ * Applies one file binding under the null-vs-absent rule (`{}` is its
+ * default), then checks the contents of a value the caller actually sent.
+ */
+static RouteResult apply_file_binding_field (const nlohmann::json& json,
+const char* field,
+std::string& out,
+std::span<const std::string_view> members,
+bool is_create) {
+    if (auto outcome = apply_json_field (json, field, out, "{}", is_create); !outcome) {
+        return outcome;
+    }
+    if (json.contains (field) && json[field].is_object ()) {
+        return validate_file_binding (json[field], field, members);
+    }
+    return {};
+}
+
 /**
  * Applies the request body onto `c` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
@@ -288,6 +392,19 @@ bool is_create) {
         if (auto outcome = validate_openapi_binding (json["openapi"]); !outcome) {
             return outcome;
         }
+    }
+
+    // The files the Spec and Data tabs are bound to (issue #2765): `{}` is
+    // "no file", so `{"specFile": null}` unbinds.
+    if (auto outcome = apply_file_binding_field (
+        json, "specFile", c.spec_file, SPEC_FILE_MEMBERS, is_create);
+    !outcome) {
+        return outcome;
+    }
+    if (auto outcome = apply_file_binding_field (
+        json, "dataFile", c.data_file, DATA_FILE_MEMBERS, is_create);
+    !outcome) {
+        return outcome;
     }
 
     if (auto outcome = reject_trashed_parent (db, json, c.parent_id); !outcome) {
@@ -499,9 +616,10 @@ void register_collection_routes (RouteContext& ctx) {
      * pointing at PUT, never a silent update (issue #95). The engine assigns
      * the id; a body carrying one is a 400 (issue #97).
      * Body params: name (required string), description, parentId, order,
-     * variables, auth, elements.
+     * variables, auth, elements, dataSchema, openapi, specFile, dataFile.
      * Returns: The created collection object, 400 (body `id`, missing
-     * `name`, bad field shape, cycle), or 409 (`parentId` in the trash).
+     * `name`, bad field shape, cycle), 409 (`parentId` in the trash), or 413
+     * (an object field, or a file binding's `path` / `fileName`, over its cap).
      */
     ctx.server.Post ("/collections",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -537,7 +655,7 @@ void register_collection_routes (RouteContext& ctx) {
      * never a silent create (issue #95).
      * Path params: id - The collection ID to update.
      * Returns: The updated collection object, 404 if it does not exist, 400,
-     * or 409 when `parentId` names a collection in the trash.
+     * 409 when `parentId` names a collection in the trash, or 413 as on POST.
      */
     ctx.server.Put (R"(/collections/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

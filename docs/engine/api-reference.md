@@ -299,7 +299,8 @@ that goes back to a bare `400`.
 
 One rule, identical for every resource (issue #1485): a request's `params` /
 `headers` / `body` / `auth`, a collection's `variables` / `auth` / `dataSchema`
-/ `openapi`, and an environment's `variables` are each refused with a `413`
+/ `openapi` / `specFile` / `dataFile`, and an environment's `variables` are each
+refused with a `413`
 when the serialized value is over the engine's field cap (10 MiB,
 `json::MAX_FIELD_SIZE` in `engine/include/vayu/core/constants.hpp`) - naming
 the field, its size and the cap, and leaving the stored row untouched. `POST
@@ -1466,7 +1467,9 @@ the null-vs-absent rule.
   "order": 0,               // Optional, appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
   "dataSchema": {},         // Optional, the declared data contract - see below
-  "openapi": {}             // Optional, the bound spec document - see below
+  "openapi": {},            // Optional, the bound spec document - see below
+  "specFile": {},           // Optional, the bound spec file - see below
+  "dataFile": {}            // Optional, the bound data file - see below
 }
 ```
 
@@ -1476,8 +1479,10 @@ the null-vs-absent rule.
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
 `null`, or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
-when a serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
-engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
+when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
+`dataFile` is over the engine's
+[field cap](#a-stored-json-field-has-a-write-time-cap), or a file binding's
+`path` or `fileName` is over its own (below).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -1496,7 +1501,9 @@ its value, an explicit `null` resets it to the default.
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "dataSchema": null,       // Optional, null clears the declared contract
-  "openapi": null           // Optional, null unbinds the spec document
+  "openapi": null,          // Optional, null unbinds the spec document
+  "specFile": null,         // Optional, null unbinds the spec file
+  "dataFile": null          // Optional, null unbinds the data file
 }
 ```
 
@@ -1509,8 +1516,10 @@ list it just left. See [Ordering](#ordering).
 **Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
 on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
-serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
-engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
+serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
+`dataFile` is over the engine's
+[field cap](#a-stored-json-field-has-a-write-time-cap), or a file binding's
+`path` or `fileName` is over its own (below).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -1550,9 +1559,8 @@ them, each at most 256 characters - `declaredAt` a number, `fileName` a string.
 Each violation is a `400` naming the field (`Invalid 'dataSchema.columns': ...`)
 that writes nothing.
 
-The schema is stored; the file's **rows are not**, anywhere, and neither is its
-path - it is machine-local and stays app-side. See
-[Data-driven runs](../app/data-driven-runs.md).
+The schema is stored; the file's **rows are not**, anywhere. Where the file is
+lives in `dataFile`, below. See [Data-driven runs](../app/data-driven-runs.md).
 
 **`openapi` (both verbs, and `POST /import/apply`):** the OpenAPI document this
 collection is bound to (issue #637).
@@ -1582,6 +1590,32 @@ and a run of it reports `hash_mismatch` as before.
 
 Deleting the document is refused while a collection binds it - the binding is
 never cascaded away, see [DELETE /specs/:id](#delete-specsid).
+
+**`specFile` and `dataFile` (both verbs; refused by `POST /import/apply`):** the
+files this collection's Spec and Data tabs are bound to (issue #2765), stored so
+a [workspace backup](#post-workspacebackup) carries them.
+
+```json
+{"path":"/home/me/specs/pets.yaml","fileName":"pets.yaml"}
+{"path":"/home/me/data/users.csv","fileName":"users.csv","hash":"<hex sha256>","castNumbers":true}
+```
+
+`{}` means no file, and is what an absent field on create and an explicit `null`
+on update both resolve to, so unbinding is `{"specFile": null}`. A present value
+must be an object (`400` otherwise). A *non-empty* one must carry `path` and
+`fileName` as non-empty strings and no member beyond its own: `specFile` holds
+those two, `dataFile` adds an optional `hash` (64 lowercase hex characters, the
+SHA-256 of the file's bytes, the digest a run records as `dataFileHash`) and an
+optional boolean `castNumbers`. Each violation is a `400` naming the field or
+member that writes nothing; a `path` over 96 KiB or a `fileName` over 1 KiB is a
+`413` naming the member, its size and the cap. The path's form is not checked: it
+is the location on the machine that picked the file, so a Windows path is stored
+on Linux as written. A stored path grants nothing - a request body may send a
+file only under the [file trust rule](#allowed-folders-file-roots) - and the engine never opens
+either file. Neither field appears in `POST /export/postman` or
+`POST /specs/export`. A `POST /import/apply` collection item carrying either is a
+`400` with `error.item`, because an import describes a document from elsewhere;
+`null` passes.
 
 ### DELETE /collections/:id
 
@@ -4127,6 +4161,9 @@ Messages, by case:
 - `400` `Missing required field: name`, with `item: "c1"`, and the other
   per-field errors of the matching `POST /<resource>`, including a wrong-typed
   field (`"name": 42`), which is a `400` rather than a `500`.
+- `400` `'specFile' is not part of an import: it binds a file on this machine,
+  set with PUT /collections/:id`, with `item: "c1"`, and the same for
+  `dataFile` (issue #2765); `null` passes.
 - `400` `Import too large: 10001 items exceeds the limit of 10000 per call`.
 - `500` `<detail>` - the transaction itself failed; nothing was
   written.

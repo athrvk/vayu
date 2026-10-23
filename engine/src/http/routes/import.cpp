@@ -767,6 +767,25 @@ const std::string& temp) {
     return {};
 }
 
+/**
+ * Refuses a collection item's `specFile` / `dataFile` (issue #2765). The shared
+ * applier would store either, but a payload describes a document from
+ * elsewhere and a binding is a path on this machine, which only
+ * `PUT /collections/:id` sets. `null` is the default and passes.
+ */
+RouteResult refuse_file_bindings (const nlohmann::json& item, const std::string& temp) {
+    for (const char* field : { "specFile", "dataFile" }) {
+        if (item.contains (field) && !item[field].is_null ()) {
+            return std::unexpected (item_error (
+            std::format ("'{}' is not part of an import: it binds a file on "
+                         "this machine, set with PUT /collections/:id",
+            field),
+            temp));
+        }
+    }
+    return {};
+}
+
 /** Pass 3a - collection rows, through the same applier POST /collections uses. */
 RouteResult build_collection_rows (vayu::db::Database& db,
 const nlohmann::json& collections,
@@ -785,6 +804,9 @@ std::vector<vayu::db::Collection>& out) {
            nlohmann::json (nullptr) :
            nlohmann::json (temps.real.at (parent->second));
 
+        if (auto outcome = refuse_file_bindings (item, temp); !outcome) {
+            return outcome;
+        }
         if (auto outcome = resolve_spec_binding (fields, temps, temp); !outcome) {
             return outcome;
         }
@@ -1754,7 +1776,8 @@ void register_import_routes (RouteContext& ctx) {
      * the `idMap` - nothing references them). A spec item carries `content` and
      * an optional `sourceUrl`; its `hash` and `fetchedAt` are engine-computed
      * and rejected if sent. All other fields are the ones the matching
-     * POST /<resource> accepts, minus `id`.
+     * POST /<resource> accepts, minus `id` and a collection's `specFile` /
+     * `dataFile`, which are refused (#2765).
      * Returns: 200 `{"idMap": {...}}`, or 400 with `error.item` naming the
      * item that failed - in which case nothing at all was written.
      */

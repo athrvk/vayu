@@ -560,6 +560,39 @@ TEST_F (ImportApplyRouteTest, CarriesADeclaredDataContractThroughTheSharedApplie
     << bad_response.dump ();
 }
 
+// The one exception to "the applier is the field list": a file binding is a
+// path on this machine (#2765), and a payload describes a document from
+// elsewhere, so the item is refused and nothing is written. `null` is the
+// default and passes. Mutation check: drop the `refuse_file_bindings` call
+// from `build_collection_rows` and the bound items import with 200.
+TEST_F (ImportApplyRouteTest, RefusesACollectionCarryingAFileBinding) {
+    const json binding{ { "path", "/data/users.csv" }, { "fileName", "users.csv" } };
+    for (const char* field : { "specFile", "dataFile" }) {
+        json item               = collection_item ("c1", "root");
+        item[field]             = binding;
+        auto [status, response] = import_apply_response (*db_,
+        json{ { "collections", json::array ({ item }) },
+        { "requests", json::array ({ request_item ("r1", "c1", "get") }) } });
+        EXPECT_EQ (status, 400) << field << " " << response.dump ();
+        EXPECT_EQ (response["error"]["item"], "c1") << response.dump ();
+        EXPECT_NE (response["error"]["message"].get<std::string> ().find (field),
+        std::string::npos)
+        << response.dump ();
+        EXPECT_EQ (stored_rows (), 0u) << "a refused payload writes nothing";
+    }
+
+    json unbound            = collection_item ("c1", "root");
+    unbound["specFile"]     = nullptr;
+    unbound["dataFile"]     = nullptr;
+    auto [status, response] = import_apply_response (
+    *db_, json{ { "collections", json::array ({ unbound }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+    const auto stored = db_->get_collection (response["idMap"]["c1"]);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->spec_file, "{}");
+    EXPECT_EQ (stored->data_file, "{}");
+}
+
 TEST_F (ImportApplyRouteTest, PerItemCreateStillWorksForThirdPartyClients) {
     // The bulk endpoint replaces the app's usage of POST /collections, not the
     // public create API - removing that is #97.
