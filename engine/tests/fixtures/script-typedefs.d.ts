@@ -1616,11 +1616,11 @@ declare const pm: {
 		 */
 		responseTime: number;
 		/**
-		 * Generator-side overhead in milliseconds (responseTime − responseTimeWire). Near-zero for single-shot sends.
+		 * Time spent before the wire in milliseconds (responseTime − responseTimeWire): the generator's own queue and libcurl's wait for a connection slot. Near-zero for single-shot sends.
 		 */
 		responseTimeQueueWait: number;
 		/**
-		 * Wire-only response time in milliseconds (CURLINFO_TOTAL_TIME). Pre-#19 semantics - use for server-only SLA assertions.
+		 * Response time on the wire in milliseconds: CURLINFO_TOTAL_TIME less libcurl's wait for a connection slot. Use for server-only SLA assertions.
 		 */
 		responseTimeWire: number;
 		/**

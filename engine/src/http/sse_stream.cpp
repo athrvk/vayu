@@ -507,11 +507,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);
     const double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
-    response.timing.total_ms = perceived_ms;
-    response.timing.wire_ms  = phase_times.total * 1000.0;
-    response.timing.queue_wait_ms =
-    std::max (0.0, perceived_ms - response.timing.wire_ms);
-    detail::apply_phase_timings (response.timing, phase_times);
+    detail::apply_transfer_timing (response.timing, phase_times, perceived_ms);
     response.transfer_attempted = detail::curl_transfer_attempted (curl, result);
 
     long negotiated_version = 0;

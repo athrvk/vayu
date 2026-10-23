@@ -737,18 +737,11 @@ Result<Response> Client::send (const Request& request) {
     // Get timing info (try to get even on errors, as curl may have partial timing)
     const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);
 
-    // Match the event-loop semantics: total_ms is perceived (submit→completion),
-    // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
+    // The event loop's semantics through the shared helper, which had drifted
+    // from this code once already (negative TLS ms on the load path).
     double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
-    double wire_ms = phase_times.total * 1000.0;
-
-    response.timing.total_ms      = perceived_ms;
-    response.timing.wire_ms       = wire_ms;
-    response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
-    // Per-phase durations, clamped and TLS-collapsed by the shared helper -
-    // the event loop had drifted from this code and rendered negative TLS ms.
-    detail::apply_phase_timings (response.timing, phase_times);
+    detail::apply_transfer_timing (response.timing, phase_times, perceived_ms);
     response.transfer_attempted = detail::curl_transfer_attempted (curl, res);
 
     // Negotiated protocol (try to get even on errors, same as timing above -

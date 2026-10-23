@@ -62,6 +62,26 @@ describe("RunWarnings", () => {
 		expect(screen.getByText("Pre-request script won't run")).toBeTruthy();
 	});
 
+	// Mutation check: drop the per_host_limit_raised title and this reads the
+	// generic "did not do everything it was asked", which this run did.
+	it("reports a raised per-host connection limit under its own title", () => {
+		render(
+			<RunWarnings
+				warnings={[
+					{
+						code: "per_host_limit_raised",
+						message:
+							"Connections per host raised from 200 to 500 per worker to cover this run's virtual users",
+						configured: 200,
+						effective: 500,
+					},
+				]}
+			/>
+		);
+		expect(screen.getByText("Connections per host were raised")).toBeTruthy();
+		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
+	});
+
 	it("renders one callout per warning when a run carries both", () => {
 		render(
 			<RunWarnings

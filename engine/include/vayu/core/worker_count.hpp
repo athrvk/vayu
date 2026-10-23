@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <cstddef>
 #include <optional>
 
 #include "vayu/db/database.hpp"
@@ -34,6 +35,27 @@ inline constexpr unsigned FALLBACK_WORKER_COUNT = 4;
  * actually use rather than the unconditional core count it used to.
  */
 int resolve_worker_count (vayu::db::Database& db);
+
+/**
+ * @brief The per-host connection limit each event-loop worker runs with
+ *        (#2394): the `eventLoopMaxPerHost` setting, raised to the worker's
+ *        share of the run's virtual users when that share is larger.
+ *
+ * Submission is round-robin across workers and the limit is applied per
+ * worker, so a worker carries about `ceil(concurrency / workers)` transfers to
+ * one host. Below that, libcurl holds the rest in its own queue while the
+ * controller counts them as in flight, and the wait reads as target latency.
+ * Only ever raises: a configured value above the share is kept.
+ *
+ * A @p workers of 0 means the count is not known yet; it is sized as one
+ * worker carrying every virtual user, which can only over-raise.
+ */
+[[nodiscard]] constexpr std::size_t
+effective_max_per_host (std::size_t configured, std::size_t concurrency, std::size_t workers) {
+    const std::size_t divisor = workers != 0 ? workers : 1;
+    const std::size_t share   = (concurrency + divisor - 1) / divisor;
+    return configured > share ? configured : share;
+}
 
 /**
  * @brief Which logical CPU a load-generation worker should pin to, if any.

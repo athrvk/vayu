@@ -118,7 +118,8 @@ constexpr size_t MAX_PARSED_RESPONSE_BODY_BYTES = size_t{ 4 } * 1024 * 1024;
 namespace event_loop {
 /// Maximum concurrent requests per worker
 constexpr size_t MAX_CONCURRENT = 1000;
-/// Maximum concurrent connections per host (per worker).
+/// Concurrent connections per host (per worker): the `eventLoopMaxPerHost`
+/// default, a floor a load run raises to cover its virtual users (#2394).
 constexpr size_t MAX_PER_HOST = 200;
 /// Timeout for a worker's curl_multi_poll in milliseconds. Deliberately short:
 /// it only bounds how long a worker with active transfers blocks waiting for

@@ -466,13 +466,15 @@ pm.response.responseTime      // Perceived latency in ms (submit → completion)
                               // In load tests this includes generator-side
                               // queue wait. For pure server wire time, use
                               // responseTimeWire.
-pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME in ms - DNS + TCP + TLS +
+pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME less any wait for a
+                              // connection slot, in ms - DNS + TCP + TLS +
                               // send + recv. Matches the pre-v0.3 meaning of
                               // responseTime; use this to assert on server SLAs
                               // independent of generator load.
-pm.response.responseTimeQueueWait // Generator-side queue overhead in ms,
-                              // i.e. responseTime − responseTimeWire (clamped
-                              // to >= 0). For single-shot sends this is ~0.
+pm.response.responseTimeQueueWait // Wait before the wire in ms - generator
+                              // queue plus libcurl's wait for a connection
+                              // slot - i.e. responseTime − responseTimeWire
+                              // (clamped to >= 0). ~0 for single-shot sends.
 pm.response.headers           // Plain object, lower-cased keys, with
                               // case-insensitive get()/has() over it - see below
 pm.response.text()            // Body as string

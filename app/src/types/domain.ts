@@ -2632,6 +2632,9 @@ export interface RunReport {
 		count?: number;
 		names?: string[];
 		steps?: number;
+		/** `per_host_limit_raised` (#2394): the setting, and the limit the run used. */
+		configured?: number;
+		effective?: number;
 	}>;
 	metadata?: {
 		runId: string;

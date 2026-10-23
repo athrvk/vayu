@@ -129,7 +129,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 					<TimingStat
 						label="Queue"
 						value={timing.queueWaitMs}
-						tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
+						tip="Time before the wire - generator queue and any wait for a connection slot (perceived − wire). Near-zero for a single request; grows under load."
 					/>
 				)}
 				{isReportedMs(timing.engineMs) && (

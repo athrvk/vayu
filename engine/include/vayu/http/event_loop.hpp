@@ -61,7 +61,8 @@ struct EventLoopConfig {
     /// Maximum number of concurrent connections per worker (default: 1000)
     size_t max_concurrent = vayu::core::constants::event_loop::MAX_CONCURRENT;
 
-    /// Maximum connections per host (default: 100)
+    /// Maximum connections per host, per worker (default: 200). A load run
+    /// raises it to cover its virtual users (`effective_max_per_host`, #2394).
     size_t max_per_host = vayu::core::constants::event_loop::MAX_PER_HOST;
 
     /// What this run adds to a request that names none of it (issue #1229),
