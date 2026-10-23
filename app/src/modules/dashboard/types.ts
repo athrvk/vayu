@@ -155,6 +155,12 @@ export interface DashboardDerived {
 	startConcurrency?: number;
 	targetConcurrency?: number;
 	breakpoint: Breakpoint;
+	/**
+	 * Worst whole-second p99 (ms) among the ticks at the run's peak load; absent
+	 * where no per-tick series reached the peak, and the stat falls back to
+	 * `p99Latency`.
+	 */
+	p99AtPeakMs?: number;
 }
 
 // ============================================================================

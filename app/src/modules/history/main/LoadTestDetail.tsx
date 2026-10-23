@@ -42,6 +42,7 @@ import {
 } from "@/components/shared";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { p99AtPeak } from "@/modules/dashboard/utils/p99AtPeak";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
 import { useRunMonitorSeriesQuery, useRunQuery, useRunTimeSeriesQuery } from "@/queries/runs";
@@ -171,7 +172,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const derived = useMemo(() => {
 		const base = reportToDerived(report);
 		if (timeSeries.length < 2) return base;
-		return { ...base, breakpoint: computeBreakpoint(timeSeries, sloThresholdMs) };
+		return {
+			...base,
+			breakpoint: computeBreakpoint(timeSeries, sloThresholdMs),
+			p99AtPeakMs: p99AtPeak(timeSeries),
+		};
 	}, [report, timeSeries, sloThresholdMs]);
 
 	// The run's degradation windows, from the same series the charts plot. Derived

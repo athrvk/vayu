@@ -86,7 +86,7 @@ export const TOOLTIPS = {
 	breakpoint:
 		'The number of virtual users at which p99 latency first crossed the configured SLO threshold (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly. "not crossed" means p99 stayed under the SLO for the whole run, so the ceiling is above the load tested.',
 	p99AtPeak:
-		"Tail latency observed during the held-target portion of the ramp (after the curve flattens). Captures the latency this many virtual users actually produce, not just how it ramped up.",
+		"The worst one-second p99 while the run was at its most virtual users. Unlike the breakpoint, which is read where p99 first crossed the SLO, this is the tail latency the full load produced. Until a second at that peak has a reading, it shows the run's p99 so far.",
 
 	// ---- Chart cards ----
 	throughputOverTime:

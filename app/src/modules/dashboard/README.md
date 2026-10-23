@@ -95,6 +95,16 @@ consumes it.
   `iterations`) show three stats: their p99 is in the hero row's
   `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
   the stats row as p99 at peak.
+- **p99 at peak is read at the run's peak load, not at the breakpoint**
+  (#2802). It is the worst whole-second p99 (`secondPercentiles`, the reading
+  `computeBreakpoint` uses) among the ticks whose `current_concurrency` equals
+  the run's peak: `utils/p99AtPeak.ts`. The breakpoint tick is a lighter load
+  than the peak, so reading it understated the stat on any run that crossed the
+  SLO early. The store latches it with `peakConcurrency` (`p99AtPeakMs`),
+  restarting whenever the peak rises, so retention cannot trim it; History
+  derives it over its own series, buckets included. Until a tick at the peak
+  has a whole-second reading the stat shows the run's cumulative p99, as it did
+  before. `Breakpoint.p99Ms` stays the crossing tick's and is not repurposed.
 - **A tick's percentiles mean different things by where it came from** (#2385),
   and `utils/tickPercentiles.ts` is the one place that says which. A stored
   tick's `latency_p*_ms` are its whole second's. A live frame's are only the

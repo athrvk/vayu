@@ -164,6 +164,7 @@ function MetricsView({
 	// of an O(n) scan over the full historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
+	const p99AtPeakMs = useDashboardStore((s) => s.p99AtPeakMs);
 	// Empty for a run that configured no monitor - the row below reads that
 	// rather than the config, so it is right for a replayed run too.
 	const monitorSamples = useDashboardStore((s) => s.monitorSamples);
@@ -236,6 +237,7 @@ function MetricsView({
 			startConcurrency: rampConfig?.startConcurrency,
 			targetConcurrency: rampConfig?.targetConcurrency,
 			breakpoint,
+			p99AtPeakMs,
 		};
 	}, [
 		metrics,
@@ -249,6 +251,7 @@ function MetricsView({
 		peakConcurrency,
 		rampOverlay,
 		breakpoint,
+		p99AtPeakMs,
 	]);
 
 	if (!derived) {
