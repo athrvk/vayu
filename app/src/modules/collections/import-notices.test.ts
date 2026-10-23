@@ -143,6 +143,28 @@ describe("importNotices - what the $ref bundling refused and fetched", () => {
 		});
 	});
 
+	it("prints an engine reason as the engine wrote it", () => {
+		const notices = importNotices(
+			meta({
+				refReport: {
+					fetched: [],
+					refused: [
+						{
+							target: "https://cdn.acme.dev/c.json",
+							reason: "The server answered HTTP 302",
+						},
+					],
+				},
+			})
+		);
+		expect(notices).toEqual([
+			{
+				tier: "action",
+				text: "Reference not followed: https://cdn.acme.dev/c.json (The server answered HTTP 302)",
+			},
+		]);
+	});
+
 	it("says nothing when nothing was fetched or refused", () => {
 		expect(importNotices(meta({ refReport: { fetched: [], refused: [] } }))).toEqual([]);
 		expect(importNotices(meta())).toEqual([]);
