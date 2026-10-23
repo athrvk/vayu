@@ -433,7 +433,9 @@ constexpr int64_t connect_timeout_ms (int64_t timeout_ms) {
     if (timeout_ms <= 0) {
         return CONNECT_TIMEOUT_CAP_MS;
     }
-    return std::min (timeout_ms, CONNECT_TIMEOUT_CAP_MS);
+    // Not std::min: a translation unit that includes <windows.h> without
+    // NOMINMAX turns `min (` into a macro (default_headers_test.cpp).
+    return timeout_ms < CONNECT_TIMEOUT_CAP_MS ? timeout_ms : CONNECT_TIMEOUT_CAP_MS;
 }
 /// Smallest heap block the daemon gives a mapping of its own, returned to the
 /// OS when freed (`platform::return_large_frees_to_os`, issue #2544). Large
