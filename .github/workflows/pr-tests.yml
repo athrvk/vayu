@@ -83,12 +83,23 @@ jobs:
     # it is skipped too - except `engine`, whose condition admits a push.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    # Both filters read the PR's file list from the API rather than cloning, so
-    # this is all they need. Stated explicitly rather than inherited, since a
-    # fork PR's token is read-only regardless and this job must work for those.
+    # Both filters read the PR's file list from the API rather than cloning;
+    # the checkout is for the suite fingerprints below. Stated explicitly
+    # rather than inherited, since a fork PR's token is read-only regardless
+    # and this job must work for those.
     permissions:
       pull-requests: read
+      contents: read
     outputs:
+      # A run of this pull request already passed the suite on identical
+      # inputs (see "Fingerprint the suites' inputs" below); the app and
+      # engine matrices are skipped when theirs is 'true'.
+      app_reuse: ${{ steps.app-pass.outputs.cache-hit == 'true' }}
+      engine_reuse: ${{ steps.engine-pass.outputs.cache-hit == 'true' }}
+      app_fingerprint: ${{ steps.fingerprint.outputs.app }}
+      engine_fingerprint: ${{ steps.fingerprint.outputs.engine }}
+      app_passed_in: ${{ steps.passed-in.outputs.app }}
+      engine_passed_in: ${{ steps.passed-in.outputs.engine }}
       code: ${{ steps.code.outputs.code }}
       app: ${{ steps.area.outputs.app }}
       app_doc_fixtures: ${{ steps.area.outputs.app_doc_fixtures }}
@@ -380,6 +391,10 @@ jobs:
               - '!**/*.md'
             build_script:
               - 'build.py'
+              # The suite fingerprint reads this file's filters (the `changes`
+              # job), and its test pins how.
+              - 'scripts/suite-fingerprint.py'
+              - 'scripts/test/suite_fingerprint_test.py'
               - 'scripts/test/vcpkg_baseline_test.py'
               # The benchmark script's mode names are read out of types.hpp.
               - 'scripts/test/bench-compare.sh'
@@ -458,6 +473,68 @@ jobs:
               - '!app/**'
               - '!engine/vendor/**'
 
+      # A suite that already passed on identical inputs in an earlier run of
+      # this pull request is not run again: an engine-only push does not re-run
+      # the app matrix, and an app-only push does not re-run the engine matrix.
+      # The fingerprint is a hash of every file the suite's own routing filters
+      # above name, read from the merge commit CI tests, so a change on the
+      # base branch counts as much as one on the head, and a rebase, a merge
+      # from master or a force-push needs no special case. The CI gate saves a
+      # pass under the fingerprint (`suite-pass-<suite>-<fingerprint>`, a cache
+      # entry in this pull request's scope) once that suite's jobs succeed.
+      #
+      # A re-run attempt never reuses, so "re-run all jobs" still runs them.
+      # A fingerprint the script cannot compute only costs the reuse: the
+      # lookup is skipped and both suites run as routed.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fingerprint the suites' inputs
+        id: fingerprint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf=.github/workflows/pr-tests.yml
+          app=$(python3 scripts/suite-fingerprint.py "$wf" area app app_doc_fixtures app_engine_inputs app_root_inputs)
+          engine=$(python3 scripts/suite-fingerprint.py "$wf" area engine)
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+
+      - name: Look for a pass of the app suite on identical inputs
+        id: app-pass
+        if: github.run_attempt == '1' && steps.fingerprint.outputs.app != ''
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .suite-pass-app
+          key: suite-pass-app-${{ steps.fingerprint.outputs.app }}
+
+      - name: Look for a pass of the engine suite on identical inputs
+        id: engine-pass
+        if: github.run_attempt == '1' && steps.fingerprint.outputs.engine != ''
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .suite-pass-engine
+          key: suite-pass-engine-${{ steps.fingerprint.outputs.engine }}
+
+      # The pass marker names the run that wrote it, so the gate can say where
+      # a skipped suite last passed.
+      - name: Read where each reused suite passed
+        id: passed-in
+        shell: bash
+        run: |
+          for suite in app engine; do
+            file=".suite-pass-$suite/pass.txt"
+            if [[ -f "$file" ]]; then
+              echo "$suite=$(head -n 1 "$file")" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
       # The routing, said out loud. Every job below is gated on these
       # booleans, and until this step existed the only way to answer "why did
       # the engine matrix run on a change that touched no engine source" was to
@@ -470,10 +547,13 @@ jobs:
         env:
           CODE: ${{ steps.code.outputs.code }}
           AREAS: ${{ toJSON(steps.area.outputs) }}
+          APP_REUSE: ${{ steps.app-pass.outputs.cache-hit == 'true' }}
+          ENGINE_REUSE: ${{ steps.engine-pass.outputs.cache-hit == 'true' }}
         run: |
           {
             echo "- non-documentation changes: \`$CODE\`"
             echo "- areas: \`$AREAS\`"
+            echo "- suites reused from an identical-input pass: app \`$APP_REUSE\`, engine \`$ENGINE_REUSE\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Lint, formatting and type-check are platform-independent, so one runner
@@ -587,7 +667,7 @@ jobs:
     # reads none of these files, so nothing it runs can change colour over an
     # edit to one. It carries a clause of its own for a fourth input instead -
     # the JavaScript outside `app/` that #1166 put under eslint.
-    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true' || needs.changes.outputs.app_engine_inputs == 'true' || needs.changes.outputs.app_root_inputs == 'true'
+    if: ((needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true' || needs.changes.outputs.app_engine_inputs == 'true' || needs.changes.outputs.app_root_inputs == 'true') && needs.changes.outputs.app_reuse != 'true'
     permissions:
       contents: read
     strategy:
@@ -713,7 +793,8 @@ jobs:
     if: >-
       ${{ !cancelled()
       && (github.event_name == 'push'
-          || (needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true')) }}
+          || (needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
+              && needs.changes.outputs.engine_reuse != 'true')) }}
     permissions:
       contents: read
       checks: write
@@ -1410,6 +1491,9 @@ jobs:
       - name: Test the third-party notices generator
         run: python3 scripts/test/third_party_notices_test.py
 
+      - name: Test the suite fingerprint
+        run: python3 scripts/test/suite_fingerprint_test.py
+
   # Shell and Python (#887) - the two languages nothing else in this workflow
   # reads. Both checks are seconds of work on a runner that needs neither a C++
   # toolchain nor Node, so they share one Linux job rather than riding a matrix
@@ -1619,6 +1703,7 @@ jobs:
           path: shard-manifests
 
       - name: Prove the shards ran the whole suite between them
+        id: shard-proof
         if: needs.app.result == 'success'
         shell: bash
         run: |
@@ -1669,6 +1754,59 @@ jobs:
             echo "- $os shards covered all **$(wc -l < "union-$os.txt")** test files, none twice" >> "$GITHUB_STEP_SUMMARY"
           done
           exit $status
+
+      # A suite's pass is saved under its input fingerprint (see the `changes`
+      # job), so a later run of this pull request with the same inputs skips
+      # it. The app suite counts as passed only once the shard proof above
+      # has shown its shards ran every test file. A save that fails, or one
+      # whose key a concurrent run already wrote, costs a later reuse and
+      # nothing else.
+      - name: Record the app suite's pass
+        if: ${{ !cancelled() && needs.app.result == 'success' && steps.shard-proof.outcome == 'success' && needs.changes.outputs.app_fingerprint != '' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p .suite-pass-app
+          echo "run ${{ github.run_id }} attempt ${{ github.run_attempt }}, head ${HEAD_SHA:0:9}" > .suite-pass-app/pass.txt
+      - name: Save the app suite's pass
+        if: ${{ !cancelled() && needs.app.result == 'success' && steps.shard-proof.outcome == 'success' && needs.changes.outputs.app_fingerprint != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .suite-pass-app
+          key: suite-pass-app-${{ needs.changes.outputs.app_fingerprint }}
+
+      - name: Record the engine suite's pass
+        if: ${{ !cancelled() && needs.engine.result == 'success' && needs.changes.outputs.engine_fingerprint != '' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p .suite-pass-engine
+          echo "run ${{ github.run_id }} attempt ${{ github.run_attempt }}, head ${HEAD_SHA:0:9}" > .suite-pass-engine/pass.txt
+      - name: Save the engine suite's pass
+        if: ${{ !cancelled() && needs.engine.result == 'success' && needs.changes.outputs.engine_fingerprint != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .suite-pass-engine
+          key: suite-pass-engine-${{ needs.changes.outputs.engine_fingerprint }}
+
+      - name: Name each suite reused from an earlier pass
+        if: ${{ !cancelled() && (needs.changes.outputs.app_reuse == 'true' || needs.changes.outputs.engine_reuse == 'true') }}
+        env:
+          APP_REUSE: ${{ needs.changes.outputs.app_reuse }}
+          APP_FROM: ${{ needs.changes.outputs.app_passed_in }}
+          ENGINE_REUSE: ${{ needs.changes.outputs.engine_reuse }}
+          ENGINE_FROM: ${{ needs.changes.outputs.engine_passed_in }}
+        run: |
+          {
+            if [[ "$APP_REUSE" == "true" ]]; then
+              echo "- app suite not run: it passed on identical inputs in $APP_FROM"
+            fi
+            if [[ "$ENGINE_REUSE" == "true" ]]; then
+              echo "- engine suite not run: it passed on identical inputs in $ENGINE_FROM"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pass if every job succeeded or was skipped
         run: |

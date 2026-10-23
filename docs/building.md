@@ -411,6 +411,12 @@ The project uses GitHub Actions for automated builds:
     ubuntu and macOS, three on Windows, the slowest leg. The `CI gate` job
     proves each platform's shards covered every test file between them, none
     twice
+  - A later push to a pull request skips the app or engine matrix when an
+    earlier run of the same pull request already passed it on identical
+    inputs. `scripts/suite-fingerprint.py` hashes every file the suite's
+    routing filters name, in the merge commit CI tests, and the `CI gate`
+    saves a passing suite under that hash; its summary names the run a
+    skipped suite passed in. A re-run attempt always runs everything
 
 - **Release Build**: `.github/workflows/release.yml`
   - Triggers on version tags (`v*`)
