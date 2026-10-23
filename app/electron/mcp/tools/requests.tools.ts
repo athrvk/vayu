@@ -42,6 +42,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 	{
 		name: "create_request",
 		category: "write",
+		retry: { check: "list_requests", noun: "request" },
 		invalidates: ["request"],
 		description: (config) =>
 			"Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app's builder stores except form-data file parts. " +

@@ -1146,8 +1146,9 @@ Notes:
   ceiling) plus 10s of grace - the same rule the renderer uses for its proxied
   calls. That way the engine's own `TIMEOUT` error, with its error code and its
   run row, arrives before this client gives up. If the budget does expire, the
-  tool says the call may still have completed and points at `list_runs`; it is
-  never reported as an unreachable engine, because a retry could re-send a
+  tool says the call may still have completed and what to check before
+  repeating it, which depends on the tool (see [Error results](#error-results));
+  it is never reported as an unreachable engine, because a retry could re-send a
   request that already went out. `run_collection_smoke` bounds the other side of
   this: a call runs at most `limit` requests (25 by default), so one call stays
   inside a typical client budget and a longer collection is resumed by `offset`
@@ -2052,8 +2053,25 @@ by the wrapper `server.ts` puts in front of its `tools/call` handler.
 | `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
 | `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
 | `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry |
-| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says when to check run history first | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
+| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
 | `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
+
+**What a timed-out or cancelled call is told to check** (#2777) is a fact about
+the tool, so each tool declares it as `retry` (`RetryAdvice` in
+`app/electron/mcp/tools/contract.ts`) and `describeFailure` writes it. The
+failure carries only the lead ("The engine did not answer within this client's
+130s budget.") and the tail; the advice between them comes from the tool:
+
+| `retry` | Tells the agent | Declared on |
+|---------|-----------------|-------------|
+| `{ check, noun }` | The call may have completed: call `check`, find the `noun`, and do not retry blindly - a retry creates a second one | Creates and imports: `create_collection`, `create_request`, `create_request_example`, `create_environment`, `import_document`, `start_mock_server`, `start_mock_issuer`, `start_webhook_inbox` |
+| `"never-blind"` | It may still have completed: check run history (`list_runs`) before retrying | Sends and run starts: `run_request`, `run_collection`, `run_collection_smoke`, `start_load_run` |
+| `"safe"` | Repeating the call is safe | Reads and re-applicable writes that do not carry `idempotentHint: true`: `list_request_examples`, `get_live_metrics`, `get_mock_activity`, `get_inbox_captures`, `update_environment`, `update_globals`, `sync_spec`, `bind_spec`, `fetch_oauth2_token` |
+
+A tool annotated `idempotentHint: true` needs no declaration and is told `safe`.
+Any other tool must declare one (`tools.test.ts` scans the registry), because a
+tool that declares none falls back to the `never-blind` wording, which sends an
+agent to run history for a call that never wrote a run.
 
 ## Resources
 

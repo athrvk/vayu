@@ -45,6 +45,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 	{
 		name: "create_collection",
 		category: "write",
+		retry: { check: "list_collections", noun: "collection" },
 		invalidates: ["collectionRow"],
 		description: (config) =>
 			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. " +

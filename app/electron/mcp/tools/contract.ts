@@ -258,6 +258,21 @@ export type ToolCategory = "read" | "execute" | "write" | "load";
  */
 export type ToolDescription = string | ((config: McpSafetyConfig) => string);
 
+/**
+ * What an agent should do when a call to a tool timed out or was cancelled
+ * before the engine answered, which is a call that may have taken effect
+ * (#2777). Per tool, because what a repeat does is a fact about the tool:
+ *
+ * - `"safe"`: repeating the call changes nothing a second time (a read, an
+ *   idempotent update or delete).
+ * - `{ check, noun }`: a create or import, where a blind retry makes a second
+ *   one. @p check is the list tool that shows whether the first landed and
+ *   @p noun what to look for in it.
+ * - `"never-blind"`: a send or a load start, which leaves a row in run history;
+ *   `list_runs` shows whether the first went out.
+ */
+export type RetryAdvice = "safe" | "never-blind" | { check: string; noun: string };
+
 export interface McpTool {
 	name: string;
 	description: ToolDescription;
@@ -288,6 +303,14 @@ export interface McpTool {
 	 * close; `[]` is a statement that the tool only reads.
 	 */
 	invalidates: readonly McpDataEntity[];
+	/**
+	 * What to tell an agent when this tool's call timed out or was cancelled.
+	 * Declared on every tool without `idempotentHint: true` (a tool that omits
+	 * the hint is not idempotent), which `tools.test.ts` holds. A tool with
+	 * `idempotentHint: true` may leave it out and is told `"safe"`; any other
+	 * tool that declares none gets the generic "check run history" wording.
+	 */
+	retry?: RetryAdvice;
 	handler: (
 		args: Record<string, unknown>,
 		ctx: ToolContext,
