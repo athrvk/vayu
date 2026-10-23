@@ -599,7 +599,9 @@ const vayu::db::Request& request);
  * send of the request it belongs to: an enabled, non-blank `script.pre` that
  * no `inherit.disable` in the list turns off. The one copy of the rule
  * `POST /compose` defers `{{names}}` by (#2521); anything else that has to
- * answer the same question calls this rather than restating it.
+ * answer the same question calls this rather than restating it. A
+ * `script.setup` does not count: it runs once before a collection run's first
+ * step, and a plan defers for it on its own (`VariableDeferral::Always`).
  */
 [[nodiscard]] bool elements_run_a_pre_request_script (const nlohmann::json& elements);
 

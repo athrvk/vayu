@@ -1748,7 +1748,7 @@ const vayu::db::Request& request) {
     return compose_elements (collection_chain (db, request.collection_id), request);
 }
 
-/*
+/**
  * `script.pre` alone, because it is the one kind that runs between composition
  * and the send of the request it belongs to. `script.setup` runs once before a
  * collection run's first step, which is composed earlier still, at plan time;
