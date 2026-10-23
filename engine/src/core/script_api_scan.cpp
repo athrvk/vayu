@@ -514,7 +514,6 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 // alias of it or a destructure of it (#2628); the ones it has are exempt.
 { "CryptoJS", Anchor::Bare, "CryptoJS", "", Exemption::CryptoJsMember },
 // `pm.*` members Vayu does not have.
-{ "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
 { "pm.execution.runRequest", Anchor::Bare, "pm.execution.runRequest", "" },
 // chai-postman members `pm.expect` still refuses by name (#2528); every
