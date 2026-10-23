@@ -2191,13 +2191,16 @@ into a pane that can never load on every restart.
   all build their query from, so they share one entry (#2741). The Code section
   fetches it on expand. The Sends line fetches it only for a URL holding a
   `{{token}}` (default mount behaviour, so a tab switch back is a cache hit),
-  for the `deferredVariables` it needs. `RequestBuilderProvider` reads it too, once
-  per builder and only while the request holds a `{{token}}` anywhere
+  for the `deferredVariables` it needs. `RequestBuilderProvider` reads it too,
+  once per builder and only while the request holds a `{{token}}` anywhere
   (`requestHasTokens`), so the token painters can leave those names unpainted as
-  resolved. The strip only reads it: a disabled
-  observer per request tab, editor entry first, never a fetch. Keyed by environment as well as request, because the same request
-  composes differently per environment and one key for both would serve the
-  wrong snippet after a switch. `source` is `"editor"` while the mounted
+  resolved. A builder holding such a request therefore asks `/compose` when it
+  opens and again after each invalidation (every autosave), where before only an
+  open Code section did - a deliberate cost of painting deferred tokens (#2741).
+  The strip only reads it: a disabled observer per request tab, editor entry
+  first, never a fetch. Keyed by environment as well as request, because the
+  same request composes differently per environment and one key for both would
+  serve the wrong snippet after a switch. `source` is `"editor"` while the mounted
   request builder publishes that request's draft (the `editorDraft` live
   surface, #2638) and `"saved"` otherwise: the query function composes the
   draft inline through `buildComposeBody`, as Send does, or the stored row by

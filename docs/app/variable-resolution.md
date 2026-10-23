@@ -623,10 +623,11 @@ which composes through the engine, shows `{{token}}` as written and names those
 tokens, and the Params tab's **Sends** line (with an unnamed request's tab
 title) leaves the same names written and names them in the same sentence - see
 [Script composition](#script-composition). The renderer never decides whether a
-script runs; the names are the engine's `deferredVariables`. The other previews
-(variable token painting among them, #2741) still resolve against the stored
-scopes. See [pm API compatibility](./pm-api-compatibility.md) for what that
-changes for a script.
+script runs; the names are the engine's `deferredVariables`. Variable token
+painting reads those names too (#2741), outside script editors; the other
+previews still resolve against the stored scopes. See
+[pm API compatibility](./pm-api-compatibility.md) for what that changes for a
+script.
 
 ### One value composition refuses: a header a variable would forge (#738)
 
@@ -875,8 +876,9 @@ Two tools, and which one applies depends on where the resolver comes from:
   holding an identical `{{$guid}}` must still differ, which is rule 2. They are
   invalidated when the text changes or when the resolver changes identity,
   which is exactly a variable edit, an environment switch or a bound-row change.
-  A name the engine reports as deferred ([Script composition](#script-composition)) is part of the Sends cache's
-  input text, so a changed answer re-resolves and nothing else rerolls.
+  A name the engine reports as deferred ([Script composition](#script-composition))
+  is part of the Sends cache's input text, so a changed answer re-resolves and
+  nothing else rerolls.
 
 Fresh-per-call stays right where the value is not a preview at all: the send
 path (`POST /compose` resolves engine-side, and `buildExecBody` is handed an
@@ -1090,12 +1092,14 @@ auth fields, nor offered as the value that will be sent, but drawn muted with a
 dashed underline and, in its popover, the same sentence. It reads the same
 `POST /compose` entry (`useDeferredVariables`), fetched once per builder and
 only while the request holds a `{{token}}` anywhere the composer interpolates
-(`requestHasTokens`); the classifier receives the engine's names and decides
-nothing about scripts, so an unscripted request paints exactly as before. The
-script editors are the exception: a token inside a pre-request script is not
-deferred (that script is what sets the name), and a post-request script reads
-the value after the pre-request one ran, so a script's reads paint from the
-stored scopes as before.
+(`requestHasTokens`), so a builder holding such a request asks `/compose` on
+open and again after each invalidation (every autosave), a deliberate cost of
+painting these tokens that only an open Code section paid before. The
+classifier receives the engine's names and decides nothing about scripts, so an
+unscripted request paints exactly as before. The script editors are the
+exception: a token inside a pre-request script is not deferred (that script is
+what sets the name), and a post-request script reads the value after the
+pre-request one ran, so a script's reads paint from the stored scopes as before.
 
 A script can also change a value composition already resolved (a name no
 pre-request script runs before) by editing `pm.request` directly; the
