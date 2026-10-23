@@ -281,13 +281,14 @@ jobs:
             --label "Whole-tree clang-tidy on ${{ matrix.os }}" \
             | tee tidy-scan-report.md >> "$GITHUB_STEP_SUMMARY"
 
-      # The `report` job files only for a leg that carries this file. The
-      # upload below is `always()`, so every leg has an artifact and the
-      # artifact's presence says nothing about whether the leg failed.
+      # The `report` job files only for a leg that carries this file, and reads
+      # the runner from its content. The upload below is `always()`, so every
+      # leg has an artifact and the artifact's presence says nothing about
+      # whether the leg failed.
       - name: Mark the leg as failed
         if: failure()
         shell: bash
-        run: echo failed > tidy-scan-failed
+        run: echo "${{ matrix.os }}" > tidy-scan-failed
 
       - name: Upload the scan
         if: always()
@@ -346,9 +347,9 @@ jobs:
       contents: read
       actions: read
     steps:
-      # No `merge-multiple`: each leg's artifact lands in its own directory,
-      # named for the artifact, which is how the script below tells legs apart
-      # and reads the runner off the name.
+      # No `merge-multiple`. One matching artifact extracts straight into `path`
+      # and only two or more get a subdirectory each, so the script below finds
+      # legs by their `tidy-scan-failed` marker, which names the runner.
       - name: Download the scan artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -420,12 +421,13 @@ jobs:
               ].join('\n');
             }
 
-            // Every leg uploads, so only a directory carrying the marker failed.
+            // Every leg uploads, so only a leg carrying the marker failed. Its
+            // directory is the leg root, wherever the download put it.
+            const marker = 'tidy-scan-failed';
             const failedLegDirs = fs.existsSync(root)
-              ? fs.readdirSync(root, { withFileTypes: true })
-                  .filter((d) => d.isDirectory())
-                  .map((d) => path.join(root, d.name))
-                  .filter((dir) => fs.existsSync(path.join(dir, 'tidy-scan-failed')))
+              ? fs.readdirSync(root, { recursive: true })
+                  .filter((p) => path.basename(p) === marker)
+                  .map((p) => path.join(root, path.dirname(p)))
                   .sort()
               : [];
             if (failedLegDirs.length === 0) {
@@ -457,7 +459,8 @@ jobs:
             });
 
             async function fileLeg(dir) {
-              const runner = path.basename(dir).slice(artifactPrefix.length);
+              const runner = fs.readFileSync(path.join(dir, marker), 'utf8').trim();
+              if (!runner) throw new Error(`empty ${marker} marker`);
               const title = `tidy: whole-tree scan failure on ${runner}`;
               const body = buildBody(runner, readReport(dir));
               const existing = open.find((i) => i.title === title);

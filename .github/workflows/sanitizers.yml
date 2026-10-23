@@ -342,10 +342,9 @@ jobs:
 
           ctest --preset "$PRESET" --output-on-failure < /dev/null 2>&1 | tee ../sanitizer.log
 
-      # What the `report` job cannot get from the artifact's name alone: `preset`
-      # appears in the issue body, and a file is the only way a matrix value
-      # crosses a job boundary here. Written at the workspace root so the
-      # artifact's layout is the same whichever other files exist.
+      # The leg's identity, carried inside its artifact: the `report` job finds
+      # legs by this file and reads sanitizer, runner and `preset` from it, as a
+      # file is the only way a matrix value crosses a job boundary here.
       - name: Record which leg this is
         if: failure()
         shell: bash
@@ -358,8 +357,8 @@ jobs:
             "$SANITIZER" "$PLATFORM" "$PRESET" > sanitizer-leg.json
 
       # Uploaded on failure only, and that is load-bearing: the `report` job
-      # files one issue per artifact it finds, so a leg that passed must not have
-      # one.
+      # files one issue per marker it finds, so a leg that passed must not
+      # upload one.
       - name: Upload the sanitizer log
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -411,8 +410,9 @@ jobs:
       contents: read
       actions: read
     steps:
-      # No `merge-multiple`: each leg's artifact lands in its own directory,
-      # named for the artifact, which is how the script below tells legs apart.
+      # No `merge-multiple`. One matching artifact extracts straight into `path`
+      # and only two or more get a subdirectory each, so the script below finds
+      # legs by their `sanitizer-leg.json` marker, not by directory name.
       - name: Download the failed legs' logs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -485,10 +485,14 @@ jobs:
               ].join('\n');
             }
 
+            // A leg root is the directory holding the marker, wherever the
+            // download put it. The recursive walk is safe because only the
+            // marker identifies a leg: `engine/build-*/Testing/Temporary/`
+            // inside an artifact is a directory but not a leg.
             const legDirs = fs.existsSync(root)
-              ? fs.readdirSync(root, { withFileTypes: true })
-                  .filter((d) => d.isDirectory())
-                  .map((d) => path.join(root, d.name))
+              ? fs.readdirSync(root, { recursive: true })
+                  .filter((p) => path.basename(p) === 'sanitizer-leg.json')
+                  .map((p) => path.join(root, path.dirname(p)))
                   .sort()
               : [];
             if (legDirs.length === 0) {
