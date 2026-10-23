@@ -37,10 +37,19 @@ import { useTreeWindow } from "./useTreeWindow";
 import { cn } from "@/lib/utils";
 import { rowInsetPx } from "@/constants/layout";
 
-/** `rowSpacingAbove`'s units as classes, written out whole for Tailwind's scan. */
-const SPACING_ABOVE_CLASS = { 0: "", 0.5: "mt-0.5", 1: "mt-1" } as const;
-/** `rowHeightUnits` as classes, for the same reason. */
-const HEIGHT_CLASS = { 8: "h-8", 10: "h-10" } as const;
+/**
+ * A row wrapper's classes by the gap above it (`rowSpacingAbove`) and the row's
+ * height (`rowHeightUnits`), written out whole for Tailwind's scan. The gap is
+ * top padding inside the wrapper, not a margin outside it, so the wrapper can
+ * paint the indent guides across it and consecutive rows' guides join (#2773);
+ * its height is the row's plus the gap, and the row fills what is below the
+ * padding.
+ */
+const WRAPPER_CLASS = {
+	0: { 8: "h-8", 10: "h-10" },
+	0.5: { 8: "h-8.5 pt-0.5", 10: "h-10.5 pt-0.5" },
+	1: { 8: "h-9 pt-1", 10: "h-11 pt-1" },
+} as const;
 
 /** The attribute naming the row a wrapper holds; the wrapper spells it out literally. */
 const ROW_KEY = "data-tree-row-key";
@@ -315,15 +324,16 @@ function CollectionTreeRowList({ rows, list = null, windowRef }: CollectionTreeR
 		// row in it - focus, rename field and pointer capture included.
 		return rows.slice(segment.start, segment.end).map((row, offset) => {
 			const index = segment.start + offset;
+			const gap = rowSpacingAbove(rows, index);
 			return (
 				<div
 					key={row.key}
 					data-tree-row-key={row.key}
 					className={cn(
-						SPACING_ABOVE_CLASS[rowSpacingAbove(rows, index)],
-						HEIGHT_CLASS[rowHeightUnits(row)],
+						WRAPPER_CLASS[gap][rowHeightUnits(row)],
 						dimmed.has(row.key) && "opacity-50"
 					)}
+					style={treeGuideStyle(row.depth, row.activeGuideLevel, gap)}
 				>
 					<RowContent row={row} />
 				</div>

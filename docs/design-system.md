@@ -1515,7 +1515,11 @@ both themes), painted as one background layer per level on the row itself
 (`treeGuideStyle`, `modules/collections/tree-guide-style.ts`), so a level adds
 no DOM node. Each row paints its own segment over its full height and the
 segments join into one line from below an open folder to its last visible
-descendant. The "Empty collection" line and the new-folder form draw guides like
+descendant. The gap between rows (half a `--spacing` unit, a whole one into a
+folder) is top padding on the row's wrapper in `CollectionTreeRows`, so the
+wrapper paints the same lines across that strip alone (the third argument of
+`treeGuideStyle`) and the line has no breaks; the row keeps its own full-height
+segment, so the accent is not painted twice. The "Empty collection" line and the new-folder form draw guides like
 any other row at their depth; a root row draws none.
 
 The selected request's folder gets the accent: the guide at that folder's level
@@ -2441,11 +2445,14 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   folder form and the "Empty collection" line are rows of the list too, but not
   treeitems.
 - **The pitch is per row.** Every row is `h-8` and its wrapper carries the gap
-  above it: `mt-0.5` between rows, `mt-1` above the first row inside an expanded
-  folder (`rowSpacingAbove`) - the spacing the nested groups' `space-y-0.5` and
-  `mt-1` drew, said from depth alone. The wrapper also carries the row's height
-  (`h-8`, `h-10` for the new-folder form, `rowHeightUnits`), so where every row
-  sits is arithmetic over spacing units rather than a measurement.
+  above it as top padding: `pt-0.5` between rows, `pt-1` above the first row
+  inside an expanded folder (`rowSpacingAbove`) - the spacing the nested groups'
+  `space-y-0.5` and `mt-1` drew, said from depth alone. The wrapper also states
+  its height, the row's plus the gap (`h-8` / `h-8.5` / `h-9`, and `h-10` /
+  `h-10.5` / `h-11` for the new-folder form; `rowHeightUnits`), so where every
+  row sits is arithmetic over spacing units rather than a measurement. The gap
+  is padding, not margin, so the wrapper can paint the indent guides across it
+  (see "Tree indent guides").
 - **Only the rows in view are in the DOM** (#2543). The drawer body mounts the
   rows it can show plus an overscan, and one `aria-hidden` spacer of the same
   units stands in for each run it skips, so the scrollbar is the whole list's.

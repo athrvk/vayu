@@ -65,4 +65,14 @@ describe("treeGuideStyle", () => {
 		expect(treeGuideStyle(1, 1)).toEqual(treeGuideStyle(1, null));
 		expect(treeGuideStyle(0, 0)).toEqual({});
 	});
+
+	it("sizes every layer to the gap strip for a wrapper, and paints none without a gap", () => {
+		const style = treeGuideStyle(2, 0, 0.5);
+
+		expect(layers(style.backgroundSize)).toEqual(
+			Array(3).fill("1px calc(var(--spacing) * 0.5)")
+		);
+		expect(layers(style.backgroundPosition)).toEqual([0, 0, 1].map(positionOf));
+		expect(treeGuideStyle(2, 0, 0)).toEqual({});
+	});
 });

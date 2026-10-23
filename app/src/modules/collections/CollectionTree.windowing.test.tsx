@@ -168,15 +168,16 @@ function inView(el: Element): boolean {
 	return box.top >= 0 && box.bottom <= VIEWPORT_PX;
 }
 
-/** A wrapper's own units: the gap class above it and its height class. */
+/**
+ * A wrapper's own units: its explicit height class, the gap above the row
+ * included (the gap is top padding inside the wrapper).
+ */
 function wrapperUnits(wrapper: HTMLElement): number {
-	const gap = wrapper.classList.contains("mt-1")
-		? 1
-		: wrapper.classList.contains("mt-0.5")
-			? 0.5
-			: 0;
-	const height = wrapper.classList.contains("h-10") ? 10 : 8;
-	return gap + height;
+	const height = Array.from(wrapper.classList)
+		.map((name) => /^h-(\d+(?:\.\d+)?)$/.exec(name))
+		.find((match) => match !== null);
+	expect(height, "a wrapper states its height as an h-N class").toBeTruthy();
+	return Number(height![1]);
 }
 
 /** The list's height as rendered: mounted rows plus the spacers standing in for the rest. */
