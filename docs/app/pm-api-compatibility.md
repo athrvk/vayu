@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input), `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) `require('chai')` (npm's `chai` 4.4.1, bundled; a separate object from `pm.expect`), `require('ajv')` (npm's `ajv` 6.12.5, vendored; draft-07) and `require('tv4')` (npm's `tv4` 1.3.0, minified; draft-04; also the `tv4` global) - any other module throws; see [The `require` shelf](#the-require-shelf) |
+| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input), `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) `require('chai')` (npm's `chai` 4.4.1, bundled; a separate object from `pm.expect`, with chai-postman's response assertions installed), `require('ajv')` (npm's `ajv` 6.12.5, vendored; draft-07) and `require('tv4')` (npm's `tv4` 1.3.0, minified; draft-04; also the `tv4` global) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -576,11 +576,14 @@ pm.test('the order is complete', () => {
 A failing chai assertion inside `pm.test` is an ordinary failed test with
 chai's message (`AssertionError: expected 1 to equal 2`). The module is **a
 separate object from `pm.expect`**, which is Vayu's own implementation and is
-not changed by loading chai or by `chai.use(plugin)`. In Postman the two are
-one chai with chai-postman installed, so `require('chai').expect(pm.response)
-.to.have.status(200)` passes there; here the module carries chai's own members
-only and that line throws `Invalid Chai property: status`. Write the response
-assertions with `pm.expect` or `pm.response.to`. `chai.should()` adds `should`
+not changed by loading chai or by `chai.use(plugin)`. The module carries
+chai-postman's response assertions, as Postman's chai does (#2751), so
+`require('chai').expect(pm.response).to.have.status(200)` runs: each forwards
+to the matching `pm.response.to` member, with its verdict and message, and the
+target must be `pm.response` itself (any other value is a `TypeError`). Its
+failure is a Vayu `AssertionError`, not an instance of `chai.AssertionError`,
+as with `pm.expect`. `pm.expect(pm.response).to.have.status(200)` is still not
+a form: write it with `pm.response.to` or this module. `chai.should()` adds `should`
 to `Object.prototype` when called, for that script only. `chai.version` reads
 `'4.3.8'`, as chai 4.4.1 does everywhere (its source was never bumped). First
 use costs about 5.5 ms (`-O2`) to 15 ms (Debug build) and about 470 KB of the
@@ -944,8 +947,10 @@ what is accepted or how it is reported, never a quiet pass:
   failure of the chain.
 - chai-postman's `postmanRequest`, `postmanResponse` and `postmanRequestOrResponse`
   are not implemented - there are no collection-SDK objects to recognise - and
-  neither is `pm.expect(pm.response).to.have.status(...)`: the response
-  assertions live on `pm.response.to`. Each throws a `TypeError` naming the
+  neither is `pm.expect(pm.response).to.have.status(...)`: on `pm.expect` the
+  response assertions live on `pm.response.to`, and
+  `require('chai').expect(pm.response)` carries them
+  ([the shelf](#the-require-shelf)). Each throws a `TypeError` naming the
   member.
 - A name outside this list throws, which chai would too for a misspelling but
   not for a plugin's member; there is no plugin interface.
