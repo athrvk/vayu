@@ -15,21 +15,12 @@ Each licence file is the package's own `LICENSE`, copied unchanged, from the
 tarballs below. The minified file drops the `@license` banner `uri-js`
 carries, so `LICENSE.uri-js` is the notice its BSD-2-Clause licence requires.
 
-- Sources and integrity (registry `dist.integrity`, each checked against the
-  tarball):
-  - <https://registry.npmjs.org/ajv/-/ajv-6.12.5.tgz>
-    `sha512-lRF8RORchjpKG50/WFf8xmg7sgCLFiYNNnqdKflk63whMQcWR5ngGjiSXkL9bjxy6B2npOK2HSMN49jEBMSkag==`
-  - <https://registry.npmjs.org/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz>
-    `sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==`
-  - <https://registry.npmjs.org/fast-json-stable-stringify/-/fast-json-stable-stringify-2.1.0.tgz>
-    `sha512-lhd/wF+Lk98HZoTCtlVraHtfh5XYijIjalXck7saUtuanSDyLMxnHhSXEDJqHxD7msR8D0uCmqlkwjCV8xvwHw==`
-  - <https://registry.npmjs.org/json-schema-traverse/-/json-schema-traverse-0.4.1.tgz>
-    `sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg==`
-  - <https://registry.npmjs.org/uri-js/-/uri-js-4.4.0.tgz>
-    `sha512-B0yRTzYdUCCn9n+F4+Gh4yIDtMQcaJsmYBDsTSG8g/OejKBodLQ2IHfN3bM7jUsRXndopT7OIXWdYqc1fjmV6g==`
+- Provenance: the `ajv` entry of `engine/vendor/js-manifest.json` holds the
+  tarball URLs, their registry `dist.integrity` values, the build and this file's SHA-256.
+  `scripts/vendor-js/rebuild.sh ajv` fetches the tarballs, checks each integrity
+  and rebuilds the file; the `VendorJsManifest` tests hash it on every test run.
 - File: `ajv.min.js` is the ajv tarball's `dist/ajv.min.js`, byte for byte
-  (122,009 bytes, 2 lines, no trailing newline, ASCII only; SHA-256
-  `5d335583bc50d693080b5ec9f4d9f7e83090bcb92bb3421ad103e4dbebaab49a`). Do not
+  (122,009 bytes, 2 lines, no trailing newline, ASCII only). Do not
   reformat or edit it. Its last line names a source map the package ships and
   this directory does not; nothing reads it.
 
@@ -95,7 +86,7 @@ measured schema (four levels of nesting, `allErrors` on) needed between 48 and
 
 To upgrade within 6.x, replace `ajv.min.js` and `LICENSE` from the new
 tarball, re-read the dependency versions its bundle carries and replace their
-licence files, and update the versions, integrities, size and hash here. ajv
-7 and later ship no `dist/ajv.min.js`, validate draft-04 only through a
+licence files, and update the versions and size here and the manifest entry
+(`docs/engine/building.md#upgrading-a-vendored-library`). ajv 7 and later ship no `dist/ajv.min.js`, validate draft-04 only through a
 separate package and report `instancePath` where 6 reports `dataPath`, so a
 move to one is a behaviour change for scripts, not an upgrade.

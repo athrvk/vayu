@@ -12,19 +12,14 @@ The npm package [`xml2js`](https://www.npmjs.com/package/xml2js), version
 Each licence file is the package's own `LICENSE`, copied unchanged except that
 `xmlbuilder`'s CRLF line endings are LF here.
 
-- Sources and integrity (registry `dist.integrity`, each checked against the
-  tarball):
-  - <https://registry.npmjs.org/xml2js/-/xml2js-0.6.2.tgz>
-    `sha512-T4rieHaC1EXcES0Kxxj4JWgaUQHDk+qwHcYOCFHfiwKz7tOVPLq7Hjq9dM1WCMhylqMEfP7hMcOIChvotiZegA==`
-  - <https://registry.npmjs.org/sax/-/sax-1.2.4.tgz>
-    `sha512-NqVDv9TpANUjFm0N8uM5GxL36UgKi9/atZw+x7YFnQ8ckwFGKrl4xX4yWtrey3UJm5nP1kUbnYgLopqWNSRhWw==`
-  - <https://registry.npmjs.org/xmlbuilder/-/xmlbuilder-11.0.1.tgz>
-    `sha512-fDlsI/kFEx7gLvbecc0/ohLG50fugQp8ryHzMTuW9vSa1GJ0XYWKnhsUx7oie3G98+r56aTQIUB4kht42R3JvA==`
+- Provenance: the `xml2js` entry of `engine/vendor/js-manifest.json` holds the
+  tarball URLs, their registry `dist.integrity` values, the build and this file's SHA-256.
+  `scripts/vendor-js/rebuild.sh xml2js` fetches the tarballs, checks each integrity
+  and rebuilds the file; the `VendorJsManifest` tests hash it on every test run.
 - File: `xml2js.min.js` is `xml2js`'s `lib/` (`xml2js.js` and the five
   modules it requires, 21,490 bytes), `sax`'s `lib/sax.js` (43,541 bytes) and
   `xmlbuilder`'s `lib/` (39 files, 133,660 bytes), bundled and minified by
-  esbuild (98,939 bytes, 13 lines, trailing newline, ASCII only; SHA-256
-  `965fe0a7bd684d4f2fd880623817273041dce66d8ecaa054c1ce3dcc2200dee0`). It is
+  esbuild (98,939 bytes, 13 lines, trailing newline, ASCII only). It is
   build output: do not reformat or edit it, rebuild it.
 
 These are the versions Postman's sandbox gives `require('xml2js')` and its
@@ -67,24 +62,14 @@ Input is a string. A `Buffer` is not supported (the sandbox has none), and
 what is cut changes nothing about `parseString`, `parseStringPromise`,
 `Parser` or `Builder`.
 
-To reproduce, with `<repo>` this checkout:
-
-```bash
-npm install --no-save xml2js@0.6.2 sax@1.2.4 xmlbuilder@11.0.1 esbuild@0.28.2
-SHIMS=<repo>/engine/vendor/xml2js/shims
-npx esbuild node_modules/xml2js/lib/xml2js.js --bundle --format=cjs \
-  --platform=neutral --main-fields=main --minify --legal-comments=none \
-  --alias:events=$SHIMS/events.cjs --alias:stream=$SHIMS/stream.cjs \
-  --alias:timers=$SHIMS/timers.cjs \
-  --alias:string_decoder=$SHIMS/string_decoder.cjs \
-  '--banner:js=(function(){' '--footer:js=})();' \
-  --outfile=xml2js.min.js
-```
-
-`npm ls sax` must show the one 1.2.4 copy, deduplicated under `xml2js`. The
-result is byte-identical to the committed file. It was checked by evaluating
-it the way the engine does (a strict-mode function with a local `module` and
-`exports`, in a context with no Node globals but `setTimeout`) and comparing
+To reproduce it, run `scripts/vendor-js/rebuild.sh xml2js`; the pinned esbuild and
+its exact arguments are the manifest entry's `build`, and the four files in
+`shims/` are listed there as inputs. The script extracts each tarball,
+integrity-checked, to `node_modules/<name>`, so the one `sax` 1.2.4 is the one
+bundled. The result is byte-identical to the committed file. It was checked by
+evaluating it the way the engine does (a strict-mode function with a local
+`module` and `exports`, in a context with no Node globals but `setTimeout`) and
+comparing
 27 `parseString` inputs (options, attributes, entities, CDATA, namespaces, a
 byte-order mark, non-strict mode and seven malformed documents), nine
 `Builder` outputs, an `async: true` parse and `parseStringPromise`'s resolve
@@ -92,6 +77,7 @@ and reject with the unbundled packages running on Node's own built-ins: every
 result and every error message matched.
 
 To upgrade, rebuild from the new tarballs, replace the licence files, and
-update the versions, integrities, sizes and hash here. xml2js 0.6.x is the
+update the versions and sizes here and the manifest entry
+(`docs/engine/building.md#upgrading-a-vendored-library`). xml2js 0.6.x is the
 line Postman ships; a move off it, or to another `sax`, is a behaviour change
 for scripts, not an upgrade.

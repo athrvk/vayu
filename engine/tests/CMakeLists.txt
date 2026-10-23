@@ -219,6 +219,7 @@ add_executable(vayu_tests
     element_kinds_test.cpp
     metric_record_test.cpp
     version_isolation_test.cpp
+    vendor_js_manifest_test.cpp
     reentrant_test.cpp
     ascii_case_test.cpp
     logger_test.cpp
