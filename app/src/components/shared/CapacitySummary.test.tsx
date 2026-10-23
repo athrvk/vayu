@@ -55,9 +55,28 @@ describe("CapacitySummary", () => {
 		expect(headline).toContain("41ms");
 		expect(headline).toContain("200ms budget");
 
+		const knee = screen.getByText(/The limit lies between/).textContent ?? "";
+		expect(knee).toBe(
+			"The limit lies between 48 and 64 virtual users: it held 48 and gave out at 64, where p99 reached 312ms."
+		);
+		cleanup();
+	});
+
+	it("names only the level that gave out when no level held", () => {
+		// With nothing held there is no bracket to draw: the knee is the first
+		// level tried, and "between" would need a lower bound the search never had.
+		render(
+			<CapacitySummary
+				capacity={capacity({
+					maxHealthyConcurrency: undefined,
+					maxHealthyRps: undefined,
+					p99AtMaxHealthyMs: undefined,
+				})}
+			/>
+		);
 		const knee = screen.getByText(/It gave out at/).textContent ?? "";
 		expect(knee).toContain("64 virtual users");
-		expect(knee).toContain("312ms");
+		expect(screen.queryByText(/The limit lies between/)).toBeNull();
 		cleanup();
 	});
 
@@ -97,6 +116,7 @@ describe("CapacitySummary", () => {
 				})}
 			/>
 		);
+		expect(screen.queryByText(/The limit lies between/)).toBeNull();
 		expect(screen.queryByText(/It gave out at/)).toBeNull();
 		expect(screen.getByText("Reached the virtual user ceiling")).toBeTruthy();
 		cleanup();
@@ -131,6 +151,144 @@ describe("CapacitySummary", () => {
 		cleanup();
 	});
 
+	describe("the headline follows why the search stopped", () => {
+		const headlineOf = (cap: Capacity): string => {
+			const { container } = render(<CapacitySummary capacity={cap} />);
+			const text = container.querySelector("p")?.textContent ?? "";
+			cleanup();
+			return text;
+		};
+
+		// Audit S1: throughput flat at 156 req/s from 8 virtual users on, p99
+		// climbing from 52ms to 103ms. The last level tried (12) is where the
+		// search ran out of patience, not where the curve flattened.
+		const plateau = (over: Partial<Capacity> = {}): Capacity =>
+			capacity({
+				stopReason: "plateau",
+				maxHealthyConcurrency: 12,
+				maxHealthyRps: 156,
+				p99AtMaxHealthyMs: 103,
+				kneeConcurrency: undefined,
+				kneeP99Ms: undefined,
+				saturationConcurrency: 8,
+				saturationRps: 156,
+				saturationP99Ms: 52,
+				levels: [
+					{ concurrency: 8, rps: 156, p99Ms: 52 },
+					{ concurrency: 10, rps: 156, p99Ms: 103 },
+					{ concurrency: 12, rps: 156, p99Ms: 103 },
+				],
+				...over,
+			});
+
+		it("puts a plateau where throughput stopped growing, not at the last level tried", () => {
+			const headline = headlineOf(plateau());
+			expect(headline).toBe(
+				"Throughput stopped growing at 8 virtual users (156 req/s, p99 52ms). More only queued."
+			);
+			expect(headline).not.toContain("Sustained");
+			expect(headline).not.toContain("12");
+			expect(headline).not.toContain("103ms");
+		});
+
+		it("names no level for a plateau stored before the engine reported one", () => {
+			const headline = headlineOf(
+				plateau({
+					saturationConcurrency: undefined,
+					saturationRps: undefined,
+					saturationP99Ms: undefined,
+				})
+			);
+			expect(headline).toBe("Throughput stopped growing. More only queued.");
+		});
+
+		it("does not repeat the headline in the plateau detail", () => {
+			render(<CapacitySummary capacity={plateau()} />);
+			expect(
+				screen.getByText("More virtual users stopped buying more throughput.")
+			).toBeTruthy();
+			expect(screen.queryByText(/latency still held/)).toBeNull();
+			cleanup();
+		});
+
+		it("reads a ceiling stop as a floor, never as Sustained", () => {
+			const headline = headlineOf(
+				capacity({
+					stopReason: "cap_reached",
+					maxHealthyConcurrency: 30,
+					maxHealthyRps: 295,
+					p99AtMaxHealthyMs: 41.2,
+					kneeConcurrency: undefined,
+					kneeP99Ms: undefined,
+					levels: [
+						{ concurrency: 20, rps: 200, p99Ms: 30 },
+						{ concurrency: 30, rps: 295, p99Ms: 41.2 },
+					],
+				})
+			);
+			expect(headline).toBe(
+				"At least 30 virtual users held the budget (295 req/s, p99 41ms). The search did not find a limit."
+			);
+			expect(headline).not.toContain("Sustained");
+		});
+
+		it.each(["deadline", "stopped"])(
+			"reads a %s stop after four levels as a floor with the next level unfinished",
+			(stopReason) => {
+				const headline = headlineOf(
+					capacity({
+						stopReason,
+						maxHealthyConcurrency: 4,
+						maxHealthyRps: 80,
+						p99AtMaxHealthyMs: 20,
+						kneeConcurrency: undefined,
+						kneeP99Ms: undefined,
+						levels: [
+							{ concurrency: 1, rps: 20, p99Ms: 18 },
+							{ concurrency: 2, rps: 40, p99Ms: 19 },
+							{ concurrency: 3, rps: 60, p99Ms: 19 },
+							{ concurrency: 4, rps: 80, p99Ms: 20 },
+						],
+					})
+				);
+				expect(headline).toBe(
+					"At least 4 virtual users held the budget (80 req/s, p99 20ms). The search did not find a limit. The next level was still being measured."
+				);
+				expect(headline).not.toContain("Sustained");
+			}
+		);
+
+		it("does not claim an unfinished next level for a ceiling stop", () => {
+			const headline = headlineOf(capacity({ stopReason: "cap_reached" }));
+			expect(headline).toContain("At least 48 virtual users");
+			expect(headline).not.toContain("next level");
+		});
+
+		it("keeps Sustained for the two stops that watched the target give out", () => {
+			for (const stopReason of ["slo_exceeded", "errors_exceeded"]) {
+				const headline = headlineOf(capacity({ stopReason }));
+				expect(headline).toContain("Sustained 48 virtual users");
+				expect(headline).not.toContain("At least");
+			}
+		});
+
+		it("brackets the limit between the level that held and the one that gave out", () => {
+			render(
+				<CapacitySummary
+					capacity={capacity({
+						maxHealthyConcurrency: 41,
+						kneeConcurrency: 51,
+						kneeP99Ms: 230,
+					})}
+				/>
+			);
+			expect(screen.getByText(/The limit lies between/).textContent).toBe(
+				"The limit lies between 41 and 51 virtual users: it held 41 and gave out at 51, where p99 reached 230ms."
+			);
+			cleanup();
+		});
+	});
+
 	it("claims no measurement when the search judged nothing", () => {
 		// `stepDuration` longer than `duration` - both accepted by the dialog and
 		// the engine - ends the run before the first level closes. The engine
@@ -160,7 +318,7 @@ describe("CapacitySummary", () => {
 
 	it("writes a latency of a second or more in seconds, from the shared formatter", () => {
 		render(<CapacitySummary capacity={capacity({ kneeP99Ms: 1234, sloMs: 2000 })} />);
-		expect(screen.getByText(/It gave out at/).textContent).toContain("1.23s");
+		expect(screen.getByText(/The limit lies between/).textContent).toContain("1.23s");
 		expect(screen.getByText(/Sustained/).textContent).toContain("2.00s budget");
 		cleanup();
 	});
@@ -193,6 +351,9 @@ describe("CapacitySummary", () => {
 			capacity({
 				stopReason: "errors_exceeded",
 				maxErrorPct: 1,
+				maxHealthyConcurrency: 16,
+				maxHealthyRps: 9000,
+				p99AtMaxHealthyMs: 40,
 				kneeConcurrency: 33,
 				kneeP99Ms: 80,
 				kneeErrorPct: 94,
@@ -210,7 +371,7 @@ describe("CapacitySummary", () => {
 				screen.getByText("More than 1% of requests failed across two consecutive windows.")
 			).toBeTruthy();
 
-			const knee = screen.getByText(/It gave out at/).textContent ?? "";
+			const knee = screen.getByText(/The limit lies between/).textContent ?? "";
 			expect(knee).toContain("33 virtual users");
 			expect(knee).toContain("94.0% of requests failed");
 			// The latency was fine at the knee; quoting it would blame the wrong thing.
@@ -275,7 +436,7 @@ describe("CapacitySummary", () => {
 			const headline = screen.getByText(/Sustained/).textContent ?? "";
 			expect(headline).toContain("27 virtual users");
 			expect(document.body.textContent).not.toContain("Sustained 50");
-			expect(screen.getByText(/It gave out at/).textContent).toContain(
+			expect(screen.getByText(/The limit lies between/).textContent).toContain(
 				"94.0% of requests failed"
 			);
 			cleanup();
@@ -285,7 +446,7 @@ describe("CapacitySummary", () => {
 			// A report written before `kneeErrorPct` existed: the knee still has to
 			// say something, and the latency is the only evidence it holds.
 			render(<CapacitySummary capacity={errorsStop({ kneeErrorPct: undefined })} />);
-			const knee = screen.getByText(/It gave out at/).textContent ?? "";
+			const knee = screen.getByText(/The limit lies between/).textContent ?? "";
 			expect(knee).toContain("33 virtual users");
 			expect(knee).toContain("p99 reached 80ms");
 			expect(knee).not.toContain("of requests failed");
@@ -317,7 +478,7 @@ describe("CapacitySummary", () => {
 
 	it("never prints 0ms for a knee that carries no p99", () => {
 		render(<CapacitySummary capacity={capacity({ kneeP99Ms: undefined })} />);
-		const knee = screen.getByText(/It gave out at/).textContent ?? "";
+		const knee = screen.getByText(/The limit lies between/).textContent ?? "";
 		expect(knee).toContain("64 virtual users");
 		expect(knee).not.toContain("0ms");
 		expect(knee).not.toContain("p99");

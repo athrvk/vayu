@@ -3172,7 +3172,12 @@ export interface RunReport {
 	 * very first level already breached (the search found no sustainable
 	 * capacity) and `knee*` when the search ended for a reason other than the
 	 * target giving out on latency (`slo_exceeded`) or errors
-	 * (`errors_exceeded`), so neither can be read as a measured zero. The error
+	 * (`errors_exceeded`), so neither can be read as a measured zero.
+	 * `saturation*` is the lowest healthy level whose throughput was within the
+	 * plateau gain of the best healthy throughput, sent only when `stopReason`
+	 * is `plateau`; a plateau stored before the engine reported it carries none,
+	 * and its `maxHealthy*` is then the last level tried, which overshoots where
+	 * throughput stopped growing. The error
 	 * share (`maxErrorPct`, `kneeErrorPct`, `levels[].errorPct`, percent 0-100)
 	 * is absent for a run stored by an engine that did not judge errors, which
 	 * is not the claim "every level was clean". `stopReason` is typed
@@ -3187,6 +3192,9 @@ export interface RunReport {
 		p99AtMaxHealthyMs?: number;
 		kneeConcurrency?: number;
 		kneeP99Ms?: number;
+		saturationConcurrency?: number;
+		saturationRps?: number;
+		saturationP99Ms?: number;
 		/** The error limit, in percent, that the levels were judged against. */
 		maxErrorPct?: number;
 		kneeErrorPct?: number;

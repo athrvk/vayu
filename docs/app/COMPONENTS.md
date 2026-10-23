@@ -1712,9 +1712,9 @@ elapsed time says only "Run stopped early."
 ## Capacity Summary (`components/shared/CapacitySummary.tsx`)
 
 What a `mode: "capacity"` run's adaptive search found (`RunReport.capacity`):
-the most virtual users the target held inside its latency budget and error
-limit, the level it gave out at, and the per-level table both were read off. Shown in the history
-detail's Overview, beside `ThresholdVerdict`.
+the virtual users the target held inside its latency budget and error limit,
+where the search stopped, and the per-level table both were read off. Shown in
+the history detail's Overview, beside `ThresholdVerdict`.
 
 The headline is a **sentence**, not a stat grid, because the mode exists to
 answer one question in words - "what can my service take" - and four numbers
@@ -1722,14 +1722,33 @@ side by side make the reader assemble that answer themselves. The table below
 is the evidence, for a reader who wants to see the shape of the curve rather
 than trust the summary of it.
 
-Four states, not two, and the distinction is the whole point of the component
-(same absent-vs-zero discipline as `ThresholdVerdict`, one level deeper):
+The headline **follows why the search stopped** (`stopReason`), because the same
+`maxHealthy*` figures mean different things under each reason, and "Sustained N"
+claims a limit that only some stops found (same absent-vs-zero discipline as
+`ThresholdVerdict`, one level deeper):
 
-- **Sustained a level** - the usual reading, with the knee beside it when
-  latency or errors is what ended the search. The knee sentence quotes the
-  reading that broke: p99 for `slo_exceeded`, the share of requests that
-  failed for `errors_exceeded` ("where 94.0% of requests failed"). A figure
-  the engine did not send is left out rather than printed as `0ms`.
+- **`slo_exceeded`, `errors_exceeded`** - "Sustained N virtual users at R
+  req/s, with a p99 of P against a B budget." The target was watched giving
+  out, so the held level is a measured capacity. The knee sentence beside it is
+  a **bracket**, not a point: "The limit lies between 41 and 51 virtual users:
+  it held 41 and gave out at 51, where p99 reached 230ms." The evidence clause
+  quotes the reading that broke: p99 for `slo_exceeded`, the share of requests
+  that failed for `errors_exceeded` ("where 94.0% of requests failed"). A
+  figure the engine did not send is left out rather than printed as `0ms`.
+  When no level held there is nothing to bracket with, and the knee reads "It
+  gave out at N virtual users".
+- **`plateau`** - "Throughput stopped growing at K virtual users (R req/s, p99
+  P). More only queued.", read from `saturation*`, the lowest healthy level
+  within the plateau gain of the best throughput. `maxHealthy*` is the last
+  level tried on a plateau and overshoots that point, so it is never printed,
+  and the word "Sustained" does not appear. A plateau stored before the engine
+  reported `saturation*` falls back to "Throughput stopped growing. More only
+  queued." and names no level.
+- **`cap_reached`, `deadline`, `stopped`** - "At least N virtual users held the
+  budget (R req/s, p99 P). The search did not find a limit." A floor, not a
+  capacity: the search ran out of ceiling, time or patience. `deadline` and
+  `stopped` add "The next level was still being measured." because no report
+  field names the level that was open, and the card does not guess one.
 - **No level held the budget** - the first level already breached. The search
   found no sustainable capacity, which is *not* the claim "this service
   sustains zero".
@@ -1740,8 +1759,8 @@ Four states, not two, and the distinction is the whole point of the component
   (`stepDuration` longer than `duration`, or a hand stop seconds in). The
   engine still reports the section, because "the search measured nothing" is
   the finding that says to lengthen the run or shorten the step - but the card
-  must say that rather than fall into the second state and claim a measurement
-  at a number of virtual users it never reached.
+  must say that rather than claim a measurement at a number of virtual users it
+  never reached. It is checked first, ahead of every stop reason.
 
 A level the search re-measured after one bad window appears **twice** in the
 table, at the same number of virtual users; that repeat is the audit trail doing its job,
