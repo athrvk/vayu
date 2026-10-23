@@ -82,7 +82,7 @@ static_assert (READ_BOUND < SERVED_BYTES, "the bound must cut the fetched body s
 /// compiled-in 30 s and the 5 s script budget that would clamp it.
 constexpr int RUN_TIMEOUT_MS = 500;
 /// Between the healthy reading (`RUN_TIMEOUT_MS` plus however late libcurl
-/// checked) and the broken one (about 4,990 ms, see `expect_run_timeout`).
+/// checked) and the broken one (about 5,000 ms, see `expect_run_timeout`).
 constexpr int64_t RUN_TIMEOUT_CEILING_MS = 2500;
 
 /// What one script's `POST /report` carried.
@@ -437,9 +437,10 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
     std::unique_ptr<BigBodyServer> server_;
 };
 
-// Mutation-check: drop `script_ctx.max_response_bytes = replay.max_response_bytes`
-// from `run_replay` and the fetch reads the whole 64 KiB, because the context
-// falls back to the compiled-in default rather than to the run's own bound.
+// Mutation-check: drop `replay.send.apply (script_ctx)` from `run_replay`, or
+// the bound's re-read in `validate_scripts`, and the fetch reads the whole
+// 64 KiB, because the context falls back to the compiled-in default rather
+// than to the run's own bound.
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptTakesTheRunsLoadBound) {
     set_load_bound (READ_BOUND);
 
@@ -484,11 +485,11 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptUnderTheBoundReadsTheWholeB
 // The script throws with its fetch's outcome, so the recorded failure carries
 // the deadline the fetch ran under. Healthy: about the run's timeout. Broken:
 // the compiled-in 30 s clamped to the script's 5 s default budget, about
-// 4,990 ms, which is also what bounds a broken build.
+// 5,000 ms, which is also what bounds a broken build.
 //
-// Mutation-check: drop `script_ctx.request_timeout_ms = replay.request_timeout_ms`
-// from `run_replay`, or the line setting it on the single-request replay in
-// `validate_scripts`, and the fetch reports about 4,990 ms.
+// Mutation-check: drop `replay.send.apply (script_ctx)` from `run_replay`, or
+// `replay.send = script_send` on the single-request replay in
+// `validate_scripts`, and the fetch reports about 5,000 ms.
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchTakesTheRunsTimeout) {
     const auto validation = vayu::core::validate_scripts (
     run_with_script (fetch_reporting (server_->hang_url ()), json{ { "timeout", 500 } }), *db_);
@@ -504,7 +505,7 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchTakesTheRunsTimeout) {
 
 // The scenario shape threads the timeout through `replay_scenario_steps`, and
 // with no `timeout` in the payload the run's timeout is the `defaultTimeout`
-// setting (its floor is 1000). Mutation-check: drop the line setting it in
+// setting (its floor is 1000). Mutation-check: drop `replay.send = send` in
 // `replay_scenario_steps`.
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedStepScriptFetchTakesTheDefaultTimeoutSetting) {
     set_config ("defaultTimeout", 1000);
@@ -673,7 +674,7 @@ class ScriptSendRequestRunTest : public ::testing::Test {
 /**
  * The one report a run's script sent took the run's `timeout`. Healthy: about
  * `RUN_TIMEOUT_MS`. Broken: the compiled-in 30 s clamped to the 5 s script
- * budget, about 4,990 ms, which leaves the report itself almost no budget, so
+ * budget, about 5,000 ms, which leaves the report itself almost no budget, so
  * a broken build reads as a missing report or a reading over the ceiling.
  */
 void expect_run_timeout (const std::vector<Report>& reports) {
