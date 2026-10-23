@@ -202,7 +202,7 @@ consumes it.
   to `currentConcurrency` live and `peakConcurrency` once finished, and the chart
   to `current_concurrency` per tick, so such a run reads as it always did. The
   chart keeps the last tick of a bucket like the other windowed series (a mean
-  is not a maximum). `capacity` and `ramp_up` stay on the instant, and the "Peak
+  is not a maximum). `capacity`, `ramp_up` and `constant_rps` stay on the instant in the card and the chart. The window credits a request to the second it completes in, so a target slower than the window reads high for a tick and low after; the card clamps to the configured users. The "Peak
   virtual users" stat and `p99AtPeak` stay on the peak.
 - **The Send / Throughput chip is judged on the windowed pair, held for a few
   seconds, and is grey until the run has settled** (#2802).

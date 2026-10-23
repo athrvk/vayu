@@ -38,6 +38,7 @@ import {
 	hasSendRate,
 	type Sample,
 	pickAvgInFlight,
+	pickConcurrency,
 	pickErrorRate,
 } from "./buildData";
 import {
@@ -371,9 +372,13 @@ export function ConnectionsChart({
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const data = useMemo<uPlot.AlignedData>(() => {
-		const { times, cols } = bucketColumns(history, [pickAvgInFlight], bucketSeconds);
+		const { times, cols } = bucketColumns(
+			history,
+			[mode === "constant_concurrency" ? pickAvgInFlight : pickConcurrency],
+			bucketSeconds
+		);
 		return [times, cols[0]];
-	}, [history, bucketSeconds]);
+	}, [history, bucketSeconds, mode]);
 	const series: UPlotSeriesSpec[] = [
 		{ label: concurrencyMeasureLabel(mode), role: "info", kind: "area", format: fmtCount },
 	];

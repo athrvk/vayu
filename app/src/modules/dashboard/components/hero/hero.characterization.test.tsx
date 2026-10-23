@@ -307,6 +307,18 @@ describe("ConcurrencyUtilCard reads the mean on the wire, not the instant (#2821
 		expect(out).not.toContain("active");
 	});
 
+	it("never reads above the configured users when a slow target's completions land in one window", () => {
+		const out = text(
+			<ConcurrencyUtilCard
+				currentConcurrency={0}
+				configuredConcurrency={10}
+				meanInFlight={20}
+			/>
+		);
+		expect(out).toContain("10.0of 10 on the wire");
+		expect(out).toContain("100.0% utilisation");
+	});
+
 	it("keeps a measured idle window as 0.0, not the instant", () => {
 		const out = text(
 			<ConcurrencyUtilCard

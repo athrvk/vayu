@@ -244,6 +244,19 @@ describe("ConnectionsChart - what the series plots (#2821)", () => {
 	});
 });
 
+describe("ConnectionsChart - modes that stay on the instant (#2821)", () => {
+	it.each(["ramp_up", "capacity", "constant_rps"])("plots %s's instantaneous count", (mode) => {
+		const history = [0, 1, 2, 3].map((i) => {
+			const t = tick(i);
+			t.current_concurrency = i % 2 === 0 ? 0 : 10;
+			t.window_avg_in_flight = 4.2;
+			return t;
+		});
+		render(<ConnectionsChart mode={mode} history={history} />);
+		expect(mockState.props.data?.[1]).toEqual([0, 10, 0, 10]);
+	});
+});
+
 describe("LatencyBreakdownChart - what the series are called", () => {
 	it("names the average latency as including queue wait, and the other series wire time", () => {
 		render(<LatencyBreakdownChart history={historyOf(4)} />);
