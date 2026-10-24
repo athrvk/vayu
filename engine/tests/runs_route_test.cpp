@@ -644,6 +644,37 @@ TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenSto
     EXPECT_FALSE (older["scenario"].contains ("stopOnError"));
 }
 
+// A scenario load run's exact assertion population (#2820) reaches the report's
+// `scenario` section; a summary without it (an older run, a sequential run, a
+// run that asserted nothing) grows none rather than "0 failed".
+// Mutation check: drop the `assertions` write in `build_scenario_report_section`
+// and the first half fails.
+TEST_F (RunsRouteTest, ScenarioReportCarriesTheStoredExactAssertions) {
+    seed ({ .id = "run_asserted" });
+    db_->update_run_summary ("run_asserted",
+    nlohmann::json{ { "scenario",
+                    { { "iterations", 4 }, { "steps_executed", 8 }, { "passed", 8 },
+                    { "assertions", { { "passed", 0 }, { "failed", 4 } } } } } }
+    .dump ());
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_asserted");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
+    EXPECT_EQ (body["scenario"].value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 4 } }));
+    EXPECT_EQ (body["scenario"]["passed"], 8)
+    << "the HTTP count is not redefined";
+
+    seed ({ .id = "run_unasserted", .start_time = 1 });
+    db_->update_run_summary ("run_unasserted",
+    nlohmann::json{ { "scenario", { { "iterations", 4 }, { "steps_executed", 8 } } } }
+    .dump ());
+    auto [plain_status, plain] =
+    vayu::http::routes::run_report_response (*db_, "run_unasserted");
+    ASSERT_EQ (plain_status, 200);
+    ASSERT_TRUE (plain.contains ("scenario")) << plain.dump ();
+    EXPECT_FALSE (plain["scenario"].contains ("assertions"));
+}
+
 // The sample cap stays for everything else - a design run has one row and a
 // load run's percentiles do not need per-request rows past a representative
 // few, so the report payload does not grow with an unbounded run's result

@@ -1599,6 +1599,15 @@ row that ended an iteration short of the plan's end carries the same
 per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
 row.
 
+A scenario load run's `scenario` object (`build_scenario_load_summary` in
+`core/scenario_load.cpp`, then `collect_summary_inputs` in `core/run_manager.cpp`)
+adds **`assertions`**, `{passed, failed}` (issue #2820): the exact assertion
+population `exact_assertion_totals` reads, every `assert.*` outcome, required
+`extract.*` miss and inline `pm.test` call, never the deferred sampled replay
+under `tests`. Absent, never zeros, for a run that made none; a sequential
+collection run never writes it and nothing backfills a run stored before it. The
+report serves it as `scenario.assertions`.
+
 `latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
 plan skipped or one refused before the wire has no duration), exact nearest-rank over the full
 sample rather than a histogram. It is computed once and is the same sample the run's `thresholds`

@@ -9091,6 +9091,7 @@ knob.
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
   "stepsExecuted": 1422, "passed": 1386, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
+  "assertions": { "passed": 444, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
@@ -9104,6 +9105,9 @@ knob.
       "unresolvedTokens": 0,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
+      "elements": [
+        { "id": "el_2", "kind": "assert.status", "passed": 444, "failed": 30, "skipped": 0, "deferred": 0 }
+      ],
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
@@ -9131,6 +9135,18 @@ top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
 not folded in; they are reported in `elements` and `tests`.
+
+**`assertions`** (#2820) is the run's exact assertion population,
+`{ passed, failed }`: every `assert.*` outcome, every required `extract.*` miss
+and every inline script's `pm.test` call, counted on each completion. It is the
+figure a `maxAssertionFailureRatePct` check reports as `assertionsExact`. It
+sits beside `passed` and `summary.errorRate` rather than inside them, both of
+which stay HTTP-only, so a run whose every assertion failed against `200`s reads
+an `errorRate` of 0 and a non-zero `assertions.failed`. The deferred replay of an
+un-inlined script is the sampled population (the step's `tests`, the report's
+`testValidation`) and is never in it. **Absent**, never `{0, 0}`, for a run that
+made no such assertion, for a sequential collection run and for a run stored
+before the field existed.
 
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead
@@ -11268,6 +11284,14 @@ setting, echoed because the same counts describe a different run under it.
 Both are written by a collection run (design mode) only: a scenario load run's
 section carries neither, and a summary stored before issue #2526 carries
 neither either.
+
+`assertions` (#2820) is the other way round: a scenario load run's alone,
+`{ passed, failed }` over the exact population (every `assert.*` outcome,
+required `extract.*` miss and inline `pm.test` call, never the sampled replay
+`testValidation` reports). `passed` and `failed` above stay HTTP-only beside it.
+It is **absent** for a run that made no such assertion, a collection run in
+design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
+has the rest.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never
