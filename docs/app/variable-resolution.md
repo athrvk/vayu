@@ -1066,7 +1066,9 @@ order, on the design run and under load (where the script is an `inline`
 `script.pre`), and so does a single-request load run that declares
 `requestElements`; under load a name nothing answers is sent as written rather
 than refused, as every residual token there is, and an OAuth 2.0 token is still
-acquired once, before any script.
+acquired once, before any script, from the stored values: a script that sets an
+OAuth 2.0 variable has no effect under load, and nothing is re-acquired per
+iteration (#2742).
 
 The Code section of the request pane composes through the engine, so for a
 scripted request its Resolved mode shows the names left written, and says so
