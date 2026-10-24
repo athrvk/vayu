@@ -398,7 +398,7 @@ TEST_F (StatsRouteTest, TickCarriesCustomMetricsWhenTheRunRecordedAny) {
 // ============================================================================
 
 // A cumulative tick the way the producer writes them: tick @p i of a run that
-// completes ten requests a second, all 200s.
+// completes ten requests a second, all 200s, and closes second @p i.
 nlohmann::json cumulative_tick (int i) {
     const auto completed       = 10 * (static_cast<size_t> (i) + 1);
     auto sample                = vayu::core::MetricTickSample{};
@@ -410,6 +410,7 @@ nlohmann::json cumulative_tick (int i) {
     sample.backpressure        = 2;
     sample.bytes_received      = completed * 100;
     sample.status_codes        = { { 200, completed } };
+    sample.status_seconds      = { { i, 1, { 10, 0, 0, 0, 0 } } };
     sample.latency_samples     = 10;
     sample.latency_p50_ms      = 5.0;
     sample.latency_p95_ms      = 8.0;
@@ -495,21 +496,53 @@ TEST (MetricTickBucket, WindowAvgInFlightIsTheBucketsMean) {
     EXPECT_DOUBLE_EQ (bucket.take ()["window_avg_in_flight"].get<double> (), 4.0);
 }
 
+// #2866: a bucket's closed seconds are one entry spanning all of them, so the
+// renderer divides by `span` and draws a rate at any resolution. A gate that
+// closed two seconds folds both; an entry that is not one's shape is skipped. Mutation check: drop the `status_seconds` branch of `take`
+// and the bucket reads the last tick's one second.
+TEST (MetricTickBucket, StatusSecondsMergeIntoOneEntrySpanningTheBucket) {
+    vayu::http::routes::MetricTickBucket bucket;
+    bucket.add (cumulative_tick (0));
+    auto two_seconds              = cumulative_tick (1);
+    two_seconds["status_seconds"] = json::parse (
+    R"([{"second":1,"span":1,"counts":[8,1,0,1,0]},{"second":2,"span":1,"counts":[6,0,2,0,2]}])");
+    bucket.add (std::move (two_seconds));
+    auto malformed              = cumulative_tick (2);
+    malformed["status_seconds"] = json::array ({ "not an entry" });
+    bucket.add (std::move (malformed));
+    bucket.add (cumulative_tick (3));
+
+    EXPECT_EQ (bucket.take ()["status_seconds"],
+    json::parse (R"([{"second":0,"span":4,"counts":[34,1,2,1,2]}])"));
+}
+
+// Ticks that carried the key and no entry fold to no entry, not to a zero
+// count over seconds nobody closed.
+TEST (MetricTickBucket, StatusSecondsOfTicksThatClosedNothingFoldToAnEmptyArray) {
+    vayu::http::routes::MetricTickBucket bucket;
+    for (int i = 0; i < 3; ++i) {
+        auto tick              = cumulative_tick (i);
+        tick["status_seconds"] = json::array ();
+        bucket.add (std::move (tick));
+    }
+    EXPECT_EQ (bucket.take ()["status_seconds"], json::array ());
+}
+
 // A row an older engine stored lacks keys a newer one writes; folding must not
 // invent them, the peak and mean keys included.
 TEST (MetricTickBucket, KeysNoTickCarriedAreNeverAdded) {
     vayu::http::routes::MetricTickBucket bucket;
     for (int i = 0; i < 3; ++i) {
         auto tick = cumulative_tick (i);
-        for (const auto* key :
-        { "http_errors", "no_response", "cancelled", "backpressure", "current_rps" }) {
+        for (const auto* key : { "http_errors", "no_response", "cancelled",
+             "backpressure", "current_rps", "status_seconds" }) {
             tick.erase (key);
         }
         bucket.add (std::move (tick));
     }
     const auto folded = bucket.take ();
     for (const auto* key : { "http_errors", "no_response", "cancelled",
-         "backpressure", "current_rps", "custom_metrics" }) {
+         "backpressure", "current_rps", "custom_metrics", "status_seconds" }) {
         EXPECT_FALSE (folded.contains (key)) << "synthesized " << key;
     }
     EXPECT_EQ (folded["requests_completed"].get<size_t> (), 30u);
@@ -583,6 +616,14 @@ TEST_F (StatsRouteTest, MaxPointsFoldsTheWholeSeriesAcrossReadChunks) {
     EXPECT_EQ (data[454]["current_concurrency"].get<size_t> (), 64u);
     EXPECT_EQ (data[453]["current_concurrency"].get<size_t> (), 4u);
     EXPECT_DOUBLE_EQ (data[454]["current_rps"].get<double> (), 10.0);
+    // Each bucket's closed seconds are one entry over its eleven ticks: still
+    // ten a second once divided by the span.
+    for (size_t b = 0; b < data.size (); ++b) {
+        ASSERT_EQ (data[b]["status_seconds"],
+        json::array (
+        { { { "second", b * 11 }, { "span", 11 }, { "counts", { 110, 0, 0, 0, 0 } } } }))
+        << "bucket " << b;
+    }
 }
 
 TEST_F (StatsRouteTest, MaxPointsLeavesAShortLastBucketAndKeepsDamagedRowsInPlace) {

@@ -9772,6 +9772,7 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | `current_send_rate` | The mean over the bucket's ticks (#2393) |
 | `window_avg_in_flight` | The mean over the bucket's ticks (#2821): each covers about its own second, so this is the bucket's mean in flight |
 | `window_avg_latency_ms`, `window_avg_queue_wait_ms` | The mean over the bucket's ticks that carried a number, `null` when none did (#2393) |
+| `status_seconds` | Every entry of the bucket's ticks merged into one (#2866): the first entry's `second`, `span` the seconds the entries cover and `counts` summed per class, so `counts[i] / span` is still responses per second; `[]` when the ticks closed no second |
 | Any other key | The last tick's |
 
 The latency fields are never averaged: each row's percentile is of its own

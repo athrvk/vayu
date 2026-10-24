@@ -32,6 +32,7 @@
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_diff.hpp"
+#include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -1724,6 +1725,10 @@ std::optional<int64_t> parse_max_points (std::string_view raw);
  *   the ticks that carried a number, `null` when none did (every second idle).
  *   The run's own mean over the bucket would weight each second by its
  *   completions; this one weights the seconds equally, as the chart plots them.
+ * - `status_seconds` (#2866): every entry of every tick merged into one, the
+ *   first entry's `second`, the spans added and the counts summed per class,
+ *   so `count / span` stays a rate. `[]` when the ticks carried the key and
+ *   no entry; an entry that is not one's shape is skipped.
  *
  * Any other key, recognised or not, is the last tick's. A key no tick in the
  * bucket carried is never added, and a bucket of one tick is that tick
@@ -1749,6 +1754,12 @@ class MetricTickBucket {
         bool seen_key = false; // Present (maybe null) on some tick.
     };
     std::map<std::string, Mean, std::less<>> means_;
+
+    /// `status_seconds` merged so far; empty until a tick carried an entry.
+    std::optional<vayu::core::StatusSecondEntry> status_span_;
+    bool seen_status_seconds_ = false;
+
+    void add_status_seconds (const nlohmann::json& tick);
 };
 
 /**
