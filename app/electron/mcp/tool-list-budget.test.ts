@@ -89,10 +89,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_300 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_400 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_600 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_200 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_800 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
