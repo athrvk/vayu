@@ -129,6 +129,75 @@ describe("PhasePercentiles", () => {
 		withTooltips(<PhasePercentiles report={reportWith({ phases: CALM_PHASES })} />);
 		expect(screen.queryByText(/p99 far above the p50/)).toBeNull();
 	});
+
+	// Each flagged phase is explained by its own cause. "Most skipped it" is true
+	// of a phase a reused connection skips and false of TTFB, which every request
+	// pays: a 20x TTFB tail is the target's own.
+	//
+	// Mutation check: restore the single shared sentence and the TTFB case finds
+	// "skipped" and loses the target-tail sentence.
+	describe("tail note per phase", () => {
+		const TTFB_TAIL = { p50: 50.7, p95: 300, p99: 1001, max: 1400, count: 4321 };
+		const CONNECT_TAIL = { p50: 0, p95: 0, p99: 40, max: 61, count: 4321 };
+		const DOWNLOAD_TAIL = { p50: 2, p95: 30, p99: 90, max: 120, count: 4321 };
+
+		it("names the target for a TTFB tail, not connection churn", () => {
+			withTooltips(
+				<PhasePercentiles
+					report={reportWith({ phases: { ...CALM_PHASES, firstByte: TTFB_TAIL } })}
+				/>
+			);
+			expect(
+				screen.getByText(/TTFB has a p99 far above the p50.*target's own slow tail/s)
+			).toBeTruthy();
+			expect(screen.queryByText(/skipped/)).toBeNull();
+			expect(screen.queryByText(/connection churn/)).toBeNull();
+		});
+
+		it("keeps the connection-churn sentence for a Connect tail", () => {
+			withTooltips(
+				<PhasePercentiles
+					report={reportWith({ phases: { ...CALM_PHASES, connect: CONNECT_TAIL } })}
+				/>
+			);
+			expect(
+				screen.getByText(
+					/Connect has a p99 far above the p50.*most skipped it.*connection churn/s
+				)
+			).toBeTruthy();
+			expect(screen.queryByText(/target's own slow tail/)).toBeNull();
+		});
+
+		it("prints one paragraph per group when both kinds of tail are present", () => {
+			withTooltips(
+				<PhasePercentiles
+					report={reportWith({
+						phases: { ...CALM_PHASES, connect: CONNECT_TAIL, firstByte: TTFB_TAIL },
+					})}
+				/>
+			);
+			expect(
+				screen.getByText(/Connect has a p99 far above the p50.*most skipped it/s)
+			).toBeTruthy();
+			expect(
+				screen.getByText(/TTFB has a p99 far above the p50.*target's own slow tail/s)
+			).toBeTruthy();
+		});
+
+		it("explains a Download tail as a few slow transfers", () => {
+			withTooltips(
+				<PhasePercentiles
+					report={reportWith({ phases: { ...CALM_PHASES, download: DOWNLOAD_TAIL } })}
+				/>
+			);
+			expect(
+				screen.getByText(
+					/Download has a p99 far above the p50.*took much longer to transfer/s
+				)
+			).toBeTruthy();
+			expect(screen.queryByText(/skipped/)).toBeNull();
+		});
+	});
 });
 
 describe("TimingWaterfall reads the averages half, not the object", () => {
