@@ -7438,8 +7438,9 @@ narrower than it looks rather than wrong.
 `propertyNames` is the one draft-07 keyword on that list, and only when it is
 nested (#2729): valijson builds a `propertyNames` subschema from its parent's
 node path, so it validates the schema's root keyword but passes every body for
-one inside `properties`, `patternProperties`, `additionalProperties`, an
-`allOf`/`anyOf`/`oneOf`/`not` member, `items` or a `$ref` target. Each nested
+one inside `properties`, `patternProperties`, `additionalProperties`, a
+`dependencies` schema, an `allOf`/`anyOf`/`oneOf`/`not` member, `items` or a
+`$ref` target. Each nested
 occurrence is counted once, a `$ref` target reached twice included; the root
 keyword is validated and counted only when a `$ref` back to `#` reaches it from
 below. In a script, `pm.response.to.have.jsonSchema` fails in both polarities

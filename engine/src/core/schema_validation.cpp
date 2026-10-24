@@ -116,9 +116,11 @@ const std::vector<std::string>& subschema_keys () {
 /// Where a keyword holds a *map* of subschemas keyed by names that are data,
 /// not keywords - walking these as if their keys were keywords is how a
 /// property legitimately called "nullable" would be reported as a dialect gap.
+/// A draft-07 `dependencies` value is a subschema or, as an array, a list of
+/// property names; `queue_subschemas` follows only the object-valued ones.
 const std::vector<std::string>& subschema_map_keys () {
-    static const std::vector<std::string> keys = { "properties",
-        "patternProperties", "definitions", "$defs", "dependentSchemas" };
+    static const std::vector<std::string> keys = { "properties", "patternProperties",
+        "definitions", "$defs", "dependentSchemas", "dependencies" };
     return keys;
 }
 
@@ -375,7 +377,9 @@ void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending)
         if (auto found = node.schema->find (key);
         found != node.schema->end () && found->is_object ()) {
             for (const auto& [name, child] : found->items ()) {
-                pending.push_back ({ &child, node.pointer / key / name });
+                if (child.is_object ()) {
+                    pending.push_back ({ &child, node.pointer / key / name });
+                }
             }
         }
     }
