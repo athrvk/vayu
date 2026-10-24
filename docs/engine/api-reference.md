@@ -9417,14 +9417,20 @@ read - an unknown unit, a non-number, a negative - is a `400` with `error.code`
 `invalid_run_config` naming the field, before the run row exists, rather than
 being silently replaced by the default (see Accepted ranges above).
 
-**`constant_rps` is time-bound, and its shortfall is recorded.** The generator
-accrues `targetRps × elapsed` and submits the whole requests owed each tick,
-carrying the fraction - so a rate above 1000 is delivered as asked rather than
-floored to a multiple of 1000. Requests that come due while in-flight is at
+**`constant_rps` is time-bound, and its shortfall is recorded.** Request *k*
+(counting from 1) is owed at `k / targetRps`, so nothing leaves at t = 0 and,
+when `targetRps × duration` is whole, the last request is owed at the deadline
+itself. Each tick submits `floor(targetRps × elapsed since the start)` minus
+what it has already taken, so a rate above 1000 is delivered as asked rather
+than floored to a multiple of 1000, and a late tick owes what the ticks it
+swallowed would have. Requests that come due while in-flight is at
 `maxInFlight` are **dropped at that instant**, not deferred: the run ends at its
 wall-clock `duration`, and `droppedRequests` (in the run summary and per-tick
 metrics) carries what the rate owed but could not issue. `sent + dropped` is
-therefore what `targetRps × duration` asked for.
+therefore exactly `floor(targetRps × duration)`, the run's `requestsExpected`
+(200 req/s for 20 s: 4000; 33.3 req/s for 3 s: 99). A product that is whole in
+decimal is read as whole even where binary lands just below it (0.57 req/s for
+100 s owes 57).
 
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
