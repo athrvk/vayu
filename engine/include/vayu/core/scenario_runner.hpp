@@ -416,11 +416,12 @@ struct ScenarioSummaryInputs {
     /// `latencies` summarised: the threshold table's input and the stored
     /// `latency` block, one computation (issue #2389).
     LatencySummary latency;
-    /// This run's combined `assert.*` element and `pm.test` tally (issue
-    /// #1497's metric, extended to this run mode by #1564): every step's
-    /// `StepTestTally`, summed. Assertion outcomes fold into `record.tests`
-    /// already (see `tally_tests`), so this is the one place that needs to
-    /// sum across steps rather than read one.
+    /// This run's `assert.*` element and `pm.test` tally (issue #1497's
+    /// metric, extended to this run mode by #1564): every step's
+    /// `StepTestTally`, summed. Every step's scripts run on every send, so
+    /// the budget reads it as the exact population (#2892). Assertion
+    /// outcomes fold into `record.tests` already (see `tally_tests`), so this
+    /// is the one place that needs to sum across steps rather than read one.
     AssertionTotals assertions;
     /// The verdict on the budgets this run's config declared, filled once at
     /// the run's own finish point - absent for every run that declared none.

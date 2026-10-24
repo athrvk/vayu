@@ -144,6 +144,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		testDuration: duration,
 		elapsedSeconds: duration,
 		setupOverhead: s.setupOverhead,
+		cleanupOverhead: s.cleanupOverhead,
 		droppedRequests: s.droppedRequests ?? 0,
 		// Swap in the Dropped Requests card only when drops actually occurred -
 		// matches the live MetricsView gate. A clean rate-limited run keeps the

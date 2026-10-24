@@ -1403,8 +1403,13 @@ when the filter is set (#2548).
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
 bytes, and the script-validation tallies. It is written once - by `run_manager.cpp` when the run
-reaches `completed`/`stopped`, and best-effort (minus `setup_overhead`, with a wall-clock
-`test_duration`) when it fails. `""` means no terminal status has written one: the run is still
+reaches `completed`/`stopped`, and best-effort (`setup_overhead` and `cleanup_overhead` left at
+`0`, with a wall-clock `test_duration`) when it fails. `setup_overhead` is the seconds from the
+load run's worker taking the run up to load start, its `script.setup` pass included;
+`cleanup_overhead` is the seconds from the end of load to its background threads stopped (issue
+#2894). A summary with no `cleanup_overhead` was stored before that issue, and its
+`setup_overhead` holds the cleanup figure: the report reads it as `cleanupOverhead` and leaves
+`setupOverhead` out. `""` means no terminal status has written one: the run is still
 `pending`/`running`, or it failed on a path that writes none. The report then stands on the run's
 sampled `results` alone, and a failed load run says so with `summary.summaryMissing`. NOT NULL
 with a `""` default, so `sync_schema()` can
@@ -1435,7 +1440,7 @@ keeps `""`, design and collection runs are given nothing, and `has_warnings` sta
 ```json
 {
   "total_requests": 100, "cancelled": 0, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
-  "test_duration": 2.0, "setup_overhead": 0.25,
+  "test_duration": 2.0, "setup_overhead": 0.25, "cleanup_overhead": 0.03,
   "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
   "completed_while_sending": 96,
   "peak_concurrency": 8, "avg_in_flight": 4.2, "dropped_requests": 2, "queue_wait_avg": 1.5,
@@ -1553,7 +1558,11 @@ keys are the wire names the payload declared, carried through unchanged; the rep
 `evaluated` follows the same absent-vs-zero rule one level down (issue #1484): a latency percentile
 with no completed requests writes `evaluated: false` and omits `actual` rather than storing the
 default `0`, which a reader could not tell apart from a genuine 0ms measurement; such a check counts
-toward `failed`. The writer is
+toward `failed`. An evaluated `maxAssertionFailureRatePct` check also stores
+`assertionsExact` and `assertionsSampled` (each `{passed, failed}`) and, when the sampled one is
+non-empty, `sampleRate` (issue #2892), so a report read after a restart still names the two
+populations its `actual` was the worse of; a check stored before the issue has none of them and
+nothing backfills them. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
 (`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.

@@ -397,15 +397,6 @@ class StepElementTallies {
     /// nothing happened" convention `unresolvedTokens` and `tests` follow.
     [[nodiscard]] nlohmann::json build (const ScenarioPlan& plan, size_t step) const;
 
-    /// Summed passed/failed across every step, for elements whose kind is
-    /// `assert.*` - the declarative half of issue #1497's combined assertion
-    /// tally. A `script.*` element's own outcome is not a `pass/fail` of its
-    /// assertions (see `script_kinds.cpp`'s file comment) and is deliberately
-    /// excluded here; its `pm.test` calls are tallied separately, on
-    /// `ScenarioLoadState::inline_script_tests_passed` /
-    /// `_failed`.
-    [[nodiscard]] AssertionTotals assertion_totals (const ScenarioPlan& plan) const;
-
     private:
     std::vector<std::vector<ElementOutcomeCounts>> counts_by_step_;
     std::vector<std::unordered_map<std::string, size_t>> index_of_id_by_step_;
@@ -497,17 +488,16 @@ struct ScenarioLoadState {
     /// token-bucket rate are different primitives that happen to share a
     /// kind-name prefix.
     SharedThroughputBudgets shared_throughput_budgets;
-    /// Combined pass/fail of every `pm.test` call an *inline* `script.pre` or
-    /// `script.post` element made this run (issue #1497). `element_tallies`
-    /// above already records that element's own outcome - did the script run
-    /// without throwing - which is a different question from whether its own
-    /// assertions passed (`script_kinds.cpp`'s file comment: "a script's own
-    /// `pm.test` assertions travel inside that `ScriptResult` untouched").
-    /// Nothing read those before this run's `maxAssertionFailureRatePct`; a
-    /// deferred (non-inline) script's tests are counted separately, in the
-    /// post-run replay's `ScriptValidationTotals`.
-    std::atomic<size_t> inline_script_tests_passed{ 0 };
-    std::atomic<size_t> inline_script_tests_failed{ 0 };
+    /// Pass/fail of every test result a step's pipeline produced this run
+    /// (issue #1497): an `assert.*` outcome, a required `extract.*` miss and
+    /// an *inline* script's `pm.test` call, as each appends to the step's
+    /// script results. `element_tallies` above records one outcome per
+    /// element, which for a script is whether it ran cleanly, not how its
+    /// `pm.test` calls went (`script_kinds.cpp`'s file comment). A deferred
+    /// script's tests are the post-run replay's `ScriptValidationTotals`.
+    /// `exact_assertion_totals` reads these (#2892).
+    std::atomic<size_t> inline_tests_passed{ 0 };
+    std::atomic<size_t> inline_tests_failed{ 0 };
     /**
      * This run's shared variable scopes (issue #1495) - the same shape and
      * source a design send's would be, loaded once here rather than per

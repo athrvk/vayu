@@ -93,27 +93,36 @@ function renderModeStats(d: DashboardDerived) {
 	}
 }
 
-/** Duration - configured wall-clock with cleanup-overhead sub. */
+/**
+ * Duration - wall-clock with the overhead sub. A run stored before the engine
+ * measured setup carries only cleanup (#2894), and its setup is left out
+ * rather than shown as a number it never had.
+ */
 function DurationStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Duration"
 			value={orDash(d.testDuration, formatSeconds)}
 			sub={
-				<>
-					cleanup overhead{" "}
-					{d.setupOverhead !== undefined ? (
-						<span className="text-muted-foreground">
-							{formatSeconds(d.setupOverhead)}
-						</span>
-					) : (
-						<span className="text-subtle-foreground">-</span>
-					)}
-				</>
+				d.setupOverhead === undefined ? (
+					<>
+						cleanup overhead <OverheadSeconds seconds={d.cleanupOverhead} />
+					</>
+				) : (
+					<>
+						setup <OverheadSeconds seconds={d.setupOverhead} /> / cleanup{" "}
+						<OverheadSeconds seconds={d.cleanupOverhead} />
+					</>
+				)
 			}
 			infoTip={TOOLTIPS.duration}
 		/>
 	);
+}
+
+function OverheadSeconds({ seconds }: { seconds: number | undefined }) {
+	if (seconds === undefined) return <span className="text-subtle-foreground">-</span>;
+	return <span className="text-muted-foreground">{formatSeconds(seconds)}</span>;
 }
 
 /** Total requests - cumulative count with error-count sub. */

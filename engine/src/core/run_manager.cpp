@@ -1540,6 +1540,12 @@ vayu::Request& request) {
     return true;
 }
 
+/** What a load run spent on either side of its load window (#2894). */
+struct RunOverheads {
+    double setup_s   = 0.0; // `execute_load_test`'s entry to load start
+    double cleanup_s = 0.0; // load end to the auxiliary threads joined
+};
+
 /** The measured figures a finished run's summary is built from. */
 struct RunTotals {
     size_t completed               = 0;
@@ -1547,8 +1553,8 @@ struct RunTotals {
     double total_duration_s        = 0.0;
     double sending_window_s        = 0.0;
     size_t completed_while_sending = 0;
-    double setup_overhead_s        = 0.0;
-    double latency_avg_ms          = 0.0;
+    RunOverheads overheads;
+    double latency_avg_ms = 0.0;
     MetricsCollector::Percentiles latency;
 };
 
@@ -1646,6 +1652,42 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     return warnings;
 }
 
+AssertionTotals exact_assertion_totals (const RunContext& context,
+const ScenarioLoadState* scenario_state) {
+    // The counters alone, never plus the element tallies: `record_assertion`
+    // appends each `assert.*` outcome to the step's script results, so it is
+    // already counted here.
+    const auto& passed = scenario_state != nullptr ? scenario_state->inline_tests_passed :
+                                                     context.inline_tests_passed;
+    const auto& failed = scenario_state != nullptr ? scenario_state->inline_tests_failed :
+                                                     context.inline_tests_failed;
+    return { .passed = passed.load (std::memory_order_relaxed),
+        .failed      = failed.load (std::memory_order_relaxed) };
+}
+
+namespace {
+
+/// What `maxAssertionFailureRatePct` judges: the exact population beside the
+/// deferred replay's sampled one (#2892). Absent when the run made no
+/// assertion, so the budget stays unevaluated rather than passing at 0/0.
+std::optional<AssertionPopulations> assertion_populations (const RunContext& context,
+const ScriptValidation& validation,
+const ScenarioLoadState* scenario_state) {
+    AssertionPopulations populations;
+    populations.exact = exact_assertion_totals (context, scenario_state);
+    if (validation.run) {
+        populations.sampled = { .passed = validation.run->passed,
+            .failed                     = validation.run->failed };
+        populations.sample_rate = context.metrics_collector->response_sample_rate ();
+    }
+    if (populations.exact.total () + populations.sampled.total () == 0) {
+        return std::nullopt;
+    }
+    return populations;
+}
+
+} // namespace
+
 /** Everything the stored whole-run summary is built from. */
 RunSummaryInputs collect_summary_inputs (const std::shared_ptr<RunContext>& context,
 const RunTotals& totals,
@@ -1653,13 +1695,14 @@ const ScriptValidation& validation,
 const SampledValidationTotals& schema_totals,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     RunSummaryInputs inputs;
-    inputs.total_requests   = totals.completed;
-    inputs.cancelled        = context->metrics_collector->cancelled ();
-    inputs.rps              = totals.actual_rps;
-    inputs.throughput       = totals.actual_rps;
-    inputs.test_duration_s  = totals.total_duration_s;
-    inputs.setup_overhead_s = totals.setup_overhead_s;
-    inputs.peak_concurrency = context->peak_in_flight.load ();
+    inputs.total_requests     = totals.completed;
+    inputs.cancelled          = context->metrics_collector->cancelled ();
+    inputs.rps                = totals.actual_rps;
+    inputs.throughput         = totals.actual_rps;
+    inputs.test_duration_s    = totals.total_duration_s;
+    inputs.setup_overhead_s   = totals.overheads.setup_s;
+    inputs.cleanup_overhead_s = totals.overheads.cleanup_s;
+    inputs.peak_concurrency   = context->peak_in_flight.load ();
     inputs.avg_in_flight =
     context->metrics_collector->average_in_flight (totals.total_duration_s);
     inputs.dropped_requests = context->metrics_collector->dropped_requests ();
@@ -1721,45 +1764,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
             inputs.elements = std::move (built);
         }
     }
-    // Issue #1497's combined assertion tally: the deferred replay's pm.test
-    // results (already in `inputs.tests`, both single-request and scenario
-    // runs), plus - for a scenario run - every `assert.*` element outcome and
-    // every inline script's own pm.test calls, neither of which anything else
-    // reads at run level. Absent when the run made no assertion, so
-    // `maxAssertionFailureRatePct` stays unevaluated rather than a trivial
-    // pass at 0/0.
-    {
-        AssertionTotals assertions;
-        if (inputs.tests) {
-            assertions.passed += inputs.tests->passed;
-            assertions.failed += inputs.tests->failed;
-        }
-        if (scenario_state) {
-            const auto element_totals =
-            scenario_state->element_tallies.assertion_totals (context->scenario->plan);
-            assertions.passed += element_totals.passed;
-            assertions.failed += element_totals.failed;
-            assertions.passed += scenario_state->inline_script_tests_passed.load (
-            std::memory_order_relaxed);
-            assertions.failed += scenario_state->inline_script_tests_failed.load (
-            std::memory_order_relaxed);
-        } else if (context->step_elements && !context->step_elements->empty ()) {
-            // The single-request sibling (issue #1594): the same combined
-            // tally, off `RunContext::element_tallies` /
-            // `inline_script_tests_passed` / `_failed` instead.
-            const auto element_totals =
-            context->element_tallies.assertion_totals (*context->step_elements);
-            assertions.passed += element_totals.passed;
-            assertions.failed += element_totals.failed;
-            assertions.passed +=
-            context->inline_script_tests_passed.load (std::memory_order_relaxed);
-            assertions.failed +=
-            context->inline_script_tests_failed.load (std::memory_order_relaxed);
-        }
-        if (assertions.passed + assertions.failed > 0) {
-            inputs.assertions = assertions;
-        }
-    }
+    inputs.assertions =
+    assertion_populations (*context, validation, scenario_state.get ());
     // Beside coverage, and deliberately not inside the `scenario_state`
     // block above: this pass reads the sample reservoirs, which are the
     // collector's, so it is available whether or not the executor left
@@ -2070,7 +2076,7 @@ void finish_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 double total_duration_s,
 const SendingWindow& sending,
-double setup_overhead_s,
+const RunOverheads& overheads,
 double target_rps,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     size_t completed   = context->total_requests ();
@@ -2148,7 +2154,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         totals.total_duration_s        = total_duration_s;
         totals.sending_window_s        = sending.seconds;
         totals.completed_while_sending = sending.completed.value_or (completed);
-        totals.setup_overhead_s        = setup_overhead_s;
+        totals.overheads               = overheads;
         totals.latency_avg_ms          = avg_latency;
         totals.latency                 = percentiles;
 
@@ -2199,6 +2205,10 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 RunManager& manager) {
+    // The origin of the summary's setup overhead (#2894): everything from
+    // here to `test_start`, the configure and `script.setup` included.
+    const auto entry = std::chrono::steady_clock::now ();
+
     // Note: is_running is set in spawn_run() before threads spawn to avoid a
     // race with metrics_thread; the load-start stamp is set below.
 
@@ -2340,13 +2350,14 @@ RunManager& manager) {
         // reads it.
         context->join_aux_threads ();
 
-        // Calculate cleanup overhead (time from test end to after cleanup)
-        auto cleanup_end = std::chrono::steady_clock::now ();
-        const double setup_overhead_s =
-        std::chrono::duration<double> (cleanup_end - test_end).count ();
+        const auto cleanup_end = std::chrono::steady_clock::now ();
+        const RunOverheads overheads{
+            .setup_s = std::chrono::duration<double> (test_start - entry).count (),
+            .cleanup_s = std::chrono::duration<double> (cleanup_end - test_end).count ()
+        };
 
-        finish_load_test (context, db, total_duration_s, sending,
-        setup_overhead_s, target_rps, scenario_state);
+        finish_load_test (context, db, total_duration_s, sending, overheads,
+        target_rps, scenario_state);
     } catch (const std::exception& e) {
         // Stop background metrics collection and join it, like the two inner
         // failure paths do. Deferring the join to ~RunContext instead would run
@@ -2478,13 +2489,16 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     }
 
     nlohmann::json summary;
-    summary["total_requests"]   = inputs.total_requests;
-    summary["cancelled"]        = inputs.cancelled;
-    summary["rps"]              = inputs.rps;
-    summary["send_rate"]        = inputs.send_rate;
-    summary["throughput"]       = inputs.throughput;
-    summary["test_duration"]    = inputs.test_duration_s;
+    summary["total_requests"] = inputs.total_requests;
+    summary["cancelled"]      = inputs.cancelled;
+    summary["rps"]            = inputs.rps;
+    summary["send_rate"]      = inputs.send_rate;
+    summary["throughput"]     = inputs.throughput;
+    summary["test_duration"]  = inputs.test_duration_s;
+    // Both always written: absent `cleanup_overhead` is a run stored before
+    // #2894, whose `setup_overhead` held the cleanup figure.
     summary["setup_overhead"]   = inputs.setup_overhead_s;
+    summary["cleanup_overhead"] = inputs.cleanup_overhead_s;
     summary["peak_concurrency"] = inputs.peak_concurrency;
     // Always written: absent is a run stored before #2821, whose report then
     // omits `avgInFlight` rather than claiming nothing was in flight.

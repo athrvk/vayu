@@ -181,7 +181,10 @@ export interface DashboardDerived {
 	// Timing
 	testDuration?: number;
 	elapsedSeconds: number;
+	/** Run entry to load start, setup script included; absent for a run stored before it was measured. */
 	setupOverhead?: number;
+	/** Load end to teardown finished. */
+	cleanupOverhead?: number;
 	// Drops
 	droppedRequests: number;
 	showDropped: boolean;

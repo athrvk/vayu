@@ -382,7 +382,7 @@ export const thresholdsInput = z
 	})
 	.optional()
 	.describe(
-		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. Omit for a run that is measured but not judged."
+		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. `maxAssertionFailureRatePct` judges the worse of the exact inline assertions and the sampled `pm.test` replay; its check names both (`assertionsExact`, `assertionsSampled`, `sampleRate`). Omit for a run that is measured but not judged."
 	);
 
 export const streamInput = z

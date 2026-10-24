@@ -2734,6 +2734,12 @@ export interface RunTransactionSummary {
 	};
 }
 
+/** One assertion population of the assertion-failure budget's check (issue #2892). */
+export interface AssertionPopulation {
+	passed: number;
+	failed: number;
+}
+
 export interface RunReport {
 	/**
 	 * What this run did not do (issue #1503): a request sent with an
@@ -2879,7 +2885,15 @@ export interface RunReport {
 		 * an older engine.
 		 */
 		completedWhileSending?: number;
+		/**
+		 * Seconds from the run's entry to load start, including the
+		 * `script.setup` script. Absent from a run stored before the engine
+		 * split it from `cleanupOverhead`: that run's figure is the teardown
+		 * time, so it must never be read as a setup time.
+		 */
 		setupOverhead?: number;
+		/** Seconds from load end to teardown finished. Always present on a stored run. */
+		cleanupOverhead?: number;
 		peakConcurrency?: number;
 		/** Mean requests on the wire over `testDuration`; absent from a run stored before it (#2821). */
 		avgInFlight?: number;
@@ -3093,6 +3107,18 @@ export interface RunReport {
 			 * same value that engine effectively assumed everywhere.
 			 */
 			evaluated?: boolean;
+			/**
+			 * `maxAssertionFailureRatePct` only (issue #2892): the budget judges the
+			 * worse of two populations, and an evaluated check names both. `Exact`
+			 * is every `assert.*` outcome, unmatched required `extract.*` and inline
+			 * `pm.test` call; `Sampled` is the deferred `pm.test` replay over 1 in
+			 * `sampleRate` responses. Absent on a report a pre-#2892 engine wrote
+			 * (its `actual` is the old blended rate) and on an unevaluated check.
+			 */
+			assertionsExact?: AssertionPopulation;
+			assertionsSampled?: AssertionPopulation;
+			/** Keep 1 in N; present only when `assertionsSampled` is non-empty. */
+			sampleRate?: number;
 		}[];
 		passed: number;
 		failed: number;

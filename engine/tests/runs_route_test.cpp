@@ -1510,6 +1510,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.throughput              = 49.5;
     inputs.test_duration_s         = 2.0;
     inputs.setup_overhead_s        = 0.25;
+    inputs.cleanup_overhead_s      = 0.125;
     inputs.peak_concurrency        = 8;
     inputs.avg_in_flight           = 3.25;
     inputs.dropped_requests        = 2;
@@ -1557,7 +1558,8 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_DOUBLE_EQ (summary["sendRate"].get<double> (), 51.0);
     EXPECT_DOUBLE_EQ (summary["throughput"].get<double> (), 49.5);
     EXPECT_DOUBLE_EQ (summary["testDuration"].get<double> (), 2.0);
-    EXPECT_DOUBLE_EQ (summary["setupOverhead"].get<double> (), 0.25);
+    EXPECT_DOUBLE_EQ (summary.value ("setupOverhead", -1.0), 0.25);
+    EXPECT_DOUBLE_EQ (summary.value ("cleanupOverhead", -1.0), 0.125);
     EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 8u);
     EXPECT_EQ (summary["droppedRequests"].get<size_t> (), 2u);
     EXPECT_DOUBLE_EQ (summary["avgQueueWaitMs"].get<double> (), 1.5);
@@ -1881,6 +1883,45 @@ TEST_F (RunsRouteTest, ReportFromAnOlderSummaryOmitsAvgInFlight) {
     EXPECT_FALSE (body["summary"].contains ("avgInFlight")) << body["summary"].dump ();
 }
 
+// #2894: a run stored before the split timed cleanup under `setup_overhead`.
+// Its report carries that figure as `cleanupOverhead` and no `setupOverhead`
+// at all. Mutation check: read `setup_overhead` into the setup figure on the
+// no-`cleanup_overhead` path in `apply_summary_overheads` and both fail.
+TEST_F (RunsRouteTest, ReportFromAnOlderSummaryReportsItsOverheadAsCleanup) {
+    seed ({ .id = "run_pre_cleanup", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_TRUE (stored.contains ("cleanup_overhead"));
+    stored.erase ("cleanup_overhead");
+    stored["setup_overhead"] = 0.5;
+    db_->update_run_summary ("run_pre_cleanup", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_pre_cleanup");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    EXPECT_DOUBLE_EQ (summary.value ("cleanupOverhead", -1.0), 0.5) << summary.dump ();
+    EXPECT_FALSE (summary.contains ("setupOverhead")) << summary.dump ();
+}
+
+// #2894: the sequential collection runner stores neither overhead key. Its
+// report keeps both as measured zeros, not as the older row's omitted setup.
+// Mutation check: reset the setup optional when the summary has neither key in
+// `apply_summary_overheads` and the `setupOverhead` assertion fails.
+TEST_F (RunsRouteTest, ReportFromASummaryWithNeitherOverheadReportsBothAsZero) {
+    seed ({ .id = "run_no_overheads", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    stored.erase ("setup_overhead");
+    stored.erase ("cleanup_overhead");
+    db_->update_run_summary ("run_no_overheads", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_overheads");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    ASSERT_TRUE (summary.contains ("setupOverhead")) << summary.dump ();
+    ASSERT_TRUE (summary.contains ("cleanupOverhead")) << summary.dump ();
+    EXPECT_DOUBLE_EQ (summary["setupOverhead"].get<double> (), 0.0);
+    EXPECT_DOUBLE_EQ (summary["cleanupOverhead"].get<double> (), 0.0);
+}
+
 // Every store a run keeps is bounded, so the report has to say how much each
 // one thinned away - a Samples tab showing 1000 traces from a 3M-request run
 // is honest only if the reader can also see that 29,000 candidates were
@@ -2014,6 +2055,35 @@ TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
     // The one assertion that pins the two sides together.
     EXPECT_DOUBLE_EQ (verdict["checks"][1]["actual"].get<double> (),
     body["summary"]["errorRate"].get<double> ());
+}
+
+// #2892: the assertion check's two populations survive the stored summary,
+// so a report read after a restart still names both. Mutation check: drop the
+// `append_assertion_populations` call in `build_threshold_outcome_payload`
+// and the population keys red.
+TEST_F (RunsRouteTest, ReportCarriesTheAssertionPopulations) {
+    seed ({ .id = "run_assert_pops", .start_time = 1000 });
+    auto inputs       = summary_inputs ();
+    inputs.assertions = vayu::core::AssertionPopulations{
+        .exact       = { .passed = 200, .failed = 0 },
+        .sampled     = { .passed = 1, .failed = 1 },
+        .sample_rate = 100,
+    };
+    inputs.thresholds = vayu::core::evaluate_thresholds (
+    nlohmann::json{ { "thresholds", { { "maxAssertionFailureRatePct", 10 } } } }, inputs);
+    db_->update_run_summary (
+    "run_assert_pops", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_assert_pops");
+    ASSERT_EQ (status, 200);
+    const auto& check = body["thresholdValidation"]["checks"][0];
+    EXPECT_DOUBLE_EQ (check["actual"].get<double> (), 50.0);
+    EXPECT_FALSE (check["passed"].get<bool> ());
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 200 }, { "failed", 0 } }));
+    EXPECT_EQ (check.value ("assertionsSampled", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 1 }, { "failed", 1 } }));
+    EXPECT_EQ (check.value ("sampleRate", 0), 100);
 }
 
 // #2436: `summary` is written only at terminal status, so a report read while

@@ -7438,8 +7438,9 @@ narrower than it looks rather than wrong.
 `propertyNames` is the one draft-07 keyword on that list, and only when it is
 nested (#2729): valijson builds a `propertyNames` subschema from its parent's
 node path, so it validates the schema's root keyword but passes every body for
-one inside `properties`, `patternProperties`, `additionalProperties`, an
-`allOf`/`anyOf`/`oneOf`/`not` member, `items` or a `$ref` target. Each nested
+one inside `properties`, `patternProperties`, `additionalProperties`, a
+`dependencies` schema, an `allOf`/`anyOf`/`oneOf`/`not` member, `items` or a
+`$ref` target. Each nested
 occurrence is counted once, a `$ref` target reached twice included; the root
 keyword is validated and counted only when a `$ref` back to `#` reaches it from
 below. In a script, `pm.response.to.have.jsonSchema` fails in both polarities
@@ -8006,7 +8007,7 @@ its report has no such section at all.
     "latencyP99Ms": 50,        // ceiling, ms
     "maxErrorRatePct": 0.1,    // ceiling, percent of the run's requests; 0-100
     "minThroughputRps": 10000, // floor, completed requests per second; > 0
-    "maxAssertionFailureRatePct": 0, // ceiling, percent of assert.* and pm.test outcomes; 0-100
+    "maxAssertionFailureRatePct": 0, // ceiling, percent of failed assertions, the worse population; 0-100
     "failRun": true            // a missed budget sets status "failed"; default false
   }
 }
@@ -8027,21 +8028,49 @@ transport failures that never got one - the
 `summary.errorRate` reports and the live tick streams. A request a Stop
 cancelled is in neither its numerator nor its denominator.
 
-`maxAssertionFailureRatePct` (issue #1497) is measured against this run's
-combined assertion tally: every `assert.*` element outcome and every
-`pm.test` call, however the script that made it ran - inline on the load
-path or through the deferred replay. Unevaluated, like a latency percentile,
-when the run made no assertion at all - a run with no `assert.*` element and
-no test script is unaffected by declaring this budget.
+`maxAssertionFailureRatePct` (issue #1497) is measured against two
+populations a load run keeps apart (issue #2892). The **exact** one is every
+`assert.*` element outcome, every required `extract.*` that found no match and
+every `pm.test` call an inline script made, counted on every completion. The
+**sampled** one is the deferred `pm.test` replay, run over responses sampled at 1 in
+`response_sample_rate` (default 100) - the same tallies the report's
+`testValidation` shows. That is a sampling period, not a promise about the
+count: on a long run the `max_response_samples` reservoir cap can make the
+replayed set sparser than 1 in `response_sample_rate`. `actual` is the **worse** of
+the two failure rates, each `0` when its population is empty, so a sampled
+`pm.test` failing half the time beside an inline assertion that never fails
+reads 50%, not the fraction of a percent a single blended count would give;
+the budget fails when either population crosses it. The check names both
+populations, so a reader can see which one the verdict came from:
+
+```jsonc
+{ "metric": "maxAssertionFailureRatePct", "limit": 10, "actual": 50.0,
+  "passed": false, "evaluated": true,
+  "assertionsExact":   { "passed": 2270, "failed": 0 },
+  "assertionsSampled": { "passed": 12, "failed": 12 },
+  "sampleRate": 100 }
+```
+
+`assertionsExact` and `assertionsSampled` are both written on an evaluated
+assertion check, an empty population as `{passed: 0, failed: 0}`;
+`sampleRate` (the period the replay ran at, keep 1 in N) is written only when
+`assertionsSampled` is non-empty. No other check carries these keys, and a
+check stored before issue #2892 has none of them: its `actual` is the old
+blended rate and nothing is backfilled. Unevaluated, like a latency
+percentile, when the run made no assertion at all - a run with no `assert.*`
+element and no test script is unaffected by declaring this budget - and then
+the population keys are absent too, as `actual` is.
 
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
 evaluate the same `thresholds` block against their own numbers and store the
 same `thresholdValidation` shape. A collection run's error rate and latency
 percentiles are drawn from the steps it actually sent (a step a script or an
-unbound data row skipped counts toward neither), and its assertion tally is
-the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
-reads for a load run. Since a script error no longer ends the iteration
+unbound data row skipped counts toward neither), and its assertion tally,
+every `assert.*` outcome and `pm.test` call of every step it ran, is all
+exact: a collection run runs each step's scripts on every send, so its
+assertion check carries `assertionsSampled` at zero and no `sampleRate`.
+Since a script error no longer ends the iteration
 (issue #2526), the steps after one are sent and counted too, so the same
 collection can report a larger denominator than it did before; `stopOnError:
 true` restores the old population.
@@ -10102,6 +10131,18 @@ no frame.
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
 
+**Read order within one tick.** The metrics thread snapshots the status-code
+distribution first, then `get_current_stats()` reads the completed count
+(`totalRequests`) afterwards, and the stored row's `requests_completed` is read
+after the same snapshot. So `totalErrors`, `errorRate` and the `status*` keys
+all come from the earlier snapshot and `totalRequests`, `totalSuccess` and
+`throughput` from the later read. A completion landing between the two makes
+`status2xx + status3xx` up to one tick of completions lower than `totalSuccess`,
+and a client's `totalErrors / totalRequests` marginally lower than the frame's
+`errorRate`. The skew is invisible at the default 1 Hz cadence, and the order is
+the safe one: `errorRate` divides by the snapshot's own total, so no rate
+exceeds 100 percent.
+
 Each `metrics` event carries an `id:` equal to its zero-based offset. The
 browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
@@ -10851,6 +10892,7 @@ named it.
     "sendRate": 100.0,
     "throughput": 99.34,
     "setupOverhead": 0.12,
+    "cleanupOverhead": 0.03,
     "peakConcurrency": 100,
     "droppedRequests": 0,
     "avgQueueWaitMs": 0.4,
@@ -11052,6 +11094,14 @@ those responses, so `testsPassed + testsFailed` is not `samplesTested` once a sc
 more than one assertion. `successRate` is `testsPassed` as a percentage of assertions.
 `samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
 (`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
+
+**`thresholdValidation`** is one check per declared
+[budget](#the-thresholds-block-passfail-budgets) with the run's verdict. A
+`maxAssertionFailureRatePct` check also names the two populations it judged
+(issue #2892): `assertionsSampled` is `testValidation`'s `testsPassed` and
+`testsFailed`, at `sampleRate`, and `assertionsExact` is the inline
+assertions counted on every completion that `testValidation` does not see.
+`actual` is the worse of the two failure rates.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/
@@ -11325,6 +11375,22 @@ the samples landed; `avgInFlight` is the figure that does not alias. Present for
 a load run stored since the issue, `0` included; **absent** for a run stored
 before it, a collection (design-mode) run, and a run reported from its sampled
 results, never a `0` nobody measured.
+
+`summary.setupOverhead` and `summary.cleanupOverhead` (issue #2894) are the two
+stretches of a load run outside `testDuration`, in seconds. `setupOverhead`
+runs from the run's own thread taking it up to load start: reading the run's
+settings, building its request or plan, and the `script.setup` pass (a
+collection's, or a single request's `lifecycleElements`), so a slow setup
+script shows here and never in `testDuration`. `cleanupOverhead` runs from the
+end of load, the drain included in `testDuration` before it, to the run's
+background threads (the metrics tick, the token-refresh watchdog, the monitor
+scrape) having stopped, before the deferred script and schema passes and the
+summary write. Both read `0` for a failed run's best-effort summary, a partial
+report of a running run, a run reported from its sampled results, and a
+collection (design-mode) run, none of which times them. A run stored before the
+issue stored the cleanup figure under the setup name: its report carries that
+figure as `cleanupOverhead` and has **no** `setupOverhead`, rather than a setup
+time nobody measured.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
 error, trace and tested-response sets are complete, and a non-zero count means

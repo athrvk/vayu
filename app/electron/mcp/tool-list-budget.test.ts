@@ -63,6 +63,13 @@
  * #2443 (the paged whole-list reads) added the envelope schema and the `q` /
  * `limit` / `offset` / `fields` arguments to four tools; the caps sit about 1%
  * above that measurement.
+ *
+ * #2892's sentence naming the assertion budget's two populations sits in the
+ * `thresholds` argument, which `run_collection` and `start_load_run` share, so
+ * it is paid twice (188 B each). It took the three rows that were within a few
+ * hundred bytes of their caps to 143,732 / 141,006 / 207,249 B (writes off:
+ * reveal off / on; writes on: reveal on), and those caps went to 143,900 /
+ * 141,200 / 207,500.
  */
 
 import { describe, it, expect } from "vitest";

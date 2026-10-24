@@ -160,7 +160,7 @@ const json& member (const json& source, std::string_view key) {
 constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
 { "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
 "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
-"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead",
+"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead", "cleanupOverhead",
 "peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
 "httpVersionDowngraded", "throughputBytesPerSec", "sendingDurationSeconds",
 "connectionReplays", "avgInFlight", "completedWhileSending" });
@@ -230,7 +230,9 @@ std::to_array<std::string_view> ({ "id", "kind", "outcome", "waitedMs" });
 constexpr auto THRESHOLD_KEYS =
 std::to_array<std::string_view> ({ "passed", "failed", "verdict" });
 constexpr auto THRESHOLD_CHECK_KEYS = std::to_array<std::string_view> (
-{ "metric", "limit", "actual", "passed", "evaluated" });
+{ "metric", "limit", "actual", "passed", "evaluated", "sampleRate" });
+constexpr auto ASSERTION_POPULATION_KEYS =
+std::to_array<std::string_view> ({ "passed", "failed" });
 constexpr auto CUSTOM_METRIC_KEYS = std::to_array<std::string_view> (
 { "type", "count", "p50", "p95", "p99", "max", "value" });
 
@@ -346,9 +348,25 @@ ordered lifecycle_section (const json& lifecycle) {
     return out;
 }
 
+ordered threshold_check (const json& check) {
+    ordered out = pick (check, THRESHOLD_CHECK_KEYS);
+    for (const char* population : { "assertionsExact", "assertionsSampled" }) {
+        if (const json& totals = member (check, population); totals.is_object ()) {
+            out[population] = pick (totals, ASSERTION_POPULATION_KEYS);
+        }
+    }
+    return out;
+}
+
 ordered threshold_section (const json& thresholds) {
-    ordered out = ordered::object ();
-    out["checks"] = pick_each (member (thresholds, "checks"), THRESHOLD_CHECK_KEYS);
+    ordered out    = ordered::object ();
+    ordered checks = ordered::array ();
+    if (const json& rows = member (thresholds, "checks"); rows.is_array ()) {
+        for (const json& check : rows) {
+            checks.push_back (threshold_check (check));
+        }
+    }
+    out["checks"] = std::move (checks);
     out.update (pick (thresholds, THRESHOLD_KEYS));
     return out;
 }

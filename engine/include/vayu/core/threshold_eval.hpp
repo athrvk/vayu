@@ -37,6 +37,31 @@ namespace vayu::core {
 // for `ThresholdOutcome`. Taking it by const reference keeps that one-way.
 struct RunSummaryInputs;
 
+/// Passed and failed assertions in one population.
+struct AssertionTotals {
+    size_t passed = 0;
+    size_t failed = 0;
+
+    [[nodiscard]] size_t total () const {
+        return passed + failed;
+    }
+};
+
+/// What `maxAssertionFailureRatePct` judges (#2892): two populations kept
+/// apart because they count different things. `exact` is every `assert.*`
+/// outcome, required `extract.*` miss and inline script `pm.test` call,
+/// counted on each completion; `sampled` is the deferred `pm.test` replay over
+/// responses sampled at 1 in `sample_rate` (the reservoir cap can make a long
+/// run's set sparser). Blending them lets one side's volume dilute the other's
+/// failures, so the budget reads the worse of the two rates.
+struct AssertionPopulations {
+    AssertionTotals exact;
+    AssertionTotals sampled;
+    /// The response sample period the replay ran at (keep 1 in N); 1 where
+    /// no replay ran.
+    size_t sample_rate = 1;
+};
+
 /// One declared budget and how the run measured against it.
 struct ThresholdCheck {
     /// The wire key the budget was declared under, e.g. "latencyP99Ms".
@@ -50,20 +75,14 @@ struct ThresholdCheck {
     /// check counts toward `failed`: a budget the run could not measure was
     /// not met.
     bool evaluated = true;
+    /// The populations `actual` was judged from, on an evaluated
+    /// `maxAssertionFailureRatePct` check only.
+    std::optional<AssertionPopulations> assertions;
 };
 
 /// Every declared budget's verdict. `failed == 0` is the run's pass.
 struct ThresholdOutcome {
     std::vector<ThresholdCheck> checks;
-    size_t passed = 0;
-    size_t failed = 0;
-};
-
-/// This run's combined assertion tally: every `assert.*` element outcome and
-/// every `pm.test` call, however the script that made it ran - inline on the
-/// load path or through the deferred replay. What `maxAssertionFailureRatePct`
-/// is measured against; nothing else in the report reads it.
-struct AssertionTotals {
     size_t passed = 0;
     size_t failed = 0;
 };
@@ -122,6 +141,10 @@ evaluate_thresholds (const nlohmann::json& config, const RunSummaryInputs& input
  * rather than two hand-written copies of the same three keys that could
  * drift - the report route's `apply_stored_summary` reads this shape off
  * `summary["thresholds"]` however it got there.
+ *
+ * A check carrying `assertions` adds `assertionsExact` and `assertionsSampled`
+ * (each `{passed, failed}`, both always written), and `sampleRate` only when
+ * the sampled population is non-empty.
  */
 [[nodiscard]] nlohmann::json build_threshold_outcome_payload (const ThresholdOutcome& outcome);
 

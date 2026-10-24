@@ -341,33 +341,6 @@ nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step)
     return array;
 }
 
-AssertionTotals StepElementTallies::assertion_totals (const ScenarioPlan& plan) const {
-    AssertionTotals totals;
-    const size_t step_count = std::min (plan.steps.size (), counts_by_step_.size ());
-    for (size_t step = 0; step < step_count; ++step) {
-        if (!plan.steps[step].elements) {
-            continue;
-        }
-        const auto& elements = *plan.steps[step].elements;
-        const auto& counts   = counts_by_step_[step];
-        const size_t count   = std::min (elements.size (), counts.size ());
-        for (size_t i = 0; i < count; ++i) {
-            // Read through the registry's own category, never a `kind ==` or
-            // prefix comparison outside `core/elements` (#1512's extensibility
-            // contract, rule 1) - the same lookup `RunContext::
-            // load_pipeline_skip_reason` uses for `HotPathClass`.
-            const auto* registered =
-            vayu::core::Registry::instance ().find (elements[i].kind);
-            if (registered == nullptr || registered->category != "assert") {
-                continue;
-            }
-            totals.passed += counts[i].passed.load (std::memory_order_relaxed);
-            totals.failed += counts[i].failed.load (std::memory_order_relaxed);
-        }
-    }
-    return totals;
-}
-
 nlohmann::json build_step_breakdown (const ScenarioPlan& plan,
 const StepHistograms& steps,
 const StepElementTallies& elements,
@@ -597,9 +570,9 @@ const nlohmann::json* data_row) {
     // empty) - the inline half of issue #1497's assertion tally.
     for (const auto& test : pre_result.tests) {
         if (test.passed) {
-            state.inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+            state.inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
         } else {
-            state.inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+            state.inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
         }
     }
 
@@ -712,12 +685,13 @@ const nlohmann::json* data_row) {
             *outcome.message, *outcome.duration_us, outcome.status == "failed");
         }
     }
-    // Same rule as `run_step_before`: empty unless `script.post` ran inline.
+    // Every `assert.*` outcome and required `extract.*` miss lands here, beside
+    // an inline `script.post`'s `pm.test` calls; a deferred one adds nothing.
     for (const auto& test : post_result.tests) {
         if (test.passed) {
-            state.inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+            state.inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
         } else {
-            state.inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+            state.inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
         }
     }
 

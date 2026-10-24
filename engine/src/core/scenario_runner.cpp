@@ -1488,8 +1488,12 @@ RunManager& manager) {
     threshold_inputs.throughput   = summary.duration_s > 0 ?
       static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
       0.0;
-    if (summary.assertions.passed + summary.assertions.failed > 0) {
-        threshold_inputs.assertions = summary.assertions;
+    // Every step's assertions ran on every send, so the whole tally is the
+    // exact population and nothing was sampled (#2892).
+    if (summary.assertions.total () > 0) {
+        AssertionPopulations populations;
+        populations.exact           = summary.assertions;
+        threshold_inputs.assertions = populations;
     }
     // `metric.record` / `pm.metrics` (issue #1500) share the same collector
     // `summary.custom_metrics` was just read from above - without this, a

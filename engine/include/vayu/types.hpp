@@ -1261,8 +1261,12 @@ struct DetailedReport {
     double send_rate;  // Avg rate at which requests were dispatched (req/s)
     double throughput; // Avg rate at which responses were received (req/s)
 
-    // Phase 2: Timing context
-    double setup_overhead_s; // Time from run creation to test start (seconds)
+    // Timing context, in seconds (#2894). Setup: the load run's entry to load
+    // start, `script.setup` included. Empty for a run stored before #2894,
+    // whose stored `setup_overhead` was the cleanup figure below.
+    std::optional<double> setup_overhead_s = 0.0;
+    // Cleanup: load end to the run's auxiliary threads joined.
+    double cleanup_overhead_s = 0.0;
 };
 
 // ============================================================================

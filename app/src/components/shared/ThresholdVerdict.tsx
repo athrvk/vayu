@@ -25,9 +25,10 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { thresholdReference } from "@/lib/agent-reference";
+import { formatNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
-import { formatDuration } from "@/modules/dashboard/utils/format";
-import type { RunReport } from "@/types/domain";
+import { formatDuration, pluralize } from "@/modules/dashboard/utils/format";
+import type { AssertionPopulation, RunReport } from "@/types/domain";
 import { CopyForAgentButton } from "./CopyForAgentButton";
 import type { StoppedRun } from "./stopped-run";
 import { THRESHOLD_METRICS } from "./threshold-metrics";
@@ -55,6 +56,41 @@ function stoppedNote({ elapsedSeconds, plannedSeconds }: StoppedRun): string {
 	if (plannedSeconds === undefined || elapsedSeconds >= plannedSeconds)
 		return `${after}. ${judged}`;
 	return `${after} of a planned ${formatSpan(plannedSeconds)}. ${judged}`;
+}
+
+type Check = NonNullable<RunReport["thresholdValidation"]>["checks"][number];
+
+function populationPhrase({ passed, failed }: AssertionPopulation, scope: string): string {
+	const total = passed + failed;
+	return `${formatNumber(total)} ${pluralize(total, "assertion")} ${scope} (${formatNumber(failed)} failed)`;
+}
+
+/**
+ * `sampleRate` is a keep-1-in-N period; absent only if a sidecar omitted it. The
+ * wording names the period, not a share of the responses: the engine's reservoir
+ * cap can leave the replayed set sparser than 1 in N on a long run.
+ */
+function sampledScope(sampleRate: number | undefined): string {
+	if (sampleRate === undefined) return "on sampled responses";
+	if (sampleRate === 1) return "on every response";
+	return `on responses sampled at 1 in ${formatNumber(sampleRate)}`;
+}
+
+/**
+ * Which population the assertion budget's verdict came from (#2892): it judges
+ * the worse of the exact inline tally and the sampled `pm.test` replay, and a
+ * rate over the blended count would hide a sampled test failing every time.
+ * Silent unless the sampled population ran, so a report from before the split
+ * and a run with no test script read as they always did.
+ */
+function assertionPopulationsNote(check: Check): string | null {
+	const { assertionsExact: exact, assertionsSampled: sampled, sampleRate } = check;
+	// An unmeasurable row reads "no samples"; a population line beside it would contradict that.
+	if (check.evaluated === false) return null;
+	if (!sampled || sampled.passed + sampled.failed === 0) return null;
+	const sampledPhrase = populationPhrase(sampled, sampledScope(sampleRate));
+	if (!exact || exact.passed + exact.failed === 0) return `Judged on ${sampledPhrase}.`;
+	return `Judged on the worse of ${populationPhrase(exact, "on every response")} and ${sampledPhrase}.`;
 }
 
 export interface ThresholdVerdictProps {
@@ -146,6 +182,7 @@ export function ThresholdVerdict({
 						// A pre-#1484 report has no `evaluated` key at all and reads as
 						// measured, the same value that engine effectively assumed.
 						const evaluated = check.evaluated !== false;
+						const populations = assertionPopulationsNote(check);
 
 						return (
 							<li
@@ -165,6 +202,9 @@ export function ThresholdVerdict({
 										>
 											carried over
 										</Badge>
+									)}
+									{populations && (
+										<span className="mt-0.5 block text-xs">{populations}</span>
 									)}
 								</span>
 								<span className="flex items-center gap-1.5">

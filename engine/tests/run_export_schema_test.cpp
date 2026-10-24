@@ -48,11 +48,11 @@ json phase () {
 json healthy_summary () {
     return json{ { "total_requests", 100 }, { "cancelled", 0 }, { "rps", 10.0 },
         { "send_rate", 10.0 }, { "throughput", 9.9 }, { "test_duration", 10.0 },
-        { "setup_overhead", 0.1 }, { "requests_sent", 100 },
-        { "requests_expected", 100 }, { "sending_duration", 9.8 },
-        { "completed_while_sending", 97 }, { "peak_concurrency", 5 },
-        { "avg_in_flight", 4.2 }, { "dropped_requests", 0 },
-        { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
+        { "setup_overhead", 0.1 }, { "cleanup_overhead", 0.05 },
+        { "requests_sent", 100 }, { "requests_expected", 100 },
+        { "sending_duration", 9.8 }, { "completed_while_sending", 97 },
+        { "peak_concurrency", 5 }, { "avg_in_flight", 4.2 },
+        { "dropped_requests", 0 }, { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
         { "bytes_received", 5000 }, { "http_version_downgraded", 0 },
         { "connection_replays", 2 }, { "status_codes", { { "200", 100 } } },
         { "latency",
@@ -261,12 +261,62 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // And the completions inside the sending window (#2882). Mutation check:
     // drop "completedWhileSending" from SUMMARY_KEYS and this fails.
     EXPECT_EQ (document["report"]["summary"].value ("completedWhileSending", -1), 97);
+    // Both overheads (#2894). Mutation check: drop "cleanupOverhead" from
+    // SUMMARY_KEYS and this fails, as does the validation of the required key.
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("setupOverhead", -1.0), 0.1);
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.05);
     EXPECT_FALSE (document["timeSeries"].empty ());
+}
+
+// #2894: a run stored before the split exports its one overhead as cleanup and
+// no setup figure, and the document still validates. Mutation check: put
+// "setupOverhead" back in the schema's `required` and this fails.
+TEST_F (RunExportSchemaTest, ARunStoredBeforeTheOverheadSplitValidates) {
+    json summary = healthy_summary ();
+    summary.erase ("cleanup_overhead");
+    seed ("run_pre_cleanup", vayu::RunStatus::Completed, summary);
+    const json document = expect_valid (json{ { "runId", "run_pre_cleanup" } });
+    EXPECT_FALSE (document["report"]["summary"].contains ("setupOverhead"));
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.1);
 }
 
 TEST_F (RunExportSchemaTest, ARunWithErrorsAndAMissedBudgetValidates) {
     seed ("run_failing", vayu::RunStatus::Completed, failing_summary ());
     expect_valid (json{ { "runId", "run_failing" } });
+}
+
+// #2892: the assertion check's two populations and its sample rate are
+// allowlisted and named by the schema, and an exact-only check, with no
+// `sampleRate`, validates too. Mutation check: drop "sampleRate" from
+// THRESHOLD_CHECK_KEYS or the population loop from `threshold_check` and the
+// presence assertions fail; drop either member from the schema and the
+// validation does.
+TEST_F (RunExportSchemaTest, AnAssertionBudgetValidatesWithBothPopulations) {
+    json summary          = healthy_summary ();
+    summary["thresholds"] = {
+        { "checks",
+        json::array ({ { { "metric", "maxAssertionFailureRatePct" }, { "limit", 10 },
+                       { "actual", 50.0 }, { "passed", false }, { "evaluated", true },
+                       { "assertionsExact", { { "passed", 200 }, { "failed", 0 } } },
+                       { "assertionsSampled", { { "passed", 1 }, { "failed", 1 } } },
+                       { "sampleRate", 100 } },
+        { { "metric", "maxAssertionFailureRatePct" }, { "limit", 10 },
+        { "actual", 0.0 }, { "passed", true }, { "evaluated", true },
+        { "assertionsExact", { { "passed", 5 }, { "failed", 0 } } },
+        { "assertionsSampled", { { "passed", 0 }, { "failed", 0 } } } } }) },
+        { "passed", 1 }, { "failed", 1 }
+    };
+    seed ("run_assert_pops", vayu::RunStatus::Completed, summary);
+
+    const json document = expect_valid (json{ { "runId", "run_assert_pops" } });
+    const json& checks  = document["report"]["thresholdValidation"]["checks"];
+    ASSERT_EQ (checks.size (), 2u) << document.dump (2);
+    EXPECT_EQ (checks[0].value ("assertionsExact", json ()),
+    (json{ { "passed", 200 }, { "failed", 0 } }));
+    EXPECT_EQ (checks[0].value ("assertionsSampled", json ()),
+    (json{ { "passed", 1 }, { "failed", 1 } }));
+    EXPECT_EQ (checks[0].value ("sampleRate", -1), 100);
+    EXPECT_FALSE (checks[1].contains ("sampleRate"));
 }
 
 TEST_F (RunExportSchemaTest, AStoppedRunValidates) {

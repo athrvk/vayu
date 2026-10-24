@@ -896,6 +896,53 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #2894: the summary's setup overhead runs from the load run's entry to load
+// start, so it holds the whole `script.setup` pass, and the teardown figure is
+// stored apart as `cleanup_overhead`. A lower bound only: a slow runner makes
+// setup longer, never shorter. Mutation checks: compute the setup figure as
+// `cleanup_end - test_end` again in `execute_load_test` and the setup
+// assertion reads the few milliseconds of the thread join; stop writing
+// `cleanup_overhead` in `build_run_summary_payload` and the key assertion
+// fails.
+TEST (LoadClock, SetupOverheadCoversTheSetupScript) {
+    const std::string db_path = "test_load_clock_setup_overhead.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        constexpr int SETUP_MS         = 300;
+        const std::string setup_script = "const until = Date.now () + " +
+        std::to_string (SETUP_MS) + "; while (Date.now () < until) {}";
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "1s" },
+            { "targetRps", 20.0 }, { "timeout", 5000 }, { "workers", 1 },
+            { "lifecycleElements",
+            nlohmann::json::array ({ { { "id", "el_setup" }, { "kind", "script.setup" },
+            { "enabled", true }, { "config", { { "script", setup_script } } } } }) } };
+
+        const std::string run_id = "run_setup_overhead";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+        const auto summary = nlohmann::json::parse (stored->summary);
+
+        EXPECT_GE (summary.value ("setup_overhead", -1.0), SETUP_MS / 1000.0)
+        << summary.dump ();
+        EXPECT_TRUE (summary.contains ("cleanup_overhead")) << summary.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #2881: a stored row's `elapsed_seconds` is the load clock its gate frame
 // reads, so History draws a second where the live view drew it. Mutation
 // check: measure from the first persisted tick again in `persist_metric_tick`
@@ -2056,6 +2103,41 @@ FailRunTest,
 [] (const ::testing::TestParamInfo<FailRunCase>& info) {
     return std::string (info.param.name);
 });
+
+// #2892 end to end: an `assert.status` that holds on all 4 completions is the
+// exact population, and a deferred `pm.test` that always fails, replayed over
+// 1 in 2 responses, is the sampled one. Judged on the worse rate, 100%; the
+// old blend read 2 of 10. Mutation checks: pass `validation.run` into
+// `.exact` in `assertion_populations` (run_manager.cpp) and every key below
+// reds; double the passed counter in `exact_assertion_totals`, the double
+// count adding the element tallies made, and `assertionsExact` reads 8.
+TEST_F (LoadRunToTerminalTest, AMixedAssertionRunStoresBothPopulations) {
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 4 }, { "concurrency", 1 }, { "url", server->fast_url () },
+        { "method", "GET" }, { "workers", 1 }, { "response_sample_rate", 2 },
+        { "requestElements",
+        nlohmann::json::array (
+        { nlohmann::json{ { "id", "el_status" }, { "kind", "assert.status" },
+          { "config", { { "in", nlohmann::json::array ({ 200 }) } } } },
+        nlohmann::json{ { "id", "el_post" }, { "kind", "script.post" },
+        { "config", { { "script", "pm.test('always fails', function () { pm.expect(1).to.equal(2); });" } } } } }) },
+        { "thresholds", { { "maxAssertionFailureRatePct", 50 } } } };
+
+    const auto row = run_to_terminal_row ("run-assert-pops-e2e", config);
+    ASSERT_HAS_VALUE (row);
+    const auto summary = nlohmann::json::parse (row->summary);
+    ASSERT_TRUE (summary.contains ("thresholds")) << summary.dump ();
+    const auto& check = summary["thresholds"]["checks"][0];
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 4 }, { "failed", 0 } }))
+    << check.dump ();
+    EXPECT_EQ (check.value ("assertionsSampled", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 2 } }))
+    << check.dump ();
+    EXPECT_EQ (check.value ("sampleRate", 0), 2);
+    EXPECT_DOUBLE_EQ (check["actual"].get<double> (), 100.0);
+    EXPECT_FALSE (check["passed"].get<bool> ());
+}
 
 // #2399, the completed-run producer end to end: every request to `/slow`
 // (500ms) crosses a 100ms threshold - a lower bound, so a slow runner cannot

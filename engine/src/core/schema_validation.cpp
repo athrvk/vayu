@@ -116,9 +116,11 @@ const std::vector<std::string>& subschema_keys () {
 /// Where a keyword holds a *map* of subschemas keyed by names that are data,
 /// not keywords - walking these as if their keys were keywords is how a
 /// property legitimately called "nullable" would be reported as a dialect gap.
+/// A draft-07 `dependencies` value is a subschema or, as an array, a list of
+/// property names; `queue_subschemas` follows only the object-valued ones.
 const std::vector<std::string>& subschema_map_keys () {
-    static const std::vector<std::string> keys = { "properties",
-        "patternProperties", "definitions", "$defs", "dependentSchemas" };
+    static const std::vector<std::string> keys = { "properties", "patternProperties",
+        "definitions", "$defs", "dependentSchemas", "dependencies" };
     return keys;
 }
 
@@ -358,6 +360,22 @@ struct SchemaNode {
     nlohmann::json::json_pointer pointer;
 };
 
+/// The object-valued entries of the map keyword @p key, queued for the walk.
+/// A non-object entry (the array form of `dependencies`) holds no subschema.
+void queue_map_subschemas (const SchemaNode& node,
+const std::string& key,
+std::vector<SchemaNode>& pending) {
+    auto found = node.schema->find (key);
+    if (found == node.schema->end () || !found->is_object ()) {
+        return;
+    }
+    for (const auto& [name, child] : found->items ()) {
+        if (child.is_object ()) {
+            pending.push_back ({ &child, node.pointer / key / name });
+        }
+    }
+}
+
 /**
  * Every subschema of @p node, queued for the walk.
  *
@@ -372,12 +390,7 @@ void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending)
         }
     }
     for (const auto& key : subschema_map_keys ()) {
-        if (auto found = node.schema->find (key);
-        found != node.schema->end () && found->is_object ()) {
-            for (const auto& [name, child] : found->items ()) {
-                pending.push_back ({ &child, node.pointer / key / name });
-            }
-        }
+        queue_map_subschemas (node, key, pending);
     }
     for (const auto& key : subschema_list_keys ()) {
         if (auto found = node.schema->find (key);

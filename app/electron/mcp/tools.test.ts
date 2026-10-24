@@ -4933,6 +4933,24 @@ describe("run_collection", () => {
 				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>;
 			expect(shapeOf("run_collection").thresholds).toBe(shapeOf("start_load_run").thresholds);
 		});
+
+		// Mutation check: drop the populations sentence from `thresholdsInput` and
+		// this fails. An agent that reads only the argument must learn that the
+		// assertion budget judges the worse of the exact and sampled populations
+		// (#2892).
+		test("describes the assertion budget's two populations (#2892)", () => {
+			const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+				string,
+				z.ZodType
+			>;
+			const description = shape.thresholds.description ?? "";
+			expect(description).toContain(
+				"judges the worse of the exact inline assertions and the sampled"
+			);
+			for (const key of ["assertionsExact", "assertionsSampled", "sampleRate"]) {
+				expect(description).toContain(key);
+			}
+		});
 	});
 });
 

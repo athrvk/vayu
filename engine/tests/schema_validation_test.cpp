@@ -661,6 +661,7 @@ TEST (SchemaKeywordVerdictTest, APropertyNamesIsDisclosedWhereverItIsNested) {
         { "items", R"({"items": {"propertyNames": {"maxLength": 1}}})" },
         { "tuple items", R"({"items": [{"propertyNames": {"maxLength": 1}}]})" },
         { "propertyNames", R"({"propertyNames": {"propertyNames": {"maxLength": 1}}})" },
+        { "dependencies", R"({"dependencies": {"a": {"propertyNames": {"maxLength": 1}}}})" },
     };
     for (const auto& [where, schema] : positions) {
         EXPECT_EQ (property_names_gaps (json::parse (schema)), 1u) << where << ": " << schema;
@@ -711,6 +712,58 @@ TEST (SchemaKeywordVerdictTest, TheRootPropertyNamesStaysValidatedAndUndisclosed
     const auto named =
     json::parse (R"({"properties": {"propertyNames": {"type": "object"}}})");
     EXPECT_EQ (property_names_gaps (named), 0u);
+}
+
+// draft-07 `dependencies` maps a property name to a subschema, so a keyword
+// under it is as unread as one under `properties` (#2890).
+TEST (SchemaKeywordVerdictTest, AnUnevaluatedKeywordUnderDependenciesIsDisclosed) {
+    const auto schema = json::parse (R"({
+        "dependencies": {"credit_card": {"prefixItems": [{"type": "string"}]}}
+    })");
+    const auto gaps   = collect_unevaluated_keywords (schema, json::object ());
+    ASSERT_EQ (gaps.size (), 1u);
+    EXPECT_EQ (gaps.front ().first, "prefixItems");
+    EXPECT_EQ (gaps.front ().second, 1u);
+}
+
+// The array form lists property names, not a schema: nothing in it is a keyword,
+// even a name that spells one.
+TEST (SchemaKeywordVerdictTest, TheArrayFormOfDependenciesHoldsNoSubschema) {
+    const char* const schema =
+    R"({"dependencies": {"a": ["propertyNames", "nullable"], "b": []}})";
+    EXPECT_TRUE (
+    collect_unevaluated_keywords (json::parse (schema), json::object ()).empty ());
+
+    const auto verdict = judge (schema, R"({"a": 1, "propertyNames": 2, "nullable": 3})");
+    EXPECT_TRUE (verdict.valid);
+    EXPECT_TRUE (verdict.unevaluated_keywords.empty ());
+
+    // A malformed list is the validator's to refuse; the walk must not follow it.
+    const auto malformed = json::parse (R"({"dependencies": {"c": [{"prefixItems": []}]}})");
+    EXPECT_TRUE (collect_unevaluated_keywords (malformed, json::object ()).empty ());
+}
+
+// Both spellings side by side: only the object-valued one is walked.
+TEST (SchemaKeywordVerdictTest, DependenciesMixingBothFormsDisclosesOnlyTheSchema) {
+    const auto schema = json::parse (R"({
+        "dependencies": {"a": ["b"], "c": {"propertyNames": {"maxLength": 1}}}
+    })");
+    EXPECT_EQ (property_names_gaps (schema), 1u);
+}
+
+// A name under `dependencies` is data, and so is a property called
+// "dependencies"; the schema of the latter is still walked.
+TEST (SchemaKeywordVerdictTest, ANameCalledDependenciesIsNotTheKeyword) {
+    const auto named = json::parse (R"({
+        "properties": {"dependencies": {"type": "array", "items": {"type": "string"}}},
+        "dependencies": {"nullable": {"type": "object"}}
+    })");
+    EXPECT_TRUE (collect_unevaluated_keywords (named, json::object ()).empty ());
+
+    const auto nested = json::parse (R"({
+        "properties": {"dependencies": {"propertyNames": {"maxLength": 1}}}
+    })");
+    EXPECT_EQ (property_names_gaps (nested), 1u);
 }
 
 // With a `$ref` back to `#` in the schema valijson no longer builds the root

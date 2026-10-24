@@ -59,6 +59,7 @@
       "sendRate": 70.17,
       "throughput": 70.17,
       "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
       "peakConcurrency": 100,
       "droppedRequests": 0,
       "avgQueueWaitMs": 0.1,
