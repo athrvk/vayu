@@ -121,7 +121,7 @@ export const TOOLTIPS = {
 	avgRequestTiming:
 		"Average breakdown of where each HTTP request spent time, in flight order. Averaged over every completion so far, which needs the phaseHistograms setting of Vayu's engine (on by default). Helps isolate whether latency lives in DNS, network setup, or the server.",
 	phasePercentiles:
-		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 is one a minority of requests paid: TLS or Connect behaving that way is connection churn under load, which an average hides. Requires the phaseHistograms setting of Vayu's engine.",
+		"The same five phases as percentiles rather than averages, over every completion instead of the stored sample. A phase whose p99 towers over its p50 has a heavy tail an average hides: for TLS or Connect that is connection churn under load, a minority of requests paying a handshake the rest skipped; for TTFB it is the target's own slow tail. Requires the phaseHistograms setting of Vayu's engine.",
 	streamEvents:
 		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended. Time to first event is the First byte row above: a stream's first byte is its first event's.",
 } satisfies Record<string, ReactNode>;
