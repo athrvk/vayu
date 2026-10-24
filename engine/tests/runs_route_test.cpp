@@ -644,6 +644,50 @@ TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenSto
     EXPECT_FALSE (older["scenario"].contains ("stopOnError"));
 }
 
+// A scenario load run's exact assertion tally (#2820) reaches the report's
+// `scenario` section as stored, zeros included, and a row stored before it
+// grows no key. Mutation check: drop the `assertions` write in
+// `build_scenario_report_section` and the first half fails.
+TEST_F (RunsRouteTest, ScenarioReportCarriesTheStoredAssertionTallyOnlyWhenStored) {
+    seed ({ .id = "run_scenario_load" });
+    db_->update_run_summary ("run_scenario_load",
+    nlohmann::json{ { "scenario",
+                    { { "iterations", 5 }, { "steps_executed", 5 }, { "virtual_users", 1 },
+                    { "assertions", { { "passed", 2 }, { "failed", 3 } } } } } }
+    .dump ());
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_scenario_load");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
+    EXPECT_EQ (body["scenario"].value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 2 }, { "failed", 3 } }))
+    << body["scenario"].dump ();
+
+    seed ({ .id = "run_scenario_none", .start_time = 1 });
+    db_->update_run_summary ("run_scenario_none",
+    nlohmann::json{ { "scenario",
+                    { { "iterations", 1 }, { "steps_executed", 1 }, { "virtual_users", 1 },
+                    { "assertions", { { "passed", 0 }, { "failed", 0 } } } } } }
+    .dump ());
+    auto [none_status, none] =
+    vayu::http::routes::run_report_response (*db_, "run_scenario_none");
+    ASSERT_EQ (none_status, 200);
+    EXPECT_EQ (none["scenario"].value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 0 } }))
+    << none["scenario"].dump ();
+
+    seed ({ .id = "run_scenario_older", .start_time = 2 });
+    db_->update_run_summary ("run_scenario_older",
+    nlohmann::json{ { "scenario", { { "iterations", 1 }, { "steps_executed", 1 } } } }
+    .dump ());
+    auto [older_status, older] =
+    vayu::http::routes::run_report_response (*db_, "run_scenario_older");
+    ASSERT_EQ (older_status, 200);
+    ASSERT_TRUE (older.contains ("scenario")) << older.dump ();
+    EXPECT_FALSE (older["scenario"].contains ("assertions"))
+    << older["scenario"].dump ();
+}
+
 // The sample cap stays for everything else - a design run has one row and a
 // load run's percentiles do not need per-request rows past a representative
 // few, so the report payload does not grow with an unbounded run's result
@@ -2628,6 +2672,44 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     for (const char* id : { "run_no_summary", "run_bad_summary", "run_other_keys" }) {
         EXPECT_FALSE (row_of (body, id).contains ("resultSummary")) << id;
     }
+}
+
+/// `judged_summary (true)` as a scenario load run stores it, with an exact
+/// assertion tally of @p passed and @p failed (#2820).
+std::string scenario_load_summary (size_t passed, size_t failed) {
+    auto summary        = nlohmann::json::parse (judged_summary (true));
+    summary["scenario"] = { { "iterations", 4 }, { "virtual_users", 1 },
+        { "assertions", { { "passed", passed }, { "failed", failed } } } };
+    return summary.dump ();
+}
+
+// A terminal scenario load row says how its assertions went beside its HTTP
+// figures, both keys or neither: a run that made no assertion, or one stored
+// before the tally, has none to show rather than a 0 of 0. Mutation check:
+// drop the two writes in `build_load_result_summary` and the first row reds;
+// drop the `total () > 0` guard and the second does.
+TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionTallyOnlyWhenItMadeOne) {
+    seed ({ .id = "run_asserted", .start_time = 1 });
+    db_->update_run_summary ("run_asserted", scenario_load_summary (1, 7));
+    seed ({ .id = "run_unasserted", .start_time = 2 });
+    db_->update_run_summary ("run_unasserted", scenario_load_summary (0, 0));
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto asserted = row_of (body, "run_asserted");
+    ASSERT_TRUE (asserted.contains ("resultSummary")) << asserted.dump ();
+    const auto& outcome = asserted["resultSummary"];
+    EXPECT_EQ (outcome.value ("assertionsPassed", -1), 1) << outcome.dump ();
+    EXPECT_EQ (outcome.value ("assertionsFailed", -1), 7) << outcome.dump ();
+    EXPECT_EQ (outcome.size (), 6u) << outcome.dump ();
+
+    const auto unasserted = row_of (body, "run_unasserted");
+    ASSERT_TRUE (unasserted.contains ("resultSummary")) << unasserted.dump ();
+    EXPECT_FALSE (unasserted["resultSummary"].contains ("assertionsPassed"));
+    EXPECT_FALSE (unasserted["resultSummary"].contains ("assertionsFailed"));
+    EXPECT_EQ (unasserted["resultSummary"].size (), 4u);
 }
 
 // The gate is the status, not whether a summary is there yet: a Pending or

@@ -410,11 +410,13 @@ class ScenarioLoadTest : public ::testing::Test {
         return execution;
     }
 
+    static constexpr const char* REPORT_RUN_ID = "run_report";
+
     /// Run @p execution as a scenario load run through `RunManager`, the
     /// production path that stores the summary, and answer its report.
     json run_to_report (json config, const vayu::core::ScenarioExecution& execution) {
         config["scenario"] = { { "source", "collection" }, { "collectionId", "col_test" } };
-        const std::string run_id = "run_report";
+        const std::string run_id = REPORT_RUN_ID;
         vayu::db::Run run;
         run.id              = run_id;
         run.type            = vayu::RunType::Load;
@@ -435,6 +437,16 @@ class ScenarioLoadTest : public ::testing::Test {
         << "the run never finished";
         manager.shutdown ();
         return vayu::http::routes::run_report_response (*db_, run_id).second;
+    }
+
+    /// The summary `run_to_report`'s run stored.
+    [[nodiscard]] json stored_report_summary () const {
+        const auto row = db_->get_run (REPORT_RUN_ID);
+        if (!row.has_value ()) {
+            ADD_FAILURE () << "the run left no row behind";
+            return json::object ();
+        }
+        return json::parse (row->summary);
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -2115,6 +2127,86 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsPmTestCallsAreTalliedSeparatelyFromItsE
     ASSERT_TRUE (summary["steps"][0].contains ("elements"));
     EXPECT_EQ (summary["steps"][0]["elements"][0]["passed"], 0);
     EXPECT_EQ (summary["steps"][0]["elements"][0]["failed"], 1);
+}
+
+// #2820: an assertion that fails on every response leaves every HTTP figure
+// clean, so the stored `scenario.assertions` is where the run says it failed,
+// and it is the tally the budget judges. Mutation checks: drop the
+// `scenario["assertions"]` write in `collect_summary_inputs` and the stored
+// key reds; stop emitting it in `build_scenario_report_section` and the
+// report's reds.
+TEST_F (ScenarioLoadTest, AScenarioLoadRunStoresItsExactAssertionTally) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/echo") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_contains" }, { "kind", "assert.contains" }, { "enabled", true },
+    { "config", { { "field", "body" }, { "text", "never-in-the-body" } } } } });
+
+    constexpr size_t ITERATIONS = 3;
+    const json report           = run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", ITERATIONS },
+              { "concurrency", 1 }, { "thresholds", { { "maxAssertionFailureRatePct", 0 } } } },
+    execution);
+
+    const json expected = { { "passed", 0 }, { "failed", ITERATIONS } };
+    const json summary  = stored_report_summary ();
+    ASSERT_TRUE (summary.contains ("scenario")) << summary.dump ();
+    EXPECT_EQ (summary["scenario"].value ("assertions", json ()), expected)
+    << summary["scenario"].dump ();
+    ASSERT_TRUE (report.contains ("scenario")) << report.dump ();
+    EXPECT_EQ (report.at ("scenario").value ("assertions", json ()), expected)
+    << report.at ("scenario").dump ();
+    EXPECT_DOUBLE_EQ (report.at ("summary").at ("errorRate").get<double> (), 0.0);
+    // One source: the budget's exact population is the stored tally.
+    const auto& check = report.at ("thresholdValidation").at ("checks").at (0);
+    EXPECT_EQ (check.value ("assertionsExact", json ()), expected) << check.dump ();
+}
+
+// The exact population only: an inline `pm.test` counts on every completion,
+// and a deferred `script.post` replay is the sampled population, which the
+// tally leaves out even when every replay fails. Mutation check: write
+// `validation.run`'s passed and failed into the key instead and this reds.
+TEST_F (ScenarioLoadTest, AScenarioLoadRunsAssertionTallyCountsInlineTestsAndNotTheReplay) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo"), server.url ("/s0") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_inline", "script.post",
+    "pm.test('passes', function () { pm.expect(1).to.equal(1); });"
+    "pm.test('fails', function () { pm.expect(1).to.equal(2); });",
+    /*inline_script=*/true) });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_deferred", "script.post",
+    "pm.test('replayed', function () { pm.expect(1).to.equal(2); });") });
+
+    constexpr size_t ITERATIONS = 2;
+    const json report =
+    run_to_report (json{ { "mode", "iterations" }, { "iterations", ITERATIONS },
+                   { "concurrency", 1 }, { "response_sample_rate", 1 } },
+    execution);
+
+    ASSERT_TRUE (report.contains ("testValidation")) << report.dump ();
+    EXPECT_EQ (report.at ("testValidation").at ("testsFailed").get<size_t> (), ITERATIONS)
+    << "the deferred replay must have run for its exclusion to mean anything";
+    EXPECT_EQ (report.at ("scenario").value ("assertions", json ()),
+    (json{ { "passed", ITERATIONS }, { "failed", ITERATIONS } }))
+    << report.at ("scenario").dump ();
+}
+
+// A scenario load run that asserted nothing still stores the key, as zeros:
+// the list row and the app decide how to show "none", the summary does not.
+// Mutation check: drop the `scenario["assertions"]` write and this reds.
+TEST_F (ScenarioLoadTest, AScenarioLoadRunWithNoAssertionStoresAZeroTally) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/echo") });
+
+    run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } }, execution);
+
+    const json summary = stored_report_summary ();
+    ASSERT_TRUE (summary.contains ("scenario")) << summary.dump ();
+    EXPECT_EQ (summary["scenario"].value ("assertions", json ()),
+    (json{ { "passed", 0 }, { "failed", 0 } }))
+    << summary["scenario"].dump ();
 }
 
 // ============================================================================

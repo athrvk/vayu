@@ -1557,8 +1557,9 @@ snapshot in place breaks that**, and would have to invalidate the cache in
 `engine/include/vayu/http/run_summary_cache.hpp`.
 
 The list row's `resultSummary` on a terminal load run (#2130) *is* read from
-this results summary (`rps`, `latency.p95`, the `status_codes` error rate and
-the `thresholds` verdict; `build_load_result_summary` in
+this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
+`thresholds` verdict and a scenario load run's `scenario.assertions`;
+`build_load_result_summary` in
 `http/routes/runs.cpp`) and held in the same cache, which is sound for the
 same reason: each `update_run_summary` writer stores the summary before the
 terminal status, and nothing rewrites it after. **A change that writes the
@@ -1598,6 +1599,19 @@ written before the issue, and a scenario load run's, carries neither. The step
 row that ended an iteration short of the plan's end carries the same
 per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
 row.
+
+A **scenario load run** stores its `scenario` object from
+`build_scenario_load_summary` (`core/scenario_load.cpp`) instead, and
+`collect_summary_inputs` (`core/run_manager.cpp`) merges two things into it
+after the drain: each step's deferred `tests`, and **`assertions`**
+(`{passed, failed}`, issue #2820), the run's exact assertion population -
+every `assert.*` outcome, required `extract.*` miss and inline `pm.test` call,
+never the deferred replay. It is the same read the `maxAssertionFailureRatePct`
+check stores as `assertionsExact`, and it is written on every scenario load
+run, zeros included. The report serves it as `scenario.assertions` and the list
+row as `assertionsPassed` / `assertionsFailed` (omitted at `0` of `0`); a
+summary stored before the issue has no key and nothing backfills it. A
+design-mode run's `scenario` never carries one.
 
 `latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
 plan skipped or one refused before the wire has no duration), exact nearest-rank over the full

@@ -394,7 +394,8 @@ homes, on the `scripts` node's own precedent.
 population the run's `maxAssertionFailureRatePct` threshold reads beside the sampled one (a
 deferred script's replay), judging the worse of the two rates (#2892); a failed budget flips the
 run's terminal status to `Failed` when the run also asks for `thresholds.failRun: true`
-(`api-reference.md`'s thresholds section, #1497).
+(`api-reference.md`'s thresholds section, #1497). A scenario load run reports the same exact
+population, whether or not a budget reads it, as its report's `scenario.assertions` (#2820).
 
 ## Load paths
 
