@@ -46,8 +46,9 @@ function classIndex(code: string): number {
  * so the first sits at elapsed 1 and `second` is the tick's `elapsed_seconds`.
  *
  * With `statusSeconds`, each tick also carries what a stored gate row does
- * (#2866): the first holds `[]`, and tick `s` holds the one entry of second
- * `s - 1`, the second its gate closed, so the last second is never stored.
+ * (#2866): the gate at load second `s` closes the seconds over for 250 ms, so
+ * the first tick holds `[]`, and tick `s` holds the one entry of load second
+ * `s - 2`, so the last two seconds are never stored.
  */
 export function storedTicks(
 	seconds: number,
@@ -85,7 +86,7 @@ export function storedTicks(
 			bytes_received: 0,
 			status_codes: { ...codes },
 			...(options.statusSeconds
-				? { status_seconds: s > 0 ? [secondEntry(s - 1, at(s - 1).status)] : [] }
+				? { status_seconds: s > 1 ? [secondEntry(s - 2, at(s - 1).status)] : [] }
 				: {}),
 		});
 	}

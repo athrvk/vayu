@@ -682,13 +682,13 @@ describe("buildStatusOverTime from per-second counts (#2866)", () => {
 	it("rates a folded History series per second, an entry spanning its bucket", () => {
 		const raw = storedTicks(
 			600,
-			// Ticks 300 on hold seconds 299 on, so the 503s start on a bucket edge.
-			(s) => (s >= 299 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}),
+			// Ticks 301 on hold seconds 299 on, so the 503s start on a bucket edge.
+			(s) => (s >= 300 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}),
 			{ statusSeconds: true }
 		);
 		const folded = foldLikeEngine(raw, 10);
 		expect(folded.ticksPerBucket).toBe(60);
-		// The first bucket's first tick closed no second, so it spans 59.
+		// The first tick closed no second, so the first bucket spans 59.
 		expect(folded.data.map((m) => m.status_seconds?.[0].span)).toEqual([
 			59, 60, 60, 60, 60, 60, 60, 60, 60, 60,
 		]);
@@ -702,7 +702,7 @@ describe("buildStatusOverTime from per-second counts (#2866)", () => {
 		expect(fromFolded.slice(0, 5).map((p) => p.c5xx)).toEqual([0, 0, 0, 0, 0]);
 		for (const p of fromFolded.slice(5)) expect(p.c5xx).toBeCloseTo(10);
 		// A bucket's point closes where its last second does: seconds 0-58 end at 59.
-		expect(fromFolded.slice(0, 2).map((p) => p.time)).toEqual([58, 118]);
+		expect(fromFolded.slice(0, 2).map((p) => p.time)).toEqual([59, 119]);
 		expect(fromRaw[fromRaw.length - 1].time).toBe(fromFolded[9].time);
 	});
 
