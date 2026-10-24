@@ -2694,6 +2694,10 @@ TEST_F (LoadStrategyTest, ThinkReservationsCountInTheLiveAndStoredBackpressureAl
     ASSERT_EQ (context->in_flight (), SENT + THINKING);
 
     context->is_running = true;
+    // What execute_load_test stamps once setup is done; no tick is stored before.
+    context->load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+                                    .count ();
     std::thread metrics (
     [context, &db] () { vayu::core::collect_metrics (context, &db); });
 

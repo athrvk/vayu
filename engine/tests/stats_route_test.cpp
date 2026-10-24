@@ -299,7 +299,7 @@ TEST_F (StatsRouteTest, TickPaginationNeverSplitsATick) {
     ASSERT_EQ (body2["data"].size (), 1u);
     EXPECT_EQ (body2["data"][0]["timestamp"].get<int64_t> (), 3000);
     EXPECT_FALSE (body2["pagination"]["hasMore"].get<bool> ());
-    // elapsed_seconds keeps counting from the run's first tick across pages.
+    // elapsed_seconds is the stored reading, so a later page does not restart it.
     EXPECT_DOUBLE_EQ (body2["data"][0]["elapsed_seconds"].get<double> (), 2.0);
 }
 

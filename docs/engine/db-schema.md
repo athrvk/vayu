@@ -1830,16 +1830,21 @@ Two consequences of the row being the tick:
 - **Pagination is tick-aligned.** `GET /runs/:runId/metrics` pages rows, and a row is a whole
   tick, so a page boundary can no longer hand back a half-populated bucket (which row-paginating
   the retired EAV `metrics` table did every ~277 ticks).
-- **`elapsed_seconds` is measured from the run's first persisted tick**, at write time, so it
-  keeps counting across page boundaries instead of restarting at 0 on each page.
+- **`elapsed_seconds` is written with the row**, so it keeps counting across page boundaries
+  instead of restarting at 0 on each page.
 
-The stored series has its own origin: the 1 Hz gate puts the first persisted tick about one
-second into the run, and that tick is `elapsed_seconds: 0`. It is not the live stream's origin.
-The cumulative rates in the same row, `send_rate` and `throughput`, are requests sent and
-completed since load start, divided by the time since **load start**, the instant the report's `test_duration` is measured from, after the request is
-built and any `script.setup` has run (issue #2395). A tick written while setup is still running
-stores both as `0`. Ticks an engine older than that issue stored divided by the time since the
-run was registered, so a run with a slow setup understated both in its early rows.
+`elapsed_seconds` is the seconds since **load start**, the instant the report's `test_duration`
+is measured from, after the request is built and any `script.setup` has run (issue #2395). It is
+the live stream's origin: a row's `elapsed_seconds` is the `elapsedSeconds` of the gate frame of
+the same tick, so the first row reads about `1.0`, the second the gate closed (issue #2881). No
+row is stored before load start: a gate that closes while setup is still running sends its live
+frame and writes nothing. The cumulative rates in the same row, `send_rate` and `throughput`, are
+requests sent and completed since load start, divided by the same `elapsed_seconds`. Rows an
+engine older than issue #2881 stored count from the run's first stored row instead, which reads
+`0` and sits about one second behind the live clock; nothing rewrites them, and such a run may
+also hold rows written during setup. Ticks an engine older than issue #2395 stored divided their
+rates by the time since the run was registered, so a run with a slow setup understated both in
+its early rows.
 
 Latency percentiles in a tick (`latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`) cover the
 **row's second**: every 100 ms window the `hdr_interval_recorder` handed back since the previous

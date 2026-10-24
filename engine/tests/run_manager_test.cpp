@@ -438,6 +438,18 @@ TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     EXPECT_EQ (p.substr (p.size () - 2), "\n\n");
 }
 
+namespace {
+
+/// What execute_load_test stamps once setup is done. A bare context that
+/// waits for a stored row needs it: no row is stored before load start.
+void stamp_load_start (RunContext& context) {
+    context.load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+                                   .count ();
+}
+
+} // namespace
+
 // A stop request is not the end of the run: the worker acts on should_stop,
 // then blocks in event_loop->stop(true) draining in-flight requests, and only
 // then clears is_running. The metrics thread used to exit on should_stop, so it
@@ -563,7 +575,9 @@ TEST (CollectMetrics, ReportsZeroActiveBeforeTheLoopIsPublished) {
     auto ctx = std::make_shared<RunContext> (run.id, cfg);
     // Deliberately never set event_loop - this is the window where the runner
     // thread is still in its config reads (or failed before building a loop).
+    // Stamping load start publishes no loop; it only lets the 1 Hz row land.
     ctx->is_running = true;
+    stamp_load_start (*ctx);
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
     EXPECT_TRUE (vayu::tests::wait_until (
@@ -619,6 +633,7 @@ TEST (CollectMetrics, TheStoredTickAndTheLiveFrameCountHttpErrors) {
         mc.record_error (vayu::ErrorCode::Timeout, "timed out");
     }
     ctx->is_running = true;
+    stamp_load_start (*ctx);
 
     // Held until the DB-gated branch persists a tick.
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
@@ -720,6 +735,31 @@ std::vector<nlohmann::json> live_frames (const RunContext& context) {
         frames.push_back (live_frame_json (payload));
     }
     return frames;
+}
+
+/// The frame stamped @p timestamp, which for a stored row is the gate frame of
+/// its tick; null when no frame carries it.
+const nlohmann::json* frame_at (const std::vector<nlohmann::json>& frames, int64_t timestamp) {
+    const auto found = std::ranges::find_if (frames, [&] (const nlohmann::json& f) {
+        return f.at ("timestamp").get<int64_t> () == timestamp;
+    });
+    return found == frames.end () ? nullptr : &*found;
+}
+
+/// Each stored row against the gate frame of its tick: the frame exists and
+/// carries the row's `elapsed_seconds`, one reading of the load clock.
+void expect_rows_on_the_live_clock (const std::map<int64_t, nlohmann::json>& rows,
+const std::vector<nlohmann::json>& frames) {
+    for (const auto& [timestamp, row] : rows) {
+        const auto* frame = frame_at (frames, timestamp);
+        if (frame == nullptr) {
+            ADD_FAILURE () << "a stored row with no live frame: " << row.dump ();
+            continue;
+        }
+        EXPECT_DOUBLE_EQ (row.at ("elapsed_seconds").get<double> (),
+        frame->at ("elapsedSeconds").get<double> ())
+        << "row " << row.dump () << " against frame " << frame->dump ();
+    }
 }
 
 struct SecondPercentileKey {
@@ -859,6 +899,115 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
         EXPECT_NEAR (frames.back ()["elapsedSeconds"].get<double> (), test_duration, 0.5)
         << "the last live frame and the report disagree about how long load "
            "ran";
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2881: a stored row's `elapsed_seconds` is the load clock its gate frame
+// reads, so History draws a second where the live view drew it. It used to
+// count from the first stored row, about a second behind. Mutation check:
+// measure from the first persisted tick again in `persist_metric_tick` and
+// the first row reads 0 and no row equals its frame.
+TEST (LoadClock, StoredElapsedIsTheLiveClock) {
+    const std::string db_path = "test_load_clock_stored_elapsed.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "3s" },
+            { "targetRps", 20.0 }, { "timeout", 5000 }, { "workers", 1 } };
+        const std::string run_id = "run_load_clock_stored_elapsed";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto run = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (run);
+        ASSERT_EQ (run->status, vayu::RunStatus::Completed) << run->summary;
+
+        const auto rows    = stored_rows (db, run_id);
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+        const auto frames = live_frames (*context);
+        ASSERT_GE (rows.size (), 2u)
+        << "too few rows to see the series advance";
+
+        expect_rows_on_the_live_clock (rows, frames);
+        EXPECT_GT (rows.begin ()->second.at ("elapsed_seconds").get<double> (), 0.0)
+        << "the first row restarted the clock at 0";
+        double previous = 0.0;
+        for (const auto& [timestamp, row] : rows) {
+            const double elapsed = row.at ("elapsed_seconds").get<double> ();
+            EXPECT_GT (elapsed, previous) << "at " << timestamp;
+            previous = elapsed;
+        }
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2881: a gate that closes while `script.setup` runs stores no row. Load has
+// not started, so its elapsed is 0, and a row there would draw a second of
+// setup as a second of load. The setup outlasts the first gate, which the test
+// asserts before trusting the rows. Mutation check: drop the load-start guard
+// in `persist_metric_tick` and the setup gate stores a row at elapsed 0.
+TEST (LoadClock, NoRowIsStoredBeforeLoadStarts) {
+    const std::string db_path = "test_load_clock_no_setup_row.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        constexpr int SETUP_MS         = 1500;
+        const std::string setup_script = "const until = Date.now () + " +
+        std::to_string (SETUP_MS) + "; while (Date.now () < until) {}";
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "2s" },
+            { "targetRps", 20.0 }, { "timeout", 5000 }, { "workers", 1 },
+            { "lifecycleElements",
+            nlohmann::json::array ({ { { "id", "el_setup" }, { "kind", "script.setup" },
+            { "enabled", true }, { "config", { { "script", setup_script } } } } }) } };
+        const std::string run_id = "run_load_clock_no_setup_row";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto run = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (run);
+        ASSERT_EQ (run->status, vayu::RunStatus::Completed) << run->summary;
+
+        const auto rows    = stored_rows (db, run_id);
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+        const auto frames = live_frames (*context);
+
+        const auto setup_gate =
+        std::ranges::find_if (frames, [] (const nlohmann::json& f) {
+            return f.contains ("secondSamples") &&
+            f.at ("elapsedSeconds").get<double> () == 0.0;
+        });
+        ASSERT_NE (setup_gate, frames.end ())
+        << "no gate closed during setup; nothing is proven";
+        EXPECT_FALSE (rows.contains (setup_gate->at ("timestamp").get<int64_t> ()))
+        << "the gate that closed during setup stored a row";
+
+        ASSERT_FALSE (rows.empty ()) << "no row was stored once load started";
+        for (const auto& [timestamp, row] : rows) {
+            EXPECT_GT (row.at ("elapsed_seconds").get<double> (), 0.0)
+            << "a row stored before load start: " << row.dump ();
+        }
+        expect_rows_on_the_live_clock (rows, frames);
 
         manager.shutdown ();
     }
@@ -1262,6 +1411,7 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     }
     ctx->requests_sent = 100;
     ctx->is_running    = true;
+    stamp_load_start (*ctx);
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
     ASSERT_TRUE (
