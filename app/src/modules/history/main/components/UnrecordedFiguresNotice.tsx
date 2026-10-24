@@ -9,7 +9,7 @@
  * Over the numbers of a failed run the engine could not fully record (#2895).
  *
  * The two causes read differently and the wording keeps them apart: a report
- * with no summary has no counts at all, and one reconciled after a crash has
+ * with no summary has no whole-run counts, and one reconciled after a crash has
  * the last figures the engine saved, which are a floor rather than the total.
  * `summaryMissing` is the stronger statement and wins when both are set.
  *
@@ -23,7 +23,7 @@ export function UnrecordedFiguresNotice({ summary }: { summary: RunReport["summa
 	if (summary.summaryMissing) {
 		return (
 			<Callout severity="warning" title="Counts were not recorded">
-				the run ended before the totals were saved.
+				The run ended before the totals were saved.
 			</Callout>
 		);
 	}

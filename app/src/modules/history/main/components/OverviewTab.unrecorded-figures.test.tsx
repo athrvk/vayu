@@ -11,7 +11,7 @@
 
 /**
  * A failed load run the engine could not fully record (#2895) carries
- * `summary.summaryMissing` (every count is a 0 nobody measured) or
+ * `summary.summaryMissing` (the counts are not whole-run totals) or
  * `summary.partial` (the last saved tick's counts, latency all zeros). The
  * Overview says so, and draws "not recorded" where a 0 would pass for a
  * measurement.
@@ -72,7 +72,7 @@ describe("OverviewTab unrecorded figures", () => {
 		renderTab(makeReport({ summaryMissing: true }, { total: 0, failed: 0 }));
 
 		expect(await screen.findByText("Counts were not recorded")).toBeInTheDocument();
-		expect(screen.getByText(/the run ended before the totals were saved/)).toBeInTheDocument();
+		expect(screen.getByText(/The run ended before the totals were saved/)).toBeInTheDocument();
 		// P99, total requests and success rate: three tiles, no 0 and no 0.0%.
 		expect(screen.getAllByText("not recorded")).toHaveLength(3);
 		expect(screen.queryByText("0.0%")).toBeNull();

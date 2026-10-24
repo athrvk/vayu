@@ -10680,8 +10680,8 @@ not measure for the whole run reads as an older engine's summary does: `avgInFli
 `peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
 `sampling` is absent, and `latency` is computed from the stored `results` rows, of which such a run
 has none, so every percentile is `0`. A failed load run with no summary at all, because it wrote no
-tick or failed on a path that writes none, carries **`summary.summaryMissing: true`** and every
-count at `0`. Both keys are absent, never `false`, on every other report. A client that shows a
+tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
+counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`). Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it
 as measured.
 

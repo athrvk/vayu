@@ -2929,8 +2929,9 @@ export interface RunReport {
 		partial?: boolean;
 		/**
 		 * A Failed load run that has no summary at all (#2895): a crash before the
-		 * first tick, or a worker failure that never wrote one. Every count is 0
-		 * and none is a measurement. Absent means false. Distinct from the
+		 * first tick, or a worker failure that never wrote one. The counts are
+		 * whatever the stored sampled results hold (0 where none were stored), not
+		 * whole-run totals, and none is a measurement. Absent means false. Distinct from the
 		 * report's top-level `partial`, which means the run is still in flight.
 		 */
 		summaryMissing?: boolean;

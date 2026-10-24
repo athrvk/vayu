@@ -9,10 +9,11 @@
  * Which of a report's figures the engine did not record (#2895).
  *
  * Two flags on `summary` say it: `summaryMissing` (a failed run with no summary,
- * so every count is a 0 that was never measured) and `partial` (a run
- * reconciled after an engine crash: the counts are the last saved tick's, the
- * latency block is all zeros). Read here once so each tile asks the same
- * question the same way, and a 0 never stands in for "not recorded".
+ * so the counts are not whole-run totals: at most a sample's, often 0) and
+ * `partial` (a run reconciled after an engine crash: the counts are the last
+ * saved tick's, the latency block is all zeros). Read here once so each tile
+ * asks the same question the same way, and a 0 never stands in for "not
+ * recorded".
  */
 
 import type { RunReport } from "@/types";
