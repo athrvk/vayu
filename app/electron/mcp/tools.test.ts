@@ -525,6 +525,15 @@ describe("tool registry", () => {
 		expect(byName.get("delete_request")?.annotations.destructiveHint).toBe(true);
 	});
 
+	// Mutation check: restoring "it can differ slightly from the report's
+	// summary.errorRate" in reads.tools.ts fails both assertions below.
+	test("list_runs says its errorRate shares the report's failure definition, with no 'differ slightly' hedge", () => {
+		const description = descriptionOf(TOOLS.find((t) => t.name === "list_runs"));
+		expect(description).not.toBe("");
+		expect(description).not.toContain("differ slightly");
+		expect(description).toContain("same failure definition");
+	});
+
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
 		const catalog = toolCatalog();
 		expect(catalog).toHaveLength(TOOLS.length);
