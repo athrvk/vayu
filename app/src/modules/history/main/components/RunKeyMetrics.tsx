@@ -12,8 +12,9 @@
  * judged on, how much it sent and how much of it worked.
  */
 
-import { Activity, CheckCircle, TrendingUp } from "lucide-react";
+import { Activity, CheckCircle, ListChecks, TrendingUp } from "lucide-react";
 import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
+import { cn } from "@/lib/utils";
 import type { RunReport } from "@/types";
 
 function successRateOf(summary: RunReport["summary"]): number {
@@ -22,8 +23,18 @@ function successRateOf(summary: RunReport["summary"]): number {
 }
 
 export default function RunKeyMetrics({ report }: { report: RunReport }) {
+	// The Success rate is HTTP-only, so a scenario load run whose assertions all
+	// failed reads 100% there; this tile is what keeps the failures in the glance
+	// (#2820). It appears only when there are some, so a clean run's row is unchanged.
+	const assertionsFailed = report.scenario?.assertions?.failed ?? 0;
 	return (
-		<div className="grid grid-cols-1 @md:grid-cols-3 gap-3">
+		<div
+			className={cn(
+				"grid grid-cols-1",
+				assertionsFailed > 0 ? "@md:grid-cols-4" : "@md:grid-cols-3",
+				"gap-3"
+			)}
+		>
 			<div className="bg-muted/50 p-3">
 				<div className="flex items-center gap-2 mb-1">
 					{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
@@ -54,6 +65,17 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 					{formatPercent(successRateOf(report.summary))}%
 				</p>
 			</div>
+			{assertionsFailed > 0 && (
+				<div className="bg-muted/50 p-3">
+					<div className="flex items-center gap-2 mb-1">
+						<ListChecks className="size-icon text-destructive-text" />
+						<span className="text-xs text-muted-foreground">Assertions</span>
+					</div>
+					<p className="text-lg font-bold text-destructive-text">
+						{formatNumber(assertionsFailed)} failed
+					</p>
+				</div>
+			)}
 		</div>
 	);
 }

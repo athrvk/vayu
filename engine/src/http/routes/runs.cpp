@@ -11,6 +11,7 @@
  */
 
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -328,6 +329,9 @@ struct ReportExtras {
     // lost" about a run nothing counted, or as a setting an older run never had.
     std::optional<size_t> steps_not_run;
     std::optional<bool> stop_on_error;
+    // Scenario load runs only, from a summary written since #2820: the exact
+    // inline assertion population. Absent stays absent for an older row.
+    std::optional<vayu::core::AssertionTotals> scenario_assertions;
     // Load-mode scenario runs only. `virtual_users` is what `concurrency` meant
     // for this run; `iterations_abandoned` is how many an errored step ended
     // before the plan's last step, which is what explains a breakdown that
@@ -441,6 +445,24 @@ const char* to_key) {
     if (from.contains (from_key) && from[from_key].is_number ()) {
         to[to_key] = from[from_key];
     }
+}
+
+// A scenario load run's stored `scenario.assertions` (#2820), or nothing for a
+// run that is not one or was stored before the tally existed.
+std::optional<vayu::core::AssertionTotals> read_scenario_assertions (
+const nlohmann::json& summary) {
+    const auto scenario = summary.find ("scenario");
+    if (scenario == summary.end () || !scenario->is_object ()) {
+        return std::nullopt;
+    }
+    const auto assertions = scenario->find ("assertions");
+    if (assertions == scenario->end () || !assertions->is_object ()) {
+        return std::nullopt;
+    }
+    vayu::core::AssertionTotals totals;
+    read_number (*assertions, "passed", totals.passed);
+    read_number (*assertions, "failed", totals.failed);
+    return totals;
 }
 
 // The stored summary's budget verdict, or nothing when the run was never
@@ -775,6 +797,7 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
             extras.steps_not_run = scenario["steps_not_run"].get<size_t> ();
         }
         read_optional_bool (scenario, "stop_on_error", extras.stop_on_error);
+        extras.scenario_assertions = read_scenario_assertions (summary);
         // Load-mode only: the design-mode runner writes neither, and a load run
         // stores no per-step `results` rows at all - the breakdown *is* how a
         // scenario load run says what each step did.
@@ -946,8 +969,9 @@ ReportExtras& extras) {
 
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
- * error rate and budget verdict, read from the run's stored `summary` - the
- * load-run counterpart of a design row's `{statusCode, latencyMs}`.
+ * error rate, budget verdict and a scenario load run's exact assertion tally
+ * (#2820), read from the run's stored `summary` - the load-run counterpart of
+ * a design row's `{statusCode, latencyMs}`.
  *
  * Each key is omitted when the summary does not record it, never zeroed: no
  * `verdict` means no budget judged the run, and how to show that is the
@@ -981,6 +1005,12 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     }
     if (const auto thresholds = read_threshold_outcome (summary)) {
         outcome["verdict"] = thresholds->verdict ();
+    }
+    // A run that asserted nothing has no tally to show, not a 0 of 0 (#2820).
+    if (const auto assertions = read_scenario_assertions (summary);
+    assertions && assertions->total () > 0) {
+        outcome["assertionsPassed"] = assertions->passed;
+        outcome["assertionsFailed"] = assertions->failed;
     }
     return outcome;
 }
@@ -1542,6 +1572,10 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     }
     if (extras.stop_on_error) {
         section["stopOnError"] = *extras.stop_on_error;
+    }
+    if (extras.scenario_assertions) {
+        section["assertions"] = { { "passed", extras.scenario_assertions->passed },
+            { "failed", extras.scenario_assertions->failed } };
     }
     // Added only when the run actually has them, so a design-mode run's
     // section keeps the exact shape the app already renders.

@@ -33,6 +33,13 @@ describe("resultSubtitle", () => {
 		[{ rps: 4.25 }, "4.25 req/s"],
 		[{ p95Ms: 42, errorRate: 2 }, "p95 42ms · 2.0% errors"],
 		[{ errorRate: 0.01 }, "<0.1% errors"],
+		[
+			{ rps: 41.2, p95Ms: 63, errorRate: 0, assertionsPassed: 0, assertionsFailed: 4580 },
+			"41 req/s · p95 63ms · 0.0% errors · 4,580 assertions failed",
+		],
+		[{ errorRate: 0, assertionsFailed: 1 }, "0.0% errors · 1 assertion failed"],
+		[{ errorRate: 0, assertionsPassed: 10, assertionsFailed: 0 }, "0.0% errors"],
+		[{ assertionsFailed: 3 }, "3 assertions failed"],
 		[{ verdict: "passed" as const }, null],
 		[{}, null],
 	])("%j reads %j", (summary, line) => {

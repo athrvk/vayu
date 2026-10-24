@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import {
+	AssertionsSummary,
 	CapacitySummary,
 	ContractCoverage,
 	CustomMetricsSummary,
@@ -146,6 +147,14 @@ export default function OverviewTab({
 			    per-step elements in the Steps tab instead, so this is absent
 			    there. */}
 			<RequestElementsSummary elements={report.elements} />
+
+			{/* A scenario load run's assertions on every response. Above the
+			    sampled replay it sits beside because that block counts a sample
+			    and this is the whole run: the Success rate and the step counts are
+			    HTTP-only, so a run whose every assertion failed reads 100% there
+			    and the failures are only visible here. Absent for a run with no
+			    tally (stored before it, or a collection run). */}
+			<AssertionsSummary assertions={report.scenario?.assertions} />
 
 			{/* Whether the run's own assertions passed, and which failed. The
 			    schema block above judges the response against a contract; this

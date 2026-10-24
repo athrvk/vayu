@@ -69,6 +69,7 @@ json healthy_summary () {
         { "steps_executed", 20 }, { "passed", 20 }, { "failed", 0 },
         { "skipped", 0 }, { "errored", 0 }, { "steps_stored", 0 },
         { "steps_dropped", 0 }, { "virtual_users", 5 }, { "iterations_abandoned", 0 },
+        { "assertions", { { "passed", 18 }, { "failed", 2 } } },
         { "steps",
         json::array ({ { { "index", 0 }, { "name", "login" }, { "requestId", "req_1" },
         { "method", "POST" }, { "executed", 10 }, { "errors", 0 }, { "httpErrors", 0 },
@@ -265,7 +266,24 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // SUMMARY_KEYS and this fails, as does the validation of the required key.
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("setupOverhead", -1.0), 0.1);
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.05);
+    // A scenario load run's exact assertion tally (#2820). Mutation check: drop
+    // the `assertions` branch from `scenario_section` and this fails; drop the
+    // member from the schema and the validation does.
+    EXPECT_EQ (document["report"]["scenario"].value ("assertions", json ()),
+    (json{ { "passed", 18 }, { "failed", 2 } }));
     EXPECT_FALSE (document["timeSeries"].empty ());
+}
+
+// #2820: a scenario load run stored before the tally exports no `assertions`
+// and still validates, because the schema keeps the member optional. Mutation
+// check: list "assertions" in the scenario object's `required` and this fails.
+TEST_F (RunExportSchemaTest, AScenarioRunStoredBeforeTheAssertionTallyValidates) {
+    json summary = healthy_summary ();
+    summary["scenario"].erase ("assertions");
+    seed ("run_pre_assertions", vayu::RunStatus::Completed, summary);
+    const json document = expect_valid (json{ { "runId", "run_pre_assertions" } });
+    ASSERT_TRUE (document["report"].contains ("scenario")) << document.dump (2);
+    EXPECT_FALSE (document["report"]["scenario"].contains ("assertions"));
 }
 
 // #2894: a run stored before the split exports its one overhead as cleanup and

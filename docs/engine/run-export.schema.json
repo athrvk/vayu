@@ -299,6 +299,10 @@
             "stepsDropped": {"type": "number"},
             "virtualUsers": {"type": "number"},
             "iterationsAbandoned": {"type": "number"},
+            "assertions": {
+              "description": "Scenario load runs only, absent on a run stored before it: assert.* outcomes and inline pm.test calls, counted on every completion; the deferred replay is not in it.",
+              "$ref": "#/definitions/assertionPopulation"
+            },
             "steps": {
               "type": "array",
               "items": {

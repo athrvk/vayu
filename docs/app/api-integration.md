@@ -1052,8 +1052,10 @@ included, which is why the list carries the two numbers rather than that - and
 why the context bar's Recent sends section is one list call and no report fetch.
 A collection run's row carries no `resultSummary`. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
-`{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
-[GET /runs](../engine/api-reference.md#get-runs)).
+`{rps, p95Ms, errorRate, verdict, assertionsPassed, assertionsFailed}` from the run's stored summary instead (#2130,
+[GET /runs](../engine/api-reference.md#get-runs)). The assertion pair is a
+scenario load run's exact inline tally (#2820), and both keys are absent when it
+made none.
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
@@ -1881,7 +1883,7 @@ bodies average more than ~256 KiB reaches the budget at the defaults, so
 absent-as-uniform is the accurate message for nearly every older run.
 The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
-dashboard's Sampled Requests, the history Samples tab and the Test validation
+dashboard's Sampled Requests, the history Samples tab and the Sampled replay
 card, and the sample-count badges say **shown** rather than *captured*, since
 `results` is capped at 100 for a single-request run by the report route irrespective of retention.
 That cap is a failures-first selection listed by time, not a uniform sample
@@ -1897,7 +1899,7 @@ not broken down by type" (issue #2400). It reads `errorsDropped` only when
 `errors.types` sums to less than the no-response count, which is a run stored
 before the engine kept exact per-type counts or a design-mode run; on any other
 run the types are exact past the error store's cap and the note stays silent.
-The Test validation card also states the arithmetic from `summary.totalRequests`
+The Sampled replay card also states the arithmetic from `summary.totalRequests`
 ("Tested N of M requests"), worded so it holds for requests that never got a
 response as well as for displaced ones; `samplesTested` counts responses and
 `testsPassed` / `testsFailed` count assertions, and the card's labels say so

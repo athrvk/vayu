@@ -225,7 +225,7 @@ The collection and run sections gate on `tab.entityId` as well as the type: a ta
 
 **There is still deliberately no "last result" section**, and `recent-sends` is not one. Status, duration and age of the *last* send are what `ResponseStatusBar` already paints in the response pane on the same screen - same `StatusCodeBadge`, same stored run, since the builder restores that run into the pane whenever nothing is in memory. A section with no state in which it says something the pane does not say better is a duplicate, not a summary, which is why the specced one was built and removed in #344. What the pane structurally cannot show is *more than one send*, and that is the whole content of `recent-sends`: if it ever narrows to the latest run it is the removed section again. Its id is new rather than reused, so the `last-result` guard in `registry.test.tsx` keeps guarding.
 
-That section is affordable because the paginated `GET /runs` now carries each design run's outcome on its row (`resultSummary`: `statusCode` + `latencyMs`), added for it in #380. Before that, N rows meant N `GET /runs/:id/report` calls, and that path loads and JSON-parses every result's `trace_data`. Collection runs carry no `resultSummary`, and a load run's (`{rps, p95Ms, errorRate, verdict}`, #2130) comes from its stored summary rather than its results - those are unbounded, and the engine's design-result query cannot read them even if asked.
+That section is affordable because the paginated `GET /runs` now carries each design run's outcome on its row (`resultSummary`: `statusCode` + `latencyMs`), added for it in #380. Before that, N rows meant N `GET /runs/:id/report` calls, and that path loads and JSON-parses every result's `trace_data`. Collection runs carry no `resultSummary`, and a load run's (`{rps, p95Ms, errorRate, verdict, assertionsPassed, assertionsFailed}`, #2130 and #2820; the assertion pair only for a scenario load run that asserted something) comes from its stored summary rather than its results - those are unbounded, and the engine's design-result query cannot read them even if asked.
 
 **Freshness is wiring, not polling.** `runs.recentDesign(requestId)` is its own key family (like `runs.lastDesign`, and for the same `InfiniteData` shape-clash reason), so nothing under `runs.lists()` refreshes it: the builder's send path, the run view's replay, the MCP `run` event and the delete/clear-history paths each invalidate it explicitly. A new invalidation point for runs needs to touch it too, or the section silently shows the sends from before.
 
@@ -578,7 +578,7 @@ after the frame left the run's retained ring.
 
 Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
-**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`; search, type, status, origin and pinned are asked of the engine so they reach runs older than the loaded pages, and only the MCP-client narrowing and the sort are client-side) and `RunItem.tsx` (one run row - status glyph, method badge, request name or URL, load-test chips; the start time and the status word are the row's time card, on its stretched activator). A **finished load run's** row also says how it went (#2130): its glyph is refined by the verdict (`rowOutcome`, from `resultSummary.verdict` and `.errorRate` alone - the tick only for a run that passed, a ringed exclamation for failed, a ringed question mark for not judged), a result line under the identity ("485 req/s · p95 42ms · 0.0% errors", each figure left out when the run did not record it) and the verdict in the activator's accessible name. The run's **comment** is a visible line of its own (two lines at most) for every run type, not a row of the time card: it is what tells two runs of one URL apart, and a hover is the wrong place for that. Right-click opens the row's pin/delete actions through `RowContextMenu` - a second route to the same hover-revealed handlers, since a history row had no menu at all before issue #1360 - plus **Copy for agent** (`runReference`, #2047), which has no hover-revealed button to mirror and is the menu's own.
+**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`; search, type, status, origin and pinned are asked of the engine so they reach runs older than the loaded pages, and only the MCP-client narrowing and the sort are client-side) and `RunItem.tsx` (one run row - status glyph, method badge, request name or URL, load-test chips; the start time and the status word are the row's time card, on its stretched activator). A **finished load run's** row also says how it went (#2130): its glyph is refined by the verdict (`rowOutcome`, from `resultSummary.verdict`, `.errorRate` and `.assertionsFailed` alone - the tick only for a run that passed, a ringed exclamation for failed, a ringed question mark for not judged), a result line under the identity ("485 req/s · p95 42ms · 0.0% errors", each figure left out when the run did not record it, then "4,580 assertions failed" for a scenario load run that failed any, #2820) and the verdict in the activator's accessible name. The run's **comment** is a visible line of its own (two lines at most) for every run type, not a row of the time card: it is what tells two runs of one URL apart, and a hover is the wrong place for that. Right-click opens the row's pin/delete actions through `RowContextMenu` - a second route to the same hover-revealed handlers, since a history row had no menu at all before issue #1360 - plus **Copy for agent** (`runReference`, #2047), which has no hover-revealed button to mirror and is the menu's own.
 
 **Who started a run** (#1817) is two marks on the row and one Select in the filter row. The engine records `origin: {kind: "app"|"mcp"|"other", client}` on every run (the renderer stamps `app` in `apiService`'s four run-starting calls, the MCP server stamps `mcp` with the client's handshake name). A run whose `requestId` is null and that is not a collection run (`type: "scenario"`, or a scenario load run, which carries `summary.scenario`) shows **Unsaved**: it came from a tab that was never saved, or from an agent that sent the request inline, so there is no request to open it from. A collection run never links a request, so it is exempt. An agent's run (`origin.kind === "mcp"`) shows a neutral chip with the client's product name from `mcpClientDisplayName` (`lib/mcp-client-names.ts`), the raw identifier when the table does not know it, and "MCP client" when the agent sent none; the app's and `other` runs show nothing, and the chip is in the activator's accessible name. Both marks are their own `shrink-0` elements beside the identity span, which stays the only thing that gives way. Every spelling in the table is one a client was seen to send, read from the client's source or from the community registry of `initialize` requests (apify/mcp-client-capabilities, snapshot 2026-10-06), and none is captured from a client talking to Vayu (the file's header says which row rests on what; #1819 stays open for the captures and for whether each client echoes `Mcp-Session-Id`). A wrong row costs a raw label rather than a wrong name. The third **Select** (All origins / App / Agents) sends the kind as `GET /runs?origin=` and re-applies it in `filterRuns`; once the loaded runs name more than one agent, each client is an entry under Agents too, narrowing client-side. "Clear the filters" resets the origin with the rest, and an origin that empties the list counts as a narrowing filter for the empty-state copy.
 
@@ -698,8 +698,8 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 | Component | Role |
 |---|---|
 | `RunConfigSummary.tsx` | The "Test config" box: one line of mode, virtual users, duration and protocol (with the "not negotiated" correction beside the protocol when the engine counted a downgrade), and a text **Details** disclosure (the bare `Collapsible`, closed by default and absent when there is nothing to put in it) holding target RPS, the bound data set and the timeout |
-| `RunKeyMetrics.tsx` | The p99, total requests and success rate tiles at the top of the Overview tab, before the hero cards; the one place in the tree besides `RunItem` allowed `text-purple-500` (the P99 arrow; see `palette-tokens.test.ts`) |
-| `OverviewTab.tsx` | Summary - opens on `RunKeyMetrics`, then renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead), `ErrorSummary` (the error card; given `onOpenSample` by `LoadTestDetail`, its status and error-type rows open the Samples tab at the first loaded sample they count, via `locateSample` in `sample-filter.ts`, and a row with no loaded sample is disabled), and `TestValidationSummary` (the last carrying the run's named `pm.test` failures and passed `totalRequests`, so its tested-of-total line has a denominator); `SlowRequestsCard.tsx` ends the tab with the count (`formatNumber`), threshold (`formatLatency`) and share (`formatPercent`, one decimal) behind the Samples tab's Slow chip, absent when `slowRequests.count` is 0 or the run set no slow threshold; the count is exact (#2399), so its footer says how many of them the run kept as samples (`slowRequests.tracesStored`, capped) and that the rest have no row on the Samples tab |
+| `RunKeyMetrics.tsx` | The p99, total requests and success rate tiles at the top of the Overview tab, before the hero cards, plus a fourth "Assertions" tile ("4,580 failed", `text-destructive-text`, grid `@md:grid-cols-4`) for a scenario load run whose `scenario.assertions.failed` is above 0 - the success rate stays the HTTP figure (#2820); the one place in the tree besides `RunItem` allowed `text-purple-500` (the P99 arrow; see `palette-tokens.test.ts`) |
+| `OverviewTab.tsx` | Summary - opens on `RunKeyMetrics`, then renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead), `AssertionsSummary` (a scenario load run's exact assertion tally, #2820, rendered before the sampled replay; absent without `scenario.assertions` or when it counted nothing), `ErrorSummary` (the error card; given `onOpenSample` by `LoadTestDetail`, its status and error-type rows open the Samples tab at the first loaded sample they count, via `locateSample` in `sample-filter.ts`, and a row with no loaded sample is disabled), and `TestValidationSummary` (titled "Sampled replay"; the last carrying the run's named `pm.test` failures and passed `totalRequests`, so its tested-of-total line has a denominator); `SlowRequestsCard.tsx` ends the tab with the count (`formatNumber`), threshold (`formatLatency`) and share (`formatPercent`, one decimal) behind the Samples tab's Slow chip, absent when `slowRequests.count` is 0 or the run set no slow threshold; the count is exact (#2399), so its footer says how many of them the run kept as samples (`slowRequests.tracesStored`, capped) and that the rest have no row on the Samples tab |
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); each window's start and end read through `formatSeconds` (`41.20s`, `75s`); silent for a clean run that the machine stayed awake for |
 | `PerformanceTab.tsx` | Latency/throughput detail; the run-level phase averages card (`PhaseAveragesCard.tsx`, "Timing breakdown", `longLabel` per phase, gated by `hasPhaseAverages` so a percentiles-only report prints no card of dashes) sits beside the per-phase percentiles. A finished run also gets what the dashboard's report showed: the HDR percentile plot (`HdrPercentileChart`, the "HDR percentile plot" card, always present) with its min / mean / p50 / p95 / p99 / max footer, and a "Stream events" card (`StreamMetrics`, gated on `report.stream`, so only a streaming run has it). Its percentile and ramp_up scatter cards, and `HistoricalChartsSection`'s request-rate card, carry the `ChartLegend` the live view gives them (#2697). The dashboard's "Avg request timing" waterfall is not a card here: it draws the same `hasPhaseAverages` data the Timing breakdown card prints |
 | `RunTrend.tsx`, `run-trend.ts` | p95, throughput and error rate across the open run's request's runs, from the runs list's `resultSummary`; mounted under the Performance tab, absent for a run with no `requestId` or fewer than two summarised runs (#2165) |
@@ -1563,21 +1563,27 @@ judged - and the live dashboard (between the notice slot and the tab bar) and
 The verdict is `run-outcome.ts`, once, and the header glyph and the history row
 read it too, so the three cannot disagree. `judgeRun` takes the status, the
 report's `thresholdValidation` (which names the missed budgets) *or* a list
-row's `verdict` (which does not), and the error rate:
+row's `verdict` (which does not), the error rate, and a scenario load run's
+failed-assertion count (`scenario.assertions.failed` / `assertionsFailed`, #2820):
 
 - **failed** - the run's status is `failed`, or a declared budget was missed. A
   budget the run could not measure (`evaluated: false`) is counted by the engine
   as failed, so it lands here and is named like any other.
-- **passed** - every budget met **and** no request errored.
+- **passed** - every budget met **and** no request errored **and** no assertion
+  failed.
 - **not-judged** - no budgets were set, or the budgets were met but requests
-  errored (a latency ceiling can be met by a run of instant 500s), or the run
-  was stopped. Never green: absence of a failure is not a pass.
+  errored (a latency ceiling can be met by a run of instant 500s) or assertions
+  failed, or the run was stopped. Never green: absence of a failure is not a
+  pass.
 - **`null`** - still pending or running, or no report: the banner renders
   nothing, because "Not judged" over a report that has not arrived is a claim
   about a run nobody has looked at.
 
 `errorRate` is a percent (0-100) by the one error definition in
-`docs/ux-writing.md`. The budgets' short names (`p95`, `throughput`) live in
+`docs/ux-writing.md`. It is HTTP-only, so failed assertions are a separate
+fragment of the reason ("No budgets set. 0.0% errors, 4,580 assertions failed",
+"The budget was met, but 0.0% errors, 4,580 assertions failed"); a failed run
+keeps its budget reason unchanged. The budgets' short names (`p95`, `throughput`) live in
 `threshold-metrics.ts` beside the long labels `ThresholdVerdict` draws, so the
 two cannot drift; a metric with no entry keeps its raw key.
 
@@ -1609,7 +1615,7 @@ the `traces` surface (`report.results`) it says requests with an error are kept
 ahead of successful ones and the set is not a uniform sample, because the
 report route picks its rows failures first (#2210). Several
 surfaces show such a set - the dashboard's Sampled Requests card, the history
-Samples tab, and the shared `TestValidationSummary` (itself rendered in both
+Samples tab, and the shared `TestValidationSummary` (its "Sampled replay" card, itself rendered in both
 the dashboard and the history Overview) - so the wording lives here once
 instead of being written out per surface and drifting.
 
@@ -1663,7 +1669,7 @@ measured, and whether it met it - under a Passed/Failed header. The history
 detail's Overview shows it, which is also the dashboard's view of a finished
 run (#2220).
 
-It is the **aggregate** counterpart to the Test validation card beside it: a
+It is the **aggregate** counterpart to the Sampled replay card beside it: a
 `pm.test` script sees one response at a time and structurally cannot assert a
 p99 or an error rate, so a run where every assertion passed can still have
 missed the budget it was run to check.
@@ -1862,7 +1868,9 @@ vocabulary of a failed budget.
 
 The file keeps the name it was given for the load-mode block it was written for.
 
-## Test Validation Summary (`components/shared/TestValidationSummary.tsx`)
+## Sampled replay (`components/shared/TestValidationSummary.tsx`)
+
+The card is titled **Sampled replay** (#2820; "Test validation" before): its figures are the post-run replay of a *sample* of responses, not the run. A scenario load run's exact, every-response tally is the [Assertions](#assertions-summary-componentssharedassertionssummarytsx) block.
 
 Whether a load run's own `pm.test` assertions passed (`RunReport.testValidation`,
 issue #726): responses tested, assertions passed and failed, the assertion success
@@ -1913,6 +1921,23 @@ Absent-vs-zero, as everywhere in this family: a run that asserted nothing has no
 `testValidation` at all and renders **nothing**. A shorter failure list than
 `totalFailed` says "Showing N of M" rather than reading as the whole set.
 
+## Assertions Summary (`components/shared/AssertionsSummary.tsx`)
+
+A scenario load run's **exact** assertion tally (`RunReport.scenario.assertions`
+`{passed, failed}`, #2820): every `assert.*` outcome, required `extract.*` miss and
+inline `pm.test` call, counted on every response and never the deferred replay.
+The card is titled "Assertions", captioned "Counted on every response", and shows
+Passed, Failed and the failure rate (`formatErrorRate`, so a rate above zero never
+reads `0.0%`). The History Overview renders it before the
+[Sampled replay](#sampled-replay-componentssharedtestvalidationsummarytsx) card, whose
+counts are a sample's.
+
+**It does not move the HTTP numbers.** `scenario.passed` / `failed` and the Success
+rate stay step and request outcomes, so a run that answered every request 200 and failed
+every assertion reads 100.0% there; `RunKeyMetrics` adds an "Assertions" tile and
+`judgeRun` stops calling the run a pass. Renders nothing when `assertions` is absent (a
+report stored before the tally, or a collection run) or its total is 0.
+
 ## Element Tally (`components/shared/ElementTally.tsx`)
 
 One element's row - its `kind` and the passed / failed / skipped counts, tallied across
@@ -1921,8 +1946,8 @@ a load run (issue #2144 extracted it from two hand-rolled copies). Both
 (the per-step rows) render it, so a field added to the tally reaches both.
 
 A row with `deferred > 0` - a `script.post` the load path left to the post-run replay -
-reads "N requests deferred to a post-run replay of sampled responses - results in Test validation" instead of "0
-passed", because its verdicts live in the Test validation card, not in the row. Passed,
+reads "N requests deferred to a post-run replay of sampled responses - results in Sampled replay" instead of "0
+passed", because its verdicts live in the Sampled replay card, not in the row. Passed,
 failed and skipped still print beside it when non-zero. A `script.pre` that was not
 inlined stays `skipped`: it has no replay. `deferred` is absent from a report stored
 before the engine wrote it, and such a row keeps the older "N passed / N skipped"

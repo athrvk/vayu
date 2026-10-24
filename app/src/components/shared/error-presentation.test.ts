@@ -61,6 +61,10 @@ const NOT_A_MESSAGE: Record<string, string> = {
 		"the per-operation 'N failed' tally in a coverage row, beside its 'N off-range' sibling",
 	"components/shared/TestValidationSummary.tsx":
 		"the failed-assertions figure in a four-up stat row, beside Assertions passed and the assertion success rate",
+	"components/shared/AssertionsSummary.tsx":
+		"the failed-assertions figure in a three-up stat row, beside Passed and the failure rate - a count, not a sentence about a failure",
+	"modules/history/main/components/RunKeyMetrics.tsx":
+		"the 'N failed' value of the Assertions key-metric tile, a count in the glance row beside p99, total requests and success rate",
 	"components/shared/response-viewer/SampledExchange.tsx":
 		"a sampled exchange's own error string, rendered as the row's trailing value and as the expanded mono block - the exchange is the subject, so this is its data",
 	"components/layout/context-bar/VariablesSection.tsx":

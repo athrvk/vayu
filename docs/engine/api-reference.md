@@ -9091,6 +9091,7 @@ knob.
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
   "stepsExecuted": 1422, "passed": 1386, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
+  "assertions": { "passed": 444, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
@@ -9104,6 +9105,9 @@ knob.
       "unresolvedTokens": 0,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
+      "elements": [
+        { "id": "el_2", "kind": "assert.status", "passed": 444, "failed": 30, "skipped": 0, "deferred": 0 }
+      ],
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
@@ -9130,7 +9134,17 @@ the same pipeline time into the run's latency as into the step's, so the run's
 top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
-not folded in; they are reported in `elements` and `tests`.
+not folded in; they are reported in `elements`, `tests` and `assertions`.
+
+**`assertions`** (issue #2820) is the run's exact assertion tally,
+`{ passed, failed }`: every `assert.*` outcome, required `extract.*` miss and
+inline script `pm.test` call, counted on every completion. The deferred replay
+is the sampled population and is not in it (it is the steps' `tests` and the
+run's `testValidation`). It is the same pair the `maxAssertionFailureRatePct`
+budget judges as `thresholdValidation`'s `assertionsExact`, where that budget
+is declared, so a run whose every assertion failed says so here even when its
+`errorRate` is 0. Every scenario load run writes it, zeros included; a run
+stored before it has no key, and a design-mode collection run never has one.
 
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead
@@ -10454,13 +10468,19 @@ run stored, never from its result rows, which are many and unbounded:
 | `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
+| `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion tally (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the deferred replay |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
 `verdict` is absent when the run declared no budgets - it was never judged,
-which is not the same claim as passing. A `pending` or `running` load row, and
+which is not the same claim as passing. `assertionsPassed` and
+`assertionsFailed` come as a pair or not at all: both are absent on a
+single-request load run, on a scenario load run stored before the tally, and on
+one that made no assertion (a stored `0` of `0`), so a row never shows a tally
+nothing was counted into. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
-carries no `resultSummary` at all. A collection run's row never carries one.
+carries no `resultSummary` at all. A design-mode collection run's row
+(`type: "scenario"`) never carries one; a scenario load run's is a `load` row.
 
 `verdict` is the verdict as stored, even for a `stopped` run, whose partial
 data the app shows as "Not judged" rather than passed or failed. `errorRate`
@@ -10493,6 +10513,25 @@ stored status-code distribution, and is omitted when no distribution is stored.
         "httpVersion": "auto"
       },
       "resultSummary": { "rps": 98.7, "p95Ms": 41.3, "errorRate": 0.4, "verdict": "passed" }
+    },
+    {
+      "id": "run_1234567892",
+      "requestId": null,
+      "environmentId": null,
+      "type": "load",
+      "status": "completed",
+      "startTime": 1234567894,
+      "endTime": 1234567954,
+      "baseline": false,
+      "origin": { "kind": "app", "client": null },
+      "summary": {
+        "mode": "iterations",
+        "iterations": 100,
+        "concurrency": 10,
+        "httpVersion": "auto",
+        "scenario": { "collectionId": "col_1", "stepCount": 3 }
+      },
+      "resultSummary": { "rps": 41.2, "p95Ms": 63.0, "errorRate": 0, "assertionsPassed": 0, "assertionsFailed": 300 }
     },
     {
       "id": "run_1234567891",
@@ -11268,6 +11307,12 @@ setting, echoed because the same counts describe a different run under it.
 Both are written by a collection run (design mode) only: a scenario load run's
 section carries neither, and a summary stored before issue #2526 carries
 neither either.
+
+`assertions` is the converse: `{ passed, failed }`, written by a scenario load
+run only (issue #2820), zeros included, and absent on a design-mode run and on
+a load run stored before it. It is the exact inline population defined under
+[Scenario load runs](#scenario-load-runs); `passed`, `failed` and `errored`
+above stay HTTP outcomes.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never

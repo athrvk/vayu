@@ -1672,9 +1672,9 @@ namespace {
 /// assertion, so the budget stays unevaluated rather than passing at 0/0.
 std::optional<AssertionPopulations> assertion_populations (const RunContext& context,
 const ScriptValidation& validation,
-const ScenarioLoadState* scenario_state) {
+const AssertionTotals& exact) {
     AssertionPopulations populations;
-    populations.exact = exact_assertion_totals (context, scenario_state);
+    populations.exact = exact;
     if (validation.run) {
         populations.sampled = { .passed = validation.run->passed,
             .failed                     = validation.run->failed };
@@ -1743,6 +1743,9 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // Read only now, after the drain above: a completion callback can
     // still be advancing a VU while the strategy's own frame has
     // already returned, so the tallies are only final here.
+    // One read for the stored tally and the budget, so they cannot disagree.
+    const AssertionTotals exact_assertions =
+    exact_assertion_totals (*context, scenario_state.get ());
     if (scenario_state) {
         inputs.scenario =
         build_scenario_load_summary (*scenario_state, context->scenario->plan);
@@ -1750,6 +1753,11 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         // The whole-run `tests` section above says only that something
         // failed, which over a sequence is not an answer.
         attach_step_test_totals (*inputs.scenario, validation.steps);
+        // The exact population only, zeros included (#2820): the step
+        // counters are HTTP outcomes, so without it a run whose every
+        // assertion failed reads as clean unless a budget judged it.
+        (*inputs.scenario)["assertions"] = { { "passed", exact_assertions.passed },
+            { "failed", exact_assertions.failed } };
         // Read on the same edge and for the same reason: a completion
         // still in flight is a request this contract was exercised with
         // (issue #629). Empty for a run of an unbound collection, which
@@ -1764,8 +1772,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
             inputs.elements = std::move (built);
         }
     }
-    inputs.assertions =
-    assertion_populations (*context, validation, scenario_state.get ());
+    inputs.assertions = assertion_populations (*context, validation, exact_assertions);
     // Beside coverage, and deliberately not inside the `scenario_state`
     // block above: this pass reads the sample reservoirs, which are the
     // collector's, so it is available whether or not the executor left

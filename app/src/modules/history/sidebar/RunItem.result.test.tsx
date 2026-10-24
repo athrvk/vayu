@@ -20,6 +20,11 @@
  * accessible-name cases redden; drop the `resultLine` render and the subtitle
  * case reddens; move the comment back into the time card and the comment case
  * reddens.
+ *
+ * Failed assertions (#2820) reach the row through `resultSummary`; the store
+ * tests cannot see that wiring, so it is driven here: pass `assertionsFailed`
+ * through neither `rowOutcome` nor `resultSubtitle` and the cases under "a
+ * scenario load run's failed assertions" redden.
  */
 
 import { describe, it, expect } from "vitest";
@@ -121,6 +126,44 @@ describe("a load run's verdict glyph", () => {
 		expect(
 			screen.getByRole("button", { name: /^Open Load test, completed, verdict failed/ })
 		).toBeInTheDocument();
+	});
+});
+
+describe("a scenario load run's failed assertions", () => {
+	const tick = glyphShape(loadRun());
+	// A 100%-HTTP-success run: the engine's errorRate is 0 whatever the assertions did.
+	const FAILING = {
+		...RESULT,
+		errorRate: 0,
+		verdict: "passed" as const,
+		assertionsPassed: 0,
+		assertionsFailed: 4580,
+	};
+
+	it("prints the count after the error rate", () => {
+		renderRow(loadRun({ resultSummary: FAILING }));
+
+		expect(
+			screen.getByText("485 req/s · p95 42ms · 0.0% errors · 4,580 assertions failed")
+		).toBeInTheDocument();
+	});
+
+	it("takes the tick away and says not judged in the accessible name", () => {
+		expect(glyphShape(loadRun({ resultSummary: FAILING }))).not.toBe(tick);
+
+		renderRow(loadRun({ resultSummary: FAILING }));
+		expect(
+			screen.getByRole("button", { name: /^Open Load test, completed, verdict not judged/ })
+		).toBeInTheDocument();
+	});
+
+	it("leaves a row that asserted nothing, or passed every assertion, exactly as it was", () => {
+		const clean = { ...RESULT, verdict: "passed" as const };
+		const allPassed = { ...clean, assertionsPassed: 10, assertionsFailed: 0 };
+
+		expect(glyphShape(loadRun({ resultSummary: allPassed }))).toBe(tick);
+		renderRow(loadRun({ resultSummary: allPassed }));
+		expect(screen.getByText("485 req/s · p95 42ms · 0.0% errors")).toBeInTheDocument();
 	});
 });
 
