@@ -1862,7 +1862,8 @@ TEST_F (ScenarioLoadTest, IncludeScriptTimeMovesTheRunsLatencyWithTheSteps) {
     EXPECT_GE (included.run, included.step - HISTOGRAM_ROUNDING_MS)
     << "step=" << included.step << "ms run=" << included.run
     << "ms - the run's max sits below its own step's";
-    EXPECT_GE (included.run - excluded.run, (included.step - excluded.step) - 2.0 * HISTOGRAM_ROUNDING_MS)
+    EXPECT_GE (included.run - excluded.run,
+    (included.step - excluded.step) - (2.0 * HISTOGRAM_ROUNDING_MS))
     << "the flag moved the step's max by " << (included.step - excluded.step)
     << "ms and the run's by only " << (included.run - excluded.run) << "ms";
 }
