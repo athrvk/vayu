@@ -75,6 +75,7 @@ function report(mode: string, cfg: Record<string, unknown>): RunReport {
 			sendRate: 198,
 			testDuration: 3,
 			setupOverhead: 0.03,
+			cleanupOverhead: 0.02,
 			peakConcurrency: 20,
 			droppedRequests: 0,
 			avgQueueWaitMs: 1.0,
