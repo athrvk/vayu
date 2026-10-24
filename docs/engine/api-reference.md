@@ -8006,7 +8006,7 @@ its report has no such section at all.
     "latencyP99Ms": 50,        // ceiling, ms
     "maxErrorRatePct": 0.1,    // ceiling, percent of the run's requests; 0-100
     "minThroughputRps": 10000, // floor, completed requests per second; > 0
-    "maxAssertionFailureRatePct": 0, // ceiling, percent of assert.* and pm.test outcomes; 0-100
+    "maxAssertionFailureRatePct": 0, // ceiling, percent of failed assertions, the worse population; 0-100
     "failRun": true            // a missed budget sets status "failed"; default false
   }
 }
@@ -8027,21 +8027,47 @@ transport failures that never got one - the
 `summary.errorRate` reports and the live tick streams. A request a Stop
 cancelled is in neither its numerator nor its denominator.
 
-`maxAssertionFailureRatePct` (issue #1497) is measured against this run's
-combined assertion tally: every `assert.*` element outcome and every
-`pm.test` call, however the script that made it ran - inline on the load
-path or through the deferred replay. Unevaluated, like a latency percentile,
-when the run made no assertion at all - a run with no `assert.*` element and
-no test script is unaffected by declaring this budget.
+`maxAssertionFailureRatePct` (issue #1497) is measured against two
+populations a load run keeps apart (issue #2892). The **exact** one is every
+`assert.*` element outcome, every required `extract.*` that found no match and
+every `pm.test` call an inline script made, counted on every completion. The
+**sampled** one is the deferred `pm.test` replay, run over 1 in
+`response_sample_rate` responses (default 100) - the same tallies the report's
+`testValidation` shows. `actual` is the **worse** of
+the two failure rates, each `0` when its population is empty, so a sampled
+`pm.test` failing half the time beside an inline assertion that never fails
+reads 50%, not the fraction of a percent a single blended count would give;
+the budget fails when either population crosses it. The check names both
+populations, so a reader can see which one the verdict came from:
+
+```jsonc
+{ "metric": "maxAssertionFailureRatePct", "limit": 10, "actual": 50.0,
+  "passed": false, "evaluated": true,
+  "assertionsExact":   { "passed": 2270, "failed": 0 },
+  "assertionsSampled": { "passed": 12, "failed": 12 },
+  "sampleRate": 100 }
+```
+
+`assertionsExact` and `assertionsSampled` are both written on an evaluated
+assertion check, an empty population as `{passed: 0, failed: 0}`;
+`sampleRate` (the period the replay ran at, keep 1 in N) is written only when
+`assertionsSampled` is non-empty. No other check carries these keys, and a
+check stored before issue #2892 has none of them: its `actual` is the old
+blended rate and nothing is backfilled. Unevaluated, like a latency
+percentile, when the run made no assertion at all - a run with no `assert.*`
+element and no test script is unaffected by declaring this budget - and then
+the population keys are absent too, as `actual` is.
 
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
 evaluate the same `thresholds` block against their own numbers and store the
 same `thresholdValidation` shape. A collection run's error rate and latency
 percentiles are drawn from the steps it actually sent (a step a script or an
-unbound data row skipped counts toward neither), and its assertion tally is
-the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
-reads for a load run. Since a script error no longer ends the iteration
+unbound data row skipped counts toward neither), and its assertion tally,
+every `assert.*` outcome and `pm.test` call of every step it ran, is all
+exact: a collection run runs each step's scripts on every send, so its
+assertion check carries `assertionsSampled` at zero and no `sampleRate`.
+Since a script error no longer ends the iteration
 (issue #2526), the steps after one are sent and counted too, so the same
 collection can report a larger denominator than it did before; `stopOnError:
 true` restores the old population.
@@ -11032,6 +11058,14 @@ those responses, so `testsPassed + testsFailed` is not `samplesTested` once a sc
 more than one assertion. `successRate` is `testsPassed` as a percentage of assertions.
 `samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
 (`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
+
+**`thresholdValidation`** is one check per declared
+[budget](#the-thresholds-block-passfail-budgets) with the run's verdict. A
+`maxAssertionFailureRatePct` check also names the two populations it judged
+(issue #2892): `assertionsSampled` is `testValidation`'s `testsPassed` and
+`testsFailed`, at `sampleRate`, and `assertionsExact` is the inline
+assertions counted on every completion that `testValidation` does not see.
+`actual` is the worse of the two failure rates.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/

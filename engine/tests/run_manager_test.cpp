@@ -2057,6 +2057,41 @@ FailRunTest,
     return std::string (info.param.name);
 });
 
+// #2892 end to end: an `assert.status` that holds on all 4 completions is the
+// exact population, and a deferred `pm.test` that always fails, replayed over
+// 1 in 2 responses, is the sampled one. Judged on the worse rate, 100%; the
+// old blend read 2 of 10. Mutation checks: pass `validation.run` into
+// `.exact` in `assertion_populations` (run_manager.cpp) and every key below
+// reds; double the passed counter in `exact_assertion_totals`, the double
+// count adding the element tallies made, and `assertionsExact` reads 8.
+TEST_F (LoadRunToTerminalTest, AMixedAssertionRunStoresBothPopulations) {
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 4 }, { "concurrency", 1 }, { "url", server->fast_url () },
+        { "method", "GET" }, { "workers", 1 }, { "response_sample_rate", 2 },
+        { "requestElements",
+        nlohmann::json::array (
+        { nlohmann::json{ { "id", "el_status" }, { "kind", "assert.status" },
+          { "config", { { "in", nlohmann::json::array ({ 200 }) } } } },
+        nlohmann::json{ { "id", "el_post" }, { "kind", "script.post" },
+        { "config", { { "script", "pm.test('always fails', function () { pm.expect(1).to.equal(2); });" } } } } }) },
+        { "thresholds", { { "maxAssertionFailureRatePct", 50 } } } };
+
+    const auto row = run_to_terminal_row ("run-assert-pops-e2e", config);
+    ASSERT_HAS_VALUE (row);
+    const auto summary = nlohmann::json::parse (row->summary);
+    ASSERT_TRUE (summary.contains ("thresholds")) << summary.dump ();
+    const auto& check = summary["thresholds"]["checks"][0];
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 4 }, { "failed", 0 } }))
+    << check.dump ();
+    EXPECT_EQ (check.value ("assertionsSampled", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 2 } }))
+    << check.dump ();
+    EXPECT_EQ (check.value ("sampleRate", 0), 2);
+    EXPECT_DOUBLE_EQ (check["actual"].get<double> (), 100.0);
+    EXPECT_FALSE (check["passed"].get<bool> ());
+}
+
 // #2399, the completed-run producer end to end: every request to `/slow`
 // (500ms) crosses a 100ms threshold - a lower bound, so a slow runner cannot
 // fail it - and the slow store keeps 2 of the 4. The stored summary has to

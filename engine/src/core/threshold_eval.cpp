@@ -7,6 +7,7 @@
 
 #include "vayu/core/threshold_eval.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -53,6 +54,9 @@ struct ThresholdMetric {
     /// fails on its own). A latency percentile needs a real completion to
     /// mean anything, so it is not evaluated when the run recorded none.
     bool (*has_data) (const RunSummaryInputs&);
+    /// The populations an evaluated check carries onto the report, for a
+    /// metric judged from more than one; `nullptr` for every other metric.
+    const std::optional<AssertionPopulations>& (*populations) (const RunSummaryInputs&);
 };
 
 /// Share of this run's requests that were errors, as a percentage - the same
@@ -69,25 +73,35 @@ double measured_error_rate (const RunSummaryInputs& inputs) {
 constexpr double MAX_LATENCY_BUDGET_MS = 86400000.0; // a day; past it nothing completes
 constexpr double MAX_THROUGHPUT_BUDGET_RPS = 1e9;
 
-/// Share of this run's assertions - `assert.*` element outcomes and `pm.test`
-/// calls alike, inline or replayed - that failed, as a percentage. Zero when
-/// the run made none, which `assertion_data_present` is what keeps this
-/// metric out of the verdict for rather than a trivial pass.
+/// One population's failure share as a percentage; 0 when it is empty.
+double failure_rate_pct (const AssertionTotals& totals) {
+    if (totals.total () == 0) {
+        return 0.0;
+    }
+    return static_cast<double> (totals.failed) * 100.0 /
+    static_cast<double> (totals.total ());
+}
+
+/// The worse of the exact and the sampled failure rate (#2892), so neither
+/// population's volume dilutes the other's failures. Zero when the run made
+/// no assertion, which `assertion_data_present` keeps out of the verdict
+/// rather than letting it pass trivially.
 double measured_assertion_failure_rate (const RunSummaryInputs& inputs) {
     if (!inputs.assertions) {
         return 0.0;
     }
-    const size_t total = inputs.assertions->passed + inputs.assertions->failed;
-    if (total == 0) {
-        return 0.0;
-    }
-    return static_cast<double> (inputs.assertions->failed) * 100.0 /
-    static_cast<double> (total);
+    return std::max (failure_rate_pct (inputs.assertions->exact),
+    failure_rate_pct (inputs.assertions->sampled));
 }
 
 bool assertion_data_present (const RunSummaryInputs& inputs) {
     return inputs.assertions.has_value () &&
-    (inputs.assertions->passed + inputs.assertions->failed) > 0;
+    (inputs.assertions->exact.total () + inputs.assertions->sampled.total ()) > 0;
+}
+
+const std::optional<AssertionPopulations>& assertion_populations (
+const RunSummaryInputs& inputs) {
+    return inputs.assertions;
 }
 
 /// Every budget a run may declare, in the order the report lists them.
@@ -96,23 +110,23 @@ const std::array<ThresholdMetric, 6>& metrics () {
     { "latencyP50Ms", "p50 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; },
-    [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
+    [] (const RunSummaryInputs& in) { return in.latency.count > 0; }, nullptr },
     { "latencyP95Ms", "p95 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p95; },
-    [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
+    [] (const RunSummaryInputs& in) { return in.latency.count > 0; }, nullptr },
     { "latencyP99Ms", "p99 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p99; },
-    [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
+    [] (const RunSummaryInputs& in) { return in.latency.count > 0; }, nullptr },
     { "maxErrorRatePct", "Error rate", Direction::AtMost, 0.0, true, 100.0, "between 0 and 100",
-    "It is a percentage of the run's requests.", measured_error_rate, nullptr },
+    "It is a percentage of the run's requests.", measured_error_rate, nullptr, nullptr },
     { "minThroughputRps", "Throughput", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
     "greater than 0 and at most 1000000000", "It is a completed-requests-per-second floor.",
-    [] (const RunSummaryInputs& in) { return in.throughput; }, nullptr },
+    [] (const RunSummaryInputs& in) { return in.throughput; }, nullptr, nullptr },
     { "maxAssertionFailureRatePct", "Assertion failure rate", Direction::AtMost, 0.0,
     true, 100.0, "between 0 and 100", "It is a percentage of this run's assert.* and pm.test outcomes.",
-    measured_assertion_failure_rate, assertion_data_present },
+    measured_assertion_failure_rate, assertion_data_present, assertion_populations },
     } };
     return table;
 }
@@ -355,6 +369,9 @@ const RunSummaryInputs& inputs) {
         check.passed = metric.direction == Direction::AtMost ?
         check.actual <= check.limit :
         check.actual >= check.limit;
+        if (metric.populations != nullptr) {
+            check.assertions = metric.populations (inputs);
+        }
     } else {
         // A budget the run could not measure was not met - counted by the
         // caller as a failure, never silently dropped from the tally.
@@ -424,6 +441,20 @@ ThresholdOutcome& outcome) {
     }
 }
 
+nlohmann::json assertion_totals_payload (const AssertionTotals& totals) {
+    return { { "passed", totals.passed }, { "failed", totals.failed } };
+}
+
+/// `sampleRate` describes the sampled population, so it is left out when that
+/// population is empty rather than naming a period nothing was judged at.
+void append_assertion_populations (nlohmann::json& row, const AssertionPopulations& populations) {
+    row["assertionsExact"]   = assertion_totals_payload (populations.exact);
+    row["assertionsSampled"] = assertion_totals_payload (populations.sampled);
+    if (populations.sampled.total () > 0) {
+        row["sampleRate"] = populations.sample_rate;
+    }
+}
+
 } // namespace
 
 std::optional<ThresholdOutcome> evaluate_thresholds (const nlohmann::json& config,
@@ -470,6 +501,9 @@ nlohmann::json build_threshold_outcome_payload (const ThresholdOutcome& outcome)
         // instead of the absence it is.
         if (check.evaluated) {
             row["actual"] = check.actual;
+        }
+        if (check.assertions) {
+            append_assertion_populations (row, *check.assertions);
         }
         checks.push_back (std::move (row));
     }

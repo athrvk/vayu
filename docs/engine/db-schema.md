@@ -1531,7 +1531,11 @@ keys are the wire names the payload declared, carried through unchanged; the rep
 `evaluated` follows the same absent-vs-zero rule one level down (issue #1484): a latency percentile
 with no completed requests writes `evaluated: false` and omits `actual` rather than storing the
 default `0`, which a reader could not tell apart from a genuine 0ms measurement; such a check counts
-toward `failed`. The writer is
+toward `failed`. An evaluated `maxAssertionFailureRatePct` check also stores
+`assertionsExact` and `assertionsSampled` (each `{passed, failed}`) and, when the sampled one is
+non-empty, `sampleRate` (issue #2892), so a report read after a restart still names the two
+populations its `actual` was the worse of; a check stored before the issue has none of them and
+nothing backfills them. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
 (`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.
