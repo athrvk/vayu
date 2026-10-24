@@ -400,12 +400,12 @@ Notes:
   `maxRedirects` is bounded 0-100 here because `POST /runs` has no guard of its
   own and the value reaches `CURLOPT_MAXREDIRS`, where a negative means
   *unlimited*.
-  **There is no per-run timeout, and that is not an omission**: the engine has
-  no such field - every transfer is bounded by the `defaultTimeout` setting
-  (`resolve_request_timeout_ms`), which `update_engine_config` changes, the run's
-  OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
-  included (issues #2833, #2841). Four transfers keep bounds of their own: a stream
-  ends on its idle timeout and its duration and event caps, never a
+  **The tool exposes no per-run `timeout`, and that is not an omission**:
+  `POST /runs` accepts one, but a run started here takes the `defaultTimeout`
+  setting (`resolve_request_timeout_ms`), which `update_engine_config` changes -
+  the run's OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
+  included (issues #2833, #2841). Four transfers keep bounds of their own: a
+  stream ends on its idle timeout and its duration and event caps, never a
   whole-transfer deadline; the import fetch has its own 30 s and stall timeout;
   the connection test its 10 s; and the server-vitals monitor its scrape
   timeout. Recorded here so it is not re-derived as a gap each time the schema

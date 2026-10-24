@@ -1844,7 +1844,7 @@ describe("a pick declares the contract (issue #2050)", () => {
 });
 
 describe("the timeout and think-time hint (issue #2229)", () => {
-	it("names where the per-request timeout and the pacing live", () => {
+	it("names where the request timeout and the pacing live", () => {
 		open();
 
 		const hint = screen.getByText(/times out after Default request timeout/);
