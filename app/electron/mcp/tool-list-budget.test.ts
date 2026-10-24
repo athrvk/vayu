@@ -64,6 +64,11 @@
  * hundred bytes of their caps to 143,732 / 141,006 / 207,249 B (writes off:
  * reveal off / on; writes on: reveal on), and those caps went to 143,900 /
  * 141,200 / 207,500.
+ *
+ * #2820's `assertionsPassed` / `assertionsFailed` sentence in `list_runs` is
+ * paid once per row, 290 B: 143,732 / 141,006 / 211,646 / 207,249 B became
+ * 144,022 / 141,296 / 211,936 / 207,539, and the four caps went to 144,100 /
+ * 141,400 / 212,000 / 207,700.
  */
 
 import { describe, it, expect } from "vitest";
@@ -83,10 +88,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 143_900 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 211_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_500 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_100 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_400 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_000 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_700 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
