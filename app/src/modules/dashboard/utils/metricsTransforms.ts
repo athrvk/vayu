@@ -15,13 +15,26 @@ import type { LoadTestMetrics } from "@/types";
 import { coversSecond, secondPercentiles, worstReading } from "./tickPercentiles";
 
 /**
- * The bucket every series transform here rounds a tick's elapsed time to before
- * plotting. Shared so the "is there anything to plot" predicates below bucket
- * exactly as the transforms do - a second copy of `* 2) / 2` is how the two
- * would drift apart.
+ * The bucket the per-tick series transforms here round a tick's elapsed time to
+ * before plotting. Shared so the "is there anything to plot" predicates below
+ * bucket exactly as the transforms do - a second copy of `* 2) / 2` is how the
+ * two would drift apart.
  */
 function halfSecondBucket(elapsedSeconds: number): number {
 	return Math.round(elapsedSeconds * 2) / 2;
+}
+
+/**
+ * The status series' bucket, which `hasStatusSeries` shares. That series diffs
+ * cumulative counts, so a point counts the completions between two ticks a
+ * bucket apart. At half a second, a closed loop's batches (10 virtual users
+ * finishing together every 200 ms) fell two or three to a bucket and a steady
+ * 50/s drew 40 and 60 (#2860). A second is the stored series' tick and the
+ * Throughput chart's window, and holds the same number of batches every time
+ * for any batch period that divides it.
+ */
+function wholeSecondBucket(elapsedSeconds: number): number {
+	return Math.round(elapsedSeconds);
 }
 
 /** A run is "rate limited" (can drop requests) only in constant_rps with a target. */
@@ -88,7 +101,8 @@ function isOrphanLiveHead(first: LoadTestMetrics | undefined): boolean {
 
 /**
  * Build per-second status-class rates from the cumulative `status_codes` map
- * each tick carries. Buckets to 0.5s, diffs consecutive buckets so a 5xx burst
+ * each tick carries. Buckets to whole seconds ({@link wholeSecondBucket}, the
+ * last tick in a bucket standing for it), diffs consecutive buckets so a 5xx burst
  * shows up as a band, not a slope change, and divides each diff by the
  * elapsed time between the two buckets' ticks. Diffs are clamped >= 0 (the
  * source is monotonic). Returns [] when no tick carries a status map.
@@ -98,7 +112,7 @@ function isOrphanLiveHead(first: LoadTestMetrics | undefined): boolean {
  * next bucket.
  *
  * The division is what keeps one unit across sources (#2547): live frames
- * close half a second per bucket, a stored series a second per tick, and a
+ * close about a second per bucket, a stored series a second per tick, and a
  * downsampled one `ticksPerBucket` seconds per point, which a raw count would
  * draw that many times taller.
  */
@@ -108,7 +122,7 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	for (const m of history) {
 		if (!m.status_codes) continue;
 		first ??= m;
-		const t = halfSecondBucket(m.elapsed_seconds);
+		const t = wholeSecondBucket(m.elapsed_seconds);
 		byBucket.set(t, {
 			time: t,
 			elapsed: m.elapsed_seconds,
@@ -449,7 +463,8 @@ export function customMetricSeriesLabel(name: string, type: "trend" | "counter" 
  * second bucket - two ticks, in the normal case.
  *
  * `include` narrows which ticks count, for a transform that skips some:
- * `buildStatusOverTime` ignores ticks with no `status_codes` map.
+ * `buildLatencyChartData` ignores ticks with no window latency. The status
+ * series buckets differently and has its own gate, {@link hasStatusSeries}.
  */
 export function spansMultipleBuckets(
 	history: LoadTestMetrics[],
@@ -467,8 +482,9 @@ export function spansMultipleBuckets(
 
 /**
  * Whether `buildStatusOverTime` would return more than one point, answered
- * without building it: the status card's gate. Distinct 0.5s buckets among the
- * ticks carrying a status map, one more of them when the head is dropped.
+ * without building it: the status card's gate. Distinct whole-second buckets
+ * among the ticks carrying a status map, one more of them when the head is
+ * dropped.
  */
 export function hasStatusSeries(history: LoadTestMetrics[]): boolean {
 	const first = history.find(hasStatusCodes);
@@ -476,7 +492,7 @@ export function hasStatusSeries(history: LoadTestMetrics[]): boolean {
 	const buckets = new Set<number>();
 	for (const m of history) {
 		if (!hasStatusCodes(m)) continue;
-		buckets.add(halfSecondBucket(m.elapsed_seconds));
+		buckets.add(wholeSecondBucket(m.elapsed_seconds));
 		if (buckets.size >= needed) return true;
 	}
 	return false;

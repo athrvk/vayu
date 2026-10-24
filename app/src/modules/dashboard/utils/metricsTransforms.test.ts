@@ -402,12 +402,44 @@ describe("buildStatusOverTime", () => {
 		expect(out[1].cErr).toBe(0);
 	});
 
-	it("rates a live series' half-second buckets per second, counted from load start", () => {
+	it("rates a live series' whole-second buckets per second, counted from load start", () => {
 		const out = buildStatusOverTime([
 			tick({ live: true, elapsed_seconds: 0.5, status_codes: { "200": 100 } }),
 			tick({ live: true, elapsed_seconds: 1.0, status_codes: { "200": 180 } }),
+			tick({ live: true, elapsed_seconds: 1.5, status_codes: { "200": 260 } }),
+			tick({ live: true, elapsed_seconds: 2.0, status_codes: { "200": 340 } }),
 		]);
-		expect(out.map((p) => p.c2xx)).toEqual([200, 160]);
+		// The last tick in a bucket stands for it: 0..1.0 s, then 1.0..2.0 s.
+		expect(out.map((p) => p.time)).toEqual([1, 2]);
+		expect(out.map((p) => p.c2xx)).toEqual([180, 160]);
+	});
+
+	/*
+	 * S6 of #2860: 10 virtual users at a 200 ms target finish together, so the
+	 * cumulative count steps by 10 every 200 ms while the true rate is a flat 50.
+	 * Half-second buckets held two or three steps (40 and 60 a second). Mutation
+	 * check: bucket the status series on halfSecondBucket again and both cadences
+	 * fail.
+	 */
+	it.each([
+		["the engine's default 100 ms", 100],
+		["a 500 ms", 500],
+	])("draws a closed loop's batched completions flat at %s live tick", (_name, tickMs) => {
+		// Milliseconds, so a batch and a tick compare exactly; the batches are offset
+		// from the ticks by 50 ms so none lands on one.
+		const batchesBy = (ms: number) => (ms >= 50 ? Math.floor((ms - 50) / 200) + 1 : 0);
+		const live = Array.from({ length: 20_000 / tickMs }, (_, i) => {
+			const ms = (i + 1) * tickMs;
+			return tick({
+				live: true,
+				elapsed_seconds: ms / 1000,
+				status_codes: { "200": 10 * batchesBy(ms) },
+			});
+		});
+		const out = buildStatusOverTime(live);
+		expect(out.length).toBeGreaterThanOrEqual(19);
+		for (const p of out)
+			expect(Math.abs(p.c2xx - 50), `at ${p.time}s`).toBeLessThanOrEqual(2.5);
 	});
 
 	it("rates a downsampled series per second, as the raw series it folds", () => {
@@ -436,22 +468,22 @@ describe("buildStatusOverTime", () => {
 		// 500 responses a second, 150000 by the first retained tick.
 		const lateWindow = [
 			tick({ live: true, elapsed_seconds: 300, status_codes: { "200": 150000 } }),
-			tick({ live: true, elapsed_seconds: 300.5, status_codes: { "200": 150250 } }),
-			tick({ live: true, elapsed_seconds: 301, status_codes: { "200": 150500, "503": 10 } }),
+			tick({ live: true, elapsed_seconds: 301, status_codes: { "200": 150500 } }),
+			tick({ live: true, elapsed_seconds: 302, status_codes: { "200": 151000, "503": 10 } }),
 		];
 
 		it("diffs from its head instead of drawing the run's lifetime average", () => {
 			const out = buildStatusOverTime(lateWindow);
 			expect(out).toHaveLength(lateWindow.length - 1);
-			expect(out.map((p) => p.time)).toEqual([300.5, 301]);
+			expect(out.map((p) => p.time)).toEqual([301, 302]);
 			expect(out[0].c2xx).toBe(500);
-			expect(out[1]).toMatchObject({ c2xx: 500, c5xx: 20 });
+			expect(out[1]).toMatchObject({ c2xx: 500, c5xx: 10 });
 		});
 
 		it("keeps a live head within one tick of load start as its first point", () => {
 			const out = buildStatusOverTime([
 				tick({ live: true, elapsed_seconds: 1.5, status_codes: { "200": 300 } }),
-				tick({ live: true, elapsed_seconds: 2, status_codes: { "200": 450 } }),
+				tick({ live: true, elapsed_seconds: 2.5, status_codes: { "200": 600 } }),
 			]);
 			expect(out.map((p) => p.c2xx)).toEqual([200, 300]);
 		});
@@ -548,6 +580,8 @@ describe("spansMultipleBuckets", () => {
 		const rng = seeded(20260901);
 		let sawTrue = 0;
 		let sawFalse = 0;
+		let sawStatus = 0;
+		let sawNoStatus = 0;
 		for (let run = 0; run < 200; run++) {
 			const history = randomHistory(rng);
 			const spans = spansMultipleBuckets(history);
@@ -555,13 +589,18 @@ describe("spansMultipleBuckets", () => {
 				buildLatencyChartData(history).length > 1
 			);
 			expect(spans).toBe(buildPercentileChartData(history).length > 1);
-			expect(hasStatusSeries(history)).toBe(buildStatusOverTime(history).length > 1);
+			const status = hasStatusSeries(history);
+			expect(status).toBe(buildStatusOverTime(history).length > 1);
 			if (spans) sawTrue++;
 			else sawFalse++;
+			if (status) sawStatus++;
+			else sawNoStatus++;
 		}
 		// The agreement above is worthless if every case landed on one side.
 		expect(sawTrue).toBeGreaterThan(20);
 		expect(sawFalse).toBeGreaterThan(20);
+		expect(sawStatus).toBeGreaterThan(20);
+		expect(sawNoStatus).toBeGreaterThan(20);
 	});
 
 	it("is false for ticks that share one 0.5s bucket, true once one leaves it", () => {

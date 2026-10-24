@@ -97,7 +97,7 @@ function MetricsView({
 	// Which chart cards are worth rendering. Each chart builds its own series
 	// from `chartWindow` (it also needs the user's bucket width, which only it
 	// reads), so these gates ask the cheap question - is there more than one
-	// 0.5s bucket to plot - rather than building the series a second time here
+	// bucket to plot - rather than building the series a second time here
 	// and throwing it away (#1152).
 	// The latency chart plots the ticks that hold a window mean (an idle window
 	// and a run stored before the window existed hold none), so it is gated on
