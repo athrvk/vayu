@@ -2166,8 +2166,8 @@ export interface LoadTestConfig {
  * the live overlay and the history overlay are drawn from identical rows.
  *
  * `timestamp` (Unix ms) rather than an elapsed offset is what the join onto the
- * run's own timeline uses: a tick's `elapsed_seconds` is measured from the
- * first *persisted* tick, while the scrape starts with the run.
+ * run's own timeline uses: a tick's `elapsed_seconds` counts from load start,
+ * after any setup script, while the scrape starts with the run.
  */
 export interface MonitorSample {
 	timestamp: number;

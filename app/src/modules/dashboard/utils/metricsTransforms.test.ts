@@ -418,14 +418,43 @@ describe("buildPercentileChartData on a live series (issue #2385)", () => {
 describe("buildStatusOverTime", () => {
 	it("classifies and diffs a stored series' cumulative maps into per-second rates", () => {
 		const out = buildStatusOverTime([
-			tick({ elapsed_seconds: 0, status_codes: { "200": 100, "404": 5 } }),
-			tick({ elapsed_seconds: 1, status_codes: { "200": 180, "404": 7, "500": 3 } }),
+			tick({ elapsed_seconds: 1, status_codes: { "200": 100, "404": 5 } }),
+			tick({ elapsed_seconds: 2, status_codes: { "200": 180, "404": 7, "500": 3 } }),
 		]);
 		expect(out).toHaveLength(2);
-		// The first stored tick closes the second before elapsed 0; the second
+		// The first stored tick closes the second from load start; the second
 		// is the diff from the first, over one second.
-		expect(out[0]).toMatchObject({ time: 0, c2xx: 100, c4xx: 5, c5xx: 0 });
-		expect(out[1]).toMatchObject({ time: 1, c2xx: 80, c4xx: 2, c5xx: 3 });
+		expect(out[0]).toMatchObject({ time: 1, c2xx: 100, c4xx: 5, c5xx: 0 });
+		expect(out[1]).toMatchObject({ time: 2, c2xx: 80, c4xx: 2, c5xx: 3 });
+	});
+
+	/*
+	 * #2881: a stored series counts from load start, so its first tick, about a
+	 * second in, closes [0, elapsed]. Mutation check: seed the first interval
+	 * from -1 again and the first tick of a current run rates at half its count.
+	 */
+	it("rates a stored head over the time since load start", () => {
+		const [first] = buildStatusOverTime([
+			tick({ elapsed_seconds: 1.0, status_codes: { "200": 120 } }),
+			tick({ elapsed_seconds: 2.0, status_codes: { "200": 240 } }),
+		]);
+		expect(first).toMatchObject({ time: 1, c2xx: 120 });
+
+		const [late] = buildStatusOverTime([
+			tick({ elapsed_seconds: 1.2, status_codes: { "200": 120 } }),
+		]);
+		expect(late.c2xx).toBeCloseTo(100);
+	});
+
+	it("still rates a run stored before #2881, whose first tick sits at 0, over one second", () => {
+		const out = buildStatusOverTime([
+			tick({ elapsed_seconds: 0, status_codes: { "200": 120 } }),
+			tick({ elapsed_seconds: 1, status_codes: { "200": 240 } }),
+		]);
+		expect(out.map((p) => [p.time, p.c2xx])).toEqual([
+			[0, 120],
+			[1, 120],
+		]);
 	});
 
 	it("treats status code 0 as connection error and clamps diffs >= 0", () => {
@@ -474,7 +503,7 @@ describe("buildStatusOverTime", () => {
 
 	it("rates a downsampled series per second, as the raw series it folds", () => {
 		const raw = storedTicks(600, (s) =>
-			s >= 300 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}
+			s > 300 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}
 		);
 		const folded = foldLikeEngine(raw, 10);
 		expect(folded.ticksPerBucket).toBe(60);
@@ -520,7 +549,7 @@ describe("buildStatusOverTime", () => {
 				tick({ elapsed_seconds: 300, status_codes: { "200": 150000 } }),
 				tick({ elapsed_seconds: 301, status_codes: { "200": 150500 } }),
 			]);
-			expect(out.map((p) => p.c2xx)).toEqual([150000 / 301, 500]);
+			expect(out.map((p) => p.c2xx)).toEqual([150000 / 300, 500]);
 		});
 
 		it("gates the status card on the points left once the head is dropped", () => {

@@ -83,20 +83,6 @@ function classifyCumulative(codes: Record<string, number> | undefined): ClassSum
 	return s;
 }
 
-/** The engine stores one tick a second. */
-const STORED_TICK_SECONDS = 1;
-
-/**
- * Where a series' elapsed clock starts, relative to the first response it
- * counts. A live frame's `elapsed_seconds` runs from load start. A stored
- * tick's runs from the first stored tick, which already holds the second the
- * engine's 1 Hz gate waited before writing it (`run_manager.cpp`), so that
- * tick closes the second before elapsed 0.
- */
-function elapsedOrigin(first: LoadTestMetrics | undefined): number {
-	return first?.live ? 0 : -STORED_TICK_SECONDS;
-}
-
 /**
  * The latest a live head may land and still be the run's first frame. Past one
  * tick interval (with slack for a slow flush) the head has no predecessor in
@@ -143,20 +129,24 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	}
 	const cum = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
 	const out: StatusPoint[] = [];
+	// Live and stored series both count from load start (#2881), so the first
+	// point closes the interval from 0.
 	let prev: ClassSums & { elapsed: number } = {
 		c2: 0,
 		c3: 0,
 		c4: 0,
 		c5: 0,
 		cErr: 0,
-		elapsed: elapsedOrigin(first),
+		elapsed: 0,
 	};
 	const orphanHead = isOrphanLiveHead(first) ? cum.shift() : undefined;
 	if (orphanHead) prev = orphanHead;
 	for (const c of cum) {
 		const seconds = c.elapsed - prev.elapsed;
-		// Only a live frame stamped at load start closes no time, and nothing has
-		// completed by then; its count stands as it is rather than divide by 0.
+		// A head at elapsed 0 closes no time: a live frame stamped at load start,
+		// before anything completed, or the first row of a run stored before
+		// #2881, which holds the second before it. Either count stands as one
+		// second's rather than divide by 0.
 		const rate = (now: number, before: number) =>
 			Math.max(0, now - before) / (seconds > 0 ? seconds : 1);
 		out.push({
