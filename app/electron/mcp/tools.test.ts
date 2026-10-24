@@ -16061,6 +16061,55 @@ describe("secret withholding", () => {
 		expect(revealed.body).toEqual(RUN_REPORT);
 	});
 
+	/*
+	 * With the engine down the masking lookup is the first thing to fail, but the
+	 * outage is the news: a Reveal secrets setting must never read as its remedy
+	 * (#2780).
+	 */
+	describe("a failed secret lookup is worded by its cause", () => {
+		const failWith = (cause: unknown) =>
+			dispatchTool(
+				"list_runs",
+				{},
+				ctxWith(runClient({ getGlobals: vi.fn().mockRejectedValue(cause) }))
+			);
+
+		test("an engine that is down leads with the outage, not the setting", async () => {
+			const res = await failWith(new TypeError("fetch failed"));
+			const text = firstText(res);
+			expect(text.startsWith("Could not reach the Vayu engine")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+			expect(res.structuredContent).toMatchObject({
+				error: { class: "unreachable", retryable: true },
+			});
+		});
+
+		test("an engine that answered 5xx leads with its answer and stays transient", async () => {
+			const res = await failWith(
+				new EngineRequestError("Engine responded 500 for GET /globals", 500, "boom")
+			);
+			const text = firstText(res);
+			expect(text.startsWith("Engine error (500)")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+			expect(res.structuredContent).toMatchObject({ error: { class: "transient" } });
+		});
+
+		test.each([
+			["a cause that says nothing about the engine", new Error("engine hiccup")],
+			["an engine refusal of the lookup itself", new EngineRequestError("403", 403, "no")],
+		])("%s keeps the masking message", async (_, cause) => {
+			const res = await failWith(cause);
+			const text = firstText(res);
+			expect(text.startsWith("Nothing is returned: masking this result's secrets")).toBe(
+				true
+			);
+			expect(text).not.toContain("Unexpected error");
+			expect(res.structuredContent).toMatchObject({ error: { class: "transient" } });
+		});
+	});
+
 	test.each([
 		["list_runs", {}],
 		["get_run", { runId: "run_1" }],
