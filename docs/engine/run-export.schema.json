@@ -398,6 +398,9 @@
             "kneeConcurrency": {"type": "number"},
             "kneeP99Ms": {"type": "number"},
             "kneeErrorPct": {"type": "number"},
+            "saturationConcurrency": {"type": "number"},
+            "saturationRps": {"type": "number"},
+            "saturationP99Ms": {"type": "number"},
             "levels": {
               "type": "array",
               "items": {

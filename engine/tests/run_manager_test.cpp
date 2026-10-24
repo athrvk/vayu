@@ -201,6 +201,31 @@ TEST (ExpectedRequestsFor, ADurationItCannotReadReservesForTheDefaultMinute) {
     EXPECT_EQ (expected_requests_for ({ { "duration", nullptr } }), minute);
 }
 
+// #2834: a stream's drain is sized by its duration cap and backstop, never by
+// the request timeout. Mutation check: return timeout + grace for a stream and
+// the stream case fails here, and `LoadDrain` below sees the stream cancelled.
+TEST (NaturalEndDrainMs, AnOrdinaryRequestWaitsItsTimeoutPlusTheGrace) {
+    EXPECT_EQ (natural_end_drain_ms (std::nullopt, 200), 200 + 2000);
+    EXPECT_EQ (natural_end_drain_ms (std::nullopt, 45000), 45000 + 2000);
+}
+
+TEST (NaturalEndDrainMs, AStreamWaitsItsCapPlusTheBackstopAndTheGrace) {
+    vayu::StreamBounds bounds;
+    bounds.max_duration_ms = 4000;
+    bounds.max_events      = 10;
+    EXPECT_EQ (natural_end_drain_ms (bounds, 200), 4000 + 5000 + 2000);
+    // The request timeout plays no part, whichever side of the cap it is on.
+    EXPECT_EQ (natural_end_drain_ms (bounds, 600000), 4000 + 5000 + 2000);
+    EXPECT_EQ (natural_end_drain_ms (bounds, 0), 4000 + 5000 + 2000);
+}
+
+TEST (NaturalEndDrainMs, ATimeoutThatIsNotPositiveFallsBackToTheDefault) {
+    const int64_t expected =
+    vayu::core::constants::server::DEFAULT_TIMEOUT_MS + int64_t{ 2000 };
+    EXPECT_EQ (natural_end_drain_ms (std::nullopt, 0), expected);
+    EXPECT_EQ (natural_end_drain_ms (std::nullopt, -1), expected);
+}
+
 // A RunContext that never reaches collect_metrics (a test, or a run whose
 // metrics thread has not read config yet) must still be bounded.
 TEST (RunContextTopic, RingIsBoundedBeforeConfigIsRead) {
@@ -896,6 +921,49 @@ TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
         EXPECT_NEAR (achievement,
         static_cast<double> (sent) * 100.0 / static_cast<double> (expected), 0.1);
         EXPECT_GT (achievement, 95.0) << "the drain is back in the denominator";
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2834: a streaming run's natural end waits for its streams to reach their
+// cap. `/sse-ticks` streams for 6 s and the cap ends it as a success at 4 s;
+// a drain sized by the 200 ms request timeout gives up at 2.2 s and records
+// the stream as a cancelled error. Asserted on the recorded outcome, never
+// the clock. Mutation check: size a stream's drain by its timeout again in
+// `natural_end_drain_ms` and every assertion below fails.
+TEST (LoadDrain, AStreamingRunsNaturalEndWaitsForTheStreamsCap) {
+    const std::string db_path = "test_load_drain_stream.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.sse_ticks_url () }, { "mode", "iterations" },
+            { "iterations", 1 }, { "concurrency", 1 }, { "timeout", 200 },
+            { "workers", 1 }, { "stream", true }, { "maxStreamDurationMs", 4000 } };
+        const std::string run_id = "run_load_drain_stream";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& summary = report.at ("summary");
+        EXPECT_EQ (summary.at ("successfulRequests").get<size_t> (), 1u)
+        << report.dump ();
+        EXPECT_EQ (summary.at ("failedRequests").get<size_t> (), 0u) << report.dump ();
+        EXPECT_FALSE (report.at ("errors").at ("types").contains ("cancelled"))
+        << report.dump ();
 
         manager.shutdown ();
     }

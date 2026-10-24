@@ -29,10 +29,16 @@ import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
 import { presentCollection } from "../collection-shape.js";
 import { engineDownRemedy, settingRemedy } from "../remedy.js";
 import { targetPolicyRefusalOfErrorBody, type GuardResult } from "../safety.js";
-import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
+import {
+	runOutputShape,
+	secretsShape,
+	withholdRowSecrets,
+	type MaskingIncompleteError,
+} from "../withhold.js";
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 import {
 	compactBody,
+	engineCode,
 	engineRefusalClass,
 	engineSentence,
 	FAILURES,
@@ -134,6 +140,18 @@ export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
  * its own error around the cause but keeps the cause's class.
  */
 export function engineFailure(err: unknown, ctx: ToolContext): Failure {
+	return (
+		recognisedEngineFailure(err, ctx) ?? {
+			// Nothing names it (a reset socket, a body that would not parse), and
+			// nothing says the call was wrong, so it is worth one more try.
+			message: `Unexpected error: ${err instanceof Error ? err.message : String(err)}`,
+			failureClass: "transient",
+		}
+	);
+}
+
+/** {@link engineFailure} for a cause it can name; undefined for the `Unexpected error` fallback. */
+function recognisedEngineFailure(err: unknown, ctx: ToolContext): Failure | undefined {
 	if (err instanceof EngineRequestError) return engineRefusal(err, ctx);
 	const msg = err instanceof Error ? err.message : String(err);
 	// An abort means the engine was reachable and working - the opposite of the
@@ -156,9 +174,33 @@ export function engineFailure(err: unknown, ctx: ToolContext): Failure {
 			failureClass: "unreachable",
 		};
 	}
-	// Nothing above names it (a reset socket, a body that would not parse), and
-	// nothing says the call was wrong, so it is worth one more try.
-	return { message: `Unexpected error: ${msg}`, failureClass: "transient" };
+	return undefined;
+}
+
+const MASKING_WITHHELD_NOTE =
+	"Nothing is returned: a result that may carry a secret is withheld whole until the engine answers.";
+
+/**
+ * The error result for a read whose masking lookup failed (#2780). When the
+ * lookup's cause is the engine being down or failing, that is the lead - the
+ * agent's remedy is the engine, never a Reveal secrets setting - and the
+ * withholding is the second sentence. A cause that says nothing about the
+ * engine keeps the masking message whole, so an `Unexpected error:` fallback
+ * never leads.
+ */
+export function maskingIncompleteResult(err: MaskingIncompleteError, ctx: ToolContext): ToolResult {
+	const outage = recognisedEngineFailure(err.cause, ctx);
+	if (outage?.failureClass !== "unreachable" && outage?.failureClass !== "transient") {
+		return errorResult(err.message, "transient");
+	}
+	const { interrupted } = outage;
+	// An interrupted failure's text is rebuilt per tool from its parts, so the note
+	// rides in the tail or `describeFailure` would drop it.
+	if (interrupted) {
+		const tail = [interrupted.tail, MASKING_WITHHELD_NOTE].filter(Boolean).join(" ");
+		return failureResult({ ...outage, interrupted: { ...interrupted, tail } });
+	}
+	return failureResult({ ...outage, message: `${outage.message} ${MASKING_WITHHELD_NOTE}` });
 }
 
 /** An HTTP refusal the engine answered. */
@@ -173,7 +215,11 @@ function engineRefusal(err: EngineRequestError, ctx: ToolContext): Failure {
 	// Kept apart from the message so the one words layer can name the missing
 	// object for a tool that declared what its ids are (#2778).
 	if (err.status !== 404) return failure;
-	return { ...failure, engineNotFound: engineSentence(err.body) ?? err.body };
+	return {
+		...failure,
+		engineNotFound: engineSentence(err.body) ?? err.body,
+		engineCode: engineCode(err.body),
+	};
 }
 
 /**

@@ -342,6 +342,13 @@ export interface McpTool {
 	 * the registry.
 	 */
 	notFound?: NotFoundDeclaration | readonly NotFoundDeclaration[];
+	/**
+	 * What to say for an engine 404 that carries one of these `code`s, instead of
+	 * the unknown-id sentence. For a 404 that is not "no such id": the id exists
+	 * and the engine says why the answer is gone. The class stays `not_found`;
+	 * a code not listed here, or a 404 with none, is worded as `notFound` words it.
+	 */
+	notFoundByCode?: Readonly<Record<string, string>>;
 	handler: (
 		args: Record<string, unknown>,
 		ctx: ToolContext,

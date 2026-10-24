@@ -42,6 +42,7 @@ import {
 import {
 	errorResult,
 	isRecord,
+	maskingIncompleteResult,
 	NOTHING_CHANGED,
 	STARTED_RUNS,
 	str,
@@ -229,7 +230,12 @@ function failureAnswer(
 	const tool = findTool(toolName);
 	const { text, error } = describeFailure(
 		FAILURES.get(result) ?? unclassified(result, toolName, ctx),
-		{ retry: interruptedAdviceFor(tool), notFound: tool?.notFound, args }
+		{
+			retry: interruptedAdviceFor(tool),
+			notFound: tool?.notFound,
+			notFoundByCode: tool?.notFoundByCode,
+			args,
+		}
 	);
 	const [, ...caveats] = result.content;
 	return resolveRemedyTokens(
@@ -330,9 +336,7 @@ async function serveCall(
 		result = await tool.handler(args, ctx, signal);
 	} catch (err) {
 		if (err instanceof ToolArgError) return errorResult(err.message, err.failureClass);
-		// The projection's own lookup failed; its message says to retry once the
-		// engine answers.
-		if (err instanceof MaskingIncompleteError) return errorResult(err.message, "transient");
+		if (err instanceof MaskingIncompleteError) return maskingIncompleteResult(err, ctx);
 		return errorResult(
 			`Unexpected error: ${err instanceof Error ? err.message : String(err)}`,
 			"transient"

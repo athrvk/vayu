@@ -219,6 +219,48 @@ describe("UPlotChart - whole-number ticks", () => {
 	});
 });
 
+describe("UPlotChart - isolated readings", () => {
+	// The indices uPlot would draw a marker at for series 1, read off the real plot.
+	const markedIndices = (values: (number | null)[]): number[] | null => {
+		const xs = values.map((_, i) => i);
+		render(<UPlotChart data={[xs, values]} series={rps} />);
+		const plot = last();
+		const points = plot.series[1].points;
+		return typeof points?.filter === "function" ? points.filter(plot, 1, false) : null;
+	};
+
+	it("marks a reading whose neighbours are both gaps, which a line cannot draw", () => {
+		expect(markedIndices([null, 301, null, 302, null])).toEqual([1, 3]);
+	});
+
+	it("marks nothing on a continuous series", () => {
+		expect(markedIndices([1, 2, 3])).toBeNull();
+	});
+
+	it("marks nothing on a reading that has a neighbour, as the line reaches it", () => {
+		expect(markedIndices([null, 5, 6, null, 7, 8])).toBeNull();
+	});
+
+	it("treats a data end as a gap", () => {
+		expect(markedIndices([301, null, 302, 303, null, 304])).toEqual([0, 5]);
+	});
+
+	it("keeps a scatter series' own points", () => {
+		render(
+			<UPlotChart
+				data={[
+					[0, 1, 2],
+					[4, 5, 6],
+				]}
+				series={[{ ...rps[0], kind: "scatter" }]}
+			/>
+		);
+		const plot = last();
+		const show = plot.series[1].points?.show;
+		expect(typeof show === "function" && show(plot, 1, 0, 2)).toBe(true);
+	});
+});
+
 describe("UPlotChart - annotation hover", () => {
 	const hoverRows = (seconds: number): string[] => {
 		const plot = last();

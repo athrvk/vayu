@@ -284,7 +284,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
-| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
+| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1. The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path and held by the engine to the URL it sends after any pre-request script (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
@@ -360,7 +360,9 @@ Notes:
   `sloMs` and `stepDuration` are that mode's own two fields, and
   `get_run_report` returns the search's findings under `capacity`, including
   each level's `errorPct`, the `kneeErrorPct` and the `maxErrorPct` limit a
-  level breaches above, beside the p99s. Every shape
+  level breaches above, beside the p99s. A `plateau` stop also carries
+  `saturationConcurrency`, `saturationRps` and `saturationP99Ms`, the level
+  where throughput stopped growing. Every shape
   field the agent leaves out is sent as the engine's default for the mode
   ([Load defaults](#load-defaults)), so the caps judge the run that will start,
   the confirmation preview states it in words ("constant_concurrency, 100
@@ -368,6 +370,9 @@ Notes:
   payload, and the started result's `shape` object carries the same fields.
   `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
+  The engine drops a run's live buffer 60 s after it ends by default
+  (`liveRetentionMs`); the answer after that is the expired-buffer sentence
+  described under [Error results](#error-results), not the engine's body.
 - **What a load run *keeps* is settable too** (issue #760), which is what the
   MCP surface was missing rather than any part of the load shape:
   `successSamplePeriod` (the engine's `success_sample_rate` - a **period**, keep
@@ -395,12 +400,12 @@ Notes:
   `maxRedirects` is bounded 0-100 here because `POST /runs` has no guard of its
   own and the value reaches `CURLOPT_MAXREDIRS`, where a negative means
   *unlimited*.
-  **There is no per-run timeout, and that is not an omission**: the engine has
-  no such field - every transfer is bounded by the `defaultTimeout` setting
-  (`resolve_request_timeout_ms`), which `update_engine_config` changes, the run's
-  OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
-  included (issues #2833, #2841). Four transfers keep bounds of their own: a stream
-  ends on its idle timeout and its duration and event caps, never a
+  **The tool exposes no per-run `timeout`, and that is not an omission**:
+  `POST /runs` accepts one, but a run started here takes the `defaultTimeout`
+  setting (`resolve_request_timeout_ms`), which `update_engine_config` changes -
+  the run's OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
+  included (issues #2833, #2841). Four transfers keep bounds of their own: a
+  stream ends on its idle timeout and its duration and event caps, never a
   whole-transfer deadline; the import fetch has its own 30 s and stall timeout;
   the connection test its 10 s; and the server-vitals monitor its scrape
   timeout. Recorded here so it is not re-derived as a gap each time the schema
@@ -2067,7 +2072,7 @@ by the wrapper `server.ts` puts in front of its `tools/call` handler.
 | `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
 | `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
 | `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry; worded as below |
-| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed, a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
+| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed (when its cause is no engine failure, else it is worded as that failure, below), a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
 | `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
 
 **An id that names nothing** (#2778) is answered with the missing object and
@@ -2087,8 +2092,18 @@ the one whose noun the engine's sentence contains ("Example not found"); an
 `idArg` that is a list (`compare_runs`' two run ids) names an id only when the
 engine's sentence carries it, since nothing else says which was missing. A kind
 with no list tool (a spec, whose id comes from a collection's binding) ends at
-the cause. A 404 the declaration does not describe, and a tool that declares
-nothing, answers the engine's body instead. A lookup a tool makes itself
+the cause. A tool can also word a 404 by the engine's `code`
+(`notFoundByCode`, read from the flat `{"error", "code", "hint"}` body or the
+nested `{"error": {"code", "message"}}` one by `engineCode` in `failure.ts`),
+for a 404 that is not an unknown id. `get_live_metrics` is the one that does:
+the engine answers `live_expired` for a run that is stored but whose live
+buffer has aged out, and the text is `The live buffer for this run expired
+(kept 60 s after it ends); the run still exists - read get_run_report(runId).`,
+in the `not_found` class, without the engine's `Use /runs/<id>/report` hint
+(the 60 s is the engine's `liveRetentionMs` default). Its `run_not_found` keeps
+the unknown-id sentence above. A 404 with no code (an older engine), a 404
+the declaration does not describe, and a tool that declares nothing answer the
+engine's body instead. A lookup a tool makes itself
 before it calls the engine (a delete that reads the row to name it in the
 prompt, a variable scope) words a miss with the same sentence
 (`unknownIdText`), so the text does not depend on which step noticed. Every
@@ -2617,6 +2632,16 @@ as an error result, a resource or a prompt as a failed request
 `run_collection_smoke`) has already sent it when it answers so; the run is in
 `list_runs` once the engine answers again. With reveal on none of the reads is
 made.
+
+A tool words that error by the lookup's cause (#2780, `maskingIncompleteResult`
+in `kit.ts`). When the engine refused the connection or answered with a failure
+it classes `unreachable` or `transient`, the answer is the same one every other
+tool gives (`Could not reach the Vayu engine ...`, `Engine error (500): ...`),
+in that class, followed by a sentence that the result is withheld whole until
+the engine answers; the Reveal secrets setting is not mentioned, since it is
+not a remedy for an outage. Any other cause, including the `Unexpected error`
+fallback and an engine refusal of the lookup itself (a 4xx), keeps the masking
+message naming the lookup that failed.
 
 The stored trace stays raw on purpose: Vayu's own History shows what went over
 the wire, and the engine's rows are unchanged. Only the MCP read is masked.

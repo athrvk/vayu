@@ -474,10 +474,11 @@ void read_optional_bool (const nlohmann::json& obj, const char* key, std::option
 //
 // Every field is optional on the way in: `max_healthy_*` is absent when the
 // very first level already breached, `knee_*` when the search ended for a
-// reason other than latency or errors, and a summary written by an older
-// engine has none of them (nor the error share, before #2815). Only a section that carries at least the levels it measured is
-// reported at all - an empty one says nothing a reader can act on, the same
-// rule the thresholds section follows.
+// reason other than latency or errors, `saturation_*` when it did not end on a
+// plateau, and a summary written by an older engine has none of them (nor the
+// error share, before #2815). Only a section that carries at least the levels
+// it measured is reported at all - an empty one says nothing a reader can act
+// on, the same rule the thresholds section follows.
 void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) {
     if (!stored.contains ("levels") || !stored["levels"].is_array ()) {
         return;
@@ -530,6 +531,17 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
         capacity["kneeConcurrency"] = concurrency;
         capacity["kneeP99Ms"]       = p99_ms;
         copy_optional_number (stored, "knee_error_pct", capacity, "kneeErrorPct");
+    }
+    if (stored.contains ("saturation_concurrency")) {
+        size_t concurrency = 0;
+        double rps         = 0.0;
+        double p99_ms      = 0.0;
+        read_number (stored, "saturation_concurrency", concurrency);
+        read_number (stored, "saturation_rps", rps);
+        read_number (stored, "saturation_p99_ms", p99_ms);
+        capacity["saturationConcurrency"] = concurrency;
+        capacity["saturationRps"]         = rps;
+        capacity["saturationP99Ms"]       = p99_ms;
     }
 
     extras.has_capacity = true;

@@ -1393,6 +1393,8 @@ type ScopeName = keyof typeof SCOPE_LOOKUPS;
  * failed. Masking with the reads that answered would hand an agent every
  * secret the failed one holds, so the read it guards answers this instead:
  * a tool as an error result, a resource or a prompt as a failed request.
+ * `cause` is the read's rejection, which a tool classes to decide whether the
+ * engine being down leads the answer (#2780).
  */
 export class MaskingIncompleteError extends Error {
 	constructor(failed: readonly ScopeName[], reason: unknown) {
@@ -1400,7 +1402,8 @@ export class MaskingIncompleteError extends Error {
 		super(
 			`Nothing is returned: masking this result's secrets could not complete, because the ${failed.join(", ")} lookup${failed.length === 1 ? "" : "s"} it reads the secret values from failed (${detail}). ` +
 				`With ${REVEAL_SETTING_NAME} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
-				`Retry once the engine answers (${ENGINE_DOWN_TOKEN}); a call that sent a request has already sent it, so check list_runs before sending it again.`
+				`Retry once the engine answers (${ENGINE_DOWN_TOKEN}); a call that sent a request has already sent it, so check list_runs before sending it again.`,
+			{ cause: reason }
 		);
 		this.name = "MaskingIncompleteError";
 	}

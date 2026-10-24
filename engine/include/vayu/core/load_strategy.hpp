@@ -438,8 +438,8 @@ struct ResultAnnotations {
  * The event loop cancels with `ErrorCode::Cancelled` on both of a run's ways
  * out: a Stop (`should_stop` set, `stop(false)`) and the natural end's drain
  * deadline. Only the first is not an error. A request still in flight past its
- * own timeout plus the grace never answered, and is counted as the failure it
- * is.
+ * own bound plus the grace (`natural_end_drain_ms`) never answered, and is
+ * counted as the failure it is.
  */
 [[nodiscard]] bool is_stop_cancellation (const RunContext& context, const vayu::Error& error);
 

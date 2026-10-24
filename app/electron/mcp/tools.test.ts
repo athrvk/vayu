@@ -42,6 +42,7 @@ import {
 	type ToolResult,
 } from "./tools.js";
 import type { McpHost } from "./tools/contract.js";
+import { engineCode } from "./tools/failure.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
@@ -9653,19 +9654,97 @@ describe("an unknown id names the object and its list tool", () => {
 	const engine404 = (body: string, path = "/runs/run_x/report") =>
 		new EngineRequestError(`Engine responded 404 for GET ${path}`, 404, body);
 
-	test("a live-metrics 404 for a run that exists is not worded as an unknown id", async () => {
-		const body = JSON.stringify({
+	describe("get_live_metrics 404", () => {
+		const LIVE_EXPIRED =
+			"The live buffer for this run expired (kept 60 s after it ends); the run still exists - read get_run_report(runId).";
+		const liveExpiredBody = JSON.stringify({
 			error: "Live metrics for this run are no longer retained",
 			code: "live_expired",
 			hint: "Use /runs/run_x/report for the stored report",
 		});
-		const client = fakeClient({
-			getLiveMetricsSnapshot: vi.fn().mockRejectedValue(engine404(body, "/runs/run_x/live")),
+		const liveCall = async (body: string) =>
+			dispatchTool(
+				"get_live_metrics",
+				{ runId: "run_x" },
+				ctxWith(
+					fakeClient({
+						getLiveMetricsSnapshot: vi
+							.fn()
+							.mockRejectedValue(engine404(body, "/runs/run_x/live")),
+					})
+				)
+			);
+
+		test("live_expired says the buffer expired and the run still exists, in the not_found class", async () => {
+			const res = await liveCall(liveExpiredBody);
+			expect(res.isError).toBe(true);
+			const text = firstText(res);
+			expect(text).toBe(LIVE_EXPIRED);
+			expect(text).not.toContain("/runs/");
+			expect(text).not.toContain("No run with id");
+			expect(res.structuredContent).toEqual({
+				error: { class: "not_found", retryable: false, advice: LIVE_EXPIRED },
+			});
 		});
-		const res = await dispatchTool("get_live_metrics", { runId: "run_x" }, ctxWith(client));
-		const text = firstText(res);
-		expect(text).not.toContain("No run with id");
-		expect(text).toContain("no longer retained");
+
+		test("live_expired is read from the nested error shape too", async () => {
+			const res = await liveCall(engineErrorBody("live_expired", "Live metrics are gone"));
+			expect(firstText(res)).toBe(LIVE_EXPIRED);
+		});
+
+		test("run_not_found keeps the unknown-id text, with no hint path", async () => {
+			const res = await liveCall(
+				JSON.stringify({
+					error: "Run not found or expired",
+					code: "run_not_found",
+					hint: "Use /runs/run_x/report for the stored report",
+				})
+			);
+			expect(firstText(res)).toBe(
+				'No run with id "run_x" (it may have been deleted or the id is mistyped). ' +
+					"List runs with list_runs."
+			);
+			expect(res.structuredContent).toMatchObject({ error: { class: "not_found" } });
+		});
+
+		test("a 404 with no code falls back to the engine's words", async () => {
+			const res = await liveCall(
+				JSON.stringify({ error: "Live metrics for this run are no longer retained" })
+			);
+			const text = firstText(res);
+			expect(text).not.toBe(LIVE_EXPIRED);
+			expect(text).toBe(
+				'Engine error (404): {"error":"Live metrics for this run are no longer retained"}'
+			);
+			expect(res.structuredContent).toMatchObject({ error: { class: "not_found" } });
+		});
+
+		test("the sentence is the tool's own: another tool's live_expired is not reworded", async () => {
+			const client = fakeClient({
+				getRunReport: vi.fn().mockRejectedValue(engine404(liveExpiredBody)),
+			});
+			const res = await dispatchTool("get_run_report", { runId: "run_x" }, ctxWith(client));
+			expect(firstText(res)).not.toBe(LIVE_EXPIRED);
+		});
+
+		test("the description names the retention window", () => {
+			const description = descriptionOf(TOOLS.find((t) => t.name === "get_live_metrics"));
+			expect(description).toContain("60 s");
+			expect(description).toContain("get_run_report");
+		});
+	});
+
+	describe("engineCode", () => {
+		test.each([
+			["flat", '{"error":"x","code":"live_expired"}', "live_expired"],
+			["nested", '{"error":{"code":"not_found","message":"x"}}', "not_found"],
+			["absent", '{"error":"x"}', undefined],
+			["empty", '{"error":"x","code":""}', undefined],
+			["not JSON", "plain text", undefined],
+			["JSON null", "null", undefined],
+		])("%s body", (_shape, body, expected) => {
+			expect(engineCode(body)).toBe(expected);
+		});
 	});
 
 	test("a 404 on get_run_report names the run and list_runs, with no path and no JSON", async () => {
@@ -15980,6 +16059,55 @@ describe("secret withholding", () => {
 
 		const revealed = await read("get_run_report", client, REVEAL, { runId: "run_1" });
 		expect(revealed.body).toEqual(RUN_REPORT);
+	});
+
+	/*
+	 * With the engine down the masking lookup is the first thing to fail, but the
+	 * outage is the news: a Reveal secrets setting must never read as its remedy
+	 * (#2780).
+	 */
+	describe("a failed secret lookup is worded by its cause", () => {
+		const failWith = (cause: unknown) =>
+			dispatchTool(
+				"list_runs",
+				{},
+				ctxWith(runClient({ getGlobals: vi.fn().mockRejectedValue(cause) }))
+			);
+
+		test("an engine that is down leads with the outage, not the setting", async () => {
+			const res = await failWith(new TypeError("fetch failed"));
+			const text = firstText(res);
+			expect(text.startsWith("Could not reach the Vayu engine")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+			expect(res.structuredContent).toMatchObject({
+				error: { class: "unreachable", retryable: true },
+			});
+		});
+
+		test("an engine that answered 5xx leads with its answer and stays transient", async () => {
+			const res = await failWith(
+				new EngineRequestError("Engine responded 500 for GET /globals", 500, "boom")
+			);
+			const text = firstText(res);
+			expect(text.startsWith("Engine error (500)")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+			expect(res.structuredContent).toMatchObject({ error: { class: "transient" } });
+		});
+
+		test.each([
+			["a cause that says nothing about the engine", new Error("engine hiccup")],
+			["an engine refusal of the lookup itself", new EngineRequestError("403", 403, "no")],
+		])("%s keeps the masking message", async (_, cause) => {
+			const res = await failWith(cause);
+			const text = firstText(res);
+			expect(text.startsWith("Nothing is returned: masking this result's secrets")).toBe(
+				true
+			);
+			expect(text).not.toContain("Unexpected error");
+			expect(res.structuredContent).toMatchObject({ error: { class: "transient" } });
+		});
 	});
 
 	test.each([

@@ -140,11 +140,18 @@ struct CapacitySummary {
     /// mark an over-limit level without re-deriving the constant.
     double max_error_pct = 0.0;
     std::string stop_reason;
-    /// The highest level that breached on neither latency nor errors, and
-    /// what it did there. Absent when the very first level already breached -
-    /// the search never found a healthy level, and reporting zero would read
-    /// like one.
+    /// The highest level tried that breached on neither latency nor errors,
+    /// and what it did there. Absent when the very first level already
+    /// breached - the search never found a healthy level, and reporting zero
+    /// would read like one. On a plateau this is the last level tried, past
+    /// where throughput stopped growing; see `saturation`.
     std::optional<CapacityWindow> max_healthy;
+    /// The lowest healthy level whose throughput the best healthy level beat
+    /// by less than `plateau_gain_pct`: where the service stopped converting
+    /// concurrency into work. Absent unless the search stopped `plateau` -
+    /// any other stop never observed a plateau, and naming a level would
+    /// claim one.
+    std::optional<CapacityWindow> saturation;
     /// The level the service gave out at: the first breaching level above
     /// `max_healthy`. Absent unless the search stopped `slo_exceeded` or
     /// `errors_exceeded` (a cap, a deadline, a plateau inside the budget saw

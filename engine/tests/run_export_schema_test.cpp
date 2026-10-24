@@ -277,6 +277,31 @@ TEST_F (RunExportSchemaTest, AStoppedRunValidates) {
     EXPECT_FALSE (document["report"]["summary"].contains ("avgInFlight"));
 }
 
+// #2817: the allowlist has to name the saturation keys or the export drops the
+// level a plateau reports, and the schema has to name them or the document is
+// refused. Mutation check: drop "saturationRps" from CAPACITY_KEYS and the
+// presence assertion fails; drop it from the schema and the validation does.
+TEST_F (RunExportSchemaTest, ARunThatStoppedOnAPlateauValidatesWithItsSaturation) {
+    json summary        = healthy_summary ();
+    summary["capacity"] = { { "slo_ms", 200 }, { "max_error_pct", 1.0 },
+        { "stop_reason", "plateau" },
+        { "levels",
+        json::array ({ { { "concurrency", 8 }, { "rps", 156 }, { "p99_ms", 52 }, { "error_pct", 0.0 } },
+        { { "concurrency", 10 }, { "rps", 156 }, { "p99_ms", 103 }, { "error_pct", 0.0 } },
+        { { "concurrency", 12 }, { "rps", 156 }, { "p99_ms", 103 }, { "error_pct", 0.0 } } }) },
+        { "max_healthy_concurrency", 12 }, { "max_healthy_rps", 156 },
+        { "p99_at_max_healthy_ms", 103 }, { "saturation_concurrency", 8 },
+        { "saturation_rps", 156 }, { "saturation_p99_ms", 52 } };
+    seed ("run_plateau", vayu::RunStatus::Completed, summary);
+
+    const json document  = expect_valid (json{ { "runId", "run_plateau" } });
+    const auto& capacity = document["report"]["capacity"];
+    EXPECT_EQ (capacity.value ("saturationConcurrency", -1), 8);
+    EXPECT_DOUBLE_EQ (capacity.value ("saturationRps", -1.0), 156.0);
+    EXPECT_DOUBLE_EQ (capacity.value ("saturationP99Ms", -1.0), 52.0);
+    EXPECT_FALSE (capacity.contains ("kneeConcurrency"));
+}
+
 TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {
     seed ("run_healthy", vayu::RunStatus::Stopped, healthy_summary ());
     seed ("run_failing", vayu::RunStatus::Completed, failing_summary ());

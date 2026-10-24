@@ -158,6 +158,29 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config);
 
 /**
+ * @brief How long a load run's natural end waits on in-flight transfers before
+ *        cancelling them: the longest a transfer can legitimately take, plus
+ *        `STOP_DRAIN_GRACE_MS` (#2834).
+ *
+ * For an ordinary request that is @p timeout_ms (the compiled-in default when
+ * it is not positive). A stream is not bounded by the request timeout: its
+ * transfer runs to `max_duration_ms` and is backstopped
+ * `LOAD_STREAM_TIMEOUT_GRACE_MS` later (`curl_utils.cpp`), so a drain sized by
+ * the timeout cancels a healthy stream long before its cap. A user Stop does
+ * not drain at all and never reads this.
+ */
+[[nodiscard]] inline int64_t
+natural_end_drain_ms (const std::optional<vayu::StreamBounds>& stream_bounds, int timeout_ms) {
+    if (stream_bounds) {
+        return stream_bounds->max_duration_ms + constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS +
+        constants::event_loop::STOP_DRAIN_GRACE_MS;
+    }
+    const int64_t transfer_ms =
+    timeout_ms > 0 ? timeout_ms : constants::server::DEFAULT_TIMEOUT_MS;
+    return transfer_ms + constants::event_loop::STOP_DRAIN_GRACE_MS;
+}
+
+/**
  * @brief Engine-config-backed defaults a run needs at construction time.
  *
  * RunContext is built from the run's JSON alone - it holds no Database - so

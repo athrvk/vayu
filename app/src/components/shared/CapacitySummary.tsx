@@ -16,11 +16,20 @@
  * table below it is the evidence, so a reader who distrusts the headline can
  * see the shape of the curve it came from.
  *
+ * The sentence follows why the search stopped, because the same
+ * `maxHealthy*` figures mean different things under each reason: a measured
+ * capacity when the target gave out (latency or errors), a floor when the
+ * search ran out of ceiling, time or patience, and an overshoot when throughput
+ * plateaued (the last level tried, not where the curve flattened - the
+ * `saturation*` figures name that one). Reading all of them as "Sustained N"
+ * claims a limit the search never found.
+ *
  * Silent for every other mode. A fixed-target run measured a point rather than
  * a curve, so an empty shell here would imply it looked for a limit and found
  * none.
  */
 
+import type { ReactNode } from "react";
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
@@ -50,7 +59,7 @@ const STOP_REASONS: Record<string, { label: string; detail: string; degraded: bo
 	},
 	plateau: {
 		label: "Throughput plateaued",
-		detail: "More virtual users stopped buying more throughput, while latency still held.",
+		detail: "More virtual users stopped buying more throughput.",
 		degraded: true,
 	},
 	cap_reached: {
@@ -108,6 +117,147 @@ function KneeEvidence({ capacity }: { capacity: Capacity }) {
 	);
 }
 
+/** A search that ran out of ceiling, time or patience: its best level is a floor, not a limit. */
+const OPEN_ENDED_STOPS: ReadonlySet<string> = new Set(["cap_reached", "deadline", "stopped"]);
+
+/** The stops with no report field naming the level that was open when they hit. */
+const INTERRUPTED_STOPS: ReadonlySet<string> = new Set(["deadline", "stopped"]);
+
+type HeadlineKind =
+	"judgedNothing" | "plateau" | "openEnded" | "sustained" | "noLevelOnErrors" | "noLevelOnBudget";
+
+// A search can end before its first level closed - `stepDuration` longer than
+// `duration`, or a run stopped seconds after it started - and the engine
+// reports the section anyway, because "judged nothing" is itself the finding
+// that says to lengthen the run or shorten the step. Absent levels and absent
+// `maxHealthy*` are therefore two different states, and only the empty-levels
+// check separates them: without it the "no level met the budget" sentence
+// claims a measurement at the lowest level that was never taken, directly
+// contradicting the "Ran out of time" badge beside it.
+function headlineKind(capacity: Capacity): HeadlineKind {
+	if (capacity.levels.length === 0) return "judgedNothing";
+	// Ahead of the held-level checks: a plateau's `maxHealthy*` is the last level
+	// tried, which is not what the headline may print.
+	if (capacity.stopReason === "plateau") return "plateau";
+	if (capacity.maxHealthyConcurrency === undefined) {
+		return capacity.stopReason === "errors_exceeded" ? "noLevelOnErrors" : "noLevelOnBudget";
+	}
+	return OPEN_ENDED_STOPS.has(capacity.stopReason) ? "openEnded" : "sustained";
+}
+
+function Figure({ children }: { children: ReactNode }) {
+	return <span className="font-mono font-semibold">{children}</span>;
+}
+
+/** Where throughput stopped growing; a plateau stored before `saturation*` existed names no level. */
+function PlateauHeadline({ capacity }: { capacity: Capacity }) {
+	const { saturationConcurrency, saturationRps, saturationP99Ms } = capacity;
+	if (
+		saturationConcurrency === undefined ||
+		saturationRps === undefined ||
+		saturationP99Ms === undefined
+	) {
+		return <>Throughput stopped growing. More only queued.</>;
+	}
+	return (
+		<>
+			Throughput stopped growing at <Figure>{saturationConcurrency}</Figure>{" "}
+			{concurrencyUnit(saturationConcurrency)} (<Figure>{formatRate(saturationRps)}</Figure>{" "}
+			req/s, p99 <Figure>{formatLatency(saturationP99Ms)}</Figure>). More only queued.
+		</>
+	);
+}
+
+/** A floor: the target held this much and the search stopped for a reason of its own. */
+function OpenEndedHeadline({ capacity }: { capacity: Capacity }) {
+	const held = capacity.maxHealthyConcurrency ?? 0;
+	return (
+		<>
+			At least <Figure>{held}</Figure> {concurrencyUnit(held)} held the budget (
+			<Figure>{formatRate(capacity.maxHealthyRps ?? 0)}</Figure> req/s, p99{" "}
+			<Figure>{formatLatency(capacity.p99AtMaxHealthyMs ?? 0)}</Figure>). The search did not
+			find a limit.
+			{INTERRUPTED_STOPS.has(capacity.stopReason) &&
+				" The next level was still being measured."}
+		</>
+	);
+}
+
+function SustainedHeadline({ capacity }: { capacity: Capacity }) {
+	const held = capacity.maxHealthyConcurrency ?? 0;
+	return (
+		<>
+			Sustained <Figure>{held}</Figure> {concurrencyUnit(held)} at{" "}
+			<Figure>{formatRate(capacity.maxHealthyRps ?? 0)}</Figure> req/s, with a p99 of{" "}
+			<Figure>{formatLatency(capacity.p99AtMaxHealthyMs ?? 0)}</Figure> against a{" "}
+			{formatLatency(capacity.sloMs)} budget.
+		</>
+	);
+}
+
+function Headline({ capacity }: { capacity: Capacity }) {
+	switch (headlineKind(capacity)) {
+		case "judgedNothing":
+			return (
+				<>
+					The search ended before it finished measuring a single level, so it has nothing
+					to report about this target. Give the run longer than one step, or shorten the
+					step.
+				</>
+			);
+		case "plateau":
+			return <PlateauHeadline capacity={capacity} />;
+		case "openEnded":
+			return <OpenEndedHeadline capacity={capacity} />;
+		case "sustained":
+			return <SustainedHeadline capacity={capacity} />;
+		case "noLevelOnErrors":
+			return (
+				<>
+					No level stayed under the error limit - the target was already over it at the
+					fewest virtual users the search tried.
+				</>
+			);
+		case "noLevelOnBudget":
+			return (
+				<>
+					No level met the {formatLatency(capacity.sloMs)} budget - the target was already
+					over it at the fewest virtual users the search tried.
+				</>
+			);
+	}
+}
+
+/**
+ * Where the limit sits. With a held level beside it the knee is half of a
+ * bracket, not a point: the target held one level and gave out at the next, so
+ * the limit lies between them. Without a held level the first one tried already
+ * gave out, and the knee is all there is to say.
+ */
+function KneeSentence({ capacity, knee }: { capacity: Capacity; knee: number }) {
+	const held = capacity.maxHealthyConcurrency;
+	if (held === undefined) {
+		return (
+			<>
+				It gave out at <span className="font-mono font-medium text-foreground">{knee}</span>{" "}
+				{concurrencyUnit(knee)}
+				<KneeEvidence capacity={capacity} />.
+			</>
+		);
+	}
+	return (
+		<>
+			The limit lies between{" "}
+			<span className="font-mono font-medium text-foreground">{held}</span> and{" "}
+			<span className="font-mono font-medium text-foreground">{knee}</span>{" "}
+			{concurrencyUnit(knee)}: it held{" "}
+			<span className="font-mono font-medium text-foreground">{held}</span> and gave out at{" "}
+			<span className="font-mono font-medium text-foreground">{knee}</span>
+			<KneeEvidence capacity={capacity} />.
+		</>
+	);
+}
+
 export interface CapacitySummaryProps {
 	capacity: RunReport["capacity"];
 	className?: string;
@@ -117,17 +267,6 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 	if (!capacity) return null;
 
 	const stop = STOP_REASONS[capacity.stopReason];
-	const sustained = capacity.maxHealthyConcurrency !== undefined;
-	// A search can end before its first level closed - `stepDuration` longer
-	// than `duration`, or a run stopped seconds after it started - and the
-	// engine reports the section anyway, because "judged nothing" is itself the
-	// finding that says to lengthen the run or shorten the step. Absent levels
-	// and absent `maxHealthy*` are therefore two different states, and only this
-	// flag separates them: without it the "no level met the budget" sentence
-	// below claims a measurement at the lowest level that was never taken,
-	// directly contradicting the "Ran out of time" badge beside it.
-	const judgedNothing = capacity.levels.length === 0;
-	const stoppedOnErrors = capacity.stopReason === "errors_exceeded";
 	// A run stored before errors were judged has no `errorPct` on any level; its
 	// column would be empty cells, so the table keeps its three columns for it.
 	const showErrors = capacity.levels.some((level) => level.errorPct !== undefined);
@@ -162,48 +301,11 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 			</CardHeader>
 			<CardContent>
 				<p className="text-sm text-foreground">
-					{judgedNothing ? (
-						<>
-							The search ended before it finished measuring a single level, so it has
-							nothing to report about this target. Give the run longer than one step,
-							or shorten the step.
-						</>
-					) : sustained ? (
-						<>
-							Sustained{" "}
-							<span className="font-mono font-semibold">
-								{capacity.maxHealthyConcurrency}
-							</span>{" "}
-							{concurrencyUnit(capacity.maxHealthyConcurrency ?? 0)} at{" "}
-							<span className="font-mono font-semibold">
-								{formatRate(capacity.maxHealthyRps ?? 0)}
-							</span>{" "}
-							req/s, with a p99 of{" "}
-							<span className="font-mono font-semibold">
-								{formatLatency(capacity.p99AtMaxHealthyMs ?? 0)}
-							</span>{" "}
-							against a {formatLatency(capacity.sloMs)} budget.
-						</>
-					) : stoppedOnErrors ? (
-						<>
-							No level stayed under the error limit - the target was already over it
-							at the fewest virtual users the search tried.
-						</>
-					) : (
-						<>
-							No level met the {formatLatency(capacity.sloMs)} budget - the target was
-							already over it at the fewest virtual users the search tried.
-						</>
-					)}
+					<Headline capacity={capacity} />
 				</p>
 				{capacity.kneeConcurrency !== undefined && (
 					<p className="mt-1.5 text-sm text-muted-foreground">
-						It gave out at{" "}
-						<span className="font-mono font-medium text-foreground">
-							{capacity.kneeConcurrency}
-						</span>{" "}
-						{concurrencyUnit(capacity.kneeConcurrency)}
-						<KneeEvidence capacity={capacity} />.
+						<KneeSentence capacity={capacity} knee={capacity.kneeConcurrency} />
 					</p>
 				)}
 				{stop && (

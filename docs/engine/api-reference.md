@@ -581,6 +581,15 @@ derived Content-Type**:
 | `variables` | the envelope's `variables`, JSON-encoded, when present and not `null` |
 | `extensions` | the envelope's `extensions`, JSON-encoded, when present and not `null` |
 
+The order the author wrote is the order sent: the parameters follow the
+envelope's member order, and the keys inside `variables` and `extensions` keep
+theirs (issue #2789), written compactly with no whitespace. The encoding
+re-renders numbers from their parsed value rather than copying the text: an
+integer up to 64 bits unsigned (`18446744073709551615`) is exact, a larger one
+becomes a double (`18446744073709551616` is sent as `1.8446744073709552e+19`),
+and a fraction or exponent form is a double (`1e2` is sent as `100.0`). The POST
+transport is unaffected and stays byte for byte.
+
 These parameters are merged into whatever query string the request's URL
 already has, not used to replace it - a `GET` sent to `/graphql?debug=1` keeps
 `debug=1` alongside `query=…`. The engine sends a body on a GraphQL `GET` in
@@ -9380,8 +9389,10 @@ breaching measurement re-measures the same level rather than ending the
 search): `slo_exceeded` when the last one's p99 is over `sloMs`,
 `errors_exceeded` when its p99 is inside `sloMs` and only its error share is
 over the limit. It also stops when two step-ups buy under 5% more throughput
-(`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
-runs out (`deadline`), or when the operator stops the run (`stopped`).
+(`plateau`; the report then names the level where throughput stopped growing as
+`saturation*`, which is lower than `maxHealthy*`, the last level tried), when
+`concurrency` is reached (`cap_reached`), when `duration` runs out
+(`deadline`), or when the operator stops the run (`stopped`).
 
 An **omitted `duration`** on a capacity run defaults to **5 minutes**, not the
 60 seconds every other mode falls back to: this mode walks a level every
@@ -9496,9 +9507,12 @@ So `totalRequests` is the requests that got an outcome,
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
 cancellation is exempt. When a run reaches its natural end, a request still in
 flight after its effective timeout (the run's `timeout`, else the
-`defaultTimeout` setting) plus a 2s grace is cancelled too, and that one
-never answered: it stays an error, under status code `0`, and its stored error
-record carries `error_type` `cancelled` (`errors.types` in the report).
+`defaultTimeout` setting) plus a 2s grace is cancelled too, except in a
+streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
+stream backstop plus the same 2s, issue #2834), so a stream still within its
+cap is never cut. A non-stream request cancelled there never answered: it stays
+an error, under status code `0`, and its stored error record carries
+`error_type` `cancelled` (`errors.types` in the report).
 
 A request libcurl **re-sent on a new connection** is not an error either
 (issue #2799). When the server drops or refuses a kept-alive connection after
@@ -9535,8 +9549,8 @@ with the percentiles and the max. It is not divided by `totalRequests`.
 Left out, because they have no duration to report:
 
 - a request a Stop cancelled (`cancelled`), and a request cancelled at a run's
-  natural end after its effective timeout plus the grace, which is an error with no
-  duration;
+  natural end after its effective timeout plus the grace (a streaming run's
+  `maxStreamDurationMs` plus grace), which is an error with no duration;
 - a request refused before the wire: one dropped at the `maxInFlight` cap
   (`droppedRequests`), an invalid URL or an unsendable header, a residual
   `{{token}}` or file-rule refusal, a data-binding failure. An invalid URL
@@ -10092,8 +10106,10 @@ run end). This is the pattern the bundled app uses.
   Both hint `Use /runs/:runId/report for the stored report`, and a client
   should fall back to the stored report in either case (for `run_not_found` the
   report then answers its own `404`). `code` is for clients to branch on; the
-  bundled app has no reader for it yet, and the MCP wording lands separately
-  (#2779).
+  bundled app has no reader for it yet. MCP's `get_live_metrics` reads it
+  (#2779): `live_expired` answers that the buffer expired and the run still
+  exists, naming `get_run_report`, and `run_not_found` keeps the unknown-id
+  text.
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
 `liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,
@@ -10504,7 +10520,9 @@ request the run sent is in exactly one of `totalRequests` and `cancelled`.
 
 A run that ends **naturally** still lets its in-flight requests finish, but only
 up to its effective timeout (its own `timeout`, else the `defaultTimeout`
-setting) plus a 2s grace; anything still outstanding then is
+setting) plus a 2s grace, except a streaming run, whose bound is its
+`maxStreamDurationMs` plus grace (the 5s stream backstop plus the same 2s,
+issue #2834); anything still outstanding then is
 cancelled the same way - and, because nobody asked for that one to stop, it is
 an error with no response, not a cancellation. Without that bound an upstream
 that never answers would hold the run in `running` indefinitely.
@@ -10866,7 +10884,8 @@ named it.
 instant of the first submission - to the last request settling, so it includes
 the end-of-run drain, in which requests still in flight at the deadline are let
 answer (up to the run's effective timeout, its `timeout` or else the
-`defaultTimeout` setting, plus a grace). `avgRps` and `throughput` are
+`defaultTimeout` setting, plus a grace, except a streaming run, whose bound is
+its `maxStreamDurationMs` plus grace). `avgRps` and `throughput` are
 completed requests over that wall time: they describe what the target served,
 and a run whose requests outlive its deadline reads below its target there by
 design. `sendRate` and `rateControl` describe what the generator sent, and
@@ -11071,16 +11090,23 @@ event's first byte. A second copy would be a second number to keep true.
 `cap_reached`, `deadline` or `stopped` - see [Capacity semantics](#post-runs).
 `maxErrorPct` is the error-share limit each level was judged against, and
 `errorPct` / `kneeErrorPct` are percentages (0-100) on the same scale, so a
-reader can mark an over-limit level without knowing the constant. The two
-optional halves are **omitted rather than zeroed**, and the distinction carries
+reader can mark an over-limit level without knowing the constant. The optional
+groups are **omitted rather than zeroed**, and the distinction carries
 information:
 
-- `maxHealthy*` is absent when the very first level already breached the budget
-  (on latency or on errors). The search found no sustainable capacity, which is
-  not the same claim as a capacity of zero.
+- `maxHealthy*` is the highest level tried that stayed inside the budget, and
+  is absent when the very first level already breached it (on latency or on
+  errors). The search found no sustainable capacity, which is not the same
+  claim as a capacity of zero. On a `plateau` stop it is the last level tried,
+  which overshoots: read `saturation*` for the plateau.
 - `knee*` is absent unless `stopReason` is `slo_exceeded` or `errors_exceeded`.
   A run that ended at its ceiling, its deadline, or on a plateau inside the
   budget never watched the target give out, so it has no knee to report.
+- `saturation*` (`saturationConcurrency`, `saturationRps`, `saturationP99Ms`) is
+  present only when `stopReason` is `plateau`: the lowest healthy level whose
+  throughput the best healthy level beat by under 5%, i.e. where more
+  concurrency stopped buying work. A run that stopped any other way never
+  observed a plateau and carries none.
 - `maxErrorPct`, `kneeErrorPct` and `levels[].errorPct` are absent from a run
   stored before the search judged errors (#2815): it never measured an error
   share, and a 0 would call every level clean.

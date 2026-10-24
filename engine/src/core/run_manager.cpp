@@ -2277,9 +2277,9 @@ RunManager& manager) {
         // stop(false) discards the backlog and cancels what is in flight.
         //
         // The natural end of the duration still lets genuine in-flight requests
-        // settle, but not forever: a request that has outlived its own timeout
-        // by the grace period is never going to answer, and waiting on it pins
-        // the run in `running` with no way out.
+        // settle, but not forever: a request that has outlived its own bound
+        // (`natural_end_drain_ms`) is never going to answer, and waiting on it
+        // pins the run in `running` with no way out.
         //
         // Both reads are deliberately NOT under event_loop_mtx: this thread is
         // the one that published the pointer, so they are ordered by program
@@ -2290,8 +2290,7 @@ RunManager& manager) {
             context->event_loop->stop (false);
         } else {
             const int64_t drain_ms =
-            (timeout_ms > 0 ? timeout_ms : vayu::core::constants::server::DEFAULT_TIMEOUT_MS) +
-            vayu::core::constants::event_loop::STOP_DRAIN_GRACE_MS;
+            natural_end_drain_ms (context->stream_bounds, timeout_ms);
             context->event_loop->stop (true, std::chrono::milliseconds (drain_ms));
         }
 
