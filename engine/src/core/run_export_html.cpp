@@ -450,7 +450,8 @@ ClassPoints counted_points (const ordered& ticks) {
             static_cast<double> (entry.counts.at (at)) /
             static_cast<double> (entry.span);
         }
-        const double x = static_cast<double> (second + entry.span);
+        const double x =
+        static_cast<double> (second) + static_cast<double> (entry.span);
         for (std::size_t at = 0; at < CLASS_COUNT; ++at) {
             points.at (at).push_back ({ x, rate.at (at) });
         }

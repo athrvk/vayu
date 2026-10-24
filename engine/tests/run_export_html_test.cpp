@@ -30,7 +30,7 @@
  * reds; write the run's comment without `escape_html` and the hostile-text case
  * reds; thin a series by taking every Nth sample and the spike case reds; feed
  * the status chart the cumulative counts and the per-interval case reds; make
- * `status_series` ignore `status_seconds` and the status-seconds golden and
+ * `counts_by_second` return false and the status-seconds golden and
  * the counted-seconds cases red; take a dark text token below 4.5:1 and the
  * contrast case reds.
  */
@@ -636,7 +636,7 @@ const std::vector<double>& expected) {
 
 // The cumulative counts below gain 10, 30 and 10 between rows, which is what
 // the old reading would draw; the entries say 20 a second throughout.
-// Mutation check: ignore `status_seconds` in `status_series` and this reds.
+// Mutation check: make `counts_by_second` return false and this reds.
 TEST (RunExportHtmlTest, TheStatusChartDrawsTheCountedSecondsNotTheRowsDifference) {
     const std::string html =
     counted_html ({ counted_tick (1, { status_entry (0, 1, { 20, 0, 0, 0, 0 }) }, 10),
