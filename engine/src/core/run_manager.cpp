@@ -2674,10 +2674,10 @@ struct GateReadings {
  * than swallowed - it never fails the run, whose live stream and final report
  * are built from the collector, not from these rows.
  *
- * A tick read before load start stores nothing (#2881): the series counts from
- * load start, as the live frames do, and a second of setup is not a second of
- * load. The stamp is compared with the tick's own reading, not only with 0,
- * because the worker can stamp it between that reading and this call.
+ * A tick read at or before load start stores nothing (#2881): the series counts
+ * from load start, as the live frames do. The stamp is compared with the tick's
+ * own reading, not only with 0, because the worker can stamp it between that
+ * reading and this call.
  */
 void persist_metric_tick (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,

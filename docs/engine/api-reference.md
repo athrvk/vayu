@@ -9716,9 +9716,11 @@ engine writes the tick object once, at write time. Two things follow:
 - **`elapsed_seconds` keeps counting across pages**, since it is stored with
   the tick: the seconds since load start, the same reading the live frame of
   that tick carries as `elapsedSeconds` (issue #2881). No tick is stored before
-  load start. A run an engine older than that issue stored counts from its
-  first stored tick instead, so its first tick reads `0`, about one second
-  behind the live clock.
+  load start, and the first stored tick reads between `0` and about `1.0` (the
+  1 Hz gate counts from the metrics thread's start, so after a setup script it
+  can land anywhere up to one interval after load start). A run an engine older
+  than that issue stored counts from its first stored tick instead, so its first
+  tick reads `0`, about one second behind the live clock.
 
 A run with no ticks returns `200` with an empty `data` array - only a run that
 does not exist is a `404`.

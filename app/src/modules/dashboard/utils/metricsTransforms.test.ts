@@ -429,9 +429,9 @@ describe("buildStatusOverTime", () => {
 	});
 
 	/*
-	 * #2881: a stored series counts from load start, so its first tick, about a
-	 * second in, closes [0, elapsed]. Mutation check: seed the first interval
-	 * from -1 again and the first tick of a current run rates at half its count.
+	 * #2881: a stored series counts from load start, so its first tick closes
+	 * [0, elapsed]. Mutation check: seed the first interval from -1 again and the
+	 * first tick of a current run rates at half its count.
 	 */
 	it("rates a stored head over the time since load start", () => {
 		const [first] = buildStatusOverTime([
@@ -446,7 +446,7 @@ describe("buildStatusOverTime", () => {
 		expect(late.c2xx).toBeCloseTo(100);
 	});
 
-	it("still rates a run stored before #2881, whose first tick sits at 0, over one second", () => {
+	it("rates a raw run stored before #2881, whose first tick sits at 0, over one second", () => {
 		const out = buildStatusOverTime([
 			tick({ elapsed_seconds: 0, status_codes: { "200": 120 } }),
 			tick({ elapsed_seconds: 1, status_codes: { "200": 240 } }),

@@ -1133,7 +1133,7 @@ struct RunContext {
  */
 struct MetricTickSample {
     int64_t timestamp = 0; // Unix ms; the tick's single wall-clock sample
-    double elapsed_seconds = 0.0; // Seconds since load start, as the live frame's
+    double elapsed_seconds = 0.0; // Seconds since load start, as the live frame's `elapsedSeconds`
     size_t requests_completed = 0; // Responses received (success + error)
     size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
     size_t http_errors = 0;     // Of the errors, those that got a response

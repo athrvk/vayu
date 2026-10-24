@@ -1836,9 +1836,10 @@ Two consequences of the row being the tick:
 `elapsed_seconds` is the seconds since **load start**, the instant the report's `test_duration`
 is measured from, after the request is built and any `script.setup` has run (issue #2395). It is
 the live stream's origin: a row's `elapsed_seconds` is the `elapsedSeconds` of the gate frame of
-the same tick, so the first row reads about `1.0`, the second the gate closed (issue #2881). No
-row is stored before load start: a gate that closes while setup is still running sends its live
-frame and writes nothing. The cumulative rates in the same row, `send_rate` and `throughput`, are
+the same tick (issue #2881). The first row reads between `0` and about `1.0`: the 1 Hz gate
+counts from the metrics thread's start, so after a setup script the first stored gate can land
+anywhere up to one interval after load start. No row is stored before load start: a gate that
+closes while setup is still running sends its live frame and writes nothing. The cumulative rates in the same row, `send_rate` and `throughput`, are
 requests sent and completed since load start, divided by the same `elapsed_seconds`. Rows an
 engine older than issue #2881 stored count from the run's first stored row instead, which reads
 `0` and sits about one second behind the live clock; nothing rewrites them, and such a run may

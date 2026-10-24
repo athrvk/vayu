@@ -30,6 +30,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
+#include "load_start_stamp.hpp"
 #include "mock_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -1562,10 +1563,7 @@ vayu::db::Database& db) {
     request.timeout_ms = 30000;
 
     context->is_running = true;
-    // What execute_load_test stamps immediately before the strategy runs.
-    context->load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now ().time_since_epoch ())
-                                    .count ();
+    vayu::tests::stamp_load_start (*context);
     std::thread metrics (
     [context, &db] () { vayu::core::collect_metrics (context, &db); });
 
@@ -2793,10 +2791,7 @@ TEST_F (LoadStrategyTest, ThinkReservationsCountInTheLiveAndStoredBackpressureAl
     ASSERT_EQ (context->in_flight (), SENT + THINKING);
 
     context->is_running = true;
-    // What execute_load_test stamps once setup is done; no tick is stored before.
-    context->load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now ().time_since_epoch ())
-                                    .count ();
+    vayu::tests::stamp_load_start (*context);
     std::thread metrics (
     [context, &db] () { vayu::core::collect_metrics (context, &db); });
 

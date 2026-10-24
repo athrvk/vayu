@@ -144,9 +144,11 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	for (const c of cum) {
 		const seconds = c.elapsed - prev.elapsed;
 		// A head at elapsed 0 closes no time: a live frame stamped at load start,
-		// before anything completed, or the first row of a run stored before
-		// #2881, which holds the second before it. Either count stands as one
-		// second's rather than divide by 0.
+		// before anything completed, or the first row of a raw run stored before
+		// #2881. Either count stands as one second's rather than divide by 0.
+		// A pre-#2881 run served downsampled has no such head: its first folded
+		// bucket spans N-1 intervals, so that one point reads about 1/N high.
+		// Accepted, because old rows are not corrected.
 		const rate = (now: number, before: number) =>
 			Math.max(0, now - before) / (seconds > 0 ? seconds : 1);
 		out.push({
