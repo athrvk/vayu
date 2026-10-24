@@ -425,6 +425,11 @@ class LoadTestService {
 		// reddening it. Marking it also sets `progressFailedRunId`, which is
 		// what makes the clear below leave the flash standing.
 		if (status === "failed") this.failProgress(runId);
+		// A run that completed reads 100% whatever its last tick said: a duration
+		// run's final tick lands a fraction of a second short of the duration, and
+		// the engine's own frame is the authority that it finished. Never for a
+		// stopped or failed run, which did not reach the end (#2914).
+		if (status === "completed") runProgress.report(RUN_PROGRESS_KEYS.loadRun, runId, 1);
 		// Same reason, and the same moment: the run is over, so the taskbar stops
 		// claiming one is going. A run that already reported its failure keeps
 		// that flash instead - see `progressFailedRunId`. A close with no run to

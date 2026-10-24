@@ -12,7 +12,8 @@ import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
  * iterations hero card #1 - progress through the configured iteration count.
- * The bar fills as requests complete; ETA is projected from current throughput.
+ * The bar fills as requests are sent, not as responses return; ETA is
+ * projected from current throughput.
  */
 export function ProgressCard({
 	requestsSent,
@@ -36,7 +37,7 @@ export function ProgressCard({
 				<span className="text-foreground font-semibold">
 					{formatNumber(requestsExpected)}
 				</span>{" "}
-				complete · ETA{" "}
+				sent · ETA{" "}
 				<span className="text-foreground font-semibold">
 					{eta !== null ? formatSeconds(eta) : "-"}
 				</span>
