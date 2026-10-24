@@ -21,13 +21,14 @@ import { act, render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";
 
-const instances = vi.hoisted(() => ({ all: [] as uPlot[] }));
+const instances = vi.hoisted(() => ({ all: [] as uPlot[], opts: [] as uPlot.Options[] }));
 vi.mock("uplot", async (importOriginal) => {
 	const actual = (await importOriginal()) as { default: new (...args: unknown[]) => uPlot };
 	class TrackedUPlot extends actual.default {
 		constructor(...args: unknown[]) {
 			super(...args);
 			instances.all.push(this as unknown as uPlot);
+			instances.opts.push(args[0] as uPlot.Options);
 		}
 	}
 	return { ...actual, default: TrackedUPlot };
@@ -72,8 +73,30 @@ function hoverRows(idx: number): string[] {
 	return Array.from(tip.children, (row) => row.textContent ?? "");
 }
 
+/** Labels of the series whose built paths carry a line to stroke. */
+function strokedLabels(): string[] {
+	const plot = instances.all[instances.all.length - 1];
+	const last = plot.data[0].length - 1;
+	return plot.series.flatMap((s, i) =>
+		i > 0 && s.paths?.(plot, i, 0, last)?.stroke ? [String(s.label)] : []
+	);
+}
+
+/** Each class' band, as [upper, lower] uPlot series indices. */
+function bandEdges(): number[][] {
+	return (instances.opts[instances.opts.length - 1].bands ?? []).map((b) => [...b.series]);
+}
+
+const STACKED_BANDS = [
+	[2, 1],
+	[3, 2],
+	[4, 3],
+	[5, 4],
+];
+
 beforeEach(() => {
 	instances.all.length = 0;
+	instances.opts.length = 0;
 });
 
 describe("StatusCodesOverTimeChart tooltip", () => {
@@ -105,5 +128,25 @@ describe("StatusCodesOverTimeChart tooltip", () => {
 		});
 		expect(instances.all).toHaveLength(1);
 		expect(hoverRows(2)).toEqual(["2.0s", "responses", "5xx7/s"]);
+		expect(strokedLabels()).toEqual(["2xx", "5xx"]);
+	});
+});
+
+// The empty classes' lines lay on the 2xx top edge in their own colours (#2860).
+describe("StatusCodesOverTimeChart strokes", () => {
+	it("draws no line for a class with no responses, and keeps its band", () => {
+		render(<StatusCodesOverTimeChart history={history([{ "200": 50 }, { "200": 50 }])} />);
+		expect(strokedLabels()).toEqual(["2xx"]);
+		expect(bandEdges()).toEqual(STACKED_BANDS);
+	});
+
+	it("draws the line of every class that has responses", () => {
+		render(
+			<StatusCodesOverTimeChart
+				history={history([{ "200": 50 }, { "200": 45, "503": 5 }, { "200": 50 }])}
+			/>
+		);
+		expect(strokedLabels()).toEqual(["2xx", "5xx"]);
+		expect(bandEdges()).toEqual(STACKED_BANDS);
 	});
 });

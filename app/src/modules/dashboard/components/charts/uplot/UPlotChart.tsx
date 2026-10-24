@@ -69,6 +69,12 @@ export interface UPlotSeriesSpec {
 	 * entry drops the row from the tooltip.
 	 */
 	tipValues?: (number | null)[];
+	/**
+	 * Whether the line is drawn (default true); fill and bands are kept either
+	 * way. Read whenever paths are built, so a value that follows the data
+	 * changes without a rebuild of the plot.
+	 */
+	stroked?: boolean;
 }
 
 export interface UPlotChartProps {
@@ -158,6 +164,20 @@ function isolatedReadings(values: ArrayLike<number | null | undefined>): number[
 	return idxs.length ? idxs : null;
 }
 
+/**
+ * uPlot's default line paths, minus the stroke for a series `unstroked` names.
+ * The fill and the band clip come from the same build, so a zero-height band
+ * stays a band and the bands above it keep their lower edge.
+ */
+function linePaths(unstroked: () => ReadonlySet<number>): uPlot.Series.PathBuilder | undefined {
+	const linear = uPlot.paths.linear?.();
+	if (!linear) return undefined;
+	return (u, seriesIdx, idx0, idx1) => {
+		const built = linear(u, seriesIdx, idx0, idx1);
+		return built && unstroked().has(seriesIdx) ? { ...built, stroke: null } : built;
+	};
+}
+
 function defaultY(v: number): string {
 	return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
 }
@@ -199,6 +219,8 @@ export function UPlotChart({
 	const focusTimesRef = useRef<number[] | undefined>(focusTimes);
 	// Read at hover time: the plot is not rebuilt when data streams in.
 	const tipValuesRef = useRef<Record<number, (number | null)[]>>({});
+	// uPlot series indices whose spec says `stroked: false`; read by the paths builder.
+	const unstrokedRef = useRef<ReadonlySet<number>>(new Set());
 
 	useEffect(() => {
 		const byPosition: Record<number, (number | null)[]> = {};
@@ -206,6 +228,13 @@ export function UPlotChart({
 			if (s.tipValues) byPosition[i + 1] = s.tipValues;
 		});
 		tipValuesRef.current = byPosition;
+
+		const unstroked = new Set(series.flatMap((s, i) => (s.stroked === false ? [i + 1] : [])));
+		const before = unstrokedRef.current;
+		unstrokedRef.current = unstroked;
+		const changed =
+			unstroked.size !== before.size || [...unstroked].some((i) => !before.has(i));
+		if (changed) plotRef.current?.redraw(true);
 	}, [series]);
 
 	useEffect(() => {
@@ -260,6 +289,7 @@ export function UPlotChart({
 		let plot: uPlot | null = null;
 		try {
 			const theme = readUplotTheme();
+			const paths = linePaths(() => unstrokedRef.current);
 
 			const uSeries: uPlot.Series[] = [
 				{}, // x
@@ -277,6 +307,7 @@ export function UPlotChart({
 							filter: (u, seriesIdx) => isolatedReadings(u.data[seriesIdx]),
 						},
 					};
+					if (paths) base.paths = paths;
 					if (s.dash) base.dash = s.dash.map((d) => d * dpr());
 					if (s.kind === "area") base.fill = theme.color(s.role, 0.14);
 					if (s.kind === "scatter") {
