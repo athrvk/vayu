@@ -31,7 +31,7 @@
  * face: a preview describing a set the run did not use.
  */
 
-import { useRef } from "react";
+import { useRef, type ChangeEvent } from "react";
 import { FileSpreadsheet, Upload, X } from "lucide-react";
 
 import {
@@ -163,7 +163,6 @@ function describeReadFailure(e: unknown): string {
 		: `Couldn't read the file: ${(e as Error).message}`;
 }
 
-/** A cell as the preview prints it. Objects and arrays show as compact JSON. */
 export default function DataFilePicker({
 	selected,
 	onSelect,
@@ -260,6 +259,16 @@ export default function DataFilePicker({
 		reader.readAsArrayBuffer(file);
 	};
 
+	const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		// Reset after every pick, not only on Remove: a refused file leaves the
+		// "Choose file" button showing with the input still holding it, and the
+		// browser fires no change event for an identical selection (#2825). The
+		// captured File outlives the reset.
+		e.target.value = "";
+		if (file) handleFile(file);
+	};
+
 	const clear = () => {
 		onSelect(null);
 		onError(null);
@@ -333,7 +342,7 @@ export default function DataFilePicker({
 				type="file"
 				className="hidden"
 				accept={DATA_FILE_ACCEPT}
-				onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+				onChange={handleInputChange}
 			/>
 
 			{error && (
