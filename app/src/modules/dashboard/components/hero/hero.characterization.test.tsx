@@ -456,7 +456,22 @@ describe("hero cards print counts, percents and spans through the shared formatt
 	it("reads a saturation p99 the way the chart does, in seconds from a second up", () => {
 		const slow = { ...crossed, p99Ms: 1234 };
 		expect(text(<SaturationCard breakpoint={slow} failedRequests={0} />)).toContain(
-			"p99 crossed 1.23s at 45"
+			"p99 crossed 1.23s (the 200ms SLO) at 45"
 		);
+	});
+
+	it("names the SLO a crossed saturation card refers to, formatted like the p99 and the chart marker", () => {
+		const out = text(
+			<SaturationCard breakpoint={{ ...crossed, sloMs: 2000 }} failedRequests={0} />
+		);
+		expect(out).toContain("p99 crossed 227ms (the 2.00s SLO) at 45 virtual users");
+	});
+
+	it("keeps the unnamed line when the breakpoint carries no SLO", () => {
+		const out = text(
+			<SaturationCard breakpoint={{ ...crossed, sloMs: null }} failedRequests={0} />
+		);
+		expect(out).toContain("p99 crossed 227ms at 45 virtual users");
+		expect(out).not.toContain("SLO");
 	});
 });

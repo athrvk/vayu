@@ -52,8 +52,8 @@ export function SaturationCard({
 					p99 crossed{" "}
 					<span className="text-foreground font-semibold">
 						{formatLatency(breakpoint.p99Ms)}
-					</span>{" "}
-					at{" "}
+					</span>
+					{breakpoint.sloMs != null && ` (the ${formatLatency(breakpoint.sloMs)} SLO)`} at{" "}
 					<span className="text-foreground font-semibold">
 						{formatNumber(breakpoint.concurrency)}
 					</span>{" "}
