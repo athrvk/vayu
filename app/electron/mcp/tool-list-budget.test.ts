@@ -54,6 +54,12 @@
  * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
  * caps went to 137,900 / 135,200 and 205,300 / 200,900.
  *
+ * #2895's `summary.partial` / `summary.summaryMissing` sentence in
+ * `get_run_report` and the two keys in its output schema took the rows to
+ * 143,949 / 141,223 B writes off and 211,863 / 207,466 B writes on; the caps
+ * went to 144,300 / 141,600 and 212,200 / 207,800 (one measurement plus a few
+ * hundred bytes).
+ *
  * #2443 (the paged whole-list reads) added the envelope schema and the `q` /
  * `limit` / `offset` / `fields` arguments to four tools; the caps sit about 1%
  * above that measurement.
@@ -83,10 +89,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 143_900 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 211_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_500 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_400 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_600 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
