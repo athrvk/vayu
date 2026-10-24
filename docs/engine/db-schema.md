@@ -1415,6 +1415,7 @@ default, so `sync_schema()` can
   "total_requests": 100, "cancelled": 0, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
   "test_duration": 2.0, "setup_overhead": 0.25,
   "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
+  "completed_while_sending": 96,
   "peak_concurrency": 8, "avg_in_flight": 4.2, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
   "http_version_downgraded": 0, "connection_replays": 1,
@@ -1506,6 +1507,13 @@ submitted in: load start to the moment it stopped submitting, before the end-of-
 does every threshold that reads them. A failed run stores its wall-clock `test_duration` in
 `sending_duration` too. Always written, zeros included: a summary with no `sending_duration` key
 predates the issue, and the report keeps that run's old rate-fidelity formula.
+
+`completed_while_sending` (issue #2882) is `total_requests` as it stood when `sending_duration`
+ended, before the drain, so it is never above `total_requests`; the report's
+`summary.completedWhileSending` reads it. Where `sending_duration` is the whole `test_duration` (an
+`iterations` run that reached its own end, a failed run) it is `total_requests`. Always written,
+`0` included; a summary stored before the issue has no key, and the report leaves
+`completedWhileSending` out rather than reading it as `0`.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
 report's `testValidation` section absent rather than reporting zero tests. `schemaValidation`

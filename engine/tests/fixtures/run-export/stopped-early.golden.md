@@ -19,13 +19,13 @@ Stopped early at 3.2 s of 20 s
 
 ## Results
 
-| Metric              | Value     | Budget |
-| ------------------- | --------- | ------ |
-| Requests            | 1,489     | -      |
-| Requests per second | 465 req/s | -      |
-| Error rate          | 0.0%      | -      |
-| Bytes in            | 1.8 MB    | -      |
-| Bytes out           | 145.4 KB  | -      |
+| Metric                                          | Value     | Budget |
+| ----------------------------------------------- | --------- | ------ |
+| Requests                                        | 1,489     | -      |
+| Requests per second (whole run, drain included) | 465 req/s | -      |
+| Error rate                                      | 0.0%      | -      |
+| Bytes in                                        | 1.8 MB    | -      |
+| Bytes out                                       | 145.4 KB  | -      |
 
 ## Latency
 

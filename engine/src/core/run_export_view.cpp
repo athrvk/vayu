@@ -613,15 +613,31 @@ ReportRow metric_row (std::string_view label, ReportText value, ReportCell budge
     return { plain_cell (std::string (label)), cell (std::move (value)), std::move (budget) };
 }
 
+/// `completedWhileSending / sendingDurationSeconds` (#2882), the drain-free
+/// counterpart of `avgRps`; nothing for a run stored before either field.
+std::optional<double> responses_per_second_while_sending (const ordered& summary) {
+    const auto completed = number_at (summary, { "completedWhileSending" });
+    const auto seconds   = number_at (summary, { "sendingDurationSeconds" });
+    if (!completed || !seconds || *seconds <= 0) {
+        return std::nullopt;
+    }
+    return *completed / *seconds;
+}
+
 Table results_table (const ordered& document) {
     const ordered& summary = at_path (document, { "report", "summary" });
     const ReportCell none  = cell (absent ());
     Table table{ { "Metric", "Value", "Budget" }, {} };
     table.rows.push_back (metric_row ("Requests",
     figure_text (number_at (summary, { "totalRequests" }), format_run_count), none));
-    table.rows.push_back (metric_row ("Requests per second",
+    table.rows.push_back (
+    metric_row ("Requests per second (whole run, drain included)",
     figure_text (number_at (summary, { "avgRps" }), format_run_figure, " req/s"),
     budget_cell (document, "minThroughputRps")));
+    if (const auto while_sending = responses_per_second_while_sending (summary)) {
+        table.rows.push_back (metric_row ("Responses per second while sending",
+        figure_text (while_sending, format_run_figure, " req/s"), none));
+    }
     table.rows.push_back (metric_row ("Error rate", error_rate_text (document),
     budget_cell (document, "maxErrorRatePct")));
     table.rows.push_back (metric_row ("Bytes in",
@@ -757,6 +773,8 @@ struct ComparedFormat {
 
 /// The app's `METRIC_LABELS` and `formatValue`
 /// (`run-comparison-format.ts`), keyed by the metric names of `COMPARED_METRICS`.
+/// The two rates name their window because both divide by `testDuration`,
+/// drain included (#2882).
 constexpr auto COMPARED_FORMATS = std::to_array<ComparedFormat> ({
 { "latency.p50", "P50 latency", format_run_figure, " ms" },
 { "latency.p90", "P90 latency", format_run_figure, " ms" },
@@ -764,8 +782,8 @@ constexpr auto COMPARED_FORMATS = std::to_array<ComparedFormat> ({
 { "latency.p99", "P99 latency", format_run_figure, " ms" },
 { "latency.avg", "Average latency", format_run_figure, " ms" },
 { "latency.max", "Max latency", format_run_figure, " ms" },
-{ "summary.avgRps", "Throughput", format_run_figure, " req/s" },
-{ "summary.throughput", "Response rate", format_run_figure, " req/s" },
+{ "summary.avgRps", "Throughput (whole run, drain included)", format_run_figure, " req/s" },
+{ "summary.throughput", "Response rate (whole run, drain included)", format_run_figure, " req/s" },
 { "summary.errorRate", "Error rate", format_run_percent, "%" },
 { "summary.totalRequests", "Total requests", format_run_count, "" },
 });

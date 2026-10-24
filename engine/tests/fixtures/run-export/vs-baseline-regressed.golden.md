@@ -18,13 +18,13 @@
 
 ## Results
 
-| Metric              | Value                                 | Budget           |
-| ------------------- | ------------------------------------- | ---------------- |
-| Requests            | 24,600                                | -                |
-| Requests per second | 410 req/s                             | -                |
-| Error rate          | 2.5% (HTTP errors 615, No response 0) | <= 1.0% - missed |
-| Bytes in            | 30.0 MB                               | -                |
-| Bytes out           | 2.3 MB                                | -                |
+| Metric                                          | Value                                 | Budget           |
+| ----------------------------------------------- | ------------------------------------- | ---------------- |
+| Requests                                        | 24,600                                | -                |
+| Requests per second (whole run, drain included) | 410 req/s                             | -                |
+| Error rate                                      | 2.5% (HTTP errors 615, No response 0) | <= 1.0% - missed |
+| Bytes in                                        | 30.0 MB                               | -                |
+| Bytes out                                       | 2.3 MB                                | -                |
 
 ## Latency
 
@@ -46,18 +46,18 @@
 
 ## Compared with `Vayu run "Orders API" (run_7f3a91) - load test, GET /orders, 2026-10-05T08:10:00Z, completed`
 
-| Metric          | Base      | This run  | Change             | Result       |
-| --------------- | --------- | --------- | ------------------ | ------------ |
-| P50 latency     | 94 ms     | 118 ms    | +24 ms (+25.3%)    | regressed    |
-| P90 latency     | 149 ms    | 191 ms    | +42 ms (+27.9%)    | regressed    |
-| P95 latency     | 171 ms    | 226 ms    | +55 ms (+31.9%)    | regressed    |
-| P99 latency     | 238 ms    | 301 ms    | +63 ms (+26.6%)    | regressed    |
-| Average latency | 98 ms     | 132 ms    | +33 ms (+33.8%)    | regressed    |
-| Max latency     | 413 ms    | 380 ms    | -33 ms (-7.9%)     | improved     |
-| Throughput      | 499 req/s | 410 req/s | -89 req/s (-17.8%) | regressed    |
-| Response rate   | -         | 410 req/s | -                  | not compared |
-| Error rate      | 0.0%      | 2.5%      | +2.5%              | regressed    |
-| Total requests  | 29,944    | 24,600    | -5,344 (-17.8%)    | unchanged    |
+| Metric                                    | Base      | This run  | Change             | Result       |
+| ----------------------------------------- | --------- | --------- | ------------------ | ------------ |
+| P50 latency                               | 94 ms     | 118 ms    | +24 ms (+25.3%)    | regressed    |
+| P90 latency                               | 149 ms    | 191 ms    | +42 ms (+27.9%)    | regressed    |
+| P95 latency                               | 171 ms    | 226 ms    | +55 ms (+31.9%)    | regressed    |
+| P99 latency                               | 238 ms    | 301 ms    | +63 ms (+26.6%)    | regressed    |
+| Average latency                           | 98 ms     | 132 ms    | +33 ms (+33.8%)    | regressed    |
+| Max latency                               | 413 ms    | 380 ms    | -33 ms (-7.9%)     | improved     |
+| Throughput (whole run, drain included)    | 499 req/s | 410 req/s | -89 req/s (-17.8%) | regressed    |
+| Response rate (whole run, drain included) | -         | 410 req/s | -                  | not compared |
+| Error rate                                | 0.0%      | 2.5%      | +2.5%              | regressed    |
+| Total requests                            | 29,944    | 24,600    | -5,344 (-17.8%)    | unchanged    |
 
 The two runs were not set up the same way, so these changes may not be like for like:
 
