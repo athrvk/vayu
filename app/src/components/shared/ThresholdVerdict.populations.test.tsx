@@ -18,7 +18,8 @@
  * the `evaluated === false` guard fails "absent for an unevaluated check";
  * deleting the `sampleRate === 1` branch fails the every-response case; testing
  * `!exact` alone fails the sampled-only case; replacing `pluralize` with a
- * literal fails the singular case.
+ * literal fails the singular case; reverting the scope to "on 1 in N responses"
+ * fails all three period cases.
  */
 
 import { describe, it, expect } from "vitest";
@@ -56,7 +57,7 @@ describe("ThresholdVerdict assertion populations", () => {
 		);
 		expect(
 			screen.getByText(
-				"Judged on the worse of 2,270 assertions on every response (0 failed) and 24 assertions on 1 in 100 responses (12 failed)."
+				"Judged on the worse of 2,270 assertions on every response (0 failed) and 24 assertions on responses sampled at 1 in 100 (12 failed)."
 			)
 		).toBeInTheDocument();
 	});
@@ -71,7 +72,7 @@ describe("ThresholdVerdict assertion populations", () => {
 		);
 		expect(
 			screen.getByText(
-				"Judged on the worse of 1 assertion on every response (0 failed) and 1 assertion on 1 in 10 responses (1 failed)."
+				"Judged on the worse of 1 assertion on every response (0 failed) and 1 assertion on responses sampled at 1 in 10 (1 failed)."
 			)
 		).toBeInTheDocument();
 	});
@@ -85,7 +86,7 @@ describe("ThresholdVerdict assertion populations", () => {
 			})
 		);
 		expect(
-			screen.getByText("Judged on 4 assertions on 1 in 50 responses (1 failed).")
+			screen.getByText("Judged on 4 assertions on responses sampled at 1 in 50 (1 failed).")
 		).toBeInTheDocument();
 	});
 

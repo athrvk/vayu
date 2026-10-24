@@ -1689,9 +1689,11 @@ The assertion-failure budget (`maxAssertionFailureRatePct`) is judged on the
 **worse of two populations** (#2892): the exact inline tally and the sampled
 `pm.test` replay. When an evaluated check carries a non-empty
 `assertionsSampled`, its row grows a muted line naming them: "Judged on the
-worse of 2,270 assertions on every response (0 failed) and 24 assertions on 1 in
-100 responses (12 failed)." If the exact population is empty it reads "Judged on
-24 assertions on 1 in 100 responses (12 failed)." The line is absent when the
+worse of 2,270 assertions on every response (0 failed) and 24 assertions on
+responses sampled at 1 in 100 (12 failed)." If the exact population is empty it
+reads "Judged on 24 assertions on responses sampled at 1 in 100 (12 failed)."
+The scope names the sampling period, not a share: a long run's reservoir cap
+(`max_response_samples`) can leave the replayed set sparser than 1 in N. The line is absent when the
 sampled population is empty or missing (a collection run, a run with no test
 script, a report stored before the split) and on an unmeasurable check, so those
 rows read as they always did.

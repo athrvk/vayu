@@ -8031,9 +8031,11 @@ cancelled is in neither its numerator nor its denominator.
 populations a load run keeps apart (issue #2892). The **exact** one is every
 `assert.*` element outcome, every required `extract.*` that found no match and
 every `pm.test` call an inline script made, counted on every completion. The
-**sampled** one is the deferred `pm.test` replay, run over 1 in
-`response_sample_rate` responses (default 100) - the same tallies the report's
-`testValidation` shows. `actual` is the **worse** of
+**sampled** one is the deferred `pm.test` replay, run over responses sampled at 1 in
+`response_sample_rate` (default 100) - the same tallies the report's
+`testValidation` shows. That is a sampling period, not a promise about the
+count: on a long run the `max_response_samples` reservoir cap can make the
+replayed set sparser than 1 in `response_sample_rate`. `actual` is the **worse** of
 the two failure rates, each `0` when its population is empty, so a sampled
 `pm.test` failing half the time beside an inline assertion that never fails
 reads 50%, not the fraction of a percent a single blended count would give;

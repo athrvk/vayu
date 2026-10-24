@@ -65,11 +65,15 @@ function populationPhrase({ passed, failed }: AssertionPopulation, scope: string
 	return `${formatNumber(total)} ${pluralize(total, "assertion")} ${scope} (${formatNumber(failed)} failed)`;
 }
 
-/** `sampleRate` is a keep-1-in-N period; absent only if a sidecar omitted it. */
+/**
+ * `sampleRate` is a keep-1-in-N period; absent only if a sidecar omitted it. The
+ * wording names the period, not a share of the responses: the engine's reservoir
+ * cap can leave the replayed set sparser than 1 in N on a long run.
+ */
 function sampledScope(sampleRate: number | undefined): string {
 	if (sampleRate === undefined) return "on sampled responses";
 	if (sampleRate === 1) return "on every response";
-	return `on 1 in ${formatNumber(sampleRate)} responses`;
+	return `on responses sampled at 1 in ${formatNumber(sampleRate)}`;
 }
 
 /**

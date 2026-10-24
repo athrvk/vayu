@@ -507,7 +507,7 @@
                     "$ref": "#/definitions/assertionPopulation"
                   },
                   "assertionsSampled": {
-                    "description": "maxAssertionFailureRatePct only: the deferred pm.test replay over 1 in sampleRate responses.",
+                    "description": "maxAssertionFailureRatePct only: the deferred pm.test replay over responses sampled at 1 in sampleRate (a long run's reservoir cap can make it sparser).",
                     "$ref": "#/definitions/assertionPopulation"
                   },
                   "sampleRate": {

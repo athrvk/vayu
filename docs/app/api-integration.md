@@ -2026,14 +2026,14 @@ computed the same either way. The list is cut at the engine's 64-entry cap
 against two populations kept apart (issue #2892), not `testValidation`'s
 per-response view: the **exact** tally of every `assert.*` element outcome,
 unmatched required `extract.*` and inline `pm.test` call, and the **sampled**
-`pm.test` replay over 1 in `response_sample_rate` responses. `actual` is the
+`pm.test` replay over responses sampled at 1 in `response_sample_rate`. `actual` is the
 worse of the two failure rates, so a sampled test failing half the time is not
 diluted by thousands of passing inline assertions. An evaluated check carries
 both as `assertionsExact` / `assertionsSampled` (`{passed, failed}`) and, when
 the sampled one is non-empty, `sampleRate`; a report stored earlier has none of
 them. `ThresholdVerdict` reads them to add one muted line under the row,
 "Judged on the worse of N assertions on every response (X failed) and M
-assertions on 1 in R responses (Y failed).", and shows nothing extra when the
+assertions on responses sampled at 1 in R (Y failed).", and shows nothing extra when the
 sampled population is empty (a collection run, a load run with no test script),
 when the check is unmeasurable, or on an older report. `thresholds.failRun: true`
 (`LoadTestConfigDialog`'s own Switch, beside the budget fields rather than in

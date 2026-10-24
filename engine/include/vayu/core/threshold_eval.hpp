@@ -50,9 +50,10 @@ struct AssertionTotals {
 /// What `maxAssertionFailureRatePct` judges (#2892): two populations kept
 /// apart because they count different things. `exact` is every `assert.*`
 /// outcome, required `extract.*` miss and inline script `pm.test` call,
-/// counted on each completion; `sampled` is the deferred `pm.test` replay over 1 in
-/// `sample_rate` responses. Blending them lets one side's volume dilute the
-/// other's failures, so the budget reads the worse of the two rates.
+/// counted on each completion; `sampled` is the deferred `pm.test` replay over
+/// responses sampled at 1 in `sample_rate` (the reservoir cap can make a long
+/// run's set sparser). Blending them lets one side's volume dilute the other's
+/// failures, so the budget reads the worse of the two rates.
 struct AssertionPopulations {
     AssertionTotals exact;
     AssertionTotals sampled;
