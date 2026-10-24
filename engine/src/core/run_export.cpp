@@ -290,6 +290,9 @@ ordered scenario_transaction (const json& transaction) {
 
 ordered scenario_section (const json& scenario) {
     ordered out = pick (scenario, SCENARIO_KEYS);
+    if (const json& assertions = member (scenario, "assertions"); assertions.is_object ()) {
+        out["assertions"] = pick (assertions, ASSERTION_POPULATION_KEYS);
+    }
     if (const json& steps = member (scenario, "steps"); steps.is_array ()) {
         ordered picked = ordered::array ();
         for (const json& step : steps) {

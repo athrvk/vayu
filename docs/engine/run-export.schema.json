@@ -299,6 +299,10 @@
             "stepsDropped": {"type": "number"},
             "virtualUsers": {"type": "number"},
             "iterationsAbandoned": {"type": "number"},
+            "assertions": {
+              "description": "A scenario load run's exact assertion population: assert.* outcomes, required extract.* misses and inline pm.test calls, counted on every completion; never the deferred sampled replay. Absent when the run made none.",
+              "$ref": "#/definitions/assertionPopulation"
+            },
             "steps": {
               "type": "array",
               "items": {
