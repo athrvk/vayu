@@ -369,6 +369,52 @@ TEST (GraphQLGetTransport, AnEnvelopeSplitsIntoItsParameters) {
     EXPECT_EQ (by_name.size (), 4U);
 }
 
+// The author's order survives, at every level the GET carries: the top-level
+// members, and the keys inside `variables` and `extensions`, which nlohmann's
+// default object would sort (#2789). Mutation check: parse into
+// `nlohmann::json` instead of `parse_ordered_json` and both tests redden.
+TEST (GraphQLGetTransport, TheAuthorsMemberOrderIsKept) {
+    const auto parameters = graphql_get_parameters (
+    R"({"extensions":{"zz":1,"aa":2},"variables":{"zeta":1,"alpha":{"y":true,"b":[3,1]},"mid":null},)"
+    R"("operationName":"B","query":"{ a }"})");
+    ASSERT_HAS_VALUE (parameters);
+    EXPECT_EQ (*parameters,
+    "extensions=" + percent_encode (R"({"zz":1,"aa":2})") +
+    "&variables=" + percent_encode (R"({"zeta":1,"alpha":{"y":true,"b":[3,1]},"mid":null})") +
+    "&operationName=" + percent_encode ("B") + "&query=" + percent_encode ("{ a }"));
+}
+
+// The same envelope the other tests use, in the order it is written: query
+// first, then the operation, then the two maps.
+TEST (GraphQLGetTransport, TheTopLevelParametersFollowTheEnvelopeOrder) {
+    const auto parameters = graphql_get_parameters (kEnvelope);
+    ASSERT_HAS_VALUE (parameters);
+    EXPECT_EQ (*parameters,
+    "query=" + percent_encode ("query A { a } query B { b }") + "&operationName=" +
+    percent_encode ("B") + "&variables=" + percent_encode (R"({"limit":10})") +
+    "&extensions=" + percent_encode (R"({"trace":"on"})"));
+}
+
+// Numbers are re-rendered from their parsed value, not copied as text: a
+// fraction or exponent form is a double, an integer is exact up to
+// UINT64_MAX, and one past that is the nearest double.
+TEST (GraphQLGetTransport, NumbersAreRenderedFromTheirParsedValue) {
+    const auto encoded = [] (const char* number) {
+        const auto parameters = graphql_get_parameters (
+        std::string (R"({"query":"{ a }","variables":{"n":)") + number + "}}");
+        return parameters ? *parameters : std::string{};
+    };
+    const auto variables = [] (const char* rendered) {
+        return "query=" + percent_encode ("{ a }") +
+        "&variables=" + percent_encode (std::string (R"({"n":)") + rendered + "}");
+    };
+
+    EXPECT_EQ (encoded ("1e2"), variables ("100.0"));
+    EXPECT_EQ (encoded ("9223372036854775808"), variables ("9223372036854775808"));
+    EXPECT_EQ (encoded ("18446744073709551615"), variables ("18446744073709551615"));
+    EXPECT_EQ (encoded ("18446744073709551616"), variables ("1.8446744073709552e+19"));
+}
+
 // An empty body has nothing to carry, and the request has no body frame
 // either - it is simply a GET.
 TEST (GraphQLGetTransport, EmptyContentCarriesNothing) {
