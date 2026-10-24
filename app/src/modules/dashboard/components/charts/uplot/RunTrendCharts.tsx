@@ -17,7 +17,8 @@
  *
  * A run that did not record the metric is a gap, not a zero. Each series is
  * drawn twice - a line, and the same values as points - because a run is a
- * discrete sample: a lone point between two gaps would otherwise draw nothing.
+ * discrete sample: every run gets a marker, not only the lone ones between two
+ * gaps that the line now marks for itself.
  */
 
 import { useMemo } from "react";

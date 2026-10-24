@@ -131,7 +131,11 @@ consumes it.
   tick stands for a second at all; one that does with no `secondPercentiles` is
   that empty second. The percentile chart plots it as a `null` point, which
   uPlot draws as a break in the line - skipping it would join its neighbours
-  straight across the stall - and `worstReading`, the merge both
+  straight across the stall. A reading with an empty second on both sides (or a
+  data end) has no neighbour to join, so `UPlotChart` draws it as a marker
+  rather than nothing; a sparse run's 0.5 req/s shows every completion. An
+  empty second never draws a bridge, and a continuous series draws no markers.
+  `worstReading`, the merge both
   `buildPercentileChartData` and `rebucket(..., "max")` use, keeps a bucket
   null only when every second in it was empty. A row an older engine stored
   holds `0` for such a second and still reads as `0`: nothing rewrites it.
