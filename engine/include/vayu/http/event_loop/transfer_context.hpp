@@ -106,6 +106,16 @@ struct TransferData {
     /// to buffer, the stream caps are the stream's intended end.
     bool stream_cap_reached = false;
 
+    /// Set when the transfer follows redirects, which is what makes
+    /// progress_callback count the bodies of the hops before the last (#2893):
+    /// libcurl zeroes `CURLINFO_SIZE_DOWNLOAD_T` at each new hop, and never
+    /// hands a followed hop's body to write_callback.
+    bool counts_redirect_bodies = false;
+    /// The current hop's body bytes, as progress_callback last saw them.
+    curl_off_t hop_body_down = 0;
+    /// The body bytes of every hop already left behind.
+    curl_off_t earlier_hops_body_down = 0;
+
     /// The redacted, per-line collector for the one `cat=client` record this
     /// transfer emits when verbosity reaches 2 (issue #1557); empty otherwise.
     std::vector<std::string> debug_lines;
