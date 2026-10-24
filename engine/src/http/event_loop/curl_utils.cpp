@@ -1678,17 +1678,18 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     }
     response.transfer_attempted = curl_transfer_attempted (curl, result);
 
-    // Wire byte counts (body + headers), for throughput-in-bytes metrics.
-    curl_off_t dl_bytes = 0, ul_bytes = 0;
+    // Wire bytes, headers and body. REQUEST_SIZE already holds every body
+    // byte sent, on every hop (POSTFIELDS, multipart and a streamed upload
+    // alike), so SIZE_UPLOAD_T added to it counts the last hop's body twice
+    // (#2893).
+    curl_off_t dl_bytes = 0;
     long header_bytes = 0, request_bytes = 0;
     get_info<CURLINFO_SIZE_DOWNLOAD_T> (curl, &dl_bytes);
-    get_info<CURLINFO_SIZE_UPLOAD_T> (curl, &ul_bytes);
     get_info<CURLINFO_HEADER_SIZE> (curl, &header_bytes);
     get_info<CURLINFO_REQUEST_SIZE> (curl, &request_bytes);
     response.timing.bytes_down = static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
     static_cast<size_t> (std::max<long> (0, header_bytes));
-    response.timing.bytes_up = static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
-    static_cast<size_t> (std::max<long> (0, request_bytes));
+    response.timing.bytes_up = static_cast<size_t> (std::max<long> (0, request_bytes));
 
     // Set body. On a failed transfer this is whatever arrived before the
     // failure, which is also the truncated prefix when the body cap tripped.

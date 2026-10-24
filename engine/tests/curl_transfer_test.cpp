@@ -76,6 +76,21 @@ class MethodEchoServer {
             res.set_header ("X-Hop", "first");
             res.set_redirect ("/repeated-headers");
         });
+        // A redirect hop with a body of its own (#2893).
+        const auto moved = [] (int status) {
+            return [status] (const httplib::Request&, httplib::Response& res) {
+                res.status = status;
+                res.set_header ("Location", "/landing");
+                res.set_content (std::string (kRedirectBodyBytes, 'r'), "text/plain");
+            };
+        };
+        svr.Post ("/moved-301", moved (301));
+        svr.Post ("/moved-307", moved (307));
+        const auto landing = [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (std::string (kLandingBodyBytes, 'x'), "text/plain");
+        };
+        svr.Get ("/landing", landing);
+        svr.Post ("/landing", landing);
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -96,7 +111,9 @@ class MethodEchoServer {
         return "http://127.0.0.1:" + std::to_string (port) + path;
     }
 
-    static constexpr size_t kBigBodyBytes = size_t{ 256 } * 1024;
+    static constexpr size_t kBigBodyBytes      = size_t{ 256 } * 1024;
+    static constexpr size_t kRedirectBodyBytes = 200;
+    static constexpr size_t kLandingBodyBytes  = size_t{ 10 } * 1024;
 
     httplib::Server svr;
     std::thread thread;
@@ -575,6 +592,84 @@ TEST_F (CurlTransferTest, FailedTransferKeepsTheTimingAndBytesCurlMeasured) {
     << "curl measured the time spent before the timeout";
     EXPECT_GT (response.timing.bytes_up, 0u)
     << "the request headers went out and must be counted";
+}
+
+// ============================================================================
+// Wire bytes across redirect hops (#2893)
+// ============================================================================
+
+namespace {
+
+constexpr size_t kPostBodyBytes = size_t{ 10 } * 1024;
+
+/// Room for two hops' request lines and headers: a few hundred bytes from this
+/// client, far under the 10 KiB body whose copies the bounds below count.
+constexpr size_t kTwoHopsHeadersBound = 2048;
+
+vayu::Request text_post (const std::string& url) {
+    vayu::Request request;
+    request.method       = vayu::HttpMethod::POST;
+    request.url          = url;
+    request.body.mode    = vayu::BodyMode::Text;
+    request.body.content = std::string (kPostBodyBytes, 'p');
+    return request;
+}
+
+class RedirectBytesTest : public CurlTransferTest {
+    protected:
+    /// What the event loop measured for @p request, which must have answered
+    /// @p status.
+    vayu::Timing measure (const vayu::Request& request, int status) {
+        auto result = run_once (request);
+        if (!result.is_ok ()) {
+            ADD_FAILURE () << request.url << ": " << result.error ().message;
+            return {};
+        }
+        const auto& response = result.value ();
+        EXPECT_EQ (response.status_code, status)
+        << request.url << ": " << response.error_message;
+        return response.timing;
+    }
+
+    /// @p request sent once following its redirect and once stopping at it.
+    std::pair<vayu::Timing, vayu::Timing>
+    followed_and_alone (vayu::Request request, int redirect_status) {
+        const auto followed      = measure (request, 200);
+        request.follow_redirects = false;
+        return { followed, measure (request, redirect_status) };
+    }
+};
+
+} // namespace
+
+// A 307 sends the body again; REQUEST_SIZE counts both copies already, so
+// SIZE_UPLOAD_T added to it counted the last one a third time, and one POST
+// with no redirect twice. Mutation check: add SIZE_UPLOAD_T back to
+// `bytes_up` in `extract_response` and the two upper bounds and the sum fail.
+TEST_F (RedirectBytesTest, A307SendsAndCountsTheBodyOnBothHops) {
+    const auto [followed, redirect] =
+    followed_and_alone (text_post (server->url ("/moved-307")), 307);
+    const auto landing = measure (text_post (server->url ("/landing")), 200);
+
+    EXPECT_GE (redirect.bytes_up, kPostBodyBytes);
+    EXPECT_LT (redirect.bytes_up, 2 * kPostBodyBytes)
+    << "one hop sent the body once";
+    EXPECT_GE (followed.bytes_up, 2 * kPostBodyBytes);
+    EXPECT_LT (followed.bytes_up, (2 * kPostBodyBytes) + kTwoHopsHeadersBound);
+    EXPECT_EQ (followed.bytes_up, redirect.bytes_up + landing.bytes_up);
+}
+
+// A 301 turns the POST into a bodyless GET, so the body went out once, on the
+// hop that was redirected, and SIZE_UPLOAD_T (the GET's, 0) never holds it.
+// Mutation check: read `bytes_up` from SIZE_UPLOAD_T and the body is lost.
+TEST_F (RedirectBytesTest, A301SendsTheBodyOnlyOnTheRedirectedHop) {
+    const auto [followed, redirect] =
+    followed_and_alone (text_post (server->url ("/moved-301")), 301);
+
+    EXPECT_GE (followed.bytes_up, kPostBodyBytes);
+    EXPECT_LT (followed.bytes_up, kPostBodyBytes + kTwoHopsHeadersBound);
+    EXPECT_GT (followed.bytes_up, redirect.bytes_up)
+    << "and the GET that followed";
 }
 
 // A load stream's total is a backstop past its duration cap, so before #2835 a

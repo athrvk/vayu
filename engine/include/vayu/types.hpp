@@ -669,7 +669,7 @@ struct Timing {
     double first_byte_ms = 0.0;
     double download_ms   = 0.0;
     size_t bytes_down = 0; // CURLINFO_SIZE_DOWNLOAD_T + response header bytes (wire)
-    size_t bytes_up = 0; // CURLINFO_SIZE_UPLOAD_T + request header bytes (wire)
+    size_t bytes_up = 0; // CURLINFO_REQUEST_SIZE: every hop's request line, headers and body (wire)
 };
 
 // ============================================================================
