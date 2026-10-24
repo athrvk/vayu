@@ -4690,10 +4690,19 @@ compares the embedded bytes with that file. Then come three charts drawn from
 2. Latency p50, p95 and p99 in ms, with the p95 budget as a labelled dashed line
    when the run declared one. The axis stretches to reach the budget, so a
    generous budget is drawn however far above the data it lies.
-3. Responses per tick by class: 2xx/3xx, 4xx, 5xx and No response (status code
-   0). A tick carries cumulative counts, so each class is drawn as what it
-   gained since the previous tick, a count that moved backwards adding nothing.
-   A class that saw no response is not drawn and has no label.
+3. Responses by class: 2xx/3xx, 4xx, 5xx and No response (status code 0). A
+   class that saw no response is not drawn and has no label. The chart reads the
+   series one of two ways, chosen once for the whole `timeSeries`:
+   - When any tick carries `status_seconds` (issue #2888, runs stored after
+     #2866), it is **responses per second**: one point per entry at
+     `counts[i] / span`, at the end of the entry's span (`second + span`), the
+     entries kept once per `second` (the last wins) and in second order, with
+     3xx counted into 2xx/3xx. The ticks' own timing moves nothing, and a tick
+     without the key adds no point. A series whose every `status_seconds` is
+     empty draws no status chart.
+   - Otherwise (a run stored before #2866) it is **responses per tick**: a tick
+     carries cumulative counts, so each class is drawn as what it gained since
+     the previous tick, a count that moved backwards adding nothing.
 
 Every y-axis starts at 0 and names its unit, the x-axis is seconds from the start
 of the run, and each line is labelled where it ends instead of in a legend; the
