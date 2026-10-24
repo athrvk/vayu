@@ -1352,7 +1352,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
 it to `start_time` up front (`seed_run_times`, `http/routes/execution.cpp`), because a run
 killed by a daemon crash never reaches a terminal status: `reconcile_orphaned_runs` marks it
-failed and leaves `end_time` as recorded (safe without an owner column because the engine holds
+failed (with a partial `summary` for a load run, see `summary` below) and leaves `end_time` as recorded (safe without an owner column because the engine holds
 the instance lock before the database opens, so no live engine owns the rows it meets - issue
 #2422), so an unseeded row would report a duration spanning
 however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
@@ -1405,10 +1405,32 @@ metric row of the run: totals, the cumulative latency percentiles, the status-co
 bytes, and the script-validation tallies. It is written once - by `run_manager.cpp` when the run
 reaches `completed`/`stopped`, and best-effort (minus `setup_overhead`, with a wall-clock
 `test_duration`) when it fails. `""` means no terminal status has written one: the run is still
-`pending`/`running`, or the engine died before it got there. The report then stands on the run's
-sampled `results` alone. NOT NULL with a `""`
-default, so `sync_schema()` can
+`pending`/`running`, or it failed on a path that writes none. The report then stands on the run's
+sampled `results` alone, and a failed load run says so with `summary.summaryMissing`. NOT NULL
+with a `""` default, so `sync_schema()` can
 `ALTER TABLE ADD COLUMN` it onto an existing table (same pattern as `requests.follow_redirects`).
+
+**A run the engine died under** (issue #2895) is given a partial summary at the next start, in
+the same transaction `reconcile_orphaned_runs` marks it `failed` in: a load run whose `summary`
+is `""` and that wrote at least one [`metric_ticks`](#metric_ticks) row is given the last row's
+cumulative figures (one `ORDER BY id DESC LIMIT 1` read per such run, `get_last_metric_tick`),
+under this column's own keys, plus `"partial": true`:
+
+```json
+{
+  "partial": true, "total_requests": 40, "test_duration": 4.0, "rps": 10.0, "cancelled": 1,
+  "send_rate": 11.0, "throughput": 10.0, "dropped_requests": 4,
+  "bytes_sent": 4000, "bytes_received": 40000, "status_codes": { "200": 38, "503": 2 }
+}
+```
+
+`rps` is `total_requests / test_duration`, not the tick's trailing `current_rps`. Nothing a tick
+holds for its last second only (`current_*`, `window_*`, the latency percentiles) is copied, and
+nothing it never measures (`latency`, `peak_concurrency`, `avg_in_flight`, `queue_wait_avg`,
+`error_types`, `sampling`, the sending window, `connection_replays`) is written, so the report
+reads each absent key as it reads an older engine's summary. The report flags the run with
+`summary.partial`. A summary the run already stored is never replaced, a run that wrote no tick
+keeps `""`, design and collection runs are given nothing, and `has_warnings` stays `0`.
 
 ```json
 {

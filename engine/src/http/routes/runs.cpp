@@ -235,6 +235,12 @@ struct SendingTotals {
 // the report. Revisit if this is ever held per run or per result.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct ReportExtras {
+    // The run's totals are its last persisted tick's, stored by
+    // `reconcile_orphaned_runs` for a run the engine died under (#2895), or
+    // there is no summary at all where a failed load run should have one.
+    // Each becomes a `summary` flag only when true.
+    bool summary_partial    = false;
+    bool summary_missing    = false;
     double peak_concurrency = 0.0;
     double dropped_total    = 0.0;
     double queue_wait_avg   = 0.0;
@@ -912,6 +918,9 @@ ReportExtras& extras) {
         return;
     }
 
+    std::optional<bool> partial;
+    read_optional_bool (summary, "partial", partial);
+    extras.summary_partial = partial.value_or (false);
     apply_summary_totals (summary, report, extras);
     apply_summary_slow_requests (summary, report);
     apply_summary_phase_means (summary, report);
@@ -1688,6 +1697,12 @@ double target_rps) {
     if (const auto& avg_in_flight = extras.avg_in_flight) {
         json_report["summary"]["avgInFlight"] = *avg_in_flight;
     }
+    if (extras.summary_partial) {
+        json_report["summary"]["partial"] = true;
+    }
+    if (extras.summary_missing) {
+        json_report["summary"]["summaryMissing"] = true;
+    }
     if (extras.latency_measured) {
         json_report["latency"] = { { "min", report.latency_min },
             { "max", report.latency_max }, { "avg", report.latency_avg },
@@ -1911,9 +1926,10 @@ nlohmann::json build_report_results (const std::vector<vayu::db::Result>& result
  *
  * The whole-run aggregates come from `runs.summary` - the values the run itself
  * computed at completion - laid over a report calculated from the run's sampled
- * `results`. A run with no summary is still pending or running, or never
- * reached a terminal status because the engine died (#2436), and reports
- * without one rather than erroring.
+ * `results`. A run with no summary is still pending or running, or failed
+ * without writing one, and reports without one rather than erroring; a run
+ * the engine died under carries its last tick's totals as a partial summary
+ * (#2895). `summary.partial` and `summary.summaryMissing` say which.
  *
  * Extracted so the wiring is covered without an in-process HTTP server - see
  * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
@@ -1954,12 +1970,12 @@ vayu::core::RunManager* live_runs) {
     vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
 
     // `summary` is written as the run finishes (#2436), so no usable one means
-    // the run is still pending/running or the engine died before it got there.
-    // The report then stands on the sampled `results` alone -
-    // `calculate_detailed_report` above - or, for a live load run, on its
-    // collector; `metadata.status` is how a reader tells them apart. Once a
-    // live load run's summary is stored it is the whole-run answer, as it is
-    // for a finished run.
+    // the run is still pending/running or failed without one (see
+    // `summary_missing` below). The report then stands on the sampled
+    // `results` alone - `calculate_detailed_report` above - or, for a live
+    // load run, on its collector; `metadata.status` is how a reader tells them
+    // apart. Once a live load run's summary is stored it is the whole-run
+    // answer, as it is for a finished run.
     ReportExtras extras;
     if (live_load && run->summary.empty ()) {
         const auto context =
@@ -1967,6 +1983,11 @@ vayu::core::RunManager* live_runs) {
         apply_live_counters (context.get (), duration_s, report, extras);
     }
     apply_run_summary (run->summary, report, extras);
+    // A failed load run with no summary has no whole-run totals at all: the
+    // engine died with no tick to rebuild them from (#2895), or the worker
+    // failed on a path that writes none. The zeros below are not a measurement.
+    extras.summary_missing = run->type == vayu::RunType::Load &&
+    run->status == vayu::RunStatus::Failed && run->summary.empty ();
 
     const double target_rps =
     reconcile_report_rates (run->config_snapshot, duration_s, extras, report);
