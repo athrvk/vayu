@@ -189,18 +189,43 @@ const MASKING_WITHHELD_NOTE =
  * never leads.
  */
 export function maskingIncompleteResult(err: MaskingIncompleteError, ctx: ToolContext): ToolResult {
+	const outage = maskingOutage(err, ctx);
+	return outage ? failureResult(outage) : errorResult(err.message, "transient");
+}
+
+/**
+ * {@link maskingIncompleteResult}'s outage-led wording as the text of a thrown
+ * error, for a resource or a prompt, which answer a failed request rather than
+ * a result. Undefined when the cause is not an outage, so the caller keeps the
+ * masking message (or a failure that is more telling). An interrupted cause
+ * drops the tool-call retry advice: a read sent nothing that could have
+ * completed.
+ */
+export function maskingOutageMessage(
+	err: MaskingIncompleteError,
+	ctx: ToolContext
+): string | undefined {
+	const outage = maskingOutage(err, ctx);
+	if (!outage) return undefined;
+	const { interrupted } = outage;
+	if (!interrupted) return outage.message;
+	return [interrupted.lead, interrupted.tail].filter(Boolean).join(" ");
+}
+
+/** The failure to lead with when the lookup's cause is the engine being down or failing, else undefined. */
+function maskingOutage(err: MaskingIncompleteError, ctx: ToolContext): Failure | undefined {
 	const outage = recognisedEngineFailure(err.cause, ctx);
 	if (outage?.failureClass !== "unreachable" && outage?.failureClass !== "transient") {
-		return errorResult(err.message, "transient");
+		return undefined;
 	}
 	const { interrupted } = outage;
 	// An interrupted failure's text is rebuilt per tool from its parts, so the note
 	// rides in the tail or `describeFailure` would drop it.
 	if (interrupted) {
 		const tail = [interrupted.tail, MASKING_WITHHELD_NOTE].filter(Boolean).join(" ");
-		return failureResult({ ...outage, interrupted: { ...interrupted, tail } });
+		return { ...outage, interrupted: { ...interrupted, tail } };
 	}
-	return failureResult({ ...outage, message: `${outage.message} ${MASKING_WITHHELD_NOTE}` });
+	return { ...outage, message: `${outage.message} ${MASKING_WITHHELD_NOTE}` };
 }
 
 /** An HTTP refusal the engine answered. */

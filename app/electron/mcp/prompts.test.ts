@@ -21,7 +21,7 @@ import { PROMPTS } from "./prompts.js";
 import { resolveSafetyConfig } from "./config.js";
 import { KNOWN_LOAD_MODES } from "./safety.js";
 import { TOOLS, type ToolContext } from "./tools.js";
-import type { EngineClient } from "./engine-client.js";
+import { EngineRequestError, type EngineClient } from "./engine-client.js";
 
 const REPORT = { latency: { p99: 120 }, summary: { avgRps: 500 }, statusCodes: { "200": 10 } };
 
@@ -245,6 +245,50 @@ describe("run output in prompts", () => {
 			).rejects.toThrow(/the environments lookup .*failed \(engine hiccup\)/);
 		}
 	);
+
+	/*
+	 * The prompt fails as a request, and with the engine down the lookup is the
+	 * first thing to fail: the outage leads, the withholding follows (#2854).
+	 */
+	describe.each(["summarize_run", "diagnose_errors"])("%s on a failed secret lookup", (name) => {
+		const failWith = (cause: unknown) => {
+			const client = reportClient();
+			(client.getGlobals as ReturnType<typeof vi.fn>).mockRejectedValue(cause);
+			return prompt(name)
+				.build({ runId: "run_1" }, { client, config: resolveSafetyConfig(), host: "app" })
+				.then(
+					() => {
+						throw new Error("the prompt did not fail");
+					},
+					(err: unknown) => (err as Error).message
+				);
+		};
+
+		test("an engine that is down leads with the outage, not the setting", async () => {
+			const text = await failWith(new TypeError("fetch failed"));
+			expect(text.startsWith("Could not reach the Vayu engine")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+		});
+
+		test("an engine that answered 5xx leads with its answer", async () => {
+			const text = await failWith(
+				new EngineRequestError("Engine responded 500 for GET /globals", 500, "boom")
+			);
+			expect(text.startsWith("Engine error (500)")).toBe(true);
+			expect(text).toContain("withheld whole");
+		});
+
+		test.each([
+			["a cause that says nothing about the engine", new Error("engine hiccup")],
+			["an engine refusal of the lookup itself", new EngineRequestError("403", 403, "no")],
+		])("%s keeps the masking message", async (_, cause) => {
+			const text = await failWith(cause);
+			expect(text.startsWith("Nothing is returned: masking this result's secrets")).toBe(
+				true
+			);
+		});
+	});
 
 	test("compare_runs embeds only the comparison, which carries no recorded string", async () => {
 		const text = textOf(

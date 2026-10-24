@@ -2634,14 +2634,21 @@ as an error result, a resource or a prompt as a failed request
 made.
 
 A tool words that error by the lookup's cause (#2780, `maskingIncompleteResult`
-in `kit.ts`). When the engine refused the connection or answered with a failure
-it classes `unreachable` or `transient`, the answer is the same one every other
-tool gives (`Could not reach the Vayu engine ...`, `Engine error (500): ...`),
-in that class, followed by a sentence that the result is withheld whole until
+in `kit.ts`), and a resource or a prompt does the same through
+`maskingOutageMessage` (#2854), so its failed request carries the same text.
+When the engine refused the connection or answered with a failure it classes
+`unreachable` or `transient`, the answer is the same one every other tool gives
+(`Could not reach the Vayu engine ...`, `Engine error (500): ...`), in that
+class, followed by a sentence that the result is withheld whole until
 the engine answers; the Reveal secrets setting is not mentioned, since it is
 not a remedy for an outage. Any other cause, including the `Unexpected error`
 fallback and an engine refusal of the lookup itself (a 4xx), keeps the masking
-message naming the lookup that failed.
+message naming the lookup that failed. A resource or prompt read puts its own
+engine read and the lookups out together and settles both: an outage lookup
+failure leads even when the read failed first with a bare `fetch failed`, and a
+lookup failure that is not an outage yields to the read's own failure (a 404
+for an unknown run). A cancelled read says so without a tool call's "may have
+completed" advice, since a read sent nothing.
 
 The stored trace stays raw on purpose: Vayu's own History shows what went over
 the wire, and the engine's rows are unchanged. Only the MCP read is masked.
