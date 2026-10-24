@@ -160,7 +160,7 @@ const json& member (const json& source, std::string_view key) {
 constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
 { "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
 "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
-"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead",
+"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead", "cleanupOverhead",
 "peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
 "httpVersionDowngraded", "throughputBytesPerSec", "sendingDurationSeconds",
 "connectionReplays", "avgInFlight", "completedWhileSending" });

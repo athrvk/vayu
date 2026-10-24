@@ -25,6 +25,7 @@ function baseReport(overrides: Partial<RunReport> = {}): RunReport {
 			sendRate: 198,
 			testDuration: 3,
 			setupOverhead: 0.03,
+			cleanupOverhead: 0.02,
 			peakConcurrency: 20,
 			droppedRequests: 0,
 			avgQueueWaitMs: 1.0,
@@ -50,6 +51,28 @@ function baseReport(overrides: Partial<RunReport> = {}): RunReport {
 }
 
 describe("reportToDerived", () => {
+	describe("setup and cleanup overhead (#2894)", () => {
+		// Mutation checked: dropping `cleanupOverhead` from the return, or reading
+		// it from `s.setupOverhead`, fails the first case; defaulting setup to 0
+		// fails the second.
+		it("passes both keys through under their own names", () => {
+			const d = reportToDerived(baseReport());
+			expect(d.setupOverhead).toBe(0.03);
+			expect(d.cleanupOverhead).toBe(0.02);
+		});
+
+		it("leaves setup undefined for a run stored before it was measured", () => {
+			const base = baseReport();
+			const d = reportToDerived(
+				baseReport({
+					summary: { ...base.summary, setupOverhead: undefined, cleanupOverhead: 0.4 },
+				})
+			);
+			expect(d.setupOverhead).toBeUndefined();
+			expect(d.cleanupOverhead).toBe(0.4);
+		});
+	});
+
 	describe("dispatch chip on a report without completedWhileSending (whole-run pair)", () => {
 		const withRates = (sendRate?: number, throughput?: number) => {
 			const base = baseReport();

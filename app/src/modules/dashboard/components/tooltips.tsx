@@ -79,7 +79,7 @@ export const TOOLTIPS = {
 
 	// ---- Row 4 stat cards ----
 	duration:
-		"Time since load started, so setup scripts are not counted. For iterations mode this counts until all N requests complete; for the others it counts up to the configured duration.",
+		"Time since load started, so setup scripts are not counted. For iterations mode this counts until all N requests complete; for the others it counts up to the configured duration. Setup is the time from the run's start to load start, including the setup script; cleanup is the time from load end to teardown finished.",
 	totalRequests:
 		"Cumulative count of requests dispatched and completed (success + failure). For iterations mode this approaches the configured target; for the others it grows with throughput.",
 	peakVirtualUsers:

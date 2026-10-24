@@ -575,6 +575,27 @@ ReportExtras& extras) {
     read_number (latency, "p999", report.latency_p999);
 }
 
+/**
+ * The setup and cleanup overheads (#2894). A summary with no
+ * `cleanup_overhead` was stored before the two were split, and its
+ * `setup_overhead` measured cleanup: it is reported as that, and the setup
+ * figure is left out rather than given a number nobody measured. A summary
+ * with neither key (the sequential collection run's) keeps the zeros.
+ */
+void apply_summary_overheads (const nlohmann::json& summary, vayu::DetailedReport& report) {
+    if (summary.contains ("cleanup_overhead")) {
+        read_number (summary, "cleanup_overhead", report.cleanup_overhead_s);
+        double setup_s = 0.0;
+        read_number (summary, "setup_overhead", setup_s);
+        report.setup_overhead_s = setup_s;
+        return;
+    }
+    if (summary.contains ("setup_overhead")) {
+        read_number (summary, "setup_overhead", report.cleanup_overhead_s);
+        report.setup_overhead_s.reset ();
+    }
+}
+
 /** The whole-run totals and the latency distribution. */
 void apply_summary_totals (const nlohmann::json& summary,
 vayu::DetailedReport& report,
@@ -584,7 +605,7 @@ ReportExtras& extras) {
     read_number (summary, "send_rate", report.send_rate);
     read_number (summary, "throughput", report.throughput);
     read_number (summary, "test_duration", report.total_duration_s);
-    read_number (summary, "setup_overhead", report.setup_overhead_s);
+    apply_summary_overheads (summary, report);
     if (summary.contains ("rps") && summary["rps"].is_number ()) {
         report.avg_rps    = summary["rps"].get<double> ();
         report.actual_rps = report.avg_rps;
@@ -1663,7 +1684,7 @@ double target_rps) {
         { "totalDurationSeconds", report.total_duration_s },
         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
         { "sendRate", report.send_rate }, { "throughput", report.throughput },
-        { "setupOverhead", report.setup_overhead_s },
+        { "cleanupOverhead", report.cleanup_overhead_s },
         { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
         { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
         { "avgQueueWaitMs", extras.queue_wait_avg },
@@ -1687,6 +1708,9 @@ double target_rps) {
     }
     if (const auto& avg_in_flight = extras.avg_in_flight) {
         json_report["summary"]["avgInFlight"] = *avg_in_flight;
+    }
+    if (const auto& setup_overhead = report.setup_overhead_s) {
+        json_report["summary"]["setupOverhead"] = *setup_overhead;
     }
     if (extras.latency_measured) {
         json_report["latency"] = { { "min", report.latency_min },

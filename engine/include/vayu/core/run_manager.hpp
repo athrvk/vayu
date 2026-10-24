@@ -1325,14 +1325,17 @@ struct SamplingRetention {
  * (whole-run) percentiles, never a window.
  */
 struct RunSummaryInputs {
-    size_t total_requests   = 0;
-    size_t cancelled        = 0; // By a Stop; not in total_requests (#2136)
-    double rps              = 0.0;
-    double send_rate        = 0.0;
-    double throughput       = 0.0;
-    double test_duration_s  = 0.0;
+    size_t total_requests  = 0;
+    size_t cancelled       = 0; // By a Stop; not in total_requests (#2136)
+    double rps             = 0.0;
+    double send_rate       = 0.0;
+    double throughput      = 0.0;
+    double test_duration_s = 0.0;
+    // `execute_load_test`'s entry to load start, `script.setup` included.
     double setup_overhead_s = 0.0;
-    size_t peak_concurrency = 0;
+    // Load end to the auxiliary threads joined.
+    double cleanup_overhead_s = 0.0;
+    size_t peak_concurrency   = 0;
     // MetricsCollector::average_in_flight over `test_duration_s` (#2821).
     double avg_in_flight     = 0.0;
     size_t dropped_requests  = 0;
