@@ -43,6 +43,7 @@ import {
 	RunComment,
 	RunStatusPill,
 } from "@/components/shared";
+import { reportOutcome, rowOutcome } from "@/components/shared/run-outcome";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { runComment, runTitle } from "./run-heading";
@@ -133,6 +134,9 @@ export default function HistoryDetail() {
 		error: reportError,
 		refetch: refetchReport,
 	} = useRunReportQuery(showsReport ? selectedRunId : null, run?.status);
+	// The verdict refines a load run's pill, as it does on the dashboard header
+	// and the sidebar row (#2130); every other run type keeps the plain glyph.
+	const judgement = isLoadRun ? (reportOutcome(report) ?? rowOutcome(run)) : null;
 
 	// No run selected
 	if (!selectedRunId) {
@@ -222,7 +226,7 @@ export default function HistoryDetail() {
 						>
 							{title}
 						</h1>
-						<RunStatusPill status={run.status} />
+						<RunStatusPill status={run.status} outcome={judgement?.outcome} />
 						<TimeValue
 							value={run.startTime}
 							className="shrink-0 text-xs text-muted-foreground"
