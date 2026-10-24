@@ -133,6 +133,21 @@ const dpr = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
 // ticks never land on a half-second and get a rounded/duplicated label.
 const TIME_INCRS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 
+/**
+ * Indices of the readings both of whose neighbours are gaps (a data end counts as
+ * one). uPlot strokes only between two adjacent non-null samples, so these draw
+ * nothing as a line; a marker keeps a lone reading (a sparse run's one completion
+ * a second) on the chart. A reading beside another reading is already a line.
+ */
+function isolatedReadings(values: ArrayLike<number | null | undefined>): number[] {
+	const idxs: number[] = [];
+	for (let i = 0; i < values.length; i++) {
+		if (values[i] == null) continue;
+		if (values[i - 1] == null && values[i + 1] == null) idxs.push(i);
+	}
+	return idxs;
+}
+
 function defaultY(v: number): string {
 	return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
 }
@@ -243,7 +258,12 @@ export function UPlotChart({
 						scale: s.scale ?? "y",
 						stroke,
 						width: (s.width ?? 1.5) * dpr(),
-						points: { show: false },
+						points: {
+							show: false,
+							size: 5 * dpr(),
+							fill: stroke,
+							filter: (u, seriesIdx) => isolatedReadings(u.data[seriesIdx]),
+						},
 					};
 					if (s.dash) base.dash = s.dash.map((d) => d * dpr());
 					if (s.kind === "area") base.fill = theme.color(s.role, 0.14);
