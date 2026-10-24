@@ -67,7 +67,7 @@ describe("RequestElementsSummary", () => {
 
 			expect(
 				screen.getByText(
-					"235,690 requests deferred to a post-run replay of sampled responses - results in Test validation"
+					"235,690 requests deferred to a post-run replay of sampled responses - results in Sampled replay"
 				)
 			).toBeTruthy();
 			expect(screen.queryByText(/passed/)).toBeNull();
@@ -78,7 +78,7 @@ describe("RequestElementsSummary", () => {
 			render(<RequestElementsSummary elements={[deferredScript({ deferred: 1 })]} />);
 			expect(
 				screen.getByText(
-					"1 request deferred to a post-run replay of sampled responses - results in Test validation"
+					"1 request deferred to a post-run replay of sampled responses - results in Sampled replay"
 				)
 			).toBeTruthy();
 		});

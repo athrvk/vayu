@@ -16,11 +16,13 @@
  * detail's banner and the history list's row glyph cannot disagree.
  *
  * - **failed** - the run's status is `failed`, or a declared budget was missed.
- * - **passed** - every declared budget was met and no request errored.
+ * - **passed** - every declared budget was met, no request errored and no
+ *   assertion failed.
  * - **not-judged** - nothing declared a pass/fail line, or the run's own errors
- *   undercut the budgets that passed (a latency ceiling can be met by a run whose
- *   responses are all instant 500s). Never green: absence of a failure is not a
- *   pass.
+ *   or failed assertions undercut the budgets that passed (a latency ceiling can
+ *   be met by a run whose responses are all instant 500s, and a run whose every
+ *   assertion failed still has a 0% error rate, #2820). Never green: absence of a
+ *   failure is not a pass.
  *
  * A budget the run could not measure (`evaluated: false`, issue #1484) is
  * counted by the engine as failed (`passed: false`, in `failed`), so it lands in
@@ -33,6 +35,7 @@
  */
 
 import type { Run, RunReport } from "@/types";
+import { formatNumber } from "@/lib/format-number";
 import { formatErrorPercent, pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import { budgetName } from "./threshold-metrics";
 
@@ -65,6 +68,11 @@ export interface RunOutcomeInput {
 	verdict?: "passed" | "failed";
 	/** Percent, 0-100. Absent when the run recorded no request. */
 	errorRate?: number;
+	/**
+	 * A scenario load run's failed assertions (#2820). HTTP-blind, so a run can
+	 * carry some at an `errorRate` of 0; absent or 0 means none to name.
+	 */
+	assertionsFailed?: number;
 }
 
 /** `15.1%`; a rate that exists but rounds to nothing reads `<0.1%`, never `0.0%`. */
@@ -107,31 +115,49 @@ function metReason(budgets: Extract<Budgets, { state: "met" }>): string {
 	});
 }
 
+/** `4,580 assertions failed`, the one phrasing the verdict and the History row share. */
+export function formatAssertionsFailed(failed: number): string {
+	return `${formatNumber(failed)} ${pluralize(failed, "assertion")} failed`;
+}
+
+function assertionsFragment(failed: number | undefined): string | null {
+	return failed !== undefined && failed > 0 ? formatAssertionsFailed(failed) : null;
+}
+
+/** The measured fragments, comma-joined; the absent ones drop out. */
+function undercuts(...fragments: Array<string | null>): string {
+	return fragments.filter((fragment) => fragment !== null).join(", ");
+}
+
 /** The verdict for a run, or `null` when it is not (yet) a run that can be judged. */
 export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
-	const { status, errorRate } = input;
+	const { status, errorRate, assertionsFailed } = input;
 	if (status === "stopped") {
 		return { outcome: "not-judged", reason: "Stopped before it finished" };
 	}
 	if (status !== "completed" && status !== "failed") return null;
 
+	// A failed run keeps its budget (or status) reason; the failed assertions
+	// are on the Overview and add nothing to a verdict that is already red.
 	const budgets = readBudgets(input);
 	if (status === "failed" || budgets.state === "missed") {
 		return { outcome: "failed", reason: failedReason(budgets) };
 	}
 
-	const errors =
-		errorRate !== undefined && errorRate > 0 ? `${formatErrorRate(errorRate)} errors` : null;
+	const measured = errorRate === undefined ? null : `${formatErrorRate(errorRate)} errors`;
+	const assertions = assertionsFragment(assertionsFailed);
 	if (budgets.state === "met") {
 		const met = metReason(budgets);
-		return errors
-			? { outcome: "not-judged", reason: `${met}, but ${errors}` }
-			: { outcome: "passed", reason: met };
+		// A met budget names "0.0% errors" only beside failed assertions: there it
+		// says the HTTP layer was clean and the assertions were not.
+		const hasErrors = errorRate !== undefined && errorRate > 0;
+		if (!hasErrors && !assertions) return { outcome: "passed", reason: met };
+		return { outcome: "not-judged", reason: `${met}, but ${undercuts(measured, assertions)}` };
 	}
 
 	const noBudgets = "No budgets set";
-	const measured = errorRate === undefined ? null : (errors ?? "0.0% errors");
-	return { outcome: "not-judged", reason: measured ? `${noBudgets}. ${measured}` : noBudgets };
+	const detail = undercuts(measured, assertions);
+	return { outcome: "not-judged", reason: detail ? `${noBudgets}. ${detail}` : noBudgets };
 }
 
 /**
@@ -145,6 +171,7 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
 	return judgeRun({
 		status,
 		thresholdValidation: report.thresholdValidation,
+		assertionsFailed: report.scenario?.assertions?.failed,
 		// A run that sent nothing has no error rate; the report's 0 there is
 		// an empty denominator, not 0.0% measured.
 		errorRate: totalRequests && totalRequests > 0 ? errorRate : undefined,
@@ -158,6 +185,6 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
  */
 export function rowOutcome(run: Run): RunJudgement | null {
 	if (run.type !== "load" || !run.resultSummary) return null;
-	const { verdict, errorRate } = run.resultSummary;
-	return judgeRun({ status: run.status, verdict, errorRate });
+	const { verdict, errorRate, assertionsFailed } = run.resultSummary;
+	return judgeRun({ status: run.status, verdict, errorRate, assertionsFailed });
 }

@@ -1937,6 +1937,14 @@ export interface LoadResultSummary {
 	/** Percent, 0-100, by the one error definition (`docs/ux-writing.md`). */
 	errorRate?: number;
 	verdict?: "passed" | "failed";
+	/**
+	 * A scenario load run's exact assertion tally (#2820), the report's
+	 * `scenario.assertions`: `assert.*` outcomes and inline `pm.test` calls, never
+	 * the deferred replay. A pair; both are absent when the run made none or was
+	 * stored before the tally, so absence is not "0 failed".
+	 */
+	assertionsPassed?: number;
+	assertionsFailed?: number;
 }
 
 /** The `{data, pagination}` envelope the paginated `GET /runs` returns. */
@@ -3346,6 +3354,14 @@ export interface RunReport {
 		skipped: number;
 		/** On a load run: step executions that got no response (the steps' `noResponse`). */
 		errored: number;
+		/**
+		 * A scenario load run's exact assertion tally (#2820): every `assert.*`
+		 * outcome and inline `pm.test` call, counted on every completion. The
+		 * deferred replay is the sampled population and is not in it
+		 * (`testValidation`), and `passed` / `failed` above stay HTTP outcomes.
+		 * Absent on a run stored before the tally and on a collection run.
+		 */
+		assertions?: { passed: number; failed: number };
 		/** Step rows the run kept - the length `results[]` should have. */
 		stepsStored: number;
 		stepsDropped: number;

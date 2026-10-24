@@ -66,6 +66,9 @@ export * from "./RequestElementsSummary";
 // "982 of 1,000 assertions passed" - a load run's test outcome, live and stored
 export * from "./TestValidationSummary";
 
+// A scenario load run's exact assertion tally, counted on every response (issue #2820)
+export * from "./AssertionsSummary";
+
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";
 

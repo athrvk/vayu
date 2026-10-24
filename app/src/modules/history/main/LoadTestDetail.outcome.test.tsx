@@ -85,6 +85,41 @@ describe("the run report's verdict banner", () => {
 		expect(screen.getByText(/The budget was met, but 15.0% errors/)).toBeInTheDocument();
 	});
 
+	it("does not call a run with every assertion failed and 0.0% errors a pass (#2820)", () => {
+		renderReport(
+			report({
+				summary: {
+					totalRequests: 4580,
+					successfulRequests: 4580,
+					failedRequests: 0,
+					errorRate: 0,
+					totalDurationSeconds: 1,
+					avgRps: 4580,
+				},
+				statusCodes: { "200": 4580 },
+				errors: { total: 0, withDetails: 0, types: {} },
+				scenario: {
+					iterations: 100,
+					iterationsCompleted: 100,
+					stepsExecuted: 4580,
+					passed: 4580,
+					failed: 0,
+					skipped: 0,
+					errored: 0,
+					stepsStored: 0,
+					stepsDropped: 0,
+					virtualUsers: 10,
+					assertions: { passed: 0, failed: 4580 },
+				},
+			})
+		);
+
+		expect(screen.getByText("Not judged")).toBeInTheDocument();
+		expect(
+			screen.getByText(/No budgets set\. 0\.0% errors, 4,580 assertions failed/)
+		).toBeInTheDocument();
+	});
+
 	it("says Failed for a failed status", () => {
 		renderReport(report({ metadata: { ...report().metadata!, status: "failed" } }));
 

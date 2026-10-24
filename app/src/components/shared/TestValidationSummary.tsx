@@ -20,6 +20,10 @@
  * at all. The History Overview renders this block, and the dashboard shows that
  * Overview for a finished run (#2220).
  *
+ * Titled "Sampled replay" (#2820): the replay runs the scripts against a sample
+ * of the responses, so its counts are a sample's. A scenario load run's exact,
+ * every-response tally is `AssertionsSummary`.
+ *
  * **`failures` lists the named failures.** The Overview passes them because
  * the synthetic failure row is filtered out of the Samples tab (see
  * `test-validation.ts`), so this is the one place they reach the screen.
@@ -86,7 +90,7 @@ export function TestValidationSummary({
 	return (
 		<Card className={className}>
 			<CardHeader>
-				<CardTitle>Test validation</CardTitle>
+				<CardTitle>Sampled replay</CardTitle>
 			</CardHeader>
 			<CardContent>
 				{testValidation && (
