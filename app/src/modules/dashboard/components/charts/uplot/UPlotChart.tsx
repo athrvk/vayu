@@ -71,8 +71,9 @@ export interface UPlotSeriesSpec {
 	tipValues?: (number | null)[];
 	/**
 	 * Whether the line is drawn (default true); fill and bands are kept either
-	 * way. Read whenever paths are built, so a value that follows the data
-	 * changes without a rebuild of the plot.
+	 * way. Read when uPlot builds the paths, which a `data` update makes it do,
+	 * so a value derived with the data takes effect with it, without a rebuild
+	 * of the plot; a change on its own waits for the next update.
 	 */
 	stroked?: boolean;
 }
@@ -228,13 +229,9 @@ export function UPlotChart({
 			if (s.tipValues) byPosition[i + 1] = s.tipValues;
 		});
 		tipValuesRef.current = byPosition;
-
-		const unstroked = new Set(series.flatMap((s, i) => (s.stroked === false ? [i + 1] : [])));
-		const before = unstrokedRef.current;
-		unstrokedRef.current = unstroked;
-		const changed =
-			unstroked.size !== before.size || [...unstroked].some((i) => !before.has(i));
-		if (changed) plotRef.current?.redraw(true);
+		unstrokedRef.current = new Set(
+			series.flatMap((s, i) => (s.stroked === false ? [i + 1] : []))
+		);
 	}, [series]);
 
 	useEffect(() => {

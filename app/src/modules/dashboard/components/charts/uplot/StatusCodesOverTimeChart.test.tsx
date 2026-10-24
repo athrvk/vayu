@@ -82,6 +82,18 @@ function strokedLabels(): string[] {
 	);
 }
 
+/**
+ * Labels of the series whose last drawn paths stroke a line: uPlot caches the
+ * paths it drew on each series as `_paths` and rebuilds them on a data update.
+ */
+function drawnStrokeLabels(): string[] {
+	const plot = instances.all[instances.all.length - 1];
+	return plot.series.flatMap((s, i) => {
+		const drawn = (s as uPlot.Series & { _paths?: uPlot.Series.Paths | null })._paths;
+		return i > 0 && drawn?.stroke ? [String(s.label)] : [];
+	});
+}
+
 /** Each class' band, as [upper, lower] uPlot series indices. */
 function bandEdges(): number[][] {
 	return (instances.opts[instances.opts.length - 1].bands ?? []).map((b) => [...b.series]);
@@ -148,5 +160,28 @@ describe("StatusCodesOverTimeChart strokes", () => {
 		);
 		expect(strokedLabels()).toEqual(["2xx", "5xx"]);
 		expect(bandEdges()).toEqual(STACKED_BANDS);
+	});
+
+	/*
+	 * The plot is kept across a data update, so the paths it last drew are
+	 * what the user sees. Mutation check: let the paths builder read the
+	 * `stroked` set the plot was built with, rather than the current one, and
+	 * the 5xx line never appears.
+	 */
+	it("strokes a class on the update that brings its first response", async () => {
+		const { rerender } = render(
+			<StatusCodesOverTimeChart history={history([{ "200": 50 }, { "200": 50 }])} />
+		);
+		await act(async () => {});
+		expect(drawnStrokeLabels()).toEqual(["2xx"]);
+		await act(async () => {
+			rerender(
+				<StatusCodesOverTimeChart
+					history={history([{ "200": 50 }, { "200": 50 }, { "200": 45, "503": 5 }])}
+				/>
+			);
+		});
+		expect(instances.all).toHaveLength(1);
+		expect(drawnStrokeLabels()).toEqual(["2xx", "5xx"]);
 	});
 });
