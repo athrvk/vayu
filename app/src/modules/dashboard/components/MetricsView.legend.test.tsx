@@ -257,8 +257,7 @@ describe("MetricsView status card's receive rate picks its unit (#2860)", () => 
 		return text;
 	}
 
-	// A steady 4.4 KB/s read "0" or "0.01" MB/s by the tick pair: 440 bytes in one
-	// 100 ms tick and 530 in the next.
+	// Two 100 ms tick pairs of one steady rate, which MB/s printed as "0" and "0.01".
 	it("reads KB/s below 0.1 MB/s, on both sides of the old 0 / 0.01 flip", () => {
 		expect(receiveRate(440, 0.1)).toBe("4.4 KB/s in");
 		expect(receiveRate(530, 0.1)).toBe("5.3 KB/s in");

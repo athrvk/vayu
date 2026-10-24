@@ -101,10 +101,7 @@ export interface ByteRateParts {
 	unit: "KB/s" | "MB/s";
 }
 
-/**
- * 0.1 MB/s. Below it two decimals of MB/s keep one significant digit or none:
- * a steady 4.4 KB/s read "0" or "0.01" by the tick pair (#2860).
- */
+/** 0.1 MB/s. Below it two decimals of MB/s keep one significant digit or none (#2860). */
 const MEGABYTE_RATE_FROM = 100_000;
 
 /**

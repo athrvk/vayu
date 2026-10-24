@@ -144,8 +144,7 @@ describe("StatusCodesOverTimeChart tooltip", () => {
 	});
 });
 
-// The empty classes' lines lay on the 2xx top edge in their own colours (#2860).
-describe("StatusCodesOverTimeChart strokes", () => {
+describe("StatusCodesOverTimeChart strokes (#2860)", () => {
 	it("draws no line for a class with no responses, and keeps its band", () => {
 		render(<StatusCodesOverTimeChart history={history([{ "200": 50 }, { "200": 50 }])} />);
 		expect(strokedLabels()).toEqual(["2xx"]);

@@ -50,8 +50,8 @@ function gate(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
 }
 
 /**
- * A minute of live frames from 10 virtual users finishing together every
- * 200 ms (+-1 ms), at a phase the seed picks. Each frame sleeps 100 ms and works
+ * A minute of live frames while 10 responses land together every 200 ms
+ * (+-1 ms), at a phase the seed picks. Each frame sleeps 100 ms and works
  * 0-2 ms, is stamped in whole ms, and is a gate once a second has passed since
  * the last gate, as `collect_metrics` in `run_manager.cpp` does.
  */
@@ -457,18 +457,12 @@ describe("buildStatusOverTime", () => {
 	});
 
 	/*
-	 * S6 of #2860 through the engine's own frame cadence: 10 virtual users
-	 * finishing together every 200 ms, a steady 50/s. Frames are 100 ms of sleep
-	 * plus 0-2 ms of work, stamped in whole ms; a frame is a gate once a second
-	 * has passed since the last one (`run_manager.cpp`), so a gate closes 1.000 to
-	 * 1.020 s. Measured over these seeds: 280 of 295 points read 49.2 to 49.8,
-	 * and 15 (1 in 20) read 59.3 to 59.6 (19% high), a batch landing in that
-	 * overrun. 5% at every point is out of reach from these frames: a batch
-	 * inside the frame interval at a window's edge is in or out by where the
-	 * frames fell, so any window they bound is one batch off now and then.
-	 * Mutation check: diff every frame (the last of each second standing for
-	 * it) and 64 of 305 points are past 5%, the worst 39.6 for the second still
-	 * open at the edge; both bounds below fail.
+	 * #2860's S6 profile, a steady 50/s. A gate closes 1.000 to 1.020 s, and
+	 * over these seeds 280 of 295 points read 49.2 to 49.8 while 15 (1 in 20)
+	 * read 59.3 to 59.6, a batch landing in that overrun; the bounds sit just
+	 * past both. Mutation check: diff every frame (the last of each second
+	 * standing for it) and 64 of 305 points are past 5%, the worst 39.6 for the
+	 * second still open at the edge; both bounds fail.
 	 */
 	it("draws a closed loop's batched completions flat but for one batch", () => {
 		const points = [1, 2, 3, 4, 5].flatMap((seed) => buildStatusOverTime(closedLoopRun(seed)));
