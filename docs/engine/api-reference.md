@@ -10831,6 +10831,7 @@ named it.
     "sendRate": 100.0,
     "throughput": 99.34,
     "setupOverhead": 0.12,
+    "cleanupOverhead": 0.03,
     "peakConcurrency": 100,
     "droppedRequests": 0,
     "avgQueueWaitMs": 0.4,
@@ -11299,6 +11300,22 @@ the samples landed; `avgInFlight` is the figure that does not alias. Present for
 a load run stored since the issue, `0` included; **absent** for a run stored
 before it, a collection (design-mode) run, and a run reported from its sampled
 results, never a `0` nobody measured.
+
+`summary.setupOverhead` and `summary.cleanupOverhead` (issue #2894) are the two
+stretches of a load run outside `testDuration`, in seconds. `setupOverhead`
+runs from the run's own thread taking it up to load start: reading the run's
+settings, building its request or plan, and the `script.setup` pass (a
+collection's, or a single request's `lifecycleElements`), so a slow setup
+script shows here and never in `testDuration`. `cleanupOverhead` runs from the
+end of load, the drain included in `testDuration` before it, to the run's
+background threads (the metrics tick, the token-refresh watchdog, the monitor
+scrape) having stopped, before the deferred script and schema passes and the
+summary write. Both read `0` for a failed run's best-effort summary, a partial
+report of a running run, a run reported from its sampled results, and a
+collection (design-mode) run, none of which times them. A run stored before the
+issue stored the cleanup figure under the setup name: its report carries that
+figure as `cleanupOverhead` and has **no** `setupOverhead`, rather than a setup
+time nobody measured.
 
 `sampling` says how much each bounded store thinned away: all zeros means the
 error, trace and tested-response sets are complete, and a non-zero count means

@@ -583,7 +583,10 @@ constant concurrency 64, against a saved request:
 | p99 | 1.935 ms | **1.516 ms** |
 | p999 | 6.455 ms | **2.819 ms** |
 | max | 37.983 ms | **16.319 ms** |
-| setup overhead | 0.508 s | 0.119 s |
+| cleanup overhead | 0.508 s | 0.119 s |
+
+The cleanup row was captured before issue #2894, when the report labelled
+that teardown figure setup overhead.
 
 These percentiles are Vayu's perceived latency (generator queue wait included),
 so set beside `wrk`'s wire-time figures above they are not like for like.

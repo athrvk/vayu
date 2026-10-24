@@ -112,7 +112,7 @@
           "required": [
             "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
             "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
-            "avgRps", "testDuration", "sendRate", "throughput", "setupOverhead",
+            "avgRps", "testDuration", "sendRate", "throughput", "cleanupOverhead",
             "peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
             "httpVersionDowngraded", "throughputBytesPerSec"
           ],
@@ -129,7 +129,8 @@
             "testDuration": {"type": "number"},
             "sendRate": {"type": "number"},
             "throughput": {"type": "number"},
-            "setupOverhead": {"type": "number"},
+            "setupOverhead": {"description": "Seconds from the load run's start to load start, the instant testDuration counts from: the run's configuration and its script.setup pass (issue #2894). Absent for a run stored before it, whose stored figure measured cleanup and is reported as cleanupOverhead.", "type": "number"},
+            "cleanupOverhead": {"description": "Seconds from the end of load to the run's background threads joined, before the summary is written (issue #2894). A run stored before it reported this figure as setupOverhead.", "type": "number"},
             "peakConcurrency": {"type": "number"},
             "droppedRequests": {"type": "number"},
             "avgQueueWaitMs": {"type": "number"},

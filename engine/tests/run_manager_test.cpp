@@ -896,6 +896,51 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #2894: the summary's setup overhead runs from the load run's entry to load
+// start, so it holds the whole `script.setup` pass, and the teardown figure is
+// stored apart as `cleanup_overhead`. A lower bound only: a slow runner makes
+// setup longer, never shorter. Mutation check: compute the setup figure as
+// `cleanup_end - test_end` again in `execute_load_test` and the setup
+// assertion reads the few milliseconds of the thread join.
+TEST (LoadClock, SetupOverheadCoversTheSetupScript) {
+    const std::string db_path = "test_load_clock_setup_overhead.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        constexpr int SETUP_MS         = 300;
+        const std::string setup_script = "const until = Date.now () + " +
+        std::to_string (SETUP_MS) + "; while (Date.now () < until) {}";
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "1s" },
+            { "targetRps", 20.0 }, { "timeout", 5000 }, { "workers", 1 },
+            { "lifecycleElements",
+            nlohmann::json::array ({ { { "id", "el_setup" }, { "kind", "script.setup" },
+            { "enabled", true }, { "config", { { "script", setup_script } } } } }) } };
+
+        const std::string run_id = "run_setup_overhead";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+        const auto summary = nlohmann::json::parse (stored->summary);
+
+        EXPECT_GE (summary.value ("setup_overhead", -1.0), SETUP_MS / 1000.0)
+        << summary.dump ();
+        EXPECT_GE (summary.value ("cleanup_overhead", -1.0), 0.0) << summary.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #2881: a stored row's `elapsed_seconds` is the load clock its gate frame
 // reads, so History draws a second where the live view drew it. Mutation
 // check: measure from the first persisted tick again in `persist_metric_tick`
