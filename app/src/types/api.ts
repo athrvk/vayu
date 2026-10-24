@@ -1027,8 +1027,8 @@ export interface StartScenarioRunRequest {
 		scripts?: "asMarked" | "allInline" | "allDeferred";
 		/**
 		 * Folds the element pipeline's own elapsed time into a step's
-		 * recorded latency when `true`. Default `false` - a step's latency is
-		 * its transfer alone.
+		 * recorded latency, and the run's with it, when `true`. Default
+		 * `false` - both are the transfer alone.
 		 */
 		includeScriptTime?: boolean;
 	};

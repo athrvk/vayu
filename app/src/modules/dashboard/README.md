@@ -210,6 +210,16 @@ consumes it.
   chart keeps the last tick of a bucket like the other windowed series (a mean
   is not a maximum). `capacity`, `ramp_up` and `constant_rps` stay on the instant in the card and the chart. The window credits a request to the second it completes in, so a target slower than the window reads high for a tick and low after; the card clamps to the configured users. The "Peak
   virtual users" stat and `p99AtPeak` stay on the peak.
+- **A finished `ramp_up` run's concurrency card is titled for the peak** (#2870).
+  Instantaneous concurrency is 0 once a run ends, so `HeroRow` already hands
+  `CurrentConcurrencyCard` the peak; with `isCompleted` the card reads "Peak
+  virtual users" and drops the "active" unit instead of claiming 30 are active.
+  The report carries no per-tick concurrency, so `reportToDerived` leaves
+  `rampDeviationPct` empty and `LoadTestDetail` fills it from the stored series
+  with `buildRampOverlay`, the overlay the live view uses. A series folded into
+  buckets (#2547) feeds the bucket's max concurrency, so the figure is the
+  overlay's over buckets. A run with no stored series prints no "lag" clause at
+  all, never `lag -%`; the live card keeps its dash.
 - **The Send / Throughput chip is judged on the windowed pair, held for a few
   seconds, and is grey until the run has settled** (#2802).
   `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is
@@ -325,10 +335,9 @@ no division by elapsed time, so where a tick happened to fall cannot move a
 response from one point to its neighbour. A History bucket the engine
 folded carries one entry spanning the bucket, so `counts / span` is still
 responses per second at either resolution (#2547). A point sits at the
-end of its span in load-start seconds, moved onto the series' own clock the way
-the other charts plot a tick: a live frame's `elapsed_seconds` already counts
-from load start, a stored row's from the first persisted row, one gate later,
-so the same instant is one lower there (`elapsedOrigin`). Two limits are the
+end of its span in load-start seconds, where the other charts plot that tick: a
+live frame's and a stored row's `elapsed_seconds` both count from load start
+(#2881). Two limits are the
 engine's and are plain on the chart: a second is closed 250 ms after it ends
 and reported at the next gate, so a point trails the instant it describes by
 up to about 1.4 s, and the last partial second of a run is never closed, so it

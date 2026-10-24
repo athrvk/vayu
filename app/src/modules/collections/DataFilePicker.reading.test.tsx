@@ -13,6 +13,10 @@
  * and JSONL carry their own types, and a toggle re-parses the same file into
  * the rows a run sends. A toggle is not a pick, so it reaches the host through
  * `onCastNumbersChange` and never through `onSelect`, which declares.
+ *
+ * Re-picking after a refusal (#2825): the hidden input is reset after every
+ * pick, or the browser fires no change event for the identical selection and
+ * the "Choose file" button does nothing.
  */
 
 import { useState } from "react";
@@ -62,6 +66,41 @@ async function pick(name: string, text: string) {
 	fireEvent.change(input, { target: { files: [new File([text], name)] } });
 	await waitFor(() => expect(onSelect).toHaveBeenCalled());
 	return { onSelect, onCastNumbersChange };
+}
+
+/** A host that shows the refusal the way the dialogs do. */
+function RefusingHost({ onSelect }: { onSelect: (file: SelectedDataFile | null) => void }) {
+	const [file, setFile] = useState<SelectedDataFile | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	return (
+		<DataFilePicker
+			selected={file}
+			onSelect={(next) => {
+				setFile(next);
+				onSelect(next);
+			}}
+			onCastNumbersChange={setFile}
+			error={error}
+			onError={setError}
+			iterations={undefined}
+		/>
+	);
+}
+
+/**
+ * Records every write to the input's `value`. jsdom ignores any non-empty
+ * assignment to a file input, so the `""` write is observable only here.
+ */
+function recordValueWrites(input: HTMLInputElement): string[] {
+	const writes: string[] = [];
+	Object.defineProperty(input, "value", {
+		configurable: true,
+		get: () => "",
+		set: (next: string) => {
+			writes.push(next);
+		},
+	});
+	return writes;
 }
 
 const checkbox = () => screen.queryByRole("checkbox", { name: /Read numbers as numbers/ });
@@ -115,5 +154,62 @@ describe("Read numbers as numbers", () => {
 		fireEvent.click(checkbox()!);
 		await waitFor(() => expect(onCastNumbersChange).toHaveBeenCalledTimes(2));
 		expect(onCastNumbersChange.mock.calls[1][0].parsed.rows).toEqual([{ id: "7", zip: "007" }]);
+	});
+});
+
+describe("Re-picking a file", () => {
+	// Mutation check: drop the `e.target.value = ""` in handleInputChange and the
+	// cases fail on the recorded writes.
+	function setup() {
+		const onSelect = vi.fn();
+		const view = render(<RefusingHost onSelect={onSelect} />);
+		const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+		const writes = recordValueWrites(input);
+		const choose = (file: File) => fireEvent.change(input, { target: { files: [file] } });
+		return { onSelect, writes, choose, input };
+	}
+
+	it("resets the input after a refused pick, so the same file can be chosen again", async () => {
+		const { writes, choose } = setup();
+
+		choose(new File(["id,name\n1,a\n2"], "users.csv"));
+
+		expect(await screen.findByText("Couldn't read the data file")).toBeTruthy();
+		expect(screen.getByText(/Row 2 has 1 value/)).toBeTruthy();
+		expect(screen.getByText("Choose file")).toBeTruthy();
+		expect(writes).toEqual([""]);
+	});
+
+	it("accepts the corrected file picked after a refusal", async () => {
+		const { onSelect, writes, choose } = setup();
+
+		choose(new File(["id,name\n1,a\n2"], "users.csv"));
+		await screen.findByText("Couldn't read the data file");
+
+		choose(new File(["id,name\n1,a\n2,b"], "users.csv"));
+
+		expect(await screen.findByText(/CSV · 2 rows · 2 columns/)).toBeTruthy();
+		expect(screen.queryByText("Couldn't read the data file")).toBeNull();
+		expect(onSelect.mock.lastCall?.[0].parsed.rows).toHaveLength(2);
+		expect(writes).toEqual(["", ""]);
+	});
+
+	it("resets the input after an accepted pick too", async () => {
+		const { onSelect, writes, choose } = setup();
+
+		choose(new File(["id\n1"], "users.csv"));
+
+		await waitFor(() => expect(onSelect).toHaveBeenCalled());
+		expect(writes).toEqual([""]);
+	});
+
+	it("stays silent when the chooser is cancelled", () => {
+		const { onSelect, writes, input } = setup();
+
+		fireEvent.change(input, { target: { files: [] } });
+
+		expect(onSelect).not.toHaveBeenCalled();
+		expect(screen.queryByText("Couldn't read the data file")).toBeNull();
+		expect(writes).toEqual([""]);
 	});
 });

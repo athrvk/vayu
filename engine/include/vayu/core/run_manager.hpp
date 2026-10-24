@@ -506,7 +506,8 @@ struct RunContext {
     /// `elements.includeScriptTime` (issue #1495): false (the default) times
     /// a step's own transfer only, excluding whatever an inline script or
     /// declarative element spent applying; true folds that time back into
-    /// the recorded sample.
+    /// the step's sample and the run's alike (#2792, through
+    /// `ResultAnnotations::script_ms`).
     bool include_script_time = false;
 
     /// `elements.timers` (issue #1495, wired by #1498): `"asConfigured"`
@@ -1132,7 +1133,7 @@ struct RunContext {
  */
 struct MetricTickSample {
     int64_t timestamp = 0; // Unix ms; the tick's single wall-clock sample
-    double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
+    double elapsed_seconds = 0.0; // Seconds since load start, as the live frame's `elapsedSeconds`
     size_t requests_completed = 0; // Responses received (success + error)
     size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
     size_t http_errors = 0;     // Of the errors, those that got a response

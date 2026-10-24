@@ -8137,8 +8137,12 @@ own unknown-key rule uses, checked before the run row is created.
   regardless of its own marking. `extract.*` and `assert.*` are unaffected -
   they always run inline on a scenario load run.
 - **`includeScriptTime`** folds the element pipeline's own elapsed time into
-  a step's recorded latency when `true`; by default (`false`) a step's
-  latency is its transfer alone, exactly as before this issue.
+  a step's recorded latency when `true`, and into the run's latency figures
+  with it (`latency`, the per-tick percentiles and a stored result's
+  `latencyMs`), so the run's `max` is never below a step's (#2792); by
+  default (`false`) both are the transfer alone. A stored trace's
+  `totalMs`, the per-phase timings and the `slow_threshold_ms` decision stay
+  on the transfer either way.
 - **`timers`** (issue #1498) is wired end to end: `"asConfigured"` (default)
   runs every `timer.*` element's own stored config unchanged; `"off"`
   silences every `timer.*` element for the run (`waitedMs: 0`, no sleep);
@@ -9074,7 +9078,9 @@ failure) is also in the step's latency, so a step that times out reports its
 timeout in `p99` and `max`; one that never reached the wire (a data-binding
 failure, a refused header, a skip) adds a count and no duration. The step's
 histogram follows the same population as the run's, and `includeScriptTime`
-applies to a failed step as it does to an answered one (issue #2384). At the
+applies to a failed step as it does to an answered one (issue #2384), folding
+the same pipeline time into the run's latency as into the step's, so the run's
+`max` is never below a step's (#2792). At the
 top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
@@ -9702,7 +9708,7 @@ since it. A tick stored before issue #2821 has no `window_avg_in_flight`.
 
 `status_seconds` (issue #2866) is the seconds the row's gate closed, each with
 the responses that **completed** in it, by class: `second` counts from load
-start (not from the origin `elapsed_seconds` counts from), `span` is `1`, and
+start (the clock `elapsed_seconds` counts from), `span` is `1`, and
 `counts` is `[2xx, 3xx, 4xx, 5xx, error]`, where `error` is a response with no
 status (code `0`) or a code outside 200-599. A second is closed 250 ms after
 it ends, so a row usually holds one second, two when its gate's cadence crosses two
@@ -9725,8 +9731,14 @@ engine writes the tick object once, at write time. Two things follow:
 - **Pagination is tick-aligned**: `limit`/`offset` count ticks, so
   `pagination.total` is the number of ticks (not rows), and a page boundary can
   no longer return a tick with half its fields zeroed.
-- **`elapsed_seconds` keeps counting across pages**, since it is measured from
-  the run's first stored tick.
+- **`elapsed_seconds` keeps counting across pages**, since it is stored with
+  the tick: the seconds since load start, the same reading the live frame of
+  that tick carries as `elapsedSeconds` (issue #2881). No tick is stored before
+  load start, and the first stored tick reads between `0` and about `1.0` (the
+  1 Hz gate counts from the metrics thread's start, so after a setup script it
+  can land anywhere up to one interval after load start). A run an engine older
+  than that issue stored counts from its first stored tick instead, so its first
+  tick reads `0`, about one second behind the live clock.
 
 A run with no ticks returns `200` with an empty `data` array - only a run that
 does not exist is a `404`.
@@ -9827,9 +9839,10 @@ than the tick cadence, so they do not line up row for row.
 ```
 
 `timestamp` is wall-clock Unix ms - when the engine scraped, not an elapsed
-offset - because a tick's `elapsed_seconds` is measured from the run's first
-*persisted* tick while the scrape starts with the run; joining the two series
-onto one timeline is what the wall clock is for. A series the target did not
+offset - because the scrape starts with the run while a tick's
+`elapsed_seconds` counts from load start, after any `script.setup`; a stored
+tick carries the same wall clock, so joining the two series onto one timeline
+is what `timestamp` is for. A series the target did not
 report in that scrape is **absent** from its `series` object rather than zero.
 
 The two fields are read off different clocks, which is why they can disagree.

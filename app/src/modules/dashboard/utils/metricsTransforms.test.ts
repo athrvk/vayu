@@ -455,14 +455,43 @@ describe("buildPercentileChartData on a live series (issue #2385)", () => {
 describe("buildStatusOverTime", () => {
 	it("classifies and diffs a stored series' cumulative maps into per-second rates", () => {
 		const out = buildStatusOverTime([
-			tick({ elapsed_seconds: 0, status_codes: { "200": 100, "404": 5 } }),
-			tick({ elapsed_seconds: 1, status_codes: { "200": 180, "404": 7, "500": 3 } }),
+			tick({ elapsed_seconds: 1, status_codes: { "200": 100, "404": 5 } }),
+			tick({ elapsed_seconds: 2, status_codes: { "200": 180, "404": 7, "500": 3 } }),
 		]);
 		expect(out).toHaveLength(2);
-		// The first stored tick closes the second before elapsed 0; the second
+		// The first stored tick closes the second from load start; the second
 		// is the diff from the first, over one second.
-		expect(out[0]).toMatchObject({ time: 0, c2xx: 100, c4xx: 5, c5xx: 0 });
-		expect(out[1]).toMatchObject({ time: 1, c2xx: 80, c4xx: 2, c5xx: 3 });
+		expect(out[0]).toMatchObject({ time: 1, c2xx: 100, c4xx: 5, c5xx: 0 });
+		expect(out[1]).toMatchObject({ time: 2, c2xx: 80, c4xx: 2, c5xx: 3 });
+	});
+
+	/*
+	 * #2881: a stored series counts from load start, so its first tick closes
+	 * [0, elapsed]. Mutation check: seed the first interval from -1 again and the
+	 * first tick of a current run rates at half its count.
+	 */
+	it("rates a stored head over the time since load start", () => {
+		const [first] = buildStatusOverTime([
+			tick({ elapsed_seconds: 1.0, status_codes: { "200": 120 } }),
+			tick({ elapsed_seconds: 2.0, status_codes: { "200": 240 } }),
+		]);
+		expect(first).toMatchObject({ time: 1, c2xx: 120 });
+
+		const [late] = buildStatusOverTime([
+			tick({ elapsed_seconds: 1.2, status_codes: { "200": 120 } }),
+		]);
+		expect(late.c2xx).toBeCloseTo(100);
+	});
+
+	it("rates a raw run stored before #2881, whose first tick sits at 0, over one second", () => {
+		const out = buildStatusOverTime([
+			tick({ elapsed_seconds: 0, status_codes: { "200": 120 } }),
+			tick({ elapsed_seconds: 1, status_codes: { "200": 240 } }),
+		]);
+		expect(out.map((p) => [p.time, p.c2xx])).toEqual([
+			[0, 120],
+			[1, 120],
+		]);
 	});
 
 	it("treats status code 0 as connection error and clamps diffs >= 0", () => {
@@ -511,7 +540,7 @@ describe("buildStatusOverTime", () => {
 
 	it("rates a downsampled series per second, as the raw series it folds", () => {
 		const raw = storedTicks(600, (s) =>
-			s >= 300 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}
+			s > 300 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}
 		);
 		const folded = foldLikeEngine(raw, 10);
 		expect(folded.ticksPerBucket).toBe(60);
@@ -557,7 +586,7 @@ describe("buildStatusOverTime", () => {
 				tick({ elapsed_seconds: 300, status_codes: { "200": 150000 } }),
 				tick({ elapsed_seconds: 301, status_codes: { "200": 150500 } }),
 			]);
-			expect(out.map((p) => p.c2xx)).toEqual([150000 / 301, 500]);
+			expect(out.map((p) => p.c2xx)).toEqual([150000 / 300, 500]);
 		});
 
 		it("gates the status card on the points left once the head is dropped", () => {
@@ -579,14 +608,11 @@ describe("buildStatusOverTime", () => {
  * read counts redden, 11 of them; the fold, gate and no-key cases are held by
  * the mutation each one names.
  *
- * Where a point sits. A live frame's `elapsed_seconds` is seconds since load
- * start (`seconds_since_load_start`, `run_manager.cpp`), the same clock an
- * entry's `second` counts, so the second `S` (over at load second `S + 1`) sits
- * at x = `S + span` with origin 0. A stored tick's `elapsed_seconds` counts
- * from the first persisted tick, which landed one gate (about 1 s) after load
- * start, so the same instant is one lower: `elapsedOrigin`, the shift the
- * diffed path already applies. The other charts plot a tick at its own
- * `elapsed_seconds`, so a point at those x values is where they put that instant.
+ * Where a point sits. A live frame's and a stored row's `elapsed_seconds` are
+ * both seconds since load start (#2881), the same clock an entry's `second`
+ * counts, so the second `S` (over at load second `S + 1`) sits at x = `S + span`
+ * on either. The other charts plot a tick at its own `elapsed_seconds`, so a
+ * point at those x values is where they put that instant.
  */
 describe("buildStatusOverTime from per-second counts (#2866)", () => {
 	/*
@@ -615,20 +641,19 @@ describe("buildStatusOverTime from per-second counts (#2866)", () => {
 		expect(out[1].cErr).toBe(2);
 	});
 
-	it("puts a stored row's second where the same instant sits on the stored clock", () => {
+	it("puts a stored row's second where the same instant sits on the live clock", () => {
 		const closed = [second(0, [50, 0, 0, 0, 0]), second(1, [48, 0, 0, 0, 2])];
 		const stored = buildStatusOverTime([
-			storedRow(0, []),
-			storedRow(1, [closed[0]]),
-			storedRow(2, [closed[1]]),
+			storedRow(1, []),
+			storedRow(2, [closed[0]]),
+			storedRow(3, [closed[1]]),
 		]);
 		const live = buildStatusOverTime([
 			gate(1, {}, []),
 			gate(2, {}, [closed[0]]),
 			gate(3, {}, [closed[1]]),
 		]);
-		// Stored elapsed 0 is load second ~1, so each instant is one lower there.
-		expect(stored.map((p) => p.time)).toEqual([0, 1]);
+		expect(stored.map((p) => p.time)).toEqual([1, 2]);
 		expect(live.map((p) => p.time)).toEqual([1, 2]);
 		expect(stored.map(({ time: _t, ...rates }) => rates)).toEqual(
 			live.map(({ time: _t, ...rates }) => rates)

@@ -892,8 +892,12 @@ class ScenarioLoadDriver {
             }
 
             const bool errored = response.has_error ();
-            record_step_response (*context, *state, step_index, response,
-            pipeline_before_ms + pipeline_after_ms);
+            // Decided once and handed to both populations, so the step's
+            // histogram and the run's cannot disagree about it (#2792).
+            const double script_ms = context->include_script_time ?
+            static_cast<double> (pipeline_before_ms + pipeline_after_ms) :
+            0.0;
+            record_step_response (*state, step_index, response, script_ms);
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
             // that counted only successes would report the send as if it never
@@ -903,7 +907,7 @@ class ScenarioLoadDriver {
             session_after (errored, step_ptr->request, response, *vu),
             errored ? std::nullopt : next_target_before);
             handle_result (context, db, result,
-            ResultAnnotations{ row, step_index, iteration, vu_index });
+            ResultAnnotations{ row, step_index, iteration, vu_index, script_ms });
         });
         context_->requests_sent++;
         return true;
@@ -1107,16 +1111,15 @@ class ScenarioLoadDriver {
      * which is the iteration-abort edge: a 4xx/5xx is a response the next step
      * can still follow (a 404 lookup, a 409 retry). A failed transfer is
      * counted by `finish_step`'s `record_error`, so here it adds only its
-     * duration, and one refused before the wire adds nothing.
+     * duration, and one refused before the wire adds nothing. @p script_ms is
+     * the pipeline time `includeScriptTime` folds in, 0 without it; the run's
+     * population receives the same figure through `ResultAnnotations`.
      */
-    static void record_step_response (const RunContext& context,
-    ScenarioLoadState& state,
+    static void record_step_response (ScenarioLoadState& state,
     size_t step_index,
     const vayu::Response& response,
-    int64_t pipeline_ms) {
-        const double latency_ms = context.include_script_time ?
-        response.timing.total_ms + static_cast<double> (pipeline_ms) :
-        response.timing.total_ms;
+    double script_ms) {
+        const double latency_ms = response.timing.total_ms + script_ms;
         if (response.has_error ()) {
             if (response.transfer_attempted) {
                 state.steps.record_failed_transfer (step_index, latency_ms);

@@ -33,7 +33,7 @@ export const TOOLTIPS = {
 	progress:
 		"Progress through the configured iteration count. The bar fills as requests complete; ETA is computed from current throughput. Once 100%, the load test stops automatically.",
 	currentConcurrency:
-		"Virtual users active at this instant: each is waiting on a response or holding a think timer. The configured ramp climbs the number of virtual users linearly from the starting count to the target over the ramp duration. Ramp lag is the percentage of the configured curve that the generator failed to deliver - non-zero values mean the server is too slow to absorb the planned number of virtual users.",
+		"Virtual users active at this instant: each is waiting on a response or holding a think timer. On a finished run the card shows the peak instead, since nothing is active once it ends. The configured ramp climbs the number of virtual users linearly from the starting count to the target over the ramp duration. Ramp lag is the percentage of the configured curve that the generator failed to deliver - non-zero values mean the server is too slow to absorb the planned number of virtual users.",
 
 	// ---- Hero card #2 (mode-adaptive) ----
 	sendThroughput: (

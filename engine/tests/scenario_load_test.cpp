@@ -1821,11 +1821,59 @@ TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelinesTimeIntoTheRecordedL
        "however noisy the machine's own baseline transfer latency is";
 }
 
-// The same rule for a failed transfer (#2384): the step's duration carries its
-// pipeline time under `includeScriptTime`, and the run's, which never does,
-// stays at the transfer alone. Mutation check: record the failed transfer's
-// `total_ms` without the pipeline and the margin closes.
-TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelineIntoAFailedTransfersStepLatency) {
+namespace {
+/// The step and the run record one completion's latency as the same double,
+/// in histograms of the same precision, so their maxima differ by no more
+/// than the microsecond the run's histogram floors a value to.
+constexpr double HISTOGRAM_ROUNDING_MS = 0.001;
+} // namespace
+
+// The step's latency and the run's are one population under
+// `includeScriptTime` (#2792): a run whose max sat below a step's reported a
+// step slower than any request of the run. Compared within one run, so the
+// machine's speed cancels out; the flag-off run shows the run's figure moves
+// as far as the step's does. Mutation check: drop `annotations.script_ms`
+// from the run's latency in record_successful_response and the run's max
+// falls to the transfer alone, below the step's.
+TEST_F (ScenarioLoadTest, IncludeScriptTimeMovesTheRunsLatencyWithTheSteps) {
+    ScenarioMockServer server;
+    const std::string slow_script =
+    "let s = 0; for (let i = 0; i < 8000000; i++) { s += i; }";
+    struct Maxima {
+        double step = 0.0;
+        double run  = 0.0;
+    };
+    const auto measure = [&] (bool include_script_time) {
+        auto execution = plan_over ({ server.url ("/echo") });
+        execution.plan.steps[0].elements =
+        vayu::tests::compiled_elements ({ vayu::tests::script_element_json (
+        "el_post", "script.post", slow_script, /*inline_script=*/true) });
+        const json config = { { "mode", "iterations" }, { "iterations", 1 },
+            { "concurrency", 1 },
+            { "elements", { { "includeScriptTime", include_script_time } } } };
+        auto state        = run (config, execution);
+        return Maxima{ state->steps.percentiles (0).max,
+            context_->metrics_collector->calculate_percentiles ().max };
+    };
+
+    const Maxima excluded = measure (false);
+    const Maxima included = measure (true);
+
+    EXPECT_GE (included.run, included.step - HISTOGRAM_ROUNDING_MS)
+    << "step=" << included.step << "ms run=" << included.run
+    << "ms - the run's max sits below its own step's";
+    EXPECT_GE (included.run - excluded.run,
+    (included.step - excluded.step) - (2.0 * HISTOGRAM_ROUNDING_MS))
+    << "the flag moved the step's max by " << (included.step - excluded.step)
+    << "ms and the run's by only " << (included.run - excluded.run) << "ms";
+}
+
+// The same rule for a failed transfer (#2384): under `includeScriptTime` the
+// step's duration carries its pipeline time, and so does the run's, so the
+// run's max is at least the step's (#2792). Mutation check: drop
+// `annotations.script_ms` from the AttemptDuration in record_failed_response
+// and the run's max falls to the transfer alone, below the step's.
+TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelineIntoAFailedTransfersRunLatency) {
     auto execution = plan_over ({ "http://127.0.0.1:1/unreachable" });
     execution.plan.steps[0].elements = vayu::tests::compiled_elements (
     { vayu::tests::script_element_json ("el_post", "script.post",
@@ -1839,9 +1887,9 @@ TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelineIntoAFailedTransfersS
     ASSERT_EQ (state->steps.latency_samples (0), 1u);
     const double step_ms = state->steps.percentiles (0).max;
     const double run_ms = context_->metrics_collector->calculate_percentiles ().max;
-    EXPECT_GT (step_ms - run_ms, 15.0)
+    EXPECT_GE (run_ms, step_ms - HISTOGRAM_ROUNDING_MS)
     << "step=" << step_ms << "ms run=" << run_ms
-    << "ms - the failed step's latency left out its own script time";
+    << "ms - the run's max left out the failed step's script time";
 }
 
 // `elements.scripts: "allInline"` forces every `script.*` element inline
