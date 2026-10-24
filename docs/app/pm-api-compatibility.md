@@ -630,7 +630,9 @@ are the answers recorded as different, and the reason for each:
 
 A keyword `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) is one ajv 6 ignores, so the same schema passes
-`ajv` with the keyword left out.
+`ajv` with the keyword left out. A `propertyNames` below the schema root is the
+exception: ajv evaluates it, `jsonSchema` does not, so ajv can reject a body
+that `jsonSchema` only discloses.
 
 **`tv4`** is npm's `tv4` package, version 1.3.0, the version Postman's sandbox
 pins, minified (the package ships no minified build). `require('tv4')` and the

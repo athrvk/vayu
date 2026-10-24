@@ -3401,7 +3401,9 @@ moves into the agreed cases:
 The keywords `jsonSchema` refuses to pass on (2019-09 and later, and OpenAPI's
 `nullable` and `discriminator`) are the ones ajv 6 ignores, so a schema that
 uses one passes `ajv` with the keyword left out and fails `jsonSchema` naming
-it.
+it. A `propertyNames` below the schema root is the one exception: ajv
+evaluates it and `jsonSchema` does not, so ajv can reject a body that
+`jsonSchema` only discloses.
 
 **Cost.** Evaluated on an execution's first `require('ajv')`, never when a
 context is built, so a script that does not require it pays nothing. The first
