@@ -46,7 +46,7 @@
         "reason": {
           "enum": [
             "stopped", "run_failed", "budgets_missed", "budgets_met", "budgets_met_with_errors",
-            "no_budgets"
+            "budgets_met_with_assertion_failures", "no_budgets"
           ]
         }
       }

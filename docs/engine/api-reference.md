@@ -4550,8 +4550,9 @@ file and the screen it came from agree. It adds no rule of its own:
 | `stopped` | `not_judged` | `stopped` |
 | `failed`, no budget missed | `failed` | `run_failed` |
 | A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
-| Every budget met, `summary.errorRate` 0 | `passed` | `budgets_met` |
-| Every budget met, some requests errored | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, `summary.errorRate` 0, no exact assertion failed | `passed` | `budgets_met` |
+| Every budget met, some requests errored (failed assertions too, if any) | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, no request errored, `scenario.assertions.failed > 0` (#2820) | `not_judged` | `budgets_met_with_assertion_failures` |
 | No budget declared | `not_judged` | `no_budgets` |
 
 `stoppedEarly` is `status == "stopped"`.
