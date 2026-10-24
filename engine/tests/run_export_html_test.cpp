@@ -738,6 +738,7 @@ TEST (RunExportHtmlTest, TheThinnedNoteCountsTheStatusLinesPointsToo) {
         int second = 0;
         for (std::size_t row = 0; row < rows; ++row) {
             std::vector<ordered_json> entries;
+            entries.reserve (entries_per_row);
             for (std::size_t at = 0; at < entries_per_row; ++at) {
                 entries.push_back (status_entry (second++, 1, { 10, 0, 0, 0, 0 }));
             }
