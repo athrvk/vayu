@@ -27,7 +27,8 @@
  * scenario load run's failed assertions" redden.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { stubNumberLocale } from "@/test/number-locale";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
@@ -130,6 +131,12 @@ describe("a load run's verdict glyph", () => {
 });
 
 describe("a scenario load run's failed assertions", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
 	const tick = glyphShape(loadRun());
 	// A 100%-HTTP-success run: the engine's errorRate is 0 whatever the assertions did.
 	const FAILING = {

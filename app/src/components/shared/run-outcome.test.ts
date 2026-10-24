@@ -17,7 +17,8 @@
  * cases do (#2820).
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { stubNumberLocale } from "@/test/number-locale";
 import type { Run, RunReport } from "@/types";
 import {
 	formatErrorRate,
@@ -28,6 +29,12 @@ import {
 } from "./run-outcome";
 
 type Budgets = NonNullable<RunReport["thresholdValidation"]>;
+
+let restoreLocale: () => void;
+beforeEach(() => {
+	restoreLocale = stubNumberLocale("en-US");
+});
+afterEach(() => restoreLocale());
 
 function budgets(
 	...checks: Array<[metric: string, passed: boolean, evaluated?: boolean]>
@@ -297,6 +304,17 @@ describe("reportOutcome", () => {
 			outcome: "not-judged",
 			reason: "No budgets set. 0.0% errors, 4,580 assertions failed",
 		});
+	});
+
+	it("groups the failed count the way the host's locale does", () => {
+		restoreLocale();
+		restoreLocale = stubNumberLocale("de-DE");
+		const scenario = {
+			assertions: { passed: 0, failed: 4580 },
+		} as NonNullable<RunReport["scenario"]>;
+		expect(reportOutcome(report({ scenario }))?.reason).toBe(
+			"No budgets set. 0.0% errors, 4.580 assertions failed"
+		);
 	});
 
 	it("is unchanged for a report whose scenario has no tally, or none failed", () => {

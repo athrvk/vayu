@@ -24,7 +24,27 @@
  * off `passed` instead of the total and the partial-failure case fails.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+
+// The percentages come from Intl.NumberFormats built at module load, which the
+// per-case `stubNumberLocale` below cannot reach, so the locale is pinned before
+// the imports run rather than left to the host.
+const restoreIntl = vi.hoisted(() => {
+	const Real = Intl.NumberFormat;
+	class EnUsNumberFormat extends Real {
+		constructor(_locale?: string | string[], options?: Intl.NumberFormatOptions) {
+			super("en-US", options);
+		}
+	}
+	Intl.NumberFormat = EnUsNumberFormat as typeof Intl.NumberFormat;
+	return () => {
+		Intl.NumberFormat = Real;
+	};
+});
+
+afterAll(restoreIntl);
+
+import { stubNumberLocale } from "@/test/number-locale";
 import { screen, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import OverviewTab from "./OverviewTab";
@@ -99,6 +119,11 @@ function keyMetricsGrid(): HTMLElement {
 
 describe("a scenario load run whose every assertion failed", () => {
 	const report = () => scenarioReport({ passed: 0, failed: 4_580 });
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
 
 	it("shows the HTTP success rate and the failed count side by side", () => {
 		renderTab(report());

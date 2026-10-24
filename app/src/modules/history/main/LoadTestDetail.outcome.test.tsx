@@ -13,7 +13,8 @@
  * draws, from the report it was handed.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { stubNumberLocale } from "@/test/number-locale";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
@@ -69,6 +70,12 @@ function renderReport(value: RunReport) {
 }
 
 describe("the run report's verdict banner", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
 	it("calls budgets met over 15% errors Not judged", () => {
 		renderReport(
 			report({
