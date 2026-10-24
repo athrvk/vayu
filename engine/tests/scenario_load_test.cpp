@@ -712,6 +712,65 @@ TEST_F (ScenarioLoadTest, AnErroredStepEndsItsIterationWithoutStrandingTheVirtua
     EXPECT_EQ (state->steps_errored.load (), 3u);
 }
 
+// #2914: every iteration abandons at step 0, so step 1 is never sent. The
+// start-of-run expected count (iterations x steps = 20) is only an upper bound;
+// a natural end settles it to what was sent, so progress reaches 100%.
+// Mutation check: drop the settling assignment at the end of
+// `execute_scenario_load` and `requestsExpected` stays 20.
+TEST_F (ScenarioLoadTest, AnAbandonedIterationSettlesTheExpectedCountToWhatWasSent) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ "http://127.0.0.1:1/unreachable", server.url ("/s1") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 10 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (state->iterations_abandoned.load (), 10u);
+    EXPECT_EQ (context_->requests_sent.load (), 10u);
+    EXPECT_EQ (context_->requests_expected.load (), context_->requests_sent.load ())
+    << "a natural end left the upper bound in place, so progress stops short "
+       "of 100%";
+}
+
+// #2914: a stopped run keeps the start-of-run upper bound, which is what it
+// fell short of. Mutation check: drop the `should_stop` guard on the settling
+// assignment and `requestsExpected` drops to the sent count.
+TEST_F (ScenarioLoadTest, AStoppedIterationsRunKeepsTheExpectedUpperBound) {
+    vayu::tests::SlowMockServer upstream;
+    auto execution = plan_over ({ upstream.hang_url (), upstream.hang_url () });
+    for (auto& step : execution.plan.steps) {
+        step.request.timeout_ms = 120000;
+    }
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1000 },
+        { "concurrency", 2 } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-stop-expected", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    std::thread stopper ([&context] () {
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&context] () { return context->event_loop->active_count () >= 2; }))
+        << "both virtual users never had a transfer in flight";
+        context->should_stop = true;
+        context->notify_refill ();
+    });
+    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto state = vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+    stopper.join ();
+    context->event_loop->stop (false);
+
+    ASSERT_GT (context->requests_sent.load (), 0u)
+    << "nothing was sent; nothing is proven";
+    EXPECT_EQ (context->requests_expected.load (), 2000u)
+    << "a stopped run's expected count was settled to what it sent";
+}
+
 // #2136: a step a user Stop cancelled neither ran nor failed. It is counted as
 // cancelled and moves no step tally - no step error, no abandoned iteration,
 // no coverage send - while its virtual user is still released.

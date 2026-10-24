@@ -1503,7 +1503,9 @@ then counts the stored slow traces as it always did.
 
 `requests_sent`, `requests_expected` and `sending_duration` (issue #2392) are what the run
 submitted, what its mode set out to submit (`targetRps` x `duration` for a rate-limited run, the
-iteration count for an `iterations` one, `0` for an open-ended mode), and the seconds it
+iteration count for an `iterations` one, `0` for an open-ended mode; a scenario `iterations`
+run stores what it sent when it reached its own end, because its iterations x steps figure is
+only an upper bound once an iteration is abandoned, issue #2914), and the seconds it
 submitted in: load start to the moment it stopped submitting, before the end-of-run drain that
 `test_duration` includes. An `iterations` run that reached its own end stores its whole
 `test_duration` there instead (see the report's

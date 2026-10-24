@@ -10067,7 +10067,7 @@ data: {"stepsPerIteration":4,"iterations":3,"stepsExpected":12}
 `iterations` is how many passes the engine resolved - a data set's row count
 where the run named no explicit count of its own. `stepsExpected` is
 `stepsPerIteration * iterations`, an upper bound rather than a promise, on the
-same terms as the load path's `requestsExpected` above: an errored step can
+same terms as a scenario load run's `requestsExpected` above while it runs: an errored step can
 end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
 `POST /runs/:id/stop` ends the run, `setNextRequest` can walk
 an iteration in fewer steps than the plan holds, and the
@@ -10125,7 +10125,7 @@ no frame.
 | `cumulativeLatency` | **Gate frames only** (issue #2782), the final frame included: the run-so-far latency distribution, `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms, p999Ms, maxMs, count}`, over the same completions as the `cumulative*Ms` keys. `null` until something has completed, never zeros. The final frame merges the last window after the drain, so its figures are the report's [`latency`](#get-runsrunidreport) block. Absent from every other frame |
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
-| `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
+| `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
