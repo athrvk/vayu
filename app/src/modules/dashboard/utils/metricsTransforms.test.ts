@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, StatusSecondEntry } from "@/types";
 import {
 	isRateLimitedRun,
 	buildLatencyChartData,
@@ -44,9 +44,32 @@ function frame(elapsed: number, codes: Record<string, number>): LoadTestMetrics 
 	return tick({ live: true, elapsed_seconds: elapsed, status_codes: codes });
 }
 
-/** A live gate frame: it closes a second, so it carries `second_samples`. */
-function gate(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
-	return tick({ live: true, elapsed_seconds: elapsed, status_codes: codes, second_samples: 1 });
+/**
+ * A live gate frame: it closes a second, so it carries `second_samples`, and
+ * `status_seconds` (#2866) when the caller gives the seconds it closed.
+ */
+function gate(
+	elapsed: number,
+	codes: Record<string, number>,
+	closed?: StatusSecondEntry[]
+): LoadTestMetrics {
+	return tick({
+		live: true,
+		elapsed_seconds: elapsed,
+		status_codes: codes,
+		second_samples: 1,
+		...(closed ? { status_seconds: closed } : {}),
+	});
+}
+
+/** The response counts of one second of load, by class: 2xx, 3xx, 4xx, 5xx, error. */
+function second(at: number, counts: StatusSecondEntry["counts"], span = 1): StatusSecondEntry {
+	return { second: at, span, counts };
+}
+
+/** A stored gate row (no `live`) holding the seconds it closed. */
+function storedRow(elapsed: number, closed: StatusSecondEntry[]): LoadTestMetrics {
+	return tick({ elapsed_seconds: elapsed, status_seconds: closed });
 }
 
 /**
@@ -54,13 +77,27 @@ function gate(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
  * (+-1 ms), at a phase the seed picks. Each frame sleeps 100 ms and works
  * 0-2 ms, is stamped in whole ms, and is a gate once a second has passed since
  * the last gate, as `collect_metrics` in `run_manager.cpp` does.
+ *
+ * With `countedBySecond` a gate also carries `status_seconds` the way the
+ * engine's `StatusSecondCounter::drain` makes them: each batch counted in the
+ * second it completed in, a second reported once it has been over for 250 ms.
  */
-function closedLoopRun(seed: number): LoadTestMetrics[] {
+function closedLoopRun(seed: number, countedBySecond = false): LoadTestMetrics[] {
 	const rng = seeded(seed);
 	const phaseMs = rng() * 200;
 	const batchAt = Array.from({ length: 301 }, (_, k) => phaseMs + 200 * k + (rng() * 2 - 1));
 	const frames: LoadTestMetrics[] = [];
 	let lastGateMs = 0;
+	let nextSecond = 0;
+	const closedSecondsAt = (ms: number): StatusSecondEntry[] => {
+		const closedBefore = Math.floor(Math.max(Math.floor(ms) - 250, 0) / 1000);
+		const closed: StatusSecondEntry[] = [];
+		for (; nextSecond < closedBefore; nextSecond++) {
+			const batches = batchAt.filter((b) => Math.floor(b / 1000) === nextSecond).length;
+			closed.push(second(nextSecond, [10 * batches, 0, 0, 0, 0]));
+		}
+		return closed;
+	};
 	for (let ms = 0; ms < 60_000; ms += 100 + rng() * 2) {
 		const codes = { "200": 10 * batchAt.filter((b) => b <= ms).length };
 		const elapsed = Math.floor(ms) / 1000;
@@ -69,7 +106,7 @@ function closedLoopRun(seed: number): LoadTestMetrics[] {
 			continue;
 		}
 		lastGateMs = ms;
-		frames.push(gate(elapsed, codes));
+		frames.push(gate(elapsed, codes, countedBySecond ? closedSecondsAt(ms) : undefined));
 	}
 	return frames;
 }
@@ -464,7 +501,7 @@ describe("buildStatusOverTime", () => {
 	 * standing for it) and 64 of 305 points are past 5%, the worst 39.6 for the
 	 * second still open at the edge; both bounds fail.
 	 */
-	it("draws a closed loop's batched completions flat but for one batch", () => {
+	it("draws a closed loop's batched completions flat but for one batch, diffing a run stored without per-second counts", () => {
 		const points = [1, 2, 3, 4, 5].flatMap((seed) => buildStatusOverTime(closedLoopRun(seed)));
 		expect(points.length).toBeGreaterThan(250);
 		const off = points.filter((p) => Math.abs(p.c2xx - 50) > 2.5);
@@ -532,6 +569,244 @@ describe("buildStatusOverTime", () => {
 			expect(hasStatusSeries(stored)).toBe(true);
 			expect(buildStatusOverTime(stored)).toHaveLength(2);
 		});
+	});
+});
+
+/*
+ * A series that carries `status_seconds` is drawn as counted (#2866): one point
+ * per entry, counts / span, no diff. Mutation check for the block: make
+ * `carriesStatusSeconds` always false (every series diffed) and the cases that
+ * read counts redden, 11 of them; the fold, gate and no-key cases are held by
+ * the mutation each one names.
+ *
+ * Where a point sits. A live frame's `elapsed_seconds` is seconds since load
+ * start (`seconds_since_load_start`, `run_manager.cpp`), the same clock an
+ * entry's `second` counts, so the second `S` (over at load second `S + 1`) sits
+ * at x = `S + span` with origin 0. A stored tick's `elapsed_seconds` counts
+ * from the first persisted tick, which landed one gate (about 1 s) after load
+ * start, so the same instant is one lower: `elapsedOrigin`, the shift the
+ * diffed path already applies. The other charts plot a tick at its own
+ * `elapsed_seconds`, so a point at those x values is where they put that instant.
+ */
+describe("buildStatusOverTime from per-second counts (#2866)", () => {
+	/*
+	 * #2860's S6 profile again, a steady 50/s, now with the engine's own counts.
+	 * Mutation check: read the cumulative map instead (the diffed path) and
+	 * points past 5% reappear, the test above allows 1 in 15 of them.
+	 */
+	it("draws a closed loop's batched completions at 50 a second, every point", () => {
+		const points = [1, 2, 3, 4, 5].flatMap((seed) =>
+			buildStatusOverTime(closedLoopRun(seed, true))
+		);
+		expect(points.length).toBeGreaterThan(250);
+		for (const p of points) expect(Math.abs(p.c2xx - 50), `at ${p.time}s`).toBeLessThan(2.5);
+	});
+
+	it("puts a live gate's second at the end of its span, after the gates that closed none", () => {
+		const out = buildStatusOverTime([
+			frame(0.5, { "200": 25 }),
+			gate(1.0, { "200": 50 }, []),
+			frame(1.5, { "200": 75 }),
+			gate(2.0, { "200": 100 }, [second(0, [50, 0, 0, 0, 0])]),
+			gate(3.0, { "200": 150 }, [second(1, [48, 0, 0, 0, 2])]),
+		]);
+		expect(out.map((p) => p.time)).toEqual([1, 2]);
+		expect(out.map((p) => p.c2xx)).toEqual([50, 48]);
+		expect(out[1].cErr).toBe(2);
+	});
+
+	it("puts a stored row's second where the same instant sits on the stored clock", () => {
+		const closed = [second(0, [50, 0, 0, 0, 0]), second(1, [48, 0, 0, 0, 2])];
+		const stored = buildStatusOverTime([
+			storedRow(0, []),
+			storedRow(1, [closed[0]]),
+			storedRow(2, [closed[1]]),
+		]);
+		const live = buildStatusOverTime([
+			gate(1, {}, []),
+			gate(2, {}, [closed[0]]),
+			gate(3, {}, [closed[1]]),
+		]);
+		// Stored elapsed 0 is load second ~1, so each instant is one lower there.
+		expect(stored.map((p) => p.time)).toEqual([0, 1]);
+		expect(live.map((p) => p.time)).toEqual([1, 2]);
+		expect(stored.map(({ time: _t, ...rates }) => rates)).toEqual(
+			live.map(({ time: _t, ...rates }) => rates)
+		);
+	});
+
+	/*
+	 * Mutation check: smooth each point to the mean of its neighbours, or read
+	 * the cumulative map (50 and 50 here), and the 40 / 60 pair reads 50 / 50.
+	 */
+	it("draws an uneven second as counted, one holding 4 batches of 10 and the next 6", () => {
+		const out = buildStatusOverTime([
+			gate(1, { "200": 0 }, []),
+			// A batch that completed in second 1 landed just after the gate that
+			// would have counted it with second 0, so the maps read 50 and 50.
+			gate(2, { "200": 50 }, [second(0, [40, 0, 0, 0, 0])]),
+			gate(3, { "200": 100 }, [second(1, [60, 0, 0, 0, 0])]),
+		]);
+		expect(out.map((p) => p.c2xx)).toEqual([40, 60]);
+	});
+
+	/*
+	 * Mutation check: divide by 1 instead of `span` and the folded series reads
+	 * 60 times the rate; drop `span` from the x and every point moves left.
+	 */
+	it("rates a folded History series per second, an entry spanning its bucket", () => {
+		const raw = storedTicks(
+			600,
+			// Ticks 300 on hold seconds 299 on, so the 503s start on a bucket edge.
+			(s) => (s >= 299 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}),
+			{ statusSeconds: true }
+		);
+		const folded = foldLikeEngine(raw, 10);
+		expect(folded.ticksPerBucket).toBe(60);
+		// The first bucket's first tick closed no second, so it spans 59.
+		expect(folded.data.map((m) => m.status_seconds?.[0].span)).toEqual([
+			59, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+		]);
+
+		const fromRaw = buildStatusOverTime(raw);
+		const fromFolded = buildStatusOverTime(folded.data);
+		expect(fromRaw).toHaveLength(599);
+		expect(fromFolded).toHaveLength(10);
+		for (const p of [...fromRaw, ...fromFolded])
+			expect(p.c2xx + p.c5xx).toBeCloseTo(STORED_RPS);
+		expect(fromFolded.slice(0, 5).map((p) => p.c5xx)).toEqual([0, 0, 0, 0, 0]);
+		for (const p of fromFolded.slice(5)) expect(p.c5xx).toBeCloseTo(10);
+		// A bucket's point closes where its last second does: seconds 0-58 end at 59.
+		expect(fromFolded.slice(0, 2).map((p) => p.time)).toEqual([58, 118]);
+		expect(fromRaw[fromRaw.length - 1].time).toBe(fromFolded[9].time);
+	});
+
+	/*
+	 * The engine's fold, mirrored by `foldLikeEngine`: ticks that carried the key
+	 * but no valid entry fold to `[]`, and a bucket whose ticks all lack it
+	 * keeps the key off. Mutation check: fold the first to "absent" in the
+	 * testkit and the first expectation reddens.
+	 */
+	it("folds a bucket by the engine's rule when it holds idle or malformed ticks", () => {
+		const malformed = [{ second: 0, span: 0, counts: [1, 0, 0, 0, 0] }] as StatusSecondEntry[];
+		const carried = foldLikeEngine([storedRow(0, malformed), tick({ elapsed_seconds: 1 })], 1);
+		expect(carried.data[0].status_seconds).toEqual([]);
+		expect(buildStatusOverTime(carried.data)).toEqual([]);
+
+		const old = foldLikeEngine([tick({ elapsed_seconds: 0 }), tick({ elapsed_seconds: 1 })], 1);
+		expect("status_seconds" in old.data[0]).toBe(false);
+	});
+
+	/*
+	 * Mutation check: diff the ticks that lack the key as well (decide per tick)
+	 * and the first tick's 9000 responses read as a point beside the counted ones.
+	 */
+	it("reads the whole series from the counts when only some ticks carry them", () => {
+		const out = buildStatusOverTime([
+			tick({ elapsed_seconds: 0, status_codes: { "200": 9000 } }),
+			storedRow(1, [second(0, [50, 0, 0, 0, 0])]),
+			tick({ elapsed_seconds: 2, status_codes: { "200": 9100 } }),
+			storedRow(3, [second(1, [48, 0, 0, 0, 2])]),
+		]);
+		expect(out.map((p) => p.c2xx)).toEqual([50, 48]);
+	});
+
+	it("draws nothing for a series whose gates all closed no second, whatever the maps say", () => {
+		const history = [gate(1, { "200": 50 }, []), gate(2, { "200": 100 }, [])];
+		expect(buildStatusOverTime(history)).toEqual([]);
+		expect(hasStatusSeries(history)).toBe(false);
+	});
+
+	it("diffs a series without the key, as before", () => {
+		const history = [gate(1.0, { "200": 180 }), gate(2.0, { "200": 340 })];
+		expect(buildStatusOverTime(history).map((p) => p.c2xx)).toEqual([180, 160]);
+		expect(hasStatusSeries(history)).toBe(true);
+	});
+
+	/*
+	 * Mutation check: key the entries by arrival instead of by `second` and the
+	 * repeated frame draws second 1 twice, at double height once stacked.
+	 */
+	it("draws a gate frame the live buffer repeats once, in second order", () => {
+		const first = second(0, [50, 0, 0, 0, 0]);
+		const next = second(1, [48, 0, 0, 0, 2]);
+		const out = buildStatusOverTime([
+			gate(3, {}, [next]),
+			gate(2, {}, [first]),
+			gate(3, {}, [next]),
+		]);
+		expect(out.map((p) => [p.time, p.c2xx])).toEqual([
+			[1, 50],
+			[2, 48],
+		]);
+	});
+
+	it("skips an entry that lacks an entry's shape and keeps the rest", () => {
+		const malformed = [
+			{ second: -1, span: 1, counts: [1, 0, 0, 0, 0] },
+			{ second: 1.5, span: 1, counts: [1, 0, 0, 0, 0] },
+			{ second: 2, span: 0, counts: [1, 0, 0, 0, 0] },
+			{ second: 3, span: 1, counts: [1, 0, 0, 0] },
+			{ second: 4, span: 1, counts: [1, 0, 0, 0, -1] },
+			{ second: 5, span: 1, counts: [1, 0, 0, 0, "1"] },
+			null,
+			"second",
+		] as unknown as StatusSecondEntry[];
+		const out = buildStatusOverTime([
+			gate(8, {}, [...malformed, second(6, [7, 0, 0, 0, 0]), second(7, [9, 0, 0, 0, 0])]),
+		]);
+		expect(out.map((p) => [p.time, p.c2xx])).toEqual([
+			[7, 7],
+			[8, 9],
+		]);
+	});
+
+	it("keeps a live window that starts late as it is, with no head to drop", () => {
+		const lateWindow = [
+			gate(300, { "200": 150000 }, [second(298, [500, 0, 0, 0, 0])]),
+			gate(301, { "200": 150500 }, [second(299, [500, 0, 0, 0, 0])]),
+		];
+		expect(buildStatusOverTime(lateWindow).map((p) => [p.time, p.c2xx])).toEqual([
+			[299, 500],
+			[300, 500],
+		]);
+		expect(hasStatusSeries(lateWindow)).toBe(true);
+	});
+
+	it("splits every class into its own rate, and a code outside 200-599 into errors", () => {
+		const [point] = buildStatusOverTime([gate(2, {}, [second(0, [10, 20, 30, 40, 50], 2)])]);
+		expect(point).toEqual({ time: 2, c2xx: 5, c3xx: 10, c4xx: 15, c5xx: 20, cErr: 25 });
+	});
+
+	/*
+	 * Mutation check: gate on the ticks' own buckets (the diffed rule) and a
+	 * stored pair of rows holding one second each reads true, or two entries in
+	 * one tick read false.
+	 */
+	it("gates the status card on two distinct seconds, agreeing with the built series", () => {
+		const rng = seeded(2866);
+		let sawTrue = 0;
+		let sawFalse = 0;
+		for (let run = 0; run < 200; run++) {
+			const history = randomHistory(rng).map((m): LoadTestMetrics => {
+				const roll = rng();
+				if (roll < 0.3) return m;
+				const entries = Array.from({ length: Math.floor(rng() * 3) }, () =>
+					second(Math.floor(rng() * 4), [1, 0, 0, 0, 0])
+				);
+				return {
+					...m,
+					...(roll < 0.6 ? { live: true as const } : {}),
+					status_seconds: entries,
+				};
+			});
+			const gated = hasStatusSeries(history);
+			expect(gated).toBe(buildStatusOverTime(history).length > 1);
+			if (gated) sawTrue++;
+			else sawFalse++;
+		}
+		expect(sawTrue).toBeGreaterThan(20);
+		expect(sawFalse).toBeGreaterThan(20);
 	});
 });
 
