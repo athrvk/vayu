@@ -40,6 +40,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
+#include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
@@ -1126,6 +1127,28 @@ class MetricsCollector {
     [[nodiscard]] std::map<int, size_t> status_code_distribution () const;
 
     /**
+     * @brief Start counting completions by the second they land in (#2866):
+     *        @p steady_ms is load start on the clock `steady_now_ms` reads,
+     *        the instant `RunContext::load_start_steady_ms` holds.
+     *
+     * Set once, before the first submission. Until it is set nothing is
+     * counted per second, and `drain_status_seconds` answers nothing.
+     */
+    void set_load_start (int64_t steady_ms) noexcept {
+        load_start_steady_ms_.store (steady_ms, std::memory_order_release);
+    }
+
+    /**
+     * @brief The seconds closed at @p now_steady_ms that no earlier call
+     *        returned, one entry each (`StatusSecondCounter::drain`).
+     *
+     * Classes are counted at record time, beside status_code_distribution(),
+     * which stays the cumulative answer. Metrics thread only, once per gate:
+     * the entries it returns are gone from the counter.
+     */
+    [[nodiscard]] std::vector<StatusSecondEntry> drain_status_seconds (int64_t now_steady_ms);
+
+    /**
      * @brief Get the stored errors (a prefix of all errors when
      *        errors_dropped() is non-zero)
      */
@@ -1273,6 +1296,11 @@ class MetricsCollector {
     // rarely-hit overflow map below; real HTTP traffic never takes that lock.
     static constexpr int STATUS_CODE_SLOTS = 600;
     std::array<std::atomic<size_t>, STATUS_CODE_SLOTS> status_code_counts_{};
+
+    // The same completions by class and completion second, fed from
+    // record_status_code. 0 until set_load_start: nothing is counted before.
+    std::atomic<int64_t> load_start_steady_ms_{ 0 };
+    StatusSecondCounter status_seconds_;
 
     // HdrHistogram for latency recording. Cumulative from start of run - feeds
     // calculate_percentiles() for the final report. Every worker thread records
@@ -1525,8 +1553,9 @@ class MetricsCollector {
     // Helper for atomic double addition
     void atomic_add_double (std::atomic<double>& target, double value);
 
-    // Increment the count for a status code. Lock-free for codes in
-    // [0, STATUS_CODE_SLOTS); falls back to the overflow map otherwise.
+    // Increment the count for a status code, and its class in the second it
+    // completed in. Lock-free for codes in [0, STATUS_CODE_SLOTS); falls back
+    // to the overflow map otherwise.
     void record_status_code (int status_code);
 
     // One request into the latency population: both sums, both histograms,

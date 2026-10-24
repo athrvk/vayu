@@ -35,6 +35,13 @@ inline int64_t now_ms () {
     .count ();
 }
 
+/// The steady clock in the milliseconds `set_load_start` is given in.
+inline int64_t steady_now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
+}
+
 /// A histogram on the scale every latency histogram here shares.
 struct hdr_histogram* new_latency_histogram () {
     struct hdr_histogram* histogram = nullptr;
@@ -1246,6 +1253,12 @@ const std::map<int, size_t>& status_snapshot) const {
 }
 
 void MetricsCollector::record_status_code (int status_code) {
+    // The clock is read here, on the completion path, so a response counts in
+    // the second it completed, not the one the metrics thread next gates.
+    const int64_t load_start = load_start_steady_ms_.load (std::memory_order_acquire);
+    if (load_start != 0) {
+        status_seconds_.record (status_code, steady_now_ms () - load_start);
+    }
     if (status_code >= 0 && status_code < STATUS_CODE_SLOTS) {
         // Hot path: single relaxed atomic increment, no lock.
         status_code_counts_.at (static_cast<size_t> (status_code)).fetch_add (1, std::memory_order_relaxed);
@@ -1272,6 +1285,14 @@ std::map<int, size_t> MetricsCollector::status_code_distribution () const {
         }
     }
     return result;
+}
+
+std::vector<StatusSecondEntry> MetricsCollector::drain_status_seconds (int64_t now_steady_ms) {
+    const int64_t load_start = load_start_steady_ms_.load (std::memory_order_acquire);
+    if (load_start == 0) {
+        return {};
+    }
+    return status_seconds_.drain (now_steady_ms - load_start);
 }
 
 size_t MetricsCollector::flush_to_database (db::Database& db) {

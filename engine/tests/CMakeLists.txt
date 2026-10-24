@@ -122,6 +122,7 @@ add_executable(vayu_tests
     load_identity_test.cpp
     refill_deficit_test.cpp
     trailing_window_test.cpp
+    status_seconds_test.cpp
     reservoir_test.cpp
     sample_capture_test.cpp
     response_capture_test.cpp
