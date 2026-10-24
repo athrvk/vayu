@@ -1545,7 +1545,11 @@ from `run-outcome.ts`) that refines **only a `completed` run** through
 from the tick and from `Failed`'s cross; `passed` keeps the tick. The word stays
 "Completed" - the verdict is the banner's. The dashboard header takes the
 outcome *string* as a prop, not the judgement object: it is memo'd on `Object.is`
-and a fresh `{outcome, reason}` per render would defeat it (#1714).
+and a fresh `{outcome, reason}` per render would defeat it (#1714). The history run tab
+(`HistoryDetail.tsx`) passes a load run's verdict from the report it already
+loads (`reportOutcome`, else `rowOutcome`), so the tab, the dashboard header and
+the sidebar row draw one run in one colour (#2872); design and scenario runs
+pass none and keep the tick.
 
 ## Run Outcome Banner (`components/shared/RunOutcomeBanner.tsx`)
 

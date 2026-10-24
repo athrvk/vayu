@@ -3350,7 +3350,9 @@ glyph; the history row carries the shape.
 take an optional `outcome` (`run-outcome.ts`) and a `completed` run whose
 verdict is `failed` or `not-judged` swaps the tick for `CircleAlert` (error
 family) or `CircleQuestionMark` (neutral, `text-muted-foreground`). The tick is
-only for a run that passed; the word stays "Completed". The verdict itself is
+only for a run that passed; the word stays "Completed". The dashboard header,
+the history run tab (a load run's, from its report) and the history row all pass
+it (#2872). The verdict itself is
 drawn by `RunOutcomeBanner`, a `Callout` whose "Not judged" case is the plain
 `info` treatment, never the success tick.
 
