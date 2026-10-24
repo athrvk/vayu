@@ -9,7 +9,7 @@
 export interface RateFidelity {
 	/** Requests sent over the sending window so far, req/s. */
 	actualRps: number;
-	/** `requestsSent / (targetRps x window) x 100`; absent without a target. */
+	/** `requestsSent` over what the target owed, as a percentage; absent without a target. */
 	achievementPct?: number;
 }
 
@@ -23,8 +23,12 @@ export interface RateFidelity {
  *
  * Owed-to-date is `targetRps x window`, not the tick's `requests_expected`:
  * that is the whole plan, so sent over it is progress through the run, not
- * fidelity to the rate. `undefined` before there is a window to divide by, so
- * the card draws its empty state instead of a 0 or a NaN.
+ * fidelity to the rate. Once the window has reached the configured duration the
+ * target owes the engine's whole count, `floor(targetRps x duration)`, because
+ * the engine sends whole requests: 33.3 req/s for 3 s sends 99, not 99.9, and a
+ * run that sent them all must read 100 (#2910). `undefined` before there is a
+ * window to divide by, so the card draws its empty state instead of a 0 or a
+ * NaN.
  */
 export function liveRateFidelity(input: {
 	targetRps?: number;
@@ -43,5 +47,20 @@ export function liveRateFidelity(input: {
 
 	const actualRps = requestsSent / window;
 	if (!targetRps || targetRps <= 0) return { actualRps };
-	return { actualRps, achievementPct: (requestsSent / (targetRps * window)) * 100 };
+	const owed = owedOverWindow(targetRps, window, durationSeconds);
+	return { actualRps, achievementPct: (requestsSent / owed) * 100 };
+}
+
+/**
+ * Same slack as `requests_owed_by` in the engine's `load_pacing.hpp`: a decimal
+ * rate and duration can multiply to a whole number that binary lands just below
+ * (0.57 x 100 is 56.99999999999999), and the engine owes 57 there.
+ */
+const PRODUCT_SLACK = 8 * Number.EPSILON;
+
+function owedOverWindow(targetRps: number, window: number, durationSeconds?: number): number {
+	const continuous = targetRps * window;
+	if (!durationSeconds || durationSeconds <= 0 || window < durationSeconds) return continuous;
+	const wholeRequests = Math.floor(targetRps * durationSeconds * (1 + PRODUCT_SLACK));
+	return wholeRequests > 0 ? wholeRequests : continuous;
 }
