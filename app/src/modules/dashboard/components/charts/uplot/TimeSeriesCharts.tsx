@@ -28,7 +28,7 @@ import type { Anomaly } from "../../../utils/detectAnomalies";
 import type { HostSleep } from "@/stores/host-sleep-store";
 import { runAnnotations } from "./annotations";
 import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
-import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
+import { UPlotChart, type UPlotSeriesSpec, type Marker, type ScaleKey } from "./UPlotChart";
 import { THROUGHPUT_LEGEND, LATENCY_LEGEND, PERCENTILE_LEGEND } from "./legend";
 import {
 	bucketColumns,
@@ -42,6 +42,7 @@ import {
 	pickErrorRate,
 } from "./buildData";
 import {
+	axisCount,
 	axisMs,
 	axisRate,
 	axisPct,
@@ -59,6 +60,9 @@ import {
 } from "@/constants/load-test-modes";
 import { pluralize } from "../../../utils/format";
 import { useClientSettingsStore } from "@/stores";
+
+const COUNT_ONLY: readonly ScaleKey[] = ["y"];
+const CONCURRENCY_ONLY: readonly ScaleKey[] = ["y2"];
 
 interface BaseProps {
 	history: LoadTestMetrics[];
@@ -343,7 +347,8 @@ export function RequestRateChart({
 			xTime
 			height={height}
 			yFormat={axisRate}
-			y2Format={(v) => `${Math.round(v)}`}
+			y2Format={axisCount}
+			wholeNumberScales={CONCURRENCY_ONLY}
 			y2Label={hasRamp ? concurrencyMeasureLabel(mode) : undefined}
 			isLive={!isCompleted}
 			syncKey={syncKey}
@@ -389,7 +394,8 @@ export function ConnectionsChart({
 			series={series}
 			xTime
 			height={height}
-			yFormat={(v) => `${Math.round(v)}`}
+			yFormat={axisCount}
+			wholeNumberScales={COUNT_ONLY}
 			isLive={!isCompleted}
 			syncKey={syncKey}
 			markers={breakpointMarker(breakpoint, mode)}

@@ -24,7 +24,7 @@ const restoreIntl = vi.hoisted(() => {
 
 afterAll(restoreIntl);
 
-import { axisMs, axisRate, axisVitals, fmtMs, fmtPct, fmtRate } from "./formatters";
+import { axisCount, axisMs, axisRate, axisVitals, fmtMs, fmtPct, fmtRate } from "./formatters";
 
 describe("the chart value formatters", () => {
 	it("draw a missing value as a dash, not 0", () => {
@@ -112,6 +112,23 @@ describe("axisRate", () => {
 	it("labels a lone value without a tick array", () => {
 		expect(axisRate(2500)).toBe("2.5k/s");
 		expect(axisRate(42)).toBe("42/s");
+	});
+});
+
+describe("axisCount", () => {
+	const label = (splits: number[]) => splits.map((v) => axisCount(v, splits));
+
+	it("writes whole-number ticks as they are", () => {
+		expect(label([0, 1, 2])).toEqual(["0", "1", "2"]);
+		expect(label([0, 5, 10, 15])).toEqual(["0", "5", "10", "15"]);
+	});
+
+	it("keeps the fractional tick of a sub-1 span apart from the zero beside it", () => {
+		expect(label([0, 0.4])).toEqual(["0", "0.4"]);
+	});
+
+	it("labels a lone value without a tick array", () => {
+		expect(axisCount(7)).toBe("7");
 	});
 });
 

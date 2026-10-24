@@ -83,6 +83,14 @@ export const axisRate = (v: number, splits: readonly number[] = [v]): string =>
 export const fmtCount = (v: number | null | undefined): string =>
 	v == null ? "-" : `${Math.round(v)}`;
 
+/**
+ * A tick on an axis of counts. Whole numbers print as they are; the one
+ * fractional tick a sub-1 span can carry (`WHOLE_NUMBER_TICKS`) keeps the
+ * decimals its spacing needs, so it never reads as the "0" beside it.
+ */
+export const axisCount = (v: number, splits: readonly number[] = [v]): string =>
+	`${Number(v.toFixed(decimalsFor(tickStep(splits))))}`;
+
 export const fmtPct = (v: number | null | undefined): string =>
 	v == null ? "-" : `${formatPercent(v)}%`;
 

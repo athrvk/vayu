@@ -44,7 +44,12 @@ const mockState = vi.hoisted(() => ({
 	constructions: 0,
 	series: [] as { label: string; bandTo?: number }[],
 	markers: [] as Marker[],
-	props: {} as { yMin?: number | null; y2Label?: string; data?: (number | null)[][] },
+	props: {} as {
+		yMin?: number | null;
+		y2Label?: string;
+		data?: (number | null)[][];
+		wholeNumberScales?: readonly string[];
+	},
 }));
 
 // Hoisted above these imports by vitest, so `RequestRateChart` above resolves
@@ -301,6 +306,23 @@ describe("RequestRateChart - what the secondary axis measures", () => {
 	it("leaves a run with no overlay without a label, as it has no secondary axis", () => {
 		render(<RequestRateChart history={historyOf(4)} rampOverlay={null} mode="ramp_up" />);
 		expect(mockState.props.y2Label).toBeUndefined();
+	});
+});
+
+describe("which axes tick on whole numbers (#2858)", () => {
+	it("opts the concurrency chart's value axis in", () => {
+		render(<ConnectionsChart mode="ramp_up" history={historyOf(4)} />);
+		expect(mockState.props.wholeNumberScales).toEqual(["y"]);
+	});
+
+	it("opts the throughput chart's concurrency axis in, and not its rate axis", () => {
+		render(<RequestRateChart history={historyOf(4)} rampOverlay={rampOverlayOf(3)} />);
+		expect(mockState.props.wholeNumberScales).toEqual(["y2"]);
+	});
+
+	it("leaves a chart that does not count things on the primitive's default", () => {
+		render(<ErrorRateChart history={historyOf(4)} />);
+		expect("wholeNumberScales" in mockState.props).toBe(false);
 	});
 });
 
