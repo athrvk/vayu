@@ -2661,6 +2661,45 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
     }
 }
 
+// A terminal scenario load run's row carries its exact assertion counts
+// (#2820), so a row whose every assertion failed at 0% errors can say so; a
+// run that asserted nothing, or stored a malformed object, carries neither key.
+// Mutation check: drop the `assertionsFailed` write in
+// `build_load_result_summary` and the first row fails.
+TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
+    auto with_assertions        = nlohmann::json::parse (judged_summary (true));
+    with_assertions["scenario"] = { { "iterations", 4 },
+        { "assertions", { { "passed", 1 }, { "failed", 4 } } } };
+    seed ({ .id = "run_asserted", .start_time = 1 });
+    db_->update_run_summary ("run_asserted", with_assertions.dump ());
+
+    auto without_assertions = nlohmann::json::parse (judged_summary (true));
+    without_assertions["scenario"] = { { "iterations", 4 } };
+    seed ({ .id = "run_unasserted", .start_time = 2 });
+    db_->update_run_summary ("run_unasserted", without_assertions.dump ());
+
+    auto malformed = nlohmann::json::parse (judged_summary (true));
+    malformed["scenario"] = { { "assertions", { { "passed", 1 }, { "failed", "4" } } } };
+    seed ({ .id = "run_malformed", .start_time = 3 });
+    db_->update_run_summary ("run_malformed", malformed.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto asserted = row_of (body, "run_asserted")["resultSummary"];
+    EXPECT_EQ (asserted.value ("assertionsFailed", -1), 4) << asserted.dump ();
+    EXPECT_EQ (asserted.value ("assertionsPassed", -1), 1) << asserted.dump ();
+    EXPECT_EQ (asserted.size (), 6u) << asserted.dump ();
+
+    for (const char* id : { "run_unasserted", "run_malformed" }) {
+        const auto outcome = row_of (body, id)["resultSummary"];
+        EXPECT_EQ (outcome.size (), 4u) << id << ": " << outcome.dump ();
+        EXPECT_FALSE (outcome.contains ("assertionsFailed")) << id;
+        EXPECT_FALSE (outcome.contains ("assertionsPassed")) << id;
+    }
+}
+
 // The gate is the status, not whether a summary is there yet: a Pending or
 // Running row is never read and never cached, so the poll after the run ends
 // builds its outcome fresh. Dropping the gate fails the second poll (the

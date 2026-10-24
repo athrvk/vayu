@@ -469,7 +469,7 @@ std::optional<ThresholdOutcome> read_threshold_outcome (const nlohmann::json& su
 }
 
 // The stored `summary.scenario.assertions` (#2820), or nothing unless both
-// counts are there.
+// counts are there. The one reader of it, for the report and the list row.
 std::optional<vayu::core::AssertionTotals> read_scenario_assertions (
 const nlohmann::json& summary) {
     const auto scenario = summary.find ("scenario");
@@ -974,8 +974,9 @@ ReportExtras& extras) {
 
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
- * error rate and budget verdict, read from the run's stored `summary` - the
- * load-run counterpart of a design row's `{statusCode, latencyMs}`.
+ * error rate, budget verdict and, for a scenario load run, its exact assertion
+ * counts (#2820), read from the run's stored `summary` - the load-run
+ * counterpart of a design row's `{statusCode, latencyMs}`.
  *
  * Each key is omitted when the summary does not record it, never zeroed: no
  * `verdict` means no budget judged the run, and how to show that is the
@@ -1009,6 +1010,10 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     }
     if (const auto thresholds = read_threshold_outcome (summary)) {
         outcome["verdict"] = thresholds->verdict ();
+    }
+    if (const auto assertions = read_scenario_assertions (summary)) {
+        outcome["assertionsPassed"] = assertions->passed;
+        outcome["assertionsFailed"] = assertions->failed;
     }
     return outcome;
 }
