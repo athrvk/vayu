@@ -67,7 +67,9 @@
       "bytesSent": 2995200,
       "bytesReceived": 38400000,
       "httpVersionDowngraded": 0,
-      "throughputBytesPerSec": 640000
+      "throughputBytesPerSec": 640000,
+      "sendingDurationSeconds": 59.6,
+      "completedWhileSending": 29894
     },
     "latency": {
       "min": 3.1,

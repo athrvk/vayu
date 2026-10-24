@@ -4624,10 +4624,12 @@ The sections, in order:
    declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows.
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
-4. `## Results`: requests, requests per second, error rate with its split into
-   HTTP errors and no response, bytes in and out, and the throughput and
-   error-rate budgets that judged them. The error rate is the report's, never
-   derived from the counts.
+4. `## Results`: requests, requests per second (`avgRps`, labelled as the
+   whole run with the drain included), responses per second while sending
+   (`completedWhileSending / sendingDurationSeconds`, issue #2882, only when
+   the report has both), error rate with its split into HTTP errors and no
+   response, bytes in and out, and the throughput and error-rate budgets that
+   judged them. The error rate is the report's, never derived from the counts.
 5. `## Latency`: min, p50, p90, p95, p99, p999 and max, with the budget that
    judged each (`<= 30 ms - missed`).
 6. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
@@ -10828,7 +10830,8 @@ named it.
     "throughputBytesPerSec": 127152.32,
     "httpVersionDowngraded": 0,
     "connectionReplays": 0,
-    "sendingDurationSeconds": 60.0
+    "sendingDurationSeconds": 60.0,
+    "completedWhileSending": 5990
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
@@ -10931,7 +10934,15 @@ completed requests over that wall time: they describe what the target served,
 and a run whose requests outlive its deadline reads below its target there by
 design. `sendRate` and `rateControl` describe what the generator sent, and
 divide by `sendingDurationSeconds`: load start to the moment the run stopped
-submitting, before the drain. `rateControl.achievement` is
+submitting, before the drain. `completedWhileSending` (issue #2882) is the
+requests completed by that same moment, so it is never above `totalRequests`,
+and `completedWhileSending / sendingDurationSeconds` is the response rate
+while sending, the figure to hold beside `sendRate`; `throughput` counts the
+drain in both its completions and its seconds. A run whose few slow
+requests time out long after the sending ends reads a `throughput` far below
+that rate; a run whose every request takes the same time reads a little
+above it, because the drain answers the requests the sending window left in
+flight. `rateControl.achievement` is
 `requestsSent / requestsExpected x 100`, the pacer's own count with
 `requestsExpected` = `targetRps` x `duration`, and `rateControl.actualRps` is
 `requestsSent / sendingDurationSeconds`. `rateControl.requestsSent` and
@@ -10950,12 +10961,14 @@ planned 60s"). A stopped report without the counts keeps its stored value.
 An `iterations` run, single-request or scenario, is the one exception: its
 loop returns on its last submission with the batch before it still in flight,
 so a window measured to that point would overstate the rate it sustained. Its
-`sendingDurationSeconds` is its whole `testDuration`, unless a Stop ended it,
-in which case the measured window stands. A run stored before issue #2392 has
-neither `sendingDurationSeconds` nor the two counts: its `sendRate` divided by
-`testDuration`, and its `rateControl` keeps the formula it was stored with,
-`actualRps` the completed rate and `achievement` = `actualRps / targetRps x
-100`.
+`sendingDurationSeconds` is its whole `testDuration` and its
+`completedWhileSending` its `totalRequests`, unless a Stop ended it, in which
+case the measured window and the count at its end stand. A run stored before
+issue #2392 has neither `sendingDurationSeconds` nor the two counts: its
+`sendRate` divided by `testDuration`, and its `rateControl` keeps the formula
+it was stored with, `actualRps` the completed rate and `achievement` =
+`actualRps / targetRps x 100`. A run stored before issue #2882 has no
+`completedWhileSending`, never a `0`.
 
 **`statusCodes` and `errors.byStatusCode` are `[[code, count], ...]` pairs** on
 the wire, in ascending code order, not objects: each is a `std::map<int,

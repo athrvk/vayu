@@ -1724,18 +1724,20 @@ TEST_F (RunsRouteTest, ReportReadsZeroCancelledFromAnOlderSummary) {
 }
 
 // A 50 RPS run that sent all 100 of its requests in 2 s, then drained for half
-// a second: completed over wall time is 40/s, the pacer's own count is 100%.
+// a second: completed over wall time is 40/s, the pacer's own count is 100%,
+// and the 25 sent in the last half second answered after sending ended.
 vayu::core::RunSummaryInputs drained_run_inputs () {
-    auto inputs               = summary_inputs ();
-    inputs.total_requests     = 100;
-    inputs.status_codes       = { { 200, 100 } };
-    inputs.test_duration_s    = 2.5;
-    inputs.rps                = 40.0;
-    inputs.throughput         = 40.0;
-    inputs.requests_sent      = 100;
-    inputs.requests_expected  = 100;
-    inputs.sending_duration_s = 2.0;
-    inputs.send_rate          = 50.0;
+    auto inputs                    = summary_inputs ();
+    inputs.total_requests          = 100;
+    inputs.status_codes            = { { 200, 100 } };
+    inputs.test_duration_s         = 2.5;
+    inputs.rps                     = 40.0;
+    inputs.throughput              = 40.0;
+    inputs.requests_sent           = 100;
+    inputs.requests_expected       = 100;
+    inputs.sending_duration_s      = 2.0;
+    inputs.completed_while_sending = 75;
+    inputs.send_rate               = 50.0;
     return inputs;
 }
 
@@ -1761,7 +1763,29 @@ TEST_F (RunsRouteTest, ReportRateControlDividesByTheSendingWindow) {
     EXPECT_DOUBLE_EQ (body["summary"]["sendingDurationSeconds"].get<double> (), 2.0);
     // The completed-over-wall-time figures keep the drain.
     EXPECT_DOUBLE_EQ (body["summary"]["avgRps"].get<double> (), 40.0);
+    EXPECT_DOUBLE_EQ (body["summary"]["throughput"].get<double> (), 40.0);
     EXPECT_DOUBLE_EQ (body["summary"]["testDuration"].get<double> (), 2.5);
+    // #2882: the completions inside the window sit beside it.
+    ASSERT_TRUE (body["summary"].contains ("completedWhileSending")) << body.dump ();
+    EXPECT_EQ (body["summary"]["completedWhileSending"].get<size_t> (), 75u);
+}
+
+// A run stored between #2392 and #2882 has its sending window and no count of
+// what completed inside it: the report leaves the key out rather than claiming
+// nothing did. Mutation check: read the key with `read_number` into a plain
+// `size_t` in `apply_summary_totals` and the report writes 0.
+TEST_F (RunsRouteTest, ReportFromASummaryWithoutCompletedWhileSendingOmitsIt) {
+    seed ({ .id = "run_pre_completed", .start_time = 1000, .config_snapshot = TARGET_50_RPS });
+    auto stored = vayu::core::build_run_summary_payload (drained_run_inputs ());
+    ASSERT_TRUE (stored.contains ("completed_while_sending"));
+    stored.erase ("completed_while_sending");
+    db_->update_run_summary ("run_pre_completed", stored.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_pre_completed");
+    ASSERT_EQ (status, 200);
+    EXPECT_DOUBLE_EQ (body["summary"]["sendingDurationSeconds"].get<double> (), 2.0);
+    EXPECT_FALSE (body["summary"].contains ("completedWhileSending")) << body.dump ();
 }
 
 // `rps: 0` falls through to `targetRps`, as the run paced and as the list row
@@ -1808,7 +1832,8 @@ TEST_F (RunsRouteTest, ReportRateFidelityOfAStoppedRunIsTheShareOfItsPlan) {
 TEST_F (RunsRouteTest, ReportFromAnOlderSummaryKeepsTheOldRateFidelity) {
     seed ({ .id = "run_pre_window", .start_time = 1000, .config_snapshot = TARGET_50_RPS });
     auto stored = vayu::core::build_run_summary_payload (drained_run_inputs ());
-    for (const char* key : { "requests_sent", "requests_expected", "sending_duration" }) {
+    for (const char* key : { "requests_sent", "requests_expected",
+         "sending_duration", "completed_while_sending" }) {
         ASSERT_TRUE (stored.contains (key)) << key;
         stored.erase (key);
     }
@@ -1823,6 +1848,7 @@ TEST_F (RunsRouteTest, ReportFromAnOlderSummaryKeepsTheOldRateFidelity) {
     EXPECT_FALSE (rate.contains ("requestsSent"));
     EXPECT_FALSE (rate.contains ("requestsExpected"));
     EXPECT_FALSE (body["summary"].contains ("sendingDurationSeconds"));
+    EXPECT_FALSE (body["summary"].contains ("completedWhileSending"));
 }
 
 // A run stored before #2799 never looked for replays, so its report claims

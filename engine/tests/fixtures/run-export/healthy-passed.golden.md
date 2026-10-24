@@ -18,13 +18,14 @@
 
 ## Results
 
-| Metric              | Value     | Budget             |
-| ------------------- | --------- | ------------------ |
-| Requests            | 29,944    | -                  |
-| Requests per second | 499 req/s | >= 400 req/s - met |
-| Error rate          | 0.0%      | <= 1.0% - met      |
-| Bytes in            | 36.6 MB   | -                  |
-| Bytes out           | 2.9 MB    | -                  |
+| Metric                                          | Value     | Budget             |
+| ----------------------------------------------- | --------- | ------------------ |
+| Requests                                        | 29,944    | -                  |
+| Requests per second (whole run, drain included) | 499 req/s | >= 400 req/s - met |
+| Responses per second while sending              | 502 req/s | -                  |
+| Error rate                                      | 0.0%      | <= 1.0% - met      |
+| Bytes in                                        | 36.6 MB   | -                  |
+| Bytes out                                       | 2.9 MB    | -                  |
 
 ## Latency
 

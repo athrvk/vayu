@@ -2872,6 +2872,13 @@ export interface RunReport {
 		 * divided by `testDuration`.
 		 */
 		sendingDurationSeconds?: number;
+		/**
+		 * Completions counted at the moment sending ended, before the drain
+		 * (#2882): over `sendingDurationSeconds` it is a received rate on the
+		 * window `sendRate` uses. 0 is a measurement. Absent from a run stored by
+		 * an older engine.
+		 */
+		completedWhileSending?: number;
 		setupOverhead?: number;
 		peakConcurrency?: number;
 		/** Mean requests on the wire over `testDuration`; absent from a run stored before it (#2821). */

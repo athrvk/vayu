@@ -1347,6 +1347,9 @@ struct RunSummaryInputs {
     size_t requests_sent      = 0;
     size_t requests_expected  = 0;
     double sending_duration_s = 0.0;
+    // Completions counted when that window closed (#2882), so never above
+    // `total_requests`, and equal to it wherever the window is the whole run.
+    size_t completed_while_sending = 0;
     std::map<int, size_t> status_codes;
     // Every error by type, under the summary's `error_types` key (#2400):
     // exact, where counting the stored error records stops at max_errors.

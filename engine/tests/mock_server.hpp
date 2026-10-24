@@ -112,10 +112,14 @@ class SlowMockServer {
         // for. The handler only returns once the fixture is torn down (or after
         // a hard cap, so a leaked handler cannot wedge the test binary).
         svr.Get ("/hang", [this] (const httplib::Request&, httplib::Response& res) {
-            auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (30);
-            while (!released.load (std::memory_order_relaxed) &&
-            std::chrono::steady_clock::now () < deadline) {
-                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            hold_until_released ();
+            res.set_content ("{}", "application/json");
+        });
+        // Fast, except that every HANG_EVERY-th request is held like /hang: a
+        // target that drops a share of its requests on the floor.
+        svr.Get ("/hang-every", [this] (const httplib::Request&, httplib::Response& res) {
+            if (++hang_every_hits % HANG_EVERY == 0) {
+                hold_until_released ();
             }
             res.set_content ("{}", "application/json");
         });
@@ -185,6 +189,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang";
     }
 
+    std::string hang_every_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/hang-every";
+    }
+
     std::string error_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/error";
     }
@@ -218,6 +226,8 @@ class SlowMockServer {
     static constexpr int STALL_MS = 300;
     /// How long `/stall-window` answers nothing, from its STALL_AT-th request.
     static constexpr int STALL_WINDOW_MS = 3000;
+    /// Which share of `/hang-every`'s requests never answer: one in this many.
+    static constexpr int HANG_EVERY = 10;
 
     /// `/sse-ticks`' cadence and how long it streams before closing.
     static constexpr int SSE_TICK_MS      = 100;
@@ -236,12 +246,24 @@ class SlowMockServer {
         return live_connections->load (std::memory_order_relaxed);
     }
 
+    /// Until the fixture is torn down, or a hard cap so a leaked handler
+    /// cannot wedge the test binary.
+    void hold_until_released () const {
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (30);
+        while (!released.load (std::memory_order_relaxed) &&
+        std::chrono::steady_clock::now () < deadline) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+    }
+
     httplib::Server svr;
     std::thread thread;
     int port = 0;
     std::atomic<bool> released{ false };
     std::atomic<int> scrapes{ 0 };
     std::atomic<int> stall_hits{ 0 };
+    std::atomic<int> hang_every_hits{ 0 };
     std::mutex stall_window_mutex;
     int stall_window_hits = 0; // stall_window_mutex
     std::chrono::steady_clock::time_point stall_window_closes; // stall_window_mutex

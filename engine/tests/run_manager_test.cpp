@@ -1066,6 +1066,99 @@ TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #2882: `completed_while_sending` is counted when sending ends, so the drain's
+// completions are not in it. One `/hang-every` request in ten never answers
+// and times out 1.5 s after it was sent, so about five are still in flight
+// when a 2 s run stops sending. Healthy: about 92 of 100 completed while
+// sending, 46 a second over the window against a whole-run `throughput` of
+// about 28 (100 over 3.5 s). Broken (the count read after the drain): all 100,
+// equal to `total_requests`. Mutation check: read `context->total_requests ()`
+// after `event_loop->stop` in `execute_load_test` and the first assertion
+// fails.
+TEST (LoadClock, CompletedWhileSendingLeavesOutTheDrain) {
+    const std::string db_path = "test_load_clock_completed_while_sending.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.hang_every_url () }, { "mode", "constant_rps" },
+            { "duration", "2s" }, { "targetRps", 50.0 }, { "timeout", 1500 },
+            { "workers", 1 } };
+        const std::string run_id = "run_load_completed_while_sending";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto summary = nlohmann::json::parse (stored->summary);
+        const auto total   = summary.at ("total_requests").get<size_t> ();
+        const auto completed_while_sending =
+        summary.at ("completed_while_sending").get<size_t> ();
+        EXPECT_LT (completed_while_sending, total)
+        << "the drain's completions were counted as completed while sending";
+        EXPECT_LE (completed_while_sending, summary.at ("requests_sent").get<size_t> ());
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& reported = report.at ("summary");
+        ASSERT_TRUE (reported.contains ("completedWhileSending")) << reported.dump ();
+        EXPECT_EQ (reported.at ("completedWhileSending").get<size_t> (), completed_while_sending);
+        const double while_sending_rate = static_cast<double> (completed_while_sending) /
+        reported.at ("sendingDurationSeconds").get<double> ();
+        EXPECT_LT (reported.at ("throughput").get<double> (), while_sending_rate)
+        << reported.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2882: an `iterations` run's sending window is its whole duration, so every
+// completion is inside it. Four `/slow` requests at concurrency 4 are all in
+// flight when the loop returns on its last submission: a count read there
+// would be 0 against a total of 4. Mutation check: keep the count read at the
+// executor's return for every mode in `sending_window` and this fails.
+TEST (LoadClock, AnIterationsRunCompletesEverythingWhileSending) {
+    const std::string db_path = "test_load_clock_iterations_completed.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.slow_url () },
+            { "mode", "iterations" }, { "iterations", 4 }, { "concurrency", 4 },
+            { "timeout", 5000 }, { "workers", 1 } };
+        const std::string run_id = "run_load_iterations_completed";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto summary = nlohmann::json::parse (stored->summary);
+        EXPECT_EQ (summary.at ("total_requests").get<size_t> (), 4u) << summary.dump ();
+        EXPECT_EQ (summary.at ("completed_while_sending").get<size_t> (),
+        summary.at ("total_requests").get<size_t> ())
+        << summary.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #2834: a streaming run's natural end waits for its streams to reach their
 // cap. `/sse-ticks` streams for 6 s and the cap ends it as a success at 4 s;
 // a drain sized by the 200 ms request timeout gives up at 2.2 s and records
@@ -1805,6 +1898,21 @@ TEST (FailedRunSummaryInputs, ARunWithNoErrorWritesAnEmptyErrorTypesObject) {
     const auto summary = build_run_summary_payload (failed_run_summary_inputs (ctx));
     ASSERT_TRUE (summary.contains ("error_types")) << summary.dump ();
     EXPECT_EQ (summary["error_types"], nlohmann::json::object ());
+}
+
+// A failed run timed no drain apart, so its window is the whole run and every
+// completion is inside it (#2882), never a 0 that reads as "nothing answered
+// while sending". Mutation check: drop the assignment in
+// `failed_run_summary_inputs` and this reads 0.
+TEST (FailedRunSummaryInputs, CountsEveryCompletionAsCompletedWhileSending) {
+    RunContext ctx ("run_failed_window", nlohmann::json::object ());
+    for (int i = 0; i < 3; ++i) {
+        ctx.metrics_collector->record_success (200, 10.0, 0.0, "{}");
+    }
+    const auto summary = build_run_summary_payload (failed_run_summary_inputs (ctx));
+    EXPECT_EQ (summary.at ("total_requests").get<size_t> (), 3u) << summary.dump ();
+    EXPECT_EQ (summary.at ("completed_while_sending").get<size_t> (), 3u)
+    << summary.dump ();
 }
 
 // A threshold of 0 measured nothing, so the summary says nothing rather than

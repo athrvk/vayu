@@ -39,12 +39,14 @@ export const TOOLTIPS = {
 	sendThroughput: (
 		<>
 			Twin rates from the open-model load generator. <b>Send</b> = requests dispatched onto
-			the wire; <b>Throughput</b> = responses received. Both figures are averages over the
-			whole run. The chip beside them reads the last second or more instead, and turns red
-			only when responses fall behind sends by at least 1 req/s and 10% of the send rate for 3
-			seconds running. Responses always trail sends by one response time, so it stays grey
-			until a response time has passed. A finished run's chip compares the two averages. A
-			persistent gap means server-side saturation - the request queue (backpressure) grows.
+			the wire; <b>Throughput</b> = responses received. Live, both are averages since load
+			started. A finished run compares them over the same window: the time spent sending,
+			counting only the responses that had come back by the moment sending stopped. The chip
+			beside them reads the last second or more live, and turns red only when responses fall
+			behind sends by at least 1 req/s and 10% of the send rate for 3 seconds running.
+			Responses always trail sends by one response time, so it stays grey until a response
+			time has passed. A finished run&apos;s chip judges the two figures printed. A persistent
+			gap means server-side saturation - the request queue (backpressure) grows.
 		</>
 	),
 	sendThroughputDispatched: (
@@ -54,7 +56,7 @@ export const TOOLTIPS = {
 		</>
 	),
 	sendThroughputReceived:
-		"Rate at which responses arrived back from the server. The server's effective serve rate.",
+		"Rate at which responses arrived back from the server, the server's effective serve rate. On a finished run, received while sending counts the responses back by the moment sending stopped, over the sending window, so it sits beside dispatched like for like. Received, whole run (a run stored by an older engine) divides by the whole run, including the wait for the last responses, so it reads lower than dispatched by that wait.",
 	queueChip:
 		"Average time requests spent waiting in the generator's in-flight queue before being sent. Non-zero values mean the generator is queueing - usually because the server is slow to respond.",
 	concurrencyUtil:

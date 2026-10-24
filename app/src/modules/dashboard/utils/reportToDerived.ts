@@ -7,7 +7,7 @@
 
 import type { RunReport } from "@/types";
 import { durationSeconds } from "@/constants/load-test";
-import type { DashboardDerived, StoppedAt } from "../types";
+import type { DashboardDerived, ReceivedWindow, StoppedAt } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
 import { notCrossed } from "./computeBreakpoint";
@@ -50,6 +50,33 @@ function stoppedRunFidelity(
 }
 
 /**
+ * The rate responses came back at, on the window `sendRate` was measured over
+ * (#2882): completions counted when sending ended, over the sending window.
+ * `throughput` divides the whole run, drain included, so beside `sendRate` it
+ * reads as the server falling behind by exactly the drain it was given. A
+ * report without the count (an older engine) or a usable window keeps
+ * `throughput`, labelled as the whole-run figure it is.
+ */
+function receivedRateOf(s: RunReport["summary"]): {
+	receivedRate: number | undefined;
+	receivedWindow: ReceivedWindow;
+} {
+	const { completedWhileSending, sendingDurationSeconds } = s;
+	if (
+		completedWhileSending === undefined ||
+		sendingDurationSeconds === undefined ||
+		!Number.isFinite(sendingDurationSeconds) ||
+		sendingDurationSeconds <= 0
+	) {
+		return { receivedRate: s.throughput, receivedWindow: "wholeRun" };
+	}
+	return {
+		receivedRate: completedWhileSending / sendingDurationSeconds,
+		receivedWindow: "sending",
+	};
+}
+
+/**
  * Adapt a completed-run RunReport into the DashboardDerived bundle the live
  * dashboard's HeroRow/ModeStatsRow consume. Marks isCompleted=true so the
  * components use peak (not instantaneous) concurrency. Fields the report can't
@@ -72,6 +99,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		(targetRps && targetRps > 0 && actualRps !== undefined
 			? (actualRps / targetRps) * 100
 			: undefined);
+	const { receivedRate, receivedWindow } = receivedRateOf(s);
 	const peak = s.peakConcurrency ?? 0;
 	const duration = s.testDuration ?? s.totalDurationSeconds ?? 0;
 
@@ -83,12 +111,16 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		rateAchievementPct,
 		stoppedAt: stopped?.stoppedAt,
 		sendRate: s.sendRate,
+		// Whole-run on purpose: the achieved-throughput, iterations and per-VU cards
+		// read it. Only the Send / Throughput pair takes `receivedRate`.
 		throughput: s.throughput,
+		receivedRate,
+		receivedWindow,
 		// A finished run has nothing in flight and no clock left to wait on, so the
-		// cumulative pair is judged as held and settled (#2800 changes what it is fed).
+		// pair is judged as held and settled, on the same `receivedRate` the card prints.
 		dispatchStatus: dispatchStatus({
 			sendRate: s.sendRate,
-			receivedRate: s.throughput,
+			receivedRate,
 			held: true,
 			settled: true,
 		}),

@@ -17,13 +17,13 @@
 
 ## Results
 
-| Metric              | Value                                      | Budget            |
-| ------------------- | ------------------------------------------ | ----------------- |
-| Requests            | 12,000                                     | -                 |
-| Requests per second | 100 req/s                                  | >= 50 req/s - met |
-| Error rate          | 15.0% (HTTP errors 1,500, No response 300) | <= 1.0% - missed  |
-| Bytes in            | 9.3 MB                                     | -                 |
-| Bytes out           | 1.5 MB                                     | -                 |
+| Metric                                          | Value                                      | Budget            |
+| ----------------------------------------------- | ------------------------------------------ | ----------------- |
+| Requests                                        | 12,000                                     | -                 |
+| Requests per second (whole run, drain included) | 100 req/s                                  | >= 50 req/s - met |
+| Error rate                                      | 15.0% (HTTP errors 1,500, No response 300) | <= 1.0% - missed  |
+| Bytes in                                        | 9.3 MB                                     | -                 |
+| Bytes out                                       | 1.5 MB                                     | -                 |
 
 ## Latency
 

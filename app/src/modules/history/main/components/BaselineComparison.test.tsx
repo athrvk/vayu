@@ -137,7 +137,11 @@ describe("BaselineComparison", () => {
 		expect(cell("P99 latency").querySelector(".text-status-error-text")).not.toBeNull();
 		// avgRps 150 vs 100: +50%, and up is better for throughput. Same sign,
 		// opposite verdict - which is the whole point of `direction`.
-		expect(cell("Throughput").querySelector(".text-status-success-text")).not.toBeNull();
+		expect(
+			cell("Throughput (whole run, drain included)").querySelector(
+				".text-status-success-text"
+			)
+		).not.toBeNull();
 		expect(cell("Error rate").querySelector(".text-status-error-text")).not.toBeNull();
 	});
 

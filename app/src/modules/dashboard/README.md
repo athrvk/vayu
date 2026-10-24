@@ -237,9 +237,18 @@ consumes it.
   `startRun`; `MetricsView`'s derived memo reads that one number, never the
   history array. A tick with no `current_send_rate` resets the streak and draws
   no chip, since the cumulative rate must not stand in for it. History feeds
-  the same function the finished report's cumulative `sendRate` / `throughput`
-  with held and settled true (`reportToDerived`), same tolerance; #2800 changes
-  what that pair is, not the rule.
+  the same function the finished report's pair with held and settled true
+  (`reportToDerived`), same tolerance. The pair is the sending window's: `sendRate`
+  against `completedWhileSending / sendingDurationSeconds` (#2882), the
+  completions counted when sending ended, so the card compares send and received
+  on one window instead of putting the drain in only the second figure. That one
+  rate is `DashboardDerived.receivedRate`, and the card's printed delta and the
+  chip's verdict both read it, so they cannot disagree. It is captioned
+  "received while sending". A report without the count or a usable window (an
+  older engine) falls back to the whole-run `throughput`, captioned "received,
+  whole run" (`receivedWindow`). The live card passes no window and keeps the
+  plain "received". `DashboardDerived.throughput` itself stays whole-run: the
+  achieved-throughput, iterations and per-VU cards read it.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 

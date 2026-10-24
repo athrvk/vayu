@@ -50,7 +50,7 @@ function baseReport(overrides: Partial<RunReport> = {}): RunReport {
 }
 
 describe("reportToDerived", () => {
-	describe("dispatch chip (History keeps the cumulative pair)", () => {
+	describe("dispatch chip on a report without completedWhileSending (whole-run pair)", () => {
 		const withRates = (sendRate?: number, throughput?: number) => {
 			const base = baseReport();
 			return reportToDerived(
@@ -69,6 +69,78 @@ describe("reportToDerived", () => {
 		it("draws no chip when the report lacks a rate", () => {
 			expect(withRates(undefined, 190)).toBeUndefined();
 			expect(withRates(198, undefined)).toBeUndefined();
+		});
+	});
+
+	describe("received rate on the sending window (#2882)", () => {
+		// 600 sent over 3 s sending (sendRate 200); 590 had come back by the time
+		// sending stopped, while the whole-run `throughput` (190) is diluted by the drain.
+		const withWindow = (
+			summary: Partial<RunReport["summary"]> & { completedWhileSending?: number }
+		) => {
+			const base = baseReport();
+			return reportToDerived(
+				baseReport({
+					summary: { ...base.summary, sendRate: 200, throughput: 190, ...summary },
+				})
+			);
+		};
+
+		it("prints completedWhileSending over the sending window and says so", () => {
+			const d = withWindow({ completedWhileSending: 590, sendingDurationSeconds: 2.95 });
+			expect(d.receivedRate).toBeCloseTo(200, 5);
+			expect(d.receivedWindow).toBe("sending");
+		});
+
+		it("judges the chip on the rate it prints, not on throughput", () => {
+			// 400/2 = 200 req/s beside sendRate 200 is kept-pace; the whole-run 190
+			// would sit 10 below, and 100 would read lagging.
+			const kept = withWindow({
+				completedWhileSending: 400,
+				sendingDurationSeconds: 2,
+				throughput: 100,
+			});
+			expect(kept.receivedRate).toBe(200);
+			expect(kept.dispatchStatus).toBe("kept-pace");
+
+			// The reverse: a healthy whole-run throughput cannot rescue a lagging window.
+			const lagging = withWindow({
+				completedWhileSending: 200,
+				sendingDurationSeconds: 2,
+				throughput: 200,
+			});
+			expect(lagging.receivedRate).toBe(100);
+			expect(lagging.dispatchStatus).toBe("lagging");
+		});
+
+		it("uses a measured 0 instead of reading it as absent", () => {
+			const d = withWindow({ completedWhileSending: 0, sendingDurationSeconds: 2 });
+			expect(d.receivedRate).toBe(0);
+			expect(d.receivedWindow).toBe("sending");
+			expect(d.dispatchStatus).toBe("lagging");
+		});
+
+		it("falls back to the whole-run throughput without the count", () => {
+			const d = withWindow({ sendingDurationSeconds: 2 });
+			expect(d.receivedRate).toBe(190);
+			expect(d.receivedWindow).toBe("wholeRun");
+		});
+
+		it.each([
+			["0", 0],
+			["absent", undefined],
+			["negative", -1],
+			["not finite", Number.POSITIVE_INFINITY],
+			["not a number", Number.NaN],
+		])("falls back to the whole-run throughput when the window is %s", (_name, window) => {
+			const d = withWindow({ completedWhileSending: 590, sendingDurationSeconds: window });
+			expect(d.receivedRate).toBe(190);
+			expect(d.receivedWindow).toBe("wholeRun");
+		});
+
+		it("leaves throughput whole-run for the cards that read it", () => {
+			const d = withWindow({ completedWhileSending: 400, sendingDurationSeconds: 2 });
+			expect(d.throughput).toBe(190);
 		});
 	});
 

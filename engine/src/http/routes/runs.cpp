@@ -215,6 +215,10 @@ struct SendingTotals {
     size_t requests_sent      = 0;
     size_t requests_expected  = 0;
     double sending_duration_s = 0.0;
+    // Completions inside that window (#2882). Empty for a summary stored
+    // before it, which leaves `summary.completedWhileSending` out rather than
+    // reporting that nothing completed.
+    std::optional<size_t> completed_while_sending;
 };
 
 // Report fields that live outside the DetailedReport struct: whole-run counters
@@ -605,6 +609,11 @@ ReportExtras& extras) {
         read_number (summary, "sending_duration", sending.sending_duration_s);
         read_number (summary, "requests_sent", sending.requests_sent);
         read_number (summary, "requests_expected", sending.requests_expected);
+        if (summary.contains ("completed_while_sending") &&
+        summary["completed_while_sending"].is_number ()) {
+            sending.completed_while_sending =
+            summary["completed_while_sending"].get<size_t> ();
+        }
         extras.sending = sending;
     }
 
@@ -1669,6 +1678,9 @@ double target_rps) {
         report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } };
     if (const auto& sending = extras.sending) {
         json_report["summary"]["sendingDurationSeconds"] = sending->sending_duration_s;
+        if (const auto& completed = sending->completed_while_sending) {
+            json_report["summary"]["completedWhileSending"] = *completed;
+        }
     }
     if (const auto& replays = extras.connection_replays) {
         json_report["summary"]["connectionReplays"] = *replays;
