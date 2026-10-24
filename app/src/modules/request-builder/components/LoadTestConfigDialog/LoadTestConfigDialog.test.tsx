@@ -51,8 +51,8 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 
 // The guard has its own suite; here it only reports what the dialog told it.
 vi.mock("../OAuth2LoadTestGuard", () => ({
-	default: ({ settingsSetByScript }: { settingsSetByScript?: boolean }) => (
-		<span data-testid="oauth2-guard" data-set-by-script={String(settingsSetByScript)} />
+	default: ({ scriptMayChangeSettings }: { scriptMayChangeSettings?: boolean }) => (
+		<span data-testid="oauth2-guard" data-script-may-change={String(scriptMayChangeSettings)} />
 	),
 }));
 
@@ -594,14 +594,14 @@ describe("OAuth 2.0 token note (#2742)", () => {
 	};
 	const NOTE_TITLE = "OAuth 2.0 token is fetched before scripts";
 
-	it("names the script-set name and says a script's changes do not apply under load", () => {
+	it("names the name a script may change and says a script's changes do not apply under load", () => {
 		open({ oauth2Config, oauth2DeferredNames: ["clientId"] });
 
 		expect(screen.getByText(NOTE_TITLE)).toBeInTheDocument();
 		expect(
 			screen.getByText((text) =>
 				text.includes(
-					"{{clientId}} is set by a pre-request script, but a load run gets its token once, before any script, from the stored values. Script changes to OAuth 2.0 settings don't apply under load."
+					"{{clientId}} may be changed by a pre-request script, but a load run gets its token once, before any script, from the stored values. Script changes to OAuth 2.0 settings don't apply under load."
 				)
 			)
 		).toBeInTheDocument();
@@ -612,17 +612,23 @@ describe("OAuth 2.0 token note (#2742)", () => {
 
 		expect(
 			screen.getByText((text) =>
-				text.includes("{{clientId}}, {{scope}} are set by a pre-request script")
+				text.includes("{{clientId}}, {{scope}} may be changed by a pre-request script")
 			)
 		).toBeInTheDocument();
-		expect(screen.getByTestId("oauth2-guard")).toHaveAttribute("data-set-by-script", "true");
+		expect(screen.getByTestId("oauth2-guard")).toHaveAttribute(
+			"data-script-may-change",
+			"true"
+		);
 	});
 
-	it("says nothing when no pre-request script sets an OAuth 2.0 name", () => {
+	it("says nothing when no pre-request script may change an OAuth 2.0 name", () => {
 		open({ oauth2Config, oauth2DeferredNames: [] });
 
 		// The guard is on screen, so the absence is the note's, not the section's.
-		expect(screen.getByTestId("oauth2-guard")).toHaveAttribute("data-set-by-script", "false");
+		expect(screen.getByTestId("oauth2-guard")).toHaveAttribute(
+			"data-script-may-change",
+			"false"
+		);
 		expect(screen.queryByText(NOTE_TITLE)).toBeNull();
 	});
 

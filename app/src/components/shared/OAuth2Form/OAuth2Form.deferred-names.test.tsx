@@ -9,7 +9,7 @@
  */
 
 /**
- * The form does not know which names a pre-request script sets (#2742): its host
+ * The form does not know which names a pre-request script may change (#2742): its host
  * does, and hands them down for the token row, which reports no token state for
  * a config the script will change. The form's one job is to pass them on.
  */
@@ -41,7 +41,7 @@ function renderForm(deferredNames?: readonly string[]) {
 }
 
 describe("OAuth2Form's token row", () => {
-	it("is told which names a pre-request script sets", () => {
+	it("is told which names a pre-request script may change", () => {
 		renderForm(["clientId"]);
 
 		expect(screen.getByTestId("token-row")).toHaveAttribute("data-deferred", "clientId");

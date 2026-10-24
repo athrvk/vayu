@@ -305,8 +305,14 @@ describe("TokenStatusRow with a complete config", () => {
 	});
 });
 
-describe("TokenStatusRow when a pre-request script sets a name in the config (#2742)", () => {
+describe("TokenStatusRow when a pre-request script may change a name in the config (#2742)", () => {
 	const complete = config({
+		accessTokenUrl: "https://idp.example.com/token",
+		clientId: "abc",
+	});
+	const interactive = config({
+		grantType: "authorization_code",
+		authorizationUrl: "https://idp.example.com/authorize",
 		accessTokenUrl: "https://idp.example.com/token",
 		clientId: "abc",
 	});
@@ -316,22 +322,22 @@ describe("TokenStatusRow when a pre-request script sets a name in the config (#2
 		token: { accessToken: "ya29.abcdefghijkl", expiresAt: null },
 	};
 
-	it("says the token is fetched at send and names the script-set variable", () => {
+	it("says the token is fetched at send and names the variable", () => {
 		renderRow(complete, ["clientId"]);
 
 		expect(
 			screen.getByText(
-				"{{clientId}} is set by a pre-request script, so this request's token is fetched at send, after the script."
+				"{{clientId}} may be changed by a pre-request script, so the token this request sends is fetched at send, after the script. Get token and Clear act on the stored settings."
 			)
 		).toBeInTheDocument();
 	});
 
-	it("agrees with several names", () => {
+	it("names several variables in one sentence", () => {
 		renderRow(complete, ["clientId", "scope"]);
 
 		expect(
 			screen.getByText((text) =>
-				text.startsWith("{{clientId}}, {{scope}} are set by a pre-request script")
+				text.startsWith("{{clientId}}, {{scope}} may be changed by a pre-request script")
 			)
 		).toBeInTheDocument();
 	});
@@ -343,16 +349,53 @@ describe("TokenStatusRow when a pre-request script sets a name in the config (#2
 		expect(screen.queryByText("ya29…ijkl")).not.toBeInTheDocument();
 		expect(screen.queryByText(/expire/i)).not.toBeInTheDocument();
 		expect(screen.queryByText(/No token cached/i)).not.toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: "Clear cached token" })).toBeNull();
 		expect(screen.queryByRole("button", { name: /show full token/i })).toBeNull();
+		// The action stays "Get token": Renew and Refresh would each claim a
+		// token it has just been said the row cannot know.
+		expect(getTokenButton()).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /renew|refresh/i })).toBeNull();
 	});
 
-	it("offers no fetch for a token the Send would not use", () => {
+	it("keeps Get token enabled and fetches the stored settings' token", () => {
 		renderRow(complete, ["clientId"]);
 
-		expect(getTokenButton()).toBeDisabled();
+		expect(getTokenButton()).toBeEnabled();
 		fireEvent.click(getTokenButton());
+
+		expect(fetchMutation.mutate).toHaveBeenCalledTimes(1);
+		expect(fetchMutation.mutate.mock.calls[0]?.[0]).toEqual({
+			config: complete,
+			force: true,
+		});
+	});
+
+	it("runs the interactive sign-in for an authorization_code grant", async () => {
+		// With a script anywhere in the request's chain this row is the only
+		// place the Auth tab offers the sign-in a Send's AUTH_REQUIRED points to.
+		authorize.mockResolvedValue(undefined);
+		renderRow(interactive, ["clientId"]);
+
+		fireEvent.click(getTokenButton());
+
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith("Authorized", "success"));
+		expect(authorize).toHaveBeenCalledWith(interactive);
 		expect(fetchMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("keeps Clear, and clears the stored settings' cache entry", () => {
+		renderRow(complete, ["clientId"]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear cached token" }));
+
+		expect(clearMutation.mutate).toHaveBeenCalledTimes(1);
+		expect(clearMutation.mutate).toHaveBeenCalledWith(expect.any(String));
+	});
+
+	it("disables the actions while the config is incomplete, and says what is missing", () => {
+		renderRow(config(), ["clientId"]);
+
+		expect(getTokenButton()).toBeDisabled();
+		expect(screen.getByText(/Access token URL and Client ID/)).toBeInTheDocument();
 	});
 
 	it("is the ordinary row for an empty list", () => {

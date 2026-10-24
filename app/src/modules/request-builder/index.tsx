@@ -56,13 +56,8 @@ import type {
 	StreamStartResult,
 	MergeableRequestField,
 } from "./types";
-import {
-	effectiveOAuth2Config,
-	oauth2DeferredNames,
-	oauth2HasTokens,
-	resolveAuthForSend,
-} from "./utils/auth-resolution";
-import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
+import { effectiveOAuth2Config, resolveAuthForSend } from "./utils/auth-resolution";
+import { useOAuth2DeferredNames } from "./hooks/useOAuth2DeferredNames";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import type { ThresholdOwner } from "@/lib/agent-reference";
@@ -320,17 +315,12 @@ export default function RequestBuilder() {
 		[pendingOAuth2Raw, resolveObject]
 	);
 
-	// The names in that config a pre-request script sets. Read from the config as
-	// written (the resolved one has swapped a name with a stored value for it), and
-	// asked of /compose only while the config holds a `{{token}}`, so a literal one
-	// costs no compose. A load run fetches its token once, before any script.
-	const engineDeferred = useDeferredVariables(
+	// Asked only while the dialog is open: a load run fetches its token once,
+	// before any script, and this is for the note that says so.
+	const pendingOAuth2DeferredNames = useOAuth2DeferredNames(
 		fetchedRequest?.id ?? "",
-		showLoadTestDialog && oauth2HasTokens(pendingOAuth2Raw)
-	);
-	const pendingOAuth2DeferredNames = useMemo(
-		() => oauth2DeferredNames(pendingOAuth2Raw, engineDeferred),
-		[pendingOAuth2Raw, engineDeferred]
+		pendingOAuth2Raw,
+		showLoadTestDialog
 	);
 
 	// The URL the load dialog names as the target and classifies for its

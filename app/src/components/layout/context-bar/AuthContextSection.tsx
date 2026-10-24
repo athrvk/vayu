@@ -24,12 +24,8 @@
 import { useMemo } from "react";
 import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
-import {
-	oauth2DeferredNames,
-	oauth2HasTokens,
-	resolveAuthSource,
-} from "@/modules/request-builder/utils/auth-resolution";
-import { useDeferredVariables } from "./code-composition";
+import { resolveAuthSource } from "@/modules/request-builder/utils/auth-resolution";
+import { useOAuth2DeferredNames } from "@/modules/request-builder/hooks/useOAuth2DeferredNames";
 import { AUTH_MODE_LABELS, isEngineExecutableAuthMode } from "@/constants/auth-modes";
 import { TokenStatusRow } from "@/components/shared/OAuth2Form";
 import { SectionEmpty, SectionLoading } from "./Section";
@@ -104,17 +100,9 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 		[configText, resolveObject]
 	);
 
-	/*
-	 * The names a pre-request script sets in the config *as written*: the resolved
-	 * one above has swapped a name that also has a stored value for it, and a Send
-	 * resolves after the script, so the row must not report a token for it (#2742).
-	 * /compose is asked only while the config holds a `{{token}}`.
-	 */
-	const rawConfig = effective.auth?.mode === "oauth2" ? effective.auth.config : null;
-	const engineDeferred = useDeferredVariables(tab.entityId ?? "", oauth2HasTokens(rawConfig));
-	const deferredNames = useMemo(
-		() => oauth2DeferredNames(rawConfig, engineDeferred),
-		[rawConfig, engineDeferred]
+	const deferredNames = useOAuth2DeferredNames(
+		tab.entityId ?? "",
+		effective.auth?.mode === "oauth2" ? effective.auth.config : null
 	);
 
 	if (isLoading) return <SectionLoading />;

@@ -39,7 +39,7 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveObject: <T,>(o: T) => o }),
 }));
 
-// The engine's answer to "which names does a pre-request script set", and what the
+// The engine's answer to "which names may a pre-request script change", and what the
 // section asked for it with: the real hook needs a query client and a /compose.
 let engineDeferred: readonly string[] = [];
 const useDeferredVariables = vi.fn((_requestId: string, _enabled: boolean) => engineDeferred);
@@ -182,7 +182,7 @@ describe("AuthContextSection", () => {
 	});
 });
 
-describe("AuthContextSection's token row when a pre-request script sets a name (#2742)", () => {
+describe("AuthContextSection's token row when a pre-request script may change a name (#2742)", () => {
 	const oauth2 = (clientId: string): RequestAuth => ({
 		mode: "oauth2",
 		config: {
@@ -193,7 +193,7 @@ describe("AuthContextSection's token row when a pre-request script sets a name (
 	});
 	const deferredOnRow = () => screen.getByTestId("token-status").getAttribute("data-deferred");
 
-	it("hands the row the script-set names the as-written config uses", () => {
+	it("hands the row the names a script may change that the as-written config uses", () => {
 		requestAuth = oauth2("{{clientId}}");
 		engineDeferred = ["clientId", "unrelated"];
 		renderSection();

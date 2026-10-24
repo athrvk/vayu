@@ -23,9 +23,9 @@
  * rule and how far it mirrors the engine's; see oauth2-load-test-coverage.ts.
  *
  * A run fetches its token once, before any script, from the stored values
- * (#2742), so that is the token judged here. Where a pre-request script sets a
- * name the config uses, a Send would judge another token, so each verdict says
- * which one it is about (`settingsSetByScript`).
+ * (#2742), so that is the token judged here. Where a pre-request script may
+ * change a name the config uses, a Send could judge another token, so each
+ * verdict says which one it is about (`scriptMayChangeSettings`).
  *
  * Reports whether the Start button should be gated via onGateChange.
  */
@@ -47,16 +47,17 @@ interface OAuth2LoadTestGuardProps {
 	/** Total test duration in seconds, or null when the test has no fixed
 	 *  duration (iterations mode) - in which case the guard is inert. */
 	durationSeconds: number | null;
-	/** A pre-request script sets a name in `config` (the dialog's deferred names are
-	 *  not empty): the verdicts then name the token as fetched before scripts. */
-	settingsSetByScript?: boolean;
+	/** A pre-request script may change a name in `config` (the dialog's deferred
+	 *  names are not empty): the verdicts then name the token as fetched before
+	 *  scripts. */
+	scriptMayChangeSettings?: boolean;
 	onGateChange: (gated: boolean) => void;
 }
 
 export default function OAuth2LoadTestGuard({
 	config,
 	durationSeconds,
-	settingsSetByScript = false,
+	scriptMayChangeSettings = false,
 	onGateChange,
 }: OAuth2LoadTestGuardProps) {
 	const showToast = useToastStore((s) => s.showToast);
@@ -122,8 +123,8 @@ export default function OAuth2LoadTestGuard({
 	};
 
 	// The sentence subject and the title lead-in for the token being judged.
-	const subject = settingsSetByScript ? "The token fetched before scripts" : "Access token";
-	const tokenName = settingsSetByScript ? "Token fetched before scripts" : "Token";
+	const subject = scriptMayChangeSettings ? "The token fetched before scripts" : "Access token";
+	const tokenName = scriptMayChangeSettings ? "Token fetched before scripts" : "Token";
 
 	if (state.kind === "covered") {
 		return (
@@ -142,7 +143,7 @@ export default function OAuth2LoadTestGuard({
 			<Callout
 				severity="warning"
 				title={
-					settingsSetByScript
+					scriptMayChangeSettings
 						? "No token cached for the stored settings"
 						: "No token cached yet"
 				}

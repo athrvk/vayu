@@ -11,7 +11,7 @@
 /**
  * A Send resolves the OAuth 2.0 config after the pre-request script, so the
  * Auth tab's token row must not report a token for the stored values when the
- * script sets a name the config uses (#2742). The panel is the host that knows
+ * script may change a name the config uses (#2742). The panel is the host that knows
  * the request, so it asks for the names and hands them down through
  * `AuthFields` to the row; the collection editor, which has no request, hands
  * down nothing.
@@ -83,8 +83,8 @@ beforeEach(() => {
 	useDeferredVariables.mockClear();
 });
 
-describe("AuthPanel's token row when a pre-request script sets a name (#2742)", () => {
-	it("hands the form the script-set names the config uses", () => {
+describe("AuthPanel's token row when a pre-request script may change a name (#2742)", () => {
+	it("hands the form the names a script may change that the config uses", () => {
 		engineDeferred = ["clientId", "traceId"];
 		renderPanel(oauth2("{{clientId}}"));
 

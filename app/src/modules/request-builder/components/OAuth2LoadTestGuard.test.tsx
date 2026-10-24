@@ -10,7 +10,7 @@
 
 /**
  * A load run fetches its OAuth 2.0 token once, before any script, from the
- * stored values (#2742). When a pre-request script sets a name the config uses,
+ * stored values (#2742). When a pre-request script may change a name the config uses,
  * a Send would judge another token, so each verdict says which one it is about;
  * with no such script the wording is the one it always had.
  */
@@ -52,7 +52,7 @@ function cacheToken(lifetimeS: number, remainingS: number) {
 }
 
 function renderGuard(props: {
-	settingsSetByScript?: boolean;
+	scriptMayChangeSettings?: boolean;
 	durationSeconds?: number;
 	config?: OAuth2Config;
 }) {
@@ -60,7 +60,7 @@ function renderGuard(props: {
 		<OAuth2LoadTestGuard
 			config={props.config ?? config}
 			durationSeconds={props.durationSeconds ?? 600}
-			settingsSetByScript={props.settingsSetByScript}
+			scriptMayChangeSettings={props.scriptMayChangeSettings}
 			onGateChange={vi.fn()}
 		/>
 	);
@@ -122,16 +122,16 @@ describe("OAuth2LoadTestGuard's verdict wording", () => {
 
 	it.each(VERDICTS)("$name: keeps its usual wording with no script", (v) => {
 		v.arrange();
-		renderGuard({ config: v.config, settingsSetByScript: false });
+		renderGuard({ config: v.config, scriptMayChangeSettings: false });
 
 		expect(screen.getByText(v.plain)).toBeInTheDocument();
 	});
 
 	it.each(VERDICTS)(
-		"$name: names the token fetched before scripts when a script sets a name",
+		"$name: names the token fetched before scripts when a script may change a name",
 		(v) => {
 			v.arrange();
-			renderGuard({ config: v.config, settingsSetByScript: true });
+			renderGuard({ config: v.config, scriptMayChangeSettings: true });
 
 			expect(screen.getByText(v.scripted)).toBeInTheDocument();
 			expect(screen.queryByText(v.plain)).toBeNull();

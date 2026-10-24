@@ -159,7 +159,7 @@ describe("the OAuth 2.0 config a load run's guard judges", () => {
 	});
 
 	it("leaves out a deferred name the OAuth 2.0 fields do not use", () => {
-		// `token` is set by a script for the request's header, not for the token request.
+		// `token` is deferred for the request's header, not for the token request.
 		expect(oauth2DeferredNames(oauth2, ["token"])).toEqual([]);
 	});
 

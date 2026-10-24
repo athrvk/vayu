@@ -135,8 +135,9 @@ export function oauth2HasTokens(config: OAuth2Config | null): boolean {
 /**
  * The names in @p deferred that the *as-written* OAuth 2.0 @p config uses.
  *
- * The resolved config cannot answer this: a name a script sets that also has a
- * stored value is replaced by that value, and the token is gone from the text.
+ * The resolved config cannot answer this: a name a script may change that also
+ * has a stored value is replaced by that value, and the token is gone from the
+ * text.
  * Stringifying the config reads every field without a list that drifts when one
  * is added.
  */

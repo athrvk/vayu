@@ -78,9 +78,10 @@ export interface LoadTestConfigDialogProps {
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
 	/**
-	 * The names in that OAuth 2.0 config that a pre-request script sets, from the
-	 * engine's `deferredVariables` (#2742). A load run fetches its token before
-	 * any script, so the dialog says the script's changes do not apply. Memoise it.
+	 * The names in that OAuth 2.0 config that a pre-request script may change,
+	 * from the engine's `deferredVariables` (#2742). A load run fetches its token
+	 * before any script, so the dialog says the script's changes do not apply.
+	 * Memoise it.
 	 */
 	oauth2DeferredNames?: readonly string[];
 	/**
@@ -465,7 +466,7 @@ export default function LoadTestConfigDialog({
 								durationSeconds={
 									usesDuration(profile.mode) ? profile.duration : null
 								}
-								settingsSetByScript={oauth2DeferredNames.length > 0}
+								scriptMayChangeSettings={oauth2DeferredNames.length > 0}
 								onGateChange={setOauthGated}
 							/>
 						</>

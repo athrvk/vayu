@@ -6177,14 +6177,14 @@ never re-resolved - see [POST /execute](#post-execute) and
   config **now**, cache key included: a run acquires its token once, when it is
   planned, from the stored values (a script's write to an OAuth 2.0 variable has
   no effect under load), and every virtual user sends that one, so without the
-  field (a Send)
-  the config is left for the send to resolve after the pre-request script (see
-  [Authentication](#authentication)). **Absent, `null` or `false` composes
-  exactly as it did before this field existed**, which is what a Send, a preview
-  and a script's `replaceIn` want: composed once, sent once. Refused with `400`
-  `invalid_compose_request` when present and not a boolean. Two limits worth
-  knowing: an unknown `{{$typo}}` is unaffected (nothing would generate it
-  either way, so it keeps its braces - issue #186), and a generator inside the
+  field (a Send) the config is left for the send to resolve after the
+  pre-request script (see [Authentication](#authentication)). **Absent, `null`
+  or `false` composes exactly as it did before this field existed**, which is
+  what a Send, a preview and a script's `replaceIn` want: composed once, sent
+  once. Refused with `400` `invalid_compose_request` when present and not a
+  boolean. Two limits worth knowing: an unknown `{{$typo}}` is unaffected
+  (nothing would generate it either way, so it keeps its braces - issue #186),
+  and a generator inside the
   **auth block** is generated here even when the field is true, because
   `apply_auth` encodes a credential when the request is built and a token left
   for the bind would go out as base64 of its own text. That is a generator's

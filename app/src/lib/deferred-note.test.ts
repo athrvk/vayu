@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { deferredNote } from "./deferred-note";
+import { deferredNote, deferredTokens } from "./deferred-note";
 
 describe("deferredNote", () => {
 	it("speaks of one name in the singular", () => {
@@ -17,5 +17,19 @@ describe("deferredNote", () => {
 		expect(deferredNote(["host", "token"])).toBe(
 			"{{host}}, {{token}} are set by a pre-request script at send."
 		);
+	});
+});
+
+describe("deferredTokens", () => {
+	it("writes each name as a {{name}} token, in order, comma separated", () => {
+		expect(deferredTokens(["host", "token"])).toBe("{{host}}, {{token}}");
+	});
+
+	it("writes one name with no separator", () => {
+		expect(deferredTokens(["token"])).toBe("{{token}}");
+	});
+
+	it("writes nothing for no names", () => {
+		expect(deferredTokens([])).toBe("");
 	});
 });

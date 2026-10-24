@@ -9,7 +9,7 @@
  */
 
 /**
- * What the builder hands the load dialog about a script-set OAuth 2.0 name
+ * What the builder hands the load dialog about an OAuth 2.0 name a script may change
  * (#2742). The dialog's own suite takes `oauth2DeferredNames` as given; nothing
  * else proves the builder derives it from the config *as written* (the
  * `oauth2Config` it also passes is already resolved, so a name with a stored
@@ -26,7 +26,7 @@ import type { Collection, OAuth2Config } from "@/types";
 import type { RequestState } from "./types";
 
 let ancestors: Collection[] = [];
-/** What the engine's composition says a pre-request script sets. */
+/** What the engine's composition says a pre-request script may change. */
 let engineDeferred: readonly string[] = [];
 const useDeferredVariables = vi.fn((_requestId: string, _enabled: boolean) => engineDeferred);
 

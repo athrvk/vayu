@@ -15,7 +15,6 @@
  * injected text input is variable-aware.
  */
 
-import { useMemo } from "react";
 import { Key, Lock, User, KeyRound, ShieldCheck } from "lucide-react";
 import {
 	Select,
@@ -28,8 +27,7 @@ import {
 } from "@/components/ui";
 import { AuthFields, Callout, type AuthTextInput } from "@/components/shared";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
-import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
-import { oauth2DeferredNames, oauth2HasTokens } from "../../../utils/auth-resolution";
+import { useOAuth2DeferredNames } from "../../../hooks/useOAuth2DeferredNames";
 import { AUTH_MODE_LABELS, EDITABLE_AUTH_MODES, uneditableAuthLabel } from "@/constants/auth-modes";
 import type { RequestAuth } from "@/types";
 import { useRequestBuilderContext } from "../../../context";
@@ -96,14 +94,9 @@ export default function AuthPanel() {
 	const variables = useVariableSupport();
 	const auth = request.auth;
 
-	// The names a pre-request script sets in the config as written (#2742): a Send
-	// resolves it after the script, so the token row must not report a token for
-	// the stored values. /compose is asked only while the config holds a `{{token}}`.
-	const rawOAuth2 = auth.mode === "oauth2" ? auth.config : null;
-	const engineDeferred = useDeferredVariables(request.id ?? "", oauth2HasTokens(rawOAuth2));
-	const deferredNames = useMemo(
-		() => oauth2DeferredNames(rawOAuth2, engineDeferred),
-		[rawOAuth2, engineDeferred]
+	const deferredNames = useOAuth2DeferredNames(
+		request.id ?? "",
+		auth.mode === "oauth2" ? auth.config : null
 	);
 
 	const handleModeChange = (mode: string) => {

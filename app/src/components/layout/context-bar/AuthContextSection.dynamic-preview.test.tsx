@@ -69,7 +69,7 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveObject }),
 }));
 
-// The section also asks /compose for the names a script sets; this file is not
+// The section also asks /compose for the names a script may change; this file is not
 // about that, and the real hook needs a query client.
 vi.mock("./code-composition", () => ({ useDeferredVariables: () => [] }));
 
