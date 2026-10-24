@@ -2919,6 +2919,21 @@ export interface RunReport {
 		 * existed, or reported from its sampled results.
 		 */
 		connectionReplays?: number;
+		/**
+		 * A failed load run reconciled after an engine crash (#2895). The counts,
+		 * `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last
+		 * persisted tick's totals, so they are a floor and not the final figures;
+		 * `latency` is all zeros, and `peakConcurrency` and `avgQueueWaitMs` are 0,
+		 * because none of them were recorded. Absent means false.
+		 */
+		partial?: boolean;
+		/**
+		 * A Failed load run that has no summary at all (#2895): a crash before the
+		 * first tick, or a worker failure that never wrote one. Every count is 0
+		 * and none is a measurement. Absent means false. Distinct from the
+		 * report's top-level `partial`, which means the run is still in flight.
+		 */
+		summaryMissing?: boolean;
 	};
 	latency: {
 		min: number;
