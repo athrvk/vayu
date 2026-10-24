@@ -85,6 +85,33 @@ describe("mapSseMetrics", () => {
 		expect(m.cumulative_p99_ms).toBeNull();
 	});
 
+	/* Mutation check: drop `status_seconds` from the mapper and the first two reden. */
+	describe("the gate frame's per-second status counts (issue #2866)", () => {
+		it("maps statusSeconds to status_seconds, entries as sent", () => {
+			const m = mapSseMetrics({
+				timestamp: 1,
+				statusSeconds: [
+					{ second: 0, span: 1, counts: [50, 0, 0, 0, 0] },
+					{ second: 1, span: 1, counts: [40, 0, 2, 7, 1] },
+				],
+			});
+			expect(m.status_seconds).toEqual([
+				{ second: 0, span: 1, counts: [50, 0, 0, 0, 0] },
+				{ second: 1, span: 1, counts: [40, 0, 2, 7, 1] },
+			]);
+		});
+
+		it("keeps a gate that closed no second as [], not as absent", () => {
+			expect(mapSseMetrics({ timestamp: 1, statusSeconds: [] }).status_seconds).toEqual([]);
+		});
+
+		it("leaves a frame between gates without the key", () => {
+			expect(
+				mapSseMetrics({ timestamp: 1, totalRequests: 3 }).status_seconds
+			).toBeUndefined();
+		});
+	});
+
 	describe("the gate frame's run-so-far distributions (issue #2782)", () => {
 		const latency = {
 			minMs: 1,

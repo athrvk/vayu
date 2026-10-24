@@ -2451,6 +2451,20 @@ export type LivePhaseDistributions = Record<
 	LivePhaseDistribution
 >;
 
+/**
+ * The responses that completed in `span` consecutive whole seconds counted from
+ * load start, starting at `second`, by status class (issue #2866). `counts`
+ * lists 2xx, 3xx, 4xx, 5xx, then every other code (no response included). A
+ * gate emits an entry per second it closed, so `span` is 1; a History tick the
+ * engine folded (`maxPoints`) carries one entry for its whole bucket, so
+ * `counts / span` is responses per second at either resolution.
+ */
+export interface StatusSecondEntry {
+	second: number;
+	span: number;
+	counts: [number, number, number, number, number];
+}
+
 export interface LoadTestMetrics {
 	timestamp: number;
 	elapsed_seconds: number;
@@ -2557,6 +2571,14 @@ export interface LoadTestMetrics {
 	// Per-tick full status-code map (e.g. { "200": 1450, "404": 5 }). Same shape
 	// the live SSE and the stored time-series both carry.
 	status_codes?: Record<string, number>;
+	/**
+	 * The responses that completed in the seconds this tick closed, by status
+	 * class (issue #2866): a stored gate row, or a live gate frame (`statusSeconds`
+	 * on the wire). `[]` is a gate that closed no second yet. Absent on every other
+	 * live frame and on a tick stored before the engine wrote it, which is what
+	 * tells the status chart to diff `status_codes` instead.
+	 */
+	status_seconds?: StatusSecondEntry[];
 	/**
 	 * Custom trends, counters and rates recorded so far, riding the same tick
 	 * as the built-in phases above (issue #1500). Absent until the run has
