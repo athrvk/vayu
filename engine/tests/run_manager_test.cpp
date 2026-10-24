@@ -899,9 +899,11 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
 // #2894: the summary's setup overhead runs from the load run's entry to load
 // start, so it holds the whole `script.setup` pass, and the teardown figure is
 // stored apart as `cleanup_overhead`. A lower bound only: a slow runner makes
-// setup longer, never shorter. Mutation check: compute the setup figure as
+// setup longer, never shorter. Mutation checks: compute the setup figure as
 // `cleanup_end - test_end` again in `execute_load_test` and the setup
-// assertion reads the few milliseconds of the thread join.
+// assertion reads the few milliseconds of the thread join; stop writing
+// `cleanup_overhead` in `build_run_summary_payload` and the key assertion
+// fails.
 TEST (LoadClock, SetupOverheadCoversTheSetupScript) {
     const std::string db_path = "test_load_clock_setup_overhead.db";
     vayu::tests::remove_database_files (db_path);
@@ -933,7 +935,7 @@ TEST (LoadClock, SetupOverheadCoversTheSetupScript) {
 
         EXPECT_GE (summary.value ("setup_overhead", -1.0), SETUP_MS / 1000.0)
         << summary.dump ();
-        EXPECT_GE (summary.value ("cleanup_overhead", -1.0), 0.0) << summary.dump ();
+        EXPECT_TRUE (summary.contains ("cleanup_overhead")) << summary.dump ();
 
         manager.shutdown ();
     }

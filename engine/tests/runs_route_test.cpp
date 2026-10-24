@@ -1902,6 +1902,26 @@ TEST_F (RunsRouteTest, ReportFromAnOlderSummaryReportsItsOverheadAsCleanup) {
     EXPECT_FALSE (summary.contains ("setupOverhead")) << summary.dump ();
 }
 
+// #2894: the sequential collection runner stores neither overhead key. Its
+// report keeps both as measured zeros, not as the older row's omitted setup.
+// Mutation check: reset the setup optional when the summary has neither key in
+// `apply_summary_overheads` and the `setupOverhead` assertion fails.
+TEST_F (RunsRouteTest, ReportFromASummaryWithNeitherOverheadReportsBothAsZero) {
+    seed ({ .id = "run_no_overheads", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    stored.erase ("setup_overhead");
+    stored.erase ("cleanup_overhead");
+    db_->update_run_summary ("run_no_overheads", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_overheads");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    ASSERT_TRUE (summary.contains ("setupOverhead")) << summary.dump ();
+    ASSERT_TRUE (summary.contains ("cleanupOverhead")) << summary.dump ();
+    EXPECT_DOUBLE_EQ (summary["setupOverhead"].get<double> (), 0.0);
+    EXPECT_DOUBLE_EQ (summary["cleanupOverhead"].get<double> (), 0.0);
+}
+
 // Every store a run keeps is bounded, so the report has to say how much each
 // one thinned away - a Samples tab showing 1000 traces from a 3M-request run
 // is honest only if the reader can also see that 29,000 candidates were
