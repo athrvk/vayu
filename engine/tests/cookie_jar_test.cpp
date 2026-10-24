@@ -2011,6 +2011,26 @@ TEST (CookieJarWriteScope, ASingleLabelDomainIsRefusedBecauseItReachesEverySiteU
     }
 }
 
+TEST (CookieJarWriteScope, AMultiLabelPublicSuffixIsStillAcceptedBecauseNoSuffixListIsApplied) {
+    // Pins the residual the owner accepted (#2731, SECURITY.md): `co.uk` is a
+    // parent of a.co.uk, so the site rule admits it, and the engine vendors no
+    // public-suffix list to tell it from a registrable domain. Adding such a
+    // refusal is a deliberate change that updates this test and the docs.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const auto result = run_jar_write (jar, "http://a.co.uk/users",
+    "pm.cookies.jar().set('http://a.co.uk/', { name: 'sid', value: 'x', "
+    "domain: '.co.uk', path: '/' });",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (warnings_of (result).empty ());
+    EXPECT_EQ (jar.matching ("env_a", "http://b.co.uk/").size (), 1u)
+    << "the public-suffix write was refused; update the docs that say it is "
+       "not";
+}
+
 TEST (CookieJarWriteScope, ASingleLabelDomainIsAllowedForTheExactHostAndASubdomainStays) {
     {
         // A host with no dot in it (`localhost`) is the only thing its own

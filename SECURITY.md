@@ -35,6 +35,13 @@ app's main process makes the writes, and only for a folder you chose in the
 system folder picker or a file that reached the window through a file dialog
 or a drop; the UI window cannot name either.
 
+A script's `pm.cookies.jar().set` is held to the request's own site: it refuses
+a `Domain` unrelated to the request host, and a single-label one such as `com`.
+It can still set a cookie for a multi-label public suffix such as `co.uk`,
+because Vayu vendors no public-suffix list (accepted, #2731). Scripts in a
+collection someone shared with you run with your own cookies and secrets, so
+read them before you press Send.
+
 A mock server or webhook inbox you start is different: it exists to be called
 from pages, so every page in the browser can reach it and, by default, read
 what it answers (CORS `*`, never with your cookies). Starting one with
