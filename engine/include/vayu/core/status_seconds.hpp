@@ -12,12 +12,10 @@
  * @brief Status-class counts keyed by the second each response completed in
  *        (#2866).
  *
- * A rate diffed between two ticks counts what landed between the ticks, so a
- * batch of completions near a window edge reads in or out depending on where
- * the ticks fell. Counting each response in the second it completed removes
- * the tick from the answer. `MetricsCollector` stamps the second on the
- * completion path; the metrics thread drains the closed seconds once per gate
- * and hands the same entries to the gate frame and the stored row.
+ * Entries are keyed by the second a response completed in, never by the tick
+ * that read it. `MetricsCollector` stamps the second on the completion path;
+ * the metrics thread drains the closed seconds once per gate and hands the
+ * same entries to the gate frame and the stored row.
  */
 
 #include <algorithm>

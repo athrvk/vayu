@@ -9705,8 +9705,8 @@ the responses that **completed** in it, by class: `second` counts from load
 start (not from the origin `elapsed_seconds` counts from), `span` is `1`, and
 `counts` is `[2xx, 3xx, 4xx, 5xx, error]`, where `error` is a response with no
 status (code `0`) or a code outside 200-599. A second is closed 250 ms after
-it ends, so a row holds one second, two when its gate's cadence crosses two
-second ends, and `[]` before load starts or the first second closes. Across a
+it ends, so a row usually holds one second, two when its gate's cadence crosses two
+second ends, and `[]` when none closed since the last gate. Across a
 run's rows the seconds run on from `0`, one entry each, and a second in which
 nothing completed is an entry of zeros. Each response is counted by the clock
 it completed at, not by the tick that read it, so `counts[i] / span` is a
@@ -9714,8 +9714,8 @@ class' rate that a batch landing near a tick does not move; the difference of
 two rows' `status_codes` counts what landed between their ticks instead. The
 live gate frame of the same tick carries the same entries as
 [`statusSeconds`](#get-runsrunidlive). The second still open when the run
-ends, and one that closes less than 250 ms before the final live frame, are
-stored nowhere. A tick stored before the issue has no `status_seconds`.
+ends is stored nowhere, and the seconds that close after the last row ride the
+final live frame only. A tick stored before the issue has no `status_seconds`.
 
 A missing run returns `404` with the message `Run not found`.
 

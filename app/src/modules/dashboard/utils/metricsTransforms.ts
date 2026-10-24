@@ -156,8 +156,9 @@ function* statusSecondEntries(history: LoadTestMetrics[]): Generator<StatusSecon
  * the same responses twice.
  *
  * The engine closes a second 250 ms after it ends and reports it at the next
- * gate, so a point arrives about 1.4 s after the instant it describes, and the
- * last partial second of a run is never closed, so it draws no point.
+ * gate, so a point arrives up to about 1.4 s after the instant it describes,
+ * and the last partial second of a run is never closed, so it draws no point.
+ * Seconds that close after the last stored row reach the live chart only.
  */
 export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	const first = history.find(carriesStatusSeconds);

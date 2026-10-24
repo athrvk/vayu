@@ -1831,12 +1831,12 @@ tick stored before the issue; like the keys above, no schema version marks it.
 `second` counted from load start rather than from the origin `elapsed_seconds` counts from,
 `span` `1`, and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, where `error` is code `0` (no response)
 and any code outside 200-599, the classes the app's status chart draws. A second is closed
-250 ms after it ends, so a row holds one second, two when its gate's ~1 s cadence crosses two
-second ends, and `[]` before load starts or the first second closes; across a run's rows the
+250 ms after it ends, so a row usually holds one second, two when its gate's ~1 s cadence crosses two
+second ends, and `[]` when none closed since the last gate (always before the first second closes); across a run's rows the
 seconds run on from `0`, and a second nothing completed in is an entry of zeros. The live gate
 frame of the same tick carries the same entries as `statusSeconds`. The second still open when the
-run ends is stored nowhere, like its percentiles, and neither is one that closes less than the
-margin before the final live frame. Absent from a tick stored before the issue, whose status
+run ends is stored nowhere, like its percentiles, and the seconds that close after the last row ride
+the final live frame only, so a run opened from History ends a point or two before the live chart did. Absent from a tick stored before the issue, whose status
 chart keeps diffing `status_codes` between rows; like the keys above, no schema version marks it.
 `status_codes` itself is unchanged, still the cumulative map.
 

@@ -498,8 +498,9 @@ TEST (MetricTickBucket, WindowAvgInFlightIsTheBucketsMean) {
 
 // #2866: a bucket's closed seconds are one entry spanning all of them, so the
 // renderer divides by `span` and draws a rate at any resolution. A gate that
-// closed two seconds folds both; an entry that is not one's shape is skipped. Mutation check: drop the `status_seconds` branch of `take`
-// and the bucket reads the last tick's one second.
+// closed two seconds folds both; an entry that is not one's shape is skipped.
+// Mutation check: drop the `status_seconds` branch of `take` and the bucket
+// reads the last tick's one second.
 TEST (MetricTickBucket, StatusSecondsMergeIntoOneEntrySpanningTheBucket) {
     vayu::http::routes::MetricTickBucket bucket;
     bucket.add (cumulative_tick (0));

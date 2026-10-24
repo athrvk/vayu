@@ -322,8 +322,7 @@ on every stored row (`status_seconds`) and every live gate frame
 `second` counted from load start. `buildStatusOverTime` draws one point per
 entry at `counts / span`, with no diff of the cumulative `status_codes` map and
 no division by elapsed time, so where a tick happened to fall cannot move a
-response from one point to its neighbour (#2860: a steady 50 a second read 49
-or 59 by the phase of a closed loop's batches). A History bucket the engine
+response from one point to its neighbour. A History bucket the engine
 folded carries one entry spanning the bucket, so `counts / span` is still
 responses per second at either resolution (#2547). A point sits at the
 end of its span in load-start seconds, moved onto the series' own clock the way
@@ -332,8 +331,10 @@ from load start, a stored row's from the first persisted row, one gate later,
 so the same instant is one lower there (`elapsedOrigin`). Two limits are the
 engine's and are plain on the chart: a second is closed 250 ms after it ends
 and reported at the next gate, so a point trails the instant it describes by
-about 1.4 s, and the last partial second of a run is never closed, so it draws
-no point. A gate that closed no second sends `[]`, and the live buffer can
+up to about 1.4 s, and the last partial second of a run is never closed, so it
+draws no point. The seconds that close after a run's last stored row ride only
+the final live frame, so a live chart can end a point or two later than the same
+run opened from History. A gate that closed no second sends `[]`, and the live buffer can
 repeat a gate frame, so entries are kept once per `second`.
 
 A run stored before #2866 has no `status_seconds` on any row. The series is

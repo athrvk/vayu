@@ -11,8 +11,9 @@
  * band between consecutive cumulative series (bottom 2xx fills to zero). The
  * tooltip prints each class' own rate (`tipValues`), not the stack height.
  * `buildStatusOverTime` plots one point per second the engine counted (#2866),
- * where the other live charts use half a second. A class with no responses in the history keeps its
- * zero-height band, so the `bandTo` indices hold, but draws no line (#2860).
+ * where the other live charts use half a second. A class with no responses in
+ * the history keeps its zero-height band, so the `bandTo` indices hold, but
+ * draws no line (#2860).
  */
 
 import { useMemo } from "react";
