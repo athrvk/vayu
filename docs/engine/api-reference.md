@@ -10067,8 +10067,8 @@ data: {"stepsPerIteration":4,"iterations":3,"stepsExpected":12}
 `iterations` is how many passes the engine resolved - a data set's row count
 where the run named no explicit count of its own. `stepsExpected` is
 `stepsPerIteration * iterations`, an upper bound rather than a promise, on the
-same terms as a scenario load run's `requestsExpected` above while it runs: an errored step can
-end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
+same terms as a scenario load run's `requestsExpected` while it runs (the live
+frame table below): an errored step can end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
 `POST /runs/:id/stop` ends the run, `setNextRequest` can walk
 an iteration in fewer steps than the plan holds, and the
 `maxStepsPerIteration` cap can end one that walks in more. It rides the same

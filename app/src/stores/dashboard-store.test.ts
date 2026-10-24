@@ -295,6 +295,18 @@ describe("deriveRunProgress", () => {
 	});
 
 	/*
+	 * A scenario iterations run publishes iterations x steps as an upper bound
+	 * and settles requests_expected to the sent count at a natural end (#2914).
+	 * Mutation check: have deriveRunProgress ignore the tick's own expected
+	 * count and the settled final tick reads below 1, so the Dock never fills.
+	 */
+	it("reads below 1 under the live upper bound and 1 once the engine settles it", () => {
+		const live = { ...tick(30), requests_sent: 10, requests_expected: 20 };
+		expect(deriveRunProgress({}, live)).toBe(0.5);
+		expect(deriveRunProgress({}, { ...live, requests_expected: 10 })).toBe(1);
+	});
+
+	/*
 	 * Mutation check: drop the clamp and a run that overshoots its own expected
 	 * count - the last window's requests land after the bound - reports a
 	 * fraction above 1, which Electron reads as an indeterminate bar.
