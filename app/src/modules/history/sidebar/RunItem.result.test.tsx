@@ -20,6 +20,10 @@
  * accessible-name cases redden; drop the `resultLine` render and the subtitle
  * case reddens; move the comment back into the time card and the comment case
  * reddens.
+ *
+ * Failed assertions (#2820): drop `assertionsFailed` from `rowOutcome`'s input
+ * and the glyph and accessible-name cases redden; drop it from `resultSubtitle`
+ * and the line case reddens.
  */
 
 import { describe, it, expect } from "vitest";
@@ -81,6 +85,33 @@ describe("a load run's result line", () => {
 		);
 		expect(design.container.textContent).not.toContain("req/s");
 		expect(design.container.textContent).not.toContain("p95");
+	});
+});
+
+describe("a load run whose assertions failed (#2820)", () => {
+	const ASSERTED = {
+		...RESULT,
+		verdict: "passed" as const,
+		assertionsPassed: 10,
+		assertionsFailed: 4580,
+	};
+
+	it("ends the result line with the failed count, though the error rate is 0.0%", () => {
+		renderRow(loadRun({ resultSummary: ASSERTED }));
+
+		expect(
+			screen.getByText("485 req/s · p95 42ms · 0.0% errors · 4,580 assertions failed")
+		).toBeInTheDocument();
+	});
+
+	it("does not draw a passed verdict as the tick, and says not judged in the name", () => {
+		const tick = glyphShape(loadRun({ resultSummary: { ...RESULT, verdict: "passed" } }));
+		expect(glyphShape(loadRun({ resultSummary: ASSERTED }))).not.toBe(tick);
+
+		renderRow(loadRun({ resultSummary: ASSERTED }));
+		expect(
+			screen.getByRole("button", { name: /^Open Load test, completed, verdict not judged/ })
+		).toBeInTheDocument();
 	});
 });
 

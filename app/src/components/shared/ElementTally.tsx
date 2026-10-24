@@ -12,7 +12,8 @@
  *
  * **A `deferred` element is not a skipped one.** A post-request script is not
  * run inline on the load path; the engine replays it against the sampled
- * responses afterwards and reports that in the Test validation card. Its
+ * responses afterwards and reports that in the Test validation card (retitled Sampled replay beside an
+ * exact Assertions card, #2820). Its
  * `passed`/`failed` are therefore zero by construction, and "0 passed" would
  * read as a script that did nothing. `deferred` is absent from a report
  * stored before #2144, which keeps the older rendering.
@@ -21,14 +22,21 @@
 import { formatNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { TEST_VALIDATION_TITLE } from "./run-assertions";
 import type { RunScenarioStepElementTally } from "@/types/domain";
 
 export interface ElementTallyProps {
 	element: RunScenarioStepElementTally;
+	/** The card a deferred row points at; `testValidationTitleOf` names it for a report. */
+	replayCard?: string;
 	className?: string;
 }
 
-export function ElementTally({ element, className }: ElementTallyProps) {
+export function ElementTally({
+	element,
+	replayCard = TEST_VALIDATION_TITLE,
+	className,
+}: ElementTallyProps) {
 	const deferred = element.deferred ?? 0;
 	// A deferred row has no inline pass count to state; for every other row
 	// "N passed" is always stated, zero included.
@@ -40,7 +48,7 @@ export function ElementTally({ element, className }: ElementTallyProps) {
 			{deferred > 0 && (
 				<span className="font-mono text-muted-foreground">
 					{formatNumber(deferred)} {pluralize(deferred, "request")} deferred to a post-run
-					replay of sampled responses - results in Test validation
+					replay of sampled responses - results in {replayCard}
 				</span>
 			)}
 			{showPassed && (

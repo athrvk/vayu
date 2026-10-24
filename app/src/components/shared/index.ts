@@ -64,6 +64,7 @@ export * from "./ElementTally";
 export * from "./RequestElementsSummary";
 
 // "982 of 1,000 assertions passed" - a load run's test outcome, live and stored
+export * from "./ExactAssertionsSummary";
 export * from "./TestValidationSummary";
 
 // "These responses were stored verbatim" - wherever captured samples are shown
@@ -89,6 +90,7 @@ export * from "./RunStatusPill";
 export * from "./run-status";
 
 // Passed, failed or not judged - the verdict `completed` does not give (#2130)
+export * from "./run-assertions";
 export * from "./run-outcome";
 export * from "./RunOutcomeBanner";
 
