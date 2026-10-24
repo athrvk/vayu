@@ -37,6 +37,7 @@ import {
 } from "./plugins";
 import { subscribeFocus, publishFocus, type FocusValue } from "./chartFocus";
 import { rangeFrom } from "./yRange";
+import { WHOLE_NUMBER_TICKS } from "./wholeNumberTicks";
 
 export type { Marker, Annotation } from "./plugins";
 
@@ -98,7 +99,13 @@ export interface UPlotChartProps {
 	xTime?: boolean;
 	/** Gets every tick of the axis as well, so a label can pick its decimals from the spacing. */
 	yFormat?: (v: number, splits: readonly number[]) => string;
-	y2Format?: (v: number) => string;
+	y2Format?: (v: number, splits: readonly number[]) => string;
+	/**
+	 * Scales whose ticks fall on whole numbers only, for axes that count things.
+	 * Without it a scale from 0 to 2 ticks at 0.5, and a rounding label prints
+	 * "2 2 1 1 0". Default: none, uPlot picks the spacing.
+	 */
+	wholeNumberScales?: readonly ScaleKey[];
 	/** What the secondary axis measures. Without it the right-hand scale reads as an unlabelled second set of numbers. */
 	y2Label?: string;
 	/**
@@ -138,6 +145,8 @@ const dpr = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
 // Whole-second (and above) tick increments for an elapsed-seconds x axis, so
 // ticks never land on a half-second and get a rounded/duplicated label.
 const TIME_INCRS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+
+const NO_SCALES: readonly ScaleKey[] = [];
 
 /**
  * Indices of the readings both of whose neighbours are gaps (a data end counts as
@@ -182,6 +191,7 @@ export function UPlotChart({
 	xTime = false,
 	yFormat = defaultY,
 	y2Format = (v) => `${Math.round(v)}`,
+	wholeNumberScales = NO_SCALES,
 	y2Label,
 	yMin = 0,
 	markers = [],
@@ -243,7 +253,7 @@ export function UPlotChart({
 						`${s.label}:${s.role}:${s.kind ?? "line"}:${s.scale ?? "y"}:${s.bandTo ?? ""}`
 				)
 				.join("|") +
-			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}|${yMin ?? "auto"}|${y2Label ?? ""}|${xSplits?.join(",") ?? ""}`,
+			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}|${yMin ?? "auto"}|${y2Label ?? ""}|${wholeNumberScales.join(",")}|${xSplits?.join(",") ?? ""}`,
 		[
 			series,
 			themeKey,
@@ -255,6 +265,7 @@ export function UPlotChart({
 			tooltipCaption,
 			yMin,
 			y2Label,
+			wholeNumberScales,
 			xSplits,
 		]
 	);
@@ -335,7 +346,12 @@ export function UPlotChart({
 						: {}),
 					values: (_u, sp) => sp.map((v) => xFormat(v)),
 				},
-				{ ...axisBase, scale: "y", values: (_u, sp) => sp.map((v) => yFormat(v, sp)) },
+				{
+					...axisBase,
+					scale: "y",
+					...(wholeNumberScales.includes("y") ? WHOLE_NUMBER_TICKS : {}),
+					values: (_u, sp) => sp.map((v) => yFormat(v, sp)),
+				},
 			];
 			if (hasY2) {
 				axes.push({
@@ -344,7 +360,8 @@ export function UPlotChart({
 					side: 1,
 					...(y2Label ? { label: y2Label, labelFont: theme.font } : {}),
 					grid: { show: false },
-					values: (_u, sp) => sp.map((v) => y2Format(v)),
+					...(wholeNumberScales.includes("y2") ? WHOLE_NUMBER_TICKS : {}),
+					values: (_u, sp) => sp.map((v) => y2Format(v, sp)),
 				});
 			}
 
