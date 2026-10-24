@@ -83,11 +83,11 @@
  * nested (#2729). valijson builds a `propertyNames` subschema from its parent's
  * node path rather than the keyword's own, so it judges the root's and passes
  * every body for one inside `properties`, `patternProperties`,
- * `additionalProperties`, an `allOf`/`anyOf`/`oneOf`/`not` member, `items` or a
- * `$ref` target, a `$ref` back to `#` included. The root keyword stays
- * validated (#2719). The verdict's `valid` covers only what was evaluated, and
- * `pm.response.to.have.jsonSchema` fails in both polarities on such a schema,
- * as it does for any unevaluated keyword.
+ * `additionalProperties`, a `dependencies` schema, an `allOf`/`anyOf`/`oneOf`/
+ * `not` member, `items` or a `$ref` target, a `$ref` back to `#` included. The
+ * root keyword stays validated (#2719). The verdict's `valid` covers only what
+ * was evaluated, and `pm.response.to.have.jsonSchema` fails in both polarities
+ * on such a schema, as it does for any unevaluated keyword.
  *
  * ### Formats
  *
