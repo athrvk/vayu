@@ -79,6 +79,16 @@
  * disclosure discipline applied to a dialect gap: nothing here ever reports a
  * body as clean when part of its contract went unread.
  *
+ * `propertyNames` is the one draft-07 keyword in that list, and only where it is
+ * nested (#2729). valijson builds a `propertyNames` subschema from its parent's
+ * node path rather than the keyword's own, so it judges the root's and passes
+ * every body for one inside `properties`, `patternProperties`,
+ * `additionalProperties`, an `allOf`/`anyOf`/`oneOf`/`not` member, `items` or a
+ * `$ref` target, a `$ref` back to `#` included. The root keyword stays
+ * validated (#2719). The verdict's `valid` covers only what was evaluated, and
+ * `pm.response.to.have.jsonSchema` fails in both polarities on such a schema,
+ * as it does for any unevaluated keyword.
+ *
  * ### Formats
  *
  * `format` is an assertion here for the names valijson checks and those in
@@ -389,6 +399,10 @@ validate_document_against_schema (const nlohmann::json& schema, const nlohmann::
  * cycle guard, so what is reported is what *this* response was actually checked
  * against - not every unevaluatable keyword anywhere in the document, which
  * would name keywords no response here ever touched.
+ *
+ * `propertyNames` is counted by position, once per nested occurrence (a `$ref`
+ * target is reached twice and counted once). The schema's own root one is
+ * validated and not counted, unless a `$ref` back to `#` reaches it from below.
  */
 [[nodiscard]] std::vector<std::pair<std::string, size_t>>
 collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots);

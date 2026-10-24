@@ -111,8 +111,8 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 								count > 1 ? `${keyword} (${count})` : keyword
 							)
 							.join(", ")}
-						. These keywords are newer than the dialect the validator reads, so what
-						they describe was neither checked nor failed.
+						. The validator can't evaluate these keywords where the schema uses them, so
+						what they describe was neither checked nor failed.
 					</span>
 				</div>
 			)}

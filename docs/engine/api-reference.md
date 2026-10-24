@@ -7435,6 +7435,16 @@ silently ignores - so a schema that meant to forbid something would permit it.
 Every such keyword is named and counted, which makes a `valid: true` beside one
 narrower than it looks rather than wrong.
 
+`propertyNames` is the one draft-07 keyword on that list, and only when it is
+nested (#2729): valijson builds a `propertyNames` subschema from its parent's
+node path, so it validates the schema's root keyword but passes every body for
+one inside `properties`, `patternProperties`, `additionalProperties`, an
+`allOf`/`anyOf`/`oneOf`/`not` member, `items` or a `$ref` target. Each nested
+occurrence is counted once, a `$ref` target reached twice included; the root
+keyword is validated and counted only when a `$ref` back to `#` reaches it from
+below. In a script, `pm.response.to.have.jsonSchema` fails in both polarities
+on such a schema, as it does for any unevaluated keyword.
+
 **`reason` codes** (all mean *bound to a document, and still not judged*):
 
 | Code | What happened |
@@ -10722,7 +10732,7 @@ of responses a load run stored**, or **every step a collection run executed**.
 | `sampled` | Responses this pass walked - the denominator for everything else |
 | `checked` | Of those, the ones a declared schema could speak about |
 | `valid` / `failed` | The partition of `checked`. `valid + failed == checked`, always |
-| `unevaluated` | Checked responses whose schema carried a keyword the draft-07 validator could not evaluate |
+| `unevaluated` | Checked responses whose schema carried a keyword the draft-07 validator could not evaluate (a nested `propertyNames` included, #2729) |
 | `uncheckedReasons` | Reason code -> count, accounting for every one of `sampled - checked` |
 | `unevaluatedKeywords[]` | `{keyword, count}`, so what went unread is named and not only counted |
 | `failures[]` | Bounded examples: `{step?, status, path, message}` |
