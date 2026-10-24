@@ -506,7 +506,8 @@ struct RunContext {
     /// `elements.includeScriptTime` (issue #1495): false (the default) times
     /// a step's own transfer only, excluding whatever an inline script or
     /// declarative element spent applying; true folds that time back into
-    /// the recorded sample.
+    /// the step's sample and the run's alike (#2792, through
+    /// `ResultAnnotations::script_ms`).
     bool include_script_time = false;
 
     /// `elements.timers` (issue #1495, wired by #1498): `"asConfigured"`

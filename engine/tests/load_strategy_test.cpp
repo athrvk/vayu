@@ -1298,6 +1298,105 @@ TEST_F (LoadStrategyTest, AZeroThresholdDisablesOutlierCapture) {
     EXPECT_EQ (context->metrics_collector->slow_results_dropped (), 0u);
 }
 
+namespace {
+/// A scenario completion's annotations carrying @p script_ms of pipeline time,
+/// the way the scenario executor hands them over under `includeScriptTime`.
+vayu::core::ResultAnnotations with_script_time (double script_ms) {
+    return vayu::core::ResultAnnotations{ std::nullopt, 0, 0, 1, script_ms };
+}
+
+constexpr double TRANSFER_MS = 10.0;
+constexpr double SCRIPT_MS   = 40.0;
+} // namespace
+
+// #2792: the pipeline time a step's histogram folds under `includeScriptTime`
+// reaches the run's latency population too, while the slow decision and the
+// stored trace stay on the transfer the trace's phases describe. The
+// threshold sits between the transfer (10) and the folded latency (50), so a
+// slow decision read off the folded figure stores a trace. Mutation-check:
+// drop `annotations.script_ms` from `latency` in record_successful_response
+// and the average and max read 10.
+TEST_F (LoadStrategyTest, ScriptTimeJoinsASuccessfulCompletionsRunLatency) {
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-script-time-success",
+    nlohmann::json{ { "mode", "constant_rps" }, { "slow_threshold_ms", 30 } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::core::handle_result (
+    context, db, completion (TRANSFER_MS), with_script_time (SCRIPT_MS));
+
+    auto& mc = *context->metrics_collector;
+    EXPECT_DOUBLE_EQ (mc.average_latency (), TRANSFER_MS + SCRIPT_MS);
+    EXPECT_NEAR (mc.calculate_percentiles ().max, TRANSFER_MS + SCRIPT_MS, 0.1);
+    EXPECT_TRUE (mc.slow_results ().empty ())
+    << "pipeline time made a 10ms transfer a slow outlier";
+}
+
+// The trace a retained completion stores keeps `totalMs` at the transfer, the
+// figure its phase breakdown describes; the record's own latency is the run
+// population's figure.
+TEST_F (LoadStrategyTest, ScriptTimeLeavesAStoredTracesTotalOnTheTransfer) {
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-script-time-trace",
+    nlohmann::json{ { "mode", "constant_rps" }, { "slow_threshold_ms", 5 } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::core::handle_result (
+    context, db, completion (TRANSFER_MS), with_script_time (SCRIPT_MS));
+
+    const auto& slow = context->metrics_collector->slow_results ();
+    ASSERT_EQ (slow.size (), 1u);
+    EXPECT_DOUBLE_EQ (slow[0].latency_ms, TRANSFER_MS + SCRIPT_MS);
+    const auto trace = nlohmann::json::parse (slow[0].trace_data);
+    EXPECT_DOUBLE_EQ (trace["totalMs"].get<double> (), TRANSFER_MS);
+}
+
+// The same for a failed transfer (#2384's population): its attempt duration
+// carries the pipeline time, its error trace's timing does not.
+// Mutation-check: drop `annotations.script_ms` from the AttemptDuration in
+// record_failed_response and the average reads 2000.
+TEST_F (LoadStrategyTest, ScriptTimeJoinsAFailedTransfersRunLatency) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-script-time-failure", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    constexpr double TIMEOUT_MS = 2000.0;
+    context->requests_sent++;
+    vayu::core::handle_result (context, db,
+    vayu::Result<vayu::Response> (timed_out_response (TIMEOUT_MS)),
+    with_script_time (SCRIPT_MS));
+
+    const auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.total_errors (), 1u);
+    EXPECT_DOUBLE_EQ (mc.average_latency (), TIMEOUT_MS + SCRIPT_MS);
+    ASSERT_EQ (mc.errors ().size (), 1u);
+    EXPECT_DOUBLE_EQ (mc.errors ()[0].latency_ms, TIMEOUT_MS + SCRIPT_MS);
+    const auto trace = nlohmann::json::parse (mc.errors ()[0].trace_data);
+    EXPECT_DOUBLE_EQ (trace["timing"]["totalMs"].get<double> (), TIMEOUT_MS);
+}
+
+// Without the flag the executor passes 0, and the run records the transfer
+// exactly as it did before #2792, on both the success and the failure path.
+TEST_F (LoadStrategyTest, ZeroScriptTimeLeavesTheRunLatencyAtTheTransfer) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-script-time-zero", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent += 2;
+    vayu::core::handle_result (
+    context, db, completion (TRANSFER_MS), with_script_time (0.0));
+    vayu::core::handle_result (context, db,
+    vayu::Result<vayu::Response> (timed_out_response (3.0 * TRANSFER_MS)),
+    with_script_time (0.0));
+
+    auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.latency_count (), 2);
+    EXPECT_DOUBLE_EQ (mc.average_latency (), 2.0 * TRANSFER_MS);
+    EXPECT_NEAR (mc.calculate_percentiles ().max, 3.0 * TRANSFER_MS, 0.1);
+}
+
 // Finding 2: only the sampled completions reach storage, and the period still
 // means one in N of *every* completion. The trace that is not built leaves
 // nothing to assert on directly - what is asserted is that no unsampled

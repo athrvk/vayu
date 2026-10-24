@@ -84,7 +84,8 @@ const ResultAnnotations& annotations) {
     // answered.
     std::optional<AttemptDuration> attempt;
     if (response.transfer_attempted) {
-        attempt = AttemptDuration{ response.timing.total_ms, response.timing.queue_wait_ms };
+        attempt = AttemptDuration{ response.timing.total_ms + annotations.script_ms,
+            response.timing.queue_wait_ms };
     }
     context->metrics_collector->record_error (response.error_code,
     response.error_message, error_json.dump (),
@@ -97,8 +98,10 @@ const ResultAnnotations& annotations) {
 void record_successful_response (const std::shared_ptr<RunContext>& context,
 const vayu::Response& response,
 const ResultAnnotations& annotations) {
-    // Successful response
-    double latency = response.timing.total_ms;
+    // The trace and the slow threshold judge the transfer alone; the latency
+    // population also carries the pipeline time `includeScriptTime` folds.
+    const double transfer_ms = response.timing.total_ms;
+    const double latency     = transfer_ms + annotations.script_ms;
 
     // Two independent reasons to keep a trace, and both are decided before
     // anything is serialised: the 1-in-N sampler (which advances its period
@@ -108,7 +111,7 @@ const ResultAnnotations& annotations) {
     // drain, then thrown away - work that delays socket processing for
     // every other transfer on the same worker.
     const bool is_slow = context->slow_threshold_ms > 0 &&
-    latency >= static_cast<double> (context->slow_threshold_ms);
+    transfer_ms >= static_cast<double> (context->slow_threshold_ms);
     const bool sampled = context->metrics_collector->should_sample_success ();
     // Third reason, and the cheapest: one relaxed fetch_add deciding
     // whether this completion is among the first few of its status code. A
