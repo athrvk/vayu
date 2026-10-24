@@ -1830,7 +1830,7 @@ declare const pm: {
 				 */
 				jsonBody(path?: string, value?: unknown): void;
 				/**
-				 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+				 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions, or a propertyNames nested below the schema's root) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
 				 * 
 				 * Example:
 				 * pm.response.to.have.jsonSchema({ type: 'object', required: ['id'] });
@@ -2120,7 +2120,7 @@ declare const pm: {
 					/**
 					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
 					 * 
-					 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+					 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions, or a propertyNames nested below the schema's root) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
 					 * 
 					 * Example:
 					 * pm.response.to.not.have.jsonSchema({ type: 'object', required: ['id'] });

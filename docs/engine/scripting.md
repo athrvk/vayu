@@ -366,9 +366,14 @@ Notes on the edges:
   schema; a constraint that records no detail (`propertyNames`, a `false`
   schema) yields one failure at the body root that names the schema path
   instead. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
-  such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
+  such as `unevaluatedProperties`, OpenAPI's `nullable`, or a `propertyNames`
+  nested anywhere below the schema's root - fails the assertion
   in **both** polarities and is named, because ignoring it would make the schema
-  looser (or, under `not`, stricter) and neither verdict could be trusted.
+  looser (or, under `not`, stricter) and neither verdict could be trusted. A
+  root `propertyNames` is evaluated; a nested one (in `properties`, `items`, an
+  `allOf` member, a `$ref` target, ...) is not, because valijson builds it from
+  its parent's node path and so never runs its own subschema (#2729), where
+  ajv does evaluate it.
   `options` is ajv's and is accepted and not read. `format` is checked for
   `date`, `time`, `date-time`, `ipv4`, `email`, `uri`, `uuid`, `hostname` and
   `ipv6`; any other name (`uri-reference`, `int64`, ...) is an annotation and

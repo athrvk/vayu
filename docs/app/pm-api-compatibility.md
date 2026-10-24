@@ -925,7 +925,10 @@ on `pm.response.to.have`, and is checked by the engine's draft-07 validator
 rather than ajv. A failure names the first path that broke the schema
 (`at /items/1/id: ...`). A keyword the validator cannot evaluate - one from JSON Schema
 2019-09 or 2020-12 (`unevaluatedProperties`, `prefixItems`,
-`dependentSchemas`, ...) or OpenAPI's own (`nullable`, `discriminator`) - fails
+`dependentSchemas`, ...), OpenAPI's own (`nullable`, `discriminator`), or a
+`propertyNames` nested below the schema's root (in `properties`, `items`, an
+`allOf` member or a `$ref` target; ajv evaluates it there and the engine's
+validator cannot, #2729) - fails
 the assertion **in both polarities**, naming the keyword, because ignoring it
 makes the schema looser anywhere but inside `not`, where it makes it stricter:
 neither verdict could be trusted, so neither is given. `options` is ajv's and is accepted and not read.

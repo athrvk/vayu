@@ -3,6 +3,7 @@
     "The draft-07 verdicts pm.response.to.have.jsonSchema (the engine's native validator, core/schema_validation.hpp) and the shelf's ajv 6.12.5 and tv4 1.3.0 must agree on (#2656); script_json_schema_conformance_test.cpp runs every datum through all of them.",
     "`valid` is the verdict each validator gives. `tv4: false` marks a case outside tv4's draft-04 reach (a draft-06/07 keyword, which tv4 ignores, or a format, which tv4 checks only when one is added) or one tv4 answers against the specification (a length in UTF-16 code units rather than characters); the other validators still run it.",
     "`ignoredByAjv` lists the keywords the native validator does not evaluate and so refuses to pass on (collect_unevaluated_keywords): ajv 6 ignores each of them by default, so its verdict leaves the keyword out and it answers valid for each row's datum. None is a keyword ajv evaluates.",
+    "`nestedPropertyNames` lists where the native validator ignores a `propertyNames` (valijson builds a nested one from its parent's node path, #2729) and so refuses to pass on it like the keywords above. Unlike them ajv 6 does evaluate it, so each row's datum breaks the keyword and ajv answers invalid; the root-level `propertyNames` is validated and lives in `cases`.",
     "`divergences` are the data the validators answer differently, each with both verdicts and why. They are kept out of `cases` and asserted as they stand, so a change on either side fails until its row moves into `cases`.",
     "Every verdict was checked against the unbundled ajv 6.12.5 and tv4 1.3.0 on Node."
   ],
@@ -485,6 +486,12 @@
     {"keyword": "$recursiveAnchor", "schema": {"$recursiveAnchor": true}, "value": 1},
     {"keyword": "nullable", "schema": {"type": ["string", "null"], "nullable": true}, "value": null},
     {"keyword": "discriminator", "schema": {"type": "object", "discriminator": {"propertyName": "kind"}}, "value": {}}
+  ],
+  "nestedPropertyNames": [
+    {"where": "properties", "schema": {"properties": {"o": {"propertyNames": {"pattern": "^[a-z]+$"}}}}, "value": {"o": {"aB": 1}}},
+    {"where": "allOf", "schema": {"allOf": [{"propertyNames": {"pattern": "^[a-z]+$"}}]}, "value": {"aB": 1}},
+    {"where": "items", "schema": {"items": {"propertyNames": {"pattern": "^[a-z]+$"}}}, "value": [{"aB": 1}]},
+    {"where": "$ref target", "schema": {"properties": {"o": {"$ref": "#/definitions/named"}}, "definitions": {"named": {"propertyNames": {"pattern": "^[a-z]+$"}}}}, "value": {"o": {"aB": 1}}}
   ],
   "divergences": [
     {"name": "format date", "schema": {"format": "date"}, "value": "2024-13-01", "ajv": true, "native": false, "why": "ajv 6 checks formats in its default `fast` mode, a shape match that takes any two digits for a month and a day; jsonSchema checks the calendar, as ajv's `format: 'full'` does."},

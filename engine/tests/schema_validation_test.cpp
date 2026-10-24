@@ -32,6 +32,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using nlohmann::json;
@@ -614,6 +615,120 @@ TEST (SchemaKeywordVerdictTest, ASilentRefusalNamesAtMostThreePaths) {
                "/definitions/c/propertyNames and 2 more,"),
     std::string::npos)
     << verdict.failures.front ().message;
+}
+
+// ─── A nested `propertyNames` is disclosed, not validated (issue #2729) ─────
+
+namespace {
+
+/// The count `collect_unevaluated_keywords` gives `propertyNames` for @p schema
+/// (zero when it names none).
+size_t property_names_gaps (const json& schema, const json& ref_roots = json::object ()) {
+    for (const auto& [keyword, count] : collect_unevaluated_keywords (schema, ref_roots)) {
+        if (keyword == "propertyNames") {
+            return count;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+// valijson builds a `propertyNames` subschema from its parent's node path, so a
+// nested one is never the subschema that runs: the body below is refused by
+// ajv and accepted here, and the verdict has to say a keyword went unread.
+TEST (SchemaKeywordVerdictTest, ANestedPropertyNamesIsDisclosedBecauseTheValidatorIgnoresIt) {
+    const char* const schema =
+    R"({"properties": {"o": {"propertyNames": {"pattern": "^[a-z]+$"}}}})";
+    const auto verdict = judge (schema, R"({"o": {"aB": 1}})");
+
+    EXPECT_TRUE (verdict.valid)
+    << "the validator cannot see the nested keyword";
+    ASSERT_EQ (verdict.unevaluated_keywords.size (), 1u);
+    EXPECT_EQ (verdict.unevaluated_keywords.front ().first, "propertyNames");
+    EXPECT_EQ (verdict.unevaluated_keywords.front ().second, 1u);
+}
+
+TEST (SchemaKeywordVerdictTest, APropertyNamesIsDisclosedWhereverItIsNested) {
+    const std::vector<std::pair<std::string, std::string>> positions = {
+        { "properties", R"({"properties": {"o": {"propertyNames": {"maxLength": 1}}}})" },
+        { "patternProperties", R"({"patternProperties": {"^x": {"propertyNames": {"maxLength": 1}}}})" },
+        { "additionalProperties", R"({"additionalProperties": {"propertyNames": {"maxLength": 1}}})" },
+        { "allOf", R"({"allOf": [{"propertyNames": {"maxLength": 1}}]})" },
+        { "anyOf", R"({"anyOf": [{"propertyNames": {"maxLength": 1}}]})" },
+        { "oneOf", R"({"oneOf": [{"propertyNames": {"maxLength": 1}}]})" },
+        { "not", R"({"not": {"propertyNames": {"maxLength": 1}}})" },
+        { "items", R"({"items": {"propertyNames": {"maxLength": 1}}})" },
+        { "tuple items", R"({"items": [{"propertyNames": {"maxLength": 1}}]})" },
+        { "propertyNames", R"({"propertyNames": {"propertyNames": {"maxLength": 1}}})" },
+    };
+    for (const auto& [where, schema] : positions) {
+        EXPECT_EQ (property_names_gaps (json::parse (schema)), 1u) << where << ": " << schema;
+    }
+}
+
+TEST (SchemaKeywordVerdictTest, ANestedPropertyNamesBehindARefIsCountedOnce) {
+    // The target is reached once through the ref and once in place; one keyword
+    // is one gap.
+    const auto in_place = json::parse (R"({
+        "properties": {"a": {"$ref": "#/definitions/named"}},
+        "definitions": {"named": {"propertyNames": {"maxLength": 1}}}
+    })");
+    EXPECT_EQ (property_names_gaps (in_place), 1u);
+
+    // Two refs to one target are still one keyword in the schema.
+    const auto twice = json::parse (R"({
+        "properties": {"a": {"$ref": "#/definitions/named"},
+                       "b": {"$ref": "#/definitions/named"}},
+        "definitions": {"named": {"propertyNames": {"maxLength": 1}}}
+    })");
+    EXPECT_EQ (property_names_gaps (twice), 1u);
+
+    // A document-level ref root, where the target is only reachable by the ref.
+    const auto ref_roots = json::parse (R"({"components": {"schemas": {
+        "Named": {"propertyNames": {"maxLength": 1}}}}})");
+    EXPECT_EQ (property_names_gaps (
+               json::parse (R"({"$ref": "#/components/schemas/Named"})"), ref_roots),
+    1u);
+}
+
+TEST (SchemaKeywordVerdictTest, EachNestedPropertyNamesIsOneGap) {
+    const auto schema = json::parse (R"({
+        "properties": {"a": {"propertyNames": {"maxLength": 1}}},
+        "allOf": [{"propertyNames": {"minLength": 1}}],
+        "items": {"propertyNames": {"pattern": "^a"}}
+    })");
+    EXPECT_EQ (property_names_gaps (schema), 3u);
+}
+
+TEST (SchemaKeywordVerdictTest, TheRootPropertyNamesStaysValidatedAndUndisclosed) {
+    const char* const schema = R"({"propertyNames": {"pattern": "^[a-z]+$"}})";
+    expect_rejected (schema, R"({"aB": 1})");
+    expect_accepted (schema, R"({"ab": 1})");
+    EXPECT_TRUE (judge (schema, R"({"aB": 1})").unevaluated_keywords.empty ());
+
+    // A property literally called "propertyNames" is data, not the keyword.
+    const auto named =
+    json::parse (R"({"properties": {"propertyNames": {"type": "object"}}})");
+    EXPECT_EQ (property_names_gaps (named), 0u);
+}
+
+// With a `$ref` back to `#` in the schema valijson no longer builds the root
+// keyword's own subschema either, so the root `propertyNames` is as unread as a
+// nested one: neither the root body nor the one below it is refused by it.
+TEST (SchemaKeywordVerdictTest, TheRootPropertyNamesReachedByARefBackToTheRootIsDisclosed) {
+    const char* const schema = R"({
+        "propertyNames": {"pattern": "^[a-z]+$"},
+        "properties": {"a": {"$ref": "#"}, "b": {"items": {"$ref": "#"}}}
+    })";
+    EXPECT_TRUE (judge (schema, R"({"aB": 1})").valid);
+    const auto verdict = judge (schema, R"({"a": {"aB": 1}})");
+    EXPECT_TRUE (verdict.valid)
+    << "the validator cannot see the keyword below the root";
+    // Two refs reach one keyword: one gap.
+    ASSERT_EQ (verdict.unevaluated_keywords.size (), 1u);
+    EXPECT_EQ (verdict.unevaluated_keywords.front ().first, "propertyNames");
+    EXPECT_EQ (verdict.unevaluated_keywords.front ().second, 1u);
 }
 
 // ─── `format` (issue #2581) ─────────────────────────────────────────────────

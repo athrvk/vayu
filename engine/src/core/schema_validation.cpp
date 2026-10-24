@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <format>
 #include <map>
+#include <set>
 #include <unordered_set>
 #include <utility>
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
@@ -78,6 +79,10 @@ std::string method_path_key (const std::string& method, const std::string& path)
  * bug in that normalisation - and disclosing it is how the bug surfaces as a
  * named gap rather than as a body wrongly reported clean (or, for `nullable`,
  * wrongly reported broken).
+ *
+ * `propertyNames` is not here: it is draft-07, and valijson evaluates it at the
+ * schema's root only, so whether it is a gap depends on where it sits
+ * (`collect_unevaluated_keywords`).
  */
 const std::unordered_set<std::string>& unevaluatable_keywords () {
     static const std::unordered_set<std::string> keywords = {
@@ -436,14 +441,34 @@ void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visi
 std::vector<std::pair<std::string, size_t>>
 collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
     std::map<std::string, size_t> counts;
+    // A `$ref` target is reached once through the ref and once in place, so the
+    // nested `propertyNames` are kept by pointer and counted once each.
+    std::set<std::string> nested_property_names;
+    size_t root_visits = 0;
     walk_schema (schema, validation_root (schema, ref_roots),
-    [&counts] (const nlohmann::json& node, const nlohmann::json::json_pointer&) {
+    [&] (const nlohmann::json& node, const nlohmann::json::json_pointer& at) {
         for (const auto& [key, value] : node.items ()) {
             if (unevaluatable_keywords ().contains (key)) {
                 ++counts[key];
             }
         }
+        // valijson builds a `propertyNames` subschema from its parent's node
+        // path (`makePropertyNamesConstraint` is handed `nodePath`, not
+        // `nodePath + "/propertyNames"`) and so reuses the parent's subschema.
+        // That holds at the root (#2719) and passes every body below it: in
+        // `properties`, `items`, an `allOf` member or a `$ref` target (#2729).
+        // The root is the empty pointer, which a `$ref` back to `#` shares: the
+        // first visit is the root itself, any later one is the same keyword
+        // reached from below, where it is ignored too.
+        const bool is_root = at.empty ();
+        root_visits += is_root ? 1 : 0;
+        if (node.contains ("propertyNames") && (!is_root || root_visits > 1)) {
+            nested_property_names.insert (at.to_string ());
+        }
     });
+    if (!nested_property_names.empty ()) {
+        counts["propertyNames"] = nested_property_names.size ();
+    }
     return { counts.begin (), counts.end () };
 }
 

@@ -192,6 +192,43 @@ pm.environment.set('verdicts', JSON.stringify(verdicts));
     }
 }
 
+// `propertyNames` is the other way round: ajv 6 evaluates it wherever it sits,
+// and the native validator only at the schema's root (valijson builds a nested
+// one from its parent's node path, #2729). Each row is a datum ajv refuses, and
+// jsonSchema declines to pass it rather than agree with a validator that
+// never read the keyword.
+TEST_F (ScriptJsonSchemaConformanceTest,
+ANestedPropertyNamesIsOneAjvEvaluatesAndJsonSchemaDiscloses) {
+    const json& rows =
+    conformance_table ().value ("nestedPropertyNames", json::array ());
+    ASSERT_EQ (rows.size (), 4u)
+    << "properties, allOf, items and a $ref target";
+
+    constexpr const char* SCRIPT = R"JS(
+var Ajv = require('ajv');
+var verdicts = CASES.map(function (row) {
+    var message = '';
+    try { pm.expect(row.value).to.have.jsonSchema(row.schema); } catch (e) { message = e.message; }
+    var validate = new Ajv().compile(row.schema);
+    return { ajv: validate(row.value), native: message };
+});
+pm.environment.set('verdicts', JSON.stringify(verdicts));
+)JS";
+    const json verdicts          = run_script (rows, SCRIPT);
+    ASSERT_EQ (verdicts.size (), rows.size ());
+    for (std::size_t i = 0; i < rows.size (); ++i) {
+        const std::string where = rows.at (i).at ("where");
+        const json& verdict     = verdicts.at (i);
+        EXPECT_EQ (verdict.at ("ajv"), false) << where << ": ajv evaluated it";
+        const std::string message = verdict.at ("native");
+        EXPECT_NE (
+        message.find ("keywords the draft-07 validator does not evaluate"), std::string::npos)
+        << where << ": " << message;
+        EXPECT_NE (message.find ("propertyNames (1)"), std::string::npos)
+        << where << ": " << message;
+    }
+}
+
 // Where the two answer differently today, each side's verdict as recorded, so
 // the record stays true: a fix on either side fails here until its row moves
 // into `cases`.

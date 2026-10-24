@@ -874,7 +874,9 @@ the verdict instead: the chip reads *Schema partly checked* and the Tests tab
 lists which keywords went unread. A body can pass every check that ran while the
 part of its schema that would have rejected it was never looked at, and saying so
 is the only honest way to show a green verdict beside a schema that was half
-read.
+read. A `propertyNames` nested below a schema's root - in a property, an
+`items`, an `allOf` member or a `$ref` target - is named the same way even
+though it is draft-07: the validator only evaluates the root one (#2729).
 
 **`format` is asserted for `date`, `time`, `date-time`, `ipv4`, `email`, `uri`,
 `uuid`, `hostname` and `ipv6`** (the checks are in
