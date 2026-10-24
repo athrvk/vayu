@@ -256,6 +256,51 @@ describe("HeroRow latency card", () => {
 	);
 });
 
+describe("a finished ramp_up run's concurrency card (#2870)", () => {
+	const renderRamp = (over: Partial<DashboardDerived>) =>
+		render(
+			<TooltipProvider>
+				<HeroRow d={{ ...derived("ramp_up"), ...over }} />
+			</TooltipProvider>
+		).container.textContent ?? "";
+
+	it("is titled for the peak, with no 'active' unit and no lag dash", () => {
+		const out = renderRamp({
+			isCompleted: true,
+			peakConcurrency: 30,
+			currentConcurrency: 0,
+			targetConcurrency: 30,
+			rampUpDurationSeconds: 30,
+		});
+		expect(out).toContain("Peak virtual users");
+		expect(out).toContain("30");
+		expect(out).toContain("targeting 30 over");
+		expect(out).not.toContain("Active virtual users");
+		expect(out).not.toContain("active");
+		expect(out).not.toContain("lag");
+		expect(out).not.toContain("ramp ·");
+	});
+
+	it("keeps the lag when the stored series supplied one", () => {
+		const out = renderRamp({
+			isCompleted: true,
+			targetConcurrency: 30,
+			rampUpDurationSeconds: 30,
+			rampDeviationPct: 4.25,
+		});
+		expect(out).toContain("Peak virtual users");
+		expect(out).toContain("ramp · lag 4.3%");
+	});
+
+	it("leaves a live run reading Active virtual users with its lag dash", () => {
+		const out = renderRamp({ isCompleted: false });
+		expect(out).toContain("Active virtual users");
+		expect(out).toContain("active");
+		expect(out).not.toContain("Peak virtual users");
+		expect(out).toContain("lag -%");
+	});
+});
+
 describe("ConcurrencyUtilCard carries no verdict colour (#2245)", () => {
 	// Idle virtual users are a fact about the run's shape, not a failure; the
 	// card's own tooltip says as much. The tier is read off the rendered style

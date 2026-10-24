@@ -210,6 +210,16 @@ consumes it.
   chart keeps the last tick of a bucket like the other windowed series (a mean
   is not a maximum). `capacity`, `ramp_up` and `constant_rps` stay on the instant in the card and the chart. The window credits a request to the second it completes in, so a target slower than the window reads high for a tick and low after; the card clamps to the configured users. The "Peak
   virtual users" stat and `p99AtPeak` stay on the peak.
+- **A finished `ramp_up` run's concurrency card is titled for the peak** (#2870).
+  Instantaneous concurrency is 0 once a run ends, so `HeroRow` already hands
+  `CurrentConcurrencyCard` the peak; with `isCompleted` the card reads "Peak
+  virtual users" and drops the "active" unit instead of claiming 30 are active.
+  The report carries no per-tick concurrency, so `reportToDerived` leaves
+  `rampDeviationPct` empty and `LoadTestDetail` fills it from the stored series
+  with `buildRampOverlay`, the overlay the live view uses. A series folded into
+  buckets (#2547) feeds the bucket's max concurrency, so the figure is the
+  overlay's over buckets. A run with no stored series prints no "lag" clause at
+  all, never `lag -%`; the live card keeps its dash.
 - **The Send / Throughput chip is judged on the windowed pair, held for a few
   seconds, and is grey until the run has settled** (#2802).
   `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is
