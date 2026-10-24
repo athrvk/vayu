@@ -58,6 +58,12 @@ export interface Failure {
 	 * unknown id when the tool declared what its ids name.
 	 */
 	engineNotFound?: string;
+	/**
+	 * The engine's `code` for a 404 ("live_expired"), which tells two 404s with
+	 * one status apart. Present only where the engine sent one: an older engine
+	 * answers none, and {@link describeFailure} then words it as it always did.
+	 */
+	engineCode?: string;
 }
 
 /** What to do about a call that may have completed, for a tool that declared nothing. */
@@ -123,6 +129,8 @@ export interface ToolWords {
 	retry?: RetryAdvice;
 	/** What the tool's id arguments name, for an engine 404. */
 	notFound?: NotFoundDeclaration | readonly NotFoundDeclaration[];
+	/** The tool's own sentence for an engine 404 carrying a given `code`. */
+	notFoundByCode?: Readonly<Record<string, string>>;
 	/** The call's arguments, which hold the id an unknown-id answer names. */
 	args?: Readonly<Record<string, unknown>>;
 }
@@ -186,10 +194,22 @@ function namedId(
 	return idArg.map(given).find((value) => value !== undefined && sentence.includes(value));
 }
 
-/** The unknown-id answer for an engine 404 the tool declared, else the failure's own words. */
-function notFoundText(failure: Failure, { notFound, args }: ToolWords): string {
+/**
+ * The answer for an engine 404 the tool declared: its sentence for the engine's
+ * `code` first, since that names a cause the noun cannot, then an unknown id,
+ * else the failure's own words.
+ */
+function notFoundText(failure: Failure, { notFound, notFoundByCode, args }: ToolWords): string {
 	const sentence = failure.engineNotFound;
 	if (sentence === undefined) return failure.message;
+	const { engineCode: code } = failure;
+	if (
+		code !== undefined &&
+		notFoundByCode &&
+		Object.prototype.hasOwnProperty.call(notFoundByCode, code)
+	) {
+		return notFoundByCode[code];
+	}
 	const kind = declaredKind(notFound, sentence);
 	return kind ? unknownIdText(kind, namedId(kind, args, sentence)) : failure.message;
 }
@@ -254,28 +274,50 @@ export function compactBody(body: string): string {
 	}
 }
 
+/** The fields of an engine error body that a failure's words read. */
+interface EngineErrorFields {
+	sentence?: string;
+	code?: string;
+}
+
+const nonEmptyString = (value: unknown): string | undefined =>
+	typeof value === "string" && value !== "" ? value : undefined;
+
 /**
- * The sentence in an engine error body, or undefined where there is none.
- *
  * **The nested shape is the contract.** `error_response` in `routes.hpp` builds
  * `{"error": {"code", "message"}}` for every refusal these routes produce, and
- * that is the one shape issue #173 settled on. The flat `{"error": "..."}`
- * branch is a fallback rather than an alternative, for the same reason the
- * renderer's `readApiError` keeps one: the app and the engine sidecar are not
- * updated together, so a newer app can be talking to an older engine.
+ * that is the one shape issue #173 settled on. The flat shapes are fallbacks
+ * rather than alternatives, for the same reason the renderer's `readApiError`
+ * keeps one: the app and the engine sidecar are not updated together, so a
+ * newer app can be talking to an older engine. The live-metrics 404 is flat on
+ * purpose, `{"error": "...", "code": "...", "hint": "..."}`
+ * (`live_metrics_unavailable_response`), so a flat `code` is read too.
  */
-export function engineSentence(body: string): string | undefined {
+function engineErrorFields(body: string): EngineErrorFields {
+	let parsed: unknown;
 	try {
-		const error = (JSON.parse(body) as { error?: unknown } | null)?.error;
-		if (typeof error === "string" && error) return error;
-		if (typeof error === "object" && error !== null) {
-			const { message } = error as { message?: unknown };
-			if (typeof message === "string" && message) return message;
-		}
+		parsed = JSON.parse(body);
 	} catch {
 		// Not JSON - the caller falls back to the raw body.
+		return {};
 	}
-	return undefined;
+	if (typeof parsed !== "object" || parsed === null) return {};
+	const { error, code } = parsed as { error?: unknown; code?: unknown };
+	if (typeof error === "object" && error !== null) {
+		const nested = error as { message?: unknown; code?: unknown };
+		return { sentence: nonEmptyString(nested.message), code: nonEmptyString(nested.code) };
+	}
+	return { sentence: nonEmptyString(error), code: nonEmptyString(code) };
+}
+
+/** The sentence in an engine error body, or undefined where there is none. */
+export function engineSentence(body: string): string | undefined {
+	return engineErrorFields(body).sentence;
+}
+
+/** The engine's error `code` in a body, in either shape, or undefined where there is none. */
+export function engineCode(body: string): string | undefined {
+	return engineErrorFields(body).code;
 }
 
 /**

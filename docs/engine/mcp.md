@@ -284,7 +284,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
-| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
+| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1. The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path and held by the engine to the URL it sends after any pre-request script (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
@@ -370,6 +370,9 @@ Notes:
   payload, and the started result's `shape` object carries the same fields.
   `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
+  The engine drops a run's live buffer 60 s after it ends by default
+  (`liveRetentionMs`); the answer after that is the expired-buffer sentence
+  described under [Error results](#error-results), not the engine's body.
 - **What a load run *keeps* is settable too** (issue #760), which is what the
   MCP surface was missing rather than any part of the load shape:
   `successSamplePeriod` (the engine's `success_sample_rate` - a **period**, keep
@@ -2089,8 +2092,18 @@ the one whose noun the engine's sentence contains ("Example not found"); an
 `idArg` that is a list (`compare_runs`' two run ids) names an id only when the
 engine's sentence carries it, since nothing else says which was missing. A kind
 with no list tool (a spec, whose id comes from a collection's binding) ends at
-the cause. A 404 the declaration does not describe, and a tool that declares
-nothing, answers the engine's body instead. A lookup a tool makes itself
+the cause. A tool can also word a 404 by the engine's `code`
+(`notFoundByCode`, read from the flat `{"error", "code", "hint"}` body or the
+nested `{"error": {"code", "message"}}` one by `engineCode` in `failure.ts`),
+for a 404 that is not an unknown id. `get_live_metrics` is the one that does:
+the engine answers `live_expired` for a run that is stored but whose live
+buffer has aged out, and the text is `The live buffer for this run expired
+(kept 60 s after it ends); the run still exists - read get_run_report(runId).`,
+in the `not_found` class, without the engine's `Use /runs/<id>/report` hint
+(the 60 s is the engine's `liveRetentionMs` default). Its `run_not_found` keeps
+the unknown-id sentence above. A 404 with no code (an older engine), a 404
+the declaration does not describe, and a tool that declares nothing answer the
+engine's body instead. A lookup a tool makes itself
 before it calls the engine (a delete that reads the row to name it in the
 prompt, a variable scope) words a miss with the same sentence
 (`unknownIdText`), so the text does not depend on which step noticed. Every

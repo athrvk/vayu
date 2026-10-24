@@ -229,7 +229,12 @@ function failureAnswer(
 	const tool = findTool(toolName);
 	const { text, error } = describeFailure(
 		FAILURES.get(result) ?? unclassified(result, toolName, ctx),
-		{ retry: interruptedAdviceFor(tool), notFound: tool?.notFound, args }
+		{
+			retry: interruptedAdviceFor(tool),
+			notFound: tool?.notFound,
+			notFoundByCode: tool?.notFoundByCode,
+			args,
+		}
 	);
 	const [, ...caveats] = result.content;
 	return resolveRemedyTokens(
