@@ -117,6 +117,9 @@ export interface StoppedAt {
  * read what they need - no card re-derives from raw metrics. `MetricsView` is
  * the one producer; see "Code-quality gates" in this module's README.
  */
+/** `sending`: completions at the end of sending over the sending window (#2882). `wholeRun`: the drain-inclusive average. */
+export type ReceivedWindow = "sending" | "wholeRun";
+
 export interface DashboardDerived {
 	mode: LoadMode;
 	isCompleted: boolean;
@@ -129,7 +132,16 @@ export interface DashboardDerived {
 	/** Only on a stopped report judged by pace; absent live and when the plan is unknown. */
 	stoppedAt?: StoppedAt;
 	sendRate?: number;
+	/** Completions over the whole run, drain included; live, the run-cumulative rate. */
 	throughput?: number;
+	/**
+	 * The received rate the Send / Throughput pair prints and `dispatchStatus`
+	 * judges, set by `reportToDerived` only. Absent live, where the card falls
+	 * back to `throughput`.
+	 */
+	receivedRate?: number;
+	/** The window `receivedRate` was measured over. */
+	receivedWindow?: ReceivedWindow;
 	/**
 	 * Verdict of the Send / Throughput chip, judged by `utils/dispatchLag.ts` on
 	 * the pair its producer chooses (the live windowed rates; a finished run's

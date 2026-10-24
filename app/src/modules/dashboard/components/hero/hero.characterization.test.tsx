@@ -226,6 +226,29 @@ describe("HeroRow rate fidelity on a stopped run (#2805)", () => {
 	});
 });
 
+describe("HeroRow Send / Throughput pair on a finished run (#2882)", () => {
+	const renderRow = (over: Partial<DashboardDerived>) =>
+		render(
+			<TooltipProvider>
+				<HeroRow d={{ ...derived("constant_rps"), isCompleted: true, ...over }} />
+			</TooltipProvider>
+		);
+
+	it("prints the sending-window received rate, not the whole-run throughput beside it", () => {
+		renderRow({ receivedRate: 98, receivedWindow: "sending" });
+
+		expect(screen.getByText("received while sending")).toBeInTheDocument();
+		expect(screen.getByText("98")).toBeInTheDocument();
+	});
+
+	it("keeps the plain caption on a derived with no received window", () => {
+		renderRow({});
+
+		expect(screen.getByText("received")).toBeInTheDocument();
+		expect(screen.getByText("3,940")).toBeInTheDocument();
+	});
+});
+
 describe("HeroRow latency card", () => {
 	const renderRow = (mode: DashboardDerived["mode"]) =>
 		render(

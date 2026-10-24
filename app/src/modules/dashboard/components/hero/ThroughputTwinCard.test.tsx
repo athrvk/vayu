@@ -55,3 +55,31 @@ describe("ThroughputTwinCard chip", () => {
 		expect(screen.queryByText(/Δ/)).toBeNull();
 	});
 });
+
+describe("ThroughputTwinCard received caption", () => {
+	// The live card is fed run-cumulative metrics and passes no window.
+	it.each([
+		[undefined, "received"],
+		["sending" as const, "received while sending"],
+		["wholeRun" as const, "received, whole run"],
+	])("captions a %s window as '%s'", (receivedWindow, caption) => {
+		draw(
+			<ThroughputTwinCard sendRate={200} throughput={190} receivedWindow={receivedWindow} />
+		);
+
+		expect(screen.getByText(caption)).toBeTruthy();
+	});
+
+	it("prints the delta of the received figure it is handed", () => {
+		draw(
+			<ThroughputTwinCard
+				sendRate={200}
+				throughput={198}
+				receivedWindow="sending"
+				status="kept-pace"
+			/>
+		);
+
+		expect(screen.getByText("Δ 2 req/s")).toBeTruthy();
+	});
+});

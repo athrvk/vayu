@@ -9,6 +9,12 @@
 
 import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 
+/**
+ * Both rates divide by `testDuration`, drain included, so they say so: beside
+ * the Send / Throughput card's sending-window pair (#2882) a bare "Response
+ * rate" reads as the same figure. `COMPARED_FORMATS` in
+ * `engine/src/core/run_export_view.cpp` copies these labels.
+ */
 export const METRIC_LABELS: Record<string, string> = {
 	"latency.p50": "P50 latency",
 	"latency.p90": "P90 latency",
@@ -16,8 +22,8 @@ export const METRIC_LABELS: Record<string, string> = {
 	"latency.p99": "P99 latency",
 	"latency.avg": "Average latency",
 	"latency.max": "Max latency",
-	"summary.avgRps": "Throughput",
-	"summary.throughput": "Response rate",
+	"summary.avgRps": "Throughput (whole run, drain included)",
+	"summary.throughput": "Response rate (whole run, drain included)",
 	"summary.errorRate": "Error rate",
 	"summary.totalRequests": "Total requests",
 };

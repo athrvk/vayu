@@ -12,6 +12,13 @@ import { InfoChip, Eyebrow } from "../shared";
 import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DispatchStatus } from "../../utils/dispatchLag";
+import type { ReceivedWindow } from "../../types";
+
+/** An absent window is the live card, whose figure is the run-cumulative rate and keeps the plain word. */
+const RECEIVED_CAPTION: Record<ReceivedWindow, string> = {
+	sending: "received while sending",
+	wholeRun: "received, whole run",
+};
 
 const STATUS_CHIP: Record<DispatchStatus, { chip: string; sentence: string }> = {
 	settling: { chip: "bg-muted text-muted-foreground", sentence: "still measuring the gap" },
@@ -34,11 +41,14 @@ const STATUS_CHIP: Record<DispatchStatus, { chip: string; sentence: string }> = 
 export function ThroughputTwinCard({
 	sendRate,
 	throughput,
+	receivedWindow,
 	status,
 	avgQueueWaitMs,
 }: {
 	sendRate?: number;
 	throughput?: number;
+	/** What `throughput` was measured over; absent on the live card. */
+	receivedWindow?: ReceivedWindow;
 	status?: DispatchStatus;
 	avgQueueWaitMs?: number;
 }) {
@@ -81,7 +91,9 @@ export function ThroughputTwinCard({
 						</span>
 					</div>
 					<Eyebrow size="xs" className="mt-1.5">
-						received
+						{receivedWindow === undefined
+							? "received"
+							: RECEIVED_CAPTION[receivedWindow]}
 						<InfoChip tip={TOOLTIPS.sendThroughputReceived} />
 					</Eyebrow>
 				</div>
