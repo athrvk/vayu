@@ -360,6 +360,22 @@ struct SchemaNode {
     nlohmann::json::json_pointer pointer;
 };
 
+/// The object-valued entries of the map keyword @p key, queued for the walk.
+/// A non-object entry (the array form of `dependencies`) holds no subschema.
+void queue_map_subschemas (const SchemaNode& node,
+const std::string& key,
+std::vector<SchemaNode>& pending) {
+    auto found = node.schema->find (key);
+    if (found == node.schema->end () || !found->is_object ()) {
+        return;
+    }
+    for (const auto& [name, child] : found->items ()) {
+        if (child.is_object ()) {
+            pending.push_back ({ &child, node.pointer / key / name });
+        }
+    }
+}
+
 /**
  * Every subschema of @p node, queued for the walk.
  *
@@ -374,14 +390,7 @@ void queue_subschemas (const SchemaNode& node, std::vector<SchemaNode>& pending)
         }
     }
     for (const auto& key : subschema_map_keys ()) {
-        if (auto found = node.schema->find (key);
-        found != node.schema->end () && found->is_object ()) {
-            for (const auto& [name, child] : found->items ()) {
-                if (child.is_object ()) {
-                    pending.push_back ({ &child, node.pointer / key / name });
-                }
-            }
-        }
+        queue_map_subschemas (node, key, pending);
     }
     for (const auto& key : subschema_list_keys ()) {
         if (auto found = node.schema->find (key);
