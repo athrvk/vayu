@@ -135,11 +135,11 @@ describe("UPlotChart - isolated readings", () => {
 	});
 
 	it("marks nothing on a continuous series", () => {
-		expect(markedIndices([1, 2, 3])).toEqual([]);
+		expect(markedIndices([1, 2, 3])).toBeNull();
 	});
 
 	it("marks nothing on a reading that has a neighbour, as the line reaches it", () => {
-		expect(markedIndices([null, 5, 6, null, 7, 8])).toEqual([]);
+		expect(markedIndices([null, 5, 6, null, 7, 8])).toBeNull();
 	});
 
 	it("treats a data end as a gap", () => {

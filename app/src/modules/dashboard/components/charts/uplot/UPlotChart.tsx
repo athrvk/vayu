@@ -139,13 +139,14 @@ const TIME_INCRS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
  * nothing as a line; a marker keeps a lone reading (a sparse run's one completion
  * a second) on the chart. A reading beside another reading is already a line.
  */
-function isolatedReadings(values: ArrayLike<number | null | undefined>): number[] {
+function isolatedReadings(values: ArrayLike<number | null | undefined>): number[] | null {
 	const idxs: number[] = [];
 	for (let i = 0; i < values.length; i++) {
 		if (values[i] == null) continue;
 		if (values[i - 1] == null && values[i + 1] == null) idxs.push(i);
 	}
-	return idxs;
+	// null, not []: uPlot builds and draws a points path for any truthy result.
+	return idxs.length ? idxs : null;
 }
 
 function defaultY(v: number): string {
