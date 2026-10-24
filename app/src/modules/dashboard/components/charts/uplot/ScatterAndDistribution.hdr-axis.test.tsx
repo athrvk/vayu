@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import type { RunReport } from "@/types";
 import { HdrPercentileChart } from "./ScatterAndDistribution";
-import { pctToX } from "./hdrMarkers";
+import { pctToX, xToPctLabel } from "./hdrMarkers";
 
 const instances = vi.hoisted(() => ({ all: [] as uPlot[] }));
 vi.mock("uplot", async (importOriginal) => {
@@ -53,5 +53,15 @@ describe("HdrPercentileChart - x axis", () => {
 
 		expect(labels).toEqual(["0%", "50%", "90%", "95%", "99%", "99.9%"]);
 		expect(splits).toEqual([0, 50, 90, 95, 99, 99.9].map(pctToX));
+	});
+});
+
+describe("HdrPercentileChart - hover readout", () => {
+	it("names the percentile at any x, never a mark-only lookup", () => {
+		expect(xToPctLabel(pctToX(50))).toBe("50%");
+		expect(xToPctLabel(pctToX(99.9))).toBe("99.9%");
+		expect(xToPctLabel(0)).toBe("0%");
+		expect(xToPctLabel(0.6)).not.toContain("undefined");
+		expect(xToPctLabel(1)).toBe("99.99%");
 	});
 });

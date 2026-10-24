@@ -22,7 +22,7 @@ import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
 import { formatLatency } from "@/lib/format-number";
 import { axisMs, fmtMs } from "./formatters";
-import { hdrPercentileMarkers, pctToX } from "./hdrMarkers";
+import { hdrPercentileMarkers, pctToX, xToPctLabel } from "./hdrMarkers";
 
 /**
  * Response time vs virtual users - a scatter of (virtual users, p99), one point per
@@ -156,6 +156,7 @@ export function HdrPercentileChart({
 			series={series}
 			height={height ?? 200}
 			xFormat={xTickLabel}
+			xTooltipFormat={xToPctLabel}
 			xSplits={HDR_SPLITS}
 			yFormat={axisMs}
 			isLive={false}
