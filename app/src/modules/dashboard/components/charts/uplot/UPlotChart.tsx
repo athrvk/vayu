@@ -78,6 +78,12 @@ export interface UPlotChartProps {
 	/** x-axis tick formatter (default: whole seconds). */
 	xFormat?: (v: number) => string;
 	/**
+	 * Explicit x-axis tick positions, in place of uPlot's spacing-driven ones, for
+	 * an axis whose labelled points are fixed (the HDR plot's percentile marks).
+	 * Each is labelled by `xFormat`; those outside the visible range are dropped.
+	 */
+	xSplits?: readonly number[];
+	/**
 	 * x formatter for the hover tooltip. Defaults to `xFormat`, but time-series
 	 * charts pass a finer one (0.5 s) so the readout matches the 0.5 s data
 	 * granularity while the axis ticks stay whole-second.
@@ -149,6 +155,14 @@ function isolatedReadings(values: ArrayLike<number | null | undefined>): number[
 	return idxs.length ? idxs : null;
 }
 
+function visibleSplits(
+	splits: readonly number[],
+	min: number | null | undefined,
+	max: number | null | undefined
+): number[] {
+	return splits.filter((v) => (min == null || v >= min) && (max == null || v <= max));
+}
+
 function defaultY(v: number): string {
 	return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
 }
@@ -163,6 +177,7 @@ export function UPlotChart({
 	series,
 	height = 220,
 	xFormat = (v) => `${v.toFixed(0)}s`,
+	xSplits,
 	xTooltipFormat,
 	xTime = false,
 	yFormat = defaultY,
@@ -228,7 +243,7 @@ export function UPlotChart({
 						`${s.label}:${s.role}:${s.kind ?? "line"}:${s.scale ?? "y"}:${s.bandTo ?? ""}`
 				)
 				.join("|") +
-			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}|${yMin ?? "auto"}|${y2Label ?? ""}`,
+			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}|${yMin ?? "auto"}|${y2Label ?? ""}|${xSplits?.join(",") ?? ""}`,
 		[
 			series,
 			themeKey,
@@ -240,6 +255,7 @@ export function UPlotChart({
 			tooltipCaption,
 			yMin,
 			y2Label,
+			xSplits,
 		]
 	);
 
@@ -311,6 +327,12 @@ export function UPlotChart({
 					// Integer-second ticks for a time axis → no 0.5 s ticks that would
 					// round to a duplicate/mislabeled second.
 					...(xTime ? { incrs: TIME_INCRS } : {}),
+					...(xSplits
+						? {
+								splits: (u: uPlot) =>
+									visibleSplits(xSplits, u.scales.x.min, u.scales.x.max),
+							}
+						: {}),
 					values: (_u, sp) => sp.map((v) => xFormat(v)),
 				},
 				{ ...axisBase, scale: "y", values: (_u, sp) => sp.map((v) => yFormat(v, sp)) },
@@ -468,7 +490,7 @@ export function UPlotChart({
 		};
 		// `shapeSig` is the serialized form of everything this effect reads -
 		// series identity, theme, height, sync key, live/x-axis flags, tooltip
-		// caption, y base and y2 label - so the omitted deps are all inside it. Listing `series` or
+		// caption, y base, y2 label and x splits - so the omitted deps are all inside it. Listing `series` or
 		// `data` instead would tear the plot down and rebuild it on every data
 		// tick, which the `setData` effect below exists to avoid.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
