@@ -26,7 +26,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatNumber, formatPercent, formatRate } from "@/lib/format-number";
+import { formatByteRateParts, formatNumber, formatPercent } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -43,7 +43,7 @@ import {
 	hasPercentileSignal,
 	hasStatusSeries,
 	hasCustomMetrics,
-	latestThroughputMbps,
+	latestReceiveBytesPerSecond,
 	spansMultipleBuckets,
 	hasWindowLatency,
 } from "../utils/metricsTransforms";
@@ -97,7 +97,7 @@ function MetricsView({
 	// Which chart cards are worth rendering. Each chart builds its own series
 	// from `chartWindow` (it also needs the user's bucket width, which only it
 	// reads), so these gates ask the cheap question - is there more than one
-	// 0.5s bucket to plot - rather than building the series a second time here
+	// bucket to plot - rather than building the series a second time here
 	// and throwing it away (#1152).
 	// The latency chart plots the ticks that hold a window mean (an idle window
 	// and a run stored before the window existed hold none), so it is gated on
@@ -122,7 +122,10 @@ function MetricsView({
 	// than `hasStatusData`'s bucket-count question, since a custom metric's tick
 	// cadence is whatever the script chose to record at, not the engine's.
 	const hasCustomMetricsData = useMemo(() => chartWindow.some(hasCustomMetrics), [chartWindow]);
-	const liveMbps = useMemo(() => latestThroughputMbps(chartWindow), [chartWindow]);
+	const liveReceiveRate = useMemo(() => {
+		const bytesPerSecond = latestReceiveBytesPerSecond(chartWindow);
+		return bytesPerSecond > 0 ? formatByteRateParts(bytesPerSecond) : null;
+	}, [chartWindow]);
 
 	const rampOverlay = useMemo(
 		() => (loadMode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),
@@ -407,10 +410,13 @@ function MetricsView({
 									{label}
 								</span>
 							))}
-							{liveMbps > 0 && (
+							{liveReceiveRate && (
 								<span className="text-foreground">
-									{formatRate(liveMbps)}
-									<span className="text-muted-foreground"> MB/s in</span>
+									{liveReceiveRate.value}
+									<span className="text-muted-foreground">
+										{" "}
+										{liveReceiveRate.unit} in
+									</span>
 								</span>
 							)}
 						</div>

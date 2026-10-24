@@ -15,7 +15,7 @@ import {
 	hasStatusCodes,
 	hasStatusSeries,
 	hasCustomMetrics,
-	latestThroughputMbps,
+	latestReceiveBytesPerSecond,
 	spansMultipleBuckets,
 } from "./metricsTransforms";
 import { hasSecondPercentiles } from "./tickPercentiles";
@@ -37,6 +37,41 @@ function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 		bytes_received: 0,
 		...partial,
 	};
+}
+
+/** A 100 ms live frame between gates. */
+function frame(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
+	return tick({ live: true, elapsed_seconds: elapsed, status_codes: codes });
+}
+
+/** A live gate frame: it closes a second, so it carries `second_samples`. */
+function gate(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
+	return tick({ live: true, elapsed_seconds: elapsed, status_codes: codes, second_samples: 1 });
+}
+
+/**
+ * A minute of live frames while 10 responses land together every 200 ms
+ * (+-1 ms), at a phase the seed picks. Each frame sleeps 100 ms and works
+ * 0-2 ms, is stamped in whole ms, and is a gate once a second has passed since
+ * the last gate, as `collect_metrics` in `run_manager.cpp` does.
+ */
+function closedLoopRun(seed: number): LoadTestMetrics[] {
+	const rng = seeded(seed);
+	const phaseMs = rng() * 200;
+	const batchAt = Array.from({ length: 301 }, (_, k) => phaseMs + 200 * k + (rng() * 2 - 1));
+	const frames: LoadTestMetrics[] = [];
+	let lastGateMs = 0;
+	for (let ms = 0; ms < 60_000; ms += 100 + rng() * 2) {
+		const codes = { "200": 10 * batchAt.filter((b) => b <= ms).length };
+		const elapsed = Math.floor(ms) / 1000;
+		if (ms - lastGateMs < 1000) {
+			frames.push(frame(elapsed, codes));
+			continue;
+		}
+		lastGateMs = ms;
+		frames.push(gate(elapsed, codes));
+	}
+	return frames;
 }
 
 describe("isRateLimitedRun", () => {
@@ -402,12 +437,39 @@ describe("buildStatusOverTime", () => {
 		expect(out[1].cErr).toBe(0);
 	});
 
-	it("rates a live series' half-second buckets per second, counted from load start", () => {
+	it("rates a live series' gate frames per second, counted from load start", () => {
 		const out = buildStatusOverTime([
-			tick({ live: true, elapsed_seconds: 0.5, status_codes: { "200": 100 } }),
-			tick({ live: true, elapsed_seconds: 1.0, status_codes: { "200": 180 } }),
+			frame(0.5, { "200": 100 }),
+			gate(1.0, { "200": 180 }),
+			frame(1.5, { "200": 260 }),
+			gate(2.0, { "200": 340 }),
 		]);
-		expect(out.map((p) => p.c2xx)).toEqual([200, 160]);
+		expect(out.map((p) => p.time)).toEqual([1, 2]);
+		expect(out.map((p) => p.c2xx)).toEqual([180, 160]);
+	});
+
+	it("draws no point for the second still open at the live edge", () => {
+		const closed = [gate(1.0, { "200": 50 }), gate(2.0, { "200": 100 })];
+		// 0.1 s past the last gate: a full-rate point over it would read 100/s.
+		const open = [...closed, frame(2.1, { "200": 110 })];
+		expect(buildStatusOverTime(open)).toEqual(buildStatusOverTime(closed));
+		expect(hasStatusSeries([closed[0], frame(1.1, { "200": 60 })])).toBe(false);
+	});
+
+	/*
+	 * #2860's S6 profile, a steady 50/s. A gate closes 1.000 to 1.020 s, and
+	 * over these seeds 280 of 295 points read 49.2 to 49.8 while 15 (1 in 20)
+	 * read 59.3 to 59.6, a batch landing in that overrun; the bounds sit just
+	 * past both. Mutation check: diff every frame (the last of each second
+	 * standing for it) and 64 of 305 points are past 5%, the worst 39.6 for the
+	 * second still open at the edge; both bounds fail.
+	 */
+	it("draws a closed loop's batched completions flat but for one batch", () => {
+		const points = [1, 2, 3, 4, 5].flatMap((seed) => buildStatusOverTime(closedLoopRun(seed)));
+		expect(points.length).toBeGreaterThan(250);
+		const off = points.filter((p) => Math.abs(p.c2xx - 50) > 2.5);
+		expect(off.length).toBeLessThanOrEqual(points.length / 15);
+		for (const p of points) expect(Math.abs(p.c2xx - 50), `at ${p.time}s`).toBeLessThan(10);
 	});
 
 	it("rates a downsampled series per second, as the raw series it folds", () => {
@@ -435,24 +497,21 @@ describe("buildStatusOverTime", () => {
 	describe("a live window whose head is not at load start", () => {
 		// 500 responses a second, 150000 by the first retained tick.
 		const lateWindow = [
-			tick({ live: true, elapsed_seconds: 300, status_codes: { "200": 150000 } }),
-			tick({ live: true, elapsed_seconds: 300.5, status_codes: { "200": 150250 } }),
-			tick({ live: true, elapsed_seconds: 301, status_codes: { "200": 150500, "503": 10 } }),
+			gate(300, { "200": 150000 }),
+			gate(301, { "200": 150500 }),
+			gate(302, { "200": 151000, "503": 10 }),
 		];
 
 		it("diffs from its head instead of drawing the run's lifetime average", () => {
 			const out = buildStatusOverTime(lateWindow);
 			expect(out).toHaveLength(lateWindow.length - 1);
-			expect(out.map((p) => p.time)).toEqual([300.5, 301]);
+			expect(out.map((p) => p.time)).toEqual([301, 302]);
 			expect(out[0].c2xx).toBe(500);
-			expect(out[1]).toMatchObject({ c2xx: 500, c5xx: 20 });
+			expect(out[1]).toMatchObject({ c2xx: 500, c5xx: 10 });
 		});
 
 		it("keeps a live head within one tick of load start as its first point", () => {
-			const out = buildStatusOverTime([
-				tick({ live: true, elapsed_seconds: 1.5, status_codes: { "200": 300 } }),
-				tick({ live: true, elapsed_seconds: 2, status_codes: { "200": 450 } }),
-			]);
+			const out = buildStatusOverTime([gate(1.5, { "200": 300 }), gate(2.5, { "200": 600 })]);
 			expect(out.map((p) => p.c2xx)).toEqual([200, 300]);
 		});
 
@@ -523,17 +582,17 @@ describe("stackStatusPoints", () => {
 	});
 });
 
-describe("latestThroughputMbps", () => {
-	it("diffs the last two cumulative byte samples into MB/s", () => {
-		const mbps = latestThroughputMbps([
+describe("latestReceiveBytesPerSecond", () => {
+	it("diffs the last two cumulative byte samples into bytes per second", () => {
+		const rate = latestReceiveBytesPerSecond([
 			tick({ elapsed_seconds: 1, bytes_received: 1_000_000 }),
-			tick({ elapsed_seconds: 2, bytes_received: 3_000_000 }),
+			tick({ elapsed_seconds: 1.5, bytes_received: 2_000_000 }),
 		]);
-		expect(mbps).toBeCloseTo(2.0); // 2 MB over 1s
+		expect(rate).toBe(2_000_000); // 1 MB over half a second
 	});
 
 	it("returns 0 with fewer than two samples", () => {
-		expect(latestThroughputMbps([tick({ bytes_received: 5 })])).toBe(0);
+		expect(latestReceiveBytesPerSecond([tick({ bytes_received: 5 })])).toBe(0);
 	});
 });
 
@@ -548,6 +607,8 @@ describe("spansMultipleBuckets", () => {
 		const rng = seeded(20260901);
 		let sawTrue = 0;
 		let sawFalse = 0;
+		let sawStatus = 0;
+		let sawNoStatus = 0;
 		for (let run = 0; run < 200; run++) {
 			const history = randomHistory(rng);
 			const spans = spansMultipleBuckets(history);
@@ -555,13 +616,26 @@ describe("spansMultipleBuckets", () => {
 				buildLatencyChartData(history).length > 1
 			);
 			expect(spans).toBe(buildPercentileChartData(history).length > 1);
-			expect(hasStatusSeries(history)).toBe(buildStatusOverTime(history).length > 1);
+			// The status gate also reads live frames, of which only a gate counts.
+			const live = history.map((m): LoadTestMetrics => ({
+				...m,
+				live: true,
+				...(rng() < 0.5 ? { second_samples: 1 } : {}),
+			}));
+			for (const h of [history, live]) {
+				const status = hasStatusSeries(h);
+				expect(status).toBe(buildStatusOverTime(h).length > 1);
+				if (status) sawStatus++;
+				else sawNoStatus++;
+			}
 			if (spans) sawTrue++;
 			else sawFalse++;
 		}
 		// The agreement above is worthless if every case landed on one side.
 		expect(sawTrue).toBeGreaterThan(20);
 		expect(sawFalse).toBeGreaterThan(20);
+		expect(sawStatus).toBeGreaterThan(20);
+		expect(sawNoStatus).toBeGreaterThan(20);
 	});
 
 	it("is false for ticks that share one 0.5s bucket, true once one leaves it", () => {

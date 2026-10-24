@@ -10,6 +10,9 @@
  * primitive. Stacking is done by feeding cumulative sums and filling each class'
  * band between consecutive cumulative series (bottom 2xx fills to zero). The
  * tooltip prints each class' own rate (`tipValues`), not the stack height.
+ * `buildStatusOverTime` plots one point per closed second, where the other
+ * live charts use half a second. A class with no responses in the history keeps its
+ * zero-height band, so the `bandTo` indices hold, but draws no line (#2860).
  */
 
 import { useMemo } from "react";
@@ -36,12 +39,14 @@ export function StatusCodesOverTimeChart({
 	syncKey?: string;
 	height?: number;
 }) {
-	const { data, own } = useMemo(() => {
+	const { data, own, stroked } = useMemo(() => {
 		const stack = stackStatusPoints(buildStatusOverTime(history));
 		// Cumulative stack, bottom → top: 2xx, +3xx, +4xx, +5xx, +err.
 		return {
 			data: [stack.times, ...stack.stacked] as uPlot.AlignedData,
 			own: stack.own,
+			// An empty class' line would lie on the top of the stack in its own colour.
+			stroked: stack.own.map((rates) => rates.some((r) => r > 0)),
 		};
 	}, [history]);
 
@@ -54,6 +59,7 @@ export function StatusCodesOverTimeChart({
 			width: 0.75,
 			format: fmtRate,
 			tipValues: own[0],
+			stroked: stroked[0],
 		},
 		/*
 		 * The five series resolve through `constants/http-status.ts` now, so a
@@ -75,6 +81,7 @@ export function StatusCodesOverTimeChart({
 			bandRole: "status-redirect",
 			format: fmtRate,
 			tipValues: own[1],
+			stroked: stroked[1],
 		},
 		{
 			label: "4xx",
@@ -84,6 +91,7 @@ export function StatusCodesOverTimeChart({
 			bandRole: "status-client-error",
 			format: fmtRate,
 			tipValues: own[2],
+			stroked: stroked[2],
 		},
 		{
 			label: "5xx",
@@ -93,6 +101,7 @@ export function StatusCodesOverTimeChart({
 			bandRole: "status-server-error",
 			format: fmtRate,
 			tipValues: own[3],
+			stroked: stroked[3],
 		},
 		{
 			label: "err",
@@ -102,6 +111,7 @@ export function StatusCodesOverTimeChart({
 			bandRole: "status-no-response",
 			format: fmtRate,
 			tipValues: own[4],
+			stroked: stroked[4],
 		},
 	];
 

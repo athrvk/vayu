@@ -21,13 +21,14 @@ import { act, render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";
 
-const instances = vi.hoisted(() => ({ all: [] as uPlot[] }));
+const instances = vi.hoisted(() => ({ all: [] as uPlot[], opts: [] as uPlot.Options[] }));
 vi.mock("uplot", async (importOriginal) => {
 	const actual = (await importOriginal()) as { default: new (...args: unknown[]) => uPlot };
 	class TrackedUPlot extends actual.default {
 		constructor(...args: unknown[]) {
 			super(...args);
 			instances.all.push(this as unknown as uPlot);
+			instances.opts.push(args[0] as uPlot.Options);
 		}
 	}
 	return { ...actual, default: TrackedUPlot };
@@ -72,8 +73,42 @@ function hoverRows(idx: number): string[] {
 	return Array.from(tip.children, (row) => row.textContent ?? "");
 }
 
+/** Labels of the series whose built paths carry a line to stroke. */
+function strokedLabels(): string[] {
+	const plot = instances.all[instances.all.length - 1];
+	const last = plot.data[0].length - 1;
+	return plot.series.flatMap((s, i) =>
+		i > 0 && s.paths?.(plot, i, 0, last)?.stroke ? [String(s.label)] : []
+	);
+}
+
+/**
+ * Labels of the series whose last drawn paths stroke a line: uPlot caches the
+ * paths it drew on each series as `_paths` and rebuilds them on a data update.
+ */
+function drawnStrokeLabels(): string[] {
+	const plot = instances.all[instances.all.length - 1];
+	return plot.series.flatMap((s, i) => {
+		const drawn = (s as uPlot.Series & { _paths?: uPlot.Series.Paths | null })._paths;
+		return i > 0 && drawn?.stroke ? [String(s.label)] : [];
+	});
+}
+
+/** Each class' band, as [upper, lower] uPlot series indices. */
+function bandEdges(): number[][] {
+	return (instances.opts[instances.opts.length - 1].bands ?? []).map((b) => [...b.series]);
+}
+
+const STACKED_BANDS = [
+	[2, 1],
+	[3, 2],
+	[4, 3],
+	[5, 4],
+];
+
 beforeEach(() => {
 	instances.all.length = 0;
+	instances.opts.length = 0;
 });
 
 describe("StatusCodesOverTimeChart tooltip", () => {
@@ -105,5 +140,47 @@ describe("StatusCodesOverTimeChart tooltip", () => {
 		});
 		expect(instances.all).toHaveLength(1);
 		expect(hoverRows(2)).toEqual(["2.0s", "responses", "5xx7/s"]);
+		expect(strokedLabels()).toEqual(["2xx", "5xx"]);
+	});
+});
+
+describe("StatusCodesOverTimeChart strokes (#2860)", () => {
+	it("draws no line for a class with no responses, and keeps its band", () => {
+		render(<StatusCodesOverTimeChart history={history([{ "200": 50 }, { "200": 50 }])} />);
+		expect(strokedLabels()).toEqual(["2xx"]);
+		expect(bandEdges()).toEqual(STACKED_BANDS);
+	});
+
+	it("draws the line of every class that has responses", () => {
+		render(
+			<StatusCodesOverTimeChart
+				history={history([{ "200": 50 }, { "200": 45, "503": 5 }, { "200": 50 }])}
+			/>
+		);
+		expect(strokedLabels()).toEqual(["2xx", "5xx"]);
+		expect(bandEdges()).toEqual(STACKED_BANDS);
+	});
+
+	/*
+	 * The plot is kept across a data update, so the paths it last drew are
+	 * what the user sees. Mutation check: let the paths builder read the
+	 * `stroked` set the plot was built with, rather than the current one, and
+	 * the 5xx line never appears.
+	 */
+	it("strokes a class on the update that brings its first response", async () => {
+		const { rerender } = render(
+			<StatusCodesOverTimeChart history={history([{ "200": 50 }, { "200": 50 }])} />
+		);
+		await act(async () => {});
+		expect(drawnStrokeLabels()).toEqual(["2xx"]);
+		await act(async () => {
+			rerender(
+				<StatusCodesOverTimeChart
+					history={history([{ "200": 50 }, { "200": 50 }, { "200": 45, "503": 5 }])}
+				/>
+			);
+		});
+		expect(instances.all).toHaveLength(1);
+		expect(drawnStrokeLabels()).toEqual(["2xx", "5xx"]);
 	});
 });

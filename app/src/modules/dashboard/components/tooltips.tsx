@@ -105,7 +105,7 @@ export const TOOLTIPS = {
 	responseTimeVsConcurrency:
 		"Scatter plot - each dot is one second of the run. X axis is the number of virtual users at the end of that second; Y is that second's p99 latency. A flat left region means the server has headroom; the elbow (knee) is the breakpoint; the steep right region means the server is saturated. The amber vertical line marks where p99 first crossed the SLO threshold.",
 	statusCodesOverTime:
-		"Responses per second by status class, stacked: the plotted height is the running total, and hovering shows each class's own rate (classes with none in that interval are left out). A healthy run is a solid 2xx field; 4xx/5xx or connection-error bands rising out of it pinpoint when failures happened. Derived by diffing the cumulative status-code map between ticks and dividing by the time between them.",
+		"Responses per second by status class, stacked: the plotted height is the running total, and hovering shows each class's own rate (classes with none in that interval are left out). A healthy run is a solid 2xx field; 4xx/5xx or connection-error bands rising out of it pinpoint when failures happened. Derived by diffing the cumulative status-code map between the once-a-second ticks Vayu's engine records and dividing by the time between them.",
 
 	serverVitals:
 		"Metrics scraped from the target itself during the run, drawn on the run's own timeline so a climb in p99 can be read against the server's CPU, memory or connection count. Each reading holds until the next scrape; a break in a line is a scrape that failed. Configure the endpoint under Server monitoring when starting the run.",
