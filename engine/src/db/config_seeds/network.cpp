@@ -56,8 +56,11 @@ std::string proxy_mode_options_json () {
 void seed_network (ConfigSeeder& seed, int64_t now) {
     seed (unit ("ms") (keywords ({ "deadline", "give up", "hang" }) (ConfigEntry{ "defaultTimeout",
     std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default request timeout",
-    "How long an HTTP request may run before it is abandoned, "
-    "when the request does not set a timeout of its own. Raise it for slow "
+    "How long an HTTP request may run before it is abandoned: sends, load "
+    "runs, OAuth 2.0 token requests and requests made from scripts. "
+    "Connecting is cut off after 30 s at most. Streams end on their idle and "
+    "duration limits instead; imports by URL, the connection test and the "
+    "server-vitals monitor have their own limits. Raise it for slow "
     "endpoints; lower it to fail faster.",
     "network_performance", std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
     "1000",   // min: 1 second
