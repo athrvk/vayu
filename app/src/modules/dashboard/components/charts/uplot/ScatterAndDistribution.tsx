@@ -22,7 +22,7 @@ import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
 import { formatLatency } from "@/lib/format-number";
 import { axisMs, fmtMs } from "./formatters";
-import { hdrPercentileMarkers, pctToX } from "./hdrMarkers";
+import { hdrPercentileMarkers, pctToX, xToPctLabel } from "./hdrMarkers";
 
 /**
  * Response time vs virtual users - a scatter of (virtual users, p99), one point per
@@ -104,6 +104,7 @@ export function ResponseTimeVsConcurrencyChart({
 }
 
 const HDR_MARKS = [0, 50, 90, 95, 99, 99.9];
+const HDR_SPLITS = HDR_MARKS.map(pctToX);
 
 /** HDR percentile distribution - latency at each percentile, tail-weighted x. */
 export function HdrPercentileChart({
@@ -146,13 +147,8 @@ export function HdrPercentileChart({
 	);
 
 	if (!data) return null;
-	const xTickLabel = (x: number) => {
-		// Map an x position back to the nearest labeled percentile for readability.
-		const nearest = HDR_MARKS.reduce((a, b) =>
-			Math.abs(pctToX(b) - x) < Math.abs(pctToX(a) - x) ? b : a
-		);
-		return `${nearest}%`;
-	};
+	// The axis ticks at exactly HDR_SPLITS, so each tick is one mark's own position.
+	const xTickLabel = (x: number) => `${HDR_MARKS.find((m) => pctToX(m) === x)}%`;
 
 	return (
 		<UPlotChart
@@ -160,6 +156,8 @@ export function HdrPercentileChart({
 			series={series}
 			height={height ?? 200}
 			xFormat={xTickLabel}
+			xTooltipFormat={xToPctLabel}
+			xSplits={HDR_SPLITS}
 			yFormat={axisMs}
 			isLive={false}
 			markers={markers}
