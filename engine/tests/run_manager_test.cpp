@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "load_start_stamp.hpp"
 #include "mock_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -438,18 +439,6 @@ TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     EXPECT_EQ (p.substr (p.size () - 2), "\n\n");
 }
 
-namespace {
-
-/// What execute_load_test stamps once setup is done. A bare context that
-/// waits for a stored row needs it: no row is stored before load start.
-void stamp_load_start (RunContext& context) {
-    context.load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now ().time_since_epoch ())
-                                   .count ();
-}
-
-} // namespace
-
 // A stop request is not the end of the run: the worker acts on should_stop,
 // then blocks in event_loop->stop(true) draining in-flight requests, and only
 // then clears is_running. The metrics thread used to exit on should_stop, so it
@@ -577,7 +566,7 @@ TEST (CollectMetrics, ReportsZeroActiveBeforeTheLoopIsPublished) {
     // thread is still in its config reads (or failed before building a loop).
     // Stamping load start publishes no loop; it only lets the 1 Hz row land.
     ctx->is_running = true;
-    stamp_load_start (*ctx);
+    vayu::tests::stamp_load_start (*ctx);
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
     EXPECT_TRUE (vayu::tests::wait_until (
@@ -633,7 +622,7 @@ TEST (CollectMetrics, TheStoredTickAndTheLiveFrameCountHttpErrors) {
         mc.record_error (vayu::ErrorCode::Timeout, "timed out");
     }
     ctx->is_running = true;
-    stamp_load_start (*ctx);
+    vayu::tests::stamp_load_start (*ctx);
 
     // Held until the DB-gated branch persists a tick.
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
@@ -907,10 +896,9 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
 }
 
 // #2881: a stored row's `elapsed_seconds` is the load clock its gate frame
-// reads, so History draws a second where the live view drew it. It used to
-// count from the first stored row, about a second behind. Mutation check:
-// measure from the first persisted tick again in `persist_metric_tick` and
-// the first row reads 0 and no row equals its frame.
+// reads, so History draws a second where the live view drew it. Mutation
+// check: measure from the first persisted tick again in `persist_metric_tick`
+// and the first row reads 0 and no row equals its frame.
 TEST (LoadClock, StoredElapsedIsTheLiveClock) {
     const std::string db_path = "test_load_clock_stored_elapsed.db";
     vayu::tests::remove_database_files (db_path);
@@ -1411,7 +1399,7 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     }
     ctx->requests_sent = 100;
     ctx->is_running    = true;
-    stamp_load_start (*ctx);
+    vayu::tests::stamp_load_start (*ctx);
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
     ASSERT_TRUE (
