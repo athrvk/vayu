@@ -25,6 +25,7 @@ const restoreIntl = vi.hoisted(() => {
 afterAll(restoreIntl);
 
 import {
+	formatByteRateParts,
 	formatLatency,
 	formatLatencyParts,
 	formatMs,
@@ -169,5 +170,25 @@ describe("formatSeconds: formatLatency under a minute, grouped whole seconds abo
 			expect(formatSeconds(missing)).toBe(formatLatency(missing));
 		}
 		expect(formatSeconds(0)).toBe("0ms");
+	});
+});
+
+describe("formatByteRateParts: KB/s below 0.1 MB/s, MB/s from there, decimal units", () => {
+	const cases: Array<[string, number | null | undefined, string, "KB/s" | "MB/s"]> = [
+		["a steady 4.4 KB/s", 4400, "4.4", "KB/s"],
+		["the reading that rounded to 0.01 MB/s", 5300, "5.3", "KB/s"],
+		["1000 bytes is a kilobyte, not 1024", 1000, "1", "KB/s"],
+		["tens of KB/s take whole numbers", 45_600, "46", "KB/s"],
+		["the boundary", 100_000, "0.1", "MB/s"],
+		["a megabyte rate", 2_500_000, "2.5", "MB/s"],
+		["tens of MB/s take whole numbers", 12_600_000, "13", "MB/s"],
+		["zero", 0, "0", "KB/s"],
+		["NaN", NaN, "0", "KB/s"],
+		["null", null, "0", "KB/s"],
+		["undefined", undefined, "0", "KB/s"],
+	];
+
+	it.each(cases)("%s", (_name, input, value, unit) => {
+		expect(formatByteRateParts(input)).toEqual({ value, unit });
 	});
 });

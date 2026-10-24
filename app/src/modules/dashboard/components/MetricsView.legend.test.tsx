@@ -232,3 +232,39 @@ describe("MetricsView percentile legend names the SLO line (#2698)", () => {
 		expect(entries[0].chart.series.map((s) => s.label)).toEqual(["p50", "p95", "p99"]);
 	});
 });
+
+describe("MetricsView status card's receive rate picks its unit (#2860)", () => {
+	/** The legend's rate when the last two ticks are `dBytes` apart over `dtSeconds`. */
+	function receiveRate(dBytes: number, dtSeconds: number): string | null {
+		const history = Array.from({ length: 6 }, (_, i) => tick(i));
+		const before = history[4];
+		history[5] = {
+			...history[5],
+			elapsed_seconds: before.elapsed_seconds + dtSeconds,
+			bytes_received: before.bytes_received + dBytes,
+		};
+		const { container, unmount } = render(
+			<TooltipProvider>
+				<MetricsView {...base} historicalMetrics={history} />
+			</TooltipProvider>
+		);
+		// The unit's own span; its parent holds the figure in front of it.
+		const unit = [...container.querySelectorAll("span")].find((el) =>
+			/^ \S+\/s in$/.test(el.textContent ?? "")
+		);
+		const text = unit?.parentElement?.textContent ?? null;
+		unmount();
+		return text;
+	}
+
+	// A steady 4.4 KB/s read "0" or "0.01" MB/s by the tick pair: 440 bytes in one
+	// 100 ms tick and 530 in the next.
+	it("reads KB/s below 0.1 MB/s, on both sides of the old 0 / 0.01 flip", () => {
+		expect(receiveRate(440, 0.1)).toBe("4.4 KB/s in");
+		expect(receiveRate(530, 0.1)).toBe("5.3 KB/s in");
+	});
+
+	it("reads MB/s from 0.1 MB/s", () => {
+		expect(receiveRate(2_500_000, 1)).toBe("2.5 MB/s in");
+	});
+});

@@ -95,6 +95,31 @@ export function formatRate(perSecond: number | undefined | null): string {
 	return formatMagnitude(perSecond);
 }
 
+/** A byte rate split for a surface that draws its unit in a slot of its own. */
+export interface ByteRateParts {
+	value: string;
+	unit: "KB/s" | "MB/s";
+}
+
+/**
+ * 0.1 MB/s. Below it two decimals of MB/s keep one significant digit or none:
+ * a steady 4.4 KB/s read "0" or "0.01" by the tick pair (#2860).
+ */
+const MEGABYTE_RATE_FROM = 100_000;
+
+/**
+ * A rate in bytes per second as `formatRate` digits and a decimal unit (1 KB is
+ * 1000 bytes; `formatBytes` in settings is 1024-based and a different
+ * question): KB/s below 0.1 MB/s, MB/s from there (4400 -> "4.4", "KB/s";
+ * 2500000 -> "2.5", "MB/s"). A missing value is "0", "KB/s".
+ */
+export function formatByteRateParts(bytesPerSecond: number | undefined | null): ByteRateParts {
+	if (isMissing(bytesPerSecond)) return { value: "0", unit: "KB/s" };
+	if (Math.abs(bytesPerSecond) >= MEGABYTE_RATE_FROM)
+		return { value: formatMagnitude(bytesPerSecond / 1e6), unit: "MB/s" };
+	return { value: formatMagnitude(bytesPerSecond / 1e3), unit: "KB/s" };
+}
+
 /** A percentage (0-100) as digits with one decimal, no sign: 99.95 -> "100.0". */
 export function formatPercent(percent: number | undefined | null): string {
 	return formatOneDecimal(percent);

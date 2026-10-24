@@ -26,7 +26,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatNumber, formatPercent, formatRate } from "@/lib/format-number";
+import { formatByteRateParts, formatNumber, formatPercent } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -122,7 +122,10 @@ function MetricsView({
 	// than `hasStatusData`'s bucket-count question, since a custom metric's tick
 	// cadence is whatever the script chose to record at, not the engine's.
 	const hasCustomMetricsData = useMemo(() => chartWindow.some(hasCustomMetrics), [chartWindow]);
-	const liveMbps = useMemo(() => latestThroughputMbps(chartWindow), [chartWindow]);
+	const liveReceiveRate = useMemo(() => {
+		const mbps = latestThroughputMbps(chartWindow);
+		return mbps > 0 ? formatByteRateParts(mbps * 1e6) : null;
+	}, [chartWindow]);
 
 	const rampOverlay = useMemo(
 		() => (loadMode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),
@@ -407,10 +410,13 @@ function MetricsView({
 									{label}
 								</span>
 							))}
-							{liveMbps > 0 && (
+							{liveReceiveRate && (
 								<span className="text-foreground">
-									{formatRate(liveMbps)}
-									<span className="text-muted-foreground"> MB/s in</span>
+									{liveReceiveRate.value}
+									<span className="text-muted-foreground">
+										{" "}
+										{liveReceiveRate.unit} in
+									</span>
 								</span>
 							)}
 						</div>
