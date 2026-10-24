@@ -17,7 +17,9 @@
  * chain for `inherit`, and flattening a concrete auth for the wire.
  */
 
-import type { Collection, RequestAuth } from "@/types";
+import { containsVariableToken } from "@/constants/variables";
+import { deferredNamesIn } from "@/lib/deferred-note";
+import type { Collection, OAuth2Config, RequestAuth } from "@/types";
 
 /** Where a descendant's `inherit` lands - see {@link resolveAuthSource}. */
 export interface AuthSource {
@@ -111,6 +113,39 @@ export function resolveEffectiveAuth(
 	// the first and stops at the second - so this is the configured auth or
 	// nothing, never a source that says "send nothing" wearing a mode.
 	return resolveAuthSource(ancestors).source?.auth ?? { mode: "none" };
+}
+
+/**
+ * The OAuth 2.0 config a request's effective auth carries, as written - tokens
+ * unresolved - or null when the effective auth is another mode (or nothing).
+ */
+export function effectiveOAuth2Config(
+	auth: RequestAuth,
+	ancestors: Collection[]
+): OAuth2Config | null {
+	const effective = resolveEffectiveAuth(auth, ancestors);
+	return effective.mode === "oauth2" ? effective.config : null;
+}
+
+/** Whether any OAuth 2.0 field holds a `{{token}}`; every string field can. */
+export function oauth2HasTokens(config: OAuth2Config | null): boolean {
+	return config !== null && containsVariableToken(JSON.stringify(config));
+}
+
+/**
+ * The names in @p deferred that the *as-written* OAuth 2.0 @p config uses.
+ *
+ * The resolved config cannot answer this: a name a script sets that also has a
+ * stored value is replaced by that value, and the token is gone from the text.
+ * Stringifying the config reads every field without a list that drifts when one
+ * is added.
+ */
+export function oauth2DeferredNames(
+	config: OAuth2Config | null,
+	deferred: readonly string[]
+): string[] {
+	if (config === null) return [];
+	return deferredNamesIn(deferred, [JSON.stringify(config)]);
 }
 
 /** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */

@@ -18,6 +18,7 @@ import { requestReference, type ThresholdOwner } from "@/lib/agent-reference";
 import { appSetting } from "@/modules/settings/main/app-settings";
 import { getAppPanel } from "@/modules/settings/main/app-panels";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
+import { OAuth2DeferredNote } from "./OAuth2DeferredNote";
 import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
 import {
@@ -77,6 +78,12 @@ export interface LoadTestConfigDialogProps {
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
 	/**
+	 * The names in that OAuth 2.0 config that a pre-request script sets, from the
+	 * engine's `deferredVariables` (#2742). A load run fetches its token before
+	 * any script, so the dialog says the script's changes do not apply. Memoise it.
+	 */
+	oauth2DeferredNames?: readonly string[];
+	/**
 	 * True when the pending request has its `stream` setting on (issue #576).
 	 *
 	 * It gates the two cap fields rather than being set here: whether a request
@@ -127,6 +134,8 @@ export interface LoadTestConfigDialogProps {
 	url?: string;
 }
 
+const NO_NAMES: readonly string[] = [];
+
 /** Both names are the Settings screen's own, so a rename there reaches this footer. */
 const ALLOWLIST = appSetting("mcp-allowlist");
 const ALLOWLIST_LABEL = ALLOWLIST.label;
@@ -139,6 +148,7 @@ export default function LoadTestConfigDialog({
 	hasPreRequestScript,
 	hasPostRequestScript,
 	oauth2Config,
+	oauth2DeferredNames = NO_NAMES,
 	isStreamingRequest,
 	collectionId,
 	request,
@@ -448,11 +458,17 @@ export default function LoadTestConfigDialog({
 
 					{/* Full width under both panes: it gates Start, so it reads just above it. */}
 					{oauth2Config && (
-						<OAuth2LoadTestGuard
-							config={oauth2Config}
-							durationSeconds={usesDuration(profile.mode) ? profile.duration : null}
-							onGateChange={setOauthGated}
-						/>
+						<>
+							<OAuth2DeferredNote names={oauth2DeferredNames} />
+							<OAuth2LoadTestGuard
+								config={oauth2Config}
+								durationSeconds={
+									usesDuration(profile.mode) ? profile.duration : null
+								}
+								settingsSetByScript={oauth2DeferredNames.length > 0}
+								onGateChange={setOauthGated}
+							/>
+						</>
 					)}
 
 					<p className="text-label leading-relaxed text-muted-foreground">

@@ -56,7 +56,13 @@ import type {
 	StreamStartResult,
 	MergeableRequestField,
 } from "./types";
-import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
+import {
+	effectiveOAuth2Config,
+	oauth2DeferredNames,
+	oauth2HasTokens,
+	resolveAuthForSend,
+} from "./utils/auth-resolution";
+import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import type { ThresholdOwner } from "@/lib/agent-reference";
@@ -74,7 +80,6 @@ import type {
 	HttpMethod,
 	LoadTestConfig,
 	StartLoadTestRequest,
-	RequestAuth,
 	OAuth2Config,
 	UpdateRequestRequest,
 } from "@/types";
@@ -296,22 +301,37 @@ export default function RequestBuilder() {
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
 
+	// The pending load-test request's OAuth 2.0 config as written, if its auth
+	// resolves to oauth2. The shared walk lets an ancestor set to No Auth stop the
+	// search here too - otherwise the guard would fetch a token the request never
+	// sends.
+	const pendingOAuth2Raw = useMemo(
+		() =>
+			pendingLoadTestRequest
+				? effectiveOAuth2Config(pendingLoadTestRequest.auth, collectionAncestors)
+				: null,
+		[pendingLoadTestRequest, collectionAncestors]
+	);
+
 	// Effective (variable-resolved) OAuth 2.0 config for the pending load-test
-	// request, if its auth resolves to oauth2. Drives the token-expiry guard.
-	const pendingOAuth2Config = useMemo<OAuth2Config | null>(() => {
-		const req = pendingLoadTestRequest;
-		if (!req) return null;
-		let auth: RequestAuth | undefined;
-		if (req.auth.mode === "oauth2") {
-			auth = req.auth;
-		} else if (req.auth.mode === "inherit") {
-			// Shared walk, so an ancestor set to No Auth stops the search here too -
-			// otherwise the guard would fetch a token the request never sends.
-			auth = resolveAuthSource(collectionAncestors).source?.auth;
-		}
-		if (!auth || auth.mode !== "oauth2") return null;
-		return resolveObject(auth.config) as OAuth2Config;
-	}, [pendingLoadTestRequest, collectionAncestors, resolveObject]);
+	// request. Drives the token-expiry guard.
+	const pendingOAuth2Config = useMemo(
+		() => (pendingOAuth2Raw ? (resolveObject(pendingOAuth2Raw) as OAuth2Config) : null),
+		[pendingOAuth2Raw, resolveObject]
+	);
+
+	// The names in that config a pre-request script sets. Read from the config as
+	// written (the resolved one has swapped a name with a stored value for it), and
+	// asked of /compose only while the config holds a `{{token}}`, so a literal one
+	// costs no compose. A load run fetches its token once, before any script.
+	const engineDeferred = useDeferredVariables(
+		fetchedRequest?.id ?? "",
+		showLoadTestDialog && oauth2HasTokens(pendingOAuth2Raw)
+	);
+	const pendingOAuth2DeferredNames = useMemo(
+		() => oauth2DeferredNames(pendingOAuth2Raw, engineDeferred),
+		[pendingOAuth2Raw, engineDeferred]
+	);
 
 	// The URL the load dialog names as the target and classifies for its
 	// off-network advisory (#2117). Resolved from the same scopes the preview
@@ -979,6 +999,7 @@ export default function RequestBuilder() {
 						)
 					)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
+					oauth2DeferredNames={pendingOAuth2DeferredNames}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}
 					request={pendingLoadTestAuditRequest}

@@ -1069,6 +1069,12 @@ than refused, as every residual token there is, and an OAuth 2.0 token is still
 acquired once, before any script, from the stored values: a script that sets an
 OAuth 2.0 variable has no effect under load, and nothing is re-acquired per
 iteration (#2742).
+The load dialog says so: when `deferredVariables` names a variable the
+as-written OAuth 2.0 config uses (the request's own or an inherited one), an
+info notice states that the run's token is fetched once, before any script, from
+the stored values, and `OAuth2LoadTestGuard` words its verdict as being about
+that token. The cache key it looks up comes from the preview-resolved config, so
+a script that would have changed the key on a Send does not change it here.
 
 The Code section of the request pane composes through the engine, so for a
 scripted request its Resolved mode shows the names left written, and says so

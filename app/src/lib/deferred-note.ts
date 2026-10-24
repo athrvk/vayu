@@ -18,11 +18,16 @@ import { pickByCount } from "@/modules/dashboard/utils/format";
  * under `components/shared/` say it too and must not load a query to do so.
  */
 export function deferredNote(names: readonly string[]): string {
-	const tokens = names.map((name) => `{{${name}}}`).join(", ");
+	const tokens = deferredTokens(names);
 	return pickByCount(names.length, {
 		one: `${tokens} is set by a pre-request script at send.`,
 		other: `${tokens} are set by a pre-request script at send.`,
 	});
+}
+
+/** @p names written as the `{{name}}` tokens a note names. */
+export function deferredTokens(names: readonly string[]): string {
+	return names.map((name) => `{{${name}}}`).join(", ");
 }
 
 /** The name inside a `{{name}}` token, trimmed the way the resolvers read it. */

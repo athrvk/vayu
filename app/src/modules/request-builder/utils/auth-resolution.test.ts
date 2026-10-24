@@ -18,8 +18,15 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Collection } from "@/types";
-import { resolveAuthForSend, resolveAuthSource, resolveInheritedAuth } from "./auth-resolution";
+import type { Collection, OAuth2Config } from "@/types";
+import {
+	effectiveOAuth2Config,
+	oauth2DeferredNames,
+	oauth2HasTokens,
+	resolveAuthForSend,
+	resolveAuthSource,
+	resolveInheritedAuth,
+} from "./auth-resolution";
 
 function collection(id: string, auth: Collection["auth"]): Collection {
 	return {
@@ -115,5 +122,62 @@ describe("resolveAuthForSend", () => {
 			mode: "bearer",
 			token: "own",
 		});
+	});
+});
+
+describe("the OAuth 2.0 config a load run's guard judges", () => {
+	const oauth2: OAuth2Config = {
+		grantType: "client_credentials",
+		accessTokenUrl: "https://auth.example.com/token",
+		clientId: "{{clientId}}",
+		scope: "read {{scope}}",
+	};
+	const oauth2Root = collection("root", { mode: "oauth2", config: oauth2 });
+
+	it("is the request's own config, as written", () => {
+		expect(effectiveOAuth2Config({ mode: "oauth2", config: oauth2 }, [])).toBe(oauth2);
+	});
+
+	it("is the inherited config when the request inherits", () => {
+		const chain = [oauth2Root, collection("leaf", { mode: "none" })];
+
+		expect(effectiveOAuth2Config({ mode: "inherit" }, chain)).toBe(oauth2);
+	});
+
+	it("is null when the effective auth is another mode, or an ancestor set No Auth", () => {
+		expect(effectiveOAuth2Config({ mode: "bearer", token: "t" }, [oauth2Root])).toBeNull();
+		expect(
+			effectiveOAuth2Config({ mode: "inherit" }, [
+				oauth2Root,
+				collection("mid", { mode: "noauth" }),
+			])
+		).toBeNull();
+	});
+
+	it("reports a deferred name from any field, in the order first used", () => {
+		expect(oauth2DeferredNames(oauth2, ["scope", "clientId"])).toEqual(["clientId", "scope"]);
+	});
+
+	it("leaves out a deferred name the OAuth 2.0 fields do not use", () => {
+		// `token` is set by a script for the request's header, not for the token request.
+		expect(oauth2DeferredNames(oauth2, ["token"])).toEqual([]);
+	});
+
+	it("reads the config as written: a name with a stored value is still reported", () => {
+		// The preview's resolved config would carry the stored value in its place.
+		expect(oauth2DeferredNames({ ...oauth2, clientId: "{{clientId}}" }, ["clientId"])).toEqual([
+			"clientId",
+		]);
+		expect(oauth2DeferredNames({ ...oauth2, clientId: "stored-id" }, ["clientId"])).toEqual([]);
+	});
+
+	it("reports nothing without a config", () => {
+		expect(oauth2DeferredNames(null, ["clientId"])).toEqual([]);
+	});
+
+	it("asks for a composition only while a field holds a token", () => {
+		expect(oauth2HasTokens(oauth2)).toBe(true);
+		expect(oauth2HasTokens({ ...oauth2, clientId: "id", scope: "read" })).toBe(false);
+		expect(oauth2HasTokens(null)).toBe(false);
 	});
 });
