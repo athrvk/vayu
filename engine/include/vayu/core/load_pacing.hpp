@@ -130,11 +130,12 @@ inline constexpr int64_t CONTROLLER_TICK_MS = 50;
  * @brief Concurrency target on a linear ramp from @p start to @p target,
  *        reached within one controller tick of @p ramp_ms and held flat after.
  *
- * The controller samples the target only when it wakes, and a run whose
- * `duration` equals its ramp stops before a wake at or past @p ramp_ms, so a
- * target owed only from @p ramp_ms on is never asked for: 1 -> 50 over 20s
- * peaked at 49 (#2913). Treating the last tick of the ramp as its end gives
- * that run its target at its last wake, and never answers past @p target.
+ * A run whose `duration` equals its ramp never samples at or past @p ramp_ms:
+ * its last sample is the controller's final refill at `duration - 1`
+ * (`maintain_concurrency`'s `run_end_ms`). A target owed only from @p ramp_ms
+ * on is never asked for (1 -> 50 over 20s peaked at 49, #2913); treating the
+ * last tick of the ramp as its end covers that sample, and never answers past
+ * @p target.
  *
  * The interpolation is done in `double`, which is signed: `start > target` is a
  * legitimate profile (ramp down), and computing `target - start` in `size_t`

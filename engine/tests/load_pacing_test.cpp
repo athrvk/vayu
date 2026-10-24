@@ -129,8 +129,8 @@ TEST (RampTargetConcurrency, DegenerateRampsHoldTheTarget) {
     EXPECT_EQ (ramp_target_concurrency (10, 0, 10000, 10000), 0u);
 }
 
-// #2913: a run whose duration equals its ramp stops before the controller
-// wakes at the ramp's end, so its last wake lands within one tick before it.
+// #2913: a run whose duration equals its ramp is last sampled by the
+// controller's final refill, at `ramp_ms - 1`, within one tick of the end.
 // Mutation check: return `target` only from `ramp_ms` on and both in-window
 // climbs read 49. A descent truncates toward its target already, so it is
 // held here only for not passing it.
