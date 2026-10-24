@@ -1799,6 +1799,7 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
   "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
   "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
   "status_codes": { "200": 118, "0": 2 },
+  "status_seconds": [ { "second": 0, "span": 1, "counts": [118, 0, 0, 0, 2] } ],
   "latency_p50_ms": 8.1, "latency_p95_ms": 20.4, "latency_p99_ms": 31.9
 }
 ```
@@ -1824,6 +1825,20 @@ completions carried over its span. Always a number, `0` for a window that comple
 active at the tick, and `RunContext::in_flight`), which a virtual user in a timer wait does not
 hold, so a run whose users wait in step aliases them between 0 and the user count. Absent from a
 tick stored before the issue; like the keys above, no schema version marks it.
+
+`status_seconds` (issue #2866) is the seconds the row's gate closed, each with the responses that
+**completed** in it by class (`vayu::core::StatusSecondCounter`): `[{second, span, counts}]`,
+`second` counted from load start rather than from the origin `elapsed_seconds` counts from,
+`span` `1`, and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, where `error` is code `0` (no response)
+and any code outside 200-599, the classes the app's status chart draws. A second is closed
+250 ms after it ends, so a row holds one second, two when its gate's ~1 s cadence crosses two
+second ends, and `[]` before load starts or the first second closes; across a run's rows the
+seconds run on from `0`, and a second nothing completed in is an entry of zeros. The live gate
+frame of the same tick carries the same entries as `statusSeconds`. The second still open when the
+run ends is stored nowhere, like its percentiles, and neither is one that closes less than the
+margin before the final live frame. Absent from a tick stored before the issue, whose status
+chart keeps diffing `status_codes` between rows; like the keys above, no schema version marks it.
+`status_codes` itself is unchanged, still the cumulative map.
 
 Two consequences of the row being the tick:
 

@@ -1162,6 +1162,11 @@ struct MetricTickSample {
     size_t bytes_sent       = 0;
     size_t bytes_received   = 0;
     std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
+    // The seconds since load start this gate closed (#2866), by the class of
+    // each response and the second it completed in: the drain the gate frame
+    // of the same tick carries as `statusSeconds`. Always written, `[]`
+    // included, so an absent key is a row stored before it existed.
+    std::vector<StatusSecondEntry> status_seconds;
     // The second since the previous row, every 100 ms window merged
     // (MetricsCollector::take_second_percentiles, #2385); neither the last
     // window alone nor the run so far. Zero samples leaves the three keys out

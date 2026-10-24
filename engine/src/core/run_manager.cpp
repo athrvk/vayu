@@ -2244,9 +2244,11 @@ RunManager& manager) {
         // Execute Load Strategy. One instant for both clocks: the report's
         // duration below and every elapsed figure the other threads publish.
         auto test_start = std::chrono::steady_clock::now ();
-        context->load_start_steady_ms.store (
+        const int64_t load_start_ms =
         std::chrono::duration_cast<std::chrono::milliseconds> (test_start.time_since_epoch ())
-        .count ());
+        .count ();
+        context->load_start_steady_ms.store (load_start_ms);
+        context->metrics_collector->set_load_start (load_start_ms);
         std::shared_ptr<ScenarioLoadState> scenario_state;
 
         try {
@@ -2432,6 +2434,7 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["bytes_sent"]          = sample.bytes_sent;
     payload["bytes_received"]      = sample.bytes_received;
     payload["status_codes"]        = codes;
+    payload["status_seconds"] = status_seconds_json (sample.status_seconds);
     // Absent rather than null: the export schema types these as numbers.
     if (sample.latency_samples > 0) {
         payload["latency_p50_ms"] = sample.latency_p50_ms;
@@ -2658,11 +2661,13 @@ cumulative_counters (const MetricsCollector& mc, int64_t steady_ms, size_t compl
     return counters;
 }
 
-/// What a gate tick hands the stored row: the second's merged percentiles and
-/// the trailing window its own frame carries.
+/// What a gate tick hands the stored row: the second's merged percentiles, the
+/// trailing window and the closed seconds' status classes its own frame
+/// carries.
 struct GateReadings {
     MetricsCollector::Percentiles second;
     WindowReading window;
+    std::vector<StatusSecondEntry> status_seconds;
 };
 
 /**
@@ -2771,6 +2776,7 @@ int64_t& first_tick_steady_ms) {
         sample.latency_p50_ms  = gate.second.p50;
         sample.latency_p95_ms  = gate.second.p95;
         sample.latency_p99_ms  = gate.second.p99;
+        sample.status_seconds  = gate.status_seconds;
         sample.custom_metrics  = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
@@ -2856,9 +2862,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
         std::optional<GateReadings> gate;
         if (closes_second) {
-            gate = GateReadings{ mc.take_second_percentiles (), rates };
+            // Drained once, here, so the frame and the row hold the same
+            // seconds and a second is never emitted twice.
+            gate = GateReadings{ mc.take_second_percentiles (), rates,
+                mc.drain_status_seconds (now_steady_ms) };
             put_interval_percentiles (stats, "second", gate->second);
             mc.put_gate_distributions (stats);
+            stats["statusSeconds"] = status_seconds_json (gate->status_seconds);
         }
 
         auto now_steady = std::chrono::steady_clock::now ();
@@ -2967,7 +2977,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Final settled tick before signalling closed - consumers use this ordering
         // as the termination contract (last data before closed==true). It closes
         // the partial second since the last gate on the live frame only: no
-        // row is stored for it, so the stored series keeps whole seconds.
+        // row is stored for it, so the stored series keeps whole seconds. Its
+        // `statusSeconds` are the seconds closed since that gate, which only
+        // this frame carries; the still-open last second is emitted nowhere.
         (void)emit_live_tick (nullptr, now_ms (), steady_now_ms (), true);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "collect_metrics: " + std::string (e.what ()),

@@ -106,6 +106,7 @@ class StatsRouteTest : public ::testing::Test {
         sample.bytes_sent               = 512;
         sample.bytes_received           = 4096;
         sample.status_codes             = { { 200, 10 } };
+        sample.status_seconds           = { { 0, 1, { 9, 0, 0, 1, 0 } } };
         sample.latency_samples          = 10;
         sample.latency_p50_ms           = 5.0;
         sample.latency_p95_ms           = 8.0;
@@ -193,6 +194,7 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "bytes_sent", nlohmann::json::value_t::number_unsigned },
         { "bytes_received", nlohmann::json::value_t::number_unsigned },
         { "status_codes", nlohmann::json::value_t::object },
+        { "status_seconds", nlohmann::json::value_t::array },
         { "latency_p50_ms", nlohmann::json::value_t::number_float },
         { "latency_p95_ms", nlohmann::json::value_t::number_float },
         { "latency_p99_ms", nlohmann::json::value_t::number_float },
@@ -216,6 +218,8 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
     EXPECT_DOUBLE_EQ (entry["window_avg_queue_wait_ms"].get<double> (), 0.25);
     EXPECT_DOUBLE_EQ (entry["latency_p50_ms"].get<double> (), 5.0);
     EXPECT_EQ (entry["status_codes"]["200"].get<size_t> (), 10u);
+    EXPECT_EQ (entry["status_seconds"],
+    json::parse (R"([{"second":0,"span":1,"counts":[9,0,0,1,0]}])"));
 }
 
 // #2386: a second with no completion has no latency, so its row carries no
@@ -236,7 +240,7 @@ TEST_F (StatsRouteTest, StoredTickOfAnEmptySecondHasNoPercentileKeys) {
     for (const auto* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
         EXPECT_FALSE (entry.contains (key)) << key << ": " << entry.dump ();
     }
-    EXPECT_EQ (entry.size (), 21u)
+    EXPECT_EQ (entry.size (), 22u)
     << "only the three percentiles leave: " << entry.dump ();
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
 }
@@ -345,6 +349,23 @@ TEST_F (StatsRouteTest, UnreadableTickPayloadIsSkippedNotFatal) {
     // The row still counts for pagination - the page really did consume it.
     EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
     EXPECT_EQ (body["pagination"]["returned"].get<int64_t> (), 2);
+}
+
+// #2866: a gate that closed no second (one before load start, or the first,
+// which waits out the margin) stores an empty array, so a reader tells it from
+// a row an older engine stored, which has no key. Mutation check: write the
+// key only when there are entries and this fails.
+TEST_F (StatsRouteTest, AGateThatClosedNoSecondStoresAnEmptyStatusSeconds) {
+    const std::string id  = seed_run ();
+    auto sample           = sample_at (1000, 0.0);
+    sample.status_seconds = {};
+    add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["status_seconds"], json::array ());
 }
 
 // This run's custom metrics (issue #1500), snapshotted into the tick the same

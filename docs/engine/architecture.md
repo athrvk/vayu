@@ -480,6 +480,21 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   [Latency population](api-reference.md#latency-population).
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
+- **Status classes by completion second** (issue #2866, `core/status_seconds.hpp`): beside the
+  cumulative per-code distribution, each completion reads the steady clock on its own thread
+  and adds one to its class (2xx, 3xx, 4xx, 5xx, or error: code 0 and anything outside
+  200-599) in the slot of the second since load start it completed in, one relaxed
+  `fetch_add`. The slots are a ring of 128 seconds, fixed at 5 KiB however long the run. The
+  gate drains each second 250 ms after it ends (`CLOSE_MARGIN_MS`), with an `exchange (0)`
+  that frees the slot, and hands the same entries to the stored row's `status_seconds` and the
+  gate frame's `statusSeconds`, so a chart draws a rate no tick's timing moves. The margin is
+  the window between a worker's clock read and its increment: a worker stalled longer than it
+  increments a second already emitted, and the next gate that emits finds the count by
+  sweeping the previous 64 emitted seconds and adds it to its first entry, about a second
+  late. A metrics thread more than 128 s behind reads two seconds that share a slot as the
+  older one; neither case loses or double-counts a response. The collector's origin is
+  `set_load_start`, given the instant `RunContext::load_start_steady_ms` holds, and nothing is
+  counted per second before it
 - **Batch DB writes**: Per-request results written after test completion; the metrics thread
   persists one wide `metric_ticks` row per second during the run (the complete tick object,
   built once at write time), and the whole-run `runs.summary` is written once at completion.
