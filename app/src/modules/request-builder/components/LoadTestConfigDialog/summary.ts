@@ -125,7 +125,7 @@ export function summarise(
 	}
 
 	if (mode === "constant_rps" && total !== null) {
-		const shape = `Holds ${count(rps)} requests/s for ${count(duration)}s`;
+		const shape = `Holds ${requestsPhrase(rps)}/s for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
 		return `${shape} - about ${requestsPhrase(total)} in total.`;
 	}

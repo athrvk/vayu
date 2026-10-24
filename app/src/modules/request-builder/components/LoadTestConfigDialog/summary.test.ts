@@ -62,6 +62,15 @@ describe("summarise", () => {
 		);
 	});
 
+	it.each([
+		[1, "Holds 1 request/s for 60s"],
+		[2, "Holds 2 requests/s for 60s"],
+		[0.5, "Holds 0.5 requests/s for 60s"],
+		[1500, "Holds 1,500 requests/s for 60s"],
+	])("agrees the rate's noun with its count: %s", (rps, expected) => {
+		expect(summarise({ ...base, mode: "constant_rps", rps }, true)).toBe(`${expected}.`);
+	});
+
 	it("describes the capacity search's shape, its budget and its ceiling", () => {
 		const s = summarise({ ...base, mode: "capacity", startConcurrency: 4, concurrency: 256 });
 		expect(s).toContain("Steps up from 4 virtual users");
