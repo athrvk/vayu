@@ -2022,9 +2022,20 @@ computed the same either way. The list is cut at the engine's 64-entry cap
 (each key may be up to 512 bytes of UTF-8). It is omitted when nothing was carried, and
 `RunCollectionDialog` and MCP never send it.
 
-`maxAssertionFailureRatePct` (issue #1497) is the sixth budget, judged against
-the run's combined `assert.*` element and `pm.test` tally rather than against
-`testValidation`'s per-response view. `thresholds.failRun: true`
+`maxAssertionFailureRatePct` (issue #1497) is the sixth budget. It is judged
+against two populations kept apart (issue #2892), not `testValidation`'s
+per-response view: the **exact** tally of every `assert.*` element outcome,
+unmatched required `extract.*` and inline `pm.test` call, and the **sampled**
+`pm.test` replay over 1 in `response_sample_rate` responses. `actual` is the
+worse of the two failure rates, so a sampled test failing half the time is not
+diluted by thousands of passing inline assertions. An evaluated check carries
+both as `assertionsExact` / `assertionsSampled` (`{passed, failed}`) and, when
+the sampled one is non-empty, `sampleRate`; a report stored earlier has none of
+them. `ThresholdVerdict` reads them to add one muted line under the row,
+"Judged on the worse of N assertions on every response (X failed) and M
+assertions on 1 in R responses (Y failed).", and shows nothing extra when the
+sampled population is empty (a collection run, a load run with no test script),
+when the check is unmeasurable, or on an older report. `thresholds.failRun: true`
 (`LoadTestConfigDialog`'s own Switch, beside the budget fields rather than in
 `BUDGET_FIELDS` - it is a flag over the budgets, not one itself) changes what a
 missed budget *does*: the run's terminal status becomes `"failed"` instead of
