@@ -8137,8 +8137,12 @@ own unknown-key rule uses, checked before the run row is created.
   regardless of its own marking. `extract.*` and `assert.*` are unaffected -
   they always run inline on a scenario load run.
 - **`includeScriptTime`** folds the element pipeline's own elapsed time into
-  a step's recorded latency when `true`; by default (`false`) a step's
-  latency is its transfer alone, exactly as before this issue.
+  a step's recorded latency when `true`, and into the run's latency figures
+  with it (`latency`, the per-tick percentiles and a stored result's
+  `latencyMs`), so the run's `max` is never below a step's (#2792); by
+  default (`false`) both are the transfer alone. A stored trace's
+  `totalMs`, the per-phase timings and the `slow_threshold_ms` decision stay
+  on the transfer either way.
 - **`timers`** (issue #1498) is wired end to end: `"asConfigured"` (default)
   runs every `timer.*` element's own stored config unchanged; `"off"`
   silences every `timer.*` element for the run (`waitedMs: 0`, no sleep);
@@ -9074,7 +9078,9 @@ failure) is also in the step's latency, so a step that times out reports its
 timeout in `p99` and `max`; one that never reached the wire (a data-binding
 failure, a refused header, a skip) adds a count and no duration. The step's
 histogram follows the same population as the run's, and `includeScriptTime`
-applies to a failed step as it does to an answered one (issue #2384). At the
+applies to a failed step as it does to an answered one (issue #2384), folding
+the same pipeline time into the run's latency as into the step's, so the run's
+`max` is never below a step's (#2792). At the
 top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are

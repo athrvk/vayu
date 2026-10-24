@@ -430,6 +430,15 @@ struct ResultAnnotations {
      * scenario path.
      */
     std::optional<size_t> vu;
+    /**
+     * Element-pipeline time to fold into the run's latency population beside
+     * the transfer (#2792). Non-zero only on a scenario load run under
+     * `elements.includeScriptTime`, set to what that step's own histogram
+     * folded, so the run and its steps measure one population. The stored
+     * trace's `totalMs` and the slow decision stay on the transfer, the
+     * figure the trace's phase breakdown describes.
+     */
+    double script_ms = 0.0;
 };
 
 /**

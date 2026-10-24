@@ -431,7 +431,12 @@ first use and is never stale, never shared across runs, and never a caller-visib
 an inline element runs after `Client::send`'s own timing already stopped and before
 `StepHistograms::record` - so opting a script in does not, by itself, change what the latency
 figures measure. Setting the run's `elements.includeScriptTime` folds the pipeline's own
-elapsed time back in for anyone who wants the scripted cost in the figures.
+elapsed time back in for anyone who wants the scripted cost in the figures. It moves the step's
+histogram and the run's together (#2792): the scenario executor decides the figure once per
+completion and hands it to `StepHistograms` and, as `ResultAnnotations::script_ms`, to the run's
+latency histogram, so the run's `max` is never below a step's. What stays on the transfer is the
+stored trace's `totalMs` (it stays consistent with the phase breakdown beside it), the per-phase
+histograms and the `slow_threshold_ms` decision.
 
 **Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, passed, failed, skipped,
 deferred }` beside the existing `tests` node, one row per element that ran at least once this run -
