@@ -5829,11 +5829,14 @@ already cached under the same key is reused). The wait on the identity
 provider is left out of `engineMs`, as a fetch at the build is, and a token that
 cannot be acquired answers `authErrorCode` as it does at the build. A
 **load** run acquires its token once, when it is planned and before any script
-runs: its composition (`deferDynamicVariables`) resolves the config, and a
-name nothing defines is refused with a `400` that names it
-(`invalid_run_config` for a single request, `invalid_scenario` for a
-collection). The same order holds wherever a script can run between the build
-and the send:
+runs, from the **stored** values: its composition (`deferDynamicVariables`)
+resolves the config, and a name nothing defines is refused with a `400` that
+names it (`invalid_run_config` for a single request, `invalid_scenario` for a
+collection). A script that sets an OAuth 2.0 variable has no effect under
+load, however many iterations or virtual users run it, and nothing is
+re-acquired per iteration; the one change to a run's token after it starts is
+the mid-run refresh of [the token cache](#oauth-20-token-cache). The same order
+holds wherever a script can run between the build and the send:
 
 | Send | Applied after |
 |------|---------------|
@@ -6172,14 +6175,16 @@ never re-resolved - see [POST /execute](#post-execute) and
   names already are, and the run's executor generates a fresh value per
   occurrence immediately before each send. It also resolves an OAuth 2.0
   config **now**, cache key included: a run acquires its token once, when it is
-  planned, and every virtual user sends that one, so without the field (a Send)
-  the config is left for the send to resolve after the pre-request script (see
-  [Authentication](#authentication)). **Absent, `null` or `false` composes
-  exactly as it did before this field existed**, which is what a Send, a preview
-  and a script's `replaceIn` want: composed once, sent once. Refused with `400`
-  `invalid_compose_request` when present and not a boolean. Two limits worth
-  knowing: an unknown `{{$typo}}` is unaffected (nothing would generate it
-  either way, so it keeps its braces - issue #186), and a generator inside the
+  planned, from the stored values (a script's write to an OAuth 2.0 variable has
+  no effect under load), and every virtual user sends that one, so without the
+  field (a Send) the config is left for the send to resolve after the
+  pre-request script (see [Authentication](#authentication)). **Absent, `null`
+  or `false` composes exactly as it did before this field existed**, which is
+  what a Send, a preview and a script's `replaceIn` want: composed once, sent
+  once. Refused with `400` `invalid_compose_request` when present and not a
+  boolean. Two limits worth knowing: an unknown `{{$typo}}` is unaffected
+  (nothing would generate it either way, so it keeps its braces - issue #186),
+  and a generator inside the
   **auth block** is generated here even when the field is true, because
   `apply_auth` encodes a credential when the request is built and a token left
   for the bind would go out as base64 of its own text. That is a generator's
@@ -8458,7 +8463,7 @@ as a smaller one:
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token (or the iteration identity) in its `oauth2` config | The token is acquired against the token endpoint (once, when a load plan is resolved; at the step's send in a sequential run), never bound per iteration, so no iteration exists for a row to reach it. Refused with or without a data set. |
-| A step of a collection **load** run with a `{{name}}` in its `oauth2` config that no variable answers | A load run acquires each step's token once, when the plan is resolved and before any script runs, so the name would reach the token endpoint as written. The message names the step and the token (#2521). A sequential run defers such a name to its step's send instead. |
+| A step of a collection **load** run with a `{{name}}` in its `oauth2` config that no variable answers (`invalid_scenario`; a single-request run is refused the same way under `invalid_run_config`, see [Auth pre-flight](#post-runs)) | A load run acquires each step's token once, when the plan is resolved and before any script runs, from the stored values, so the name would reach the token endpoint as written. A script's write to an OAuth 2.0 variable is ignored under load and nothing is re-acquired per iteration (the only change after the start is the [mid-run refresh](#oauth-20-token-cache)). The message names the step and the token (#2521, #2742). A sequential run defers such a name to its step's send instead. |
 | A step whose OAuth 2.0 token endpoint host the run's [`targetPolicy`](#post-execute) refuses | Judged before the endpoint is posted to. The code is the policy's, `target_not_allowed` or `target_host_unknown`, not `invalid_scenario` (#2521). |
 | `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
@@ -9335,9 +9340,12 @@ token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
 required) or `400`, carrying the `/oauth2` error codes, so a bad token never
 surfaces as a silently-failed run. A load run acquires once, before any script,
-so an `oauth2` config still holding a `{{name}}` when the run starts (one that
-nothing defines, or one posted without being composed for a run with
-`deferDynamicVariables`) is a `400` `invalid_run_config` naming it; and a [`targetPolicy`](#post-execute) that refuses the config's
+from the stored values (a script that sets an OAuth 2.0 variable has no effect
+under load, and nothing is re-acquired per iteration), so an `oauth2` config
+still holding a `{{name}}` when the run starts (one that nothing defines, or one
+posted without being composed for a run with `deferDynamicVariables`) is a
+`400` `invalid_run_config` naming it (a collection load run's step is
+`invalid_scenario`, see [Scenario runs](#scenario-runs)); and a [`targetPolicy`](#post-execute) that refuses the config's
 token endpoint is a `400` under the policy's code, before anything is posted.
 
 **Concurrency model.** `constant_concurrency`, `ramp_up`, and `iterations` are

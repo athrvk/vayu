@@ -69,6 +69,10 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveObject }),
 }));
 
+// The section also asks /compose for the names a script may change; this file is not
+// about that, and the real hook needs a query client.
+vi.mock("./code-composition", () => ({ useDeferredVariables: () => [] }));
+
 vi.mock("@/components/shared/OAuth2Form", () => ({
 	TokenStatusRow: ({ resolvedConfig }: { resolvedConfig: { clientId: string } }) => (
 		<div data-testid="token-status">{resolvedConfig.clientId}</div>

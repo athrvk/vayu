@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button, IconSwap, LabelSwap, TooltipIconButton } from "@/components/ui";
@@ -17,6 +17,7 @@ import {
 	useClearOAuth2TokenMutation,
 } from "@/queries/oauth";
 import { queryKeys } from "@/queries/keys";
+import { deferredTokens } from "@/lib/deferred-note";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
@@ -27,6 +28,16 @@ import type { OAuth2Config } from "@/types";
 interface TokenStatusRowProps {
 	/** The config with {{variables}} already resolved (used for the token request). */
 	resolvedConfig: OAuth2Config;
+	/**
+	 * The names in the as-written config that a pre-request script may change,
+	 * from the engine's `deferredVariables` (#2742). A Send resolves the config
+	 * after the script, so the token cached for `resolvedConfig` may not be the
+	 * one it uses: with any name here the row reports no token state and says why,
+	 * while Get token and Clear keep acting on the stored settings. The HOST
+	 * computes it and the row never queries - three surfaces share this row and
+	 * none of them gives it a query client by contract. Memoise it.
+	 */
+	deferredNames?: readonly string[];
 }
 
 const TOKEN_ACTION_LABELS = ["Get token", "Renew", "Refresh"] as const;
@@ -57,31 +68,34 @@ function TokenExpiry({ expiresAt, expired }: { expiresAt: number | null; expired
 	);
 }
 
-export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) {
+export default function TokenStatusRow({ resolvedConfig, deferredNames }: TokenStatusRowProps) {
+	if (deferredNames && deferredNames.length > 0)
+		return <DeferredTokenRow resolvedConfig={resolvedConfig} names={deferredNames} />;
+	return <CachedTokenRow resolvedConfig={resolvedConfig} />;
+}
+
+/**
+ * What both rows do to the token stored for @p resolvedConfig: fetch it (the
+ * interactive sign-in for an authorization_code grant, a client request for the
+ * rest) and clear it. The rows differ in what they report, never in what the
+ * actions do.
+ */
+function useTokenActions(resolvedConfig: OAuth2Config) {
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
 	const [authorizing, setAuthorizing] = useState(false);
-	const [revealed, setRevealed] = useState(false);
 
 	const cacheKey = useMemo(() => {
 		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
 		return computeOAuth2CacheKey(resolvedConfig);
 	}, [resolvedConfig]);
 
-	// Re-hide the token whenever the config identity changes (render-phase reset)
-	// so switching requests never reveals a different token unmasked.
-	const [prevKey, setPrevKey] = useState(cacheKey);
-	if (cacheKey !== prevKey) {
-		setPrevKey(cacheKey);
-		setRevealed(false);
-	}
-
-	const statusQuery = useOAuth2TokenStatusQuery(cacheKey);
 	const fetchMutation = useFetchOAuth2TokenMutation();
 	const clearMutation = useClearOAuth2TokenMutation();
 
 	const interactive = resolvedConfig.grantType === "authorization_code";
 	const busy = fetchMutation.isPending || clearMutation.isPending || authorizing;
+	const fetching = fetchMutation.isPending || authorizing;
 
 	// What the engine needs before a token request can go anywhere: the authorize
 	// start rejects without authorizationUrl + clientId, the token endpoint without
@@ -100,7 +114,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 	}, [interactive, resolvedConfig]);
 	const incomplete = missingFields.length > 0;
 
-	const handleGetToken = async () => {
+	const getToken = async () => {
 		if (incomplete) return;
 		if (interactive) {
 			// Engine-hosted loopback + PKCE; opens the system browser (or the
@@ -146,43 +160,35 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 		);
 	};
 
-	const handleClear = () => {
+	const clear = () => {
 		if (!cacheKey) return;
 		clearMutation.mutate(cacheKey);
 	};
 
-	const status = statusQuery.data;
-	const token = status?.found ? status.token : undefined;
-	const expired = status?.expired ?? false;
+	return { cacheKey, missingFields, incomplete, busy, fetching, getToken, clear };
+}
 
+type TokenActions = ReturnType<typeof useTokenActions>;
+
+/** The bordered box both rows draw: a dot and a summary on the left, the action rail on the right. */
+function TokenRowShell({
+	dotClass,
+	summary,
+	rail,
+	below,
+}: {
+	dotClass: string;
+	summary: ReactNode;
+	rail: ReactNode;
+	below?: ReactNode;
+}) {
 	return (
 		<div className="rounded-md border border-border bg-panel">
 			{/* Summary row - geometry never changes */}
 			<div className="flex items-center gap-3 px-3 py-2">
 				<div className="flex items-center gap-2 min-w-0 flex-1">
-					<span
-						className={`h-2 w-2 rounded-full shrink-0 ${
-							token
-								? expired
-									? "bg-warning"
-									: "bg-status-success"
-								: "bg-muted-foreground/40"
-						}`}
-						aria-hidden
-					/>
-					{token ? (
-						<span className="text-xs text-muted-foreground">
-							<code className="text-foreground">{maskToken(token.accessToken)}</code>
-							{" · "}
-							<TokenExpiry expiresAt={token.expiresAt} expired={expired} />
-						</span>
-					) : incomplete ? (
-						<span className="text-xs text-muted-foreground">
-							Enter the {listPhrase(missingFields)} to fetch a token
-						</span>
-					) : (
-						<span className="text-xs text-muted-foreground">No token cached</span>
-					)}
+					<span className={`h-2 w-2 rounded-full shrink-0 ${dotClass}`} aria-hidden />
+					{summary}
 				</div>
 
 				{/*
@@ -194,7 +200,144 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 				 * spot cleared the token just fetched - the hazard
 				 * `SchemaStatusBadge` documents for its Refresh button.
 				 */}
-				<div className="flex items-center gap-1 shrink-0">
+				<div className="flex items-center gap-1 shrink-0">{rail}</div>
+			</div>
+			{below}
+		</div>
+	);
+}
+
+function ClearTokenButton({ actions }: { actions: TokenActions }) {
+	return (
+		<TooltipIconButton
+			size="sm"
+			label="Clear cached token"
+			onClick={actions.clear}
+			disabled={actions.busy}
+			icon={<Trash2 className="size-icon-sm" />}
+		/>
+	);
+}
+
+function GetTokenButton({
+	actions,
+	label,
+	renews,
+}: {
+	actions: TokenActions;
+	label: (typeof TOKEN_ACTION_LABELS)[number];
+	/** The glyph for a token that is current: renew, not fetch. */
+	renews: boolean;
+}) {
+	return (
+		<Button
+			size="sm"
+			variant="outline"
+			onClick={actions.getToken}
+			disabled={actions.busy || actions.incomplete}
+		>
+			<IconSwap
+				state={actions.fetching ? "pending" : renews ? "renew" : "fetch"}
+				icons={{
+					fetch: <KeyRound className="size-icon-sm" />,
+					renew: <RefreshCw className="size-icon-sm" />,
+					pending: <Loader2 className="size-icon-sm animate-spin" />,
+				}}
+			/>
+			<LabelSwap label={label} states={TOKEN_ACTION_LABELS} />
+		</Button>
+	);
+}
+
+/**
+ * The row for a config a pre-request script may change (#2742). It reads no
+ * cache entry and reports no token: a Send resolves the config after the script,
+ * so the token cached for the stored values may not be the one it sends, and the
+ * row cannot know the one it does. The actions stay live because they act on the
+ * stored settings, and for an authorization_code grant this row is the only
+ * place to sign in.
+ */
+function DeferredTokenRow({
+	resolvedConfig,
+	names,
+}: {
+	resolvedConfig: OAuth2Config;
+	names: readonly string[];
+}) {
+	const actions = useTokenActions(resolvedConfig);
+	return (
+		<TokenRowShell
+			dotClass="bg-muted-foreground/40"
+			summary={
+				<span className="text-xs text-muted-foreground">
+					{deferredTokens(names)} may be changed by a pre-request script, so the token
+					this request sends is fetched at send, after the script. Get token and Clear act
+					on the stored settings.
+				</span>
+			}
+			rail={
+				<>
+					<ClearTokenButton actions={actions} />
+					<GetTokenButton actions={actions} label="Get token" renews={false} />
+				</>
+			}
+			below={
+				actions.incomplete && <MissingFieldsNote missingFields={actions.missingFields} />
+			}
+		/>
+	);
+}
+
+function MissingFieldsNote({ missingFields }: { missingFields: string[] }) {
+	return (
+		<div className="border-t border-border px-3 py-2">
+			<p className="text-xs text-muted-foreground">
+				Enter the {listPhrase(missingFields)} to fetch a token
+			</p>
+		</div>
+	);
+}
+
+function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
+	const actions = useTokenActions(resolvedConfig);
+	const { cacheKey, missingFields, incomplete } = actions;
+	const [revealed, setRevealed] = useState(false);
+
+	// Re-hide the token whenever the config identity changes (render-phase reset)
+	// so switching requests never reveals a different token unmasked.
+	const [prevKey, setPrevKey] = useState(cacheKey);
+	if (cacheKey !== prevKey) {
+		setPrevKey(cacheKey);
+		setRevealed(false);
+	}
+
+	const statusQuery = useOAuth2TokenStatusQuery(cacheKey);
+	const status = statusQuery.data;
+	const token = status?.found ? status.token : undefined;
+	const expired = status?.expired ?? false;
+
+	return (
+		<TokenRowShell
+			dotClass={
+				token ? (expired ? "bg-warning" : "bg-status-success") : "bg-muted-foreground/40"
+			}
+			summary={
+				token ? (
+					<span className="text-xs text-muted-foreground">
+						<code className="text-foreground">{maskToken(token.accessToken)}</code>
+						{" · "}
+						<TokenExpiry expiresAt={token.expiresAt} expired={expired} />
+					</span>
+				) : incomplete ? (
+					<span className="text-xs text-muted-foreground">
+						Enter the {listPhrase(missingFields)} to fetch a token
+					</span>
+				) : (
+					<span className="text-xs text-muted-foreground">No token cached</span>
+				)
+			}
+			rail={
+				<>
 					{token && (
 						<TooltipIconButton
 							size="sm"
@@ -212,64 +355,33 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							}
 						/>
 					)}
-					{token && (
-						<TooltipIconButton
-							size="sm"
-							label="Clear cached token"
-							onClick={handleClear}
-							disabled={busy}
-							icon={<Trash2 className="size-icon-sm" />}
-						/>
+					{token && <ClearTokenButton actions={actions} />}
+					<GetTokenButton
+						actions={actions}
+						label={token ? (expired ? "Refresh" : "Renew") : "Get token"}
+						renews={!!token && !expired}
+					/>
+				</>
+			}
+			below={
+				<>
+					{/* A cached token survives edits that break the config - the cache key
+					    omits grantType, so switching Client Credentials → Authorization Code
+					    keeps the token on screen while the empty Authorization URL disables
+					    the action. The summary slot is taken by the token, so the reason goes
+					    below rather than nowhere. */}
+					{incomplete && token && <MissingFieldsNote missingFields={missingFields} />}
+
+					{/* Full token disclosure - expands below, doesn't affect the row above */}
+					{revealed && token && (
+						<div className="border-t border-border px-3 py-2">
+							<code className="block break-all text-label leading-relaxed text-foreground select-all">
+								{token.accessToken}
+							</code>
+						</div>
 					)}
-					<Button
-						size="sm"
-						variant="outline"
-						onClick={handleGetToken}
-						disabled={busy || incomplete}
-					>
-						<IconSwap
-							state={
-								fetchMutation.isPending || authorizing
-									? "pending"
-									: token && !expired
-										? "renew"
-										: "fetch"
-							}
-							icons={{
-								fetch: <KeyRound className="size-icon-sm" />,
-								renew: <RefreshCw className="size-icon-sm" />,
-								pending: <Loader2 className="size-icon-sm animate-spin" />,
-							}}
-						/>
-						<LabelSwap
-							label={token ? (expired ? "Refresh" : "Renew") : "Get token"}
-							states={TOKEN_ACTION_LABELS}
-						/>
-					</Button>
-				</div>
-			</div>
-
-			{/* A cached token survives edits that break the config - the cache key
-			    omits grantType, so switching Client Credentials → Authorization Code
-			    keeps the token on screen while the empty Authorization URL disables
-			    the action. The summary slot is taken by the token, so the reason goes
-			    below rather than nowhere. */}
-			{incomplete && token && (
-				<div className="border-t border-border px-3 py-2">
-					<p className="text-xs text-muted-foreground">
-						Enter the {listPhrase(missingFields)} to fetch a token
-					</p>
-				</div>
-			)}
-
-			{/* Full token disclosure - expands below, doesn't affect the row above */}
-			{revealed && token && (
-				<div className="border-t border-border px-3 py-2">
-					<code className="block break-all text-label leading-relaxed text-foreground select-all">
-						{token.accessToken}
-					</code>
-				</div>
-			)}
-		</div>
+				</>
+			}
+		/>
 	);
 }

@@ -111,6 +111,7 @@ export default function OAuth2Form({
 	onChange,
 	resolveString,
 	resolveKey,
+	deferredNames,
 	TextInput = PlainTextInput,
 	variables,
 }: OAuth2FormProps) {
@@ -441,7 +442,7 @@ export default function OAuth2Form({
 			</Collapsible>
 
 			<div className="pt-1">
-				<TokenStatusRow resolvedConfig={resolvedConfig} />
+				<TokenStatusRow resolvedConfig={resolvedConfig} deferredNames={deferredNames} />
 			</div>
 		</div>
 	);

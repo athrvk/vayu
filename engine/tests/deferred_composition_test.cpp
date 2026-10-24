@@ -694,3 +694,38 @@ TEST_F (DeferredCompositionTest, OAuth2ALoadRunAcquiresFromTheStoredValuesOrIsRe
     EXPECT_EQ (token_form_field (tokens, "client_secret"), "stored");
     EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
 }
+
+// The token is acquired once per run, not per iteration or per virtual user
+// (#2742): at plan time, from the stored values, before any script. A
+// `script.pre` that sets an OAuth variable has no effect under load, even when
+// it is inline and runs on every submission; `expires_in` is an hour, so the
+// mid-run refresh (#478) adds no hit. Mutation check: make
+// `compose_request_core` resolve a run's OAuth 2.0 config `AfterTheScript`
+// (`oauth2_resolution`), and the run is refused with the name still a template.
+// Dropping the refusal in `read_load_data_set` (`first_oauth2_scope_token`) is
+// held by the test above.
+TEST_F (DeferredCompositionTest, OAuth2ALoadRunAcquiresOncePerRunWhateverItsScriptSets) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "stored" }, { "scope", "read" } });
+    seed_request (echo.url (),
+    json::object (), "pm.environment.set('secret', 'new'); pm.request.headers['X-Script-Ran'] = 'yes';",
+    client_credentials (tokens));
+
+    json payload = as_single_iteration_run (compose_for_a_run ());
+    payload["requestElements"][0]["config"]["inline"] = true;
+    payload["iterations"]                             = 6;
+    payload["concurrency"]                            = 3;
+
+    const auto [status, body] = post ("/runs", payload);
+    ASSERT_EQ (status, 202) << body.dump ();
+    await_run (body.value ("runId", std::string ()));
+
+    const std::vector<std::string> six (6, "yes");
+    EXPECT_EQ (echo.header_per_request ("X-Script-Ran"), six)
+    << "the script must run on every submission for the test to mean anything";
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (token_form_field (tokens, "client_secret"), "stored");
+    EXPECT_EQ (echo.header_per_request ("Authorization"),
+    std::vector<std::string> (6, "Bearer AT1"));
+}

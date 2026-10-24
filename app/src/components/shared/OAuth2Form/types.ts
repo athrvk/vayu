@@ -35,6 +35,12 @@ export interface OAuth2FormProps {
 	 * the note above `stableConfigField` in `OAuth2Form.tsx`.
 	 */
 	resolveKey?: string;
+	/**
+	 * The names in `value` that a pre-request script may change (#2742), for the
+	 * token row, which then reports no token state - see `TokenStatusRow`. Only a
+	 * host that knows the request can ask the engine; the collection editor omits it.
+	 */
+	deferredNames?: readonly string[];
 	/** Variable-aware text input; falls back to a plain input when omitted. */
 	TextInput?: OAuth2TextInput;
 	/**

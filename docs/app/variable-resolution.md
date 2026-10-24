@@ -1066,7 +1066,27 @@ order, on the design run and under load (where the script is an `inline`
 `script.pre`), and so does a single-request load run that declares
 `requestElements`; under load a name nothing answers is sent as written rather
 than refused, as every residual token there is, and an OAuth 2.0 token is still
-acquired once, before any script.
+acquired once, before any script, from the stored values: a script that sets an
+OAuth 2.0 variable has no effect under load, and nothing is re-acquired per
+iteration (#2742).
+The load dialog says so: when `deferredVariables` names a variable the
+as-written OAuth 2.0 config uses (the request's own or an inherited one), an
+info notice states that the run's token is fetched once, before any script, from
+the stored values, and `OAuth2LoadTestGuard` words its verdict as being about
+that token. The cache key it looks up comes from the preview-resolved config, so
+a script that would have changed the key on a Send does not change it here.
+`deferredVariables` lists every name a scope answers whenever a pre-request
+script runs, not the names the script writes, so the copy says a script *may*
+change them. The token status row, which does key on the preview-resolved
+config, is the opposite case: a Send resolves after the script, so with such a
+name it reports no token state and says the token is fetched at send, after the
+script, while Get token and Clear stay live and act on the stored settings (an
+Authorization Code grant has no other place to sign in) - in the request's Auth
+tab and the context bar's Auth section, both from the as-written config
+(`useOAuth2DeferredNames`, #2742). The collection's own auth editor has no
+request to compose and keeps the ordinary row: a collection has no request to
+ask the engine about, and the renderer holds no rule of its own for which
+requests are scripted.
 
 The Code section of the request pane composes through the engine, so for a
 scripted request its Resolved mode shows the names left written, and says so

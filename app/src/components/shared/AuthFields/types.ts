@@ -36,4 +36,6 @@ export interface AuthFieldsProps {
 	resolveKey?: string;
 	/** Forwarded to `OAuth2Form` - see `variables` on `OAuth2FormProps`. */
 	variables?: VariableSupport;
+	/** Forwarded to `OAuth2Form` - see `deferredNames` on `OAuth2FormProps`. */
+	deferredNames?: readonly string[];
 }

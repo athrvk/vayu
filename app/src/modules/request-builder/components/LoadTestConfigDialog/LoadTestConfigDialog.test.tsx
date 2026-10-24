@@ -28,7 +28,7 @@ import {
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import LoadTestConfigDialog from "./index";
-import type { LoadTestConfig } from "@/types";
+import type { LoadTestConfig, OAuth2Config } from "@/types";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useClientSettingsStore, useDataFileStore } from "@/stores";
 import {
@@ -49,8 +49,11 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 	return renderBare(ui, { wrapper: TooltipProvider, ...options });
 }
 
+// The guard has its own suite; here it only reports what the dialog told it.
 vi.mock("../OAuth2LoadTestGuard", () => ({
-	default: () => null,
+	default: ({ scriptMayChangeSettings }: { scriptMayChangeSettings?: boolean }) => (
+		<span data-testid="oauth2-guard" data-script-may-change={String(scriptMayChangeSettings)} />
+	),
 }));
 
 /**
@@ -580,6 +583,59 @@ describe("stream caps (issue #576)", () => {
 		const config = started(onStart);
 		expect(config.stream_duration_seconds).toBeUndefined();
 		expect(config.stream_max_events).toBeUndefined();
+	});
+});
+
+describe("OAuth 2.0 token note (#2742)", () => {
+	const oauth2Config: OAuth2Config = {
+		grantType: "client_credentials",
+		accessTokenUrl: "https://auth.example.com/token",
+		clientId: "{{clientId}}",
+	};
+	const NOTE_TITLE = "OAuth 2.0 token is fetched before scripts";
+
+	it("names the name a script may change and says a script's changes do not apply under load", () => {
+		open({ oauth2Config, oauth2DeferredNames: ["clientId"] });
+
+		expect(screen.getByText(NOTE_TITLE)).toBeInTheDocument();
+		expect(
+			screen.getByText((text) =>
+				text.includes(
+					"{{clientId}} may be changed by a pre-request script, but a load run gets its token once, before any script, from the stored values. Script changes to OAuth 2.0 settings don't apply under load."
+				)
+			)
+		).toBeInTheDocument();
+	});
+
+	it("agrees with several names and tells the guard its verdict is about the stored values", () => {
+		open({ oauth2Config, oauth2DeferredNames: ["clientId", "scope"] });
+
+		expect(
+			screen.getByText((text) =>
+				text.includes("{{clientId}}, {{scope}} may be changed by a pre-request script")
+			)
+		).toBeInTheDocument();
+		expect(screen.getByTestId("oauth2-guard")).toHaveAttribute(
+			"data-script-may-change",
+			"true"
+		);
+	});
+
+	it("says nothing when no pre-request script may change an OAuth 2.0 name", () => {
+		open({ oauth2Config, oauth2DeferredNames: [] });
+
+		// The guard is on screen, so the absence is the note's, not the section's.
+		expect(screen.getByTestId("oauth2-guard")).toHaveAttribute(
+			"data-script-may-change",
+			"false"
+		);
+		expect(screen.queryByText(NOTE_TITLE)).toBeNull();
+	});
+
+	it("says nothing for a request whose effective auth is not OAuth 2.0", () => {
+		open({ oauth2DeferredNames: ["clientId"] });
+
+		expect(screen.queryByText(NOTE_TITLE)).toBeNull();
 	});
 });
 

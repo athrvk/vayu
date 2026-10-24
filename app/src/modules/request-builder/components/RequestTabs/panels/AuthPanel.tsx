@@ -27,6 +27,7 @@ import {
 } from "@/components/ui";
 import { AuthFields, Callout, type AuthTextInput } from "@/components/shared";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
+import { useOAuth2DeferredNames } from "../../../hooks/useOAuth2DeferredNames";
 import { AUTH_MODE_LABELS, EDITABLE_AUTH_MODES, uneditableAuthLabel } from "@/constants/auth-modes";
 import type { RequestAuth } from "@/types";
 import { useRequestBuilderContext } from "../../../context";
@@ -93,6 +94,11 @@ export default function AuthPanel() {
 	const variables = useVariableSupport();
 	const auth = request.auth;
 
+	const deferredNames = useOAuth2DeferredNames(
+		request.id ?? "",
+		auth.mode === "oauth2" ? auth.config : null
+	);
+
 	const handleModeChange = (mode: string) => {
 		updateField("auth", defaultsFor(mode as PickerMode));
 	};
@@ -153,6 +159,7 @@ export default function AuthPanel() {
 					TextInput={VariableTextInput}
 					resolveString={resolveString}
 					variables={variables}
+					deferredNames={deferredNames}
 					/*
 					 * Names the fields whose resolved values have to hold still
 					 * across this panel's unmount - Auth is not force-mounted, so

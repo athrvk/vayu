@@ -22,6 +22,11 @@
  * Which case applies is `isMidRunRefreshable`, whose docstring holds the exact
  * rule and how far it mirrors the engine's; see oauth2-load-test-coverage.ts.
  *
+ * A run fetches its token once, before any script, from the stored values
+ * (#2742), so that is the token judged here. Where a pre-request script may
+ * change a name the config uses, a Send could judge another token, so each
+ * verdict says which one it is about (`scriptMayChangeSettings`).
+ *
  * Reports whether the Start button should be gated via onGateChange.
  */
 
@@ -42,12 +47,17 @@ interface OAuth2LoadTestGuardProps {
 	/** Total test duration in seconds, or null when the test has no fixed
 	 *  duration (iterations mode) - in which case the guard is inert. */
 	durationSeconds: number | null;
+	/** A pre-request script may change a name in `config` (the dialog's deferred
+	 *  names are not empty): the verdicts then name the token as fetched before
+	 *  scripts. */
+	scriptMayChangeSettings?: boolean;
 	onGateChange: (gated: boolean) => void;
 }
 
 export default function OAuth2LoadTestGuard({
 	config,
 	durationSeconds,
+	scriptMayChangeSettings = false,
 	onGateChange,
 }: OAuth2LoadTestGuardProps) {
 	const showToast = useToastStore((s) => s.showToast);
@@ -112,14 +122,18 @@ export default function OAuth2LoadTestGuard({
 		);
 	};
 
+	// The sentence subject and the title lead-in for the token being judged.
+	const subject = scriptMayChangeSettings ? "The token fetched before scripts" : "Access token";
+	const tokenName = scriptMayChangeSettings ? "Token fetched before scripts" : "Token";
+
 	if (state.kind === "covered") {
 		return (
 			<Callout severity="info" positive>
 				{state.nonExpiring
-					? "Access token doesn't expire - it covers the whole run."
+					? `${subject} doesn't expire - it covers the whole run.`
 					: state.viaRefresh
-						? "Access token expires during the run - Vayu's engine refreshes it mid-run."
-						: "Access token covers the whole run."}
+						? `${subject} expires during the run - Vayu's engine refreshes it mid-run.`
+						: `${subject} covers the whole run.`}
 			</Callout>
 		);
 	}
@@ -128,7 +142,11 @@ export default function OAuth2LoadTestGuard({
 		return (
 			<Callout
 				severity="warning"
-				title="No token cached yet"
+				title={
+					scriptMayChangeSettings
+						? "No token cached for the stored settings"
+						: "No token cached yet"
+				}
 				action={
 					<Button
 						size="sm"
@@ -161,8 +179,8 @@ export default function OAuth2LoadTestGuard({
 			severity="blocking"
 			title={
 				isRefreshable
-					? "Token expires before the run ends"
-					: "Token is shorter than the run"
+					? `${tokenName} expires before the run ends`
+					: `${tokenName} is shorter than the run`
 			}
 			action={
 				<label className="flex items-center gap-2 text-label text-muted-foreground">
