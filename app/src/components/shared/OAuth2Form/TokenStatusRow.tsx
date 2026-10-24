@@ -17,6 +17,8 @@ import {
 	useClearOAuth2TokenMutation,
 } from "@/queries/oauth";
 import { queryKeys } from "@/queries/keys";
+import { deferredTokens } from "@/lib/deferred-note";
+import { pickByCount } from "@/modules/dashboard/utils/format";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
@@ -27,6 +29,15 @@ import type { OAuth2Config } from "@/types";
 interface TokenStatusRowProps {
 	/** The config with {{variables}} already resolved (used for the token request). */
 	resolvedConfig: OAuth2Config;
+	/**
+	 * The names in the as-written config that a pre-request script sets, from the
+	 * engine's `deferredVariables` (#2742). A Send resolves the config after the
+	 * script, so the token cached for `resolvedConfig` may not be the one it uses:
+	 * with any name here the row reports no token state and says why. Read by the
+	 * host, never here - three surfaces share this row and none of them gives it a
+	 * query client by contract. Memoise it.
+	 */
+	deferredNames?: readonly string[];
 }
 
 const TOKEN_ACTION_LABELS = ["Get token", "Renew", "Refresh"] as const;
@@ -57,7 +68,47 @@ function TokenExpiry({ expiresAt, expired }: { expiresAt: number | null; expired
 	);
 }
 
-export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) {
+export default function TokenStatusRow({ resolvedConfig, deferredNames }: TokenStatusRowProps) {
+	if (deferredNames && deferredNames.length > 0)
+		return <DeferredTokenRow names={deferredNames} />;
+	return <CachedTokenRow resolvedConfig={resolvedConfig} />;
+}
+
+/**
+ * The row for a config a pre-request script will change (#2742). It reads no
+ * cache entry and offers no fetch: whatever the stored values would cache is a
+ * token the Send does not use, and the row cannot know the one it does. The
+ * disabled action keeps the row's shape; the reason is the text, since a
+ * disabled button shows no tooltip.
+ */
+function DeferredTokenRow({ names }: { names: readonly string[] }) {
+	const tokens = deferredTokens(names);
+	const reason = pickByCount(names.length, {
+		one: `${tokens} is set by a pre-request script, so this request's token is fetched at send, after the script.`,
+		other: `${tokens} are set by a pre-request script, so this request's token is fetched at send, after the script.`,
+	});
+	return (
+		<div className="rounded-md border border-border bg-panel">
+			<div className="flex items-center gap-3 px-3 py-2">
+				<div className="flex items-center gap-2 min-w-0 flex-1">
+					<span
+						className="h-2 w-2 rounded-full shrink-0 bg-muted-foreground/40"
+						aria-hidden
+					/>
+					<span className="text-xs text-muted-foreground">{reason}</span>
+				</div>
+				<div className="flex items-center gap-1 shrink-0">
+					<Button size="sm" variant="outline" disabled>
+						<KeyRound className="size-icon-sm" />
+						Get token
+					</Button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
 	const [authorizing, setAuthorizing] = useState(false);

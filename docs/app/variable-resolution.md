@@ -1075,6 +1075,12 @@ info notice states that the run's token is fetched once, before any script, from
 the stored values, and `OAuth2LoadTestGuard` words its verdict as being about
 that token. The cache key it looks up comes from the preview-resolved config, so
 a script that would have changed the key on a Send does not change it here.
+The token status row, which does key on the preview-resolved config, is the
+opposite case: a Send resolves after the script, so with such a name it reports
+no token state and says the token is fetched at send, after the script - in the
+request's Auth tab and the context bar's Auth section, both from the as-written
+config (#2742). The collection's own auth editor has no request to compose and
+keeps the ordinary row.
 
 The Code section of the request pane composes through the engine, so for a
 scripted request its Resolved mode shows the names left written, and says so

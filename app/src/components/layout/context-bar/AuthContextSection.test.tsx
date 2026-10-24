@@ -39,9 +39,26 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveObject: <T,>(o: T) => o }),
 }));
 
+// The engine's answer to "which names does a pre-request script set", and what the
+// section asked for it with: the real hook needs a query client and a /compose.
+let engineDeferred: readonly string[] = [];
+const useDeferredVariables = vi.fn((_requestId: string, _enabled: boolean) => engineDeferred);
+vi.mock("./code-composition", () => ({
+	useDeferredVariables: (requestId: string, enabled: boolean) =>
+		useDeferredVariables(requestId, enabled),
+}));
+
 vi.mock("@/components/shared/OAuth2Form", () => ({
-	TokenStatusRow: ({ resolvedConfig }: { resolvedConfig: { clientId: string } }) => (
-		<div data-testid="token-status">{resolvedConfig.clientId}</div>
+	TokenStatusRow: ({
+		resolvedConfig,
+		deferredNames,
+	}: {
+		resolvedConfig: { clientId: string };
+		deferredNames?: readonly string[];
+	}) => (
+		<div data-testid="token-status" data-deferred={(deferredNames ?? []).join(",")}>
+			{resolvedConfig.clientId}
+		</div>
 	),
 }));
 
@@ -57,6 +74,12 @@ const collection = (id: string, auth: Collection["auth"]): Collection => ({
 	updatedAt: "",
 });
 
+const oauth2Config = (clientId: string) => ({
+	grantType: "client_credentials" as const,
+	accessTokenUrl: "https://t",
+	clientId,
+});
+
 const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
 
 const renderSection = () => render(<AuthContextSection tab={TAB} />);
@@ -64,6 +87,8 @@ const renderSection = () => render(<AuthContextSection tab={TAB} />);
 beforeEach(() => {
 	requestAuth = { mode: "inherit" };
 	ancestors = [];
+	engineDeferred = [];
+	useDeferredVariables.mockClear();
 });
 
 describe("AuthContextSection", () => {
@@ -154,5 +179,56 @@ describe("AuthContextSection", () => {
 		requestAuth = { mode: "basic", username: "u", password: "p" };
 		renderSection();
 		expect(screen.queryByTestId("token-status")).not.toBeInTheDocument();
+	});
+});
+
+describe("AuthContextSection's token row when a pre-request script sets a name (#2742)", () => {
+	const oauth2 = (clientId: string): RequestAuth => ({
+		mode: "oauth2",
+		config: {
+			grantType: "client_credentials",
+			accessTokenUrl: "https://t",
+			clientId,
+		},
+	});
+	const deferredOnRow = () => screen.getByTestId("token-status").getAttribute("data-deferred");
+
+	it("hands the row the script-set names the as-written config uses", () => {
+		requestAuth = oauth2("{{clientId}}");
+		engineDeferred = ["clientId", "unrelated"];
+		renderSection();
+
+		// "unrelated" is the request's, not this config's: the engine lists every
+		// name the whole request defers.
+		expect(deferredOnRow()).toBe("clientId");
+	});
+
+	it("reads the names off an inherited config, not only the request's own", () => {
+		ancestors = [collection("root", { mode: "oauth2", config: oauth2Config("{{clientId}}") })];
+		engineDeferred = ["clientId"];
+		renderSection();
+
+		expect(deferredOnRow()).toBe("clientId");
+	});
+
+	it("hands the row nothing when the script's name is not in the OAuth 2.0 config", () => {
+		requestAuth = oauth2("{{clientId}}");
+		engineDeferred = ["traceId"];
+		renderSection();
+
+		expect(deferredOnRow()).toBe("");
+	});
+
+	it("asks the engine only while the config holds a variable token", () => {
+		requestAuth = oauth2("{{clientId}}");
+		const { unmount } = renderSection();
+		expect(useDeferredVariables).toHaveBeenLastCalledWith("req_1", true);
+		unmount();
+
+		requestAuth = oauth2("cid");
+		engineDeferred = ["clientId"];
+		renderSection();
+		expect(useDeferredVariables).toHaveBeenLastCalledWith("req_1", false);
+		expect(deferredOnRow()).toBe("");
 	});
 });

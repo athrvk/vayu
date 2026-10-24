@@ -68,12 +68,12 @@ function config(overrides: Partial<OAuth2Config> = {}): OAuth2Config {
 	};
 }
 
-function renderRow(cfg: OAuth2Config) {
+function renderRow(cfg: OAuth2Config, deferredNames?: readonly string[]) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
-				<TokenStatusRow resolvedConfig={cfg} />
+				<TokenStatusRow resolvedConfig={cfg} deferredNames={deferredNames} />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -302,5 +302,65 @@ describe("TokenStatusRow with a complete config", () => {
 
 		await waitFor(() => expect(showToast).toHaveBeenCalled());
 		expect(mockNotifyPost).not.toHaveBeenCalled();
+	});
+});
+
+describe("TokenStatusRow when a pre-request script sets a name in the config (#2742)", () => {
+	const complete = config({
+		accessTokenUrl: "https://idp.example.com/token",
+		clientId: "abc",
+	});
+	const cached = {
+		found: true,
+		expired: false,
+		token: { accessToken: "ya29.abcdefghijkl", expiresAt: null },
+	};
+
+	it("says the token is fetched at send and names the script-set variable", () => {
+		renderRow(complete, ["clientId"]);
+
+		expect(
+			screen.getByText(
+				"{{clientId}} is set by a pre-request script, so this request's token is fetched at send, after the script."
+			)
+		).toBeInTheDocument();
+	});
+
+	it("agrees with several names", () => {
+		renderRow(complete, ["clientId", "scope"]);
+
+		expect(
+			screen.getByText((text) =>
+				text.startsWith("{{clientId}}, {{scope}} are set by a pre-request script")
+			)
+		).toBeInTheDocument();
+	});
+
+	it("reports no token state for the stored values, cached or not", () => {
+		statusQuery.data = cached;
+		renderRow(complete, ["clientId"]);
+
+		expect(screen.queryByText("ya29…ijkl")).not.toBeInTheDocument();
+		expect(screen.queryByText(/expire/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/No token cached/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Clear cached token" })).toBeNull();
+		expect(screen.queryByRole("button", { name: /show full token/i })).toBeNull();
+	});
+
+	it("offers no fetch for a token the Send would not use", () => {
+		renderRow(complete, ["clientId"]);
+
+		expect(getTokenButton()).toBeDisabled();
+		fireEvent.click(getTokenButton());
+		expect(fetchMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("is the ordinary row for an empty list", () => {
+		statusQuery.data = cached;
+		renderRow(complete, []);
+
+		expect(screen.getByText("ya29…ijkl")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /renew/i })).toBeEnabled();
+		expect(screen.queryByText(/pre-request script/)).not.toBeInTheDocument();
 	});
 });
