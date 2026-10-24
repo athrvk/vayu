@@ -39,6 +39,7 @@ import {
 	TabBreadcrumb,
 	TruncatedText,
 	reportOutcome,
+	testValidationTitleOf,
 } from "@/components/shared";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
@@ -423,6 +424,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 										virtualUsers={report.scenario?.virtualUsers}
 										iterationsCompleted={report.scenario?.iterationsCompleted}
 										iterationsAbandoned={report.scenario?.iterationsAbandoned}
+										replayCard={testValidationTitleOf(report)}
 									/>
 								</TabsContent>
 							)}

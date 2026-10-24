@@ -290,6 +290,9 @@ ordered scenario_transaction (const json& transaction) {
 
 ordered scenario_section (const json& scenario) {
     ordered out = pick (scenario, SCENARIO_KEYS);
+    if (const json& assertions = member (scenario, "assertions"); assertions.is_object ()) {
+        out["assertions"] = pick (assertions, ASSERTION_POPULATION_KEYS);
+    }
     if (const json& steps = member (scenario, "steps"); steps.is_array ()) {
         ordered picked = ordered::array ();
         for (const json& step : steps) {
@@ -600,11 +603,19 @@ ordered run_section (const RunExportRun& run) {
 
 // --- verdict -------------------------------------------------------------------
 
+/// Whether the scenario's exact assertion population (#2820) counts a failure.
+bool any_assertion_failed (const json& report) {
+    const json& failed =
+    member (member (member (report, "scenario"), "assertions"), "failed");
+    return failed.is_number () && failed.get<double> () > 0;
+}
+
 /**
  * `{state, stoppedEarly, reason}`, the app's `judgeRun` (`run-outcome.ts`)
  * over the same report fields, so a file and the screen it came from agree:
  * a stopped run is not judged; a failed run, or a missed budget, fails; met
- * budgets pass only when no request errored; no budgets is not judged.
+ * budgets pass only when no request errored and no exact assertion failed
+ * (#2820); no budgets is not judged.
  */
 ordered verdict_section (const json& report, std::string_view status) {
     const bool stopped = status == "stopped";
@@ -631,8 +642,12 @@ ordered verdict_section (const json& report, std::string_view status) {
     const json& rate      = member (summary, "errorRate");
     const bool any_errors = total.is_number () && total.get<double> () > 0 &&
     rate.is_number () && rate.get<double> () > 0;
-    return any_errors ? verdict ("not_judged", "budgets_met_with_errors") :
-                        verdict ("passed", "budgets_met");
+    if (any_errors) {
+        return verdict ("not_judged", "budgets_met_with_errors");
+    }
+    return any_assertion_failed (report) ?
+    verdict ("not_judged", "budgets_met_with_assertion_failures") :
+    verdict ("passed", "budgets_met");
 }
 
 // --- time series -----------------------------------------------------------------

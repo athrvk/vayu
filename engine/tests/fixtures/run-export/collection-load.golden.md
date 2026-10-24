@@ -2,7 +2,7 @@
 
 `Vayu run "Checkout flow" (run_c91d04) - load test, collection "Checkout flow", 2026-10-05T08:10:00Z, completed`
 
-**Not judged** - 1 of 1 budget met, but 0.4% of requests errored
+**Not judged** - 1 of 1 budget met, but 0.4% of requests errored, 68 assertions failed
 
 ## Run
 

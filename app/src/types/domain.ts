@@ -1937,6 +1937,20 @@ export interface LoadResultSummary {
 	/** Percent, 0-100, by the one error definition (`docs/ux-writing.md`). */
 	errorRate?: number;
 	verdict?: "passed" | "failed";
+	/**
+	 * Exact assertion outcomes of a **scenario load run** that made at least one
+	 * (#2820): `assert.*` outcomes, required `extract.*` misses and inline
+	 * `pm.test` calls. Both keys are present or neither is, and neither is ever
+	 * zeroed: absent for a run that asserted nothing, a collection run, a
+	 * single-request run and a run stored before the field.
+	 *
+	 * `assertionsFailed` is what a row's verdict and subtitle read (`rowOutcome`,
+	 * `resultSubtitle`); `errorRate` and `verdict` stay HTTP-and-budget only.
+	 * `assertionsPassed` has no renderer reader - the MCP `list_runs` row, which
+	 * passes the summary through, is its consumer.
+	 */
+	assertionsPassed?: number;
+	assertionsFailed?: number;
 }
 
 /** The `{data, pagination}` envelope the paginated `GET /runs` returns. */
@@ -3346,6 +3360,19 @@ export interface RunReport {
 		skipped: number;
 		/** On a load run: step executions that got no response (the steps' `noResponse`). */
 		errored: number;
+		/**
+		 * A scenario *load* run's exact assertion population (#2820): every
+		 * `assert.*` outcome, required `extract.*` miss and inline `pm.test` call,
+		 * counted on each completion. Not folded into `passed`, `failed` or the
+		 * report's error rate, which stay HTTP-only, so a run whose every assertion
+		 * failed against `200`s reads a 0% error rate and a non-zero
+		 * `assertions.failed`. The sampled replay of an un-inlined script is
+		 * `testValidation`, a different population.
+		 *
+		 * Absent, never `{0, 0}`, for a run that made none, a collection run and a
+		 * report stored before the field. Read it through `exactAssertionsOf`.
+		 */
+		assertions?: { passed: number; failed: number };
 		/** Step rows the run kept - the length `results[]` should have. */
 		stepsStored: number;
 		stepsDropped: number;

@@ -22,6 +22,7 @@ import {
 	ContractCoverage,
 	CustomMetricsSummary,
 	ErrorSummary,
+	ExactAssertionsSummary,
 	type ErrorRowTarget,
 	RequestElementsSummary,
 	RunWarnings,
@@ -30,7 +31,9 @@ import {
 	TestValidationSummary,
 	ThresholdVerdict,
 	TransactionsSummary,
+	exactAssertionsOf,
 	stoppedRunOf,
+	testValidationTitleOf,
 	CancelledRequestsNote,
 } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
@@ -147,6 +150,12 @@ export default function OverviewTab({
 			    there. */}
 			<RequestElementsSummary elements={report.elements} />
 
+			{/* A scenario load run's assertions counted on every response
+			    (#2820), ahead of the sampled replay below: it is the exact
+			    figure, and the HTTP numbers above cannot say it. Absent for a
+			    run that made none, which then keeps the card below as it was. */}
+			<ExactAssertionsSummary assertions={exactAssertionsOf(report)} />
+
 			{/* Whether the run's own assertions passed, and which failed. The
 			    schema block above judges the response against a contract; this
 			    judges it against the run's pm.test scripts - the same distinction
@@ -158,6 +167,7 @@ export default function OverviewTab({
 				failures={testFailures?.messages}
 				failuresTotal={testFailures?.total}
 				totalRequests={report.summary.totalRequests}
+				title={testValidationTitleOf(report)}
 			/>
 
 			{/* When the run went wrong, in words. Above the status/error totals

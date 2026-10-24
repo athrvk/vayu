@@ -536,7 +536,12 @@ TEST_F (RunExportTest, RefusesAMalformedBody) {
 
 // --- the builder, without a database -----------------------------------------
 
-RunExportRun judged_run (const std::string& status, const json& thresholds, double error_rate) {
+/// @p assertions is the scenario's exact population (`{passed, failed}`); null
+/// leaves the report without a `scenario` section, as a single-request run has.
+RunExportRun judged_run (const std::string& status,
+const json& thresholds,
+double error_rate,
+const json& assertions = json ()) {
     RunExportRun run;
     run.id     = "run_v";
     run.status = status;
@@ -544,6 +549,9 @@ RunExportRun judged_run (const std::string& status, const json& thresholds, doub
     json{ { "summary", { { "totalRequests", 10 }, { "errorRate", error_rate } } } };
     if (!thresholds.is_null ()) {
         run.report["thresholdValidation"] = thresholds;
+    }
+    if (!assertions.is_null ()) {
+        run.report["scenario"] = { { "assertions", assertions } };
     }
     return run;
 }
@@ -583,6 +591,41 @@ TEST (RunExportBuilder, VerdictFollowsTheBudgetsAndTheStatus) {
         EXPECT_EQ (verdict["state"], c.state) << c.status << " " << c.reason;
         EXPECT_EQ (verdict["reason"], c.reason) << c.status;
         EXPECT_EQ (verdict["stoppedEarly"], c.status == "stopped");
+    }
+}
+
+/// A failed exact assertion keeps met budgets from reading `passed`, as
+/// `judgeRun` does (#2820). Mutation check: drop `any_assertion_failed` from
+/// `verdict_section` and the first two rows answer `passed`/`budgets_met`.
+TEST (RunExportBuilder, FailedAssertionsKeepMetBudgetsFromPassing) {
+    const json met = { { "checks", json::array ({ { { "metric", "latencyP99Ms" } } }) },
+        { "passed", 1 }, { "failed", 0 }, { "verdict", "passed" } };
+    const json some_failed = { { "passed", 8352 }, { "failed", 68 } };
+    const json none_failed = { { "passed", 8420 }, { "failed", 0 } };
+    struct Case {
+        std::string status;
+        json thresholds;
+        double error_rate;
+        json assertions;
+        std::string state;
+        std::string reason;
+    };
+    const auto cases = std::to_array<Case> ({
+    { "completed", met, 0.0, some_failed, "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.0, json{ { "passed", 0 }, { "failed", 4580 } },
+    "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.4, some_failed, "not_judged", "budgets_met_with_errors" },
+    { "completed", met, 0.0, none_failed, "passed", "budgets_met" },
+    { "completed", met, 0.0, json (), "passed", "budgets_met" },
+    { "completed", met, 0.0, json::object (), "passed", "budgets_met" },
+    { "completed", json (), 0.0, some_failed, "not_judged", "no_budgets" },
+    { "stopped", met, 0.0, some_failed, "not_judged", "stopped" },
+    });
+    for (const Case& c : cases) {
+        const json verdict =
+        verdict_of (judged_run (c.status, c.thresholds, c.error_rate, c.assertions));
+        EXPECT_EQ (verdict["state"], c.state) << c.reason << " " << c.assertions;
+        EXPECT_EQ (verdict["reason"], c.reason) << c.assertions;
     }
 }
 
