@@ -20,7 +20,7 @@ export function pctToX(pct: number): number {
 export function xToPctLabel(x: number): string {
 	const span = Math.log10(1 / (1 - 99.99 / 100));
 	const pct = 100 * (1 - Math.pow(10, -Math.min(1, Math.max(0, x)) * span));
-	return `${Number(pct.toFixed(2))}%`;
+	return `${Math.round(pct * 100) / 100}%`;
 }
 
 interface HdrMarkerSpec {
