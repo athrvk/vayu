@@ -2011,7 +2011,7 @@ void add_tick (Database& db, const std::string& run_id, size_t completed, double
     sample.current_send_rate    = 998.0;
     sample.window_avg_in_flight = 7.0;
     sample.current_concurrency  = 9;
-    sample.send_rate        = static_cast<double> (completed) / elapsed + 1.0;
+    sample.send_rate        = (static_cast<double> (completed) / elapsed) + 1.0;
     sample.throughput       = static_cast<double> (completed) / elapsed;
     sample.dropped_requests = 4;
     sample.bytes_sent       = completed * 100;
