@@ -1404,8 +1404,12 @@ TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOther
 // the only place that defaults it.
 TEST (RunReportConfigTest, CarriesExpectContinueWhenSnapshotHasItAndOmitsItOtherwise) {
     const auto snapshot = [] (const char* flag) {
-        return json::parse (
-        std::string (R"({"mode":"once","defaultHeaders":{"expectContinue":)") + flag + "}}");
+        // Appends, not an operator+ chain: gcc 13 -O3 reports the chain's
+        // inlined memcpy as -Warray-bounds.
+        std::string text = R"({"mode":"once","defaultHeaders":{"expectContinue":)";
+        text += flag;
+        text += "}}";
+        return json::parse (text);
     };
 
     EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("true"))["expectContinue"],
