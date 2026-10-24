@@ -2583,6 +2583,23 @@ TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
     EXPECT_GT (state->steps_executed.load (), 0u);
 }
 
+// #2913: the scenario controller shares the ramp, so a ramp as long as the run
+// reaches its last virtual user at the end rather than stopping one short.
+// Mutation check: return `target` only from `ramp_ms` on in
+// `ramp_target_concurrency` and the peak never passes 7.
+TEST_F (ScenarioLoadTest, ARampAsLongAsTheRunPeaksAtTheConfiguredUserCount) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/slow") });
+
+    const size_t VUS  = 8;
+    const json config = { { "mode", "ramp_up" }, { "duration", "1s" },
+        { "rampUpDuration", "1s" }, { "startConcurrency", 1 }, { "concurrency", VUS } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (state->vus.size (), VUS);
+    EXPECT_EQ (context_->peak_in_flight.load (), VUS);
+}
+
 // #2821: a virtual user in a think wait has nothing on the wire, so the run's
 // mean in flight is its share of time spent sending: two 20 ms steps around a
 // 200 ms think is about 0.17 of each user, under 2 of 10 here, and 10 if the

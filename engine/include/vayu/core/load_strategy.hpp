@@ -131,7 +131,8 @@ const LoadDataSet* data);
 /**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the
  * in-flight deficit toward target(t) - woken per completion via refill_cv with
- * a 50ms safety-net timeout (drives ramp growth + bounds stop latency).
+ * a `CONTROLLER_TICK_MS` safety-net timeout (drives ramp growth + bounds stop
+ * latency).
  *
  * Shared by the single-request strategies and the scenario load executor, which
  * differ only in what @p submit_one submits: "another copy of the one request"

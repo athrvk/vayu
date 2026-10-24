@@ -1074,14 +1074,15 @@ const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn) {
         {
             std::unique_lock<std::mutex> lk (context->refill_mtx);
             if (defer_wait_ms) {
-                const auto bound =
-                std::chrono::milliseconds (std::min<int64_t> (50, *defer_wait_ms));
+                const auto bound = std::chrono::milliseconds (
+                std::min (CONTROLLER_TICK_MS, *defer_wait_ms));
                 context->refill_cv.wait_for (lk, bound, [&] () {
                     return context->should_stop.load () ||
                     context->in_flight () != in_flight_before;
                 });
             } else {
-                context->refill_cv.wait_for (lk, std::chrono::milliseconds (50), [&] () {
+                context->refill_cv.wait_for (
+                lk, std::chrono::milliseconds (CONTROLLER_TICK_MS), [&] () {
                     return context->should_stop.load () ||
                     context->in_flight () < target_fn (elapsed_ms ());
                 });

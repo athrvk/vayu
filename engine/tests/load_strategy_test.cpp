@@ -199,6 +199,43 @@ TEST_F (LoadStrategyTest, RampUpTracksTargetWithoutOvershoot) {
     EXPECT_GE (context->peak_in_flight.load (), TARGET - 5);
 }
 
+// #2913: a run as long as its ramp stops before the controller wakes at or past
+// the ramp's end, and so peaked one short of the configured count. The 500ms
+// endpoint keeps completions, and so controller wakes, arriving well inside one
+// tick of each other near the end, where the target is owed. Mutation check:
+// return `target` only from `ramp_ms` on in `ramp_target_concurrency` and the
+// peak never passes 49.
+TEST_F (LoadStrategyTest, ARampAsLongAsTheRunPeaksAtTheConfiguredCount) {
+    const size_t TARGET   = 50;
+    nlohmann::json config = {
+        { "mode", "ramp_up" },
+        { "duration", "2s" },
+        { "rampUpDuration", "2s" },
+        { "startConcurrency", 1 },
+        { "concurrency", TARGET },
+    };
+
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ramp-equal", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    ASSERT_NE (strategy, nullptr);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->peak_in_flight.load (), TARGET);
+}
+
 // Behavior-change check: duration < ramp runs a partial ramp for the full
 // duration and submits requests (old open-loop code finished instantly with 0).
 TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
