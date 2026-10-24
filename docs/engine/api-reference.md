@@ -9496,9 +9496,12 @@ So `totalRequests` is the requests that got an outcome,
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
 cancellation is exempt. When a run reaches its natural end, a request still in
 flight after its effective timeout (the run's `timeout`, else the
-`defaultTimeout` setting) plus a 2s grace is cancelled too, and that one
-never answered: it stays an error, under status code `0`, and its stored error
-record carries `error_type` `cancelled` (`errors.types` in the report).
+`defaultTimeout` setting) plus a 2s grace is cancelled too, except in a
+streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
+stream backstop plus the same 2s, issue #2834), so a stream still within its
+cap is never cut. A non-stream request cancelled there never answered: it stays
+an error, under status code `0`, and its stored error record carries
+`error_type` `cancelled` (`errors.types` in the report).
 
 A request libcurl **re-sent on a new connection** is not an error either
 (issue #2799). When the server drops or refuses a kept-alive connection after
@@ -9535,8 +9538,8 @@ with the percentiles and the max. It is not divided by `totalRequests`.
 Left out, because they have no duration to report:
 
 - a request a Stop cancelled (`cancelled`), and a request cancelled at a run's
-  natural end after its effective timeout plus the grace, which is an error with no
-  duration;
+  natural end after its effective timeout plus the grace (a streaming run's
+  `maxStreamDurationMs` plus grace), which is an error with no duration;
 - a request refused before the wire: one dropped at the `maxInFlight` cap
   (`droppedRequests`), an invalid URL or an unsendable header, a residual
   `{{token}}` or file-rule refusal, a data-binding failure. An invalid URL
@@ -10504,7 +10507,9 @@ request the run sent is in exactly one of `totalRequests` and `cancelled`.
 
 A run that ends **naturally** still lets its in-flight requests finish, but only
 up to its effective timeout (its own `timeout`, else the `defaultTimeout`
-setting) plus a 2s grace; anything still outstanding then is
+setting) plus a 2s grace, except a streaming run, whose bound is its
+`maxStreamDurationMs` plus grace (the 5s stream backstop plus the same 2s,
+issue #2834); anything still outstanding then is
 cancelled the same way - and, because nobody asked for that one to stop, it is
 an error with no response, not a cancellation. Without that bound an upstream
 that never answers would hold the run in `running` indefinitely.
@@ -10866,7 +10871,8 @@ named it.
 instant of the first submission - to the last request settling, so it includes
 the end-of-run drain, in which requests still in flight at the deadline are let
 answer (up to the run's effective timeout, its `timeout` or else the
-`defaultTimeout` setting, plus a grace). `avgRps` and `throughput` are
+`defaultTimeout` setting, plus a grace, except a streaming run, whose bound is
+its `maxStreamDurationMs` plus grace). `avgRps` and `throughput` are
 completed requests over that wall time: they describe what the target served,
 and a run whose requests outlive its deadline reads below its target there by
 design. `sendRate` and `rateControl` describe what the generator sent, and

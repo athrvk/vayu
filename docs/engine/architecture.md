@@ -371,7 +371,10 @@ Manages the lifecycle of load test runs:
 - **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
   backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
   reaches the end of its duration waits for genuine in-flight requests, but no longer than
-  `timeout` + 2s. A request the drain deadline cancels is recorded as an error; one a user stop
+  `timeout` + 2s. A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
+  stream's duration cap (`maxStreamDurationMs`) plus the 5s backstop grace plus 2s
+  (`natural_end_drain_ms`, issue #2834), so the drain never cuts a healthy stream short of its
+  cap. A request the drain deadline cancels is recorded as an error; one a user stop
   cancels is not (issue #2136) - it is counted apart, as `cancelled`, outside the run's total and
   its error count, so `requests_sent` is always the total plus the cancelled count.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
