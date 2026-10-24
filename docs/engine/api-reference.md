@@ -10102,6 +10102,18 @@ no frame.
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
 
+**Read order within one tick.** The metrics thread snapshots the status-code
+distribution first, then `get_current_stats()` reads the completed count
+(`totalRequests`) afterwards, and the stored row's `requests_completed` is read
+after the same snapshot. So `totalErrors`, `errorRate` and the `status*` keys
+all come from the earlier snapshot and `totalRequests`, `totalSuccess` and
+`throughput` from the later read. A completion landing between the two makes
+`status2xx + status3xx` up to one tick of completions lower than `totalSuccess`,
+and a client's `totalErrors / totalRequests` marginally lower than the frame's
+`errorRate`. The skew is invisible at the default 1 Hz cadence, and the order is
+the safe one: `errorRate` divides by the snapshot's own total, so no rate
+exceeds 100 percent.
+
 Each `metrics` event carries an `id:` equal to its zero-based offset. The
 browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
