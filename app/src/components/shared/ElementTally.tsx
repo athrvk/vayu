@@ -12,11 +12,11 @@
  *
  * **A `deferred` element is not a skipped one.** A post-request script is not
  * run inline on the load path; the engine replays it against the sampled
- * responses afterwards and reports that in the Test validation card (retitled Sampled replay beside an
- * exact Assertions card, #2820). Its
- * `passed`/`failed` are therefore zero by construction, and "0 passed" would
- * read as a script that did nothing. `deferred` is absent from a report
- * stored before #2144, which keeps the older rendering.
+ * responses afterwards and reports that in the Test validation card (retitled
+ * Sampled replay beside an exact Assertions card, #2820). Its `passed`/`failed`
+ * are therefore zero by construction, and "0 passed" would read as a script
+ * that did nothing. `deferred` is absent from a report stored before #2144,
+ * which keeps the older rendering.
  */
 
 import { formatNumber } from "@/lib/format-number";
