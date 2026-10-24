@@ -11213,7 +11213,9 @@ describe("run status reads (#2436)", () => {
 			const done = await getRun(runRow({ status: "completed", endTime: START + 1 }));
 			expect(done.nextStep).toBe("read get_run_report(runId)");
 			const failed = await getRun(runRow({ status: "failed", endTime: START + 1 }));
-			expect(failed.nextStep).toMatch(/numbers recorded before the failure/);
+			expect(failed.nextStep).toMatch(/what was recorded before the failure/);
+			// A failed run's counts may be absent altogether (#2895): the pointer names the flags.
+			expect(failed.nextStep).toMatch(/summary\.summaryMissing or summary\.partial/);
 			const stopped = await getRun(runRow({ status: "stopped", endTime: START + 1 }));
 			expect(stopped.nextStep).toMatch(/partial numbers.*no verdict/);
 		});
@@ -11445,6 +11447,32 @@ describe("run status reads (#2436)", () => {
 				/^Get the report for a run; a run still in progress returns a partial report marked `partial: true`/
 			);
 			expect(description).toContain("metadata.status");
+		});
+
+		test("the description names the summary flags and keeps them apart from the top-level partial (#2895)", () => {
+			const description = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
+			expect(description).toContain("`summary.partial: true`");
+			expect(description).toContain("`summary.summaryMissing: true`");
+			expect(description).toMatch(/neither is the top-level `partial`/);
+			expect(description).toMatch(/absent otherwise, never false/);
+		});
+
+		test("a report's summary flags reach the agent and satisfy the output schema", async () => {
+			const flagged = {
+				metadata: { runId: "run_1", runType: "load", status: "failed" },
+				summary: { totalRequests: 0, summaryMissing: true },
+				results: [],
+			};
+			const client = fakeClient({ getRunReport: vi.fn().mockResolvedValue(flagged) });
+			const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+			expect(res.isError).toBeFalsy();
+			const schema = TOOLS.find((t) => t.name === "get_run_report")!.outputSchema!;
+			expect(schema.safeParse(res.structuredContent).success).toBe(true);
+			// Named in the schema, so a non-boolean is a contract break and not a pass-through.
+			expect(schema.safeParse({ summary: { partial: "yes" } }).success).toBe(false);
+			expect(res.structuredContent).toMatchObject({ summary: { summaryMissing: true } });
+			// Not the top-level marker of an unfinished run.
+			expect(res.structuredContent).not.toHaveProperty("partial");
 		});
 	});
 

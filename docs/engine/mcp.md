@@ -278,7 +278,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first, as one JSON document also returned as `structuredContent` (`pagination.nextOffset` is the offset to read next, null on the last page, and `pagination.note` says so in words); 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` uses the same failure definition as the report's `summary.errorRate`, over the stored status-code distribution, and is omitted when none is stored); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
-| `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
+| `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); a failed load run the engine could not fully record carries `summary.partial: true` (the last saved tick's counts, zero latency) or `summary.summaryMissing: true` (no summary: every count is 0), both absent otherwise and unrelated to the top-level key (#2895); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max, with `pagination.nextOffset` / `note` as `list_runs`; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000; `pagination.nextOffset` / `note` as `list_runs`; a tick's `status_seconds` (#2866) is passed through as the engine stored it - the responses that completed in the seconds the tick closed, by class, `[]` for a tick that closed none, absent on a tick stored before it |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
@@ -510,6 +510,17 @@ Notes:
   run, so the key's presence is the whole signal. `get_run` is the cheap read for
   "is it done": `terminal` comes from the status, never from `endTime`, because
   the engine seeds `endTime` to `startTime` on a row that has not finished.
+  A failed load run the engine could not fully record is a different statement,
+  made inside `summary` and not to be read as the top-level `partial` (#2895):
+  `summary.partial: true` is a run reconciled after an engine crash, whose counts,
+  `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last saved
+  tick's (a floor under the real totals) while `latency` is all zeros and
+  `peakConcurrency` and `avgQueueWaitMs` are 0, none recorded;
+  `summary.summaryMissing: true` is a failed run with no summary at all (a crash
+  before the first tick, or a worker failure), whose every count is a 0 that was
+  never measured. Both are absent otherwise, never false; the tool description
+  and `outputSchema` name them, and a failed run's `get_run` `nextStep` points
+  at them. The app draws the same two reports as a notice and "not recorded".
   `progress` is `elapsedMs / plannedDurationMs` clamped to 0..1 for a run whose
   stored `duration` parses and whose mode is not `iterations`, and null otherwise
   rather than a guess. The poll interval in its `nextStep`, and in the
