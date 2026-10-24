@@ -199,18 +199,18 @@ export function stackStatusPoints(points: StatusPoint[]): StatusStack {
 }
 
 /**
- * Latest instantaneous receive throughput in MB/s, derived by diffing the last
- * two cumulative `bytes_received` samples (mirrors how currentRps is derived).
- * Returns 0 when there aren't two samples or no byte data.
+ * Latest instantaneous receive rate in bytes per second, derived by diffing the
+ * last two cumulative `bytes_received` samples (mirrors how currentRps is
+ * derived). Returns 0 when there aren't two samples or no byte data.
  */
-export function latestThroughputMbps(history: LoadTestMetrics[]): number {
+export function latestReceiveBytesPerSecond(history: LoadTestMetrics[]): number {
 	if (history.length < 2) return 0;
 	const a = history[history.length - 2];
 	const b = history[history.length - 1];
 	const dBytes = (b.bytes_received ?? 0) - (a.bytes_received ?? 0);
 	const dt = b.elapsed_seconds - a.elapsed_seconds;
 	if (dt <= 0 || dBytes <= 0) return 0;
-	return dBytes / dt / 1e6;
+	return dBytes / dt;
 }
 
 export interface LatencyPoint {

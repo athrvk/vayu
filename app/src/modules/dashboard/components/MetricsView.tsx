@@ -43,7 +43,7 @@ import {
 	hasPercentileSignal,
 	hasStatusSeries,
 	hasCustomMetrics,
-	latestThroughputMbps,
+	latestReceiveBytesPerSecond,
 	spansMultipleBuckets,
 	hasWindowLatency,
 } from "../utils/metricsTransforms";
@@ -123,8 +123,8 @@ function MetricsView({
 	// cadence is whatever the script chose to record at, not the engine's.
 	const hasCustomMetricsData = useMemo(() => chartWindow.some(hasCustomMetrics), [chartWindow]);
 	const liveReceiveRate = useMemo(() => {
-		const mbps = latestThroughputMbps(chartWindow);
-		return mbps > 0 ? formatByteRateParts(mbps * 1e6) : null;
+		const bytesPerSecond = latestReceiveBytesPerSecond(chartWindow);
+		return bytesPerSecond > 0 ? formatByteRateParts(bytesPerSecond) : null;
 	}, [chartWindow]);
 
 	const rampOverlay = useMemo(

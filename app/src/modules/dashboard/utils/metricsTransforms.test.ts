@@ -15,7 +15,7 @@ import {
 	hasStatusCodes,
 	hasStatusSeries,
 	hasCustomMetrics,
-	latestThroughputMbps,
+	latestReceiveBytesPerSecond,
 	spansMultipleBuckets,
 } from "./metricsTransforms";
 import { hasSecondPercentiles } from "./tickPercentiles";
@@ -588,17 +588,17 @@ describe("stackStatusPoints", () => {
 	});
 });
 
-describe("latestThroughputMbps", () => {
-	it("diffs the last two cumulative byte samples into MB/s", () => {
-		const mbps = latestThroughputMbps([
+describe("latestReceiveBytesPerSecond", () => {
+	it("diffs the last two cumulative byte samples into bytes per second", () => {
+		const rate = latestReceiveBytesPerSecond([
 			tick({ elapsed_seconds: 1, bytes_received: 1_000_000 }),
-			tick({ elapsed_seconds: 2, bytes_received: 3_000_000 }),
+			tick({ elapsed_seconds: 1.5, bytes_received: 2_000_000 }),
 		]);
-		expect(mbps).toBeCloseTo(2.0); // 2 MB over 1s
+		expect(rate).toBe(2_000_000); // 1 MB over half a second
 	});
 
 	it("returns 0 with fewer than two samples", () => {
-		expect(latestThroughputMbps([tick({ bytes_received: 5 })])).toBe(0);
+		expect(latestReceiveBytesPerSecond([tick({ bytes_received: 5 })])).toBe(0);
 	});
 });
 
