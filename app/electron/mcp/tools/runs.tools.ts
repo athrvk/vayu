@@ -214,7 +214,7 @@ export const RUN_TOOLS: McpTool[] = [
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		notFoundByCode: { live_expired: LIVE_EXPIRED_TEXT },
 		description:
-			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. The live buffer is kept 60 s after a run ends (by default); after that the call is refused as expired, and get_run_report holds the run's numbers. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. " +
+			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. The live buffer is kept 60 s after a run ends (by default); after that the call is refused as expired, and get_run_report holds the run's numbers. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. A tick that closes a second (about one a second) also carries statusSeconds, [{second, span, counts: [2xx, 3xx, 4xx, 5xx, error]}]: the responses that completed in each second it closed, second counted from load start, and [] when it closed none; the other ticks carry no statusSeconds. " +
 			RUN_ERROR_DEFINITION_POINTER,
 		annotations: {
 			title: "Get live metrics",

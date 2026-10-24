@@ -304,7 +304,9 @@ stall, as the drop it is.
 reads its series in one `maxPoints` request of `HISTORY_SERIES_MAX_POINTS`
 (2,000). A run that stored more arrives folded into buckets of `ticksPerBucket`
 seconds: p99 and concurrency the bucket's worst second, `current_rps`, `current_send_rate` and the window latency means their mean (#2393),
-every counter and the status map its last tick. The detector and
+every counter and the status map its last tick, and the per-second status
+counts (`status_seconds`, below) merged into one entry that spans the bucket.
+The detector and
 `computeBreakpoint` run over those buckets unchanged, on purpose: a bucket's p99
 is an upper bound on its seconds, so no second over a threshold is missed, and
 the breakpoint and the first 5xx land on the bucket holding them, at most one
@@ -320,13 +322,39 @@ max); `joinMonitorToTimeline` needs nothing for it, because its staleness window
 is derived from the samples' own spacing and so widens with the buckets, and the
 Server vitals card carries its own note. A run of at most 2,000 ticks arrives raw and
 behaves exactly as it always has; `utils/downsampled-series.test.ts` holds the
-two paths to each other. The status chart rates each point per second over the
-time it closes (`buildStatusOverTime`), so a bucket is not drawn
-`ticksPerBucket` times taller than the second it stands for. Live, it reads
-only the gate frames (`coversSecond`), the ticks the stored series is made of,
-so it draws the points History will and never the second still open at the
-edge; batched completions read flat but for one batch now and then (#2860).
-A live window whose head is not at load start (a late attach, or a trimmed buffer)
-drops its first point: with no predecessor to diff against, its count is the
-run to date, not one interval's rate. The card's gate
-(`hasStatusSeries`) counts the points that leave.
+two paths to each other. The status chart reads its own per-second counts
+instead of the folded cumulative map, below.
+
+**The status chart draws what the engine counted, per second (#2866).** The
+engine counts each response in the second it completed in and sends the counts
+on every stored row (`status_seconds`) and every live gate frame
+(`statusSeconds`): `[{second, span, counts: [2xx, 3xx, 4xx, 5xx, error]}]`,
+`second` counted from load start. `buildStatusOverTime` draws one point per
+entry at `counts / span`, with no diff of the cumulative `status_codes` map and
+no division by elapsed time, so where a tick happened to fall cannot move a
+response from one point to its neighbour. A History bucket the engine
+folded carries one entry spanning the bucket, so `counts / span` is still
+responses per second at either resolution (#2547). A point sits at the
+end of its span in load-start seconds, where the other charts plot that tick: a
+live frame's and a stored row's `elapsed_seconds` both count from load start
+(#2881). Two limits are the
+engine's and are plain on the chart: a second is closed 250 ms after it ends
+and reported at the next gate, so a point trails the instant it describes by
+up to about 1.4 s, and the last partial second of a run is never closed, so it
+draws no point. The seconds that close after a run's last stored row ride only
+the final live frame, so a live chart can end a point or two later than the same
+run opened from History. A gate that closed no second sends `[]`, and the live buffer can
+repeat a gate frame, so entries are kept once per `second`.
+
+A run stored before #2866 has no `status_seconds` on any row. The series is
+read from the counts when any tick carries them and otherwise as it always was:
+rates diffed from the cumulative map at the gate frames (`coversSecond`), each
+over the time between the two ticks, never the second still open at the edge.
+The choice is per series, never per tick: mixing the two would count the same
+responses twice. Only that fallback has the late-attach rule: a live window
+whose head is not at load start (a late attach, or a trimmed buffer) drops its
+first point, since with no predecessor to diff against its count is the run to
+date. The counts need none, as every entry says which second it is. The card's
+gate (`hasStatusSeries`) asks for two distinct seconds of counts, or on the
+fallback for the points that leave. The cumulative map stays: the error-rate bar,
+the anomaly detector and `reportToDerived` read it.

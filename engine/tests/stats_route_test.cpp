@@ -106,6 +106,7 @@ class StatsRouteTest : public ::testing::Test {
         sample.bytes_sent               = 512;
         sample.bytes_received           = 4096;
         sample.status_codes             = { { 200, 10 } };
+        sample.status_seconds           = { { 0, 1, { 9, 0, 0, 1, 0 } } };
         sample.latency_samples          = 10;
         sample.latency_p50_ms           = 5.0;
         sample.latency_p95_ms           = 8.0;
@@ -193,6 +194,7 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "bytes_sent", nlohmann::json::value_t::number_unsigned },
         { "bytes_received", nlohmann::json::value_t::number_unsigned },
         { "status_codes", nlohmann::json::value_t::object },
+        { "status_seconds", nlohmann::json::value_t::array },
         { "latency_p50_ms", nlohmann::json::value_t::number_float },
         { "latency_p95_ms", nlohmann::json::value_t::number_float },
         { "latency_p99_ms", nlohmann::json::value_t::number_float },
@@ -216,6 +218,8 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
     EXPECT_DOUBLE_EQ (entry["window_avg_queue_wait_ms"].get<double> (), 0.25);
     EXPECT_DOUBLE_EQ (entry["latency_p50_ms"].get<double> (), 5.0);
     EXPECT_EQ (entry["status_codes"]["200"].get<size_t> (), 10u);
+    EXPECT_EQ (entry["status_seconds"],
+    json::parse (R"([{"second":0,"span":1,"counts":[9,0,0,1,0]}])"));
 }
 
 // #2386: a second with no completion has no latency, so its row carries no
@@ -236,7 +240,7 @@ TEST_F (StatsRouteTest, StoredTickOfAnEmptySecondHasNoPercentileKeys) {
     for (const auto* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
         EXPECT_FALSE (entry.contains (key)) << key << ": " << entry.dump ();
     }
-    EXPECT_EQ (entry.size (), 21u)
+    EXPECT_EQ (entry.size (), 22u)
     << "only the three percentiles leave: " << entry.dump ();
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
 }
@@ -347,6 +351,23 @@ TEST_F (StatsRouteTest, UnreadableTickPayloadIsSkippedNotFatal) {
     EXPECT_EQ (body["pagination"]["returned"].get<int64_t> (), 2);
 }
 
+// #2866: a gate that closed no second (one before load start, or the first,
+// which waits out the margin) stores an empty array, so a reader tells it from
+// a row an older engine stored, which has no key. Mutation check: write the
+// key only when there are entries and this fails.
+TEST_F (StatsRouteTest, AGateThatClosedNoSecondStoresAnEmptyStatusSeconds) {
+    const std::string id  = seed_run ();
+    auto sample           = sample_at (1000, 0.0);
+    sample.status_seconds = {};
+    add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["status_seconds"], json::array ());
+}
+
 // This run's custom metrics (issue #1500), snapshotted into the tick the same
 // way every other field here is - absent by default (StoredTickPayloadKeysAndTypesArePinned
 // already pins that `sample_at`'s default carries no `custom_metrics` key at all), present
@@ -377,7 +398,7 @@ TEST_F (StatsRouteTest, TickCarriesCustomMetricsWhenTheRunRecordedAny) {
 // ============================================================================
 
 // A cumulative tick the way the producer writes them: tick @p i of a run that
-// completes ten requests a second, all 200s.
+// completes ten requests a second, all 200s, and closes second @p i.
 nlohmann::json cumulative_tick (int i) {
     const auto completed       = 10 * (static_cast<size_t> (i) + 1);
     auto sample                = vayu::core::MetricTickSample{};
@@ -389,6 +410,7 @@ nlohmann::json cumulative_tick (int i) {
     sample.backpressure        = 2;
     sample.bytes_received      = completed * 100;
     sample.status_codes        = { { 200, completed } };
+    sample.status_seconds      = { { i, 1, { 10, 0, 0, 0, 0 } } };
     sample.latency_samples     = 10;
     sample.latency_p50_ms      = 5.0;
     sample.latency_p95_ms      = 8.0;
@@ -474,21 +496,54 @@ TEST (MetricTickBucket, WindowAvgInFlightIsTheBucketsMean) {
     EXPECT_DOUBLE_EQ (bucket.take ()["window_avg_in_flight"].get<double> (), 4.0);
 }
 
+// #2866: a bucket's closed seconds are one entry spanning all of them, so the
+// renderer divides by `span` and draws a rate at any resolution. A gate that
+// closed two seconds folds both; an entry that is not one's shape is skipped.
+// Mutation check: drop the `status_seconds` branch of `take` and the bucket
+// reads the last tick's one second.
+TEST (MetricTickBucket, StatusSecondsMergeIntoOneEntrySpanningTheBucket) {
+    vayu::http::routes::MetricTickBucket bucket;
+    bucket.add (cumulative_tick (0));
+    auto two_seconds              = cumulative_tick (1);
+    two_seconds["status_seconds"] = json::parse (
+    R"([{"second":1,"span":1,"counts":[8,1,0,1,0]},{"second":2,"span":1,"counts":[6,0,2,0,2]}])");
+    bucket.add (std::move (two_seconds));
+    auto malformed              = cumulative_tick (2);
+    malformed["status_seconds"] = json::array ({ "not an entry" });
+    bucket.add (std::move (malformed));
+    bucket.add (cumulative_tick (3));
+
+    EXPECT_EQ (bucket.take ()["status_seconds"],
+    json::parse (R"([{"second":0,"span":4,"counts":[34,1,2,1,2]}])"));
+}
+
+// Ticks that carried the key and no entry fold to no entry, not to a zero
+// count over seconds nobody closed.
+TEST (MetricTickBucket, StatusSecondsOfTicksThatClosedNothingFoldToAnEmptyArray) {
+    vayu::http::routes::MetricTickBucket bucket;
+    for (int i = 0; i < 3; ++i) {
+        auto tick              = cumulative_tick (i);
+        tick["status_seconds"] = json::array ();
+        bucket.add (std::move (tick));
+    }
+    EXPECT_EQ (bucket.take ()["status_seconds"], json::array ());
+}
+
 // A row an older engine stored lacks keys a newer one writes; folding must not
 // invent them, the peak and mean keys included.
 TEST (MetricTickBucket, KeysNoTickCarriedAreNeverAdded) {
     vayu::http::routes::MetricTickBucket bucket;
     for (int i = 0; i < 3; ++i) {
         auto tick = cumulative_tick (i);
-        for (const auto* key :
-        { "http_errors", "no_response", "cancelled", "backpressure", "current_rps" }) {
+        for (const auto* key : { "http_errors", "no_response", "cancelled",
+             "backpressure", "current_rps", "status_seconds" }) {
             tick.erase (key);
         }
         bucket.add (std::move (tick));
     }
     const auto folded = bucket.take ();
     for (const auto* key : { "http_errors", "no_response", "cancelled",
-         "backpressure", "current_rps", "custom_metrics" }) {
+         "backpressure", "current_rps", "custom_metrics", "status_seconds" }) {
         EXPECT_FALSE (folded.contains (key)) << "synthesized " << key;
     }
     EXPECT_EQ (folded["requests_completed"].get<size_t> (), 30u);
@@ -562,6 +617,14 @@ TEST_F (StatsRouteTest, MaxPointsFoldsTheWholeSeriesAcrossReadChunks) {
     EXPECT_EQ (data[454]["current_concurrency"].get<size_t> (), 64u);
     EXPECT_EQ (data[453]["current_concurrency"].get<size_t> (), 4u);
     EXPECT_DOUBLE_EQ (data[454]["current_rps"].get<double> (), 10.0);
+    // Each bucket's closed seconds are one entry over its eleven ticks: still
+    // ten a second once divided by the span.
+    for (size_t b = 0; b < data.size (); ++b) {
+        ASSERT_EQ (data[b]["status_seconds"],
+        json::array (
+        { { { "second", b * 11 }, { "span", 11 }, { "counts", { 110, 0, 0, 0, 0 } } } }))
+        << "bucket " << b;
+    }
 }
 
 TEST_F (StatsRouteTest, MaxPointsLeavesAShortLastBucketAndKeepsDamagedRowsInPlace) {

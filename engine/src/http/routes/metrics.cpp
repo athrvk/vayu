@@ -16,7 +16,9 @@
 #include <optional>
 #include <string_view>
 #include <thread>
+#include <vector>
 
+#include "vayu/core/status_seconds.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
@@ -200,8 +202,28 @@ void MetricTickBucket::add (nlohmann::json tick) {
             ++mean.ticks;
         }
     }
+    add_status_seconds (tick);
     last_ = std::move (tick);
     ++ticks_;
+}
+
+void MetricTickBucket::add_status_seconds (const nlohmann::json& tick) {
+    const auto entries = tick.find ("status_seconds");
+    if (entries == tick.end () || !entries->is_array ()) {
+        return;
+    }
+    seen_status_seconds_ = true;
+    for (const auto& value : *entries) {
+        const auto entry = vayu::core::status_second_entry_from_json (value);
+        if (!entry) {
+            continue;
+        }
+        if (status_span_) {
+            vayu::core::merge_status_seconds (*status_span_, *entry);
+        } else {
+            status_span_ = *entry;
+        }
+    }
 }
 
 bool MetricTickBucket::empty () const {
@@ -220,6 +242,13 @@ nlohmann::json MetricTickBucket::take () {
             } else if (mean.seen_key) {
                 folded[key] = nullptr; // Every second idle: no mean to give.
             }
+        }
+        if (seen_status_seconds_) {
+            std::vector<vayu::core::StatusSecondEntry> merged;
+            if (status_span_) {
+                merged.push_back (*status_span_);
+            }
+            folded["status_seconds"] = vayu::core::status_seconds_json (merged);
         }
     }
     *this = MetricTickBucket{};

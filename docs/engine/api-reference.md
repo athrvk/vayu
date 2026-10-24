@@ -9665,6 +9665,7 @@ their second instead.
       "bytes_sent": 48000,
       "bytes_received": 1920000,
       "status_codes": { "200": 1495, "404": 3, "500": 2 },
+      "status_seconds": [ { "second": 10, "span": 1, "counts": [149, 0, 1, 0, 0] } ],
       "latency_p50_ms": 38.5,
       "latency_p95_ms": 95.1,
       "latency_p99_ms": 12.0
@@ -9712,6 +9713,23 @@ start, so they flatten a change of rate the window shows within a second. A
 tick stored before issue #2393 has none of the three new keys, and its
 `current_rps` divided the completions since the previous row by the time
 since it. A tick stored before issue #2821 has no `window_avg_in_flight`.
+
+`status_seconds` (issue #2866) is the seconds the row's gate closed, each with
+the responses that **completed** in it, by class: `second` counts from load
+start (the clock `elapsed_seconds` counts from), `span` is `1`, and
+`counts` is `[2xx, 3xx, 4xx, 5xx, error]`, where `error` is a response with no
+status (code `0`) or a code outside 200-599. A second is closed 250 ms after
+it ends, so a row usually holds one second, two when its gate's cadence crosses two
+second ends, and `[]` when none closed since the last gate. Across a
+run's rows the seconds run on from `0`, one entry each, and a second in which
+nothing completed is an entry of zeros. Each response is counted by the clock
+it completed at, not by the tick that read it, so `counts[i] / span` is a
+class' rate that a batch landing near a tick does not move; the difference of
+two rows' `status_codes` counts what landed between their ticks instead. The
+live gate frame of the same tick carries the same entries as
+[`statusSeconds`](#get-runsrunidlive). The second still open when the run
+ends is stored nowhere, and the seconds that close after the last row ride the
+final live frame only. A tick stored before the issue has no `status_seconds`.
 
 A missing run returns `404` with the message `Run not found`.
 
@@ -9774,6 +9792,7 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | `current_send_rate` | The mean over the bucket's ticks (#2393) |
 | `window_avg_in_flight` | The mean over the bucket's ticks (#2821): each covers about its own second, so this is the bucket's mean in flight |
 | `window_avg_latency_ms`, `window_avg_queue_wait_ms` | The mean over the bucket's ticks that carried a number, `null` when none did (#2393) |
+| `status_seconds` | Every entry of the bucket's ticks merged into one (#2866): the first entry's `second`, `span` the seconds the entries cover and `counts` summed per class, so `counts[i] / span` is still responses per second; `[]` when the ticks closed no second |
 | Any other key | The last tick's |
 
 The latency fields are never averaged: each row's percentile is of its own
@@ -10040,7 +10059,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency` and `cumulativePhases` keys, which it adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases` and `statusSeconds` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -10068,6 +10087,7 @@ no frame.
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
+| `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
 
 Each `metrics` event carries an `id:` equal to its zero-based offset. The
 browser's built-in `EventSource` retry automatically replays this id as

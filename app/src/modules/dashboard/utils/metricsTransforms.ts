@@ -11,7 +11,7 @@
  * components are dumb consumers of these results.
  */
 
-import type { LoadTestMetrics } from "@/types";
+import type { LoadTestMetrics, StatusSecondEntry } from "@/types";
 import { coversSecond, secondPercentiles, worstReading } from "./tickPercentiles";
 
 /**
@@ -34,7 +34,8 @@ function wholeSecondBucket(elapsedSeconds: number): number {
 }
 
 /**
- * The ticks the status series diffs: the ones that close one of the engine's
+ * The ticks the status series diffs when no tick carries per-second counts (a
+ * run stored before #2866): the ones that close one of the engine's
  * seconds (a stored tick, or the live gate frame stored as one) and carry a
  * status map. The 100 ms live frames between gates are left out, because the
  * count between two of them is the run's completions quantised to the frames
@@ -95,9 +96,77 @@ function isOrphanLiveHead(first: LoadTestMetrics | undefined): boolean {
 	return Boolean(first?.live) && (first?.elapsed_seconds ?? 0) > LIVE_HEAD_MAX_SECONDS;
 }
 
+/** `value` as an entry, or null when it lacks an entry's shape (the rule the engine folds by). */
+function statusSecondEntry(value: unknown): StatusSecondEntry | null {
+	if (typeof value !== "object" || value === null) return null;
+	const { second, span, counts } = value as Partial<StatusSecondEntry>;
+	const whole = (n: unknown, floor: number) => Number.isInteger(n) && (n as number) >= floor;
+	if (!whole(second, 0) || !whole(span, 1)) return null;
+	if (!Array.isArray(counts) || counts.length !== 5 || !counts.every((n) => whole(n, 0))) {
+		return null;
+	}
+	return value as StatusSecondEntry;
+}
+
+const carriesStatusSeconds = (m: LoadTestMetrics): boolean => Array.isArray(m.status_seconds);
+
+/** Every well-formed entry the series carries, in tick order; a malformed one is skipped. */
+function* statusSecondEntries(history: LoadTestMetrics[]): Generator<StatusSecondEntry> {
+	for (const m of history) {
+		if (!Array.isArray(m.status_seconds)) continue;
+		for (const raw of m.status_seconds) {
+			const entry = statusSecondEntry(raw);
+			if (entry) yield entry;
+		}
+	}
+}
+
 /**
- * Build per-second status-class rates from the cumulative `status_codes` map
- * each tick that closes a second ({@link closesStatusSecond}). Labels each on
+ * Build per-second status-class rates for the status chart (#2866).
+ *
+ * The engine counts each response in the second it completed in and sends the
+ * counts on every gate frame and stored row (`status_seconds`). When any tick
+ * of the series carries them, they are drawn as counted: one point per entry,
+ * each class' `counts / span` (so a downsampled bucket's entry, which spans its
+ * whole bucket, is still responses per second, #2547), with no diff, no
+ * division by elapsed time and no orphan head, because nothing is derived from
+ * where the ticks happened to fall. A point sits at the end of its span in
+ * load-start seconds, the clock live frames and stored rows both count
+ * `elapsed_seconds` on (#2881), so it is where the other charts put that
+ * instant. The live buffer can repeat a gate frame, so entries are kept once
+ * per `second`.
+ *
+ * A series with no such tick is a run stored before #2866 and is read by
+ * {@link buildStatusOverTimeFromCumulative}. The choice is per series, never
+ * per tick: a run carries the key on every gate from its first row, and
+ * diffing the ticks without it beside the entries of those with it would count
+ * the same responses twice.
+ *
+ * The engine closes a second 250 ms after it ends and reports it at the next
+ * gate, so a point arrives up to about 1.4 s after the instant it describes,
+ * and the last partial second of a run is never closed, so it draws no point.
+ * Seconds that close after the last stored row reach the live chart only.
+ */
+export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
+	if (!history.some(carriesStatusSeconds)) return buildStatusOverTimeFromCumulative(history);
+	const bySecond = new Map<number, StatusSecondEntry>();
+	for (const entry of statusSecondEntries(history)) bySecond.set(entry.second, entry);
+	return Array.from(bySecond.values())
+		.sort((a, b) => a.second - b.second)
+		.map(({ second, span, counts: [c2, c3, c4, c5, cErr] }) => ({
+			time: second + span,
+			c2xx: c2 / span,
+			c3xx: c3 / span,
+			c4xx: c4 / span,
+			c5xx: c5 / span,
+			cErr: cErr / span,
+		}));
+}
+
+/**
+ * The fallback for a run stored before #2866: per-second status-class rates
+ * diffed from the cumulative `status_codes` map each tick that closes a second
+ * ({@link closesStatusSecond}) carries. Labels each on
  * its whole second (the last tick in a second standing for it), diffs
  * consecutive ones so a 5xx burst shows up as a band, not a slope change, and
  * divides each diff by the elapsed time between the two ticks. Diffs are
@@ -114,7 +183,7 @@ function isOrphanLiveHead(first: LoadTestMetrics | undefined): boolean {
  * `ticksPerBucket` seconds, which a raw count would draw that many times
  * taller.
  */
-export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
+function buildStatusOverTimeFromCumulative(history: LoadTestMetrics[]): StatusPoint[] {
 	const byBucket = new Map<number, ClassSums & { time: number; elapsed: number }>();
 	let first: LoadTestMetrics | undefined;
 	for (const m of history) {
@@ -356,7 +425,7 @@ export function buildRampOverlay(
 	};
 }
 
-/** A tick carrying the cumulative status map `buildStatusOverTime` reads. */
+/** A tick carrying the cumulative status map the fallback of `buildStatusOverTime` diffs. */
 export const hasStatusCodes = (m: LoadTestMetrics): boolean => Boolean(m.status_codes);
 
 /**
@@ -486,11 +555,13 @@ export function spansMultipleBuckets(
 
 /**
  * Whether `buildStatusOverTime` would return more than one point, answered
- * without building it: the status card's gate. Distinct whole-second buckets
- * among the ticks it reads ({@link closesStatusSecond}), one more of them when
- * the head is dropped.
+ * without building it: the status card's gate. With per-second counts
+ * (#2866) that is two distinct seconds among the entries; otherwise distinct
+ * whole-second buckets among the ticks the fallback reads
+ * ({@link closesStatusSecond}), one more of them when its head is dropped.
  */
 export function hasStatusSeries(history: LoadTestMetrics[]): boolean {
+	if (history.some(carriesStatusSeconds)) return hasTwoStatusSeconds(history);
 	const first = history.find(closesStatusSecond);
 	const needed = isOrphanLiveHead(first) ? 3 : 2;
 	const buckets = new Set<number>();
@@ -498,6 +569,15 @@ export function hasStatusSeries(history: LoadTestMetrics[]): boolean {
 		if (!closesStatusSecond(m)) continue;
 		buckets.add(wholeSecondBucket(m.elapsed_seconds));
 		if (buckets.size >= needed) return true;
+	}
+	return false;
+}
+
+function hasTwoStatusSeconds(history: LoadTestMetrics[]): boolean {
+	const seconds = new Set<number>();
+	for (const entry of statusSecondEntries(history)) {
+		seconds.add(entry.second);
+		if (seconds.size >= 2) return true;
 	}
 	return false;
 }

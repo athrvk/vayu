@@ -17,6 +17,7 @@ import type {
 	ResponseValidation,
 	ScenarioRunPlanEvent,
 	ScenarioStepEvent,
+	StatusSecondEntry,
 	StepOutcome,
 	StepTestTally,
 } from "@/types";
@@ -64,6 +65,8 @@ interface RawSseMetrics {
 	bytesSent?: number;
 	bytesReceived?: number;
 	statusCodes?: Record<string, number>;
+	/** Gate frames only (issue #2866); `[]` when the gate closed no second. */
+	statusSeconds?: StatusSecondEntry[];
 	/** Issue #1500 - see `LoadTestMetrics.custom_metrics`. */
 	customMetrics?: LoadTestMetrics["custom_metrics"];
 }
@@ -116,6 +119,9 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		requests_sent: m.requestsSent || 0,
 		requests_expected: m.requestsExpected || 0,
 		status_codes: m.statusCodes,
+		// As sent: absent is "not a gate frame", and `[]` a gate that closed no
+		// second, which the status chart must tell apart.
+		status_seconds: m.statusSeconds,
 		custom_metrics: m.customMetrics,
 	};
 }

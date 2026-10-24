@@ -16,6 +16,7 @@
 #include "load_start_stamp.hpp"
 #include "mock_server.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -1455,6 +1456,121 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     }
     EXPECT_EQ (gate_frames, 1u)
     << "no live frame carried the stored row's timestamp";
+
+    vayu::tests::remove_database_files (db_path);
+}
+
+namespace {
+
+/// @p entries' counts summed per class.
+StatusClassCounts class_totals (const nlohmann::json& entries) {
+    StatusClassCounts totals{};
+    for (const auto& value : entries) {
+        const auto entry = status_second_entry_from_json (value);
+        if (!entry) {
+            ADD_FAILURE () << "not a status-seconds entry: " << value.dump ();
+            continue;
+        }
+        for (size_t i = 0; i < totals.size (); ++i) {
+            totals.at (i) += entry->counts.at (i);
+        }
+    }
+    return totals;
+}
+
+} // namespace
+
+// #2866: a gate drains the closed seconds once and hands the same entries to
+// its frame (`statusSeconds`) and its stored row (`status_seconds`), so live
+// and History draw the same seconds; the seconds run on from 0 with none
+// emitted twice. Load "started" 2.5 s before the completions, so they belong
+// to a second the first gates close. Mutation check: drain again in
+// `persist_metric_tick` instead of taking the gate's entries and the rows
+// store no second, so the wait below runs out and the frame/row equality
+// fails.
+TEST (CollectMetrics, TheGateFrameAndItsStoredRowCarryTheSameClosedSeconds) {
+    const std::string db_path = "test_collect_metrics_status_seconds.db";
+    vayu::tests::remove_database_files (db_path);
+
+    vayu::db::Database db (db_path);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "status_seconds_run";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = 1;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> (run.id, cfg);
+    auto& mc = *ctx->metrics_collector;
+    const int64_t load_start = std::chrono::duration_cast<std::chrono::milliseconds> (
+                               std::chrono::steady_clock::now ().time_since_epoch ())
+                               .count () -
+    2500;
+    ctx->load_start_steady_ms.store (load_start);
+    mc.set_load_start (load_start);
+    for (int i = 0; i < 80; ++i) {
+        mc.record_success (200, 5.0, 0.0);
+    }
+    for (int i = 0; i < 15; ++i) {
+        mc.record_success (500, 5.0, 0.0);
+    }
+    for (int i = 0; i < 5; ++i) {
+        mc.record_error (vayu::ErrorCode::Timeout, "timed out");
+    }
+    ctx->is_running = true;
+
+    const StatusClassCounts recorded{ 80, 0, 0, 15, 5 };
+    const auto stored_totals = [&] () {
+        nlohmann::json entries = nlohmann::json::array ();
+        for (const auto& [timestamp, row] : stored_rows (db, run.id)) {
+            for (const auto& entry : row.at ("status_seconds")) {
+                entries.push_back (entry);
+            }
+        }
+        return class_totals (entries);
+    };
+    std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&] () { return stored_totals () == recorded; }))
+    << "the stored rows never held every completion";
+    ctx->is_running = false;
+    metrics.join ();
+
+    const auto rows   = stored_rows (db, run.id);
+    const auto frames = live_frames (*ctx);
+    ASSERT_FALSE (frames.empty ());
+    size_t gate_frames  = 0;
+    int64_t next_second = 0;
+    for (size_t i = 0; i < frames.size (); ++i) {
+        const auto& frame = frames[i];
+        ASSERT_EQ (frame.contains ("statusSeconds"), frame.contains ("secondSamples"))
+        << "statusSeconds is a gate frame's key: " << frame.dump ();
+        if (!frame.contains ("statusSeconds")) {
+            continue;
+        }
+        for (const auto& entry : frame.at ("statusSeconds")) {
+            EXPECT_EQ (entry.at ("second").get<int64_t> (), next_second++)
+            << frame.dump ();
+            EXPECT_EQ (entry.at ("span").get<int64_t> (), 1) << frame.dump ();
+        }
+        // The final frame closes what closed since the last gate, and stores
+        // no row.
+        if (i + 1 == frames.size ()) {
+            continue;
+        }
+        ++gate_frames;
+        const auto row = rows.find (frame.at ("timestamp").get<int64_t> ());
+        ASSERT_NE (row, rows.end ())
+        << "a gate frame with no stored row: " << frame.dump ();
+        EXPECT_EQ (row->second.at ("status_seconds"), frame.at ("statusSeconds"))
+        << "at " << row->first;
+    }
+    EXPECT_EQ (gate_frames, rows.size ());
+    EXPECT_GE (next_second, 3) << "the completions' second was never closed";
 
     vayu::tests::remove_database_files (db_path);
 }

@@ -14,14 +14,15 @@
  * The fold restates `MetricTickBucket` (`engine/src/http/routes/metrics.cpp`):
  * consecutive runs of `ceil(total / maxPoints)` ticks, each the bucket's last
  * tick with the latency percentiles, `current_concurrency` and `backpressure`
- * replaced by the bucket's max and `current_rps` by its mean. A rule change
+ * replaced by the bucket's max and `current_rps` by its mean, and `status_seconds`
+ * (#2866) by every entry of the bucket merged into one. A rule change
  * there is a change here too; `docs/engine/api-reference.md` ("Downsampling
  * with `maxPoints`") is the contract both follow. The monitor series' fold
  * (#2611, `foldLikeEngineMonitor`) restates the same engine file's
  * `MonitorSampleBucket`: the last sample's timestamp and each name's max.
  */
 
-import type { LoadTestMetrics, MonitorSample } from "@/types";
+import type { LoadTestMetrics, MonitorSample, StatusSecondEntry } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
 /** Completions a healthy second of {@link storedTicks} carries. */
@@ -30,6 +31,12 @@ export const STORED_RPS = 100;
 /** The p99 a healthy second of {@link storedTicks} carries. */
 export const STORED_P99_MS = 50;
 
+/** The index of a status code's class in an entry's `counts`: 2xx, 3xx, 4xx, 5xx, then the rest. */
+function classIndex(code: string): number {
+	const n = Number(code);
+	return n >= 200 && n < 600 ? Math.floor(n / 100) - 2 : 4;
+}
+
 /**
  * `seconds` stored ticks of a steady run: {@link STORED_RPS} completions a
  * second, all 200 unless `at` says otherwise, p99 {@link STORED_P99_MS}.
@@ -37,6 +44,11 @@ export const STORED_P99_MS = 50;
  * that second's own counts, which the series accumulates as the engine does.
  * A tick is stored at the end of its second, counted from load start (#2881),
  * so the first sits at elapsed 1 and `second` is the tick's `elapsed_seconds`.
+ *
+ * With `statusSeconds`, each tick also carries what a stored gate row does
+ * (#2866): the gate at load second `s` closes the seconds over for 250 ms, so
+ * the first tick holds `[]`, and tick `s` holds the one entry of load second
+ * `s - 2`, so the last two seconds are never stored.
  */
 export function storedTicks(
 	seconds: number,
@@ -44,7 +56,8 @@ export function storedTicks(
 		p99?: number;
 		failed?: number;
 		status?: Record<string, number>;
-	} = () => ({})
+	} = () => ({}),
+	options: { statusSeconds?: boolean } = {}
 ): LoadTestMetrics[] {
 	const ticks: LoadTestMetrics[] = [];
 	let completed = 0;
@@ -72,9 +85,18 @@ export function storedTicks(
 			bytes_sent: 0,
 			bytes_received: 0,
 			status_codes: { ...codes },
+			...(options.statusSeconds
+				? { status_seconds: s > 1 ? [secondEntry(s - 2, at(s - 1).status)] : [] }
+				: {}),
 		});
 	}
 	return ticks;
+}
+
+function secondEntry(second: number, status: Record<string, number> = { "200": STORED_RPS }) {
+	const counts: StatusSecondEntry["counts"] = [0, 0, 0, 0, 0];
+	for (const [code, n] of Object.entries(status)) counts[classIndex(code)] += n;
+	return { second, span: 1, counts };
 }
 
 const MAX_KEYS = [
@@ -85,6 +107,44 @@ const MAX_KEYS = [
 	"backpressure",
 ] as const;
 
+/** An entry the engine keeps when it folds: integer `second` >= 0 and `span` >= 1, five integer counts >= 0. */
+function isEngineEntry(value: unknown): value is StatusSecondEntry {
+	const whole = (n: unknown, floor: number) => Number.isInteger(n) && (n as number) >= floor;
+	const e = value as Partial<StatusSecondEntry> | null;
+	return (
+		typeof e === "object" &&
+		e !== null &&
+		whole(e.second, 0) &&
+		whole(e.span, 1) &&
+		Array.isArray(e.counts) &&
+		e.counts.length === 5 &&
+		e.counts.every((n) => whole(n, 0))
+	);
+}
+
+/**
+ * `MetricTickBucket::add_status_seconds` and `take`: every entry of every tick
+ * that carries the key, merged into the first entry with the spans and the
+ * counts summed; `[]` when ticks carried the key but no valid entry; `undefined`
+ * (key absent) when none did.
+ */
+function foldStatusSeconds(bucket: LoadTestMetrics[]): StatusSecondEntry[] | undefined {
+	const carriers = bucket.filter((m) => Array.isArray(m.status_seconds));
+	if (carriers.length === 0) return undefined;
+	const entries = carriers.flatMap((m) => (m.status_seconds ?? []).filter(isEngineEntry));
+	if (entries.length === 0) return [];
+	const merged: StatusSecondEntry = {
+		second: entries[0].second,
+		span: 0,
+		counts: [0, 0, 0, 0, 0],
+	};
+	for (const entry of entries) {
+		merged.span += entry.span;
+		entry.counts.forEach((n, i) => (merged.counts[i] += n));
+	}
+	return [merged];
+}
+
 function foldBucket(bucket: LoadTestMetrics[]): LoadTestMetrics {
 	const folded: LoadTestMetrics = { ...bucket[bucket.length - 1] };
 	for (const key of MAX_KEYS) {
@@ -92,6 +152,8 @@ function foldBucket(bucket: LoadTestMetrics[]): LoadTestMetrics {
 		if (values.length > 0) folded[key] = Math.max(...values);
 	}
 	folded.current_rps = bucket.reduce((sum, m) => sum + m.current_rps, 0) / bucket.length;
+	const statusSeconds = bucket.length > 1 ? foldStatusSeconds(bucket) : undefined;
+	if (statusSeconds) folded.status_seconds = statusSeconds;
 	return folded;
 }
 
