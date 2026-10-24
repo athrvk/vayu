@@ -16,6 +16,13 @@ export function pctToX(pct: number): number {
 	return Math.log10(1 / (1 - p / 100)) / Math.log10(1 / (1 - 99.99 / 100));
 }
 
+/** The percentile at an x position: the inverse of `pctToX`, for the hover readout. */
+export function xToPctLabel(x: number): string {
+	const span = Math.log10(1 / (1 - 99.99 / 100));
+	const pct = 100 * (1 - Math.pow(10, -Math.min(1, Math.max(0, x)) * span));
+	return `${Math.round(pct * 100) / 100}%`;
+}
+
 interface HdrMarkerSpec {
 	label: "p50" | "p95" | "p99";
 	pct: number;

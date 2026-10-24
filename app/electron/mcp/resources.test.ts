@@ -15,14 +15,20 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
-import { STATIC_RESOURCES, projectScriptingSurface, projectScriptingTypes } from "./resources.js";
+import {
+	RUN_REPORT_RESOURCE,
+	STATIC_RESOURCES,
+	projectScriptingSurface,
+	projectScriptingTypes,
+} from "./resources.js";
+import { resolveSafetyConfig } from "./config.js";
 import { TOOLS, type ToolContext } from "./tools.js";
 import {
 	VARIABLE_PRECEDENCE_SENTENCE,
 	VARIABLE_RESOLUTION_MODEL,
 	VARIABLE_RESOLUTION_URI,
 } from "./variable-origins.js";
-import type { EngineClient } from "./engine-client.js";
+import { EngineRequestError, type EngineClient } from "./engine-client.js";
 
 /** One completion in the engine's shape - Monaco fields and all. */
 function engineEntry(label: string, extra: Record<string, unknown> = {}) {
@@ -446,5 +452,105 @@ describe("the variable resolution resource", () => {
 		// The fact the old one-liner omitted, and the reason an agent wrote to
 		// the wrong environment.
 		expect(environments?.description).toMatch(/isActive/);
+	});
+});
+
+/*
+ * A masked read whose secret lookup failed is withheld whole. With the engine
+ * down the lookup is the first thing to fail, but the outage is the news and a
+ * Reveal secrets setting must never read as its remedy (#2854).
+ */
+describe("a masked run read whose secret lookup failed", () => {
+	const runsResource = () => {
+		const r = STATIC_RESOURCES.find((s) => s.name === "runs");
+		if (!r) throw new Error("runs resource is not registered");
+		return r;
+	};
+
+	const reads: Array<[string, (ctx: ToolContext) => Promise<unknown>]> = [
+		["vayu://runs", (ctx) => runsResource().read(ctx)],
+		["vayu://run/{runId}/report", (ctx) => RUN_REPORT_RESOURCE.read(ctx, "run_1")],
+	];
+
+	function ctxFailing(cause: unknown, readError?: unknown): ToolContext {
+		const answer = () =>
+			readError === undefined
+				? vi.fn().mockResolvedValue({ data: [] })
+				: vi.fn().mockRejectedValue(readError);
+		const client = {
+			listRuns: answer(),
+			getRunReport: answer(),
+			getGlobals: vi.fn().mockRejectedValue(cause),
+			listEnvironments: vi.fn().mockResolvedValue([]),
+			listCollections: vi.fn().mockResolvedValue([]),
+			listAllRequests: vi.fn().mockResolvedValue([]),
+		} as unknown as EngineClient;
+		return { client, config: resolveSafetyConfig(), host: "app" };
+	}
+
+	const messageOf = async (read: (ctx: ToolContext) => Promise<unknown>, ctx: ToolContext) => {
+		const err = await read(ctx).then(
+			() => null,
+			(e: unknown) => e
+		);
+		if (!(err instanceof Error)) throw new Error("the read did not fail");
+		return err.message;
+	};
+
+	describe.each(reads)("%s", (_, read) => {
+		test("an engine that is down leads with the outage, not the setting", async () => {
+			const text = await messageOf(read, ctxFailing(new TypeError("fetch failed")));
+			expect(text.startsWith("Could not reach the Vayu engine")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+		});
+
+		test("an engine read that fails first does not take the lead from the outage", async () => {
+			const down = new TypeError("fetch failed");
+			const text = await messageOf(read, ctxFailing(down, down));
+			expect(text.startsWith("Could not reach the Vayu engine")).toBe(true);
+			expect(text).toContain("withheld whole");
+		});
+
+		test("an engine that answered 5xx leads with its answer", async () => {
+			const text = await messageOf(
+				read,
+				ctxFailing(
+					new EngineRequestError("Engine responded 500 for GET /globals", 500, "boom")
+				)
+			);
+			expect(text.startsWith("Engine error (500)")).toBe(true);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toMatch(/Reveal secrets/i);
+		});
+
+		test("a cancelled lookup says so, without a tool call's retry advice", async () => {
+			const aborted = Object.assign(new Error("The operation was aborted"), {
+				name: "AbortError",
+			});
+			const text = await messageOf(read, ctxFailing(aborted));
+			expect(text.startsWith("The call was cancelled before the engine answered.")).toBe(
+				true
+			);
+			expect(text).toContain("withheld whole");
+			expect(text).not.toContain("list_runs");
+		});
+
+		test.each([
+			["a cause that says nothing about the engine", new Error("engine hiccup")],
+			["an engine refusal of the lookup itself", new EngineRequestError("403", 403, "no")],
+		])("%s keeps the masking message", async (__, cause) => {
+			const text = await messageOf(read, ctxFailing(cause));
+			expect(text.startsWith("Nothing is returned: masking this result's secrets")).toBe(
+				true
+			);
+			expect(text).toMatch(/Reveal secrets/i);
+		});
+
+		test("the read's own failure wins over a lookup failure that is not an outage", async () => {
+			const missing = new EngineRequestError("Engine responded 404", 404, "no such run");
+			const text = await messageOf(read, ctxFailing(new Error("engine hiccup"), missing));
+			expect(text).toBe("Engine responded 404");
+		});
 	});
 });

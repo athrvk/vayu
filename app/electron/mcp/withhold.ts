@@ -1393,8 +1393,8 @@ type ScopeName = keyof typeof SCOPE_LOOKUPS;
  * failed. Masking with the reads that answered would hand an agent every
  * secret the failed one holds, so the read it guards answers this instead:
  * a tool as an error result, a resource or a prompt as a failed request.
- * `cause` is the read's rejection, which a tool classes to decide whether the
- * engine being down leads the answer (#2780).
+ * `cause` is the read's rejection, which the answering surface classes to
+ * decide whether the engine being down leads it (#2780, #2854).
  */
 export class MaskingIncompleteError extends Error {
 	constructor(failed: readonly ScopeName[], reason: unknown) {

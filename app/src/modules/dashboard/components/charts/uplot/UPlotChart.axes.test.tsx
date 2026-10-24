@@ -122,6 +122,58 @@ describe("UPlotChart - secondary axis label", () => {
 	});
 });
 
+describe("UPlotChart - x splits", () => {
+	// What uPlot would tick and print on the x axis, read off the real plot's axis.
+	const xTicks = () => {
+		const plot = last();
+		const axis = plot.axes[0];
+		const splits = (axis.splits as (u: uPlot) => number[])(plot);
+		const labels = (axis.values as (u: uPlot, sp: number[]) => string[])(plot, splits);
+		return { splits, labels };
+	};
+	const marks: uPlot.AlignedData = [
+		[0, 0.5, 1],
+		[10, 20, 30],
+	];
+
+	it("ticks exactly at the given positions, each labelled by xFormat", async () => {
+		render(
+			<UPlotChart
+				data={marks}
+				series={rps}
+				xSplits={[0, 0.5, 1]}
+				xFormat={(v) => `at ${v}`}
+			/>
+		);
+		await settled();
+		expect(xTicks()).toEqual({ splits: [0, 0.5, 1], labels: ["at 0", "at 0.5", "at 1"] });
+	});
+
+	it("drops a position outside the visible range", async () => {
+		render(<UPlotChart data={marks} series={rps} xSplits={[-1, 0.5, 2]} />);
+		await settled();
+		expect(xTicks().splits).toEqual([0.5]);
+	});
+
+	it("leaves uPlot's own tick spacing when no positions are given", async () => {
+		render(<UPlotChart data={marks} series={rps} />);
+		await settled();
+		const plot = last();
+		const own = plot.axes[0].splits as unknown as (u: uPlot, ...rest: number[]) => number[];
+		expect(own(plot, 0, 0, 1, 0.25, 50)).toEqual([0, 0.25, 0.5, 0.75, 1]);
+	});
+
+	it("rebuilds the plot when the positions change", async () => {
+		const { rerender } = render(<UPlotChart data={marks} series={rps} xSplits={[0, 1]} />);
+		rerender(<UPlotChart data={marks} series={rps} xSplits={[0, 1]} />);
+		expect(instances.all).toHaveLength(1);
+		rerender(<UPlotChart data={marks} series={rps} xSplits={[0, 0.5, 1]} />);
+		await settled();
+		expect(instances.all).toHaveLength(2);
+		expect(xTicks().splits).toEqual([0, 0.5, 1]);
+	});
+});
+
 /** The ticks and labels uPlot drew for the axis on `scale`. */
 function drawnAxis(scale: "y" | "y2"): { splits: number[]; labels: string[] } {
 	const plot = last();

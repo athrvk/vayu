@@ -30,6 +30,7 @@ import {
 	withCurrentDataFileHashes,
 } from "./collection-shape.js";
 import {
+	MaskingIncompleteError,
 	runOutputShape,
 	secretsShape,
 	withholdConfigCredentials,
@@ -40,6 +41,7 @@ import {
 	WITHHELD_VARIABLE_SENTENCE,
 } from "./withhold.js";
 import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
+import { maskingOutageMessage } from "./tools/kit.js";
 import type { ToolContext } from "./tools.js";
 import {
 	VARIABLE_PRECEDENCE_SENTENCE,
@@ -327,14 +329,29 @@ export function projectElementKinds(payload: unknown): ElementKindEntry[] {
  * What a run recorded, through the projection the run tools apply (#1809):
  * the resources and the prompts are a second read path to the same records.
  * The engine read and the secret lookups go out together.
+ *
+ * Both are settled before either failure is thrown: with the engine down the
+ * read usually rejects first, and the outage-led wording of a failed lookup
+ * (#2854) would otherwise lose to a bare `fetch failed`. A lookup failure that
+ * is not an outage yields to the read's own failure, which is the more telling
+ * of the two.
  */
 export async function withheldRunOutput(
 	ctx: ToolContext,
 	answer: Promise<unknown>,
 	signal?: AbortSignal
 ): Promise<unknown> {
-	const [value, withhold] = await Promise.all([answer, runOutputShape(ctx, signal)]);
-	return withhold(value);
+	const [read, shape] = await Promise.allSettled([answer, runOutputShape(ctx, signal)]);
+	if (shape.status === "rejected") {
+		const outage =
+			shape.reason instanceof MaskingIncompleteError
+				? maskingOutageMessage(shape.reason, ctx)
+				: undefined;
+		if (outage) throw new Error(outage, { cause: shape.reason });
+		throw read.status === "rejected" ? read.reason : shape.reason;
+	}
+	if (read.status === "rejected") throw read.reason;
+	return shape.value(read.value);
 }
 
 /** Templated per-run report resource. */
