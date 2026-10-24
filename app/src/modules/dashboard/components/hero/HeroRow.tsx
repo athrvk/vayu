@@ -118,6 +118,7 @@ function renderModeCards(d: DashboardDerived) {
 						targetConcurrency={d.targetConcurrency}
 						rampUpDurationSeconds={d.rampUpDurationSeconds}
 						rampDeviationPct={d.rampDeviationPct}
+						isCompleted={d.isCompleted}
 					/>
 					<SaturationCard breakpoint={d.breakpoint} failedRequests={d.failedRequests} />
 				</>

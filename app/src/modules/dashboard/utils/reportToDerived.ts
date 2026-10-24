@@ -118,7 +118,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		// Rate Fidelity card (otherwise it shows "0 dropped" with a false
 		// "Server saturating" warning).
 		showDropped: isRateLimitedRun(mode, targetRps) && (s.droppedRequests ?? 0) > 0,
-		rampDeviationPct: undefined, // needs per-tick concurrency (deferred to W1)
+		rampDeviationPct: undefined, // filled from the stored series by LoadTestDetail
 		// A unit-aware parse: "2m" is 120 s, not 2 (#1945).
 		rampUpDurationSeconds: durationSeconds(cfg.rampUpDuration) ?? undefined,
 		startConcurrency: cfg.startConcurrency,

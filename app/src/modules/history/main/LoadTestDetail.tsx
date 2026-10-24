@@ -43,6 +43,7 @@ import {
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { p99AtPeak } from "@/modules/dashboard/utils/p99AtPeak";
+import { buildRampOverlay } from "@/modules/dashboard/utils/metricsTransforms";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { detectAnomalies } from "@/modules/dashboard/utils/detectAnomalies";
 import { useRunMonitorSeriesQuery, useRunQuery, useRunTimeSeriesQuery } from "@/queries/runs";
@@ -172,10 +173,21 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const derived = useMemo(() => {
 		const base = reportToDerived(report);
 		if (timeSeries.length < 2) return base;
+		// The report has no per-tick concurrency, so the ramp's lag comes from the
+		// stored series, by the same overlay the live view reads.
+		const rampDeviationPct =
+			base.mode === "ramp_up"
+				? buildRampOverlay(timeSeries, {
+						rampUpDurationSeconds: base.rampUpDurationSeconds,
+						startConcurrency: base.startConcurrency,
+						targetConcurrency: base.targetConcurrency,
+					})?.rampDeviationPct
+				: undefined;
 		return {
 			...base,
 			breakpoint: computeBreakpoint(timeSeries, sloThresholdMs),
 			p99AtPeakMs: p99AtPeak(timeSeries),
+			rampDeviationPct,
 		};
 	}, [report, timeSeries, sloThresholdMs]);
 
