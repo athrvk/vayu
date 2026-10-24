@@ -310,12 +310,11 @@ Server vitals card carries its own note. A run of at most 2,000 ticks arrives ra
 behaves exactly as it always has; `utils/downsampled-series.test.ts` holds the
 two paths to each other. The status chart rates each point per second over the
 time it closes (`buildStatusOverTime`), so a bucket is not drawn
-`ticksPerBucket` times taller than the second it stands for. Its buckets are
-whole seconds, not the half second the other live series use, so it agrees
-with the stored series and the 1 s Throughput chart: a closed loop's batched
-completions (10 virtual users finishing together every 200 ms) fell two or
-three to a half second and drew a steady 50/s as 40 and 60 (#2860). A live
-window whose head is not at load start (a late attach, or a trimmed buffer)
+`ticksPerBucket` times taller than the second it stands for. Live, it reads
+only the gate frames (`coversSecond`), the ticks the stored series is made of,
+so it draws the points History will and never the second still open at the
+edge; batched completions read flat but for one batch now and then (#2860).
+A live window whose head is not at load start (a late attach, or a trimmed buffer)
 drops its first point: with no predecessor to diff against, its count is the
 run to date, not one interval's rate. The card's gate
 (`hasStatusSeries`) counts the points that leave.

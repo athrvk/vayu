@@ -39,6 +39,41 @@ function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	};
 }
 
+/** A 100 ms live frame between gates. */
+function frame(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
+	return tick({ live: true, elapsed_seconds: elapsed, status_codes: codes });
+}
+
+/** A live gate frame: it closes a second, so it carries `second_samples`. */
+function gate(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
+	return tick({ live: true, elapsed_seconds: elapsed, status_codes: codes, second_samples: 1 });
+}
+
+/**
+ * A minute of live frames from 10 virtual users finishing together every
+ * 200 ms (+-1 ms), at a phase the seed picks. Each frame sleeps 100 ms and works
+ * 0-2 ms, is stamped in whole ms, and is a gate once a second has passed since
+ * the last gate, as `collect_metrics` in `run_manager.cpp` does.
+ */
+function closedLoopRun(seed: number): LoadTestMetrics[] {
+	const rng = seeded(seed);
+	const phaseMs = rng() * 200;
+	const batchAt = Array.from({ length: 301 }, (_, k) => phaseMs + 200 * k + (rng() * 2 - 1));
+	const frames: LoadTestMetrics[] = [];
+	let lastGateMs = 0;
+	for (let ms = 0; ms < 60_000; ms += 100 + rng() * 2) {
+		const codes = { "200": 10 * batchAt.filter((b) => b <= ms).length };
+		const elapsed = Math.floor(ms) / 1000;
+		if (ms - lastGateMs < 1000) {
+			frames.push(frame(elapsed, codes));
+			continue;
+		}
+		lastGateMs = ms;
+		frames.push(gate(elapsed, codes));
+	}
+	return frames;
+}
+
 describe("isRateLimitedRun", () => {
 	it("is true only for constant_rps with a positive targetRps", () => {
 		expect(isRateLimitedRun("constant_rps", 100)).toBe(true);
@@ -402,44 +437,45 @@ describe("buildStatusOverTime", () => {
 		expect(out[1].cErr).toBe(0);
 	});
 
-	it("rates a live series' whole-second buckets per second, counted from load start", () => {
+	it("rates a live series' gate frames per second, counted from load start", () => {
 		const out = buildStatusOverTime([
-			tick({ live: true, elapsed_seconds: 0.5, status_codes: { "200": 100 } }),
-			tick({ live: true, elapsed_seconds: 1.0, status_codes: { "200": 180 } }),
-			tick({ live: true, elapsed_seconds: 1.5, status_codes: { "200": 260 } }),
-			tick({ live: true, elapsed_seconds: 2.0, status_codes: { "200": 340 } }),
+			frame(0.5, { "200": 100 }),
+			gate(1.0, { "200": 180 }),
+			frame(1.5, { "200": 260 }),
+			gate(2.0, { "200": 340 }),
 		]);
-		// The last tick in a bucket stands for it: 0..1.0 s, then 1.0..2.0 s.
 		expect(out.map((p) => p.time)).toEqual([1, 2]);
 		expect(out.map((p) => p.c2xx)).toEqual([180, 160]);
 	});
 
+	it("draws no point for the second still open at the live edge", () => {
+		const closed = [gate(1.0, { "200": 50 }), gate(2.0, { "200": 100 })];
+		// 0.1 s past the last gate: a full-rate point over it would read 100/s.
+		const open = [...closed, frame(2.1, { "200": 110 })];
+		expect(buildStatusOverTime(open)).toEqual(buildStatusOverTime(closed));
+		expect(hasStatusSeries([closed[0], frame(1.1, { "200": 60 })])).toBe(false);
+	});
+
 	/*
-	 * S6 of #2860: 10 virtual users at a 200 ms target finish together, so the
-	 * cumulative count steps by 10 every 200 ms while the true rate is a flat 50.
-	 * Half-second buckets held two or three steps (40 and 60 a second). Mutation
-	 * check: bucket the status series on halfSecondBucket again and both cadences
-	 * fail.
+	 * S6 of #2860 through the engine's own frame cadence: 10 virtual users
+	 * finishing together every 200 ms, a steady 50/s. Frames are 100 ms of sleep
+	 * plus 0-2 ms of work, stamped in whole ms; a frame is a gate once a second
+	 * has passed since the last one (`run_manager.cpp`), so a gate closes 1.000 to
+	 * 1.020 s. Measured over these seeds: 280 of 295 points read 49.2 to 49.8,
+	 * and 15 (1 in 20) read 59.3 to 59.6 (19% high), a batch landing in that
+	 * overrun. 5% at every point is out of reach from these frames: a batch
+	 * inside the frame interval at a window's edge is in or out by where the
+	 * frames fell, so any window they bound is one batch off now and then.
+	 * Mutation check: diff every frame (the last of each second standing for
+	 * it) and 64 of 305 points are past 5%, the worst 39.6 for the second still
+	 * open at the edge; both bounds below fail.
 	 */
-	it.each([
-		["the engine's default 100 ms", 100],
-		["a 500 ms", 500],
-	])("draws a closed loop's batched completions flat at %s live tick", (_name, tickMs) => {
-		// Milliseconds, so a batch and a tick compare exactly; the batches are offset
-		// from the ticks by 50 ms so none lands on one.
-		const batchesBy = (ms: number) => (ms >= 50 ? Math.floor((ms - 50) / 200) + 1 : 0);
-		const live = Array.from({ length: 20_000 / tickMs }, (_, i) => {
-			const ms = (i + 1) * tickMs;
-			return tick({
-				live: true,
-				elapsed_seconds: ms / 1000,
-				status_codes: { "200": 10 * batchesBy(ms) },
-			});
-		});
-		const out = buildStatusOverTime(live);
-		expect(out.length).toBeGreaterThanOrEqual(19);
-		for (const p of out)
-			expect(Math.abs(p.c2xx - 50), `at ${p.time}s`).toBeLessThanOrEqual(2.5);
+	it("draws a closed loop's batched completions flat but for one batch", () => {
+		const points = [1, 2, 3, 4, 5].flatMap((seed) => buildStatusOverTime(closedLoopRun(seed)));
+		expect(points.length).toBeGreaterThan(250);
+		const off = points.filter((p) => Math.abs(p.c2xx - 50) > 2.5);
+		expect(off.length).toBeLessThanOrEqual(points.length / 15);
+		for (const p of points) expect(Math.abs(p.c2xx - 50), `at ${p.time}s`).toBeLessThan(10);
 	});
 
 	it("rates a downsampled series per second, as the raw series it folds", () => {
@@ -467,9 +503,9 @@ describe("buildStatusOverTime", () => {
 	describe("a live window whose head is not at load start", () => {
 		// 500 responses a second, 150000 by the first retained tick.
 		const lateWindow = [
-			tick({ live: true, elapsed_seconds: 300, status_codes: { "200": 150000 } }),
-			tick({ live: true, elapsed_seconds: 301, status_codes: { "200": 150500 } }),
-			tick({ live: true, elapsed_seconds: 302, status_codes: { "200": 151000, "503": 10 } }),
+			gate(300, { "200": 150000 }),
+			gate(301, { "200": 150500 }),
+			gate(302, { "200": 151000, "503": 10 }),
 		];
 
 		it("diffs from its head instead of drawing the run's lifetime average", () => {
@@ -481,10 +517,7 @@ describe("buildStatusOverTime", () => {
 		});
 
 		it("keeps a live head within one tick of load start as its first point", () => {
-			const out = buildStatusOverTime([
-				tick({ live: true, elapsed_seconds: 1.5, status_codes: { "200": 300 } }),
-				tick({ live: true, elapsed_seconds: 2.5, status_codes: { "200": 600 } }),
-			]);
+			const out = buildStatusOverTime([gate(1.5, { "200": 300 }), gate(2.5, { "200": 600 })]);
 			expect(out.map((p) => p.c2xx)).toEqual([200, 300]);
 		});
 
@@ -589,12 +622,20 @@ describe("spansMultipleBuckets", () => {
 				buildLatencyChartData(history).length > 1
 			);
 			expect(spans).toBe(buildPercentileChartData(history).length > 1);
-			const status = hasStatusSeries(history);
-			expect(status).toBe(buildStatusOverTime(history).length > 1);
+			// The status gate also reads live frames, of which only a gate counts.
+			const live = history.map((m): LoadTestMetrics => ({
+				...m,
+				live: true,
+				...(rng() < 0.5 ? { second_samples: 1 } : {}),
+			}));
+			for (const h of [history, live]) {
+				const status = hasStatusSeries(h);
+				expect(status).toBe(buildStatusOverTime(h).length > 1);
+				if (status) sawStatus++;
+				else sawNoStatus++;
+			}
 			if (spans) sawTrue++;
 			else sawFalse++;
-			if (status) sawStatus++;
-			else sawNoStatus++;
 		}
 		// The agreement above is worthless if every case landed on one side.
 		expect(sawTrue).toBeGreaterThan(20);

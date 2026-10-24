@@ -25,16 +25,26 @@ function halfSecondBucket(elapsedSeconds: number): number {
 }
 
 /**
- * The status series' bucket, which `hasStatusSeries` shares. That series diffs
- * cumulative counts, so a point counts the completions between two ticks a
- * bucket apart. At half a second, a closed loop's batches (10 virtual users
- * finishing together every 200 ms) fell two or three to a bucket and a steady
- * 50/s drew 40 and 60 (#2860). A second is the stored series' tick and the
- * Throughput chart's window, and holds the same number of batches every time
- * for any batch period that divides it.
+ * The status series' x value, which `hasStatusSeries` shares: every tick that
+ * series reads closes a second ({@link closesStatusSecond}), so it is labelled
+ * with the whole second it closes.
  */
 function wholeSecondBucket(elapsedSeconds: number): number {
 	return Math.round(elapsedSeconds);
+}
+
+/**
+ * The ticks the status series diffs: the ones that close one of the engine's
+ * seconds (a stored tick, or the live gate frame stored as one) and carry a
+ * status map. The 100 ms live frames between gates are left out, because the
+ * count between two of them is the run's completions quantised to the frames
+ * either side: a closed loop's batches land 4 to 6 to a window the frames make
+ * 0.9 to 1.1 s wide (#2860). Between gates the window is the engine's own
+ * second, so live and History draw the same points; it still runs a few ms
+ * past 1 s, and an arrival in that overrun reads one batch high.
+ */
+function closesStatusSecond(m: LoadTestMetrics): boolean {
+	return hasStatusCodes(m) && coversSecond(m);
 }
 
 /** A run is "rate limited" (can drop requests) only in constant_rps with a target. */
@@ -101,26 +111,28 @@ function isOrphanLiveHead(first: LoadTestMetrics | undefined): boolean {
 
 /**
  * Build per-second status-class rates from the cumulative `status_codes` map
- * each tick carries. Buckets to whole seconds ({@link wholeSecondBucket}, the
- * last tick in a bucket standing for it), diffs consecutive buckets so a 5xx burst
- * shows up as a band, not a slope change, and divides each diff by the
- * elapsed time between the two buckets' ticks. Diffs are clamped >= 0 (the
- * source is monotonic). Returns [] when no tick carries a status map.
+ * each tick that closes a second ({@link closesStatusSecond}). Labels each on
+ * its whole second (the last tick in a second standing for it), diffs
+ * consecutive ones so a 5xx burst shows up as a band, not a slope change, and
+ * divides each diff by the elapsed time between the two ticks. Diffs are
+ * clamped >= 0 (the source is monotonic). Returns [] when no such tick exists.
+ * A live second still open at the edge of the window has no gate yet, so it
+ * draws no point until it closes.
  *
  * A live head past `LIVE_HEAD_MAX_SECONDS` has nothing to diff against, so it
  * seeds the baseline and draws no point of its own; the series starts at the
  * next bucket.
  *
- * The division is what keeps one unit across sources (#2547): live frames
- * close about a second per bucket, a stored series a second per tick, and a
- * downsampled one `ticksPerBucket` seconds per point, which a raw count would
- * draw that many times taller.
+ * The division is what keeps one unit across sources (#2547): a live gate
+ * and a stored tick close about a second each, and a downsampled point
+ * `ticksPerBucket` seconds, which a raw count would draw that many times
+ * taller.
  */
 export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	const byBucket = new Map<number, ClassSums & { time: number; elapsed: number }>();
 	let first: LoadTestMetrics | undefined;
 	for (const m of history) {
-		if (!m.status_codes) continue;
+		if (!closesStatusSecond(m)) continue;
 		first ??= m;
 		const t = wholeSecondBucket(m.elapsed_seconds);
 		byBucket.set(t, {
@@ -483,15 +495,15 @@ export function spansMultipleBuckets(
 /**
  * Whether `buildStatusOverTime` would return more than one point, answered
  * without building it: the status card's gate. Distinct whole-second buckets
- * among the ticks carrying a status map, one more of them when the head is
- * dropped.
+ * among the ticks it reads ({@link closesStatusSecond}), one more of them when
+ * the head is dropped.
  */
 export function hasStatusSeries(history: LoadTestMetrics[]): boolean {
-	const first = history.find(hasStatusCodes);
+	const first = history.find(closesStatusSecond);
 	const needed = isOrphanLiveHead(first) ? 3 : 2;
 	const buckets = new Set<number>();
 	for (const m of history) {
-		if (!hasStatusCodes(m)) continue;
+		if (!closesStatusSecond(m)) continue;
 		buckets.add(wholeSecondBucket(m.elapsed_seconds));
 		if (buckets.size >= needed) return true;
 	}

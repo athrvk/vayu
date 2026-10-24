@@ -10,8 +10,8 @@
  * primitive. Stacking is done by feeding cumulative sums and filling each class'
  * band between consecutive cumulative series (bottom 2xx fills to zero). The
  * tooltip prints each class' own rate (`tipValues`), not the stack height.
- * `buildStatusOverTime` buckets on whole seconds, where the other live charts
- * use half a second. A class with no responses in the history keeps its
+ * `buildStatusOverTime` plots one point per closed second, where the other
+ * live charts use half a second. A class with no responses in the history keeps its
  * zero-height band, so the `bandTo` indices hold, but draws no line (#2860).
  */
 
