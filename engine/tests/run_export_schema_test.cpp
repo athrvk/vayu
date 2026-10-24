@@ -269,6 +269,40 @@ TEST_F (RunExportSchemaTest, ARunWithErrorsAndAMissedBudgetValidates) {
     expect_valid (json{ { "runId", "run_failing" } });
 }
 
+// #2892: the assertion check's two populations and its sample rate are
+// allowlisted and named by the schema, and an exact-only check, with no
+// `sampleRate`, validates too. Mutation check: drop "sampleRate" from
+// THRESHOLD_CHECK_KEYS or the population loop from `threshold_check` and the
+// presence assertions fail; drop either member from the schema and the
+// validation does.
+TEST_F (RunExportSchemaTest, AnAssertionBudgetValidatesWithBothPopulations) {
+    json summary          = healthy_summary ();
+    summary["thresholds"] = {
+        { "checks",
+        json::array ({ { { "metric", "maxAssertionFailureRatePct" }, { "limit", 10 },
+                       { "actual", 50.0 }, { "passed", false }, { "evaluated", true },
+                       { "assertionsExact", { { "passed", 200 }, { "failed", 0 } } },
+                       { "assertionsSampled", { { "passed", 1 }, { "failed", 1 } } },
+                       { "sampleRate", 100 } },
+        { { "metric", "maxAssertionFailureRatePct" }, { "limit", 10 },
+        { "actual", 0.0 }, { "passed", true }, { "evaluated", true },
+        { "assertionsExact", { { "passed", 5 }, { "failed", 0 } } },
+        { "assertionsSampled", { { "passed", 0 }, { "failed", 0 } } } } }) },
+        { "passed", 1 }, { "failed", 1 }
+    };
+    seed ("run_assert_pops", vayu::RunStatus::Completed, summary);
+
+    const json document = expect_valid (json{ { "runId", "run_assert_pops" } });
+    const json& checks  = document["report"]["thresholdValidation"]["checks"];
+    ASSERT_EQ (checks.size (), 2u) << document.dump (2);
+    EXPECT_EQ (checks[0].value ("assertionsExact", json ()),
+    (json{ { "passed", 200 }, { "failed", 0 } }));
+    EXPECT_EQ (checks[0].value ("assertionsSampled", json ()),
+    (json{ { "passed", 1 }, { "failed", 1 } }));
+    EXPECT_EQ (checks[0].value ("sampleRate", -1), 100);
+    EXPECT_FALSE (checks[1].contains ("sampleRate"));
+}
+
 TEST_F (RunExportSchemaTest, AStoppedRunValidates) {
     seed ("run_stopped", vayu::RunStatus::Stopped,
     json{ { "total_requests", 5 }, { "cancelled", 2 },
