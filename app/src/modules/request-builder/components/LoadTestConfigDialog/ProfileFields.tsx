@@ -160,7 +160,7 @@ export function ProfileFields({
 					max={limits.RAMP_DURATION_S.MAX}
 					hint={`One climb up, then hold. ${
 						profile.duration === profile.rampDuration
-							? "The total duration equals the ramp, so the run ends as it reaches the target, with no hold at the target. "
+							? "The total duration equals the ramp, so there is no hold at the target. "
 							: ""
 					}For a staircase or a limit search use ${loadTestModeLabel("capacity")}.`}
 				/>

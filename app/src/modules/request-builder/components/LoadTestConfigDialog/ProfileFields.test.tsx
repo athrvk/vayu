@@ -64,7 +64,7 @@ describe("ProfileFields' ramp duration hint", () => {
 		const field = screen.getByRole("spinbutton", { name: "Ramp duration" });
 		const described = screen.getByText(/no hold at the target/);
 		expect(described.textContent).toBe(
-			"One climb up, then hold. The total duration equals the ramp, so the run ends as it reaches the target, with no hold at the target. For a staircase or a limit search use Capacity discovery."
+			"One climb up, then hold. The total duration equals the ramp, so there is no hold at the target. For a staircase or a limit search use Capacity discovery."
 		);
 		expect(field.getAttribute("aria-describedby")).toBe(described.getAttribute("id"));
 		expect(described.getAttribute("id")).toBe("lt-ramp-hint");
