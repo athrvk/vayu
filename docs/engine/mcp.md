@@ -360,7 +360,9 @@ Notes:
   `sloMs` and `stepDuration` are that mode's own two fields, and
   `get_run_report` returns the search's findings under `capacity`, including
   each level's `errorPct`, the `kneeErrorPct` and the `maxErrorPct` limit a
-  level breaches above, beside the p99s. Every shape
+  level breaches above, beside the p99s. A `plateau` stop also carries
+  `saturationConcurrency`, `saturationRps` and `saturationP99Ms`, the level
+  where throughput stopped growing. Every shape
   field the agent leaves out is sent as the engine's default for the mode
   ([Load defaults](#load-defaults)), so the caps judge the run that will start,
   the confirmation preview states it in words ("constant_concurrency, 100

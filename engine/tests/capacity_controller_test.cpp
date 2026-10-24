@@ -338,9 +338,126 @@ TEST (CapacityControllerTest, PayloadOmitsWhatWasNotObserved) {
 
     EXPECT_FALSE (payload.contains ("max_healthy_concurrency"));
     EXPECT_TRUE (payload.contains ("knee_concurrency"));
+    EXPECT_FALSE (payload.contains ("saturation_concurrency"));
+    EXPECT_FALSE (payload.contains ("saturation_rps"));
+    EXPECT_FALSE (payload.contains ("saturation_p99_ms"));
     EXPECT_EQ (payload["stop_reason"], "slo_exceeded");
     EXPECT_EQ (payload["levels"].size (), 2u);
     EXPECT_EQ (payload["levels"][0]["concurrency"], 10u);
+}
+
+// ---------------------------------------------------------------------------
+// Saturation: where a plateau's throughput stopped growing (#2817)
+// ---------------------------------------------------------------------------
+
+/// A search whose budget the plateau history below stays inside (its levels
+/// run to a 103ms p99).
+CapacityConfig roomy_search () {
+    CapacityConfig config = search ();
+    config.slo_ms         = 200.0;
+    return config;
+}
+
+/// Throughput flat at 156 from level 8 up while p99 doubles: the search keeps
+/// stepping until two step-ups bought nothing, so the last level tried (12) is
+/// two levels past where throughput stopped growing.
+std::vector<CapacityWindow> flat_from_eight () {
+    return { window (4, 90, 20.0), window (6, 130, 31.0), window (8, 156, 52.0),
+        window (10, 156, 103.0), window (12, 156, 103.0) };
+}
+
+// Mutation-check: set `saturation` to `max_healthy` and this reports 12.
+TEST (CapacityControllerTest, APlateauReportsWhereThroughputStoppedGrowing) {
+    const auto history  = flat_from_eight ();
+    const auto decision = decide_next_level (roomy_search (), history);
+    ASSERT_EQ (decision.action, CapacityAction::Stop);
+    ASSERT_STREQ (decision.stop_reason, stop::PLATEAU);
+
+    const auto summary = summarize_capacity (roomy_search (), history, decision.stop_reason);
+    ASSERT_HAS_VALUE (summary.saturation);
+    EXPECT_EQ (summary.saturation->concurrency, 8u);
+    EXPECT_DOUBLE_EQ (summary.saturation->rps, 156.0);
+    EXPECT_DOUBLE_EQ (summary.saturation->p99_ms, 52.0);
+
+    ASSERT_HAS_VALUE (summary.max_healthy);
+    EXPECT_EQ (summary.max_healthy->concurrency, 12u);
+}
+
+TEST (CapacityControllerTest, SaturationIsTheLowestLevelWithinTheGainOfTheBest) {
+    // 10 -> 14 gained 4%, under the 5% plateau gain, so 10 is where the curve
+    // went flat; 12 is within the gain too but is not the lowest.
+    const std::vector<CapacityWindow> history{ window (8, 120, 30.0),
+        window (10, 150, 40.0), window (12, 155, 50.0), window (14, 156, 60.0) };
+    const auto summary = summarize_capacity (roomy_search (), history, stop::PLATEAU);
+
+    ASSERT_HAS_VALUE (summary.saturation);
+    EXPECT_EQ (summary.saturation->concurrency, 10u);
+}
+
+TEST (CapacityControllerTest, SaturationMeasuresTheGainAgainstTheLowerLevel) {
+    // 148 -> 156 is 5.4% of the lower level: just over the gain, though it is
+    // 5.1% of the higher one. `plateaued` measures against the lower level, so
+    // 10 is the answer, not 8.
+    const std::vector<CapacityWindow> history{ window (8, 148, 30.0),
+        window (10, 156, 40.0), window (12, 156, 50.0) };
+    const auto summary = summarize_capacity (roomy_search (), history, stop::PLATEAU);
+
+    ASSERT_HAS_VALUE (summary.saturation);
+    EXPECT_EQ (summary.saturation->concurrency, 10u);
+}
+
+TEST (CapacityControllerTest, SaturationReadsAReMeasuredLevelByItsLastWindow) {
+    const std::vector<CapacityWindow> history{ window (8, 90, 300.0),
+        window (8, 156, 52.0), window (10, 156, 60.0), window (12, 156, 70.0) };
+    const auto summary = summarize_capacity (roomy_search (), history, stop::PLATEAU);
+
+    ASSERT_HAS_VALUE (summary.saturation);
+    EXPECT_EQ (summary.saturation->concurrency, 8u);
+    EXPECT_DOUBLE_EQ (summary.saturation->p99_ms, 52.0);
+}
+
+// Mutation-check: drop the `breaches` filter and the 400 rps level, which gave
+// out on latency, becomes both the best throughput and the saturation level.
+TEST (CapacityControllerTest, ABreachedLevelIsNeverTheSaturationLevel) {
+    const std::vector<CapacityWindow> history{ window (8, 100, 50.0),
+        window (10, 400, 900.0), window (12, 500, 20.0, 40.0), window (14, 101, 60.0) };
+    const auto summary = summarize_capacity (roomy_search (), history, stop::PLATEAU);
+
+    ASSERT_HAS_VALUE (summary.saturation);
+    EXPECT_EQ (summary.saturation->concurrency, 8u);
+    EXPECT_DOUBLE_EQ (summary.saturation->rps, 100.0);
+}
+
+TEST (CapacityControllerTest, NoSaturationWhenNoLevelDeliveredAnyThroughput) {
+    const std::vector<CapacityWindow> history{ window (8, 0, 5.0), window (10, 0, 5.0) };
+    EXPECT_FALSE (
+    summarize_capacity (roomy_search (), history, stop::PLATEAU).saturation.has_value ());
+    EXPECT_FALSE (
+    summarize_capacity (roomy_search (), {}, stop::PLATEAU).saturation.has_value ());
+}
+
+TEST (CapacityControllerTest, OnlyAPlateauReportsSaturation) {
+    for (const char* reason : { stop::SLO_EXCEEDED, stop::ERRORS_EXCEEDED,
+         stop::CAP_REACHED, stop::DEADLINE, stop::STOPPED }) {
+        const auto summary =
+        summarize_capacity (roomy_search (), flat_from_eight (), reason);
+        EXPECT_FALSE (summary.saturation.has_value ()) << reason;
+    }
+}
+
+TEST (CapacityControllerTest, PayloadCarriesSaturationOnAPlateauOnly) {
+    const auto plateau = build_capacity_summary_payload (
+    summarize_capacity (roomy_search (), flat_from_eight (), stop::PLATEAU));
+    EXPECT_EQ (plateau["saturation_concurrency"], 8u);
+    EXPECT_DOUBLE_EQ (plateau["saturation_rps"].get<double> (), 156.0);
+    EXPECT_DOUBLE_EQ (plateau["saturation_p99_ms"].get<double> (), 52.0);
+    EXPECT_EQ (plateau["max_healthy_concurrency"], 12u);
+
+    const auto capped = build_capacity_summary_payload (
+    summarize_capacity (roomy_search (), flat_from_eight (), stop::CAP_REACHED));
+    EXPECT_FALSE (capped.contains ("saturation_concurrency"));
+    EXPECT_FALSE (capped.contains ("saturation_rps"));
+    EXPECT_FALSE (capped.contains ("saturation_p99_ms"));
 }
 
 // ---------------------------------------------------------------------------

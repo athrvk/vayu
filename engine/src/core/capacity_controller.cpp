@@ -66,6 +66,33 @@ bool plateaued (const CapacityConfig& config, const std::vector<CapacityWindow>&
     return gain_pct < config.plateau_gain_pct;
 }
 
+/// The lowest healthy level that already delivered the plateau's throughput:
+/// the first whose rps the best healthy level exceeds by less than
+/// `plateau_gain_pct`. The gain is measured against the lower level, as
+/// `plateaued` measures it, so "plateaued" and "saturated here" agree. The
+/// levels past it add concurrency and latency, not throughput. A level with no
+/// positive rps has no percentage and cannot be the answer.
+std::optional<CapacityWindow> saturation_level (const CapacityConfig& config,
+const std::vector<CapacityWindow>& history) {
+    const auto levels = per_level (history);
+    double best_rps   = 0.0;
+    for (const auto& level : levels) {
+        if (!breaches (config, level)) {
+            best_rps = std::max (best_rps, level.rps);
+        }
+    }
+    for (const auto& level : levels) {
+        if (breaches (config, level) || !(level.rps > 0.0)) {
+            continue;
+        }
+        const double gain_pct = (best_rps - level.rps) * 100.0 / level.rps;
+        if (gain_pct < config.plateau_gain_pct) {
+            return level;
+        }
+    }
+    return std::nullopt;
+}
+
 size_t next_level_above (const CapacityConfig& config, size_t current) {
     const double grown = static_cast<double> (current) * (1.0 + config.step_growth);
     size_t next = current + 1;
@@ -147,6 +174,12 @@ const char* stop_reason) {
         summary.knee = history.back ();
     }
 
+    // On a plateau `max_healthy` is the last level tried, which is past the
+    // point where throughput stopped growing; saturation is where it stopped.
+    if (summary.stop_reason == capacity_stop::PLATEAU) {
+        summary.saturation = saturation_level (config, history);
+    }
+
     return summary;
 }
 
@@ -162,7 +195,7 @@ nlohmann::json build_capacity_summary_payload (const CapacitySummary& summary) {
     payload["max_error_pct"] = summary.max_error_pct;
     payload["stop_reason"]   = summary.stop_reason;
     payload["levels"]        = levels;
-    // Both halves are omitted rather than zeroed when they were not observed -
+    // Each group is omitted rather than zeroed when it was not observed -
     // "the first level already breached" and "the service sustained nothing"
     // are different findings, and only the absent key can say the first.
     if (summary.max_healthy) {
@@ -174,6 +207,11 @@ nlohmann::json build_capacity_summary_payload (const CapacitySummary& summary) {
         payload["knee_concurrency"] = summary.knee->concurrency;
         payload["knee_p99_ms"]      = summary.knee->p99_ms;
         payload["knee_error_pct"]   = summary.knee->error_pct;
+    }
+    if (summary.saturation) {
+        payload["saturation_concurrency"] = summary.saturation->concurrency;
+        payload["saturation_rps"]         = summary.saturation->rps;
+        payload["saturation_p99_ms"]      = summary.saturation->p99_ms;
     }
     return payload;
 }
