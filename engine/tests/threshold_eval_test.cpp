@@ -34,7 +34,8 @@
 
 namespace {
 
-using vayu::core::AssertionTotals;
+using vayu::core::AssertionPopulations;
+using vayu::core::build_threshold_outcome_payload;
 using vayu::core::evaluate_thresholds;
 using vayu::core::RunSummaryInputs;
 using vayu::core::ThresholdOutcome;
@@ -366,7 +367,7 @@ TEST (ThresholdEval, AThroughputOrErrorRateBudgetIsAlwaysEvaluated) {
 }
 
 // --- maxAssertionFailureRatePct (issue #1497): assert.* elements and
-// pm.test calls, folded together, over a run's combined assertion tally ---
+// pm.test calls, judged per population (#2892) ---
 
 TEST (ThresholdEval, AZeroAssertionFailureRateBudgetIsAccepted) {
     // Same reasoning as the error rate: "no assertion may fail" is a real ask.
@@ -388,19 +389,141 @@ TEST (ThresholdEval, AnAssertionFailureRateBudgetIsUnevaluatedWithNoAssertions) 
     EXPECT_FALSE (check.passed);
 }
 
-TEST (ThresholdEval, AnAssertionFailureRateBudgetReadsTheCombinedTally) {
+// Mutation check: reduce `assertion_data_present` to `has_value ()` and this
+// reads evaluated.
+TEST (ThresholdEval, AnAssertionPopulationsObjectWithNothingInItIsUnevaluated) {
     RunSummaryInputs inputs = measured_run ();
-    inputs.assertions = AssertionTotals{ .passed = 18, .failed = 2 }; // 10%
+    inputs.assertions       = AssertionPopulations{};
+    auto check              = only_check (evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 0 } }), inputs));
+    EXPECT_FALSE (check.evaluated);
+    EXPECT_FALSE (check.assertions.has_value ());
+}
 
-    auto pass = only_check (evaluate_thresholds (
-    config_with ({ { "maxAssertionFailureRatePct", 10 } }), inputs));
-    EXPECT_TRUE (pass.evaluated);
-    EXPECT_DOUBLE_EQ (pass.actual, 10.0);
-    EXPECT_TRUE (pass.passed);
+// #2892: an exact assertion that never fails beside a sampled pm.test that
+// fails half the time is judged at 50%, the sampled rate. A blend over equal
+// counts reads 25%; over the counts a 1-in-100 replay gives, 0.495%.
+// Mutation check: return the blended failed/total in
+// `measured_assertion_failure_rate` and both readings red.
+TEST (ThresholdEval, AnAssertionBudgetJudgesTheWorseOfTheExactAndSampledRates) {
+    for (const size_t exact_passed : { size_t{ 2 }, size_t{ 200 } }) {
+        RunSummaryInputs inputs = measured_run ();
+        inputs.assertions       = AssertionPopulations{
+                  .exact       = { .passed = exact_passed, .failed = 0 },
+                  .sampled     = { .passed = 1, .failed = 1 },
+                  .sample_rate = 100,
+        };
 
-    auto fail = only_check (evaluate_thresholds (
+        auto pass = only_check (evaluate_thresholds (
+        config_with ({ { "maxAssertionFailureRatePct", 50 } }), inputs));
+        EXPECT_TRUE (pass.evaluated);
+        EXPECT_DOUBLE_EQ (pass.actual, 50.0) << exact_passed << " exact passes";
+        EXPECT_TRUE (pass.passed);
+
+        auto fail = only_check (evaluate_thresholds (
+        config_with ({ { "maxAssertionFailureRatePct", 49 } }), inputs));
+        EXPECT_FALSE (fail.passed) << exact_passed << " exact passes";
+    }
+}
+
+// The same rule from the other side: a failing exact population is not
+// diluted by a clean sampled one.
+TEST (ThresholdEval, AFailingExactPopulationIsNotDilutedByACleanSampledOne) {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.assertions       = AssertionPopulations{
+              .exact       = { .passed = 18, .failed = 2 }, // 10%
+              .sampled     = { .passed = 500, .failed = 0 },
+              .sample_rate = 10,
+    };
+    auto check = only_check (evaluate_thresholds (
     config_with ({ { "maxAssertionFailureRatePct", 9 } }), inputs));
-    EXPECT_FALSE (fail.passed);
+    EXPECT_DOUBLE_EQ (check.actual, 10.0);
+    EXPECT_FALSE (check.passed);
+}
+
+// A run whose only assertions came from the deferred replay is still judged.
+// Mutation check: read only `exact` in `assertion_data_present` and this
+// reads unevaluated.
+TEST (ThresholdEval, ASampledOnlyAssertionPopulationIsEvaluated) {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.assertions       = AssertionPopulations{
+              .exact = {}, .sampled = { .passed = 3, .failed = 1 }, .sample_rate = 10
+    };
+    auto check = only_check (evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 30 } }), inputs));
+    EXPECT_TRUE (check.evaluated);
+    EXPECT_DOUBLE_EQ (check.actual, 25.0);
+    EXPECT_TRUE (check.passed);
+}
+
+// The stored check names both populations and the period the sampled one ran
+// at, beside the worse rate as `actual`. Mutation check: drop the
+// `append_assertion_populations` call in `build_threshold_outcome_payload`
+// and every key below reds.
+TEST (ThresholdEval, AnAssertionCheckPayloadNamesBothPopulations) {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.assertions       = AssertionPopulations{
+              .exact       = { .passed = 200, .failed = 0 },
+              .sampled     = { .passed = 1, .failed = 1 },
+              .sample_rate = 100,
+    };
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 10 } }), inputs);
+    ASSERT_HAS_VALUE (outcome);
+    const auto payload = build_threshold_outcome_payload (*outcome);
+    const auto& check  = payload["checks"][0];
+    EXPECT_DOUBLE_EQ (check["actual"].get<double> (), 50.0);
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 200 }, { "failed", 0 } }));
+    EXPECT_EQ (check.value ("assertionsSampled", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 1 }, { "failed", 1 } }));
+    EXPECT_EQ (check.value ("sampleRate", 0), 100);
+}
+
+// Nothing sampled: the sampled object is still written, at zero, and no
+// sample rate is named. Mutation check: write `sampleRate` unconditionally in
+// `append_assertion_populations` and the last assertion reds.
+TEST (ThresholdEval, AnExactOnlyAssertionCheckNamesNoSampleRate) {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.assertions       = AssertionPopulations{
+              .exact = { .passed = 18, .failed = 2 }, .sampled = {}, .sample_rate = 1
+    };
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 10 } }), inputs);
+    ASSERT_HAS_VALUE (outcome);
+    EXPECT_DOUBLE_EQ (outcome->checks.at (0).actual, 10.0);
+    const auto payload = build_threshold_outcome_payload (*outcome);
+    const auto& check  = payload["checks"][0];
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 18 }, { "failed", 2 } }));
+    EXPECT_EQ (check.value ("assertionsSampled", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 0 } }));
+    EXPECT_FALSE (check.contains ("sampleRate")) << check.dump ();
+}
+
+// The populations belong to the assertion check alone, and an unevaluated
+// one carries none, as it carries no `actual`. Mutation check: fill
+// `check.assertions` for every evaluated metric in
+// `evaluate_known_metric_check` and the error-rate row reds.
+TEST (ThresholdEval, OnlyAnEvaluatedAssertionCheckCarriesPopulations) {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.assertions       = AssertionPopulations{
+              .exact = { .passed = 1, .failed = 0 }, .sampled = {}, .sample_rate = 1
+    };
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "maxErrorRatePct", 5 }, { "maxAssertionFailureRatePct", 5 } }), inputs);
+    ASSERT_HAS_VALUE (outcome);
+    const auto payload = build_threshold_outcome_payload (*outcome);
+    ASSERT_EQ (payload["checks"].size (), 2u);
+    EXPECT_FALSE (payload["checks"][0].contains ("assertionsExact")) << payload.dump ();
+    EXPECT_TRUE (payload["checks"][1].contains ("assertionsExact")) << payload.dump ();
+
+    auto unjudged = evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 5 } }), measured_run ());
+    ASSERT_HAS_VALUE (unjudged);
+    const auto row = build_threshold_outcome_payload (*unjudged)["checks"][0];
+    EXPECT_FALSE (row.contains ("assertionsExact")) << row.dump ();
+    EXPECT_FALSE (row.contains ("assertionsSampled")) << row.dump ();
 }
 
 // --- thresholds.failRun (issue #1497): a flag, not a budget -----------------

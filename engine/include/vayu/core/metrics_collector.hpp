@@ -636,6 +636,12 @@ class MetricsCollector {
         return response_budget_spent_.load (std::memory_order_relaxed);
     }
 
+    /// The response sample period this collector applied (keep 1 in N), after
+    /// the constructor's floor of 1.
+    [[nodiscard]] size_t response_sample_rate () const {
+        return config_.response_sample_rate;
+    }
+
     /**
      * @brief Body bytes the retained response samples currently hold.
      * The figure `max_response_sample_bytes` is spent against, across the

@@ -390,9 +390,11 @@ too.
 `POST /execute`'s live response body carries the same array under the same key - one object, two
 homes, on the `scripts` node's own precedent.
 
-`assert.*` outcomes join `pm.test` results in one assertion tally the run's `maxAssertionFailureRatePct`
-threshold reads; a failed budget flips the run's terminal status to `Failed` when the run also asks for
-`thresholds.failRun: true` (`api-reference.md`'s thresholds section, #1497).
+`assert.*` outcomes count, with the `pm.test` calls of inline scripts, in the exact assertion
+population the run's `maxAssertionFailureRatePct` threshold reads beside the sampled one (a
+deferred script's replay), judging the worse of the two rates (#2892); a failed budget flips the
+run's terminal status to `Failed` when the run also asks for `thresholds.failRun: true`
+(`api-reference.md`'s thresholds section, #1497).
 
 ## Load paths
 

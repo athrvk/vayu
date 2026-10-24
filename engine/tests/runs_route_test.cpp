@@ -2057,6 +2057,35 @@ TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
     body["summary"]["errorRate"].get<double> ());
 }
 
+// #2892: the assertion check's two populations survive the stored summary,
+// so a report read after a restart still names both. Mutation check: drop the
+// `append_assertion_populations` call in `build_threshold_outcome_payload`
+// and the population keys red.
+TEST_F (RunsRouteTest, ReportCarriesTheAssertionPopulations) {
+    seed ({ .id = "run_assert_pops", .start_time = 1000 });
+    auto inputs       = summary_inputs ();
+    inputs.assertions = vayu::core::AssertionPopulations{
+        .exact       = { .passed = 200, .failed = 0 },
+        .sampled     = { .passed = 1, .failed = 1 },
+        .sample_rate = 100,
+    };
+    inputs.thresholds = vayu::core::evaluate_thresholds (
+    nlohmann::json{ { "thresholds", { { "maxAssertionFailureRatePct", 10 } } } }, inputs);
+    db_->update_run_summary (
+    "run_assert_pops", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_assert_pops");
+    ASSERT_EQ (status, 200);
+    const auto& check = body["thresholdValidation"]["checks"][0];
+    EXPECT_DOUBLE_EQ (check["actual"].get<double> (), 50.0);
+    EXPECT_FALSE (check["passed"].get<bool> ());
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 200 }, { "failed", 0 } }));
+    EXPECT_EQ (check.value ("assertionsSampled", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 1 }, { "failed", 1 } }));
+    EXPECT_EQ (check.value ("sampleRate", 0), 100);
+}
+
 // #2436: `summary` is written only at terminal status, so a report read while
 // the run is still going has no verdict, and `metadata.status` is what tells a
 // reader it is partial. A load run's rows are read only once it is terminal

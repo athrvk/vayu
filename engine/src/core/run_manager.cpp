@@ -1652,6 +1652,42 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     return warnings;
 }
 
+AssertionTotals exact_assertion_totals (const RunContext& context,
+const ScenarioLoadState* scenario_state) {
+    // The counters alone, never plus the element tallies: `record_assertion`
+    // appends each `assert.*` outcome to the step's script results, so it is
+    // already counted here.
+    const auto& passed = scenario_state != nullptr ? scenario_state->inline_tests_passed :
+                                                     context.inline_tests_passed;
+    const auto& failed = scenario_state != nullptr ? scenario_state->inline_tests_failed :
+                                                     context.inline_tests_failed;
+    return { .passed = passed.load (std::memory_order_relaxed),
+        .failed      = failed.load (std::memory_order_relaxed) };
+}
+
+namespace {
+
+/// What `maxAssertionFailureRatePct` judges: the exact population beside the
+/// deferred replay's sampled one (#2892). Absent when the run made no
+/// assertion, so the budget stays unevaluated rather than passing at 0/0.
+std::optional<AssertionPopulations> assertion_populations (const RunContext& context,
+const ScriptValidation& validation,
+const ScenarioLoadState* scenario_state) {
+    AssertionPopulations populations;
+    populations.exact = exact_assertion_totals (context, scenario_state);
+    if (validation.run) {
+        populations.sampled = { .passed = validation.run->passed,
+            .failed                     = validation.run->failed };
+        populations.sample_rate = context.metrics_collector->response_sample_rate ();
+    }
+    if (populations.exact.total () + populations.sampled.total () == 0) {
+        return std::nullopt;
+    }
+    return populations;
+}
+
+} // namespace
+
 /** Everything the stored whole-run summary is built from. */
 RunSummaryInputs collect_summary_inputs (const std::shared_ptr<RunContext>& context,
 const RunTotals& totals,
@@ -1728,45 +1764,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
             inputs.elements = std::move (built);
         }
     }
-    // Issue #1497's combined assertion tally: the deferred replay's pm.test
-    // results (already in `inputs.tests`, both single-request and scenario
-    // runs), plus - for a scenario run - every `assert.*` element outcome and
-    // every inline script's own pm.test calls, neither of which anything else
-    // reads at run level. Absent when the run made no assertion, so
-    // `maxAssertionFailureRatePct` stays unevaluated rather than a trivial
-    // pass at 0/0.
-    {
-        AssertionTotals assertions;
-        if (inputs.tests) {
-            assertions.passed += inputs.tests->passed;
-            assertions.failed += inputs.tests->failed;
-        }
-        if (scenario_state) {
-            const auto element_totals =
-            scenario_state->element_tallies.assertion_totals (context->scenario->plan);
-            assertions.passed += element_totals.passed;
-            assertions.failed += element_totals.failed;
-            assertions.passed += scenario_state->inline_script_tests_passed.load (
-            std::memory_order_relaxed);
-            assertions.failed += scenario_state->inline_script_tests_failed.load (
-            std::memory_order_relaxed);
-        } else if (context->step_elements && !context->step_elements->empty ()) {
-            // The single-request sibling (issue #1594): the same combined
-            // tally, off `RunContext::element_tallies` /
-            // `inline_script_tests_passed` / `_failed` instead.
-            const auto element_totals =
-            context->element_tallies.assertion_totals (*context->step_elements);
-            assertions.passed += element_totals.passed;
-            assertions.failed += element_totals.failed;
-            assertions.passed +=
-            context->inline_script_tests_passed.load (std::memory_order_relaxed);
-            assertions.failed +=
-            context->inline_script_tests_failed.load (std::memory_order_relaxed);
-        }
-        if (assertions.passed + assertions.failed > 0) {
-            inputs.assertions = assertions;
-        }
-    }
+    inputs.assertions =
+    assertion_populations (*context, validation, scenario_state.get ());
     // Beside coverage, and deliberately not inside the `scenario_state`
     // block above: this pass reads the sample reservoirs, which are the
     // collector's, so it is available whether or not the executor left

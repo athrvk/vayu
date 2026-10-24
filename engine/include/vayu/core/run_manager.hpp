@@ -51,6 +51,10 @@ class CookieJar;
 
 namespace vayu::core {
 
+// Declared, not included: `scenario_load.hpp` reaches this header through
+// `scenario_runner.hpp`, so including it here would be a cycle.
+struct ScenarioLoadState;
+
 /**
  * @brief One wire-ready SSE frame: `event: <name>`, `id: <offset>`, `data:`.
  *
@@ -267,31 +271,6 @@ class RequestElementTallies {
         return out;
     }
 
-    /// Summed passed/failed across every `assert.*` element - the
-    /// declarative half of the run's combined assertion tally
-    /// (`maxAssertionFailureRatePct`), on the same rule
-    /// `StepElementTallies::assertion_totals` follows: a `script.*`
-    /// element's own outcome is not counted here, only its `pm.test` calls,
-    /// tallied separately on `RunContext::inline_script_tests_passed` /
-    /// `_failed`.
-    [[nodiscard]] vayu::core::AssertionTotals assertion_totals (
-    const std::vector<vayu::core::CompiledElement>& elements) const {
-        vayu::core::AssertionTotals totals;
-        for (const auto& element : elements) {
-            const auto* kind = vayu::core::Registry::instance ().find (element.kind);
-            if (kind == nullptr || kind->category != "assert") {
-                continue;
-            }
-            auto it = counts_.find (element.id);
-            if (it == counts_.end ()) {
-                continue;
-            }
-            totals.passed += it->second.passed.load (std::memory_order_relaxed);
-            totals.failed += it->second.failed.load (std::memory_order_relaxed);
-        }
-        return totals;
-    }
-
     private:
     std::unordered_map<std::string, vayu::core::ElementOutcomeCounts> counts_;
 };
@@ -485,12 +464,14 @@ struct RunContext {
     /// for a run with none, so `record` is always a safe no-op there too.
     RequestElementTallies element_tallies;
 
-    /// An inline `script.post`'s `pm.test` calls (issue #1594), the same
-    /// counters `ScenarioLoadState::inline_script_tests_passed` / `_failed`
-    /// are for the scenario path - empty unless `script.post` actually ran
-    /// inline this run.
-    std::atomic<size_t> inline_script_tests_passed{ 0 };
-    std::atomic<size_t> inline_script_tests_failed{ 0 };
+    /// Every test result @ref step_elements produced on a submission (issue
+    /// #1594): an `assert.*` outcome, a required `extract.*` miss and an
+    /// inline script's `pm.test` call, as the pipeline appends them to the
+    /// step's script results. The scenario path's twin is
+    /// `ScenarioLoadState::inline_tests_passed` / `_failed`; both are what
+    /// `exact_assertion_totals` reads.
+    std::atomic<size_t> inline_tests_passed{ 0 };
+    std::atomic<size_t> inline_tests_failed{ 0 };
 
     /**
      * `elements.scripts` (issue #1495), resolved once here from a payload
@@ -1288,6 +1269,19 @@ void attach_step_test_totals (nlohmann::json& scenario,
 const std::vector<std::optional<ScriptValidationTotals>>& per_step);
 
 /**
+ * @brief A load run's exact assertion population (#2892): every `assert.*`
+ *        outcome, required `extract.*` miss and inline script `pm.test`
+ *        call, counted on each completion.
+ *
+ * The same population a collection run's `tally_tests` counts. Never the
+ * deferred replay, which is the sampled population. Reads @p scenario_state's
+ * `inline_tests_*` counters for a scenario load run, else @p context's; zero
+ * for a run whose elements made no test. Final only once the run has drained.
+ */
+[[nodiscard]] AssertionTotals exact_assertion_totals (const RunContext& context,
+const ScenarioLoadState* scenario_state);
+
+/**
  * @brief What each bounded store thinned away, for the run summary.
  *
  * Every store the collector keeps is capped, so a long enough run retains a
@@ -1381,12 +1375,11 @@ struct RunSummaryInputs {
     // Absent when the run had no test script or no sampled responses - the
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;
-    // This run's combined assert.* element and pm.test tally (issue #1497):
-    // `tests` above plus every declarative assertion and inline script
-    // assertion, folded together for `maxAssertionFailureRatePct`. Absent
-    // when the run made no assertion at all, which is what keeps that metric
-    // unevaluated rather than a trivial pass at 0/0.
-    std::optional<AssertionTotals> assertions;
+    // What `maxAssertionFailureRatePct` judges (#1497, #2892): the exact
+    // population (`exact_assertion_totals`) beside the sampled one (`tests`
+    // above). Absent when the run made no assertion at all, which keeps that
+    // metric unevaluated rather than a trivial pass at 0/0.
+    std::optional<AssertionPopulations> assertions;
     // A single-request run's own `requestElements` outcomes (issue #1594),
     // under the summary's top-level `elements` key - the single-request
     // sibling of a scenario run's per-step `scenario.steps[].elements`,

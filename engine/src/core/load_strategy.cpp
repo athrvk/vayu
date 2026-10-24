@@ -717,9 +717,9 @@ vayu::http::routes::ScopeOverlay& overlay) {
     // half of issue #1497's assertion tally the scenario path folds in.
     for (const auto& test : pre_result.tests) {
         if (test.passed) {
-            context->inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+            context->inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
         } else {
-            context->inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+            context->inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
         }
     }
 }
@@ -789,13 +789,13 @@ vayu::http::routes::ScopeOverlay& overlay) {
     for (const auto& outcome : outcomes) {
         context->element_tallies.record (outcome);
     }
-    // Same rule as `run_request_elements_step_before`: empty unless
-    // `script.post` ran inline.
+    // Every `assert.*` outcome and required `extract.*` miss lands here, beside
+    // an inline `script.post`'s `pm.test` calls; a deferred one adds nothing.
     for (const auto& test : post_result.tests) {
         if (test.passed) {
-            context->inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+            context->inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
         } else {
-            context->inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+            context->inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
         }
     }
 

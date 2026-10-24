@@ -2595,9 +2595,12 @@ TEST_F (ScenarioRunnerTest, ACollectionRunWithNoDeclaredBudgetsStoresNoVerdict) 
     EXPECT_FALSE (summary_of (run_id).contains ("thresholds"));
 }
 
-// The combined `assert.*` and `pm.test` tally (#1497's metric) works for a
-// collection run too: a failing declarative assertion is exactly what
-// `maxAssertionFailureRatePct: 0` is declared to catch.
+// The `assert.*` and `pm.test` tally (#1497's metric) works for a collection
+// run too: a failing declarative assertion is exactly what
+// `maxAssertionFailureRatePct: 0` is declared to catch. Every step's
+// assertions run on every send, so the check names them all exact and
+// nothing sampled (#2892). Mutation check: put `summary.assertions` into
+// `.sampled` in `execute_scenario_run` and the population keys red.
 TEST_F (ScenarioRunnerTest, AFailingAssertionFailsTheAssertionFailureRateBudget) {
     seed_collection ("col_1");
     seed_request_with_elements ("req_a", 0, "/ok",
@@ -2613,9 +2616,14 @@ TEST_F (ScenarioRunnerTest, AFailingAssertionFailsTheAssertionFailureRateBudget)
     ASSERT_FALSE (thresholds.is_null ());
     EXPECT_EQ (thresholds["failed"].get<size_t> (), 1u);
     ASSERT_EQ (thresholds["checks"].size (), 1u);
-    EXPECT_EQ (thresholds["checks"][0]["metric"].get<std::string> (),
-    "maxAssertionFailureRatePct");
-    EXPECT_FALSE (thresholds["checks"][0]["passed"].get<bool> ());
+    const auto& check = thresholds["checks"][0];
+    EXPECT_EQ (check["metric"].get<std::string> (), "maxAssertionFailureRatePct");
+    EXPECT_FALSE (check["passed"].get<bool> ());
+    EXPECT_EQ (check.value ("assertionsExact", json ()),
+    (json{ { "passed", 0 }, { "failed", 1 } }));
+    EXPECT_EQ (check.value ("assertionsSampled", json ()),
+    (json{ { "passed", 0 }, { "failed", 0 } }));
+    EXPECT_FALSE (check.contains ("sampleRate")) << check.dump ();
 }
 
 // `thresholds.failRun: true` sets a collection run's terminal status to

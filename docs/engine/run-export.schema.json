@@ -502,7 +502,19 @@
                   "limit": {"type": "number"},
                   "actual": {"type": "number"},
                   "passed": {"type": "boolean"},
-                  "evaluated": {"type": "boolean"}
+                  "evaluated": {"type": "boolean"},
+                  "assertionsExact": {
+                    "description": "maxAssertionFailureRatePct only: assert.* outcomes and inline pm.test calls, counted on every completion.",
+                    "$ref": "#/definitions/assertionPopulation"
+                  },
+                  "assertionsSampled": {
+                    "description": "maxAssertionFailureRatePct only: the deferred pm.test replay over responses sampled at 1 in sampleRate (a long run's reservoir cap can make it sparser).",
+                    "$ref": "#/definitions/assertionPopulation"
+                  },
+                  "sampleRate": {
+                    "description": "The period assertionsSampled ran at (keep 1 in N); absent when it is empty.",
+                    "type": "number"
+                  }
                 }
               }
             },
@@ -675,6 +687,14 @@
         "failed": {"type": "number"},
         "skipped": {"type": "number"},
         "deferred": {"type": "number"}
+      }
+    },
+    "assertionPopulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "passed": {"type": "number"},
+        "failed": {"type": "number"}
       }
     },
     "lifecycleOutcomes": {
