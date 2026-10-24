@@ -2673,14 +2673,23 @@ struct GateReadings {
  * downstream can tell a hole from a quiet second, so the reason is logged rather
  * than swallowed - it never fails the run, whose live stream and final report
  * are built from the collector, not from these rows.
+ *
+ * A tick read before load start stores nothing (#2881): the series counts from
+ * load start, as the live frames do, and a second of setup is not a second of
+ * load. The stamp is compared with the tick's own reading, not only with 0,
+ * because the worker can stamp it between that reading and this call.
  */
 void persist_metric_tick (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 int64_t tick_wall_ms,
 int64_t tick_steady_ms,
 const std::map<int, size_t>& status_snapshot,
-const GateReadings& gate,
-int64_t& first_tick_steady_ms) {
+const GateReadings& gate) {
+    const int64_t load_start_steady_ms = context->load_start_steady_ms.load ();
+    if (load_start_steady_ms == 0 || tick_steady_ms <= load_start_steady_ms) {
+        return;
+    }
+
     size_t current_total = context->total_requests ();
     // The same snapshot the live tick counted its errors from, so the stored
     // row and the SSE frame for one tick cannot disagree.
@@ -2728,20 +2737,11 @@ int64_t& first_tick_steady_ms) {
     // Persist the tick: one wide row, built here rather than
     // reassembled from ~18 EAV rows by every reader.
     try {
-        // elapsed_seconds is measured from the *first persisted*
-        // tick, not from load start (which the cumulative rates
-        // above divide by): the 1 Hz gate means the first stored
-        // tick lands ~1s in, and a series that starts at 0 is what
-        // the charts have always drawn.
-        if (first_tick_steady_ms == 0) {
-            first_tick_steady_ms = tick_steady_ms;
-        }
-
         auto& mc = *context->metrics_collector;
         MetricTickSample sample;
         sample.timestamp = tick_wall_ms;
-        sample.elapsed_seconds =
-        static_cast<double> (tick_steady_ms - first_tick_steady_ms) / 1000.0;
+        // The gate frame of this tick carries the same reading.
+        sample.elapsed_seconds          = run_elapsed_s;
         sample.requests_completed       = current_total;
         sample.requests_failed          = failures.failed;
         sample.http_errors              = failures.http_errors ();
@@ -2805,10 +2805,6 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Live tick cadence (default 100 ms); DB write still gated at 1 Hz.
     // Declared here so it is in scope inside the try block below.
     int tick_interval_ms = 0;
-
-    // Monotonic reading at the first persisted tick; the origin every stored
-    // tick's elapsed_seconds is relative to. 0 until the first DB-gated tick.
-    int64_t first_tick_steady_ms = 0;
 
     // Build and append one SSE "metrics" event to the in-memory tick topic.
     // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
@@ -2954,12 +2950,14 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             auto elapsed = std::chrono::duration<double> (now - last_update).count ();
 
             // Emit a live tick every iteration; a gate tick also closes the
-            // second, whether or not the row below then persists.
+            // second, whether or not the row below then persists. A gate that
+            // stores nothing (setup still running) still restarts the second,
+            // or every tick after it would be a gate.
             const auto gate = emit_live_tick (
             &status_snapshot, tick_wall_ms, tick_steady_ms, elapsed >= 1.0);
             if (gate) {
                 persist_metric_tick (context, db, tick_wall_ms, tick_steady_ms,
-                status_snapshot, *gate, first_tick_steady_ms);
+                status_snapshot, *gate);
                 last_update = now;
             }
         }

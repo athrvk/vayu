@@ -35,6 +35,8 @@ export const STORED_P99_MS = 50;
  * second, all 200 unless `at` says otherwise, p99 {@link STORED_P99_MS}.
  * `at(second)` overrides that second's own figures; `failed` and `status` are
  * that second's own counts, which the series accumulates as the engine does.
+ * A tick is stored at the end of its second, counted from load start (#2881),
+ * so the first sits at elapsed 1 and `second` is the tick's `elapsed_seconds`.
  */
 export function storedTicks(
 	seconds: number,
@@ -48,7 +50,7 @@ export function storedTicks(
 	let completed = 0;
 	let failed = 0;
 	const codes: Record<string, number> = {};
-	for (let s = 0; s < seconds; s++) {
+	for (let s = 1; s <= seconds; s++) {
 		const own = at(s);
 		completed += STORED_RPS;
 		failed += own.failed ?? 0;
@@ -57,7 +59,7 @@ export function storedTicks(
 		}
 		const p99 = own.p99 ?? STORED_P99_MS;
 		ticks.push({
-			timestamp: 1_750_000_000_000 + s * 1000,
+			timestamp: 1_750_000_000_000 + (s - 1) * 1000,
 			elapsed_seconds: s,
 			requests_completed: completed,
 			requests_failed: failed,
