@@ -3308,7 +3308,13 @@ export interface RunReport {
 		/** The error limit, in percent, that the levels were judged against. */
 		maxErrorPct?: number;
 		kneeErrorPct?: number;
-		levels: { concurrency: number; rps: number; p99Ms: number; errorPct?: number }[];
+		levels: {
+			concurrency: number;
+			rps: number;
+			p99Ms: number;
+			errorPct?: number;
+			samples?: number;
+		}[];
 	};
 	/**
 	 * How many records each of the run's bounded stores thinned away.

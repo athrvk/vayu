@@ -93,7 +93,7 @@ json healthy_summary () {
         { { "slo_ms", 200 }, { "max_error_pct", 1.0 }, { "stop_reason", "slo_exceeded" },
         { "levels",
         json::array ({ { { "concurrency", 1 }, { "rps", 10 }, { "p99_ms", 5 },
-        { "error_pct", 0.0 } } }) },
+        { "error_pct", 0.0 }, { "samples", 50 } } }) },
         { "max_healthy_concurrency", 1 }, { "max_healthy_rps", 10 },
         { "p99_at_max_healthy_ms", 5 }, { "knee_concurrency", 2 },
         { "knee_p99_ms", 300 }, { "knee_error_pct", 0.5 } } },
@@ -266,6 +266,9 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_TRUE (capacity.contains ("maxErrorPct"));
     EXPECT_TRUE (capacity.contains ("kneeErrorPct"));
     EXPECT_TRUE (capacity["levels"].at (0).contains ("errorPct"));
+    // And the completions each level was judged on (#2926). Mutation check:
+    // drop "samples" from CAPACITY_LEVEL_KEYS and this fails.
+    EXPECT_EQ (capacity["levels"].at (0).value ("samples", -1), 50);
     // The allowlist has to name it, or the export drops the replays (#2799).
     // Mutation check: drop "connectionReplays" from SUMMARY_KEYS and this fails.
     EXPECT_EQ (document["report"]["summary"].value ("connectionReplays", -1), 2);

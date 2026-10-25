@@ -1793,7 +1793,10 @@ claims a limit that only some stops found (same absent-vs-zero discipline as
 
 A level the search re-measured after one bad window appears **twice** in the
 table, at the same number of virtual users; that repeat is the audit trail doing its job,
-so the rows are keyed by index rather than by level. A `stopReason` this build
+so the rows are keyed by index rather than by level. The second and later rows
+of a number of virtual users carry a muted "re-measured" beside it, so a repeat
+reads as the search checking itself rather than a duplicated row; the first
+occurrence and a level measured once are unlabelled. A `stopReason` this build
 has no words for renders under its raw key, as `ThresholdVerdict` does with an
 unknown metric.
 
@@ -1805,6 +1808,15 @@ it keeps three columns, tints nothing and says nothing about errors, because an
 absent share is not the claim "every level was clean". The `errors_exceeded`
 detail names the limit from `maxErrorPct` when present and reads generically
 when not.
+
+A **Samples** column follows (`levels[].samples`, a count through
+`formatNumber`) when at least one level carries it: the completions the level's
+p99 was read from. A level of refused connections records no latency, so its
+p99 is 0 because nothing was measured, and `0` in this column is what tells
+that apart from a service that answered instantly. A level without the field,
+on a run stored before the engine reported it, gets an empty cell and never a
+`0`, and a run with none of them keeps the table without the column. The
+rightmost column shown sits flush and every other one keeps the `pr-3` gutter.
 
 Every latency in the card (headline, knee, budget, table) is `formatLatency`, so
 a level at 1234 ms reads `1.23s` like the rest of the app; the same holds for
