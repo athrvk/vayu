@@ -468,7 +468,10 @@ nlohmann::json& raw_elements_out) {
     vayu::http::AuthResolution::Apply :
     vayu::http::AuthResolution::Defer;
 
-    auto built = vayu::http::build_request (payload, &db, options.timeout_ms,
+    // A step's own stored `timeout` (#2937) wins over the run's; a step that
+    // states none takes the run's, itself the run's `timeout` or the setting.
+    auto built = vayu::http::build_request (payload, &db,
+    vayu::http::routes::resolve_request_timeout_ms (payload, options.timeout_ms),
     auth_resolution, options.target_policy, options.cancel);
     if (!built.ok || built.parse_failed) {
         return StepRefusal{ "Cannot compose " + describe_step (index, row) +

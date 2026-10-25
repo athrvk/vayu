@@ -227,8 +227,8 @@ UrlOmitted& omitted);
 
 /**
  * `settings` as the request fields it stands for (`followRedirects`,
- * `maxRedirects`, `httpVersion`, `verifySSL`, `stream`), or nothing when any
- * member present has the wrong type or value.
+ * `maxRedirects`, `timeout`, `httpVersion`, `verifySSL`, `stream`), or nothing
+ * when any member present has the wrong type or value.
  */
 [[nodiscard]] std::optional<Json> settings_of (const Json& value);
 

@@ -1688,6 +1688,11 @@ struct Request {
     bool follow_redirects    = true;   // INTEGER NOT NULL DEFAULT 1
     int max_redirects        = 10;     // INTEGER NOT NULL DEFAULT 10
     std::string http_version = "auto"; // TEXT NOT NULL DEFAULT 'auto'
+    // This endpoint's own whole-transfer timeout in ms (issue #2937), held to
+    // `REQUEST_TIMEOUT_FIELD`'s range. Nullable with no default, on the
+    // `spec_operation` precedent: NULL is "use the `defaultTimeout` setting",
+    // which a stored number would freeze at the value of the day it was saved.
+    std::optional<int> timeout_ms;
     // Whether the TLS certificate is verified (issue #706). Stored beside the
     // redirect policy for the same reason: it is a property of *this* endpoint
     // - the internal host with the self-signed certificate - not a mode the

@@ -248,6 +248,10 @@ inline auto make_vayu_storage (const std::string& path) {
     // pre-existing rows backfill to the engine defaults (follow, cap at 10).
     make_column ("follow_redirects", &Request::follow_redirects, default_value (true)),
     make_column ("max_redirects", &Request::max_redirects, default_value (10)),
+    // The request's own timeout (issue #2937, schema version 9). Nullable
+    // with no default, like `method_source`: NULL is "use the setting", and
+    // every pre-existing row backfills to it.
+    make_column ("timeout_ms", &Request::timeout_ms),
     // Per-request TLS verification (issue #706). Same NOT NULL + default_value
     // shape, and the default is the safe one: a row written before this column
     // existed backfills to verifying, never to trusting whatever answers.

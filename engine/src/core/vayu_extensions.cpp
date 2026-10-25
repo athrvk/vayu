@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/log_redact.hpp"
 
@@ -777,6 +778,15 @@ std::optional<Json> settings_of (const Json& value) {
             return std::nullopt;
         }
         out["maxRedirects"] = *found;
+    }
+    // Held to the bound `POST /import/apply` refuses outside of, so a bad value
+    // is this piece's `vayu_extension_invalid`, never a refused import.
+    if (const auto found = value.find ("timeout"); found != value.end ()) {
+        if (found->is_null () ||
+        vayu::http::routes::check_numeric_field (value, vayu::http::routes::REQUEST_TIMEOUT_FIELD)) {
+            return std::nullopt;
+        }
+        out["timeout"] = *found;
     }
     if (const auto found = value.find ("httpVersion"); found != value.end ()) {
         if (!found->is_string () || !one_of (HTTP_VERSIONS, found->get<std::string> ())) {

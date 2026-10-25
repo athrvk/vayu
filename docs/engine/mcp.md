@@ -402,10 +402,13 @@ Notes:
   own and the value reaches `CURLOPT_MAXREDIRS`, where a negative means
   *unlimited*.
   **The tool exposes no per-run `timeout`, and that is not an omission**:
-  `POST /runs` accepts one, but a run started here takes the `defaultTimeout`
-  setting (`resolve_request_timeout_ms`), which `update_engine_config` changes -
-  the run's OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
-  included (issues #2833, #2841). Four transfers keep bounds of their own: a
+  `POST /runs` accepts one, but a run started here takes the timeout of the
+  request itself. A run started by `requestId` sends with the stored request's
+  own `timeout` when it states one (issue #2937), because `POST /compose` writes
+  it into the payload the run is started from; otherwise, and for an ad-hoc
+  target, it takes the `defaultTimeout` setting (`resolve_request_timeout_ms`),
+  which `update_engine_config` changes - the run's OAuth 2.0 token fetches and
+  every `pm.sendRequest` its scripts make included (issues #2833, #2841). Four transfers keep bounds of their own: a
   stream ends on its idle timeout and its duration and event caps, never a
   whole-transfer deadline; the import fetch has its own 30 s and stall timeout;
   the connection test its 10 s; and the server-vitals monitor its scrape

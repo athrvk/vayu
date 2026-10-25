@@ -1203,7 +1203,15 @@ const std::vector<vayu::db::Collection>& chain) {
         payload["disabledSystemHeaders"] = nlohmann::json::array ();
     }
     payload["disableUrlEncoding"] = request.disable_url_encoding;
-    payload["requestId"]          = request.id;
+    // The deliberate inverse of the switches above (issue #2937): emitted only
+    // when the request states one. The absent default is the live
+    // `defaultTimeout` setting, which `/execute` and `/runs` resolve at send
+    // time (`resolve_request_timeout_ms`); emitting it here would freeze the
+    // setting into every composed payload and the run snapshots built from it.
+    if (request.timeout_ms) {
+        payload["timeout"] = *request.timeout_ms;
+    }
+    payload["requestId"] = request.id;
 
     // Identity for the script sandbox (`pm.info.requestName`), not an HTTP
     // field. Only the by-id path has a row to read it from; the inline path's

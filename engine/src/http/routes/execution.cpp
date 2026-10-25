@@ -887,45 +887,6 @@ const nlohmann::json& elements = nlohmann::json::array ()) {
     return response_json;
 }
 
-// One numeric field of a run config: what it is called on the wire, and the
-// closed interval it must fall in. Kept as data so the four checks below read
-// as a table rather than four hand-written branches that can drift apart.
-struct NumericRunField {
-    const char* key;
-    int64_t min;
-    int64_t max;
-    const char* why; // appended to the message, explains the bound
-};
-
-// The `timeout` bound both `POST /execute` and `POST /runs` hold a payload to.
-constexpr NumericRunField REQUEST_TIMEOUT_FIELD{ "timeout", 1, 86400000,
-    "A transfer with no timeout never completes, so the run can never reach a "
-    "terminal status." };
-
-// Reject a numeric field that is present but of the wrong JSON type or outside
-// its range. Absent is always fine - every field has a default.
-std::optional<std::string> check_numeric_field (const nlohmann::json& config,
-const NumericRunField& field) {
-    if (!config.contains (field.key) || config[field.key].is_null ()) {
-        return std::nullopt;
-    }
-    const auto& value = config[field.key];
-    if (!value.is_number ()) {
-        return std::string ("'") + field.key + "' must be a number (got " +
-        std::string (value.type_name ()) + ")";
-    }
-    // Read as a double first: an integer read of a fractional or huge value is
-    // itself undefined, and this is the guard that has to be total.
-    const double raw = value.get<double> ();
-    if (!std::isfinite (raw) || raw < static_cast<double> (field.min) ||
-    raw > static_cast<double> (field.max)) {
-        return std::string ("'") + field.key + "' must be between " +
-        std::to_string (field.min) + " and " + std::to_string (field.max) +
-        " (got " + value.dump () + "). " + field.why;
-    }
-    return std::nullopt;
-}
-
 // Reject a duration-shaped field that is present but not a positive magnitude
 // with an optional ms/s/m/h unit. Absent or null is always fine - every such
 // field has a default. Shared by `duration` and `stepDuration` rather than

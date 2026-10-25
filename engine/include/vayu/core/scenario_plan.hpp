@@ -381,7 +381,8 @@ struct ScenarioLimits {
  */
 struct ScenarioResolveOptions {
     std::string environment_id;
-    /// Applied to every composed step, exactly as `POST /execute` applies it.
+    /// The run's timeout, applied to every composed step that states none of
+    /// its own: a stored request's `timeout` wins (#2937), as on `POST /execute`.
     int timeout_ms = 0;
     ScenarioLimits limits;
     /// Whether a step's OAuth 2.0 token is acquired at its send, after its

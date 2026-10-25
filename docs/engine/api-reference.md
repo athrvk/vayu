@@ -258,7 +258,8 @@ The defaults are `{}` for `variables`, the resource's own default for `auth`
 (`{"mode":"none"}` for a collection, `{"mode":"inherit"}` for a request), `[]`
 for `params` / `headers`, `""` for `description` and the two script fields,
 `{"mode":"none"}` for a request `body`, `true` for `followRedirects`, `10` for
-`maxRedirects`, and `false` for `isActive`.
+`maxRedirects`, `null` for a request's `timeout` (the `defaultTimeout` setting,
+read at each send), and `false` for `isActive`.
 
 `order` is the one default that is computed rather than constant: it means
 "append after the current siblings", on both resources and on both verbs - see
@@ -1723,6 +1724,7 @@ field whole, however large.
     "elements": [],
     "followRedirects": true,
     "maxRedirects": 10,
+    "timeout": null,
     "httpVersion": "auto",
     "verifySSL": true,
     "stream": false,
@@ -1741,6 +1743,10 @@ the request's stored execution options. They are always present in the response:
 a request saved before these columns existed reads back as the engine defaults
 (`true` / `10` / `"auto"` / `true` / `false`), which is the behaviour it already
 had.
+`timeout` is the request's own timeout in milliseconds (issue #2937), always
+present on a stored-row response (`GET /requests`, `GET /requests/:id` and the
+`POST` / `PUT` answers): a number, or `null` when the request states none and sends with
+the `defaultTimeout` setting.
 `disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` are Postman's
 per-request protocol settings (issue #1765), always present too (`false` / `[]` /
 `false` for a request that states none); `postmanProtocolBehavior` is the
@@ -1815,6 +1821,8 @@ the null-vs-absent rule.
                                       // and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
+  "timeout": null,                   // Optional, this request's timeout in ms, 1..86400000.
+                                      // Absent/null: the "defaultTimeout" setting - see below
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
                                       // from the "defaultHttpVersion" config entry
   "verifySSL": true,                 // Optional, verify the TLS certificate. Default true
@@ -1859,6 +1867,20 @@ toggle persists here and a bulk import carries it. The engine never acts on the
 stored value by itself: `POST /execute` reads the flag off the payload it is
 given, and the by-id compose path deliberately does not add it, so an existing
 caller that composes by id keeps getting a buffered send.
+
+**`timeout` is the saved half of [`POST /execute`'s `timeout`](#post-execute)**
+(issue #2937): one slow endpoint can wait longer, or a fast one fail sooner,
+without changing the `defaultTimeout` setting for every request. It is held to
+the same `1`-`86400000` ms, and a number outside it or a value that is not a
+number is a `400` naming `'timeout'` here, on `PUT` and in `POST /import/apply`.
+Absent or `null` on create stores none, and the request sends with the setting
+in force at each send rather than a copy of it. [`POST /compose`](#post-compose)
+by `requestId` emits `timeout` only when the request states one, so a Send, a
+sequential collection run, a single-request load run built from the composed
+payload and a scenario load step all take it, and a request that states none
+still takes the setting. A Postman collection has no per-request timeout, so
+`POST /export/postman` lists one under `notCarried` (`request_timeout`); an
+OpenAPI export carries it in `x-vayu-request.settings`.
 
 **`specOperation` names which operation of the collection's
 [bound spec](#post-collections) this request is** (issue #637):
@@ -1987,14 +2009,16 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`verifySSL` / `stream` / `specOperation` / `methodSource` / `mockResponseMode` /
-`mockExampleId` / `disableCookies` / `disabledSystemHeaders` /
-`disableUrlEncoding` / `postmanProtocolBehavior` leaves the stored values
-untouched; sending `null` resets them to `true` / `10` / `true` / `false` / "no
-operation" / "no marker" / `"first"` / "no target" / `false` / `[]` / `false` /
-"none".
+`timeout` / `verifySSL` / `stream` / `specOperation` / `methodSource` /
+`mockResponseMode` / `mockExampleId` / `disableCookies` /
+`disabledSystemHeaders` / `disableUrlEncoding` / `postmanProtocolBehavior`
+leaves the stored values untouched; sending `null` resets them to `true` / `10`
+/ "the `defaultTimeout` setting" / `true` / `false` / "no operation" / "no
+marker" / `"first"` / "no target" / `false` / `[]` / `false` / "none".
 A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
+`timeout` is the exception among them: a value outside `1`-`86400000` or one
+that is not a number is a `400` naming `'timeout'`, and nothing is written.
 
 **`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
 as the fields above, but validates more strictly: absent keeps the stored
@@ -3189,8 +3213,8 @@ holds the request as the UI does: `name`, `method`, `url` (verbatim, `{{...}}`
 and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
-the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
-`verifySSL`, `stream`), every saved example with its headers and its `origin`
+the non-default `settings` (`followRedirects`, `maxRedirects`, `timeout`,
+`httpVersion`, `verifySSL`, `stream`), every saved example with its headers and its `origin`
 (`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
 and a document with none, as an older Vayu wrote, imports as `"import"`), and
 the mock mode with the index of a `fixed` target. At the root,
@@ -4295,6 +4319,7 @@ was before these rules.
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
 | `event_stream` | A request consumed as an event stream |
+| `request_timeout` | A request with a timeout of its own (Postman has only an app-wide one) |
 | `mock_response_mode` | A mock response mode other than `first` |
 | `truncated_examples` | An example saved from a cut-off response, written with the partial body |
 | `example_content_types` | An example content type no Content-Type header row states |
@@ -6239,7 +6264,10 @@ never re-resolved - see [POST /execute](#post-execute) and
   the request's own, each stamped with its origin, disabled and blank
   `script.*` entries dropped the same way - see [Elements](elements.md)),
   the stored execution options (`followRedirects` /
-  `maxRedirects` / `httpVersion` / `verifySSL`, always emitted) and its `requestName` (the
+  `maxRedirects` / `httpVersion` / `verifySSL`, always emitted; the request's own
+  `timeout`, emitted only when it states one, so a request that states none
+  sends with the `defaultTimeout` setting in force at the send, issue #2937) and
+  its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is
   only a fallback for a request without one. An unknown id is a definitive
@@ -6846,7 +6874,10 @@ sent twice and auth adds none.
 
 **`timeout` is the whole-transfer deadline in milliseconds** (issue #1917), held
 to `1`-`86400000` and defaulting to the `defaultTimeout` setting when absent or
-`null`. A number outside that range, or a value that is not a number, is a `400`
+`null`. A stored request's own `timeout` (issue #2937) reaches this field the
+same way: [`POST /compose`](#post-compose) by `requestId` writes it into the
+payload only when the request states one, so a composed send takes the inline
+overlay's `timeout`, else the stored request's, else the setting. A number outside that range, or a value that is not a number, is a `400`
 naming `'timeout'` before any run row exists and with nothing sent: libcurl
 reads `0` as "no timeout", and a negative value is a rejected option the
 transfer then runs without. `POST /runs` holds the same bound (see its
@@ -9291,7 +9322,7 @@ default, and whose message names the offending field and why the bound exists:
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
-| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). It also bounds the run's OAuth 2.0 token fetches (the pre-flight's, each step's at plan time, and every mid-run refresh) and is the default timeout of a `pm.sendRequest` from any script of the run: a sequential run's step, setup and teardown scripts, and a load run's inline step scripts, `script.setup` / `script.teardown` and deferred `tests` script (#2833, #2841). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). In a scenario run, sequential or load, it is what a step whose stored request states no `timeout` of its own sends with; a step that states one sends with its own (#2937), and fetches and refreshes its OAuth 2.0 token under it too. It also bounds the run's other OAuth 2.0 token fetches (the pre-flight's, and each step's at plan time and every mid-run refresh) and is the default timeout of a `pm.sendRequest` from any script of the run: a sequential run's step, setup and teardown scripts, and a load run's inline step scripts, `script.setup` / `script.teardown` and deferred `tests` script (#2833, #2841). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
@@ -9320,7 +9351,10 @@ constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run and
 `capacity` run's `duration` defaults to its own 300 s search deadline instead.
 `timeout` is the exception: it defaults to the `defaultTimeout` setting (30 s
 unless changed in Settings), read when the run starts, for a single-request
-and a scenario run alike. None of them is written to the stored snapshot; only
+and a scenario run alike. A scenario step's own stored `timeout` (#2937) wins
+over both for that step's transfers. A `pm.sendRequest` keeps the run-level
+value, except from a sequential run's step scripts, which take their step's
+timeout as a Send's scripts take the Send's. None of them is written to the stored snapshot; only
 what the body carried is, so a replayed snapshot that carried no `timeout`
 takes the setting in force at its own start.
 
