@@ -1075,9 +1075,71 @@ TEST_F (LoadStrategyTest, SaturatedRunEndsAtDeadlineAndRecordsTheShortfall) {
 
     EXPECT_LT (elapsed_ms, 1500) << "run overshot its 1s wall-clock deadline";
     EXPECT_GT (dropped, 0u) << "a saturated run recorded no drops";
-    EXPECT_NEAR (static_cast<double> (sent + dropped), RPS * DUR_S, 5.0)
+    EXPECT_EQ (sent + dropped, static_cast<size_t> (RPS * DUR_S))
     << "sent(" << sent << ") + dropped(" << dropped << ") does not account for the "
     << (RPS * DUR_S) << " requests the rate owed";
+}
+
+namespace {
+
+// What an open-loop run accounted for.
+struct PacedRun {
+    size_t sent     = 0;
+    size_t dropped  = 0;
+    size_t expected = 0;
+};
+
+PacedRun run_constant_rps (double rps, const char* duration, const std::string& url) {
+    const nlohmann::json config = { { "mode", "constant_rps" },
+        { "duration", duration }, { "targetRps", rps } };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-rps-exact", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = url;
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    vayu::core::LoadStrategy::create (config)->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    return { context->requests_sent.load (),
+        context->metrics_collector->dropped_requests (),
+        context->requests_expected.load () };
+}
+
+void expect_exactly (const PacedRun& run, size_t owed) {
+    EXPECT_EQ (run.expected, owed) << "requests_expected";
+    EXPECT_EQ (run.sent, owed) << "dropped " << run.dropped;
+    EXPECT_EQ (run.dropped, 0u) << "an unsaturated run dropped requests";
+}
+
+} // namespace
+
+// An unsaturated constant_rps run sends floor(targetRps x duration), not one
+// fewer (#2910). Mutation check: accrue from per-tick deltas truncated with
+// `duration_cast<microseconds>` again, and each of these is one short.
+TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDuration) {
+    expect_exactly (run_constant_rps (200.0, "2s", mock_server->fast_url ()), 400);
+}
+
+TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDurationAbove1000) {
+    expect_exactly (run_constant_rps (3000.0, "2s", mock_server->fast_url ()), 6000);
+}
+
+TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDurationBelowOne) {
+    expect_exactly (run_constant_rps (0.5, "4s", mock_server->fast_url ()), 2);
+}
+
+// 33.3 x 3 is 99.9: the schedule owes request k at k / 33.3, the 99th at
+// 2.973s, and the 100th would be due after the deadline.
+TEST_F (LoadStrategyTest, ConstantRpsSendsTheFlooredProductOfAFractionalRate) {
+    expect_exactly (run_constant_rps (33.3, "3s", mock_server->fast_url ()), 99);
 }
 
 // Ramp down (start > target) is a legitimate profile. The size_t delta
