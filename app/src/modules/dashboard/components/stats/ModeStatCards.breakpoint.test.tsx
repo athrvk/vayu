@@ -11,8 +11,11 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useClientSettingsStore } from "@/stores";
+import type { RunReport } from "@/types";
 import type { DashboardDerived } from "../../types";
 import { notCrossed, type Breakpoint } from "../../utils/computeBreakpoint";
+import { reportToDerived } from "../../utils/reportToDerived";
 import { BreakpointStat } from "./ModeStatCards";
 
 function renderStat(breakpoint: Breakpoint) {
@@ -33,6 +36,22 @@ describe("BreakpointStat", () => {
 
 	it("reads the SLO off the breakpoint, so a later settings change cannot rewrite it", () => {
 		expect(renderStat(notCrossed(350)).textContent).toContain("SLO 350ms");
+	});
+
+	// A stored capacity run reaches the stat through `reportToDerived`; the
+	// Settings SLO (200ms) must not be the line it names (#2816).
+	it("names a capacity run's own SLO, not the Settings one", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 200 });
+		const report = {
+			metadata: { configuration: { mode: "capacity" } },
+			summary: {},
+			latency: {},
+			capacity: { sloMs: 50, stopReason: "plateau", levels: [] },
+		} as unknown as RunReport;
+		const text = renderStat(reportToDerived(report).breakpoint).textContent;
+		expect(text).toContain("not crossed");
+		expect(text).toContain("SLO 50ms");
+		expect(text).not.toContain("SLO 200ms");
 	});
 
 	it("shows the concurrency once the SLO was crossed, with no SLO line", () => {

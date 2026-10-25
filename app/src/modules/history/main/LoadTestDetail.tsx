@@ -169,7 +169,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// p99 series, now persisted per W1). Derive it from the time-series and fold it
 	// into the dashboard bundle so the Saturation card / Breakpoint stat light up
 	// for completed ramp_up runs instead of showing the "healthy"/"-" defaults.
-	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	const settingSloMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	// A capacity run is judged against the budget its search stopped on, not the
+	// Settings line, which may have moved since.
+	const sloThresholdMs = report.capacity?.sloMs ?? settingSloMs;
 	const derived = useMemo(() => {
 		const base = reportToDerived(report);
 		if (timeSeries.length < 2) return base;

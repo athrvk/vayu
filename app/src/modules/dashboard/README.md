@@ -175,7 +175,11 @@ consumes it.
   the flag with the breakpoint; History's `computeBreakpoint` sets it over its
   own series, where on a bucketed run it means the first bucket. The Saturation
   card's call-out names the same SLO ("p99 crossed 203ms (the 200ms SLO) at 19
-  virtual users").
+  virtual users"). Which SLO that is: a `capacity` run's own `sloMs` (live, from
+  the start config; stored, from `report.capacity.sloMs`), the Settings
+  threshold in every other mode. Every SLO line and tile reads it back through
+  `useSloMs(breakpoint)`, so the Settings value never moves a capacity run's
+  lines.
 - **A tick's rates and means cover its trailing second, and the run-cumulative
   ones stay on the hero cards** (#2393). The engine reads one trailing window
   (at least a second) per tick, and a live frame and a stored row carry the

@@ -51,6 +51,24 @@ function baseReport(overrides: Partial<RunReport> = {}): RunReport {
 }
 
 describe("reportToDerived", () => {
+	// Mutation checked: restoring `notCrossed(null)` fails the first case.
+	describe("breakpoint SLO (#2816)", () => {
+		const capacity = {
+			sloMs: 50,
+			stopReason: "slo_exceeded",
+			levels: [],
+		};
+
+		it("names a capacity run's own SLO", () => {
+			const d = reportToDerived(baseReport({ capacity }));
+			expect(d.breakpoint).toMatchObject({ crossed: false, sloMs: 50 });
+		});
+
+		it("names none for a report with no capacity block", () => {
+			expect(reportToDerived(baseReport()).breakpoint.sloMs).toBeNull();
+		});
+	});
+
 	describe("setup and cleanup overhead (#2894)", () => {
 		// Mutation checked: dropping `cleanupOverhead` from the return, or reading
 		// it from `s.setupOverhead`, fails the first case; defaulting setup to 0

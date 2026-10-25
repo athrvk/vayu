@@ -466,7 +466,7 @@ function MetricsView({
 			)}
 
 			{/* Row 3 - run-so-far latency distribution + request timing */}
-			<LiveDistributionRow history={historicalMetrics} />
+			<LiveDistributionRow history={historicalMetrics} breakpoint={breakpoint} />
 
 			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />

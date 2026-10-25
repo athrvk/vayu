@@ -38,7 +38,7 @@ import MonitorSummary from "./MonitorSummary";
 import { PhaseAveragesCard } from "./PhaseAveragesCard";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import { useHostSleeps } from "@/stores/host-sleep-store";
-import { useClientSettingsStore } from "@/stores";
+import { useSloMs } from "@/modules/dashboard/hooks/useSloMs";
 import type { PerformanceTabProps } from "../../types";
 
 export default function PerformanceTab({
@@ -58,7 +58,7 @@ export default function PerformanceTab({
 	// run id rather than drilled from `LoadTestDetail`: Overview states them and
 	// this tab marks them, and neither derives anything the other must match.
 	const hostSleeps = useHostSleeps(runId);
-	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	const sloMs = useSloMs(derived.breakpoint);
 	// Stored ticks carry each second's merged percentiles (#2385), so the
 	// history percentile chart / scatter can render the same views as the live
 	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency

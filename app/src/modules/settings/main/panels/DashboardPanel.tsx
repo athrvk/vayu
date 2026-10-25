@@ -10,7 +10,8 @@
  *
  * Behavioral preferences for live test dashboards and charts, in two topics:
  * the live charts (retention window, time granularity, refresh rate) and
- * capacity (the SLO threshold that drives breakpoint/saturation). Client-side
+ * capacity (the SLO threshold that drives breakpoint/saturation of a ramp-up
+ * run; a Capacity run uses the SLO it was started with). Client-side
  * only (localStorage-backed); consumed by the charts, the dashboard store, and
  * the live metrics service.
  */
@@ -132,7 +133,7 @@ export default function DashboardPanel() {
 					<NumberSettingRow
 						anchor={SLO_THRESHOLD.anchor}
 						label={SLO_THRESHOLD.label}
-						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts, and prefills the p99 budget and the Capacity discovery target when you open the load-test dialog."
+						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts of every run except Capacity discovery, which keeps the SLO it was started with. It also prefills the p99 budget and the Capacity discovery target when you open the load-test dialog."
 						value={String(sloThresholdMs)}
 						commit="change"
 						onCommit={(next) => setSloThresholdMs(parseInt(next, 10))}
