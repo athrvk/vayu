@@ -970,13 +970,18 @@ are read **per run**, so none needs a restart - and none is flagged
   not a ceiling. Before that, 4 workers at the default of 200 held a run to
   800 connections: every virtual user above 800 against an HTTP/1.1 target
   waited inside libcurl for a connection, and that wait was reported as
-  target latency. A run that raised it says so in its warnings
-  (`per_host_limit_raised`).
+  target latency. A run that asked for virtual users (its config carries
+  `concurrency`) and raised it says so in its warnings
+  (`per_host_limit_raised`, #2801).
 - `dnsCacheTimeout` - set it high (3600) for a fixed target; the hostname never
   needs re-resolution. Worth little on a warm run, since DNS cost per request
   amortises to ~0.005 ms over 60 s.
-- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`,
-  which is every run the app starts.
+- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`.
+  A `constant_rps` run the app starts sets none, so it reads this default as
+  its concurrency: the loop's `max_concurrent` and the per-host raise above
+  are sized from it (1000 on 4 workers is 250 per worker), with no
+  `per_host_limit_raised` warning, since the run has no virtual users to
+  cover (#2801).
 
 **How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound.
 Request *k* (counting from 1) is owed at `k / targetRps`: nothing leaves at
@@ -999,6 +1004,19 @@ is `requestsSent / requestsExpected`, with `requestsExpected` the same
 `floor(targetRps × duration)`, so an unsaturated run reads 100, and `sendRate`
 divides by the sending window, so neither is diluted by the drain that lets
 the last requests answer.
+
+The pacing thread is the only limiter on a `constant_rps` run
+([#2801](https://github.com/athrvk/vayu/issues/2801)). The event-loop workers
+used to hold a token bucket at the same rate as well, split `targetRps ÷
+workers`; the bucket re-anchors on every take while the pacer's schedule is
+absolute, so the two drifted, and a submission that reached its worker ahead of
+the worker's token waited inside the request's queue wait. At 2 req/s against
+a 300 ms mock on 4 workers that wait climbed from 0.2 ms to 12.9 ms over 34 s,
+reset and climbed again (`avgQueueWaitMs` 4.79, p99 315.1 ms against the
+server's 300.8); with no bucket, 40 s at the same rate and target read
+0.29 ms, flat, and p99 301.8 ms, while 50 and 500 req/s still sent the rate they asked for. What the
+bucket also did was meter a catch-up burst after a pacing stall; that burst is
+now bounded by `maxInFlight` alone.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)

@@ -9305,7 +9305,9 @@ when `rps` is absent or `0`.
 
 The executor chooses by mode as well (`open_loop_rate` in `load_strategy.hpp`):
 a rate that reaches a closed-loop mode without passing this route, in a stored
-config, neither opens the loop nor reaches the event loop's token bucket.
+config, does not open the loop. No mode throttles the event loop's workers
+with a rate of their own: a `constant_rps` run is paced by its pacing thread
+alone (#2801).
 
 One field is rejected by **presence**, not by range: **`transient`**. It is
 `POST /execute`'s no-run-row flag (issue #382) and has no meaning here, because
@@ -9414,7 +9416,10 @@ the default formula across the whole advertised RPS span (50k RPS → 500,000),
 which is why it is not the `concurrency` guard - a ceiling of 10,000 would
 reject explicitly what the engine already does implicitly. For the closed-loop
 modes the `concurrency` target *is* the in-flight bound, so `maxInFlight` is
-ignored there.
+ignored there. It is also the only bound on a catch-up burst: when the pacing
+thread stalls (a host sleep, a blocked thread), its next tick submits every
+request the stall owed at once, up to the `maxInFlight` headroom (the rest are
+dropped), and nothing meters that burst per worker (#2801).
 
 **Durations.** `duration` and `rampUpDuration` take a string holding a number
 with an optional unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix
@@ -11166,8 +11171,12 @@ is of another kind: the run did everything, but opened more connections per
 host than `eventLoopMaxPerHost` says, because each worker's share of the
 virtual users (`ceil(concurrency / workers)`) was larger; it carries
 `configured` (the setting) and `effective` (the per-host limit each worker ran
-with). `connection_replayed` ([#2799](https://github.com/athrvk/vayu/issues/2799))
-is another: libcurl re-sent `count` requests on a new connection after the
+with). It appears only when the run asked for virtual users, a config that
+carries `concurrency` ([#2801](https://github.com/athrvk/vayu/issues/2801)): a
+run that sets none is sized from the `eventLoopMaxConcurrent` default and gets
+the same raise, but has no virtual users to cover and no warning about them.
+`connection_replayed` ([#2799](https://github.com/athrvk/vayu/issues/2799)) is
+another: libcurl re-sent `count` requests on a new connection after the
 server dropped or refused a reused one before answering, so the target
 received that many more requests than the run counted, each of those
 requests' latency covers both attempts, and a non-idempotent one may have run

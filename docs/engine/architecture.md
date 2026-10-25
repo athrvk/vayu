@@ -290,14 +290,16 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: Token bucket algorithm for precise RPS control, on a `constant_rps`
-  run only (every other mode's loop is built with no bucket). `targetRps` is an
-  **aggregate** budget: each worker owns a private bucket and submissions are sharded
-  round-robin, so the rate and burst are split N ways when the loop is built (with a
-  one-token burst floor, since a sub-token bucket could never start a transfer). A
-  worker the bucket refuses with requests queued and nothing in flight parks in
-  `curl_multi_poll` until its next token (at most `TOKEN_WAIT_CAP_MS`, and cut short by a
-  submit, a stop or a bounded drain's deadline) instead of asking the bucket again in a loop (#1915)
+- **Rate limiting**: none on a load run. A `constant_rps` run is paced by its pacing
+  thread alone (`run_rate_limited`, see [Load Test Strategies](#load-test-strategies)), and
+  every loop a run builds has `EventLoopConfig::target_rps` 0 (#2801): a worker-side bucket
+  re-anchors on every take while the pacer's schedule is absolute, so the two drifted apart
+  and the wait for a token landed in each request's queue wait and latency, 0 to 13 ms at
+  2 req/s. The bucket itself (`RateLimiter`) remains for a caller that sets the field: the
+  rate is an **aggregate** budget split N ways across the workers' private buckets, with a
+  one-token burst floor, and a worker the bucket refuses with nothing in flight parks in
+  `curl_multi_poll` until its next token (at most `TOKEN_WAIT_CAP_MS`, cut short by a
+  submit, a stop or a bounded drain's deadline) instead of asking again in a loop (#1915)
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 
@@ -325,7 +327,10 @@ system resolver. Three rules make that safe:
 - Max connections per host: 200 per worker (`eventLoopMaxPerHost`), raised
   by a load run to each worker's share of its virtual users,
   `ceil(concurrency / workers)` (`effective_max_per_host`, #2394), and reported
-  as a `per_host_limit_raised` run warning when it was. Below that share libcurl
+  as a `per_host_limit_raised` run warning when it was for a run that asked for
+  virtual users, one whose config carries `concurrency` (#2801). A run that sets
+  none, which is every `constant_rps` run the app starts, is sized from
+  `eventLoopMaxConcurrent` and raised without a warning. Below that share libcurl
   queues the rest of a worker's transfers while the run counts them in flight;
   that wait is libcurl's `CURLINFO_QUEUE_TIME_T`, taken off the wire time and
   counted as queue wait (`detail::curl_queue_seconds`)
@@ -1145,15 +1150,16 @@ throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open
 
 The mode chooses the loop, never the rate (#2396). `rps` / `targetRps` is `constant_rps`'s field
 alone: `POST /runs` refuses a positive one on any other mode, and `open_loop_rate`
-(`load_strategy.hpp`) answers 0 for every other mode, so a rate in a stored config neither opens
-`constant_concurrency`'s loop nor gives a closed-loop run's event-loop workers a token bucket
-(`apply_open_loop_rate`, the one source of `EventLoopConfig::target_rps`). A body with no `mode`
-is `constant_rps`, the way `LoadStrategy::create` reads it.
+(`load_strategy.hpp`) answers 0 for every other mode, so a rate in a stored config does not open
+`constant_concurrency`'s loop. No mode gives the event-loop workers a token bucket (#2801). A body
+with no `mode` is `constant_rps`, the way `LoadStrategy::create` reads it.
 
 ### 1. `constant_rps` (open-loop)
 
 Dispatches at a fixed `targetRps` regardless of how fast responses return. `maxInFlight` caps how
 many requests may be outstanding before new ones are dropped (and counted as `dropped_requests`).
+The pacing thread is the run's only limiter (#2801), so the backlog a stalled pacer pays in its
+next tick is bounded by `maxInFlight` alone, not metered per worker.
 
 ```json
 { "mode": "constant_rps", "targetRps": 1000, "duration": "60s", "maxInFlight": 10000 }

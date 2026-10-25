@@ -9,7 +9,8 @@
  * @file tests/per_host_limit_test.cpp
  * @brief A load run's per-host connection limit covers its virtual users
  *        (#2394): `configure_event_loop` raises `eventLoopMaxPerHost` to each
- *        worker's share, and the run's warnings say when it did.
+ *        worker's share, and the run's warnings say when it did for a run
+ *        that declared its `concurrency` (#2801).
  *
  * `effective_max_per_host` itself is tabled in `worker_count_test.cpp`; this
  * file holds the wiring, which a test of the pure function cannot see.
@@ -41,11 +42,12 @@ class PerHostLimitRunTest : public ::testing::Test {
 
     /// The run's own sizing, the call `execute_load_test` makes. Small
     /// numbers on purpose: each worker pre-allocates `max(concurrency, 100)`
-    /// curl handles, and nothing is ever submitted to this loop.
+    /// curl handles, and nothing is ever submitted to this loop. @p config is
+    /// the run's own body, which decides whether a raise is reported; the
+    /// sizing reads @p concurrency, as `execute_load_test` hands it over.
     std::shared_ptr<vayu::core::RunContext>
-    configure (size_t concurrency, int pool_size, int setting) const {
-        auto context = std::make_shared<vayu::core::RunContext> (
-        "run-per-host", nlohmann::json::object ());
+    configure (const nlohmann::json& config, size_t concurrency, int pool_size, int setting) const {
+        auto context = std::make_shared<vayu::core::RunContext> ("run-per-host", config);
         vayu::core::configure_event_loop (*db_, context->config, context,
         concurrency, /*timeout_ms=*/5000, pool_size, setting);
         return context;
@@ -72,7 +74,8 @@ class PerHostLimitRunTest : public ::testing::Test {
 // default_max_per_host` in configure_event_loop and both the recorded limit
 // and the warning fail.
 TEST_F (PerHostLimitRunTest, ALimitBelowEachWorkersShareIsRaisedAndReported) {
-    const auto context = configure (/*concurrency=*/40, /*pool_size=*/4, /*setting=*/4);
+    const auto context = configure ({ { "concurrency", 40 } },
+    /*concurrency=*/40, /*pool_size=*/4, /*setting=*/4);
 
     EXPECT_EQ (context->configured_max_per_host, 4u);
     EXPECT_EQ (context->effective_max_per_host, 10u);
@@ -87,11 +90,30 @@ TEST_F (PerHostLimitRunTest, ALimitBelowEachWorkersShareIsRaisedAndReported) {
 
 // The setting already covers each worker's share: kept, and nothing to say.
 TEST_F (PerHostLimitRunTest, ALimitThatCoversEachWorkersShareIsKeptSilently) {
-    const auto context = configure (/*concurrency=*/40, /*pool_size=*/4, /*setting=*/200);
+    const auto context = configure ({ { "concurrency", 40 } },
+    /*concurrency=*/40, /*pool_size=*/4, /*setting=*/200);
 
     EXPECT_EQ (context->configured_max_per_host, 200u);
     EXPECT_EQ (context->effective_max_per_host, 200u);
     EXPECT_TRUE (raised_warning (context).is_null ());
+}
+
+// A run whose body names no `concurrency` (a `constant_rps` run the app
+// starts) is sized from the `eventLoopMaxConcurrent` default: still raised,
+// since its in-flight can grow, but it asked for no virtual users and is told
+// about none. An explicit null is absent. Mutation check: drop the
+// `declares_concurrency` condition in `build_run_warnings` and both report.
+TEST_F (PerHostLimitRunTest, ARaiseForARunThatDeclaredNoConcurrencyIsNotReported) {
+    for (const nlohmann::json& config :
+    { nlohmann::json{ { "mode", "constant_rps" }, { "targetRps", 2 } },
+    nlohmann::json{ { "mode", "constant_rps" }, { "targetRps", 2 },
+    { "concurrency", nullptr } } }) {
+        const auto context =
+        configure (config, /*concurrency=*/40, /*pool_size=*/4, /*setting=*/4);
+
+        EXPECT_EQ (context->effective_max_per_host, 10u) << config.dump ();
+        EXPECT_TRUE (raised_warning (context).is_null ()) << config.dump ();
+    }
 }
 
 } // namespace
