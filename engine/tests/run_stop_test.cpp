@@ -499,6 +499,8 @@ class StopActiveRunTest : public DeleteRunTest {
 // A collection run's worker feeds no collector, so the collector says 0 after
 // steps ran (#2822). The answer is the summary the worker stored before it
 // cleared `is_running`: 31 sent of 40 steps, 2 of them a 500.
+// Mutation check: answer a Scenario run from `calculate_summary` again; this
+// and the no-summary test fail.
 TEST_F (StopActiveRunTest, CollectionRunAnswersItsStoredCounts) {
     seed_running ("run_seq", vayu::RunType::Scenario);
     auto context        = make_context ("run_seq");
@@ -554,6 +556,7 @@ TEST_F (StopActiveRunTest, CollectionRunWithNoStoredSummaryAnswersNone) {
 }
 
 // A load run, a scenario load run included, still answers from its collector.
+// Mutation check: route a Load run down the collection branch; this fails.
 TEST_F (StopActiveRunTest, LoadRunAnswersFromItsCollector) {
     seed_running ("run_load", vayu::RunType::Load);
     auto context = make_context ("run_load");

@@ -1824,6 +1824,7 @@ TEST_F (ScenarioRunnerTest, ASkippedStepIsInNeitherTheRequestCountNorTheDistribu
 
 // The other side of the same line: a request that went out and got no answer
 // is a request, recorded under status 0 like the load path records it.
+// Mutation check: count only 2xx in the tally; the status 0 entry goes missing.
 TEST_F (ScenarioRunnerTest, ARefusedConnectionIsAStatusZeroRequestInTheSummary) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");
