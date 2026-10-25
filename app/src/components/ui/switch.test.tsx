@@ -44,6 +44,13 @@ describe("Switch", () => {
 		expect(sw.className).not.toMatch(/data-\[state=checked\]:border-\d/);
 	});
 
+	it("edges the checked track in the accent so it clears 3:1 against the card in dark", () => {
+		// The ratios per scheme are held by checked-control-contrast.test.ts.
+		render(<Switch aria-label="Reduced motion" checked onCheckedChange={() => {}} />);
+		const sw = screen.getByRole("switch", { name: "Reduced motion" });
+		expect(sw.className).toContain("data-[state=checked]:border-primary");
+	});
+
 	it("keeps the checked state on the accent fill", () => {
 		render(<Switch aria-label="Reduced motion" checked onCheckedChange={() => {}} />);
 		const sw = screen.getByRole("switch", { name: "Reduced motion" });
