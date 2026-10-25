@@ -193,6 +193,15 @@ consumes it.
   has the figure, and a tick with no window latency (absent or `null`) adds no
   point to the latency chart. The ETA reads the live `current_rps`, so it
   follows the last second rather than the last 100 ms.
+- **The Progress card counts requests sent, against the requests the run
+  expects** (#2914). `requests_sent / requests_expected` is dispatches, not
+  completions, so the card reads "N / M sent" and the bar can lead the
+  responses by the in-flight tail. A scenario iterations run that ends on its
+  own settles `requests_expected` to the sent count (the engine, so the last
+  tick reads 100%). The taskbar and Dock indicator reads the same fraction per
+  flush, and `LoadTestService.handleClose` reports 1 for a run whose frame says
+  `completed` just before it clears the indicator; a stopped or failed run is
+  never snapped.
 - **Virtual user utilisation and the Active virtual users chart read the mean on
   the wire, not the instant** (#2821). `current_concurrency` counts the curl
   workers' active transfers at the sample, and a virtual user in a timer wait

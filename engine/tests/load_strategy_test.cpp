@@ -113,6 +113,9 @@ TEST_F (LoadStrategyTest, MaxInFlightCapDropsWhenTrueInFlightExceedsCap) {
     << "maxInFlight cap did not drop any requests; the cap is likely gated on "
        "EventLoop::pending_count() (submission-queue depth) instead of true "
        "in-flight (requests_sent - completed)";
+    // The peak counts what was submitted, never what the cap dropped: ten are
+    // in flight within ~33ms and none settles before 500ms (#2912).
+    EXPECT_EQ (context->peak_in_flight.load (), 10u);
 }
 
 // RunContext exposes the closed-loop refill primitives and a peak gauge.
@@ -260,6 +263,39 @@ TEST_F (LoadStrategyTest, ConstantConcurrencyCarryingARateStaysClosedLoop) {
     EXPECT_EQ (context->requests_expected.load (), 0u)
     << "ran the open-loop path";
     EXPECT_GT (context->requests_sent.load (), 0u);
+}
+
+// The open-loop pacer records the in-flight high-water mark itself (#2912),
+// not only through the 1 Hz sample, which a direct `execute` never starts.
+// At 100 RPS against a target that holds every answer 500ms, nothing settles
+// for the first 500ms, so ~50 are in flight at every submission after that,
+// however slow the runner (a late tick submits its backlog at once). Healthy
+// reads ~50, broken reads 0; 25 sits between. Mutation check: drop the
+// `update_peak` call in `submit_due` and this reads 0.
+TEST_F (LoadStrategyTest, ConstantRpsRecordsPeakInFlightAtSubmission) {
+    const nlohmann::json config = { { "mode", "constant_rps" },
+        { "duration", "1s" }, { "targetRps", 100.0 } };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-rps-peak", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    ASSERT_NE (strategy, nullptr);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_FALSE (context->closed_loop.load ()) << "ran the closed-loop path";
+    EXPECT_GE (context->peak_in_flight.load (), 25u)
+    << "constant_rps left peakConcurrency to the 1 Hz sample";
 }
 
 // A single-request load run's token-free fast path (issue #1540) never

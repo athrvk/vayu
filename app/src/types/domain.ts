@@ -2900,7 +2900,7 @@ export interface RunReport {
 		 * time, so it must never be read as a setup time.
 		 */
 		setupOverhead?: number;
-		/** Seconds from load end to teardown finished. Always present on a stored run. */
+		/** Seconds from load end to teardown finished. Present on a stored load run; a collection run has none (#2822). */
 		cleanupOverhead?: number;
 		peakConcurrency?: number;
 		/** Mean requests on the wire over `testDuration`; absent from a run stored before it (#2821). */
