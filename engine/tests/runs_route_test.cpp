@@ -3055,6 +3055,96 @@ TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
     }
 }
 
+/// The fixture's summary with the capacity search @p levels ended in, against
+/// a 100 ms budget and a 256 ceiling.
+std::string capacity_summary (const std::vector<vayu::core::CapacityWindow>& levels,
+const char* stop_reason) {
+    auto inputs = summary_inputs ();
+    vayu::core::CapacityConfig search;
+    search.slo_ms          = 100.0;
+    search.max_concurrency = 256;
+    inputs.capacity = vayu::core::summarize_capacity (search, levels, stop_reason);
+    return vayu::core::build_run_summary_payload (inputs).dump ();
+}
+
+// A capacity run's row says what the search found (#2930): why it stopped, the
+// highest level it held and the level it broke at, the same three the report
+// headlines. A level the search never found is absent, never 0, which would
+// read as a service that held nothing or broke at nothing.
+// Mutation check: drop the `capacity` write in `build_load_result_summary` and
+// every capacity row fails.
+TEST_F (RunsRouteTest, CapacityRowCarriesTheHeldAndKneeLevels) {
+    seed ({ .id = "run_capacity_knee", .start_time = 1 });
+    db_->update_run_summary ("run_capacity_knee",
+    capacity_summary ({ { 8, 900.0, 12.0, 0.0, 4500 }, { 16, 1700.0, 20.0, 0.5, 8500 },
+                      { 32, 1750.0, 180.0, 2.0, 8750 }, { 32, 1720.0, 210.0, 3.5, 0 } },
+    vayu::core::capacity_stop::SLO_EXCEEDED));
+    seed ({ .id = "run_capacity_cap", .start_time = 2 });
+    db_->update_run_summary ("run_capacity_cap",
+    capacity_summary ({ { 8, 900.0, 12.0 } }, vayu::core::capacity_stop::CAP_REACHED));
+    seed ({ .id = "run_capacity_breached", .start_time = 3 });
+    db_->update_run_summary ("run_capacity_breached",
+    capacity_summary ({ { 8, 900.0, 300.0 } }, vayu::core::capacity_stop::SLO_EXCEEDED));
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto knee = row_of (body, "run_capacity_knee")["resultSummary"];
+    ASSERT_TRUE (knee.contains ("capacity")) << knee.dump ();
+    EXPECT_EQ (knee["capacity"],
+    (nlohmann::json{ { "stopReason", "slo_exceeded" },
+    { "maxHealthyConcurrency", 16 }, { "kneeConcurrency", 32 } }));
+    // The rest of the row is untouched beside it.
+    EXPECT_EQ (knee.size (), 4u) << knee.dump ();
+
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_capacity_knee");
+    ASSERT_EQ (report_status, 200);
+    for (const char* key : { "stopReason", "maxHealthyConcurrency", "kneeConcurrency" }) {
+        EXPECT_EQ (knee["capacity"][key], report["capacity"][key]) << key;
+    }
+
+    const auto cap = row_of (body, "run_capacity_cap")["resultSummary"];
+    ASSERT_TRUE (cap.contains ("capacity")) << cap.dump ();
+    EXPECT_EQ (cap["capacity"],
+    (nlohmann::json{ { "stopReason", "cap_reached" }, { "maxHealthyConcurrency", 8 } }));
+
+    const auto breached =
+    row_of (body, "run_capacity_breached")["resultSummary"];
+    ASSERT_TRUE (breached.contains ("capacity")) << breached.dump ();
+    EXPECT_EQ (breached["capacity"],
+    (nlohmann::json{ { "stopReason", "slo_exceeded" }, { "kneeConcurrency", 8 } }));
+}
+
+// Only a capacity section the report would show reaches the row: a load run
+// that searched nothing, a `capacity` that is not an object, and one with no
+// levels all leave the key off rather than carrying an empty headline.
+TEST_F (RunsRouteTest, LoadRowWithoutACapacitySearchCarriesNoCapacity) {
+    seed ({ .id = "run_plain", .start_time = 1 });
+    db_->update_run_summary ("run_plain", judged_summary (true));
+
+    auto not_object        = nlohmann::json::parse (judged_summary (true));
+    not_object["capacity"] = 5;
+    seed ({ .id = "run_capacity_scalar", .start_time = 2 });
+    db_->update_run_summary ("run_capacity_scalar", not_object.dump ());
+
+    auto no_levels = nlohmann::json::parse (judged_summary (true));
+    no_levels["capacity"] = { { "stop_reason", "slo_exceeded" }, { "knee_concurrency", 8 } };
+    seed ({ .id = "run_capacity_no_levels", .start_time = 3 });
+    db_->update_run_summary ("run_capacity_no_levels", no_levels.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    for (const char* id : { "run_plain", "run_capacity_scalar", "run_capacity_no_levels" }) {
+        const auto outcome = row_of (body, id)["resultSummary"];
+        EXPECT_FALSE (outcome.contains ("capacity")) << id << ": " << outcome.dump ();
+        EXPECT_EQ (outcome.size (), 4u) << id << ": " << outcome.dump ();
+    }
+}
+
 // The gate is the status, not whether a summary is there yet: a Pending or
 // Running row is never read and never cached, so the poll after the run ends
 // builds its outcome fresh. Dropping the gate fails the second poll (the

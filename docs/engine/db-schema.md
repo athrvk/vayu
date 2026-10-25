@@ -1595,8 +1595,10 @@ snapshot in place breaks that**, and would have to invalidate the cache in
 
 The list row's `resultSummary` on a terminal load run (#2130) *is* read from
 this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
-`thresholds` verdict and, for a scenario load run, `scenario.assertions` as
-`assertionsPassed` / `assertionsFailed`; `build_load_result_summary` in
+`thresholds` verdict, for a scenario load run `scenario.assertions` as
+`assertionsPassed` / `assertionsFailed`, and for a capacity run the
+`capacity` section's `stop_reason`, `max_healthy_concurrency` and
+`knee_concurrency` (#2930); `build_load_result_summary` in
 `http/routes/runs.cpp`) and held in the same cache, which is sound for the
 same reason: each `update_run_summary` writer stores the summary before the
 terminal status, and nothing rewrites it after. **A change that writes the

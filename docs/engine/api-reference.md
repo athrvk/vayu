@@ -10532,6 +10532,7 @@ run stored, never from its result rows, which are many and unbounded:
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
 | `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion counts (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the sampled replay. Beside `errorRate`, not folded into it |
+| `capacity` | A capacity run's headline (#2930), the same three keys of the report's [`capacity` section](#get-runsrunidreport): `stopReason`, and `maxHealthyConcurrency` / `kneeConcurrency` each only when the search found that level |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
@@ -10540,7 +10541,13 @@ which is not the same claim as passing. The two assertion counts are absent
 for a single-request run, a scenario load run that made no assertion and one
 stored before #2820. A scenario load run whose every assertion failed against
 `200`s reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
-"assertionsPassed": 0, "assertionsFailed": 4580 }`. A `pending` or `running` load row, and
+"assertionsPassed": 0, "assertionsFailed": 4580 }`. `capacity` is absent on
+every run that was not a capacity search; inside it, `maxHealthyConcurrency`
+is absent when the very first level already breached the budget and
+`kneeConcurrency` when the search ended without the target giving out, the
+report's rules for the same keys. A capacity search that stopped on its
+latency budget reads `"capacity": { "stopReason": "slo_exceeded",
+"maxHealthyConcurrency": 48, "kneeConcurrency": 64 }`. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
 carries no `resultSummary` at all. A collection run's row never carries one.
 
