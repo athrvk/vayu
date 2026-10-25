@@ -80,6 +80,53 @@ describe("CapacitySummary", () => {
 		cleanup();
 	});
 
+	describe("the stop detail names measurements of a level, never windows", () => {
+		it("words a latency stop as consecutive measurements and omits the step length when absent", () => {
+			render(<CapacitySummary capacity={capacity()} />);
+			expect(
+				screen.getByText(
+					"p99 stayed above the budget across two consecutive measurements of the level."
+				)
+			).toBeTruthy();
+			cleanup();
+		});
+
+		it("names the step length when the report carries one", () => {
+			render(<CapacitySummary capacity={capacity()} stepDuration="5s" />);
+			expect(
+				screen.getByText(
+					"p99 stayed above the budget across two consecutive measurements of the level (each 5s long)."
+				)
+			).toBeTruthy();
+			cleanup();
+		});
+
+		it.each([
+			["slo_exceeded", {}],
+			["slo_exceeded", { stepDuration: "5s" }],
+			["errors_exceeded", { maxErrorPct: 1 }],
+			["errors_exceeded", { maxErrorPct: 1, stepDuration: "5s" }],
+			["errors_exceeded", {}],
+			["plateau", { saturationP99Ms: 52 }],
+			["plateau", {}],
+			["cap_reached", {}],
+			["deadline", {}],
+			["stopped", {}],
+		])("never calls a level a window: %s %j", (stopReason, extra) => {
+			const { stepDuration, ...over } = extra as Partial<Capacity> & {
+				stepDuration?: string;
+			};
+			const { container } = render(
+				<CapacitySummary
+					capacity={capacity({ stopReason, ...over })}
+					stepDuration={stepDuration}
+				/>
+			);
+			expect(container.textContent).not.toMatch(/window/i);
+			cleanup();
+		});
+	});
+
 	it("heads the levels table with the app's one name for the count", () => {
 		render(<CapacitySummary capacity={capacity()} />);
 		expect(screen.getByRole("columnheader", { name: CONCURRENCY_LABEL })).toBeTruthy();
@@ -239,12 +286,57 @@ describe("CapacitySummary", () => {
 			expect(headline).toBe("Throughput stopped growing. More only queued.");
 		});
 
-		it("does not repeat the headline in the plateau detail", () => {
+		it("quotes the p99 rise from the saturation level to the last level tried", () => {
 			render(<CapacitySummary capacity={plateau()} />);
+			expect(
+				screen.getByText(
+					"More virtual users stopped buying more throughput; p99 stayed inside the budget but rose from 52ms to 103ms."
+				)
+			).toBeTruthy();
+			cleanup();
+		});
+
+		it("says nothing of latency when the last level's p99 did not rise", () => {
+			render(
+				<CapacitySummary
+					capacity={plateau({
+						levels: [
+							{ concurrency: 8, rps: 156, p99Ms: 52 },
+							{ concurrency: 10, rps: 156, p99Ms: 52 },
+							{ concurrency: 12, rps: 156, p99Ms: 48 },
+						],
+					})}
+				/>
+			);
 			expect(
 				screen.getByText("More virtual users stopped buying more throughput.")
 			).toBeTruthy();
-			expect(screen.queryByText(/latency still held/)).toBeNull();
+			expect(screen.queryByText(/rose/)).toBeNull();
+			cleanup();
+		});
+
+		it("falls back to the plain sentence for a plateau with no saturation figures", () => {
+			render(
+				<CapacitySummary
+					capacity={plateau({
+						saturationConcurrency: undefined,
+						saturationRps: undefined,
+						saturationP99Ms: undefined,
+					})}
+				/>
+			);
+			expect(
+				screen.getByText("More virtual users stopped buying more throughput.")
+			).toBeTruthy();
+			expect(screen.queryByText(/rose|still held/)).toBeNull();
+			cleanup();
+		});
+
+		it("falls back to the plain sentence for a plateau with no levels", () => {
+			render(<CapacitySummary capacity={plateau({ levels: [] })} />);
+			expect(
+				screen.getByText("More virtual users stopped buying more throughput.")
+			).toBeTruthy();
 			cleanup();
 		});
 
@@ -405,7 +497,9 @@ describe("CapacitySummary", () => {
 			render(<CapacitySummary capacity={errorsStop()} />);
 			expect(screen.getByText("Errors exceeded the limit")).toBeTruthy();
 			expect(
-				screen.getByText("More than 1% of requests failed across two consecutive windows.")
+				screen.getByText(
+					"More than 1% of requests failed across two consecutive measurements of the level."
+				)
 			).toBeTruthy();
 
 			const knee = screen.getByText(/The limit lies between/).textContent ?? "";
@@ -419,6 +513,16 @@ describe("CapacitySummary", () => {
 		it("falls back to generic wording when the report carries no limit", () => {
 			render(<CapacitySummary capacity={errorsStop({ maxErrorPct: undefined })} />);
 			expect(screen.getByText(/More requests failed than the limit allows/)).toBeTruthy();
+			cleanup();
+		});
+
+		it("names the step length beside the limit when the report carries one", () => {
+			render(<CapacitySummary capacity={errorsStop()} stepDuration="5s" />);
+			expect(
+				screen.getByText(
+					"More than 1% of requests failed across two consecutive measurements of the level (each 5s long)."
+				)
+			).toBeTruthy();
 			cleanup();
 		});
 

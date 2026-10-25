@@ -35,17 +35,9 @@ import { cn } from "@/lib/utils";
 import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_LABEL, concurrencyUnit } from "@/constants/load-test-modes";
 import type { RunReport } from "@/types/domain";
-import { STOP_REASONS, type CapacityResult } from "./capacityStop";
+import { STOP_REASONS, stopDetail, type CapacityResult } from "./capacityStop";
 
 type Capacity = CapacityResult;
-
-/** The engine's limit when the report carries it, the generic wording for a run stored without. */
-function stopDetail(capacity: Capacity, fallback: string): string {
-	if (capacity.stopReason !== "errors_exceeded" || capacity.maxErrorPct === undefined) {
-		return fallback;
-	}
-	return `More than ${formatNumber(capacity.maxErrorPct)}% of requests failed across two consecutive windows.`;
-}
 
 /**
  * The reading at the knee: the error share when errors ended the search, the p99
@@ -236,13 +228,16 @@ function lastColumn(showErrors: boolean, showSamples: boolean): OptionalColumn {
 
 export interface CapacitySummaryProps {
 	capacity: RunReport["capacity"];
+	/** `metadata.configuration.stepDuration`, as the engine sent it ("5s"); named in the stop detail. */
+	stepDuration?: string;
 	className?: string;
 }
 
-export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
+export function CapacitySummary({ capacity, stepDuration, className }: CapacitySummaryProps) {
 	if (!capacity) return null;
 
 	const stop = STOP_REASONS[capacity.stopReason];
+	const detail = stopDetail(capacity, stepDuration);
 	// A run stored before errors were judged has no `errorPct` on any level; its
 	// column would be empty cells, so the table keeps its three columns for it.
 	const showErrors = capacity.levels.some((level) => level.errorPct !== undefined);
@@ -289,11 +284,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 						<KneeSentence capacity={capacity} knee={capacity.kneeConcurrency} />
 					</p>
 				)}
-				{stop && (
-					<p className="mt-1.5 text-xs text-muted-foreground">
-						{stopDetail(capacity, stop.detail)}
-					</p>
-				)}
+				{detail && <p className="mt-1.5 text-xs text-muted-foreground">{detail}</p>}
 
 				{capacity.levels.length > 0 && (
 					<div className="mt-3 overflow-x-auto">
@@ -338,7 +329,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 										level.errorPct > capacity.maxErrorPct;
 									return (
 										// Index, not concurrency: a level the search
-										// re-measured after one bad window appears
+										// re-measured after one bad measurement appears
 										// twice, and that repeat is the audit trail
 										// doing its job rather than a duplicate key.
 										<tr
