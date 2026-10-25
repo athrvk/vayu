@@ -2802,8 +2802,9 @@ export interface RunReport {
 			 * A `capacity` run's step length, as it was started (issue #2925), and
 			 * the p99 budget it searched for the edge of. Absent on every other
 			 * mode and on a capacity run that left either at its default (the
-			 * effective budget is {@link RunReport.capacity}'s `sloMs`). Nothing in
-			 * the renderer reads either yet.
+			 * effective budget is {@link RunReport.capacity}'s `sloMs`). No renderer
+			 * reads either today; #2819 (the export's run table) and #2927 are the
+			 * readers.
 			 */
 			stepDuration?: string;
 			sloMs?: number;
