@@ -86,10 +86,6 @@ constexpr const char* DEFAULT_LEVEL = "debug";
 namespace http {
 /// End-of-line characters for HTTP headers
 constexpr const char* EOL_CHARS = "\r\n";
-/// Multiplier for burst size relative to target RPS
-constexpr double BURST_MULTIPLIER = 2.0;
-/// Cost of a single token in the rate limiter
-constexpr double TOKEN_COST = 1.0;
 /// Largest response body a design-mode send - `POST /execute` and every step
 /// of a collection run - reads into memory (issue #1157). Deliberately the
 /// same figure as the load path's `event_loop::MAX_RESPONSE_BODY_BYTES` and
@@ -128,12 +124,6 @@ constexpr size_t MAX_PER_HOST = 200;
 /// `platform::HighResolutionTimerScope`; at the OS default this poll would
 /// return after ~15.6ms (issue #1161).
 constexpr int POLL_TIMEOUT_MS = 1;
-/// Longest a worker with nothing in flight parks waiting for its next
-/// rate-limiter token (issue #1915). submit() and stop() cut the wait short
-/// via curl_multi_wakeup, and a bounded drain's deadline shortens it, so the
-/// cap is a safety bound on a wait nothing else ends (a 0.25 rps worker's
-/// token is 4s away).
-constexpr int TOKEN_WAIT_CAP_MS = 100;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation).
 /// Governs both curl's own cache and the pre-resolution pin cache.
 /// 0 disables caching; a negative value never expires.

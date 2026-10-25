@@ -1060,7 +1060,7 @@ all green: 278s serial, 78s at `-j4`, 55s at `-j8`, 47s at `-j12`, 42s at
 `-j16`, 40s at `-j24`. It stops at 8 because the curve is flattening by then
 and a hosted runner is noisier than an idle machine, with the wall-clock-budget
 tests (`run_stop_test.cpp`, `run_shutdown_test.cpp`, `load_pacing_test.cpp`,
-`rate_limit_test.cpp`, `monitor_test.cpp`) the ones that would pay for a wrong
+`monitor_test.cpp`) the ones that would pay for a wrong
 guess - and widening a timing budget to afford a bigger number is not on the
 table.
 

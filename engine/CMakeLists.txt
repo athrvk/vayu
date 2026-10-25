@@ -522,7 +522,6 @@ add_library(vayu_core STATIC
     src/http/event_loop/curl_utils.cpp
     src/http/event_loop/event_loop_worker.cpp
     src/http/event_loop/event_loop_impl.cpp
-    src/http/rate_limiter.cpp
     src/http/script_parts.cpp
     src/http/request_exchange.cpp
     src/http/set_cookie.cpp

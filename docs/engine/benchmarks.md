@@ -791,39 +791,42 @@ still tracks that Linux measurement.
 
 ### A rate-limited worker no longer spins between tokens (2026-10-12, engine 0.41.x, Linux)
 
-An event-loop worker asks its token bucket for a token before it looks at its
+> **Historical.** The worker-side token bucket this measurement is about was
+> removed in [#2911](https://github.com/athrvk/vayu/issues/2911) after #2801
+> stopped arming it on every run, so no symbol or test named here exists any
+> more; the numbers are kept as a record of what the park was worth while it
+> did.
+
+An event-loop worker asked its token bucket for a token before it looked at its
 queue. When the bucket refused it and nothing was in flight, `wait_for_work`
 skipped both of its parks - the `curl_multi_poll` is only for a worker with
 transfers, and the idle park only for an empty queue - so the loop asked the
 bucket again at once, for as long as the rate held items back, draining
 included (issue #1915). A low `targetRps` against a fast target was the worst
 case: almost every moment is spent waiting for the next token with nothing in
-flight. The worker now parks in `curl_multi_poll` until its next token
-(`RateLimiter::time_until_token_unlocked`), capped at
-`event_loop::TOKEN_WAIT_CAP_MS` (100 ms) and by a bounded drain's remaining
-time, so a drain deadline is met rather than overshot by the park; a submit or
-a stop wakes it as before.
+flight. The worker was changed to park in `curl_multi_poll` until its next
+token, capped at 100 ms and by a bounded drain's remaining time, so a drain
+deadline was met rather than overshot by the park; a submit or a stop woke it
+as before.
 
 One worker at 4 RPS with a one-token burst, nine requests submitted at once to
 the in-process mock's `/fast` (the first on the burst token, eight more 250 ms
-apart), whole-process `getrusage` sampled around the window
-(`RateLimiterTest.AWorkerWaitingForATokenWithNothingInFlightDoesNotSpin`;
-Debug build, a 4-vCPU cloud VM):
+apart), whole-process `getrusage` sampled around the window (Debug build, a
+4-vCPU cloud VM):
 
 | | CPU over the 2 s window | % of one core |
 |---|---:|---:|
 | Before | ~1,994 ms | ~100% |
 | After | 26-32 ms (3 runs) | ~1.5% |
 
-The pacing is unchanged: the window still lasts 2.0 s, and the
-`EnforcesTargetRPS` pair (100 RPS, one and four workers) holds its ±25%
-window either side. With the worker parked for a token 2 s away, `stop
-(false)` returned at once (the test bounds it at 0.5 s; a hand-timed run
-was well under a millisecond) and a bounded drain (`stop (true, 30 ms)`)
-ended at its deadline, 0.03 s. The park is bounded by the drain's remaining
-time as well as by `TOKEN_WAIT_CAP_MS`: without that clamp the same drain ran
-a whole 100 ms slice past its deadline (0.10 s), and with neither bound it
-waited out the 2 s token.
+The pacing was unchanged: the window still lasted 2.0 s, and a 100 RPS test on
+one and on four workers held its +/-25% window either side. With the worker
+parked for a token 2 s away, `stop (false)` returned at once (a hand-timed run
+was well under a millisecond) and a bounded drain (`stop (true, 30 ms)`) ended
+at its deadline, 0.03 s. The park was bounded by the drain's remaining time as
+well as by the 100 ms cap: without that clamp the same drain ran a whole 100 ms
+slice past its deadline (0.10 s), and with neither bound it waited out the 2 s
+token.
 
 ## Prior results (2026-07, CLI, unreconciled)
 

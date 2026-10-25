@@ -21,7 +21,7 @@ The Vayu Engine is a high-performance C++ daemon that executes HTTP requests and
 │  │ (cpp-httplib)    │      │    (curl_multi)             │  │
 │  │  Port: 9876      │      │  • Multi-worker              │  │
 │  │                  │      │  • Lock-free SPSC queues     │  │
-│  └────────┬─────────┘      │  • Rate limiting             │  │
+│  └────────┬─────────┘      │  • Connection pooling        │  │
 │           │                └──────────┬──────────────────┘  │
 │           │                           │                      │
 │           ▼                           ▼                      │
@@ -290,16 +290,12 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: none on a load run. A `constant_rps` run is paced by its pacing
-  thread alone (`run_rate_limited`, see [Load Test Strategies](#load-test-strategies)), and
-  every loop a run builds has `EventLoopConfig::target_rps` 0 (#2801): a worker-side bucket
-  re-anchors on every take while the pacer's schedule is absolute, so the two drifted apart
-  and the wait for a token landed in each request's queue wait and latency, 0 to 13 ms at
-  2 req/s. The bucket itself (`RateLimiter`) remains for a caller that sets the field: the
-  rate is an **aggregate** budget split N ways across the workers' private buckets, with a
-  one-token burst floor, and a worker the bucket refuses with nothing in flight parks in
-  `curl_multi_poll` until its next token (at most `TOKEN_WAIT_CAP_MS`, cut short by a
-  submit, a stop or a bounded drain's deadline) instead of asking again in a loop (#1915)
+- **Rate limiting**: none in the workers. A `constant_rps` run is paced by its pacing
+  thread alone (`run_rate_limited`, see [Load Test Strategies](#load-test-strategies)). A
+  worker-side token bucket re-anchored on every take while the pacer's schedule is absolute,
+  so the two drifted apart and the wait for a token landed in each request's queue wait and
+  latency, 0 to 13 ms at 2 req/s (#2801); it was never armed after that and is gone (#2911),
+  so a worker takes whatever its queue holds, up to `max_concurrent`
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 
@@ -1151,7 +1147,7 @@ throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open
 The mode chooses the loop, never the rate (#2396). `rps` / `targetRps` is `constant_rps`'s field
 alone: `POST /runs` refuses a positive one on any other mode, and `open_loop_rate`
 (`load_strategy.hpp`) answers 0 for every other mode, so a rate in a stored config does not open
-`constant_concurrency`'s loop. No mode gives the event-loop workers a token bucket (#2801). A body
+`constant_concurrency`'s loop. The event-loop workers hold no token bucket (#2801, #2911). A body
 with no `mode` is `constant_rps`, the way `LoadStrategy::create` reads it.
 
 ### 1. `constant_rps` (open-loop)

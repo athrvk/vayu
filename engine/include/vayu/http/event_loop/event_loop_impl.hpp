@@ -22,22 +22,6 @@ struct TransferData;
 class EventLoopWorker;
 
 /**
- * @brief Split an aggregate rate-limit budget into one worker's share.
- *
- * Each worker owns a private token bucket and submissions are sharded
- * round-robin, so handing every worker the full `target_rps` made the real
- * aggregate cap `num_workers x target_rps` - the limiter enforced nothing.
- *
- * The one-token burst floor is load-bearing, not cosmetic: `refill_tokens()`
- * clamps the bucket to `burst_size`, so a share below a single token could
- * never accumulate one and that worker would never start a transfer (any run
- * with `target_rps < num_workers`).
- *
- * @return @p config with `target_rps`/`burst_size` scaled to one worker.
- */
-EventLoopConfig per_worker_config (const EventLoopConfig& config, size_t num_workers);
-
-/**
  * @brief EventLoop implementation managing a pool of workers
  *
  * Coordinates multiple EventLoopWorker instances, distributing
@@ -65,9 +49,6 @@ class EventLoopImpl {
     size_t pending_count () const;
     size_t total_processed () const;
     EventLoopStats stats () const;
-    [[nodiscard]] const EventLoopConfig& configuration () const {
-        return config;
-    }
 
     std::atomic<bool> running{ false };
 
@@ -76,10 +57,8 @@ class EventLoopImpl {
 
     /// Windows' 1 ms timer resolution, held for exactly as long as this loop
     /// exists (issue #1161). The loop is the consumer that needs it - each
-    /// worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1` wait, and a
-    /// rate-limited worker parks in the same poll for a token wait as short as
-    /// 1 ms (at most TOKEN_WAIT_CAP_MS); the OS default rounds either to
-    /// ~15.6ms - and the rate-limited pacing loop
+    /// worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1` wait, which
+    /// the OS default rounds to ~15.6ms - and the rate-limited pacing loop
     /// that sleeps beside it below ~500 RPS is coextensive with it. A loop
     /// exists only while a run is sending, so an idle sidecar - which it is
     /// for nearly all of an app session - asks for nothing, and a design-mode

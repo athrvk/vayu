@@ -173,8 +173,8 @@ test that touches time, threads, sockets or a large render, check these rules:
   Name both numbers in the comment. An upper bound is the side that flakes; a
   lower bound cannot fail slow. If the gap is too narrow for one sample, widen
   it (a longer injected delay, as in `mock_server_routes_test.cpp`), take the
-  best of N (`rate_limit_test.cpp`), or assert a recorded value instead of
-  the clock (an element's `waitedMs`).
+  best of N (a stall lands in one attempt, a regression in all of them), or
+  assert a recorded value instead of the clock (an element's `waitedMs`).
 - **A budget is a hang detector, not a speed check.** The app's per-test and
   `waitFor` budgets live in `app/src/test/timeouts.ts`, sized for the slowest
   leg. `timeouts.guard.test.ts` refuses a numeric `timeout:` in a test file.

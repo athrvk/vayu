@@ -6,7 +6,7 @@ The load-testing and request-execution engine. AGPL-3.0. See the repo root
 ```
 engine/
 ├── src/core/      # load_strategy, metrics_collector, run_manager, import, openapi
-├── src/http/      # HTTP server, SSE, routes, rate_limiter, transport
+├── src/http/      # HTTP server, SSE, routes, transport
 ├── src/db/        # SQLite persistence
 ├── src/runtime/   # QuickJS scripting engine; pm/ holds the pm.* surfaces, one file per family
 ├── src/platform/  # per-OS code (timer resolution, process, paths)

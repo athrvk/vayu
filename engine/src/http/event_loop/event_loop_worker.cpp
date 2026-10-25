@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <utility>
 
 #include "vayu/core/constants.hpp"
@@ -246,10 +245,9 @@ void CurlHandlePool::release (CURL* handle) {
 // EventLoopWorker Implementation
 // ============================================================================
 
-EventLoopWorker::EventLoopWorker (const EventLoopConfig& cfg, unsigned worker_index, unsigned num_workers)
+EventLoopWorker::EventLoopWorker (EventLoopConfig cfg, unsigned worker_index, unsigned num_workers)
 : pending_queue (core::constants::queue::CAPACITY), // 64K capacity ring buffer
-  config (cfg), rate_limiter (RateLimiterConfig{ cfg.target_rps, cfg.burst_size }),
-  handle_pool_ (config.max_concurrent), // Pre-allocate handles
+  config (std::move (cfg)), handle_pool_ (config.max_concurrent), // Pre-allocate handles
   worker_index_ (worker_index), num_workers_ (num_workers) {
     multi_handle = curl_multi_init ();
     if (!multi_handle) {
@@ -346,35 +344,17 @@ void EventLoopWorker::cancel_active_transfers () {
     current_active_count.store (0, std::memory_order_relaxed);
 }
 
-EventLoopWorker::SubmitPass EventLoopWorker::submit_pending_transfers (size_t& local_active) {
-    SubmitPass pass;
+bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
+    bool took_work = false;
     std::unique_ptr<TransferData> data;
 
-    // Fetch Phase: get up to max_concurrent items, but only while tokens are
-    // available - driving IO for the transfers already in flight matters more
-    // than accepting new work when rate limited. A refusal is reported, not
-    // waited out here; wait_for_work parks for the next token when nothing is
-    // in flight.
+    // Fetch Phase: get up to max_concurrent items.
     while (local_active < config.max_concurrent) {
-        // Peek before taking a token: a token spent on an empty queue is gone,
-        // and at a one-token burst the next request then waits a whole token
-        // interval (#2032). This worker is the queue's only consumer, so an
-        // item seen here is still there for the pop.
-        if (pending_queue.read_available () == 0) {
-            break;
-        }
-
-        // Single-threaded access, no lock needed
-        if (!rate_limiter.try_acquire_unlocked ()) {
-            pass.rate_limited = true;
-            break;
-        }
-
         if (!pending_queue.pop (data)) {
             break;
         }
 
-        pass.took_work = true;
+        took_work = true;
 
         // A request curl cannot put on the wire as written is refused here
         // rather than quietly sent as something else.
@@ -422,7 +402,7 @@ EventLoopWorker::SubmitPass EventLoopWorker::submit_pending_transfers (size_t& l
             local_active++; // Local cache update for loop condition
         }
     }
-    return pass;
+    return took_work;
 }
 
 bool EventLoopWorker::drain_completions () {
@@ -475,20 +455,12 @@ bool EventLoopWorker::drain_completions () {
     return did_work;
 }
 
-void EventLoopWorker::wait_for_work (int still_running, bool rate_limited) {
+void EventLoopWorker::wait_for_work (int still_running) {
     if (still_running > 0) {
         // Wait for IO activity, but allow interruption via curl_multi_wakeup
         // Use a short timeout to keep checking the queue even if no IO events
         curl_multi_poll (multi_handle, nullptr, 0,
         core::constants::event_loop::POLL_TIMEOUT_MS, nullptr);
-        return;
-    }
-
-    // Nothing in flight, yet the queue is not idle: the limiter refused it,
-    // and returning now would ask the bucket again in a hot loop, draining
-    // included (issue #1915).
-    if (rate_limited && pending_queue.read_available () > 0) {
-        wait_for_next_token ();
         return;
     }
 
@@ -511,35 +483,6 @@ void EventLoopWorker::wait_for_work (int still_running, bool rate_limited) {
     if (pending_queue.read_available () == 0) {
         queue_has_items.store (false, std::memory_order_release);
     }
-}
-
-void EventLoopWorker::wait_for_next_token () {
-    const auto wait = rate_limiter.time_until_token_unlocked ();
-    if (wait <= std::chrono::duration<double>::zero ()) {
-        return; // A token arrived since the pass that was refused
-    }
-
-    // Rounded up: curl_multi_poll counts whole milliseconds, and a timeout of
-    // 0 would return at once - the spin this wait exists to replace.
-    const double wait_ms =
-    std::ceil (std::chrono::duration<double, std::milli> (wait).count ());
-    double park_ms = std::min (wait_ms,
-    static_cast<double> (core::constants::event_loop::TOKEN_WAIT_CAP_MS));
-
-    // A bounded drain must not outlive its deadline by the park: nothing wakes
-    // this poll when a deadline passes.
-    const int64_t deadline_ticks = drain_deadline_ticks.load (std::memory_order_relaxed);
-    if (deadline_ticks != 0) {
-        const auto remaining = std::chrono::steady_clock::duration (deadline_ticks) -
-        std::chrono::steady_clock::now ().time_since_epoch ();
-        if (remaining <= std::chrono::steady_clock::duration::zero ()) {
-            return; // run_loop's deadline check ends the drain
-        }
-        park_ms = std::min (park_ms,
-        std::ceil (std::chrono::duration<double, std::milli> (remaining).count ()));
-    }
-    const int timeout_ms = static_cast<int> (park_ms);
-    curl_multi_poll (multi_handle, nullptr, 0, timeout_ms, nullptr);
 }
 
 namespace {
@@ -596,8 +539,7 @@ void EventLoopWorker::run_loop () {
             break;
         }
 
-        bool did_work     = false;
-        bool rate_limited = false;
+        bool did_work = false;
 
         // 1. Process pending queue (Lock-free Consumer).
         // Use atomic load for the active-count check (lock-free hot path). The
@@ -608,9 +550,7 @@ void EventLoopWorker::run_loop () {
         // untouched for the caller's post-join cancel drain.
         if (!stop_requested.load (std::memory_order_acquire) ||
         drain_on_stop.load (std::memory_order_acquire)) {
-            const SubmitPass pass = submit_pending_transfers (local_active);
-            did_work              = pass.took_work;
-            rate_limited          = pass.rate_limited;
+            did_work = submit_pending_transfers (local_active);
         }
 
         // 2. Drive CURL state machine
@@ -622,7 +562,7 @@ void EventLoopWorker::run_loop () {
 
         // 4. Wait Strategy
         if (!did_work) {
-            wait_for_work (still_running, rate_limited);
+            wait_for_work (still_running);
         }
     }
 }
