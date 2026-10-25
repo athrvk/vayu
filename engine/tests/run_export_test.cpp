@@ -155,8 +155,10 @@ class RunExportTest : public ::testing::Test {
 
     /// The leak fixture: credentials and payload in the snapshot, a trace
     /// carrying the sent `Authorization`, a captured `Set-Cookie`, and one
-    /// metric tick.
-    void seed_leak_run (const std::string& id) {
+    /// metric tick. A non-null @p status_seconds is stored on the tick as it
+    /// stands, a shape the engine would never write included; null stores the
+    /// tick as a run from before #2866 has it.
+    void seed_leak_run (const std::string& id, const json& status_seconds = json ()) {
         seed_run (id, vayu::RunType::Load, vayu::RunStatus::Completed,
         leak_snapshot (), leak_summary ());
         vayu::db::Result result;
@@ -181,7 +183,7 @@ class RunExportTest : public ::testing::Test {
         vayu::db::MetricTick tick;
         tick.run_id    = id;
         tick.timestamp = START_MS + 1000;
-        tick.payload   = json{ { "timestamp", START_MS + 1000 },
+        json payload   = json{ { "timestamp", START_MS + 1000 },
               { "elapsed_seconds", 1.0 }, { "requests_completed", 6 },
               { "requests_failed", 1 }, { "http_errors", 1 }, { "no_response", 0 },
               { "cancelled", 0 }, { "current_rps", 6.0 }, { "current_concurrency", 2 },
@@ -189,8 +191,11 @@ class RunExportTest : public ::testing::Test {
               { "error_rate", 16.7 }, { "dropped_requests", 0 },
               { "bytes_sent", 10 }, { "bytes_received", 20 },
               { "status_codes", { { "200", 5 }, { "500", 1 } } }, { "latency_p50_ms", 1.0 },
-              { "latency_p95_ms", 2.0 }, { "latency_p99_ms", 3.0 } }
-                       .dump ();
+              { "latency_p95_ms", 2.0 }, { "latency_p99_ms", 3.0 } };
+        if (!status_seconds.is_null ()) {
+            payload["status_seconds"] = status_seconds;
+        }
+        tick.payload = payload.dump ();
         db_->add_metric_tick (tick);
     }
 
@@ -307,6 +312,63 @@ TEST_F (RunExportTest, TimeSeriesIsAllowlistedAndOptional) {
     auto [none, without] =
     export_ok (json{ { "runId", "run_leak" }, { "series", "none" } });
     EXPECT_FALSE (without.contains ("timeSeries"));
+}
+
+// #2888: the allowlist copies the key by hand because `pick` carries scalars
+// and lists of scalars only.
+// Mutation check: drop `copy_status_seconds` from `time_series` and the copied
+// and empty cases fail; copy `stored` unfiltered and the malformed case fails.
+TEST_F (RunExportTest, StatusSecondsAreCopiedWhenTheStoredTickCarriesThem) {
+    const json entries = json::array (
+    { { { "second", 0 }, { "span", 1 }, { "counts", { 9, 0, 0, 1, 0 } } },
+    { { "second", 1 }, { "span", 3 }, { "counts", { 30, 3, 0, 0, 2 } } } });
+    seed_leak_run ("run_seconds", entries);
+
+    auto [envelope, document] = export_ok (json{ { "runId", "run_seconds" } });
+    ASSERT_EQ (document["timeSeries"].size (), 1U);
+    EXPECT_EQ (document["timeSeries"][0]["status_seconds"], entries);
+}
+
+TEST_F (RunExportTest, AnEmptyStatusSecondsIsKeptAsTheSeriesWideSwitch) {
+    seed_leak_run ("run_seconds", json::array ());
+
+    auto [envelope, document] = export_ok (json{ { "runId", "run_seconds" } });
+    const json& tick          = document["timeSeries"][0];
+    ASSERT_TRUE (tick.contains ("status_seconds")) << tick.dump ();
+    EXPECT_EQ (tick["status_seconds"], json::array ());
+}
+
+TEST_F (RunExportTest, ATickStoredBeforeStatusSecondsExportsWithoutTheKey) {
+    seed_leak_run ("run_before");
+    auto [envelope, document] = export_ok (json{ { "runId", "run_before" } });
+    EXPECT_FALSE (document["timeSeries"][0].contains ("status_seconds"));
+}
+
+TEST_F (RunExportTest, AMalformedStatusSecondsEntryIsDroppedAndTheRestKept) {
+    const json good = { { "second", 4 }, { "span", 1 }, { "counts", { 1, 2, 3, 4, 5 } } };
+    seed_leak_run ("run_seconds",
+    json::array ({ "not an entry", 7, nullptr,
+    { { "second", -1 }, { "span", 1 }, { "counts", { 1, 0, 0, 0, 0 } } },
+    { { "second", 1.5 }, { "span", 1 }, { "counts", { 1, 0, 0, 0, 0 } } },
+    { { "second", 0 }, { "span", 0 }, { "counts", { 1, 0, 0, 0, 0 } } },
+    { { "second", 0 }, { "span", 1 }, { "counts", { 1, 0, 0, 0 } } },
+    { { "second", 0 }, { "span", 1 }, { "counts", { 1, 0, 0, 0, 0, 0 } } },
+    { { "second", 0 }, { "span", 1 }, { "counts", { 1, 0, 0, -1, 0 } } },
+    { { "second", 0 }, { "span", 1 }, { "counts", { 1, 0, 0, 0.5, 0 } } },
+    { { "second", 0 }, { "span", 1 }, { "counts", { "1", 0, 0, 0, 0 } } },
+    { { "second", 0 }, { "span", 1 } }, { { "span", 1 }, { "counts", { 1, 0, 0, 0, 0 } } }, good,
+    { { "second", 5 }, { "span", 1 }, { "counts", { 0, 0, 0, 0, 0 } }, { "note", "LEAKNOTE" } } }));
+
+    auto [envelope, document] = export_ok (json{ { "runId", "run_seconds" } });
+    EXPECT_EQ (document["timeSeries"][0]["status_seconds"],
+    json::array (
+    { good, { { "second", 5 }, { "span", 1 }, { "counts", { 0, 0, 0, 0, 0 } } } }));
+}
+
+TEST_F (RunExportTest, AStatusSecondsThatIsNotAnArrayIsLeftOut) {
+    seed_leak_run ("run_seconds", json::object ());
+    auto [envelope, document] = export_ok (json{ { "runId", "run_seconds" } });
+    EXPECT_FALSE (document["timeSeries"][0].contains ("status_seconds"));
 }
 
 TEST_F (RunExportTest, AStoppedRunIsAResult) {
