@@ -12,8 +12,9 @@ import { hasSecondPercentiles, secondPercentiles } from "./tickPercentiles";
 export const DEFAULT_SLO_MS = 200;
 
 /**
- * The capacity breakpoint of a ramp_up run: the first per-tick moment at which
- * p99 latency crossed the SLO threshold, and the concurrency in flight then.
+ * The capacity breakpoint of a ramp_up or capacity run: the first per-tick
+ * moment at which p99 latency crossed the SLO threshold, and the concurrency in
+ * flight then.
  * Consumed by the Saturation hero card (A1), the Breakpoint stat (A2), and the
  * Response-time-vs-concurrency scatter's SLO line (A3) - one definition, three
  * call sites.

@@ -26,6 +26,7 @@ import {
 	CONCURRENCY_UNIT,
 	LOAD_TEST_MODES,
 	formatConcurrency,
+	isConcurrencySweepMode,
 	loadTestModeLabel,
 } from "./load-test-modes";
 
@@ -119,4 +120,17 @@ describe("formatConcurrency", () => {
 		// Mutation check: drop `formatNumber` from the helper and this reddens.
 		expect(formatConcurrency(12345)).toBe(`12,345 ${CONCURRENCY_UNIT}`);
 	});
+});
+
+describe("isConcurrencySweepMode (#2931)", () => {
+	it.each(["ramp_up", "capacity"])("holds for %s, where load rises under the run", (mode) => {
+		expect(isConcurrencySweepMode(mode)).toBe(true);
+	});
+
+	it.each(["constant_rps", "constant_concurrency", "iterations", "", undefined, null])(
+		"does not hold for %s",
+		(mode) => {
+			expect(isConcurrencySweepMode(mode)).toBe(false);
+		}
+	);
 });

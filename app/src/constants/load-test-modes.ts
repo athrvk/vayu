@@ -129,6 +129,17 @@ export function isClosedLoopMode(mode: string | undefined | null): boolean {
 	return mode != null && CLOSED_LOOP_MODES.has(mode);
 }
 
+/**
+ * Whether load rises under the run, so response time against concurrency is a
+ * curve with a knee rather than a single point: a ramp walks the user count up
+ * on a clock, a capacity search steps it up level by level. The scatter and the
+ * breakpoint line on every time chart ask this, so the two modes cannot drift
+ * apart on which of them draw a capacity picture (#2931).
+ */
+export function isConcurrencySweepMode(mode: string | undefined | null): boolean {
+	return mode === "ramp_up" || mode === "capacity";
+}
+
 /** The words for the series the engine reports as `current_concurrency` under `mode`. */
 export function concurrencyMeasureLabel(mode: string | undefined | null): string {
 	return isClosedLoopMode(mode) ? CONCURRENCY_LABEL : IN_FLIGHT_LABEL;

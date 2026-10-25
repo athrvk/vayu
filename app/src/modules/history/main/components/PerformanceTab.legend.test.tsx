@@ -34,6 +34,7 @@ import type { ColorRole } from "@/modules/dashboard/components/charts/uplot/uplo
 
 interface RecordedProps {
 	series: { label: string; role: ColorRole }[];
+	markers?: { orient: string; value: number; label: string; role: ColorRole }[];
 }
 
 const charts = vi.hoisted(() => new Map<string, unknown>());
@@ -103,11 +104,11 @@ function legendOf(container: HTMLElement, title: string | RegExp) {
 	};
 }
 
-function renderTab(mode: string, withSendRate = true) {
+function renderTab(mode: string, withSendRate = true, runReport: RunReport = report) {
 	charts.clear();
 	return render(
 		<PerformanceTab
-			report={report}
+			report={runReport}
 			runId="run_1"
 			derived={{ mode, targetRps: 0 } as unknown as DashboardDerived}
 			timeSeries={Array.from({ length: 6 }, (_, i) => tick(i, withSendRate))}
@@ -150,6 +151,46 @@ describe("PerformanceTab chart legends (#2697)", () => {
 		expect(labels).toEqual(["p99", "SLO"]);
 		expect(chart?.series.map((s) => s.label)).toContain("p99");
 		expect(container.textContent).not.toContain(PERCENTILES_TITLE);
+	});
+
+	it("keys the capacity scatter p99 and SLO, and shows no percentile card (#2931)", () => {
+		const container = renderTab("capacity");
+		const { labels, chart } = legendOf(container, SCATTER_TITLE);
+
+		expect(labels).toEqual(["p99", "SLO"]);
+		expect(chart?.series.map((s) => s.label)).toContain("p99");
+		expect(container.textContent).not.toContain(PERCENTILES_TITLE);
+	});
+
+	describe("the capacity scatter's knee marker (#2931)", () => {
+		const withKnee = (kneeConcurrency?: number) =>
+			({
+				...report,
+				capacity: { sloMs: 200, stopReason: "slo_exceeded", kneeConcurrency, levels: [] },
+			}) as unknown as RunReport;
+		const kneeLines = (runReport: RunReport) =>
+			legendOf(renderTab("capacity", true, runReport), SCATTER_TITLE).chart?.markers?.filter(
+				(m) => m.label.startsWith("knee")
+			);
+
+		it("draws a vertical line at the knee the report recorded", () => {
+			expect(kneeLines(withKnee(50))).toEqual([
+				{
+					orient: "vertical",
+					value: 50,
+					label: "knee 50 virtual users",
+					role: "destructive",
+				},
+			]);
+		});
+
+		it("draws none where the search recorded no knee", () => {
+			expect(kneeLines(withKnee(undefined))).toEqual([]);
+		});
+
+		it("draws none for a report without a capacity section", () => {
+			expect(kneeLines(report)).toEqual([]);
+		});
 	});
 
 	it("keeps the throughput key free of the ramp pair on a ramp_up run", () => {

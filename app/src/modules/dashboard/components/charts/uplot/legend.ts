@@ -61,7 +61,8 @@ export const PERCENTILE_LEGEND = {
 /**
  * What the scatter draws, by role (see `THROUGHPUT_LEGEND`). The SLO entry names
  * the horizontal threshold line; the vertical breakpoint marker is `warning`
- * and carries its own label.
+ * and a finished capacity run's knee marker is `destructive`; each carries its
+ * own label.
  */
 export const SCATTER_LEGEND = {
 	// `categorical`, not `primary`: `--primary` tracks the user's accent theme,

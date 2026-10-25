@@ -90,7 +90,12 @@ const base: MetricsViewProps = {
 };
 
 // ramp_up draws the scatter and the ramp pair; constant_rps draws the percentile card.
-const RUNS: MetricsViewProps[] = [base, { ...base, mode: "constant_rps", rampConfig: undefined }];
+// capacity draws the scatter and no ramp pair, its search sets no ramp.
+const RUNS: MetricsViewProps[] = [
+	base,
+	{ ...base, mode: "constant_rps", rampConfig: undefined },
+	{ ...base, mode: "capacity", rampConfig: undefined },
+];
 
 interface LegendEntryView {
 	card: Element;
@@ -230,6 +235,53 @@ describe("MetricsView percentile legend names the SLO line (#2698)", () => {
 		expect(isDrawnWithRole(slo as LegendEntryView, "other")).toBe(true);
 		// The line is a marker; the chart's series stay the three percentiles.
 		expect(entries[0].chart.series.map((s) => s.label)).toEqual(["p50", "p95", "p99"]);
+	});
+});
+
+describe("MetricsView draws the scatter for a capacity run (#2931)", () => {
+	const SCATTER_LABELS = ["p99", "SLO"];
+	const PERCENTILE_LABELS = ["p50", "p95", "p99", "SLO"];
+
+	/** The legend labels of every card whose chart draws a p99 series, one list per card. */
+	function p99Cards(props: MetricsViewProps): string[][] {
+		const entries = legendEntries(props).filter((e) =>
+			e.chart.series.some((s) => s.label === "p99")
+		);
+		return [...new Set(entries.map((e) => e.card))].map((card) =>
+			entries.filter((e) => e.card === card).map((e) => e.label)
+		);
+	}
+
+	it.each(["ramp_up", "capacity"] as const)(
+		"draws the scatter and no percentile card in mode %s",
+		(mode) => {
+			expect(p99Cards({ ...base, mode, rampConfig: undefined })).toEqual([SCATTER_LABELS]);
+		}
+	);
+
+	it.each(["constant_rps", "constant_concurrency", "iterations"] as const)(
+		"keeps the percentile card, and no scatter, in mode %s",
+		(mode) => {
+			expect(p99Cards({ ...base, mode, rampConfig: undefined })).toEqual([PERCENTILE_LABELS]);
+		}
+	);
+
+	it("draws the SLO line and no knee marker on the live capacity scatter", () => {
+		// The knee is in the final report only; a live run has nothing to draw it from.
+		charts.clear();
+		render(
+			<TooltipProvider>
+				<MetricsView {...base} mode="capacity" rampConfig={undefined} />
+			</TooltipProvider>
+		);
+		const scatter = [...charts.values()].find((props) =>
+			(props as RecordedProps).series.some(
+				(s) => s.label === "p99" && s.role === "categorical"
+			)
+		) as RecordedProps;
+		const labels = scatter.markers?.map((m) => m.label) ?? [];
+		expect(labels.some((label) => label.startsWith("SLO "))).toBe(true);
+		expect(labels.some((label) => label.startsWith("knee"))).toBe(false);
 	});
 });
 

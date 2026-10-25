@@ -15,7 +15,7 @@
  *                             throughput-led modes add a p95/p99 latency card)
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
  *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
- *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
+ *   Row 2.7 - Percentiles over time  (ramp_up and capacity: Response-time-vs-concurrency scatter)
  *   Row 3   - HDR percentile plot + Request timing waterfall + phase percentiles (LiveDistributionRow),
  *             from the latest gate frame
  *   Row 4   - ModeStatsRow   (mode-adaptive: 3 or 4 stat cards)
@@ -27,7 +27,7 @@
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { formatByteRateParts, formatNumber, formatPercent } from "@/lib/format-number";
-import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
+import { CONCURRENCY_UNIT, isConcurrencySweepMode } from "@/constants/load-test-modes";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useDashboardStore } from "@/stores";
@@ -345,9 +345,9 @@ function MetricsView({
 				</Card>
 			)}
 
-			{/* Row 2.7 - ramp_up shows Response-time-vs-concurrency scatter (A3);
-			    every other mode shows Response-time percentiles over time. */}
-			{derived.mode === "ramp_up"
+			{/* Row 2.7 - ramp_up and capacity show Response-time-vs-concurrency scatter
+			    (A3); every other mode shows Response-time percentiles over time. */}
+			{isConcurrencySweepMode(derived.mode)
 				? historicalMetrics.length > 1 && (
 						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">

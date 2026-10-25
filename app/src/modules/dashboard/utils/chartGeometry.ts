@@ -8,7 +8,7 @@
 
 /**
  * Shared SVG geometry for the full-width time-series charts (Throughput,
- * Latency, Percentiles, and the ramp_up Response-time-vs-concurrency scatter).
+ * Latency, Percentiles, and the ramp_up / capacity Response-time-vs-concurrency scatter).
  * All of these MUST stay dimensionally identical so the dashboard rows line up
  * Chart geometry constants belong here, never in a component file.
  */
