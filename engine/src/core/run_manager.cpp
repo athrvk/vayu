@@ -2760,10 +2760,10 @@ const GateReadings& gate) {
     // second in - reports zero instead of dereferencing null.
     const size_t active_now = context->active_transfer_count ();
 
-    // Sample the in-flight high-water mark. The closed-loop controller
-    // also updates this at submit granularity; open-loop modes
-    // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
-    // writers don't clobber each other.
+    // Sample the in-flight high-water mark. Every load strategy updates it
+    // after each submission batch (`update_peak` in load_strategy.cpp); this
+    // 1 Hz sample is the backstop. CAS-max so the two writers don't clobber
+    // each other.
     {
         size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
         while (backpressure > pk &&

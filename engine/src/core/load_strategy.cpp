@@ -571,7 +571,8 @@ const LoadDataSet* data) {
 
 namespace {
 
-// Update the in-flight high-water mark (single writer: the strategy thread).
+// Raise the in-flight high-water mark to the current reading. A CAS-max because
+// the 1 Hz metrics sample in run_manager.cpp writes the same atomic.
 inline void update_peak (const std::shared_ptr<RunContext>& context) {
     size_t f    = context->in_flight ();
     size_t prev = context->peak_in_flight.load (std::memory_order_relaxed);
@@ -1175,6 +1176,9 @@ class ConstantLoadStrategy : public LoadStrategy {
             submit_one_request (context, db, live);
             sent++;
         }
+        // After the loop, so the reading counts only what was submitted: the
+        // requests the cap refused above never entered in_flight() (#2912).
+        update_peak (context);
         return sent;
     }
 

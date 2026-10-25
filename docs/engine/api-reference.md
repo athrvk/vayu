@@ -11343,10 +11343,15 @@ included; a virtual user in a timer wait between requests has none, and a
 request cancelled or refused before the wire adds nothing. With no think time
 it equals the virtual user count, and over that count it is the run's
 utilisation. `peakConcurrency` beside it is the high-water mark of the
-instantaneous in-flight gauge, sampled once a second for a scenario run, so on a
-run whose users wait in step it can read the user count or 0 depending on where
-the samples landed; `avgInFlight` is the figure that does not alias. Present for
-a load run stored since the issue, `0` included; **absent** for a run stored
+instantaneous in-flight gauge (the live stream's `backpressure`), which the load
+generator reads after each batch of submissions in every mode: the closed-loop
+controller behind `constant_concurrency`, `ramp_up`, `iterations`, `capacity`
+and every scenario run, and the open-loop pacer behind `constant_rps` (issue
+#2912). The once-a-second metrics sample is a backstop writer. The peak is the
+most requests ever in flight at once, so on a run whose users wait in step it
+can read the full user count though most of the run had far fewer in flight;
+`avgInFlight` is the figure that measures utilisation. `avgInFlight` is present
+for a load run stored since issue #2821, `0` included; **absent** for a run stored
 before it, a collection (design-mode) run, and a run reported from its sampled
 results, never a `0` nobody measured.
 
