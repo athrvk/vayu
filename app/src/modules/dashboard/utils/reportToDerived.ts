@@ -11,6 +11,7 @@ import type { DashboardDerived, ReceivedWindow, StoppedAt } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
 import { notCrossed } from "./computeBreakpoint";
+import { runSloMs } from "./runSloMs";
 import { dispatchStatus } from "./dispatchLag";
 import { shouldShowDropped } from "./metricsTransforms";
 import { liveRateFidelity } from "./rateFidelity";
@@ -163,6 +164,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		// A capacity run names its own budget; every other report has no threshold
 		// until LoadTestDetail judges its stored series against the Settings SLO.
 		breakpoint: notCrossed(report.capacity?.sloMs ?? null),
+		runSloMs: runSloMs(report),
 		capacity: report.capacity,
 	};
 }

@@ -14,6 +14,11 @@
  * already printed the run's figure, while the breakpoint, the chart lines and
  * the latency tiles read the setting and drew a second, different budget.
  *
+ * Any other run draws an SLO line only where it declared a p99 budget
+ * (`thresholdValidation`'s `latencyP99Ms` check); the Settings SLO is a client
+ * preference, so a run without a budget draws no line, no legend entry and no
+ * coloured tile, whatever Settings holds (#2939).
+ *
  * Real charts, `UPlotChart` swapped for a recorder, so the lines are read off
  * the markers the charts were handed. The Settings SLO is 200 ms throughout and
  * the run's own 50 ms, with p99 crossing 50 and never 200, so a reader of the
@@ -21,7 +26,8 @@
  *
  * Mutation-check: judge with the setting in `LoadTestDetail` (drop the
  * `report.capacity?.sloMs ??`) and the line, marker and tile cases fail; read
- * the setting in `PerformanceTab` (`sloMs`) and the tile case fails.
+ * the setting in `PerformanceTab` (`sloMs = derived.runSloMs ?? settingSloMs`)
+ * and the tile case and the no-budget cases fail.
  */
 
 import { useId } from "react";
@@ -90,7 +96,7 @@ function climbingTicks(): LoadTestMetrics[] {
 	}));
 }
 
-function report(mode: string, capacity?: RunReport["capacity"]): RunReport {
+function report(mode: string, capacity?: RunReport["capacity"], p99BudgetMs?: number): RunReport {
 	return {
 		metadata: {
 			runId: "run_cap",
@@ -112,6 +118,14 @@ function report(mode: string, capacity?: RunReport["capacity"]): RunReport {
 		// p99 60 is over the run's 50 ms and under the setting's 200 ms.
 		latency: { min: 1, max: 90, avg: 10, p50: 8, p90: 30, p95: 40, p99: 60 },
 		capacity,
+		...(p99BudgetMs !== undefined && {
+			thresholdValidation: {
+				checks: [{ metric: "latencyP99Ms", limit: p99BudgetMs, actual: 60, passed: false }],
+				passed: 0,
+				failed: 1,
+				verdict: "failed",
+			},
+		}),
 	} as unknown as RunReport;
 }
 
@@ -130,6 +144,10 @@ const labels = (orient: Marker["orient"]) =>
 	[...charts.values()].flatMap((c) =>
 		(c.markers ?? []).filter((m) => m.orient === orient).map((m) => m.label)
 	);
+
+/** The key under the percentile and scatter cards: the SLO is an entry only where a line is drawn. */
+const legendLabels = () =>
+	[...document.querySelectorAll("[data-legend-role]")].map((e) => e.textContent);
 
 const p99Tile = () => screen.getByText("P99", { exact: true }).parentElement as HTMLElement;
 const isDanger = () => p99Tile().innerHTML.includes("status-error");
@@ -157,13 +175,34 @@ describe("a stored capacity run against its own SLO (#2816)", () => {
 		expect(isDanger()).toBe(true);
 	});
 
-	it("still follows the setting for a run that is not a capacity run", async () => {
+	it("draws no SLO line, key entry or coloured tile for a run with no p99 budget, though p99 is over the setting", async () => {
+		// p99 60 is over this setting and the run declared no line of its own.
+		useClientSettingsStore.setState({ sloThresholdMs: 30 });
 		openPerformance(report("constant_concurrency"));
 
 		await screen.findByText("Latency distribution");
-		expect(labels("horizontal")).toContain("SLO 200ms");
-		expect(labels("horizontal")).not.toContain("SLO 50ms");
-		expect(labels("vertical").filter((l) => l?.startsWith("p99 > SLO"))).toEqual([]);
+		expect(labels("horizontal")).toEqual([]);
+		expect(legendLabels()).toContain("p99");
+		expect(legendLabels()).not.toContain("SLO");
+		expect(isDanger()).toBe(false);
+	});
+
+	it("draws the run's p99 budget as its SLO line, key entry and tile verdict, not the setting", async () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 200 });
+		openPerformance(report("constant_concurrency", undefined, 50));
+
+		await screen.findByText("Latency distribution");
+		expect(labels("horizontal")).toEqual(["SLO 50ms"]);
+		expect(legendLabels()).toContain("SLO");
+		expect(isDanger()).toBe(true);
+	});
+
+	it("draws the SLO line a p99 budget names above the setting's, and leaves a tile under it neutral", async () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 30 });
+		openPerformance(report("constant_concurrency", undefined, 350));
+
+		await screen.findByText("Latency distribution");
+		expect(labels("horizontal")).toEqual(["SLO 350ms"]);
 		expect(isDanger()).toBe(false);
 	});
 });

@@ -61,7 +61,6 @@ import {
 } from "@/constants/load-test-modes";
 import { pluralize } from "../../../utils/format";
 import { useClientSettingsStore } from "@/stores";
-import { useSloMs } from "../../../hooks/useSloMs";
 
 const COUNT_ONLY: readonly ScaleKey[] = ["y"];
 const CONCURRENCY_ONLY: readonly ScaleKey[] = ["y2"];
@@ -138,23 +137,28 @@ export function LatencyPercentilesChart({
 	height,
 	mode,
 	breakpoint,
+	sloMs,
 	anomalies,
 	sleeps,
-}: BaseProps & { mode?: string }) {
+}: BaseProps & {
+	mode?: string;
+	/** The run's SLO line (ms); absent draws no horizontal line (#2939). */
+	sloMs?: number;
+}) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const sloMs = useSloMs(breakpoint);
-	const markers = useMemo<Marker[]>(
-		() => [
-			{
+	const markers = useMemo<Marker[]>(() => {
+		const m: Marker[] = [];
+		if (sloMs !== undefined) {
+			m.push({
 				orient: "horizontal",
 				value: sloMs,
 				role: PERCENTILE_LEGEND.slo.role,
 				label: `${PERCENTILE_LEGEND.slo.label} ${formatLatency(sloMs)}`,
-			},
-			...breakpointMarker(breakpoint, mode, true),
-		],
-		[sloMs, breakpoint, mode]
-	);
+			});
+		}
+		m.push(...breakpointMarker(breakpoint, mode, true));
+		return m;
+	}, [sloMs, breakpoint, mode]);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series } = useMemo(() => {
 		const d = buildPercentileChartData(history);

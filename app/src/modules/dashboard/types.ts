@@ -200,6 +200,13 @@ export interface DashboardDerived {
 	targetConcurrency?: number;
 	breakpoint: Breakpoint;
 	/**
+	 * The p99 line (ms) the stored run declared for itself, from `runSloMs`; the
+	 * only SLO its charts and latency tiles draw. Absent for a run with neither a
+	 * capacity budget nor a p99 budget, and absent live. Distinct from
+	 * `breakpoint.sloMs`, which a non-capacity run judges against the Settings SLO.
+	 */
+	runSloMs?: number;
+	/**
 	 * What a finished capacity run's search found, from the report. Absent live
 	 * (the engine publishes the stop reason only in the report, which replaces
 	 * the live view once the run ends) and for every other mode; the Saturation

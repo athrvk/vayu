@@ -272,32 +272,34 @@ describe("LatencyBreakdownChart - what the series are called", () => {
 	});
 });
 
-describe("ResponseTimeVsConcurrencyChart - the SLO line (#2816)", () => {
+describe("ResponseTimeVsConcurrencyChart - the SLO line (#2816, #2939)", () => {
 	afterEach(() => useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS }));
 	const horizontals = () => mockState.markers.filter((m) => m.orient === "horizontal");
+	const NOT_CROSSED: Breakpoint = {
+		crossed: false,
+		concurrency: null,
+		timeSeconds: null,
+		p99Ms: null,
+		sloMs: 200,
+		atRunStart: false,
+	};
 
-	it("draws the SLO the breakpoint was judged against, not the setting", () => {
-		useClientSettingsStore.setState({ sloThresholdMs: 200 });
+	it("draws the SLO it is handed, not the breakpoint's or the setting's", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 450 });
 		render(
 			<ResponseTimeVsConcurrencyChart
 				history={historyOf(4)}
-				breakpoint={{
-					crossed: false,
-					concurrency: null,
-					timeSeconds: null,
-					p99Ms: null,
-					sloMs: 50,
-					atRunStart: false,
-				}}
+				breakpoint={NOT_CROSSED}
+				sloMs={50}
 			/>
 		);
 		expect(horizontals().map((m) => [m.value, m.label])).toEqual([[50, "SLO 50ms"]]);
 	});
 
-	it("draws the setting when the breakpoint holds none", () => {
+	it("draws no horizontal line when handed none, whatever the setting or breakpoint holds", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: 450 });
-		render(<ResponseTimeVsConcurrencyChart history={historyOf(4)} breakpoint={null} />);
-		expect(horizontals().map((m) => [m.value, m.label])).toEqual([[450, "SLO 450ms"]]);
+		render(<ResponseTimeVsConcurrencyChart history={historyOf(4)} breakpoint={NOT_CROSSED} />);
+		expect(horizontals()).toEqual([]);
 	});
 });
 
@@ -528,23 +530,16 @@ describe("the breakpoint line on the time charts (#2698)", () => {
 	});
 });
 
-describe("LatencyPercentilesChart - the SLO line (#2698)", () => {
-	const horizontals = () => mockState.markers.filter((m) => m.orient === "horizontal");
+describe("LatencyPercentilesChart - the SLO line (#2698, #2939)", () => {
 	afterEach(() => useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS }));
+	const horizontals = () => mockState.markers.filter((m) => m.orient === "horizontal");
 
-	it("draws the SLO the breakpoint was judged against, named as the scatter names it", () => {
+	it("draws the SLO it is handed, named as the scatter names it", () => {
 		render(
 			<LatencyPercentilesChart
 				history={historyOf(4)}
 				mode="constant_concurrency"
-				breakpoint={{
-					crossed: true,
-					concurrency: 12,
-					timeSeconds: 2,
-					p99Ms: 303,
-					sloMs: 350,
-					atRunStart: false,
-				}}
+				sloMs={350}
 			/>
 		);
 		expect(horizontals()).toEqual([
@@ -552,18 +547,31 @@ describe("LatencyPercentilesChart - the SLO line (#2698)", () => {
 		]);
 	});
 
-	it("draws the client setting when the breakpoint holds none", () => {
+	it("draws no horizontal line when handed none, whatever the setting or breakpoint holds", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: 450 });
-		render(<LatencyPercentilesChart history={historyOf(4)} breakpoint={null} />);
-		expect(horizontals().map((m) => [m.value, m.label])).toEqual([[450, "SLO 450ms"]]);
-	});
-
-	it("draws it for a run that never crossed, and for one that began over it", () => {
-		useClientSettingsStore.setState({ sloThresholdMs: 200 });
 		render(
 			<LatencyPercentilesChart
 				history={historyOf(4)}
 				mode="ramp_up"
+				breakpoint={{
+					crossed: false,
+					concurrency: null,
+					timeSeconds: null,
+					p99Ms: null,
+					sloMs: 450,
+					atRunStart: false,
+				}}
+			/>
+		);
+		expect(horizontals()).toEqual([]);
+	});
+
+	it("draws it for a run that began over it, beside no vertical line", () => {
+		render(
+			<LatencyPercentilesChart
+				history={historyOf(4)}
+				mode="ramp_up"
+				sloMs={200}
 				breakpoint={{
 					crossed: true,
 					concurrency: 10,
