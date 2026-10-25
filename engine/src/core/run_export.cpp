@@ -163,8 +163,8 @@ constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
 "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
 "avgRps", "testDuration", "sendRate", "throughput", "setupOverhead", "cleanupOverhead",
 "peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
-"httpVersionDowngraded", "throughputBytesPerSec", "sendingDurationSeconds",
-"connectionReplays", "avgInFlight", "completedWhileSending" });
+"httpVersionDowngraded", "throughputBytesPerSec", "sendingDurationSeconds", "connectionReplays",
+"avgInFlight", "completedWhileSending", "partial", "summaryMissing" });
 constexpr auto LATENCY_KEYS = std::to_array<std::string_view> (
 { "min", "max", "avg", "median", "p50", "p75", "p90", "p95", "p99", "p999" });
 constexpr auto RATE_CONTROL_KEYS = std::to_array<std::string_view> (

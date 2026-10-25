@@ -263,6 +263,9 @@ Section verdict_section (const ReportView& view) {
     if (!verdict.stopped_early.empty ()) {
         body += "<p>" + text_of (verdict.stopped_early) + "</p>\n";
     }
+    for (const ReportText& notice : view.notices) {
+        body += "<p>" + text_of (notice) + "</p>\n";
+    }
     return section_of ("verdict", "Verdict", body + "</div>");
 }
 

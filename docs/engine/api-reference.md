@@ -4557,6 +4557,18 @@ file and the screen it came from agree. It adds no rule of its own:
 
 `stoppedEarly` is `status == "stopped"`.
 
+**A summary that is not a whole-run measurement** (issues #2895, #2905).
+`report.summary` carries two optional booleans, each present only when `true`
+(the `GET /runs/:runId/report` flags of the same name): `partial` for a run the
+engine died under and reconciled at the next start, whose counts are its last
+saved tick's, and `summaryMissing` for a failed load run that stored no summary,
+whose counts are not whole-run totals. In both, `report.latency` is still
+present (the schema requires it) but is not a measurement: all zeros for a
+crashed run, and for a failed run with no summary whatever its sampled results
+held.
+The verdict is not changed by either; the Markdown and HTML reports word it
+(below).
+
 `comparison` diffs the run (the target) against `baseRunId` the way the app's
 vs-baseline strip and the MCP `compare_runs` tool do (`compareReports`): the
 engine's copy is `core/run_compare.hpp`, and
@@ -4622,7 +4634,10 @@ The sections, in order:
    `**Passed** - 3 of 3 budgets met`,
    `**Failed** - p95 <= 30 ms missed (41 ms)` (every missed budget, or `not
    evaluated` for one the run could not measure), `**Not judged** - no budgets
-   declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows.
+   declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows,
+   and for a run with `summary.partial` or `summary.summaryMissing` one
+   sentence each follows that, saying the totals are the last saved tick's or
+   not whole-run totals, and that the latency figures are not measurements.
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
 4. `## Results`: requests, requests per second (`avgRps`, labelled as the
@@ -4679,7 +4694,8 @@ It holds the Markdown report's sections in the same order (title and reference
 line, verdict, run, results, latency with its budgets, errors, comparison,
 warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
 description list for the run - from the same reading of the document, so the two
-cannot word a verdict differently. Above the title sits a one-line brand
+cannot word a verdict differently; the partial and missing-summary sentences
+sit in the verdict's band, one paragraph each. Above the title sits a one-line brand
 (the Vayu mark at 28 px, then the wordmark `Vayu run report`, muted; the mark has
 an empty `alt` because the wordmark names the product). The mark is
 `shared/icon_png/vayu_icon_64x64.png`, embedded as a base64 `data:` URI
