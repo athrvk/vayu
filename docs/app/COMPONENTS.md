@@ -1742,8 +1742,13 @@ the virtual users the target held inside its latency budget and error limit,
 where the search stopped, and the per-level table both were read off. Shown in
 the history detail's Overview, beside `ThresholdVerdict`.
 
-Why the search stopped is worded once, in `STOP_REASONS` (`components/shared/capacityStop.ts`): the badge's label, the detail line and whether the stop is a
-finding about the target (`degrading`, `saturated`) or only a bound the caller set (`none`). The dashboard's Saturation card reads the same table.
+Why the search stopped is worded once, in `components/shared/capacityStop.ts`. `STOP_REASONS` holds the badge's label and whether the stop is a
+finding about the target (`degrading`, `saturated`) or only a bound the caller set (`none`); the dashboard's Saturation card reads the same table. The detail
+line under the headline is computed from the report by `stopDetail(capacity, stepDuration)`, not stored: a `plateau` quotes the p99 rise ("p99 stayed inside the
+budget but rose from 52ms to 103ms", the saturation level's p99 against the last level tried) and says nothing of latency when the report has no
+`saturation*` figures, no levels or no rise; `slo_exceeded` and `errors_exceeded` say "two consecutive measurements of the level" and, when the run's
+`metadata.configuration.stepDuration` is passed in, "(each 5s long)". A level is measured, never a "window". The export view (#2819) mirrors this list, so
+a change to the wording is made in `stopDetail` and reaches both.
 
 The headline is a **sentence**, not a stat grid, because the mode exists to
 answer one question in words - "what can my service take" - and four numbers
@@ -1791,7 +1796,7 @@ claims a limit that only some stops found (same absent-vs-zero discipline as
   must say that rather than claim a measurement at a number of virtual users it
   never reached. It is checked first, ahead of every stop reason.
 
-A level the search re-measured after one bad window appears **twice** in the
+A level the search re-measured after one bad measurement appears **twice** in the
 table, at the same number of virtual users; that repeat is the audit trail doing its job,
 so the rows are keyed by index rather than by level. The second and later rows
 of a number of virtual users carry a muted "re-measured" beside it, so a repeat

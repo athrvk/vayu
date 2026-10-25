@@ -137,7 +137,10 @@ export default function OverviewTab({
 			{/* What the search found, for a capacity run. Beside the verdict
 			    rather than below the charts: "what can it take" is the question
 			    the run was started to answer. Absent for every other mode. */}
-			<CapacitySummary capacity={report.capacity} />
+			<CapacitySummary
+				capacity={report.capacity}
+				stepDuration={report.metadata?.configuration?.stepDuration}
+			/>
 
 			{/* Whether the run touched the contract it was measured against.
 			    Beside the verdict rather than below the charts, and for the same
