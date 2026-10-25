@@ -10621,8 +10621,10 @@ recorded before this issue.
 
 ### POST /runs/:runId/stop
 
-Stop a running load test. The engine signals the run, waits up to 5s for its
-worker to settle, and answers with a summary of what the run actually did.
+Stop a running load test or collection run. The engine signals the run, waits up
+to 5s for its worker to settle, and answers with a summary of what the run
+actually did. A collection run's summary is optional; see
+[Stopping a collection run](#stopping-a-collection-run) below.
 
 **Stop discards, it does not drain.** The queued backlog is thrown away rather
 than sent, and transfers already in flight are cancelled (removed from curl and
@@ -10683,6 +10685,43 @@ run reaches `stopped` with its trace and its true event count together; the
 stream's `complete` event carries `"reason": "stopped"`. A stream that had
 already terminated keeps the reason it recorded rather than being rewritten as a
 user stop.
+
+#### Stopping a collection run
+
+A sequential collection run (a `scenario` run, issue #2822) feeds no load
+collector, so its answer is read from the summary its worker stores once it has
+stopped, the same one the [report](#get-runsrunidreport) reads:
+
+```json
+{
+  "status": "stopped",
+  "runId": "run_1234567890",
+  "summary": {
+    "totalRequests": 31,
+    "errors": 2,
+    "httpErrors": 2,
+    "noResponse": 0,
+    "errorRate": 6.45,
+    "avgLatencyMs": 12.5,
+    "stepsExecuted": 40
+  }
+}
+```
+
+`totalRequests` is **requests sent** and `stepsExecuted` is **steps**, as in the
+report: a step the plan skipped is a step and not a request. `errors`,
+`httpErrors`, `noResponse` and `errorRate` come from the stored status-code
+distribution over those requests, and `avgLatencyMs` is the stored latency
+block's `avg` (`0` when no step sent). There is no `cancelled`: a collection
+run keeps no count of what its stop cancelled. `status` is the run's stored
+status.
+
+**The summary is absent when the worker has not stored one** within the 5s,
+or could not store it. The answer is then
+`{"status": "<stored status>", "runId": ..., "message": "Stop signalled; read
+the report"}`, usually with `status` `running`. The stop still stands: read the
+run's report once it reports a terminal status. A scenario **load** run is a
+`load` run and answers from its collector as above.
 
 ### GET /runs/:runId/report
 

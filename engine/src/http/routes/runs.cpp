@@ -32,11 +32,14 @@ namespace vayu::http::routes {
 
 namespace {
 
+// How long POST /runs/:id/stop waits for an active run's worker to settle
+// before answering.
+constexpr int STOP_GRACE_SECONDS = 5;
+
 // How long DELETE /runs/:id waits for an active run's worker to settle before
-// refusing the delete. Matches the 5s POST /runs/:id/stop already waits for a
-// graceful stop, so a client that stops and then deletes sees one budget, not
-// two different ones.
-constexpr int64_t DELETE_STOP_WAIT_MS = 5000;
+// refusing the delete. The stop's budget, so a client that stops and then
+// deletes sees one budget, not two different ones.
+constexpr int64_t DELETE_STOP_WAIT_MS = int64_t{ STOP_GRACE_SECONDS } * 1000;
 
 // Copy src[key] to dst[key] when present and not null. Shared by the list-row
 // `summary` builder and the report route's `config_obj` (which adds a few
@@ -1387,6 +1390,72 @@ int64_t stop_wait_ms) {
         nlohmann::json{ { "message", "Run deleted successfully" }, { "runId", run_id } } };
 }
 
+namespace {
+
+/**
+ * A stopped sequential collection run's answer, from the summary its worker
+ * stores before clearing `is_running`: the collector it never fed would say
+ * zero for a run that sent (#2822). With no summary yet (the grace period ran
+ * out, or the write failed) there is nothing true to count, so the answer
+ * carries none and points at the report.
+ */
+nlohmann::json scenario_stop_response (vayu::db::Database& db, const std::string& run_id) {
+    using pointer   = nlohmann::json::json_pointer;
+    const auto run  = db.get_run (run_id);
+    const auto body = run ?
+    nlohmann::json::parse (run->summary, nullptr, /*allow_exceptions=*/false) :
+    nlohmann::json ();
+
+    nlohmann::json response;
+    response["status"] = to_string (run ? run->status : vayu::RunStatus::Running);
+    response["runId"] = run_id;
+    if (!body.is_object () || !body.contains ("status_codes") ||
+    !body["status_codes"].is_object ()) {
+        response["message"] = "Stop signalled; read the report";
+        return response;
+    }
+
+    const auto failures =
+    vayu::count_status_failures (read_status_codes (body["status_codes"]));
+    response["summary"] = { { "totalRequests", failures.total },
+        { "errors", failures.failed },
+        { "httpErrors", failures.failed - failures.no_response },
+        { "noResponse", failures.no_response }, { "errorRate", failures.error_rate () },
+        { "avgLatencyMs", body.value (pointer ("/latency/avg"), 0.0) },
+        { "stepsExecuted", body.value (pointer ("/scenario/steps_executed"), size_t{ 0 }) } };
+    return response;
+}
+
+} // namespace
+
+nlohmann::json stop_active_run_response (vayu::db::Database& db,
+vayu::core::RunContext& context,
+vayu::RunType run_type,
+int grace_seconds) {
+    const auto& run_id = context.run_id;
+    vayu::utils::log_info (
+    "run", "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
+    context.should_stop = true;
+    // Wake the closed-loop controller for immediate cancellation (otherwise it
+    // waits up to its 50ms safety-net timeout).
+    context.notify_refill ();
+    vayu::utils::MetricsHelper::wait_for_graceful_stop (context, grace_seconds);
+
+    if (run_type == vayu::RunType::Scenario) {
+        auto response = scenario_stop_response (db, run_id);
+        vayu::utils::log_info ("run", "Collection run stopped",
+        { { "runId", run_id }, { "status", response["status"] },
+        { "summaryStored", response.contains ("summary") } });
+        return response;
+    }
+
+    const auto summary = vayu::utils::MetricsHelper::calculate_summary (context);
+    vayu::utils::log_info ("run", "Run stopped",
+    { { "runId", run_id }, { "totalRequests", summary.total_requests },
+    { "errors", summary.errors }, { "cancelled", summary.cancelled } });
+    return vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
+}
+
 /**
  * Testable core of DELETE /runs (#2429): "Clear run history", which keeps what
  * retention keeps - pinned baselines and runs still in flight. The deleted ids
@@ -2292,25 +2361,8 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
         // Try to find active run context
         auto context = ctx.run_manager.get_run (run_id);
         if (context) {
-            vayu::utils::log_info ("run",
-            "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
-            // Signal the running thread to stop
-            context->should_stop = true;
-            // Wake the closed-loop controller for immediate cancellation
-            // (otherwise it waits up to its 50ms safety-net timeout).
-            context->notify_refill ();
-
-            // Wait for graceful shutdown
-            vayu::utils::MetricsHelper::wait_for_graceful_stop (*context, 5);
-
-            // Calculate summary metrics
-            auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
-            vayu::utils::log_info ("run", "Run stopped",
-            { { "runId", run_id }, { "totalRequests", summary.total_requests },
-            { "errors", summary.errors }, { "cancelled", summary.cancelled } });
-            auto response =
-            vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
-
+            const auto response =
+            stop_active_run_response (ctx.db, *context, run->type, STOP_GRACE_SECONDS);
             res.set_content (response.dump (), "application/json");
         } else {
             // Run not active, just update DB
@@ -2468,7 +2520,8 @@ void register_run_routes (RouteContext& ctx) {
 
     /**
      * POST /runs/:runId/stop
-     * Stops a running load test.
+     * Stops a running load test, collection run or streaming send. See
+     * stop_active_run_response for what an active run answers.
      */
     ctx.server.Post (R"(/runs/([^/]+)/stop)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
