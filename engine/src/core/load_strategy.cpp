@@ -571,7 +571,8 @@ const LoadDataSet* data) {
 
 namespace {
 
-// Update the in-flight high-water mark (single writer: the strategy thread).
+// Raise the in-flight high-water mark to the current reading. A CAS-max because
+// the 1 Hz metrics sample in run_manager.cpp writes the same atomic.
 inline void update_peak (const std::shared_ptr<RunContext>& context) {
     size_t f    = context->in_flight ();
     size_t prev = context->peak_in_flight.load (std::memory_order_relaxed);
@@ -1187,6 +1188,9 @@ class ConstantLoadStrategy : public LoadStrategy {
             submit_one_request (context, db, live);
             sent++;
         }
+        // After the loop, so the reading counts only what was submitted: the
+        // requests the cap refused above never entered in_flight() (#2912).
+        update_peak (context);
         return sent;
     }
 
@@ -1254,16 +1258,17 @@ class ConstantLoadStrategy : public LoadStrategy {
         vayu::utils::log_info ("run", "  Duration: " + std::to_string (duration_ms) + " ms");
         vayu::utils::log_info ("run", "  Target RPS: " + std::to_string (target_rps));
 
-        // Calculate expected requests
-        size_t expected = static_cast<size_t> (
-        (static_cast<double> (duration_ms) / 1000.0) * target_rps);
+        // The same call the final accrual makes at the deadline, so an
+        // unsaturated run's sent + dropped is this count exactly.
+        const auto duration        = std::chrono::milliseconds (duration_ms);
+        const size_t expected      = requests_owed_by (target_rps, duration);
         context->requests_expected = expected;
 
         // Tick length: the request interval up to 1000 RPS, 1ms above it
         // (below 1ms we would busy-spin). How many requests a tick owes is
-        // not the tick's business - take_due_requests accrues the exact
-        // fractional amount, so 1500 RPS owes 1 or 2 per 1ms tick rather
-        // than the floored 1 the old batch_size gave.
+        // not the tick's business - requests_owed_by reads it off the time
+        // since the start, so 1500 RPS owes 1 or 2 per 1ms tick and a late
+        // tick owes what the ticks it swallowed would have.
         const int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
         const int64_t tick_us = std::max<int64_t> (base_interval_us, 1000);
 
@@ -1275,11 +1280,10 @@ class ConstantLoadStrategy : public LoadStrategy {
         { { "tickUs", tick_us }, { "maxInFlight", max_pending },
         { "expectedRequests", expected } });
 
-        const auto test_start = std::chrono::steady_clock::now ();
-        const auto duration_end = test_start + std::chrono::milliseconds (duration_ms);
-        auto accrued_through = test_start;
-        double debt          = 0.0;
-        size_t submitted     = 0;
+        const auto test_start   = std::chrono::steady_clock::now ();
+        const auto duration_end = test_start + duration;
+        size_t taken            = 0; // submitted + dropped
+        size_t submitted        = 0;
 
         while (!context->should_stop) {
             const auto now = std::chrono::steady_clock::now ();
@@ -1288,22 +1292,20 @@ class ConstantLoadStrategy : public LoadStrategy {
             // deadline, so the final tick pays out only the slice of the
             // window it covers and the loop cannot push a backlog beyond it.
             const auto accrue_to = std::min (now, duration_end);
-            const int64_t elapsed_us =
-            std::chrono::duration_cast<std::chrono::microseconds> (accrue_to - accrued_through)
-            .count ();
-            accrued_through = accrue_to;
-
-            const size_t due = take_due_requests (debt, target_rps, elapsed_us);
-            if (due > 0) {
-                submitted += submit_due (context, db, live, due, max_pending);
+            const size_t owed = requests_owed_by (target_rps, accrue_to - test_start);
+            if (owed > taken) {
+                submitted += submit_due (context, db, live, owed - taken, max_pending);
+                taken = owed;
             }
 
             if (now >= duration_end) {
                 break;
             }
 
-            wait_for_next_tick (
-            context, accrued_through + std::chrono::microseconds (tick_us));
+            // The last request is owed at the deadline itself when the
+            // product is whole, so the final wait ends there, not a tick past.
+            wait_for_next_tick (context,
+            std::min (accrue_to + std::chrono::microseconds (tick_us), duration_end));
         }
 
         vayu::utils::log_info ("run", "Submitted " + std::to_string (submitted) + " requests");

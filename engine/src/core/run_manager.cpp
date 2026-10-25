@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <iostream>
 
@@ -1322,11 +1321,6 @@ vayu::http::CookieJar& cookie_jar) {
     });
 }
 
-void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config) {
-    loop.target_rps = open_loop_rate (config);
-    loop.burst_size = loop.target_rps > 0.0 ? loop.target_rps * 2.0 : 0.0;
-}
-
 /**
  * The event loop this run drives, configured, started and published.
  *
@@ -1357,9 +1351,10 @@ int default_max_per_host) {
     { { "runId", context->run_id }, { "configured", configured_per_host },
     { "effective", loop_config.max_per_host },
     { "workers", configured_workers }, { "concurrency", concurrency } });
-    apply_open_loop_rate (loop_config, config);
-    // A token bucket on any other mode throttles a closed-loop run (#2396).
-    assert (loop_config.target_rps <= 0.0 || is_constant_rps_mode (config));
+    // `target_rps` stays 0 on every run: a `constant_rps` run is paced by its
+    // pacing thread alone, and a worker-side bucket on top of it drifts
+    // against that schedule and counts the wait as latency (#2801). On any
+    // other mode a bucket throttles a closed-loop run (#2396).
     loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
     vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
     // Read once for the run and held for it - see EventLoopConfig::transport
@@ -1396,8 +1391,8 @@ int default_max_per_host) {
 
     vayu::utils::log_debug ("run", "EventLoop config",
     { { "runId", context->run_id }, { "workers", configured_workers },
-    { "maxConcurrent", loop_config.max_concurrent }, { "maxPerHost", loop_config.max_per_host },
-    { "targetRps", loop_config.target_rps }, { "timeoutMs", timeout_ms } });
+    { "maxConcurrent", loop_config.max_concurrent },
+    { "maxPerHost", loop_config.max_per_host }, { "timeoutMs", timeout_ms } });
 
     // Create, start, and only then publish the event loop. The metrics
     // thread has been ticking since before this thread first ran (both are
@@ -1579,6 +1574,17 @@ nlohmann::json connection_replayed_warning (size_t replays) {
         "target." },
         { "count", replays } };
 }
+
+/**
+ * Whether @p config asks for virtual users: a `concurrency` it carries. A run
+ * that sets none (every `constant_rps` run the app starts) is sized from the
+ * `eventLoopMaxConcurrent` default, so its per-host raise covers no virtual
+ * user and is not worth a warning (#2801).
+ */
+bool declares_concurrency (const nlohmann::json& config) {
+    const auto concurrency = config.find ("concurrency");
+    return concurrency != config.end () && !concurrency->is_null ();
+}
 } // namespace
 
 /**
@@ -1591,11 +1597,11 @@ nlohmann::json connection_replayed_warning (size_t replays) {
  * script did not run inline (#1938). Neither refuses the run: a
  * literal `{{` can be deliberate in a body, and a run that already sent
  * every request must still be reported as finished. Also a per-host
- * connection limit the run raised above `eventLoopMaxPerHost` (#2394), so a
- * run that opened more connections than the setting says is not silent about
- * it. And requests libcurl re-sent on a new connection (#2799). Empty for a
- * run with nothing to say, which is what lets the caller omit the key
- * entirely.
+ * connection limit the run raised above `eventLoopMaxPerHost` (#2394) to cover
+ * the virtual users it asked for (#2801), so a run that opened more
+ * connections than the setting says is not silent about it. And requests
+ * libcurl re-sent on a new connection (#2799). Empty for a run with nothing
+ * to say, which is what lets the caller omit the key entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     nlohmann::json warnings = nlohmann::json::array ();
@@ -1616,7 +1622,8 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
         { "message", message }, { "count", affected }, { "names", names } });
     }
 
-    if (context->effective_max_per_host > context->configured_max_per_host) {
+    if (context->effective_max_per_host > context->configured_max_per_host &&
+    declares_concurrency (context->config)) {
         warnings.push_back ({ { "code", "per_host_limit_raised" },
         { "message",
         "Connections per host raised from " + std::to_string (context->configured_max_per_host) +
@@ -2761,10 +2768,10 @@ const GateReadings& gate) {
     // second in - reports zero instead of dereferencing null.
     const size_t active_now = context->active_transfer_count ();
 
-    // Sample the in-flight high-water mark. The closed-loop controller
-    // also updates this at submit granularity; open-loop modes
-    // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
-    // writers don't clobber each other.
+    // Sample the in-flight high-water mark. Every load strategy updates it
+    // after each submission batch (`update_peak` in load_strategy.cpp); this
+    // 1 Hz sample is the backstop. CAS-max so the two writers don't clobber
+    // each other.
     {
         size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
         while (backpressure > pk &&

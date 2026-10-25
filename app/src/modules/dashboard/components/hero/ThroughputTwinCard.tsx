@@ -32,6 +32,22 @@ const STATUS_CHIP: Record<DispatchStatus, { chip: string; sentence: string }> = 
 	},
 };
 
+const QUEUE_CHIP_FLOOR_MS = 0.5;
+const QUEUE_CHIP_MEDIAN_SHARE = 0.01;
+
+/**
+ * Queue wait is worth a chip when it is material against the run's own latency
+ * (#2801). A median that is absent, zero or not a number (a live run before its
+ * first completion) leaves the floor alone.
+ */
+function showsQueueChip(avgQueueWaitMs?: number, medianLatency?: number): boolean {
+	if (avgQueueWaitMs === undefined) return false;
+	const usable = medianLatency !== undefined && Number.isFinite(medianLatency);
+	const median = usable && medianLatency > 0 ? medianLatency : 0;
+	const bar = Math.max(QUEUE_CHIP_FLOOR_MS, QUEUE_CHIP_MEDIAN_SHARE * median);
+	return avgQueueWaitMs >= bar;
+}
+
 /**
  * constant_rps hero card #2 - twin send/throughput rates from the open model.
  * The chip's verdict arrives decided (`utils/dispatchLag.ts`) on a pair its
@@ -44,6 +60,7 @@ export function ThroughputTwinCard({
 	receivedWindow,
 	status,
 	avgQueueWaitMs,
+	medianLatency,
 }: {
 	sendRate?: number;
 	throughput?: number;
@@ -51,8 +68,10 @@ export function ThroughputTwinCard({
 	receivedWindow?: ReceivedWindow;
 	status?: DispatchStatus;
 	avgQueueWaitMs?: number;
+	/** The run's median latency, ms: the scale `avgQueueWaitMs` is judged against. */
+	medianLatency?: number;
 }) {
-	const showQueueChip = avgQueueWaitMs !== undefined && avgQueueWaitMs > 5;
+	const showQueueChip = showsQueueChip(avgQueueWaitMs, medianLatency);
 	const delta =
 		sendRate !== undefined && throughput !== undefined
 			? Math.max(0, sendRate - throughput)

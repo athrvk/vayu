@@ -277,8 +277,8 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
  * @brief The rate a run paces at: `requested_rps` on a `constant_rps` run, 0 on
  *        every other mode whatever the config carries (#2396).
  *
- * The one switch for both halves of open loop: `ConstantLoadStrategy`'s
- * rate-limited path and the event loop's per-worker token bucket. The route
+ * The one switch for open loop: `ConstantLoadStrategy`'s rate-limited path,
+ * which is the only limiter such a run has (#2801). The route
  * refuses a rate on another mode, so a non-zero rate reaching a closed-loop
  * mode here is a stored or hand-built config, and it must not change the load
  * model the run is labelled with.

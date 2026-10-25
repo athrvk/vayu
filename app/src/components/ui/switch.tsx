@@ -25,6 +25,13 @@ import { cn } from "@/lib/utils";
  * resizes. `subtle-foreground` is the faintest tier that clears the bar (3.17
  * light / 3.34 dark); `muted-foreground` would pass at 5.61/6.77 but reads
  * almost as loudly as the on state.
+ *
+ * The on state has the same need in dark: `--primary-fill` is one deep value
+ * in both themes, so the track alone is 2.98 against `--card` on aurora. The
+ * reserved border takes `--primary` for the checked edge (at least 5.79 against
+ * `--card` in every dark scheme). In light `--primary` equals `--primary-fill`,
+ * so the edge is invisible there. It stays 2px, not 1px: a thinner border would
+ * change `border-2` for the unchecked state and the thumb's 24px travel.
  */
 function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimitives.Root>) {
 	return (
@@ -38,7 +45,7 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
 				// and a rhythm-scaled width paired with a fixed-floor height made
 				// the thumb's travel distance a different fraction of the track at
 				// each density; fixed keeps both ends of the transform exact.
-				"peer inline-flex h-target w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary-fill data-[state=unchecked]:bg-border-strong data-[state=unchecked]:border-subtle-foreground",
+				"peer inline-flex h-target w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary-fill data-[state=checked]:border-primary data-[state=unchecked]:bg-border-strong data-[state=unchecked]:border-subtle-foreground",
 				className
 			)}
 			{...props}

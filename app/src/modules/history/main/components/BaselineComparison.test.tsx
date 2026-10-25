@@ -170,6 +170,49 @@ describe("BaselineComparison", () => {
 		expect(screen.getByText("-50.0%")).toBeInTheDocument();
 	});
 
+	it("leaves out the p99 delta for a run whose latency was not recorded (#2895)", async () => {
+		mocked.getRun.mockResolvedValue(run());
+		mocked.listRuns.mockResolvedValue(
+			baselinePage([run({ id: "run_baseline", baseline: true })])
+		);
+		mocked.getRunReport.mockResolvedValue(report({ p99: 50, avgRps: 100, errorRate: 1 }));
+		// A crash-reconciled run: its counts are the last tick's, its latency block is zeros.
+		const crashed = report({ p99: 0, avgRps: 100, errorRate: 1 });
+		crashed.summary.partial = true;
+
+		render(withQueryClient(<BaselineComparison report={crashed} runId="run_target" />));
+
+		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
+		expect(screen.queryByText("P99 latency")).not.toBeInTheDocument();
+		expect(screen.getByText("Error rate")).toBeInTheDocument();
+	});
+
+	it("draws no strip for a run that has no summary (#2895)", async () => {
+		mocked.getRun.mockResolvedValue(run());
+		mocked.listRuns.mockResolvedValue(
+			baselinePage([run({ id: "run_baseline", baseline: true })])
+		);
+		mocked.getRunReport.mockResolvedValue(report({ p99: 50, avgRps: 100, errorRate: 1 }));
+		const missing = report({ p99: 0, avgRps: 0, errorRate: 0 });
+		missing.summary.summaryMissing = true;
+
+		// The unflagged sibling shares the query cache, so its strip appearing
+		// says the baseline report has arrived and the flagged one had its chance.
+		render(
+			withQueryClient(
+				<>
+					<BaselineComparison report={missing} runId="run_target" />
+					<BaselineComparison
+						report={report({ p99: 50, avgRps: 100, errorRate: 1 })}
+						runId="run_target"
+					/>
+				</>
+			)
+		);
+
+		expect(await screen.findAllByText("vs baseline")).toHaveLength(1);
+	});
+
 	it("draws nothing when no run is pinned", async () => {
 		mocked.getRun.mockResolvedValue(run());
 		mocked.listRuns.mockResolvedValue(baselinePage([]));

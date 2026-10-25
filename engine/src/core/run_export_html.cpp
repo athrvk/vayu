@@ -19,6 +19,7 @@
 #include "run_export_html_logo.hpp"
 #include "svg_chart.hpp"
 #include "vayu/core/run_export_view.hpp"
+#include "vayu/core/status_seconds.hpp"
 #include "vayu/utils/parse.hpp"
 #include "vayu/utils/text_escape.hpp"
 
@@ -400,9 +401,68 @@ ClassCounts gained_in (const ordered& tick, std::map<int, double>& seen) {
     return gained;
 }
 
-/// One series per class that saw a response; a class that never did is not drawn.
-std::vector<ChartSeries> status_series (const ordered& ticks) {
-    std::array<std::vector<ChartPoint>, CLASS_COUNT> points;
+using ClassPoints = std::array<std::vector<ChartPoint>, CLASS_COUNT>;
+
+/// The chart class each of a status-second entry's five counts belongs to, in
+/// `StatusClass` order: 2xx and 3xx share a series, as in the cumulative reading.
+constexpr auto ENTRY_CLASSES = std::to_array<ResponseClass> (
+{ ResponseClass::success, ResponseClass::success, ResponseClass::client_error,
+ResponseClass::server_error, ResponseClass::no_response });
+static_assert (ENTRY_CLASSES.size () == STATUS_CLASS_COUNT);
+
+/// Whether the series counts statuses by completion second (#2866): any row
+/// carrying the array decides it for every row, because a run stores the key on
+/// every gate from its first row and differencing the rows without it beside the
+/// entries of those with it would count the same responses twice.
+bool counts_by_second (const ordered& ticks) {
+    return std::ranges::any_of (ticks, [] (const ordered& tick) {
+        return doc::member (tick, "status_seconds").is_array ();
+    });
+}
+
+/// Every well-formed entry of every row, once per `second` (a later row's entry
+/// replaces an earlier one, as the app's chart keeps them) and in second order.
+std::map<std::int64_t, StatusSecondEntry> status_second_entries (const ordered& ticks) {
+    std::map<std::int64_t, StatusSecondEntry> by_second;
+    for (const ordered& tick : ticks) {
+        const ordered& stored = doc::member (tick, "status_seconds");
+        if (!stored.is_array ()) {
+            continue;
+        }
+        for (const ordered& raw : stored) {
+            if (const auto entry = status_second_entry_from_json (nlohmann::json (raw))) {
+                by_second.insert_or_assign (entry->second, *entry);
+            }
+        }
+    }
+    return by_second;
+}
+
+/// One point per entry, at the end of its span, each class at `counts / span`
+/// responses per second whatever span the entry covers; the app's
+/// `buildStatusOverTime`.
+ClassPoints counted_points (const ordered& ticks) {
+    ClassPoints points;
+    for (const auto& [second, entry] : status_second_entries (ticks)) {
+        ClassCounts rate{};
+        for (std::size_t at = 0; at < STATUS_CLASS_COUNT; ++at) {
+            rate.at (std::to_underlying (ENTRY_CLASSES.at (at))) +=
+            static_cast<double> (entry.counts.at (at)) /
+            static_cast<double> (entry.span);
+        }
+        const double x =
+        static_cast<double> (second) + static_cast<double> (entry.span);
+        for (std::size_t at = 0; at < CLASS_COUNT; ++at) {
+            points.at (at).push_back ({ x, rate.at (at) });
+        }
+    }
+    return points;
+}
+
+/// One point per row at what each class gained since the previous row: the
+/// reading of a run stored before #2866.
+ClassPoints differenced_points (const ordered& ticks) {
+    ClassPoints points;
     std::map<int, double> seen;
     for (const ordered& tick : ticks) {
         const auto seconds = doc::number_at (tick, { "elapsed_seconds" });
@@ -414,25 +474,45 @@ std::vector<ChartSeries> status_series (const ordered& ticks) {
             points.at (at).push_back ({ *seconds, gained.at (at) });
         }
     }
+    return points;
+}
+
+/// What the status chart calls itself, which differs with what it plots.
+struct StatusWording {
+    std::string_view label;
+    std::string_view axis;
+    std::string_view unit;
+};
+
+constexpr StatusWording PER_TICK{ "Responses per interval by class",
+    "Responses per tick", " responses" };
+constexpr StatusWording PER_SECOND{ "Responses per second by class",
+    "Responses per second", " resp/s" };
+
+/// One series per class that saw a response; a class that never did is not drawn.
+std::vector<ChartSeries> drawn_classes (const ClassPoints& points, std::string_view unit) {
     std::vector<ChartSeries> series;
     for (std::size_t at = 0; at < CLASS_COUNT; ++at) {
         const auto& drawn = points.at (at);
         if (std::ranges::any_of (
             drawn, [] (const ChartPoint& p) { return p.y > 0; })) {
             series.push_back ({ std::string (CLASS_LABELS.at (at).name),
-            std::string (CLASS_LABELS.at (at).style), " responses", drawn });
+            std::string (CLASS_LABELS.at (at).style), std::string (unit), drawn });
         }
     }
     return series;
 }
 
 std::optional<Chart> status_chart (const ordered& ticks) {
-    std::vector<ChartSeries> series = status_series (ticks);
+    const bool by_second            = counts_by_second (ticks);
+    const StatusWording& words      = by_second ? PER_SECOND : PER_TICK;
+    std::vector<ChartSeries> series = drawn_classes (
+    by_second ? counted_points (ticks) : differenced_points (ticks), words.unit);
     if (series.empty ()) {
         return std::nullopt;
     }
-    return Chart{ "chart-status", "Responses per interval by class", "Seconds from start",
-        { { "Responses per tick", std::move (series), std::nullopt } } };
+    return Chart{ "chart-status", std::string (words.label), "Seconds from start",
+        { { std::string (words.axis), std::move (series), std::nullopt } } };
 }
 
 std::string figure_markup (std::string_view caption, const Chart& chart) {
@@ -450,6 +530,16 @@ constexpr std::string_view THINNED_NOTE =
 "every stretch keeps its lowest and highest value, so a brief spike still "
 "shows.";
 
+/// Whether any line is drawn from fewer points than it holds. The status chart
+/// has a point per entry, and a row can close more than one second.
+bool is_thinned (const ordered& ticks, const std::optional<Chart>& status) {
+    const auto too_long = [] (const ChartSeries& series) {
+        return series.points.size () > MAX_CHART_POINTS;
+    };
+    return ticks.size () > MAX_CHART_POINTS ||
+    (status && std::ranges::any_of (status->panels.front ().series, too_long));
+}
+
 Section charts_section (const ordered& document) {
     const ordered& ticks = doc::member (document, "timeSeries");
     const bool any       = ticks.is_array () && !ticks.empty ();
@@ -457,10 +547,11 @@ Section charts_section (const ordered& document) {
     if (any) {
         body += figure_markup ("Throughput and virtual users", throughput_chart (ticks));
         body += figure_markup ("Latency percentiles", latency_chart (document, ticks));
-        if (const auto status = status_chart (ticks)) {
-            body += figure_markup ("Responses per interval by class", *status);
+        const auto status = status_chart (ticks);
+        if (status) {
+            body += figure_markup (status->label, *status);
         }
-        if (ticks.size () > MAX_CHART_POINTS) {
+        if (is_thinned (ticks, status)) {
             body += "<p class=\"chart-note\">" + escape_html (THINNED_NOTE) + "</p>\n";
         }
     } else {

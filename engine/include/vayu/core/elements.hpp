@@ -119,9 +119,8 @@ class SharedThroughputBudgets {
      * must hold off before using it, clamped to never negative.
      *
      * Tokens accrue at @p target_rps between calls and the *fraction* left
-     * over is carried, exactly as `take_due_requests` (`load_pacing.hpp`)
-     * carries it on the open-loop side - a rate of 3/s issues its slots 334ms,
-     * 333ms, 333ms apart rather than losing a third of a slot every time.
+     * over is carried - a rate of 3/s issues its slots 334ms, 333ms, 333ms
+     * apart rather than losing a third of a slot every time.
      * Taking a slot the budget cannot yet afford drives the balance negative,
      * which is the reservation: the next caller waits out that debt plus its
      * own, so N virtual users claiming at once are spread across the rate

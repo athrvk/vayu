@@ -92,7 +92,8 @@ struct EventLoopConfig {
     /// Exceeding it fails that transfer instead of allocating without bound.
     size_t max_response_body_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
 
-    /// Target requests per second (0 = unlimited, no rate limiting)
+    /// Target requests per second (0 = unlimited, no rate limiting). No load
+    /// run sets it: a `constant_rps` run is paced by its pacing thread (#2801).
     double target_rps = 0.0;
 
     /// Maximum burst size for rate limiting (defaults to 2x target_rps)
@@ -234,6 +235,12 @@ class EventLoop {
      * @brief Get comprehensive statistics about the event loop
      */
     [[nodiscard]] EventLoopStats stats () const;
+
+    /**
+     * @brief The configuration this loop was built with, before
+     *        `per_worker_config` splits it.
+     */
+    [[nodiscard]] const EventLoopConfig& config () const;
 
     private:
     std::unique_ptr<detail::EventLoopImpl> impl_;

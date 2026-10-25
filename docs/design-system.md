@@ -505,10 +505,13 @@ treatment.
 The on rows are the default scheme (Ocean) with the track on `bg-primary-fill`.
 They used to read `--primary`, which brightens in dark: the track was 5.89
 against the card but only 2.94 under the white thumb. `checked-control-contrast.test.ts`
-holds the thumb and the checkbox's check at 3.0 on the fill in every dark scheme.
-The track against the card is the weaker half of the new pair and is not held:
-`aurora` measures 2.98 in dark, where the thumb's own 5.29 and its position
-carry the state.
+holds the thumb and the checkbox's check at 3.0 on the fill in every dark scheme,
+and holds the on switch's edge against the card at 3.0 in every dark scheme. The
+track fill alone stays under the bar on `aurora` (2.98), so the checked state
+also paints the reserved 2px border with `--primary` (`data-[state=checked]:border-primary`):
+that edge measures 5.79 on the card at its weakest (`coral`) and 6.47 on `aurora`,
+and it carries the 3:1. In light `--primary` equals `--primary-fill`, so the edge
+is invisible there and the light on-state is unchanged.
 
 The focus ring needed no work, which is the one that matters most for keyboard
 users - worth knowing so nobody "fixes" it.
@@ -531,7 +534,10 @@ information, it needs its own colour rather than the border token - which is
 exactly what the switch needed. Its off state now colours the 2px border it had
 already reserved, with `subtle-foreground` (3.17 / 3.34), the faintest tier that
 clears the bar. The fill stays quiet on purpose; `muted-foreground` would pass
-at 5.61 / 6.77 and make an off switch read almost as loudly as an on one.
+at 5.61 / 6.77 and make an off switch read almost as loudly as an on one. Its on
+state uses the same border for the accent edge described above, which is why the
+border stays 2px in both states: a 1px edge would change `border-2` and the
+thumb's 24px travel for the unchecked switch too.
 
 Measure with transitions frozen. An unchecked switch first measured 13.58 in
 light, which was a `transition-colors` mid-flight reading, not a colour.

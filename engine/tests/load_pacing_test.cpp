@@ -1,7 +1,7 @@
 /**
  * @file load_pacing_test.cpp
  * @brief Tests for the load-generation pacing cores: duration parsing, ramp
- *        interpolation, and the fractional rate accumulator.
+ *        interpolation, and the open-loop owed count.
  *
  * These are the pure halves of three defects that were only reachable through a
  * live run: a duration whose unit was ignored, a ramp whose delta underflowed,
@@ -14,10 +14,17 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <limits>
+#include <vector>
+
 using vayu::core::CONTROLLER_TICK_MS;
 using vayu::core::parse_duration_ms;
 using vayu::core::ramp_target_concurrency;
-using vayu::core::take_due_requests;
+using vayu::core::requests_owed_by;
 
 // ============================================================================
 // parse_duration_ms
@@ -157,53 +164,119 @@ TEST (RampTargetConcurrency, ARampWithinOneTickSeedsAtStartThenHoldsTarget) {
 }
 
 // ============================================================================
-// take_due_requests
+// requests_owed_by
 // ============================================================================
 
-// batch_size = size_t(target_rps / 1000.0) delivered 1000 for a 1500 RPS ask
-// and 2000 for 2500. The carried fraction is what fixes both.
-TEST (TakeDueRequests, DeliversFractionalRatesAbove1000) {
-    for (double rps : { 1500.0, 2500.0, 1001.0, 99999.0 }) {
-        double debt  = 0.0;
-        size_t total = 0;
-        for (int tick = 0; tick < 1000; ++tick) { // 1000 x 1ms = 1 second
-            total += take_due_requests (debt, rps, 1000);
+namespace {
+
+using namespace std::chrono_literals;
+
+// What a pacer taking the difference at every @p tick submits, each tick's
+// share collected; the last tick lands on the deadline, as the strategy's does.
+std::vector<size_t> per_tick_shares (double rps,
+std::chrono::nanoseconds duration,
+std::chrono::nanoseconds tick) {
+    std::vector<size_t> shares;
+    size_t taken = 0;
+    for (auto at = tick;; at += tick) {
+        const auto accrue_to = std::min (at, duration);
+        const size_t owed    = requests_owed_by (rps, accrue_to);
+        shares.push_back (owed - taken);
+        taken = owed;
+        if (accrue_to == duration) {
+            return shares;
         }
-        EXPECT_NEAR (static_cast<double> (total), rps, 1.0)
+    }
+}
+
+} // namespace
+
+// batch_size = size_t(target_rps / 1000.0) delivered 1000 for a 1500 RPS ask
+// and 2000 for 2500. Every 1ms tick owes the floor or the ceiling of the
+// per-tick rate, and the second as a whole owes the rate exactly.
+TEST (RequestsOwedBy, DeliversFractionalRatesAbove1000) {
+    for (double rps : { 1500.0, 2500.0, 1001.0, 99999.0 }) {
+        const auto shares = per_tick_shares (rps, 1s, 1ms);
+        const auto low    = static_cast<size_t> (std::floor (rps / 1000.0));
+        const auto high   = static_cast<size_t> (std::ceil (rps / 1000.0));
+        size_t total      = 0;
+        for (size_t share : shares) {
+            EXPECT_TRUE (share == low || share == high)
+            << "a 1ms tick at " << rps << " RPS owed " << share;
+            total += share;
+        }
+        EXPECT_EQ (total, static_cast<size_t> (rps))
         << "delivered " << total << " for a target of " << rps << " RPS";
     }
 }
 
-TEST (TakeDueRequests, CarriesTheFractionAcrossTicks) {
-    double debt = 0.0;
-    EXPECT_EQ (take_due_requests (debt, 1500.0, 500), 0u); // 0.75 owed
-    EXPECT_EQ (take_due_requests (debt, 1500.0, 500), 1u); // 1.5 owed, 1 taken
-    EXPECT_EQ (take_due_requests (debt, 1500.0, 500), 1u); // 1.25 owed
+// Ticks whose spacing is not a whole number of microseconds were each short a
+// fraction when the pacer summed truncated deltas (#2910); read off the
+// absolute time, the run still owes the whole product.
+TEST (RequestsOwedBy, TicksOffTheMicrosecondGridLoseNothing) {
+    const auto odd_tick = 333333ns + 7ns;
+    for (double rps : { 200.0, 3000.0, 0.5, 2.0 }) {
+        const auto shares = per_tick_shares (rps, 4s, odd_tick);
+        size_t total      = 0;
+        for (size_t share : shares) {
+            total += share;
+        }
+        EXPECT_EQ (total, static_cast<size_t> (rps * 4.0)) << rps << " RPS";
+    }
 }
 
-// Below 1000 RPS most ticks owe nothing; the request lands on the tick where
-// the accumulated debt first reaches 1.
-TEST (TakeDueRequests, LowRatesOweNothingUntilDue) {
-    double debt  = 0.0;
-    size_t total = 0;
-    for (int tick = 0; tick < 100; ++tick) {
-        total += take_due_requests (debt, 10.0, 1000); // 10 RPS, 1ms ticks
-    }
-    EXPECT_EQ (total, 1u); // 100ms at 10 RPS
+TEST (RequestsOwedBy, CarriesTheFractionAcrossTicks) {
+    EXPECT_EQ (requests_owed_by (1500.0, 500us), 0u);  // 0.75 owed
+    EXPECT_EQ (requests_owed_by (1500.0, 1000us), 1u); // 1.5 owed
+    EXPECT_EQ (requests_owed_by (1500.0, 1500us), 2u); // 2.25 owed
+}
+
+// Request k is owed at k / rate: nothing at the start, the first a whole
+// interval in.
+TEST (RequestsOwedBy, LowRatesOweNothingUntilDue) {
+    EXPECT_EQ (requests_owed_by (10.0, 0ms), 0u);
+    EXPECT_EQ (requests_owed_by (10.0, 99ms), 0u);
+    EXPECT_EQ (requests_owed_by (10.0, 100ms), 1u);
 }
 
 // Timer jitter is corrected rather than lost: one long tick owes what the ticks
 // it swallowed would have.
-TEST (TakeDueRequests, LongTickOwesTheWholeElapsedWindow) {
-    double debt = 0.0;
-    EXPECT_EQ (take_due_requests (debt, 1000.0, 50000), 50u); // a 50ms hiccup
+TEST (RequestsOwedBy, LongTickOwesTheWholeElapsedWindow) {
+    EXPECT_EQ (requests_owed_by (1000.0, 60ms) - requests_owed_by (1000.0, 10ms), 50u);
 }
 
-TEST (TakeDueRequests, NonPositiveInputsOweNothing) {
-    double debt = 0.0;
-    EXPECT_EQ (take_due_requests (debt, 0.0, 1000), 0u);
-    EXPECT_EQ (take_due_requests (debt, -5.0, 1000), 0u);
-    EXPECT_EQ (take_due_requests (debt, 1000.0, 0), 0u);
-    EXPECT_EQ (take_due_requests (debt, 1000.0, -1000), 0u);
-    EXPECT_DOUBLE_EQ (debt, 0.0);
+// What a run's `requests_expected` reads, and so what an unsaturated run sends.
+TEST (RequestsOwedBy, ARunOwesTheFlooredProduct) {
+    struct Case {
+        double rps;
+        std::chrono::milliseconds duration;
+        size_t owed;
+    };
+    for (const Case& c : { Case{ 200.0, 20s, 4000 }, Case{ 100.0, 20s, 2000 },
+         Case{ 3000.0, 10s, 30000 }, Case{ 0.5, 30s, 15 }, Case{ 2.0, 60s, 120 },
+         Case{ 50.0, 20s, 1000 }, Case{ 33.3, 3s, 99 }, Case{ 0.5, 1s, 0 } }) {
+        EXPECT_EQ (requests_owed_by (c.rps, c.duration), c.owed)
+        << c.rps << " RPS for " << c.duration.count () << "ms";
+    }
+}
+
+// Mutation check: drop the slack from requests_owed_by and these read 56, 28.
+TEST (RequestsOwedBy, ADecimalProductBinaryLandsJustBelowCountsAsWhole) {
+    EXPECT_EQ (requests_owed_by (0.57, 100s), 57u); // 56.99999999999999 in binary
+    EXPECT_EQ (requests_owed_by (0.29, 100s), 29u); // 28.999999999999996
+}
+
+// The slack is a few ulps, not a rounding rule: a product a thousandth short
+// of whole, at the largest rate a run accepts for a day, still floors.
+TEST (RequestsOwedBy, TheSlackNeverRoundsUpAProductThatIsNotWhole) {
+    EXPECT_EQ (requests_owed_by (1000000.0, 86400s - 1ns), 86399999999u);
+    EXPECT_EQ (requests_owed_by (33.3, 3s), 99u); // 99.9
+}
+
+TEST (RequestsOwedBy, NonPositiveInputsOweNothing) {
+    EXPECT_EQ (requests_owed_by (0.0, 1s), 0u);
+    EXPECT_EQ (requests_owed_by (-5.0, 1s), 0u);
+    EXPECT_EQ (requests_owed_by (std::numeric_limits<double>::quiet_NaN (), 1s), 0u);
+    EXPECT_EQ (requests_owed_by (1000.0, 0ns), 0u);
+    EXPECT_EQ (requests_owed_by (1000.0, -1s), 0u);
 }

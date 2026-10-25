@@ -44,7 +44,8 @@ const NOTIFY_TITLES: Record<LoadRunNotifyKind, string> = {
 
 /**
  * "12,400 requests, p95 210ms, 0.3% errors", or `null` when the report cannot
- * supply all three.
+ * supply all three. A flagged report (`summaryMissing`, `partial`) says what was
+ * not recorded instead.
  *
  * The numbers, not an adjective: a notification that says only "finished"
  * makes the user open the app to learn what a glance should have told them.
@@ -56,6 +57,12 @@ function runSummaryLine(report: RunReport): string | null {
 	const requests = report.summary?.totalRequests;
 	const p95 = report.latency?.p95;
 	const errorRate = report.summary?.errorRate;
+	// A failed run the engine could not fully record (#2895): its zeros are not
+	// measurements, and the line must not read as one.
+	if (report.summary?.summaryMissing) return "The run ended before its totals were saved.";
+	if (report.summary?.partial && typeof requests === "number" && typeof errorRate === "number") {
+		return `At least ${formatNumber(requests)} requests, ${formatPercent(errorRate)}% errors, latency not recorded`;
+	}
 	if (typeof requests !== "number" || typeof p95 !== "number" || typeof errorRate !== "number") {
 		return null;
 	}

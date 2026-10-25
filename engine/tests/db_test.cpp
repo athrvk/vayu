@@ -27,6 +27,7 @@
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/file_ref.hpp"
@@ -1980,6 +1981,159 @@ TEST_F (DatabaseTest, ReconcileLeavesNoIndeterminateEndTimeOnAnUnseededRun) {
     // 0 is the "no end recorded" sentinel every reader guards on; anything
     // between 1 and start_time would be garbage posing as a real timestamp.
     EXPECT_EQ (run->end_time, 0);
+}
+
+namespace {
+/// A run row of @p type left at @p status, with no summary.
+void seed_orphan (Database& db,
+const std::string& id,
+vayu::RunStatus status,
+vayu::RunType type = vayu::RunType::Load) {
+    vayu::db::Run run;
+    run.id              = id;
+    run.type            = type;
+    run.status          = status;
+    run.start_time      = now_ms ();
+    run.config_snapshot = "{}";
+    db.create_run (run);
+}
+
+/// One tick as the 1 Hz writer stores it, @p completed responses after
+/// @p elapsed seconds. Every windowed figure is set far from the cumulative
+/// one beside it, so a summary that read the window shows.
+void add_tick (Database& db, const std::string& run_id, size_t completed, double elapsed) {
+    vayu::core::MetricTickSample sample;
+    sample.elapsed_seconds      = elapsed;
+    sample.requests_completed   = completed;
+    sample.requests_failed      = 2;
+    sample.cancelled            = 1;
+    sample.current_rps          = 999.0;
+    sample.current_send_rate    = 998.0;
+    sample.window_avg_in_flight = 7.0;
+    sample.current_concurrency  = 9;
+    sample.send_rate        = (static_cast<double> (completed) / elapsed) + 1.0;
+    sample.throughput       = static_cast<double> (completed) / elapsed;
+    sample.dropped_requests = 4;
+    sample.bytes_sent       = completed * 100;
+    sample.bytes_received   = completed * 1000;
+    sample.status_codes     = { { 200, completed - 2 }, { 503, 2 } };
+    sample.latency_samples  = 5;
+    sample.latency_p50_ms   = 11.0;
+    sample.latency_p95_ms   = 22.0;
+    sample.latency_p99_ms   = 33.0;
+
+    vayu::db::MetricTick tick;
+    tick.run_id    = run_id;
+    tick.timestamp = now_ms ();
+    tick.payload   = vayu::core::build_metric_tick_payload (sample).dump ();
+    db.add_metric_tick (tick);
+}
+
+/// The stored summary of @p id after a restart reconciled it, parsed; null
+/// when none was written.
+nlohmann::json reconciled_summary (Database& db, const std::string& id) {
+    const auto run = db.get_run (id);
+    if (!run) {
+        ADD_FAILURE () << "run vanished: " << id;
+        return nullptr;
+    }
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed) << id;
+    EXPECT_FALSE (run->has_warnings) << id;
+    if (run->summary.empty ()) {
+        return nullptr;
+    }
+    return nlohmann::json::parse (run->summary);
+}
+} // namespace
+
+// #2895: a load run the engine died under is given its last tick's totals,
+// flagged partial, under the keys a finished run's summary uses. Mutation
+// checks: drop the `run.summary` write in `reconcile_orphaned_runs` and the
+// summary is null; order `get_last_metric_tick` ascending and the totals are
+// the first tick's.
+TEST_F (DatabaseTest, ReconcileStoresALoadRunsLastTickAsAPartialSummary) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_orphan (db, "crashed", vayu::RunStatus::Running);
+        add_tick (db, "crashed", 10, 1.0);
+        add_tick (db, "crashed", 25, 2.0);
+        add_tick (db, "crashed", 40, 4.0);
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    const auto summary = reconciled_summary (db, "crashed");
+    ASSERT_TRUE (summary.is_object ()) << summary.dump ();
+
+    EXPECT_EQ (summary.value ("partial", false), true);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 40u);
+    EXPECT_DOUBLE_EQ (summary["test_duration"].get<double> (), 4.0);
+    // Completions over elapsed time, not the tick's trailing `current_rps`.
+    EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 10.0);
+    EXPECT_DOUBLE_EQ (summary["send_rate"].get<double> (), 11.0);
+    EXPECT_DOUBLE_EQ (summary["throughput"].get<double> (), 10.0);
+    EXPECT_EQ (summary["cancelled"].get<size_t> (), 1u);
+    EXPECT_EQ (summary["dropped_requests"].get<size_t> (), 4u);
+    EXPECT_EQ (summary["bytes_sent"].get<size_t> (), 4000u);
+    EXPECT_EQ (summary["bytes_received"].get<size_t> (), 40000u);
+    EXPECT_EQ (summary["status_codes"], (nlohmann::json{ { "200", 38 }, { "503", 2 } }));
+
+    // Nothing the tick holds only for its last second, and nothing it never
+    // measured: an absent key keeps the report's older-summary reading.
+    for (const char* key : { "latency", "peak_concurrency", "avg_in_flight",
+         "queue_wait_avg", "error_types", "sending_duration", "sampling",
+         "connection_replays", "http_version_downgraded", "setup_overhead" }) {
+        EXPECT_FALSE (summary.contains (key)) << key << " in " << summary.dump ();
+    }
+}
+
+// No tick means nothing to rebuild from: the run stays without a summary, and
+// the report says so (`summaryMissing`) rather than inventing zeros.
+TEST_F (DatabaseTest, ReconcileWritesNoSummaryForALoadRunThatWroteNoTick) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_orphan (db, "no_ticks", vayu::RunStatus::Running);
+    }
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_TRUE (reconciled_summary (db, "no_ticks").is_null ());
+}
+
+// A summary the run already stored is the run's own account and is never
+// replaced by a tick. Mutation check: drop the `!run.summary.empty ()` guard in
+// `orphan_summary` and the stored summary is overwritten.
+TEST_F (DatabaseTest, ReconcileKeepsASummaryTheRunAlreadyStored) {
+    const std::string stored = R"({"total_requests":7,"rps":3.5})";
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_orphan (db, "summarised", vayu::RunStatus::Running);
+        add_tick (db, "summarised", 40, 4.0);
+        db.update_run_summary ("summarised", stored);
+    }
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (reconciled_summary (db, "summarised"), nlohmann::json::parse (stored));
+}
+
+// Only a load run has ticks to rebuild from. A pending run that never sent is
+// failed with nothing, and a scenario run's tick (none is written today) is
+// not read. Mutation check: drop the `RunType::Load` test in `orphan_summary`
+// and the scenario run gains a summary.
+TEST_F (DatabaseTest, ReconcileGivesOnlyALoadRunAPartialSummary) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_orphan (db, "pending", vayu::RunStatus::Pending);
+        seed_orphan (db, "sequence", vayu::RunStatus::Running, vayu::RunType::Scenario);
+        add_tick (db, "sequence", 40, 4.0);
+    }
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_TRUE (reconciled_summary (db, "pending").is_null ());
+    EXPECT_TRUE (reconciled_summary (db, "sequence").is_null ());
 }
 
 TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {

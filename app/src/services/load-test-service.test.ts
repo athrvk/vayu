@@ -702,6 +702,44 @@ describe("LoadTestService", () => {
 			);
 		});
 
+		it("does not report zeros as a measurement for a run with no summary (issue #2895)", async () => {
+			dashboard.currentRunId = "run_13";
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				metadata: { status: "failed" },
+				summary: { totalRequests: 0, errorRate: 0, summaryMissing: true },
+				latency: { p95: 0 },
+			} as never);
+			loadTestService.startMonitoring("run_13");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: NOTIFY_KINDS.loadRunFailed,
+					body: "The run ended before its totals were saved.",
+				})
+			);
+		});
+
+		it("gives a crashed run's last counts and leaves out the latency it never measured (issue #2895)", async () => {
+			dashboard.currentRunId = "run_14";
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				metadata: { status: "failed" },
+				summary: { totalRequests: 12400, errorRate: 0.3, partial: true },
+				latency: { p95: 0 },
+			} as never);
+			loadTestService.startMonitoring("run_14");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: NOTIFY_KINDS.loadRunFailed,
+					body: "At least 12,400 requests, 0.3% errors, latency not recorded",
+				})
+			);
+		});
+
 		it("says so plainly when the report cannot supply the numbers", async () => {
 			// The shipped fixture for a report the engine answered with nothing
 			// usable. Reverting `runSummaryLine`'s checks turns this body into
