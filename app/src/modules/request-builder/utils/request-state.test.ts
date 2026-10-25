@@ -31,12 +31,19 @@ describe("createDefaultRequestState", () => {
 	it("uses the given override instead of the hardcoded default", () => {
 		expect(createDefaultRequestState("http2").httpVersion).toBe("http2");
 	});
+
+	it("starts with no timeout of its own, never a copy of the setting (#2937)", () => {
+		expect(createDefaultRequestState().timeout).toBeNull();
+	});
 });
+
+const OWN_TIMEOUT = 1500;
 
 describe("isRequestSettingsNonDefault", () => {
 	const defaults = {
 		followRedirects: true,
 		maxRedirects: 10,
+		timeout: null as number | null,
 		httpVersion: DEFAULT_HTTP_VERSION,
 		verifySSL: true,
 		stream: false,
@@ -55,6 +62,13 @@ describe("isRequestSettingsNonDefault", () => {
 
 	it("is true when maxRedirects differs", () => {
 		expect(isRequestSettingsNonDefault({ ...defaults, maxRedirects: 5 })).toBe(true);
+	});
+
+	it("is true for any own timeout, and false once it is cleared back to the default (#2937)", () => {
+		// `null` is the default ("use the setting"); a number badges whatever it is,
+		// including one that happens to equal today's setting.
+		expect(isRequestSettingsNonDefault({ ...defaults, timeout: OWN_TIMEOUT })).toBe(true);
+		expect(isRequestSettingsNonDefault({ ...defaults, timeout: null })).toBe(false);
 	});
 
 	it("is true when httpVersion differs, even with both redirect fields at their defaults", () => {

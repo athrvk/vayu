@@ -44,6 +44,16 @@ export const MIN_MAX_REDIRECTS = 0;
 export const MAX_MAX_REDIRECTS = 100;
 
 /**
+ * A request's own timeout in milliseconds (issue #2937). The engine refuses a
+ * value outside this range with a 400 (`REQUEST_TIMEOUT_FIELD`, the same bound
+ * `POST /execute` holds), so the Settings tab and the transformer both stay
+ * inside it. There is no default constant: a request with no timeout of its own
+ * is `null`, and the engine reads the `defaultTimeout` setting at each send.
+ */
+export const MIN_REQUEST_TIMEOUT_MS = 1;
+export const MAX_REQUEST_TIMEOUT_MS = 86_400_000;
+
+/**
  * Event-stream defaults (issue #574). `requests.stream` defaults to 0, so a
  * request saved before the column existed reads back as not a stream - which is
  * what it was.

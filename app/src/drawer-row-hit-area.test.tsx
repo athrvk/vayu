@@ -67,6 +67,7 @@ const REQUEST: Request = {
 	elements: [],
 	followRedirects: true,
 	maxRedirects: 10,
+	timeout: null,
 	verifySSL: true,
 	disableCookies: false,
 	disabledSystemHeaders: [],

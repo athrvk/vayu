@@ -53,6 +53,7 @@ const BASE: Request = {
 	elements: [],
 	followRedirects: true,
 	maxRedirects: 10,
+	timeout: null,
 	httpVersion: "auto",
 	verifySSL: true,
 	disableCookies: false,

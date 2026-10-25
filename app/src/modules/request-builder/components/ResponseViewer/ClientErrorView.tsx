@@ -59,7 +59,7 @@ const ENGINE_ANSWERED_HINT =
  */
 const ErrorHints: Record<string, string> = {
 	TIMEOUT:
-		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Default request timeout in Settings › Network & connectivity, or check the server.",
+		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Request timeout in this request's Settings tab or Default request timeout in Settings › Network & connectivity, or check the server.",
 	CONNECTION_FAILED:
 		"Nothing answered at that address. Check the URL, and that the server is running.",
 	DNS_ERROR:

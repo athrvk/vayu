@@ -540,6 +540,12 @@ interface NumberSettingRowProps {
 	/** The committed value. Shown whenever the field is not mid-edit. */
 	value: string;
 	/**
+	 * What the field says while it is empty. For a setting that may be unset,
+	 * where empty is a real state ("use the default") rather than a draft the
+	 * row is waiting on.
+	 */
+	placeholder?: string;
+	/**
 	 * Fires per `commit`. Receives the raw string (always parseable as a
 	 * number); the owner still decides what to do with it - clamping included.
 	 */
@@ -595,6 +601,7 @@ export function NumberSettingRow({
 	labelHidden = false,
 	description,
 	value,
+	placeholder,
 	onCommit,
 	commit = "blur",
 	onDraftChange,
@@ -685,6 +692,7 @@ export function NumberSettingRow({
 						type="number"
 						inputMode="numeric"
 						value={shown}
+						placeholder={placeholder}
 						min={min}
 						max={max}
 						step={integer ? 1 : "any"}

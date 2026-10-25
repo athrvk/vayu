@@ -102,6 +102,7 @@ function FieldProbe() {
 					request.disableUrlEncoding,
 				])}
 			</span>
+			<span data-testid="timeout">{String(request.timeout)}</span>
 			<span data-testid="dirty">{String(hasUnsavedChanges)}</span>
 			<span data-testid="conflicts">{Object.keys(fieldConflicts).sort().join(",")}</span>
 			<span data-testid="conflict-url">{String(fieldConflicts.url ?? "")}</span>
@@ -135,6 +136,8 @@ function Harness({
 		</TestQueryClient>
 	);
 }
+
+const EXTERNAL_TIMEOUT = 2500;
 
 const shown = (testId: string) => screen.getByTestId(testId).textContent;
 const click = (label: string) => act(() => screen.getByText(label).click());
@@ -177,6 +180,24 @@ describe("the request builder's draft adopts an external write per field", () =>
 		);
 
 		expect(shown("protocol")).toBe('[true,["accept"],true]');
+		expect(shown("dirty")).toBe("false");
+	});
+
+	it("adopts a timeout set, then reset, by an external write (#2937)", () => {
+		// `timeout` missing from the merge list would leave an agent's
+		// update_request out of an open tab, and the next autosave would write the
+		// stale value back; `null` (the reset) has to be adopted as a value too.
+		const { rerender } = render(<Harness initialRequest={{ id: "req_1", timeout: null }} />);
+		expect(shown("timeout")).toBe("null");
+
+		act(() =>
+			rerender(<Harness initialRequest={{ id: "req_1", timeout: EXTERNAL_TIMEOUT }} />)
+		);
+		expect(shown("timeout")).toBe(String(EXTERNAL_TIMEOUT));
+		expect(shown("dirty")).toBe("false");
+
+		act(() => rerender(<Harness initialRequest={{ id: "req_1", timeout: null }} />));
+		expect(shown("timeout")).toBe("null");
 		expect(shown("dirty")).toBe("false");
 	});
 

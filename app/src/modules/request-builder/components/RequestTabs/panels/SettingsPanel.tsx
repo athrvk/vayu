@@ -9,13 +9,19 @@
  * SettingsPanel Component
  *
  * Per-request execution settings: the protocol to negotiate, the redirect
- * policy, and whether the response is consumed as an event stream. The engine
- * has always accepted `followRedirects` / `maxRedirects` and defaulted to
- * following, but nothing in the app sent them, so a 3xx was followed silently
- * and never reached the response pane. Every field here is stored on the
- * request and sent on every Send and every load test, never elided even when it
- * equals the default - see the comment on the payload fields in `index.tsx` and
- * `types/api.ts`.
+ * policy, the timeout, and whether the response is consumed as an event
+ * stream. The engine has always accepted `followRedirects` / `maxRedirects` and
+ * defaulted to following, but nothing in the app sent them, so a 3xx was
+ * followed silently and never reached the response pane. Every field here is
+ * stored on the request and sent on every Send and every load test, never
+ * elided even when it equals the default - see the comment on the payload
+ * fields in `index.tsx` and `types/api.ts` - with one deliberate exception.
+ *
+ * **Timeout is the exception** (issue #2937). It has no default to send: an
+ * empty field is `null`, stays off the composed payload, and the engine reads
+ * the `defaultTimeout` setting at each send. Sending today's setting instead
+ * would pin it on the request, so a later change to the setting would not
+ * reach it. The empty field's placeholder names the setting's current value.
  *
  * **Event stream is a setting, not a body mode** (issue #574). The request's
  * body semantics are untouched by it - a stream is a GET as often as it is a
@@ -51,13 +57,15 @@
 import { AlertTriangle } from "lucide-react";
 
 import { Badge, Checkbox, Eyebrow } from "@/components/ui";
-import { useRequestDefaultsQuery } from "@/queries";
+import { useConfigQuery, useRequestDefaultsQuery } from "@/queries";
 import {
 	ACCEPT_HEADER,
 	DEFAULT_MAX_REDIRECTS,
 	HTTP_VERSIONS,
 	MAX_MAX_REDIRECTS,
+	MAX_REQUEST_TIMEOUT_MS,
 	MIN_MAX_REDIRECTS,
+	MIN_REQUEST_TIMEOUT_MS,
 	SSE_ACCEPT,
 	isHttpVersion,
 } from "@/constants/request";
@@ -73,10 +81,17 @@ import {
 	displayHeaderName,
 	unappliedStoredHeaders,
 } from "../../../utils/automatic-headers";
+import {
+	defaultTimeoutFrom,
+	parseTimeout,
+	timeoutPlaceholder,
+} from "../../../utils/request-timeout";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { formatNumber } from "@/lib/format-number";
 
 const FOLLOW_LABEL = "Follow redirects";
 const MAX_LABEL = "Maximum redirects";
+const TIMEOUT_LABEL = "Request timeout";
 const PROTOCOL_LABEL = "Protocol";
 const STREAM_LABEL = "Event stream";
 const VERIFY_LABEL = "Verify TLS certificate";
@@ -95,6 +110,8 @@ export default function SettingsPanel() {
 	const { request, setRequest, updateField } = useRequestBuilderContext();
 	const followRedirects = request.followRedirects;
 	const { data: requestDefaults } = useRequestDefaultsQuery();
+	const { data: config } = useConfigQuery();
+	const timeoutPlaceholderText = timeoutPlaceholder(defaultTimeoutFrom(config?.entries));
 	const storedOff = request.disabledSystemHeaders;
 	const headerOptions = automaticHeaderOptions(requestDefaults?.headers ?? [], storedOff);
 	const unapplied = unappliedStoredHeaders(storedOff);
@@ -168,6 +185,22 @@ export default function SettingsPanel() {
 		if (raw === "") updateField("maxRedirects", DEFAULT_MAX_REDIRECTS);
 	};
 
+	/** Keep the stored value inside the range the engine accepts. */
+	const commitTimeout = (raw: string) => {
+		const parsed = parseTimeout(raw);
+		if (parsed !== null) updateField("timeout", parsed);
+	};
+
+	/**
+	 * An emptied field is "use the default", which is a state of its own
+	 * rather than a draft to wait out, so it is committed as `null` the moment
+	 * it empties - unlike `maxRedirects` above, which has to be serialised as a
+	 * number.
+	 */
+	const handleTimeoutDraft = (raw: string) => {
+		if (raw === "") updateField("timeout", null);
+	};
+
 	return (
 		<div className="space-y-6 max-w-xl">
 			{/*
@@ -184,6 +217,20 @@ export default function SettingsPanel() {
 				onChange={handleProtocolChange}
 				options={HTTP_VERSIONS}
 				description="The HTTP protocol to negotiate."
+			/>
+
+			<NumberSettingRow
+				label={TIMEOUT_LABEL}
+				value={request.timeout === null ? "" : String(request.timeout)}
+				placeholder={timeoutPlaceholderText}
+				commit="change"
+				onCommit={commitTimeout}
+				onDraftChange={handleTimeoutDraft}
+				unit="ms"
+				min={String(MIN_REQUEST_TIMEOUT_MS)}
+				max={String(MAX_REQUEST_TIMEOUT_MS)}
+				rangeHint={`${formatNumber(MIN_REQUEST_TIMEOUT_MS)} - ${formatNumber(MAX_REQUEST_TIMEOUT_MS)}`}
+				description="How long Send and load tests wait for the whole transfer. Leave empty to use the default timeout in Settings › Network & connectivity."
 			/>
 
 			<div className="space-y-4">

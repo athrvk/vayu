@@ -596,7 +596,7 @@ export function storedAuthInput(subject: string, extra: string) {
 }
 
 /**
- * The **Settings** tab's five per-request fields, as the engine stores them on
+ * The **Settings** tab's six per-request fields, as the engine stores them on
  * the row (issues #759, #795).
  *
  * One definition spread into both `create_request` and `update_request`: the
@@ -633,6 +633,16 @@ export function requestSettingsInput() {
 			.describe(
 				`How many redirects to follow before giving up (default 10, 0-${MAX_REDIRECTS_BOUND}).`
 			),
+		timeout: z
+			.number()
+			.int()
+			.min(1)
+			.max(86_400_000)
+			.nullable()
+			.optional()
+			.describe(
+				"This request's own timeout in milliseconds (1-86400000), applied to every later send of it. Omit it, or on update_request send null, for none: it then sends with the defaultTimeout setting."
+			),
 		httpVersion: z
 			.enum(HTTP_VERSIONS)
 			.optional()
@@ -664,6 +674,7 @@ export function requestSettingsInput() {
 export const REQUEST_SETTINGS_KEYS = [
 	"followRedirects",
 	"maxRedirects",
+	"timeout",
 	"httpVersion",
 	"stream",
 	"verifySSL",

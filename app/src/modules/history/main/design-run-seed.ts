@@ -86,6 +86,8 @@ interface DesignSnapshot {
 	postRequestScript?: string;
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/** Present only when the send's body carried one - the engine records the body as sent. */
+	timeout?: number;
 	httpVersion?: string;
 	verifySSL?: boolean;
 	disableCookies?: boolean;
@@ -366,6 +368,11 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			],
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+			// The timeout the send named, so a replay waits as long as the run did;
+			// no key is a send that took the `defaultTimeout` setting, and the
+			// replay takes the setting too. Display-and-replay only: Save to
+			// request never writes it (see `writableFields`).
+			timeout: typeof snapshot.timeout === "number" ? snapshot.timeout : null,
 			httpVersion: isHttpVersion(snapshot.httpVersion)
 				? snapshot.httpVersion
 				: DEFAULT_HTTP_VERSION,

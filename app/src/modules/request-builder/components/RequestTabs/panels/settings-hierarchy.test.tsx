@@ -39,6 +39,8 @@ import { createDefaultRequestState } from "../../../utils/request-state";
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
 	useRequestDefaultsQuery: () => ({ data: undefined }),
+	// The timeout field names the default timeout; this file is not about it.
+	useConfigQuery: () => ({ data: undefined }),
 }));
 
 const PANEL_SOURCE = readFileSync(
@@ -148,6 +150,7 @@ describe("the Settings tab's hierarchy", () => {
 		);
 		expect(named).toEqual([
 			"Protocol",
+			"Request timeout",
 			"Follow redirects",
 			"Maximum redirects",
 			"Verify TLS certificate",

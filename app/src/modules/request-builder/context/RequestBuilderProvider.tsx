@@ -88,6 +88,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"elements",
 	"followRedirects",
 	"maxRedirects",
+	"timeout",
 	"httpVersion",
 	"verifySSL",
 	"disableCookies",

@@ -392,7 +392,7 @@ sources), `preRequestScript`, `postRequestScript`, `children: CollectionDraft[]`
 `params: KeyValueEntry[]`, `headers: KeyValueEntry[]`, `body: RequestBody`,
 `auth: RequestAuth` (**`inherit` allowed**, resolved against the collection chain at
 execution time), `preRequestScript`, `postRequestScript`, `followRedirects?: boolean`,
-`maxRedirects?: number`, `examples?: ExampleDraft[]`.
+`maxRedirects?: number`, `timeout?: number`, `examples?: ExampleDraft[]`.
 
 Both redirect fields are optional because absent means "leave the engine's default"
 (`followRedirects: true`, `maxRedirects: 10`): a parser sets one only when the source
@@ -402,6 +402,11 @@ absent value as `false` would stop one they never touched. Producers: Postman's
 item-level `protocolProfileBehavior`, resolved through its folders (both fields, see [postman.md](./postman.md)) and
 Insomnia's `settingFollowRedirects` (`followRedirects` only - its redirect *limit* is an
 app-wide setting, not a per-request field, see [insomnia-v4.md](./insomnia-v4.md)).
+
+`timeout` (milliseconds, issue #2937) follows the same rule: absent means the request
+uses the `defaultTimeout` setting, and the orchestrator forwards it only when set. Its
+one producer is a Vayu OpenAPI export (`x-vayu-request.settings.timeout`); Postman,
+Insomnia and JMeter state no per-request timeout the importer reads.
 
 **`ExampleDraft`** - `name`, `status: number`, `headers: KeyValueEntry[]`, `body: string`,
 `contentType: string`. A saved example response the source file carried next to the request

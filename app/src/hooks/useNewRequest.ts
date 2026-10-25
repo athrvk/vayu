@@ -76,6 +76,7 @@ const PRESET_FIELDS = {
 	elements: true,
 	followRedirects: true,
 	maxRedirects: true,
+	timeout: true,
 	httpVersion: true,
 	verifySSL: true,
 	stream: true,

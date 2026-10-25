@@ -80,6 +80,9 @@ const source: Request = {
 	],
 	followRedirects: false,
 	maxRedirects: 3,
+	// Non-default, like the rest: a copy that dropped it would send the
+	// request's timeout back to the setting (#2937).
+	timeout: 1500,
 	httpVersion: "http1.1",
 	verifySSL: false,
 	// Postman's protocol switches and their export carrier (#1765), at
@@ -148,6 +151,17 @@ describe("duplicating a request", () => {
 		const sent = createRequest.mock.calls[0][0];
 		const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...expected } = source;
 		expect(sent).toEqual({ ...expected, name: "Get pet (Copy)" });
+	});
+
+	it("keeps a request with no timeout of its own on the setting, as null", async () => {
+		getRequest.mockResolvedValue({ ...source, timeout: null });
+		const { result } = renderCrud();
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(createRequest.mock.calls[0][0]).toHaveProperty("timeout", null);
 	});
 
 	// #2356: the read's `unresolved` is the engine's answer for the source, not

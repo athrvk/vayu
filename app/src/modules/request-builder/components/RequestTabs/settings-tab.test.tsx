@@ -23,13 +23,23 @@
  * from a `.map()`, so no static scan can see whether it was computed.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { RequestBuilderContextValue, RequestState } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
-import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS, HTTP_VERSIONS } from "@/constants/request";
+import {
+	DEFAULT_MAX_REDIRECTS,
+	MAX_MAX_REDIRECTS,
+	MAX_REQUEST_TIMEOUT_MS,
+	MIN_REQUEST_TIMEOUT_MS,
+	HTTP_VERSIONS,
+} from "@/constants/request";
+import { formatMs } from "@/lib/format-number";
 import RequestTabs from "./index";
+
+/** The `defaultTimeout` config entry the empty timeout field names; empty = a cold cache. */
+const config = vi.hoisted(() => ({ entries: [] as { key: string; value: string }[] }));
 
 // The Settings tab reads the engine's declared defaults for its automatic
 // header list (issue #1765); no engine answers here, which is the
@@ -37,6 +47,9 @@ import RequestTabs from "./index";
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
 	useRequestDefaultsQuery: () => ({ data: undefined }),
+	useConfigQuery: () => ({
+		data: config.entries.length > 0 ? { entries: config.entries } : undefined,
+	}),
 }));
 
 function renderTabsView(overrides: Partial<RequestState> = {}, updateField = vi.fn()) {
@@ -75,6 +88,7 @@ const expectMarked = (tab: HTMLElement) => {
 const followToggle = () => screen.getByRole("switch", { name: /follow redirects/i });
 const hopLimit = () => screen.getByLabelText(/maximum redirects/i);
 const protocolPicker = () => screen.getByRole("combobox", { name: /protocol/i });
+const timeoutField = () => screen.getByLabelText(/request timeout/i) as HTMLInputElement;
 const verifyToggle = () => screen.getByRole("switch", { name: /verify tls certificate/i });
 
 describe("Settings tab", () => {
@@ -214,6 +228,70 @@ describe("Settings panel controls", () => {
 		const updateField = renderTabs();
 		fireEvent.change(hopLimit(), { target: { value: "" } });
 		expect(updateField).toHaveBeenCalledWith("maxRedirects", DEFAULT_MAX_REDIRECTS);
+	});
+});
+
+describe("Request timeout field (#2937)", () => {
+	const OWN_TIMEOUT = 1500;
+	const SETTING_MS = 45_000;
+
+	afterEach(() => {
+		config.entries = [];
+	});
+
+	it("does not badge the tab while the request has no timeout of its own", () => {
+		renderTabs({ timeout: null });
+		expect(settingsTab()).toHaveAccessibleName("Settings");
+		expect(settingsTab().querySelector("[data-slot='tab-presence-dot']")).toBeNull();
+	});
+
+	it("badges the tab once the request states one, and shows it in the field", () => {
+		renderTabs({ timeout: OWN_TIMEOUT });
+		expectMarked(settingsTab());
+		expect(timeoutField().value).toBe(String(OWN_TIMEOUT));
+	});
+
+	it("names the default timeout's current value while empty", () => {
+		config.entries = [{ key: "defaultTimeout", value: String(SETTING_MS) }];
+		renderTabs({ timeout: null });
+		expect(timeoutField().value).toBe("");
+		expect(timeoutField().placeholder).toBe(`Use default (${formatMs(SETTING_MS)} ms)`);
+	});
+
+	it("names no number while the config has not loaded", () => {
+		renderTabs({ timeout: null });
+		expect(timeoutField().placeholder).toBe("Use default");
+	});
+
+	it("writes a typed value through to the request", () => {
+		const updateField = renderTabs();
+		fireEvent.change(timeoutField(), { target: { value: "5000" } });
+		expect(updateField).toHaveBeenCalledWith("timeout", 5000);
+	});
+
+	it("clears the override to null when the field is emptied", () => {
+		// Not an omitted key and not the setting's number: `null` is what the
+		// save sends as an explicit reset, and what leaves the compose body free
+		// of a timeout so the engine reads the live setting.
+		const updateField = renderTabs({ timeout: OWN_TIMEOUT });
+		fireEvent.change(timeoutField(), { target: { value: "" } });
+		expect(updateField).toHaveBeenCalledWith("timeout", null);
+	});
+
+	it("refuses a value outside the engine's range by clamping it", () => {
+		const updateField = renderTabs();
+		fireEvent.change(timeoutField(), { target: { value: "0" } });
+		expect(updateField).toHaveBeenLastCalledWith("timeout", MIN_REQUEST_TIMEOUT_MS);
+		fireEvent.change(timeoutField(), { target: { value: "-30" } });
+		expect(updateField).toHaveBeenLastCalledWith("timeout", MIN_REQUEST_TIMEOUT_MS);
+		fireEvent.change(timeoutField(), { target: { value: String(MAX_REQUEST_TIMEOUT_MS * 2) } });
+		expect(updateField).toHaveBeenLastCalledWith("timeout", MAX_REQUEST_TIMEOUT_MS);
+	});
+
+	it("declares the engine's range on the input itself", () => {
+		renderTabs();
+		expect(timeoutField().min).toBe(String(MIN_REQUEST_TIMEOUT_MS));
+		expect(timeoutField().max).toBe(String(MAX_REQUEST_TIMEOUT_MS));
 	});
 });
 
