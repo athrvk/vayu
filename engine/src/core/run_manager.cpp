@@ -1573,6 +1573,17 @@ nlohmann::json connection_replayed_warning (size_t replays) {
         "target." },
         { "count", replays } };
 }
+
+/**
+ * Whether @p config asks for virtual users: a `concurrency` it carries. A run
+ * that sets none (every `constant_rps` run the app starts) is sized from the
+ * `eventLoopMaxConcurrent` default, so its per-host raise covers no virtual
+ * user and is not worth a warning (#2801).
+ */
+bool declares_concurrency (const nlohmann::json& config) {
+    const auto concurrency = config.find ("concurrency");
+    return concurrency != config.end () && !concurrency->is_null ();
+}
 } // namespace
 
 /**
@@ -1585,11 +1596,11 @@ nlohmann::json connection_replayed_warning (size_t replays) {
  * script did not run inline (#1938). Neither refuses the run: a
  * literal `{{` can be deliberate in a body, and a run that already sent
  * every request must still be reported as finished. Also a per-host
- * connection limit the run raised above `eventLoopMaxPerHost` (#2394), so a
- * run that opened more connections than the setting says is not silent about
- * it. And requests libcurl re-sent on a new connection (#2799). Empty for a
- * run with nothing to say, which is what lets the caller omit the key
- * entirely.
+ * connection limit the run raised above `eventLoopMaxPerHost` (#2394) to cover
+ * the virtual users it asked for (#2801), so a run that opened more
+ * connections than the setting says is not silent about it. And requests
+ * libcurl re-sent on a new connection (#2799). Empty for a run with nothing
+ * to say, which is what lets the caller omit the key entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     nlohmann::json warnings = nlohmann::json::array ();
@@ -1610,7 +1621,8 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
         { "message", message }, { "count", affected }, { "names", names } });
     }
 
-    if (context->effective_max_per_host > context->configured_max_per_host) {
+    if (context->effective_max_per_host > context->configured_max_per_host &&
+    declares_concurrency (context->config)) {
         warnings.push_back ({ { "code", "per_host_limit_raised" },
         { "message",
         "Connections per host raised from " + std::to_string (context->configured_max_per_host) +

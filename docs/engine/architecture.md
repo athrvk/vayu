@@ -327,7 +327,10 @@ system resolver. Three rules make that safe:
 - Max connections per host: 200 per worker (`eventLoopMaxPerHost`), raised
   by a load run to each worker's share of its virtual users,
   `ceil(concurrency / workers)` (`effective_max_per_host`, #2394), and reported
-  as a `per_host_limit_raised` run warning when it was. Below that share libcurl
+  as a `per_host_limit_raised` run warning when it was for a run that asked for
+  virtual users, one whose config carries `concurrency` (#2801). A run that sets
+  none, which is every `constant_rps` run the app starts, is sized from
+  `eventLoopMaxConcurrent` and raised without a warning. Below that share libcurl
   queues the rest of a worker's transfers while the run counts them in flight;
   that wait is libcurl's `CURLINFO_QUEUE_TIME_T`, taken off the wire time and
   counted as queue wait (`detail::curl_queue_seconds`)

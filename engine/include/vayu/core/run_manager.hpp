@@ -733,10 +733,11 @@ struct RunContext {
      * The `eventLoopMaxPerHost` setting this load run read, and the per-host
      * limit each event-loop worker actually ran with (#2394,
      * `effective_max_per_host`). The second is above the first when the run's
-     * virtual users needed more connections per worker than the setting
-     * allows, which `build_run_warnings` reports. Both 0 until
-     * `configure_event_loop` writes them, before the first submission, on the
-     * run's worker thread that reads them at the end.
+     * concurrency, its own or the `eventLoopMaxConcurrent` default, needed
+     * more connections per worker than the setting allows, which
+     * `build_run_warnings` reports for a run that declared its own (#2801).
+     * Both 0 until `configure_event_loop` writes them, before the first
+     * submission, on the run's worker thread that reads them at the end.
      */
     size_t configured_max_per_host = 0;
     size_t effective_max_per_host  = 0;
@@ -1459,7 +1460,8 @@ struct RunSummaryInputs {
  * @brief The summary's `warnings` array for a finished run (issue #1503): an
  *        unresolved `{{token}}` that was sent anyway, and, for a scenario run,
  *        the steps whose `script.pre` did not run inline (#1938), and a
- *        per-host connection limit the run raised (#2394), and requests
+ *        per-host connection limit raised for the `concurrency` the run
+ *        declared (#2394, #2801), and requests
  *        re-sent on a new connection (#2799). Declared here
  *        so a test reaches the rule without driving a whole run.
  */

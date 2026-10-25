@@ -970,13 +970,18 @@ are read **per run**, so none needs a restart - and none is flagged
   not a ceiling. Before that, 4 workers at the default of 200 held a run to
   800 connections: every virtual user above 800 against an HTTP/1.1 target
   waited inside libcurl for a connection, and that wait was reported as
-  target latency. A run that raised it says so in its warnings
-  (`per_host_limit_raised`).
+  target latency. A run that asked for virtual users (its config carries
+  `concurrency`) and raised it says so in its warnings
+  (`per_host_limit_raised`, #2801).
 - `dnsCacheTimeout` - set it high (3600) for a fixed target; the hostname never
   needs re-resolution. Worth little on a warm run, since DNS cost per request
   amortises to ~0.005 ms over 60 s.
-- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`,
-  which is every run the app starts.
+- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`.
+  A `constant_rps` run the app starts sets none, so it reads this default as
+  its concurrency: the loop's `max_concurrent` and the per-host raise above
+  are sized from it (1000 on 4 workers is 250 per worker), with no
+  `per_host_limit_raised` warning, since the run has no virtual users to
+  cover (#2801).
 
 **How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound:
 each tick accrues `targetRps × elapsed` and dispatches the whole requests owed,

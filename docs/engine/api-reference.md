@@ -11134,8 +11134,12 @@ is of another kind: the run did everything, but opened more connections per
 host than `eventLoopMaxPerHost` says, because each worker's share of the
 virtual users (`ceil(concurrency / workers)`) was larger; it carries
 `configured` (the setting) and `effective` (the per-host limit each worker ran
-with). `connection_replayed` ([#2799](https://github.com/athrvk/vayu/issues/2799))
-is another: libcurl re-sent `count` requests on a new connection after the
+with). It appears only when the run asked for virtual users, a config that
+carries `concurrency` ([#2801](https://github.com/athrvk/vayu/issues/2801)): a
+run that sets none is sized from the `eventLoopMaxConcurrent` default and gets
+the same raise, but has no virtual users to cover and no warning about them.
+`connection_replayed` ([#2799](https://github.com/athrvk/vayu/issues/2799)) is
+another: libcurl re-sent `count` requests on a new connection after the
 server dropped or refused a reused one before answering, so the target
 received that many more requests than the run counted, each of those
 requests' latency covers both attempts, and a non-idempotent one may have run
