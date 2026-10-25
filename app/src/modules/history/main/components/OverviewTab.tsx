@@ -37,6 +37,8 @@ import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
 import RunKeyMetrics from "./RunKeyMetrics";
+import { UnrecordedFiguresNotice } from "./UnrecordedFiguresNotice";
+import { unrecordedFiguresOf } from "./unrecorded-figures";
 import { SlowRequestsCard } from "./SlowRequestsCard";
 import { extractTestFailures, sampleResultsWithoutValidationRow } from "../test-validation";
 import { locateSample, numberByTime, type SampleDestination } from "../sample-filter";
@@ -78,14 +80,27 @@ export default function OverviewTab({
 		if (destination) onOpenSample?.(destination);
 	};
 
+	const unrecorded = unrecordedFiguresOf(report.summary);
+	// Every card in these two rows reads at least one figure the engine did not
+	// record for a flagged run (latency, peak concurrency, queue wait, or the
+	// counts themselves), and each would draw it as a measured 0. The tiles above
+	// and the status and error blocks below carry the counts that do exist.
+	const showGlance = !unrecorded.counts && !unrecorded.latency;
+
 	return (
 		<>
+			<UnrecordedFiguresNotice summary={report.summary} />
+
 			{/* The p99-led glance, then the mode-adaptive summary - same hero cards +
 			    stat row the live dashboard shows. Config and request URL/method sit
 			    above the tabs, so no separate "Test Configuration" card here. */}
 			<RunKeyMetrics report={report} />
-			<HeroRow d={derived} />
-			<ModeStatsRow d={derived} />
+			{showGlance && (
+				<>
+					<HeroRow d={derived} />
+					<ModeStatsRow d={derived} />
+				</>
+			)}
 
 			{/* Above the verdict it would otherwise hide behind: a run that sent
 			    every request with an unresolved variable, or skipped a

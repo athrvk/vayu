@@ -145,10 +145,14 @@ export const collectionPageSchema = pagedEnvelopeSchema(
 	z.looseObject({ id: optStr, name: optStr, parentId: nullStr })
 );
 
-/** `get_run_report`: `partial` and `note` appear only while the run is unfinished. */
+/**
+ * `get_run_report`: `partial` and `note` appear only while the run is unfinished.
+ * `summary.partial` and `summary.summaryMissing` are a different statement, made
+ * of a failed run whose counts the engine could not fully record (#2895).
+ */
 export const runReportSchema = z.looseObject({
 	metadata: z.looseObject({ runId: optStr, runType: optStr, status: optStr }).optional(),
-	summary: anyRecord.optional(),
+	summary: z.looseObject({ partial: optBool, summaryMissing: optBool }).optional(),
 	results: anyList,
 	partial: optBool,
 	note: optStr,

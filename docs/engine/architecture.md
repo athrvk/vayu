@@ -857,7 +857,10 @@ See [Database Schema](db-schema.md) for the full column list.
    it writes a terminal status) - nothing else would ever move them off those
    statuses, so `GET /runs` reported them as running forever. They are marked
    `failed`; `end_time` is left as recorded, since when the process died is
-   unknowable at restart.
+   unknowable at restart. A load run that stored no summary but wrote metric
+   ticks is given one from its last tick in the same transaction, flagged
+   `partial` (#2895), so its report shows the totals it reached rather than
+   zeros (see [Database Schema](db-schema.md#runs)).
 2. **Pruning**: run history is trimmed per kind - load and collection runs to
    `maxRunsRetained`, design Sends to `maxDesignRunsRetained` (#2429) - and every
    kind to `runRetentionDays`.

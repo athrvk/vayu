@@ -9640,11 +9640,12 @@ or cancelled at a run's natural end) is stored at `0`. The row has no other
 way to say "no duration", and `0` can also be a real reading under a coarse
 clock, so the two cannot be told apart from a stored row; a load run stored by
 an engine before #2412 holds `0` for every error. That bounds one report: a
-run with **no summary** (still running, or the engine died before writing one)
-is reported from its stored rows alone, and there every stored row, a `0`
-included, is in the percentiles and the mean, which divides by the rows stored
-rather than by this population. A run that reached a terminal status reports
-from its summary, which this does not affect.
+run whose summary holds no `latency` (a failed run that wrote no summary, or
+one the engine died under, whose summary is rebuilt from its last tick and
+flagged `summary.partial`) is reported from its stored rows alone, and there
+every stored row, a `0` included, is in the percentiles and the mean, which
+divides by the rows stored rather than by this population. A run that finished
+on its own reports from its summary, which this does not affect.
 
 The sequential collection runner follows the same population, with two differences:
 its `latency` block is computed **exact nearest-rank** over every sent step's duration
@@ -10678,9 +10679,10 @@ The whole-run aggregates come from the run's stored `summary` (written once when
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
 rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
 first - see "`results[]` is not a uniform sample" below). A run with no summary has either not
-reached a terminal status yet (`metadata.status` is `pending` or `running`) or never will because
-the engine died mid-run; its report is built without it rather than erroring. **The response
-shape is the same either way.**
+reached a terminal status yet (`metadata.status` is `pending` or `running`) or failed without
+writing one; its report is built without it rather than erroring. **The response shape is the
+same either way.** A load run the engine died under is marked `failed` at the next start and
+given the totals of its last persisted tick instead (see "A run the engine died under" below).
 
 A report read while the run is `pending` or `running` is therefore **partial**: `metadata.status`
 says the run is still in flight, and `thresholdValidation` is absent even when the run declared
@@ -10705,6 +10707,24 @@ still writing and arrive with the summary. `results[]` is empty and `resultsStor
 status flip the aggregates are the summary's, as for a finished run, still with no row read. A
 run whose row says `running` but which the engine no longer holds answers the same shape with
 every count at zero.
+
+**A run the engine died under** (issue #2895) is marked `failed` when the next engine starts
+(`reconcile_orphaned_runs`, see [db-schema.md](db-schema.md#runs)). A load run that persisted at
+least one [metric tick](#get-runsrunidmetrics) is given a summary built from its last one, and its
+report carries **`summary.partial: true`**. The figures are the run's up to that tick:
+`totalRequests`, the success/failure split, `errorRate`, `statusCodes` and `errors.byStatusCode`
+(all from the tick's cumulative status distribution), `cancelledRequests`, `testDuration` (the
+tick's elapsed seconds), `avgRps` (completions over that time, not the tick's trailing rate),
+`sendRate`, `throughput`, `droppedRequests`, `bytesSent` and `bytesReceived`. What the tick does
+not measure for the whole run reads as an older engine's summary does: `avgInFlight`,
+`connectionReplays`, `sendingDurationSeconds` and `completedWhileSending` are absent,
+`peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
+`sampling` is absent, and `latency` is computed from the stored `results` rows, of which such a run
+has none, so every percentile is `0`. A failed load run with no summary at all, because it wrote no
+tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
+counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`). Both keys are absent, never `false`, on every other report. A client that shows a
+figure from a report carrying either one says the figure was not recorded rather than showing it
+as measured.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is
@@ -11304,6 +11324,12 @@ in none of the figures above - a healthy target stopped mid-run reports
 `errorRate` 0 beside them. Always present: `0` for a run nothing cancelled,
 and for a run whose stored summary predates the count, because only the
 stored summary records it (the status-code distribution never held them).
+
+`summary.partial` (`true`) marks a run the engine died under, whose figures are
+its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load
+run with no summary at all, whose counts are not a measurement. Each is absent
+otherwise, never `false`; "A run the engine died under" above says what each
+figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked
 for HTTP/2 and negotiated something older - see

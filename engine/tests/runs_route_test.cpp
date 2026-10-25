@@ -2402,6 +2402,120 @@ TEST_F (RunsRouteTest, ReportErrorTypesFallBackToStoredRecordsOnlyWhenTheSummary
     EXPECT_EQ (body["errors"]["withDetails"].get<size_t> (), 2u);
 }
 
+// ============================================================================
+// #2895: a run the engine died under says its totals are partial, or missing
+// ============================================================================
+
+namespace {
+/// A tick as the 1 Hz writer stores it: @p completed responses after
+/// @p elapsed seconds, three of them failed (two 500s, one with no response).
+/// `current_rps` is deliberately far from completed/elapsed.
+vayu::db::MetricTick crash_tick (const std::string& run_id, size_t completed, double elapsed) {
+    vayu::core::MetricTickSample sample;
+    sample.elapsed_seconds    = elapsed;
+    sample.requests_completed = completed;
+    sample.requests_failed    = 3;
+    sample.current_rps        = 999.0;
+    sample.status_codes = { { 200, completed - 3 }, { 500, 2 }, { 0, 1 } };
+    vayu::db::MetricTick tick;
+    tick.run_id    = run_id;
+    tick.timestamp = static_cast<int64_t> (elapsed * 1000);
+    tick.payload   = vayu::core::build_metric_tick_payload (sample).dump ();
+    return tick;
+}
+
+int64_t wall_clock_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+} // namespace
+
+// The whole path: a load run left running with three ticks, the engine
+// restarted over the same file, and the report of the reconciled run. Mutation
+// check: drop the `run.summary` write in `reconcile_orphaned_runs` and the
+// report answers totalRequests 0 with no `partial`.
+TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPartial) {
+    // Recent: the restart's init() prunes by the real retention defaults.
+    seed ({ .id = "run_crashed", .status = vayu::RunStatus::Running, .start_time = wall_clock_ms () });
+    db_->add_metric_tick (crash_tick ("run_crashed", 10, 1.0));
+    db_->add_metric_tick (crash_tick ("run_crashed", 25, 2.0));
+    db_->add_metric_tick (crash_tick ("run_crashed", 40, 4.0));
+
+    db_.reset ();
+    db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+    db_->init ();
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_crashed");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["metadata"]["status"], "failed");
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary.value ("partial", false), true) << summary.dump ();
+    EXPECT_FALSE (summary.contains ("summaryMissing"));
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 40u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 3u);
+    EXPECT_EQ (summary["noResponseRequests"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 7.5);
+    EXPECT_DOUBLE_EQ (summary["testDuration"].get<double> (), 4.0);
+    EXPECT_DOUBLE_EQ (summary["avgRps"].get<double> (), 10.0);
+    // What the tick cannot measure stays out rather than reading as zero.
+    EXPECT_FALSE (summary.contains ("avgInFlight"));
+    EXPECT_FALSE (summary.contains ("connectionReplays"));
+    EXPECT_FALSE (summary.contains ("sendingDurationSeconds"));
+
+    // The history row reads the same summary: a rate, an error share, and no
+    // tail latency or verdict nothing measured.
+    auto [list_status, list] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (list_status, 200);
+    ASSERT_EQ (list["data"].size (), 1u);
+    const auto& outcome = list["data"][0]["resultSummary"];
+    EXPECT_DOUBLE_EQ (outcome.value ("rps", -1.0), 10.0) << outcome.dump ();
+    EXPECT_DOUBLE_EQ (outcome.value ("errorRate", -1.0), 7.5);
+    EXPECT_FALSE (outcome.contains ("p95Ms"));
+    EXPECT_FALSE (outcome.contains ("verdict"));
+}
+
+// A failed load run with no summary at all says so instead of passing its
+// zeros off as a run that sent nothing. Only a load run: a design run never
+// has a load summary to miss. Mutation check: drop the `summary_missing`
+// assignment in `run_report_response` and the first assertion fails.
+TEST_F (RunsRouteTest, ReportOfAFailedLoadRunWithNoSummarySaysItIsMissing) {
+    seed ({ .id = "run_no_summary", .status = vayu::RunStatus::Failed, .start_time = 1000 });
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_summary");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["summary"].value ("summaryMissing", false), true)
+    << body["summary"].dump ();
+    EXPECT_FALSE (body["summary"].contains ("partial"));
+
+    seed ({ .id = "run_design_failed",
+    .type       = vayu::RunType::Design,
+    .status     = vayu::RunStatus::Failed,
+    .start_time = 1000 });
+    auto [design_status, design] =
+    vayu::http::routes::run_report_response (*db_, "run_design_failed");
+    ASSERT_EQ (design_status, 200);
+    EXPECT_FALSE (design["summary"].contains ("summaryMissing"));
+}
+
+// A run that stored its own summary carries neither flag, whether it completed
+// or failed: the keys are present only when true.
+TEST_F (RunsRouteTest, ReportOfARunWithItsOwnSummaryCarriesNeitherFlag) {
+    for (const auto run_status : { vayu::RunStatus::Completed, vayu::RunStatus::Failed }) {
+        const std::string id = "run_" + std::string (vayu::to_string (run_status));
+        seed ({ .id = id, .status = run_status, .start_time = 1000 });
+        db_->update_run_summary (
+        id, vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+        auto [status, body] = vayu::http::routes::run_report_response (*db_, id);
+        ASSERT_EQ (status, 200);
+        const auto& summary = body["summary"];
+        EXPECT_FALSE (summary.contains ("partial")) << id;
+        EXPECT_FALSE (summary.contains ("summaryMissing")) << id;
+        EXPECT_EQ (summary["totalRequests"].get<size_t> (), 100u) << id;
+    }
+}
+
 // #2659: only a load run's live report skips its rows. A design or scenario run stores
 // its rows just before the status flips, and a one-shot reader (response
 // restore, the step list) fetching in that gap needs `trace`.
