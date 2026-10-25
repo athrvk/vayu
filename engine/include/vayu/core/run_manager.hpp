@@ -151,17 +151,6 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 }
 
 /**
- * @brief Set @p loop's token bucket from @p config: `open_loop_rate` and twice
- *        it as the burst, so both are 0 on every mode but `constant_rps`
- *        (#2396).
- *
- * `per_worker_config` splits a non-zero rate into a bucket per worker, which
- * throttles a closed-loop run below the concurrency it is labelled with.
- * `configure_event_loop`'s only source for the two fields.
- */
-void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config);
-
-/**
  * @brief How long a load run's natural end waits on in-flight transfers before
  *        cancelling them: the longest a transfer can legitimately take, plus
  *        `STOP_DRAIN_GRACE_MS` (#2834).

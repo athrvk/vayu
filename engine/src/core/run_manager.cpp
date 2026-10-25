@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <iostream>
 
@@ -1321,11 +1320,6 @@ vayu::http::CookieJar& cookie_jar) {
     });
 }
 
-void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config) {
-    loop.target_rps = open_loop_rate (config);
-    loop.burst_size = loop.target_rps > 0.0 ? loop.target_rps * 2.0 : 0.0;
-}
-
 /**
  * The event loop this run drives, configured, started and published.
  *
@@ -1356,9 +1350,10 @@ int default_max_per_host) {
     { { "runId", context->run_id }, { "configured", configured_per_host },
     { "effective", loop_config.max_per_host },
     { "workers", configured_workers }, { "concurrency", concurrency } });
-    apply_open_loop_rate (loop_config, config);
-    // A token bucket on any other mode throttles a closed-loop run (#2396).
-    assert (loop_config.target_rps <= 0.0 || is_constant_rps_mode (config));
+    // `target_rps` stays 0 on every run: a `constant_rps` run is paced by its
+    // pacing thread alone, and a worker-side bucket on top of it drifts
+    // against that schedule and counts the wait as latency (#2801). On any
+    // other mode a bucket throttles a closed-loop run (#2396).
     loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
     vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
     // Read once for the run and held for it - see EventLoopConfig::transport
@@ -1395,8 +1390,8 @@ int default_max_per_host) {
 
     vayu::utils::log_debug ("run", "EventLoop config",
     { { "runId", context->run_id }, { "workers", configured_workers },
-    { "maxConcurrent", loop_config.max_concurrent }, { "maxPerHost", loop_config.max_per_host },
-    { "targetRps", loop_config.target_rps }, { "timeoutMs", timeout_ms } });
+    { "maxConcurrent", loop_config.max_concurrent },
+    { "maxPerHost", loop_config.max_per_host }, { "timeoutMs", timeout_ms } });
 
     // Create, start, and only then publish the event loop. The metrics
     // thread has been ticking since before this thread first ran (both are

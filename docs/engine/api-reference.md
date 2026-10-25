@@ -9296,7 +9296,9 @@ when `rps` is absent or `0`.
 
 The executor chooses by mode as well (`open_loop_rate` in `load_strategy.hpp`):
 a rate that reaches a closed-loop mode without passing this route, in a stored
-config, neither opens the loop nor reaches the event loop's token bucket.
+config, does not open the loop. No mode throttles the event loop's workers
+with a rate of their own: a `constant_rps` run is paced by its pacing thread
+alone (#2801).
 
 One field is rejected by **presence**, not by range: **`transient`**. It is
 `POST /execute`'s no-run-row flag (issue #382) and has no meaning here, because
@@ -9405,7 +9407,10 @@ the default formula across the whole advertised RPS span (50k RPS → 500,000),
 which is why it is not the `concurrency` guard - a ceiling of 10,000 would
 reject explicitly what the engine already does implicitly. For the closed-loop
 modes the `concurrency` target *is* the in-flight bound, so `maxInFlight` is
-ignored there.
+ignored there. It is also the only bound on a catch-up burst: when the pacing
+thread stalls (a host sleep, a blocked thread), its next tick submits every
+request the stall owed at once, up to the `maxInFlight` headroom (the rest are
+dropped), and nothing meters that burst per worker (#2801).
 
 **Durations.** `duration` and `rampUpDuration` take a string holding a number
 with an optional unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix
