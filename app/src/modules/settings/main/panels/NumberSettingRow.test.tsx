@@ -210,6 +210,14 @@ describe("NumberSettingRow", () => {
 			expect(screen.getByText("A").className).toContain("text-sm");
 		});
 
+		it("widens the input for a placeholder so its sentence is not cut off", () => {
+			render(<NumberSettingRow label="A" value="" placeholder="Use default (30,000 ms)" />);
+
+			expect(field("A").className).toContain("max-w-[16rem]");
+			expect(field("A").className).not.toContain("max-w-[12rem]");
+			expect(field("A").parentElement?.className).toContain("w-64");
+		});
+
 		it("lets a compact input fill whatever holds it, at the denser type", () => {
 			render(<NumberSettingRow label="A" value="5" compact />);
 
