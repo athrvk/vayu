@@ -9730,6 +9730,8 @@ their second instead.
       "backpressure": 0,
       "error_rate": 0.33,
       "dropped_requests": 0,
+      "skipped_requests": 0,
+      "stalled_ms": 0,
       "bytes_sent": 48000,
       "bytes_received": 1920000,
       "status_codes": { "200": 1495, "404": 3, "500": 2 },
@@ -9851,7 +9853,7 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | Field | Folded value |
 |-------|--------------|
 | `timestamp`, `elapsed_seconds` | The last tick's |
-| `requests_completed`, `requests_failed`, `http_errors`, `no_response`, `cancelled`, `dropped_requests`, `bytes_sent`, `bytes_received` | The last tick's (run totals) |
+| `requests_completed`, `requests_failed`, `http_errors`, `no_response`, `cancelled`, `dropped_requests`, `skipped_requests`, `stalled_ms`, `bytes_sent`, `bytes_received` | The last tick's (run totals) |
 | `error_rate`, `send_rate`, `throughput` | The last tick's (run-long rates) |
 | `status_codes`, `custom_metrics` | The last tick's (cumulative maps) |
 | `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` | The **max** over the bucket, its worst second |
@@ -10726,8 +10728,8 @@ zeros while the run sends and a growing prefix of the flush after. Its figures c
 run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive) reads:
 `summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
 `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
-`errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
-`bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput`,
+`errors.byStatusCode`, `droppedRequests`, `skippedRequests`, `stalledMs`, `peakConcurrency`,
+`avgQueueWaitMs`, `bytesSent`, `bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput`,
 `sendRate` and `avgInFlight` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
 still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
 (`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
@@ -10743,7 +10745,7 @@ report carries **`summary.partial: true`**. The figures are the run's up to that
 `totalRequests`, the success/failure split, `errorRate`, `statusCodes` and `errors.byStatusCode`
 (all from the tick's cumulative status distribution), `cancelledRequests`, `testDuration` (the
 tick's elapsed seconds), `avgRps` (completions over that time, not the tick's trailing rate),
-`sendRate`, `throughput`, `droppedRequests`, `bytesSent` and `bytesReceived`. What the tick does
+`sendRate`, `throughput`, `droppedRequests`, `skippedRequests`, `stalledMs`, `bytesSent` and `bytesReceived`. What the tick does
 not measure for the whole run reads as an older engine's summary does: `avgInFlight`,
 `connectionReplays`, `sendingDurationSeconds` and `completedWhileSending` are absent,
 `peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
@@ -10923,6 +10925,8 @@ named it.
     "cleanupOverhead": 0.03,
     "peakConcurrency": 100,
     "droppedRequests": 0,
+    "skippedRequests": 0,
+    "stalledMs": 0,
     "avgQueueWaitMs": 0.4,
     "avgInFlight": 4.2,
     "bytesSent": 192000,
@@ -11048,7 +11052,9 @@ flight. `rateControl.achievement` is
 `requestsSent / sendingDurationSeconds`. `rateControl.requestsSent` and
 `requestsExpected` are the run totals behind the live `metrics` frame's fields of
 the same name. A shortfall there is not only a slow generator: a request
-dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, and a Stop
+dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, a request a
+stalled pacer skipped (`summary.skippedRequests`, with the schedule time they
+cover in `summary.stalledMs`) was never sent either, and a Stop
 ends the sending early, so a stopped run's achievement is the share of its plan
 it reached. The app's Rate fidelity card instead divides by what the target
 owed up to now (`targetRps` times the time spent sending, capped at the
@@ -11059,6 +11065,22 @@ run in History from `requestsSent`, `sendingDurationSeconds` and the configured
 duration (issue #2805), while the stored `rateControl.achievement` stays the
 plan share and the card states it beside the figure ("stopped at 50% of the
 planned 60s"). A stopped report without the counts keeps its stored value.
+
+**Skips lower the achievement and are shown beside it** (issue #2911).
+`summary.skippedRequests` is the requests a `constant_rps` pacer owed beyond its
+100 ms catch-up window and chose not to send after a stall of the load generator
+itself, and `summary.stalledMs` the schedule time they cover
+(`skippedRequests ÷ targetRps`, in ms). They are the run's totals, stored as
+`skipped_requests` / `stalled_ms` in the [summary](db-schema.md#runs) and on every
+metric tick, and read as `0` from a summary stored before them (the run skipped
+nothing, it had no cap to skip under). `rateControl.achievement` is not adjusted
+for them: a skipped request was owed and never sent, so `requestsSent /
+requestsExpected` is the honest share of the plan, and the two counters are what
+tell a stall from a slow target. `sent + skipped + dropped` is
+`requestsExpected` for a run that reaches its deadline. The [run
+export](#post-exportrun-report) carries both in `report.summary` (optional in its
+schema, absent from a document written before them); its Markdown and HTML
+renderings print neither, as they print no `droppedRequests`.
 
 An `iterations` run, single-request or scenario, is the one exception: its
 loop returns on its last submission with the batch before it still in flight,
@@ -11330,7 +11352,7 @@ never closed. One entry per declared name that closed at least once, in the
 same shape `scenario.transactions` documents elsewhere on this page.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `avgInFlight`, `droppedRequests`,
-`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
+`skippedRequests`, `stalledMs`, `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
 `summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
 latency.
 

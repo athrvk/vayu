@@ -1005,7 +1005,9 @@ where binary lands just below it (0.57 RPS over 100 s owes 57). The report's
 rate fidelity is that same count since
 [#2392](https://github.com/athrvk/vayu/issues/2392): `rateControl.achievement`
 is `requestsSent / requestsExpected`, with `requestsExpected` the same
-`floor(targetRps × duration)`, so an unsaturated run reads 100, and `sendRate`
+`floor(targetRps × duration)`, so an unsaturated run reads 100 and a stalled one reads
+below it by the skipped share (`skippedRequests` and `stalledMs` sit beside it in the report
+summary, stored in the run summary and on every tick), and `sendRate`
 divides by the sending window, so neither is diluted by the drain that lets
 the last requests answer.
 

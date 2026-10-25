@@ -678,10 +678,13 @@ TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     mc.record_success (404, 5.0, 0.0, "");
     mc.record_bytes (10, 1000);
     mc.record_drop_batch (3);
+    mc.record_skipped_batch (2, 200.0);
 
     vayu::core::MetricTickSample sample;
     sample.timestamp        = 12345;
     sample.dropped_requests = mc.dropped_requests ();
+    sample.skipped_requests = mc.skipped_requests ();
+    sample.stalled_ms       = mc.stalled_ms ();
     sample.bytes_sent       = mc.total_bytes_sent ();
     sample.bytes_received   = mc.total_bytes_received ();
     sample.status_codes     = mc.status_code_distribution ();
@@ -689,6 +692,8 @@ TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     auto payload = vayu::core::build_metric_tick_payload (sample);
     EXPECT_EQ (payload["timestamp"].get<int64_t> (), 12345);
     EXPECT_EQ (payload["dropped_requests"].get<size_t> (), 3u);
+    EXPECT_EQ (payload["skipped_requests"].get<size_t> (), 2u);
+    EXPECT_DOUBLE_EQ (payload["stalled_ms"].get<double> (), 200.0);
     EXPECT_EQ (payload["bytes_sent"].get<size_t> (), 10u);
     EXPECT_EQ (payload["bytes_received"].get<size_t> (), 1000u);
     ASSERT_TRUE (payload["status_codes"].is_object ());

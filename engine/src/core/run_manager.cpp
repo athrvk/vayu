@@ -267,6 +267,8 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.peak_concurrency        = context.peak_in_flight.load ();
     inputs.avg_in_flight           = mc.average_in_flight (elapsed_s);
     inputs.dropped_requests        = mc.dropped_requests ();
+    inputs.skipped_requests        = mc.skipped_requests ();
+    inputs.stalled_ms              = mc.stalled_ms ();
     inputs.queue_wait_avg_ms       = mc.average_queue_wait ();
     inputs.bytes_sent              = mc.total_bytes_sent ();
     inputs.bytes_received          = mc.total_bytes_received ();
@@ -1713,6 +1715,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.avg_in_flight =
     context->metrics_collector->average_in_flight (totals.total_duration_s);
     inputs.dropped_requests = context->metrics_collector->dropped_requests ();
+    inputs.skipped_requests = context->metrics_collector->skipped_requests ();
+    inputs.stalled_ms       = context->metrics_collector->stalled_ms ();
     // Over the window the run sent in, which leaves out the drain (#2392).
     inputs.requests_sent           = context->requests_sent.load ();
     inputs.requests_expected       = context->requests_expected.load ();
@@ -2473,6 +2477,8 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["backpressure"]        = sample.backpressure;
     payload["error_rate"]          = sample.error_rate;
     payload["dropped_requests"]    = sample.dropped_requests;
+    payload["skipped_requests"]    = sample.skipped_requests;
+    payload["stalled_ms"]          = sample.stalled_ms;
     payload["bytes_sent"]          = sample.bytes_sent;
     payload["bytes_received"]      = sample.bytes_received;
     payload["status_codes"]        = codes;
@@ -2511,6 +2517,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // omits `avgInFlight` rather than claiming nothing was in flight.
     summary["avg_in_flight"]    = inputs.avg_in_flight;
     summary["dropped_requests"] = inputs.dropped_requests;
+    // Always written, zeros included; absent is a run stored before #2911.
+    summary["skipped_requests"] = inputs.skipped_requests;
+    summary["stalled_ms"]       = inputs.stalled_ms;
     summary["queue_wait_avg"]   = inputs.queue_wait_avg_ms;
     summary["bytes_sent"]       = inputs.bytes_sent;
     summary["bytes_received"]   = inputs.bytes_received;
@@ -2810,6 +2819,8 @@ const GateReadings& gate) {
         sample.backpressure             = backpressure;
         sample.error_rate               = error_rate;
         sample.dropped_requests         = mc.dropped_requests ();
+        sample.skipped_requests         = mc.skipped_requests ();
+        sample.stalled_ms               = mc.stalled_ms ();
         sample.bytes_sent               = mc.total_bytes_sent ();
         sample.bytes_received           = mc.total_bytes_received ();
         // Reuse the snapshot already taken for the live tick above.

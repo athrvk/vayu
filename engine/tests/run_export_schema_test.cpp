@@ -52,7 +52,8 @@ json healthy_summary () {
         { "requests_sent", 100 }, { "requests_expected", 100 },
         { "sending_duration", 9.8 }, { "completed_while_sending", 97 },
         { "peak_concurrency", 5 }, { "avg_in_flight", 4.2 },
-        { "dropped_requests", 0 }, { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
+        { "dropped_requests", 0 }, { "skipped_requests", 3 },
+        { "stalled_ms", 300.0 }, { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
         { "bytes_received", 5000 }, { "http_version_downgraded", 0 },
         { "connection_replays", 2 }, { "status_codes", { { "200", 100 } } },
         { "latency",
@@ -265,7 +266,35 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // SUMMARY_KEYS and this fails, as does the validation of the required key.
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("setupOverhead", -1.0), 0.1);
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.05);
+    // The pacer's skips (#2911). Mutation check: drop "skippedRequests" or
+    // "stalledMs" from SUMMARY_KEYS and the matching assertion fails.
+    EXPECT_EQ (document["report"]["summary"].value ("skippedRequests", -1), 3);
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("stalledMs", -1.0), 300.0);
     EXPECT_FALSE (document["timeSeries"].empty ());
+}
+
+// #2911: a document written before the skip counters has neither key and
+// still validates, so they are properties and not `required`. Mutation check:
+// put "skippedRequests" in the schema's `required` and this fails.
+TEST_F (RunExportSchemaTest, ADocumentWithoutTheSkipCountersValidates) {
+    seed ("run_skips", vayu::RunStatus::Completed, healthy_summary ());
+    json document = expect_valid (json{ { "runId", "run_skips" } });
+    auto& summary = document["report"]["summary"];
+    ASSERT_TRUE (summary.contains ("skippedRequests")) << "nothing to remove";
+    summary.erase ("skippedRequests");
+    summary.erase ("stalledMs");
+    EXPECT_EQ (run_export_schema_errors (schema_, document), "");
+}
+
+// A summary stored before them exports them as 0: the run skipped nothing.
+TEST_F (RunExportSchemaTest, ARunStoredBeforeTheSkipCountersExportsZero) {
+    json summary = healthy_summary ();
+    summary.erase ("skipped_requests");
+    summary.erase ("stalled_ms");
+    seed ("run_pre_skips", vayu::RunStatus::Completed, summary);
+    const json document = expect_valid (json{ { "runId", "run_pre_skips" } });
+    EXPECT_EQ (document["report"]["summary"].value ("skippedRequests", -1), 0);
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("stalledMs", -1.0), 0.0);
 }
 
 // #2894: a run stored before the split exports its one overhead as cleanup and

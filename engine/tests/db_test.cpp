@@ -2014,6 +2014,8 @@ void add_tick (Database& db, const std::string& run_id, size_t completed, double
     sample.send_rate        = (static_cast<double> (completed) / elapsed) + 1.0;
     sample.throughput       = static_cast<double> (completed) / elapsed;
     sample.dropped_requests = 4;
+    sample.skipped_requests = 3;
+    sample.stalled_ms       = 300.0;
     sample.bytes_sent       = completed * 100;
     sample.bytes_received   = completed * 1000;
     sample.status_codes     = { { 200, completed - 2 }, { 503, 2 } };
@@ -2050,7 +2052,8 @@ nlohmann::json reconciled_summary (Database& db, const std::string& id) {
 // flagged partial, under the keys a finished run's summary uses. Mutation
 // checks: drop the `run.summary` write in `reconcile_orphaned_runs` and the
 // summary is null; order `get_last_metric_tick` ascending and the totals are
-// the first tick's.
+// the first tick's; drop `skipped_requests` from `CUMULATIVE_TICK_KEYS` and
+// the skip assertions fail (#2911).
 TEST_F (DatabaseTest, ReconcileStoresALoadRunsLastTickAsAPartialSummary) {
     {
         Database db (TEST_DB_PATH);
@@ -2075,6 +2078,9 @@ TEST_F (DatabaseTest, ReconcileStoresALoadRunsLastTickAsAPartialSummary) {
     EXPECT_DOUBLE_EQ (summary["throughput"].get<double> (), 10.0);
     EXPECT_EQ (summary["cancelled"].get<size_t> (), 1u);
     EXPECT_EQ (summary["dropped_requests"].get<size_t> (), 4u);
+    // Cumulative like the drops, so a crashed stalled run keeps them (#2911).
+    EXPECT_EQ (summary["skipped_requests"].get<size_t> (), 3u);
+    EXPECT_DOUBLE_EQ (summary["stalled_ms"].get<double> (), 300.0);
     EXPECT_EQ (summary["bytes_sent"].get<size_t> (), 4000u);
     EXPECT_EQ (summary["bytes_received"].get<size_t> (), 40000u);
     EXPECT_EQ (summary["status_codes"], (nlohmann::json{ { "200", 38 }, { "503", 2 } }));
