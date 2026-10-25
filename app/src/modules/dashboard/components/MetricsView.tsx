@@ -38,7 +38,7 @@ import { TOOLTIPS } from "./tooltips";
 import { STATUS_CLASS_SERIES, STATUS_CLASS_CSS_VAR } from "@/constants/http-status";
 import { useMode } from "../hooks/useMode";
 import {
-	isRateLimitedRun,
+	shouldShowDropped,
 	buildRampOverlay,
 	hasPercentileSignal,
 	hasStatusSeries,
@@ -196,6 +196,7 @@ function MetricsView({
 			durationSeconds: runDurationSeconds,
 		});
 		const droppedRequests = metrics.dropped_requests ?? 0;
+		const skippedRequests = metrics.skipped_requests ?? 0;
 		// Over the run so far, the span `avg_latency_ms` covers, so the card's
 		// mean, median and tail describe one population (issue #2385).
 		const cumulative = cumulativePercentiles(metrics);
@@ -242,7 +243,9 @@ function MetricsView({
 			p95Latency: cumulative.p95,
 			elapsedSeconds: lastElapsedSeconds,
 			droppedRequests,
-			showDropped: isRateLimitedRun(mode, targetRps) && droppedRequests > 0,
+			skippedRequests,
+			stalledMs: metrics.stalled_ms ?? 0,
+			showDropped: shouldShowDropped(loadMode, targetRps, droppedRequests, skippedRequests),
 			rampDeviationPct: rampOverlay?.rampDeviationPct,
 			rampUpDurationSeconds: rampConfig?.rampUpDurationSeconds,
 			startConcurrency: rampConfig?.startConcurrency,
@@ -256,7 +259,6 @@ function MetricsView({
 		loadMode,
 		targetRps,
 		concurrency,
-		mode,
 		runDurationSeconds,
 		rampConfig,
 		peakConcurrency,

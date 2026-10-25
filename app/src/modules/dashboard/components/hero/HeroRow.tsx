@@ -131,6 +131,8 @@ function renderModeCards(d: DashboardDerived) {
 						<DroppedRequestsCard
 							dropped={d.droppedRequests}
 							completed={d.totalRequests}
+							skipped={d.skippedRequests}
+							stalledMs={d.stalledMs}
 						/>
 					) : (
 						<RateFidelityCard

@@ -12,7 +12,7 @@ import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
 import { notCrossed } from "./computeBreakpoint";
 import { dispatchStatus } from "./dispatchLag";
-import { isRateLimitedRun } from "./metricsTransforms";
+import { shouldShowDropped } from "./metricsTransforms";
 import { liveRateFidelity } from "./rateFidelity";
 
 /**
@@ -102,6 +102,8 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 	const { receivedRate, receivedWindow } = receivedRateOf(s);
 	const peak = s.peakConcurrency ?? 0;
 	const duration = s.testDuration ?? s.totalDurationSeconds ?? 0;
+	const droppedRequests = s.droppedRequests ?? 0;
+	const skippedRequests = s.skippedRequests ?? 0;
 
 	return {
 		mode,
@@ -145,12 +147,14 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		elapsedSeconds: duration,
 		setupOverhead: s.setupOverhead,
 		cleanupOverhead: s.cleanupOverhead,
-		droppedRequests: s.droppedRequests ?? 0,
-		// Swap in the Dropped Requests card only when drops actually occurred -
-		// matches the live MetricsView gate. A clean rate-limited run keeps the
-		// Rate Fidelity card (otherwise it shows "0 dropped" with a false
+		droppedRequests,
+		skippedRequests,
+		stalledMs: s.stalledMs ?? 0,
+		// Swap in the Dropped Requests card only when requests were lost - the
+		// live MetricsView calls the same helper. A clean rate-limited run keeps
+		// the Rate Fidelity card (otherwise it shows "0 dropped" with a false
 		// "Server saturating" warning).
-		showDropped: isRateLimitedRun(mode, targetRps) && (s.droppedRequests ?? 0) > 0,
+		showDropped: shouldShowDropped(mode, targetRps, droppedRequests, skippedRequests),
 		rampDeviationPct: undefined, // filled from the stored series by LoadTestDetail
 		// A unit-aware parse: "2m" is 120 s, not 2 (#1945).
 		rampUpDurationSeconds: durationSeconds(cfg.rampUpDuration) ?? undefined,
