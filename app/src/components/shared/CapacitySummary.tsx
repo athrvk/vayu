@@ -216,6 +216,24 @@ function KneeSentence({ capacity, knee }: { capacity: Capacity; knee: number }) 
 	);
 }
 
+/** True for each level whose concurrency an earlier level already measured. */
+function repeatedLevels(levels: Capacity["levels"]): boolean[] {
+	const seen = new Set<number>();
+	return levels.map(({ concurrency }) => {
+		const repeated = seen.has(concurrency);
+		seen.add(concurrency);
+		return repeated;
+	});
+}
+
+type OptionalColumn = "p99" | "errors" | "samples";
+
+/** The rightmost column shown: it sits flush, every other one leaves a gutter. */
+function lastColumn(showErrors: boolean, showSamples: boolean): OptionalColumn {
+	if (showSamples) return "samples";
+	return showErrors ? "errors" : "p99";
+}
+
 export interface CapacitySummaryProps {
 	capacity: RunReport["capacity"];
 	className?: string;
@@ -228,6 +246,11 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 	// A run stored before errors were judged has no `errorPct` on any level; its
 	// column would be empty cells, so the table keeps its three columns for it.
 	const showErrors = capacity.levels.some((level) => level.errorPct !== undefined);
+	// Likewise `samples`, absent on a run stored before the engine reported it.
+	const showSamples = capacity.levels.some((level) => level.samples !== undefined);
+	const repeated = repeatedLevels(capacity.levels);
+	const last = lastColumn(showErrors, showSamples);
+	const gutter = (column: OptionalColumn) => (column === last ? undefined : "pr-3");
 
 	return (
 		<Card className={className}>
@@ -286,13 +309,23 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 									<th
 										className={cn(
 											"py-1.5 text-right font-medium",
-											showErrors && "pr-3"
+											gutter("p99")
 										)}
 									>
 										p99
 									</th>
 									{showErrors && (
-										<th className="py-1.5 text-right font-medium">Errors</th>
+										<th
+											className={cn(
+												"py-1.5 text-right font-medium",
+												gutter("errors")
+											)}
+										>
+											Errors
+										</th>
+									)}
+									{showSamples && (
+										<th className="py-1.5 text-right font-medium">Samples</th>
 									)}
 								</tr>
 							</thead>
@@ -307,13 +340,22 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 										// Index, not concurrency: a level the search
 										// re-measured after one bad window appears
 										// twice, and that repeat is the audit trail
-										// doing its job rather than a duplicate key.
+										// doing its job rather than a duplicate key. The label marks the
+										// second and later occurrences, so a repeat reads as a re-measure.
 										<tr
 											key={`${level.concurrency}-${index}`}
 											className="border-b border-rule last:border-b-0"
 										>
 											<td className="py-1.5 pr-3 font-mono">
 												{level.concurrency}
+												{repeated[index] && (
+													<>
+														{" "}
+														<span className="font-sans text-xs text-muted-foreground">
+															re-measured
+														</span>
+													</>
+												)}
 											</td>
 											<td className="py-1.5 pr-3 text-right font-mono text-muted-foreground">
 												{formatRate(level.rps)}
@@ -321,7 +363,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 											<td
 												className={cn(
 													"py-1.5 text-right font-mono",
-													showErrors && "pr-3",
+													gutter("p99"),
 													overBudget
 														? "text-warning-text"
 														: "text-muted-foreground"
@@ -333,6 +375,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 												<td
 													className={cn(
 														"py-1.5 text-right font-mono",
+														gutter("errors"),
 														overErrorLimit
 															? "text-warning-text"
 															: "text-muted-foreground"
@@ -341,6 +384,13 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 													{level.errorPct === undefined
 														? ""
 														: `${formatPercent(level.errorPct)}%`}
+												</td>
+											)}
+											{showSamples && (
+												<td className="py-1.5 text-right font-mono text-muted-foreground">
+													{level.samples === undefined
+														? ""
+														: formatNumber(level.samples)}
 												</td>
 											)}
 										</tr>

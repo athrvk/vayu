@@ -147,7 +147,44 @@ describe("CapacitySummary", () => {
 		);
 		const rows = Array.from(container.querySelectorAll("tbody tr"));
 		expect(rows).toHaveLength(3);
-		expect(rows.map((row) => row.querySelector("td")?.textContent)).toEqual(["48", "64", "64"]);
+		// The concurrency is the cell's first node; the label is a sibling after it.
+		expect(rows.map((row) => row.querySelector("td")?.firstChild?.textContent)).toEqual([
+			"48",
+			"64",
+			"64",
+		]);
+		cleanup();
+	});
+
+	it("labels a level the search measured again, on the repeat only", () => {
+		// Mutation check: drop the `seen.has` comparison in `repeatedLevels` (label
+		// every row, or none) and this fails.
+		const { container } = render(
+			<CapacitySummary
+				capacity={capacity({
+					levels: [
+						{ concurrency: 48, rps: 23400, p99Ms: 41.2 },
+						{ concurrency: 64, rps: 23000, p99Ms: 300 },
+						{ concurrency: 64, rps: 22800, p99Ms: 312 },
+						{ concurrency: 64, rps: 22900, p99Ms: 305 },
+					],
+				})}
+			/>
+		);
+		const firstCells = Array.from(container.querySelectorAll("tbody tr")).map(
+			(row) => row.querySelector("td")?.textContent
+		);
+		expect(firstCells).toEqual(["48", "64", "64 re-measured", "64 re-measured"]);
+		// Plain muted text: the row already carries the number, a chip would shout.
+		const label = screen.getAllByText("re-measured")[0];
+		expect(label.className).toContain("text-muted-foreground");
+		expect(label.tagName).toBe("SPAN");
+		cleanup();
+	});
+
+	it("labels nothing when every level is measured once", () => {
+		render(<CapacitySummary capacity={capacity()} />);
+		expect(screen.queryByText("re-measured")).toBeNull();
 		cleanup();
 	});
 
@@ -474,6 +511,110 @@ describe("CapacitySummary", () => {
 			expect(row.querySelectorAll("td")).toHaveLength(3);
 		}
 		cleanup();
+	});
+
+	describe("the Samples column", () => {
+		const withSamples = (samples: (number | undefined)[]): Capacity =>
+			capacity({
+				levels: [
+					{ concurrency: 48, rps: 23400, p99Ms: 41.2, samples: samples[0] },
+					{ concurrency: 64, rps: 23000, p99Ms: 312, samples: samples[1] },
+				],
+			});
+		const column = (container: HTMLElement, index: number): (string | null)[] =>
+			Array.from(container.querySelectorAll("tbody tr")).map(
+				(row) => row.querySelectorAll("td")[index].textContent
+			);
+
+		it("prints the completions behind each row, after p99, under a pinned header", () => {
+			const { container } = render(<CapacitySummary capacity={withSamples([4900, 12])} />);
+			const headers = screen.getAllByRole("columnheader").map((th) => th.textContent);
+			expect(headers).toEqual([CONCURRENCY_LABEL, "Throughput", "p99", "Samples"]);
+			expect(column(container, 3)).toEqual(["4,900", "12"]);
+			const cell = container.querySelectorAll("tbody tr")[0].querySelectorAll("td")[3];
+			expect(cell.className).toContain("text-muted-foreground");
+			expect(cell.className).toContain("text-right");
+			expect(cell.className).toContain("font-mono");
+			cleanup();
+		});
+
+		it("leaves a level without a count empty rather than printing 0", () => {
+			// Mutation check: render `level.samples ?? 0` and the absent cell reads
+			// "0", the claim that a level of refused connections is exactly this.
+			const { container } = render(
+				<CapacitySummary capacity={withSamples([4900, undefined])} />
+			);
+			expect(column(container, 3)).toEqual(["4,900", ""]);
+			cleanup();
+		});
+
+		it("prints 0 for a level whose p99 measured nothing", () => {
+			const { container } = render(<CapacitySummary capacity={withSamples([4900, 0])} />);
+			expect(column(container, 3)).toEqual(["4,900", "0"]);
+			cleanup();
+		});
+
+		it("omits the column for a run stored before the engine reported it", () => {
+			render(<CapacitySummary capacity={withSamples([undefined, undefined])} />);
+			expect(screen.queryByRole("columnheader", { name: "Samples" })).toBeNull();
+			cleanup();
+		});
+
+		it("follows Errors when both are present, with the gutter on every column but the last", () => {
+			const { container } = render(
+				<CapacitySummary
+					capacity={capacity({
+						levels: [
+							{
+								concurrency: 48,
+								rps: 23400,
+								p99Ms: 41.2,
+								errorPct: 0,
+								samples: 4900,
+							},
+							{ concurrency: 64, rps: 23000, p99Ms: 312, errorPct: 94, samples: 0 },
+						],
+					})}
+				/>
+			);
+			const headers = screen.getAllByRole("columnheader");
+			expect(headers.map((th) => th.textContent)).toEqual([
+				CONCURRENCY_LABEL,
+				"Throughput",
+				"p99",
+				"Errors",
+				"Samples",
+			]);
+			for (const row of container.querySelectorAll("tbody tr")) {
+				expect(row.querySelectorAll("td")).toHaveLength(5);
+			}
+			expect(column(container, 3)).toEqual(["0.0%", "94.0%"]);
+			expect(column(container, 4)).toEqual(["4,900", "0"]);
+			// Only the rightmost column sits flush; p99 and Errors leave a gutter.
+			const [, , p99, errors, samples] = headers;
+			expect(p99.className).toContain("pr-3");
+			expect(errors.className).toContain("pr-3");
+			expect(samples.className).not.toContain("pr-3");
+			cleanup();
+		});
+
+		it.each([
+			["p99 alone", capacity(), "p99"],
+			[
+				"Errors",
+				capacity({ levels: [{ concurrency: 48, rps: 1, p99Ms: 1, errorPct: 0 }] }),
+				"Errors",
+			],
+			["Samples", withSamples([1, 2]), "Samples"],
+		])("sits the %s column flush and leaves a gutter before it", (_name, cap, lastHeader) => {
+			render(<CapacitySummary capacity={cap} />);
+			const headers = screen.getAllByRole("columnheader");
+			const last = headers[headers.length - 1];
+			expect(last.textContent).toBe(lastHeader);
+			expect(last.className).not.toContain("pr-3");
+			for (const header of headers.slice(1, -1)) expect(header.className).toContain("pr-3");
+			cleanup();
+		});
 	});
 
 	it("never prints 0ms for a knee that carries no p99", () => {
