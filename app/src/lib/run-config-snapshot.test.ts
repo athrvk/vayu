@@ -69,6 +69,15 @@ describe("loadConfigFromSnapshot", () => {
 		);
 	});
 
+	// A capacity run's own SLO is what an agent-started run's breakpoint is judged
+	// by (#2816). Mutation check: drop `sloMs` from `loadConfigFromSnapshot`.
+	it("copies a capacity run's sloMs", () => {
+		expect(loadConfigFromSnapshot({ mode: "capacity", sloMs: 50 })).toStrictEqual({
+			mode: "capacity",
+			sloMs: 50,
+		});
+	});
+
 	it("falls back to the engine's rps key for the target rate", () => {
 		expect(loadConfigFromSnapshot({ rps: 40 }).targetRps).toBe(40);
 		expect(loadConfigFromSnapshot({ targetRps: 10, rps: 40 }).targetRps).toBe(10);

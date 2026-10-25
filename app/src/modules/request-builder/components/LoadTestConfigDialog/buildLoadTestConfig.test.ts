@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { buildLoadTestConfig, SCRIPTS_DEFAULT, type LoadTestDraft } from "./buildLoadTestConfig";
 import { emptyBudgetDraft } from "./budgets";
 import { emptyMonitorDraft } from "./monitor";
+import { judgeRun } from "@/components/shared/run-outcome";
 
 const DRAFT: LoadTestDraft = {
 	profile: {
@@ -144,6 +145,87 @@ describe("buildLoadTestConfig", () => {
 			const config = build({ carriedBudgets: ["latencyP99Ms"] });
 			expect(config.thresholds).toBeUndefined();
 			expect(config).not.toHaveProperty("carriedBudgets");
+		});
+	});
+
+	/**
+	 * The engine judges `latencyP99Ms` on the run's pooled histogram, which for a
+	 * capacity search holds every level it climbed past the limit on purpose.
+	 */
+	describe("the Settings p99 seed in Capacity discovery (issue #2816)", () => {
+		const budgets = { ...emptyBudgetDraft(), latencyP99Ms: "500" };
+		const seed = { budgetSources: { latencyP99Ms: "slo" as const } };
+		const OTHER_MODES = [
+			"constant_rps",
+			"constant_concurrency",
+			"ramp_up",
+			"iterations",
+		] as const;
+
+		it("drops a seeded p99 from a capacity run, and the carried key with it", () => {
+			const config = build({
+				...withMode("capacity"),
+				budgets,
+				carriedBudgets: ["latencyP99Ms"],
+				...seed,
+			});
+			expect(config.thresholds).toBeUndefined();
+			expect(config).not.toHaveProperty("carriedBudgets");
+		});
+
+		it("keeps the other budgets of a capacity run, carried keys included", () => {
+			const config = build({
+				...withMode("capacity"),
+				budgets: { ...budgets, maxErrorRatePct: "2" },
+				failRun: true,
+				carriedBudgets: ["latencyP99Ms", "maxErrorRatePct"],
+				budgetSources: { latencyP99Ms: "slo", maxErrorRatePct: "memo" },
+			});
+			expect(config.thresholds).toEqual({ maxErrorRatePct: 2, failRun: true });
+			expect(config.carriedBudgets).toEqual(["maxErrorRatePct"]);
+		});
+
+		it("keeps a p99 the memo carried", () => {
+			const config = build({
+				...withMode("capacity"),
+				budgets,
+				carriedBudgets: ["latencyP99Ms"],
+				budgetSources: { latencyP99Ms: "memo" },
+			});
+			expect(config.thresholds).toEqual({ latencyP99Ms: 500 });
+			expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+		});
+
+		it("keeps a p99 the user typed, which carries no source at all", () => {
+			const config = build({ ...withMode("capacity"), budgets, budgetSources: {} });
+			expect(config.thresholds).toEqual({ latencyP99Ms: 500 });
+			expect(build({ ...withMode("capacity"), budgets }).thresholds).toEqual({
+				latencyP99Ms: 500,
+			});
+		});
+
+		it.each(OTHER_MODES)("sends the seed in %s", (mode) => {
+			// Mutation check: drop the `mode === "capacity"` condition in
+			// `isUnsentSeed` and every mode here loses its p99.
+			const config = build({
+				...withMode(mode),
+				budgets,
+				carriedBudgets: ["latencyP99Ms"],
+				...seed,
+			});
+			expect(config.thresholds).toEqual({ latencyP99Ms: 500 });
+			expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+		});
+
+		it("leaves an unconfigured capacity run reading no budgets", () => {
+			const config = build({ ...withMode("capacity"), budgets, ...seed });
+			expect(config.thresholds).toBeUndefined();
+			// A run with no thresholds stores no verdict, which is what the
+			// outcome line reads.
+			expect(judgeRun({ status: "completed" })).toEqual({
+				outcome: "not-judged",
+				reason: "No budgets set",
+			});
 		});
 	});
 });

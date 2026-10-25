@@ -826,6 +826,7 @@ export default function RequestBuilder() {
 						comment: apiRequest.comment,
 						rampUpDuration: apiRequest.rampUpDuration,
 						startConcurrency: apiRequest.startConcurrency,
+						sloMs: apiRequest.sloMs,
 						dataRowCount: config.data?.length,
 						dataFileName: config.dataFileName,
 						dataFileHash: config.dataFileHash,

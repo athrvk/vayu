@@ -17,6 +17,7 @@ import type { LoadTestMetrics, RunReport } from "@/types";
 import { type Breakpoint } from "../../../utils/computeBreakpoint";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import { useClientSettingsStore } from "@/stores";
+import { useSloMs } from "../../../hooks/useSloMs";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
@@ -65,7 +66,7 @@ export function ResponseTimeVsConcurrencyChart({
 		},
 	];
 
-	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
+	const sloMs = useSloMs(breakpoint);
 	const markers = useMemo<Marker[]>(() => {
 		const m: Marker[] = [
 			{

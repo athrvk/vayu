@@ -10,6 +10,7 @@ import { successSamplePeriod } from "@/constants/load-test";
 import { runDataFileName } from "@/lib/run-data-file";
 import type { SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { type BudgetDraft, type CustomBudgetDraft, buildThresholds } from "./budgets";
+import { budgetsToSend, type CarriedBudgets } from "./carried-budgets";
 import { type MonitorDraft, buildMonitor } from "./monitor";
 import { type ProfileParams, profileParams } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
@@ -38,6 +39,12 @@ export interface LoadTestDraft {
 	comment: string;
 	/** `thresholds` keys still holding a value the user did not set this time (issue #2195). */
 	carriedBudgets?: readonly string[];
+	/**
+	 * Where each still-carried fixed budget came from. Beside the key list
+	 * because the Settings p99 seed is withheld from a capacity run while a memo
+	 * or typed p99 is not (issue #2816).
+	 */
+	budgetSources?: CarriedBudgets["fixed"];
 	scriptsOverride: ScriptsOverride;
 	dataFile: SelectedDataFile | null;
 	isStreamingRequest: boolean;
@@ -87,7 +94,8 @@ function carriedInThresholds(
 
 export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 	const { profile, dataFile } = draft;
-	const thresholds = buildThresholds(draft.budgets, draft.failRun, draft.customBudgets);
+	const budgets = budgetsToSend(draft.budgets, profile.mode, draft.budgetSources);
+	const thresholds = buildThresholds(budgets, draft.failRun, draft.customBudgets);
 	const carriedBudgets = carriedInThresholds(draft.carriedBudgets, thresholds);
 
 	const config: LoadTestConfig = {

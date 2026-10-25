@@ -40,6 +40,7 @@ import { CurrentConcurrencyCard } from "./CurrentConcurrencyCard";
 import { SaturationCard } from "./SaturationCard";
 import { LatencyPercentilesCard } from "./LatencyPercentilesCard";
 import { HeroRow } from "./HeroRow";
+import type { CapacityResult } from "@/components/shared/capacityStop";
 import type { DashboardDerived } from "../../types";
 import type { Breakpoint } from "../../utils/computeBreakpoint";
 
@@ -563,5 +564,200 @@ describe("hero cards print counts, percents and spans through the shared formatt
 		);
 		expect(out).toContain("p99 crossed 227ms at 45 virtual users");
 		expect(out).not.toContain("SLO");
+	});
+});
+
+describe("the Saturation card of a capacity run reads the search's stop reason (#2816)", () => {
+	const row = (over: Partial<DashboardDerived>) => ({ ...derived("capacity"), ...over });
+	const render_ = (d: DashboardDerived) =>
+		render(
+			<TooltipProvider>
+				<HeroRow d={d} />
+			</TooltipProvider>
+		);
+	/** The card's own text, with the eyebrow's label and the sibling cards cut away. */
+	const saturation = (d: DashboardDerived): string => {
+		const { container } = render_(d);
+		const card = [...container.querySelectorAll('[data-slot="card"]')].find((c) =>
+			c.textContent?.startsWith("Saturation")
+		);
+		return card?.textContent ?? "";
+	};
+	const headline = (text: string) => screen.getByText(text);
+
+	const search = (over: Partial<CapacityResult>): CapacityResult => ({
+		sloMs: 200,
+		stopReason: "slo_exceeded",
+		levels: [],
+		...over,
+	});
+
+	it("reads a latency stop as degrading, at the level the target gave out", () => {
+		const out = saturation(
+			row({
+				isCompleted: true,
+				capacity: search({
+					kneeConcurrency: 41,
+					kneeP99Ms: 230,
+					maxHealthyConcurrency: 31,
+				}),
+			})
+		);
+		expect(out).toContain("⚠ degrading");
+		expect(out).toContain("p99 crossed 230ms (the 200ms SLO) at 41 virtual users");
+		expect(headline("⚠ degrading").className).toContain("text-warning-text");
+	});
+
+	it("reads an error stop as degrading, with the share that failed", () => {
+		const out = saturation(
+			row({
+				isCompleted: true,
+				failedRequests: 480,
+				capacity: search({
+					stopReason: "errors_exceeded",
+					kneeConcurrency: 30,
+					kneeErrorPct: 12.5,
+					maxHealthyConcurrency: 20,
+				}),
+			})
+		);
+		expect(out).toContain("⚠ degrading");
+		expect(out).toContain("12.5% of requests failed at 30 virtual users");
+		// The stop reason already says what failed; the count line would repeat it.
+		expect(out).not.toContain("480");
+	});
+
+	it("reads a plateau as saturated, at the level the engine names", () => {
+		const out = saturation(
+			row({
+				isCompleted: true,
+				capacity: search({
+					stopReason: "plateau",
+					saturationConcurrency: 64,
+					saturationRps: 1200,
+					saturationP99Ms: 90,
+					maxHealthyConcurrency: 96,
+				}),
+			})
+		);
+		expect(out).toContain("⚠ saturated");
+		expect(out).toContain("Throughput stopped growing at 64 virtual users (1,200 req/s)");
+		expect(headline("⚠ saturated").className).toContain("text-warning-text");
+	});
+
+	it("names no level for a plateau stored before the engine reported one", () => {
+		const out = saturation(
+			row({ isCompleted: true, capacity: search({ stopReason: "plateau" }) })
+		);
+		expect(out).toContain("⚠ saturated");
+		expect(out).toContain("Throughput stopped growing");
+		expect(out).not.toContain(" at ");
+	});
+
+	it.each([
+		["cap_reached", "Reached the virtual user ceiling"],
+		["deadline", "Ran out of time"],
+		["stopped", "Stopped by hand"],
+	])("reads %s as no limit found, in a neutral colour", (stopReason, label) => {
+		const out = saturation(row({ isCompleted: true, capacity: search({ stopReason }) }));
+		expect(out).toContain("no limit found");
+		expect(out).toContain(label);
+		const cls = headline("no limit found").className;
+		expect(cls).toContain("text-foreground");
+		expect(cls).not.toMatch(/text-(success|warning|destructive)/);
+	});
+
+	it("says searching, never healthy, while the run is live", () => {
+		const out = saturation(row({}));
+		expect(out).toContain("searching");
+		expect(out).not.toContain("healthy");
+		expect(headline("searching").className).toContain("text-foreground");
+	});
+
+	it("keeps reading the ticks against the run's SLO while it searches", () => {
+		const out = saturation(
+			row({
+				breakpoint: {
+					crossed: true,
+					concurrency: 22,
+					timeSeconds: 12,
+					p99Ms: 310,
+					sloMs: 250,
+					atRunStart: false,
+				},
+			})
+		);
+		expect(out).toContain("searching");
+		expect(out).toContain("p99 crossed 310ms (the 250ms SLO) at 22 virtual users");
+	});
+
+	// S7: the first level already broke the budget, so the search has a knee at
+	// level 1 and nothing held - and the ticks may never have crossed the line.
+	it("never reads healthy when no level met the budget", () => {
+		const out = saturation(
+			row({
+				isCompleted: true,
+				capacity: search({
+					kneeConcurrency: 1,
+					kneeP99Ms: 350,
+					levels: [{ concurrency: 1, rps: 12, p99Ms: 350 }],
+				}),
+			})
+		);
+		expect(out).toContain("⚠ degrading");
+		expect(out).toContain("p99 crossed 350ms (the 200ms SLO) at 1 virtual user");
+		expect(out).not.toContain("healthy");
+	});
+
+	it("names errors that did not end the search, without lighting the card", () => {
+		const out = saturation(
+			row({
+				isCompleted: true,
+				failedRequests: 3,
+				capacity: search({ stopReason: "cap_reached" }),
+			})
+		);
+		expect(out).toContain("no limit found");
+		expect(out).toContain("3 errors");
+		expect(out).not.toContain("so far");
+		expect(headline("no limit found").className).not.toContain("text-warning-text");
+	});
+
+	it("counts a single error in the singular, and a live one as so far", () => {
+		const out = saturation(row({ failedRequests: 1 }));
+		expect(out).toContain("searching");
+		expect(out).toContain("1 error so far");
+		expect(out).not.toContain("errors");
+	});
+
+	it("claims neither a limit nor its absence for a report without the section", () => {
+		const out = saturation(row({ isCompleted: true }));
+		expect(out).toContain("no result");
+		expect(out).not.toMatch(/healthy|searching|no limit found/);
+	});
+
+	it("prints a reason this build has no words for under its raw key", () => {
+		const out = saturation(
+			row({ isCompleted: true, capacity: search({ stopReason: "memory_exceeded" }) })
+		);
+		expect(out).toContain("no result");
+		expect(out).toContain("memory_exceeded");
+	});
+
+	it.each([
+		"slo_exceeded",
+		"errors_exceeded",
+		"plateau",
+		"cap_reached",
+		"deadline",
+		"stopped",
+		"something_new",
+	])("never prints healthy for %s", (stopReason) => {
+		const out = saturation(row({ isCompleted: true, capacity: search({ stopReason }) }));
+		expect(out).not.toContain("healthy");
+	});
+
+	it("leaves ramp_up's card on healthy / degrading", () => {
+		expect(saturation(derived("ramp_up"))).toContain("✓ healthy");
 	});
 });

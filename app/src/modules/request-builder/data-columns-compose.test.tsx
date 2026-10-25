@@ -293,6 +293,19 @@ describe("a load run started with a data file", () => {
 		expect(sent.dataFileCastNumbers).toBeUndefined();
 	});
 
+	// The dashboard judges a capacity run's breakpoint against the SLO the run was
+	// started with (#2816). Mutation check: drop `sloMs` from the `startRun`
+	// config in `index.tsx` and this fails.
+	it("hands the dashboard a capacity run's own SLO", async () => {
+		await startLoadRun({ mode: "capacity", concurrency: 100, slo_ms: 50 });
+
+		expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
+			mode: "capacity",
+			sloMs: 50,
+		});
+		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(50);
+	});
+
 	it("leaves the row count off a run with no file (#1940)", async () => {
 		await startLoadRun(LOAD_CONFIG);
 

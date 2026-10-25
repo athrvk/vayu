@@ -2026,13 +2026,18 @@ every assertion passed can still have missed its budget. `undefined` is a run
 that declared none - not a run that passed nothing - so a report without the
 section renders exactly as it did before budgets existed. The dialog seeds its
 p99 field from the client `sloThresholdMs` setting, which until then only
-annotated a chart.
+annotated a chart. A Capacity discovery run does not send that seed (issue
+#2816): the engine judges `latencyP99Ms` on the run's pooled histogram, which
+holds every over-budget level the search climbed through on purpose, so
+`thresholds` omits it and a run with no other budget reads "No budgets set". A
+p99 typed in the dialog, or carried from the last Start, is sent in every mode.
 
 `LoadTestConfigDialog` also tells the engine which of those budgets the user did
 not set for this run (issue #2195): top-level `carriedBudgets: string[]` on
 `POST /runs` (`StartLoadTestRequest`), the `thresholds` keys still holding a
 value the memo or the SLO seed filled in and the user left alone, spelled as
-they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`). The engine
+they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`; the SLO seed
+only outside Capacity discovery, which does not send it). The engine
 only stores it and echoes it as `metadata.configuration.carriedBudgets`, which
 `ThresholdVerdict` reads to tag those rows "carried over"; the verdict itself is
 computed the same either way. The list is cut at the engine's 64-entry cap
