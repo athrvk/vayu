@@ -1660,6 +1660,21 @@ const std::string& run_id,
 vayu::core::RunManager* live_runs = nullptr);
 
 /**
+ * Testable core of `POST /runs/:id/stop` for a run whose context is active:
+ * signals the stop, waits up to @p grace_seconds for the worker to clear
+ * `is_running`, and answers the body. Defined in runs.cpp.
+ *
+ * A load run (a scenario load run included) answers from its context's
+ * collector. A sequential collection run (`RunType::Scenario`) feeds no
+ * collector, so it answers from the summary its worker stores before clearing
+ * `is_running`, and with no `summary` at all while none is stored (#2822).
+ */
+nlohmann::json stop_active_run_response (vayu::db::Database& db,
+vayu::core::RunContext& context,
+vayu::RunType run_type,
+int grace_seconds);
+
+/**
  * Testable core of `GET /runs/:id/metrics`: one `{data, pagination}` page of
  * the run's ticks, 404 for a missing run. @p limit and @p offset arrive
  * clamped (at most `RUN_TIME_SERIES_PAGE_MAX` ticks a page). Defined in

@@ -10621,8 +10621,10 @@ recorded before this issue.
 
 ### POST /runs/:runId/stop
 
-Stop a running load test. The engine signals the run, waits up to 5s for its
-worker to settle, and answers with a summary of what the run actually did.
+Stop a running load test or collection run. The engine signals the run, waits up
+to 5s for its worker to settle, and answers with a summary of what the run
+actually did. A collection run's summary is optional; see
+[Stopping a collection run](#stopping-a-collection-run) below.
 
 **Stop discards, it does not drain.** The queued backlog is thrown away rather
 than sent, and transfers already in flight are cancelled (removed from curl and
@@ -10683,6 +10685,43 @@ run reaches `stopped` with its trace and its true event count together; the
 stream's `complete` event carries `"reason": "stopped"`. A stream that had
 already terminated keeps the reason it recorded rather than being rewritten as a
 user stop.
+
+#### Stopping a collection run
+
+A sequential collection run (a `scenario` run, issue #2822) feeds no load
+collector, so its answer is read from the summary its worker stores once it has
+stopped, the same one the [report](#get-runsrunidreport) reads:
+
+```json
+{
+  "status": "stopped",
+  "runId": "run_1234567890",
+  "summary": {
+    "totalRequests": 31,
+    "errors": 2,
+    "httpErrors": 2,
+    "noResponse": 0,
+    "errorRate": 6.45,
+    "avgLatencyMs": 12.5,
+    "stepsExecuted": 40
+  }
+}
+```
+
+`totalRequests` is **requests sent** and `stepsExecuted` is **steps**, as in the
+report: a step the plan skipped is a step and not a request. `errors`,
+`httpErrors`, `noResponse` and `errorRate` come from the stored status-code
+distribution over those requests, and `avgLatencyMs` is the stored latency
+block's `avg` (`0` when no step sent). There is no `cancelled`: a collection
+run keeps no count of what its stop cancelled. `status` is the run's stored
+status.
+
+**The summary is absent when the worker has not stored one** within the 5s,
+or could not store it. The answer is then
+`{"status": "<stored status>", "runId": ..., "message": "Stop signalled; read
+the report"}`, usually with `status` `running`. The stop still stands: read the
+run's report once it reports a terminal status. A scenario **load** run is a
+`load` run and answers from its collector as above.
 
 ### GET /runs/:runId/report
 
@@ -11302,8 +11341,18 @@ and never needed to (that one reports an empty `refreshes` array).
 
 `stepsStored` versus `stepsExecuted` is the honest reading of `results[]`: a run
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
-non-passing step among the ones kept. `summary.totalRequests` is the number of
-step executions, not the number of rows that survived.
+non-passing step among the ones kept. On a collection run (design mode)
+`stepsExecuted` counts **steps** and `summary.totalRequests` counts **requests
+sent** (issue #2822): a step the plan skipped (`control.if`,
+`control.throughput`, `pm.execution.skipRequest()`) is a step and not a request,
+while a request that got no response is one, under status `0`. `statusCodes`,
+`successfulRequests`, `failedRequests` and `errorRate` come from the
+distribution the runner stored over those same requests, never from the kept
+rows, where a skipped step is a status-`0` row: they describe the whole run past
+`maxScenarioStoredSteps` and agree with a `maxErrorRatePct` check's `actual`. A
+run in which every step was skipped reports `totalRequests` `0` and an empty
+`statusCodes`. A summary stored before #2822 has no distribution: its
+`totalRequests` is the step count and the split comes from the kept rows.
 
 `stepsNotRun` is how many plan positions errors cost the run - summed over
 every iteration an `errored` step ended, the positions after that step the
@@ -11325,6 +11374,13 @@ same shape `scenario.transactions` documents elsewhere on this page.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
 `summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
 latency.
+
+**A collection run's `summary` omits the load-only figures** (issue #2822). A
+sequential run feeds no load collector, so `sendRate`, `throughput`,
+`peakConcurrency`, `droppedRequests`, `avgQueueWaitMs`, `bytesSent`,
+`bytesReceived`, `throughputBytesPerSec`, `setupOverhead` and `cleanupOverhead`
+are absent rather than `0`; `avgRps` is requests sent over `testDuration`. A
+scenario load run is a `load` run and carries every one of them.
 
 **A collection run's `latency` block** (issue #2389) is the stored `latency` its runner wrote,
 over the [latency population](#latency-population) of the sequential path: every step whose

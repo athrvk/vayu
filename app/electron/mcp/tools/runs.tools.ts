@@ -88,7 +88,7 @@ export const RUN_TOOLS: McpTool[] = [
 		invalidates: ["run"],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description:
-			"Stop a run that is still in progress: a load test, or a streaming Design-mode send that is holding its connection open. The run ends where it is and keeps what it already recorded rather than being discarded, so get_run_report and get_run_samples still answer for it afterwards. Read the status in the result: a stream that closes within the engine's 5 s settle budget comes back `stopped`, and one that has not settled yet comes back `running` with a message saying the stop was signalled - it is not a failure, and re-reading the run reports the end state. Calling it on a run that has already finished is not an error: the result reports the status it was already in. A run id the engine does not know is an error.",
+			"Stop a run that is still in progress: a load test, a collection run, or a streaming Design-mode send holding its connection open. The run ends where it is and keeps what it already recorded, so get_run_report and get_run_samples still answer for it. Read the status in the result: a stream or collection run that has not settled within the engine's 5 s budget comes back `running` with a message saying the stop was signalled - not a failure; re-reading the run reports the end state. A collection run's result then carries no `summary`: read get_run_report(runId) for its counts. A run that already finished is not an error: the result reports its status. An unknown run id is an error.",
 		annotations: {
 			title: "Stop run",
 			readOnlyHint: false,
