@@ -4624,7 +4624,10 @@ The sections, in order:
    declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows.
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
-4. `## Results`: requests, requests per second (`avgRps`, labelled as the
+4. `## Results`: requests, a `Skipped requests` row only when `summary.skippedRequests`
+   is above 0 (`625 requests skipped: the load generator stalled for 2.5 s`, from
+   `skippedRequests` and `stalledMs`, issue #2911; absent or `0` prints no row),
+   requests per second (`avgRps`, labelled as the
    whole run with the drain included), responses per second while sending
    (`completedWhileSending / sendingDurationSeconds`, issue #2882, only when
    the report has both), error rate with its split into HTTP errors and no
@@ -11080,7 +11083,9 @@ tell a stall from a slow target. `sent + skipped + dropped` is
 `requestsExpected` for a run that reaches its deadline. The [run
 export](#post-exportrun-report) carries both in `report.summary` (optional in its
 schema, absent from a document written before them); its Markdown and HTML
-renderings print neither, as they print no `droppedRequests`.
+renderings print them as one `Skipped requests` row of the results table when
+`skippedRequests` is above 0, apart from `maxInFlight` drops, which they do not
+print (`droppedRequests` has no row).
 
 An `iterations` run, single-request or scenario, is the one exception: its
 loop returns on its last submission with the batch before it still in flight,

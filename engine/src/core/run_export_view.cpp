@@ -624,12 +624,36 @@ std::optional<double> responses_per_second_while_sending (const ordered& summary
     return *completed / *seconds;
 }
 
+/// `625 requests skipped: the load generator stalled for 2.5 s` (#2911), the
+/// app's dropped-requests card in words. Nothing when the summary holds no skip
+/// (a run stored before the field, or one the pacer kept up with), so an older
+/// document renders as it always did.
+std::optional<ReportText> skipped_requests_text (const ordered& summary) {
+    const auto skipped = number_at (summary, { "skippedRequests" });
+    if (!skipped || *skipped <= 0) {
+        return std::nullopt;
+    }
+    const double stalled_seconds =
+    number_at (summary, { "stalledMs" }).value_or (0) / 1000;
+    // A stall under half a tenth of a second would spell "0 s", which reads as
+    // no stall at all next to a positive skip count.
+    const std::string stalled =
+    stalled_seconds > 0 && format_run_seconds (stalled_seconds) == "0 s" ?
+    "<0.1 s" :
+    format_run_seconds (stalled_seconds);
+    return words (format_run_count (*skipped) + (*skipped == 1 ? " request" : " requests") +
+    " skipped: the load generator stalled for " + stalled);
+}
+
 Table results_table (const ordered& document) {
     const ordered& summary = at_path (document, { "report", "summary" });
     const ReportCell none  = cell (absent ());
     Table table{ { "Metric", "Value", "Budget" }, {} };
     table.rows.push_back (metric_row ("Requests",
     figure_text (number_at (summary, { "totalRequests" }), format_run_count), none));
+    if (const auto skipped = skipped_requests_text (summary)) {
+        table.rows.push_back (metric_row ("Skipped requests", *skipped, none));
+    }
     table.rows.push_back (
     metric_row ("Requests per second (whole run, drain included)",
     figure_text (number_at (summary, { "avgRps" }), format_run_figure, " req/s"),
