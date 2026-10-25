@@ -827,6 +827,7 @@ export default function RequestBuilder() {
 						rampUpDuration: apiRequest.rampUpDuration,
 						startConcurrency: apiRequest.startConcurrency,
 						sloMs: apiRequest.sloMs,
+						latencyP99Ms: apiRequest.thresholds?.latencyP99Ms,
 						dataRowCount: config.data?.length,
 						dataFileName: config.dataFileName,
 						dataFileHash: config.dataFileHash,

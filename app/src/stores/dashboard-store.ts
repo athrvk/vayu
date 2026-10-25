@@ -59,20 +59,35 @@ export interface LoadTestRunConfig {
 	dataFileCastNumbers?: boolean;
 	/** A capacity run's own p99 budget (ms), the search's stop line; absent in every other mode. */
 	sloMs?: number;
+	/** The `latencyP99Ms` threshold the run declared (ms); absent when it set none. */
+	latencyP99Ms?: number;
+}
+
+/** A capacity run's own p99 budget, the line its search stops on; no other mode has one. */
+function capacitySloMs(config: LoadTestRunConfig | null): number | undefined {
+	return config?.mode === "capacity" ? config.sloMs : undefined;
+}
+
+/**
+ * The p99 line (ms) the live charts, latency tiles and HDR markers draw: the
+ * run's own, which mirrors `runSloMs(report)` for a stored run (#2939). A
+ * capacity run's `sloMs` (the line its search stopped on), else its
+ * `latencyP99Ms` budget, else `undefined`. The Settings SLO is a client
+ * preference, not a property of the run, so it is never the answer.
+ */
+export function runOwnSloMs(config: LoadTestRunConfig | null): number | undefined {
+	return capacitySloMs(config) ?? config?.latencyP99Ms;
 }
 
 /**
  * The SLO (ms) a run's breakpoint is judged against: a capacity run's own, which
  * its search stopped on, and the Settings SLO for every other mode. A capacity
  * run judged by the Settings line would draw one budget on the Capacity summary
- * and another on the Saturation card and the chart.
+ * and another on the Saturation card and the chart. This is the judge only; what
+ * the charts draw is {@link runOwnSloMs}, as History's is.
  */
-function runOwnSloMs(config: LoadTestRunConfig | null): number | undefined {
-	return config?.mode === "capacity" ? config.sloMs : undefined;
-}
-
 function sloMsFor(config: LoadTestRunConfig | null): number {
-	return runOwnSloMs(config) ?? useClientSettingsStore.getState().sloThresholdMs;
+	return capacitySloMs(config) ?? useClientSettingsStore.getState().sloThresholdMs;
 }
 
 /**
@@ -255,7 +270,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			// A run started elsewhere (an MCP agent's) streams ticks before its config
 			// is read, so they were judged against the Settings SLO. A capacity run's
 			// own line replaces that verdict, from the ticks still retained.
-			const ownSloMs = runOwnSloMs(config);
+			const ownSloMs = capacitySloMs(config);
 			if (ownSloMs === undefined || ownSloMs === state.breakpoint.sloMs) return patch;
 			return { ...patch, breakpoint: computeBreakpoint(state.historicalMetrics, ownSloMs) };
 		}),

@@ -1215,6 +1215,13 @@ export interface RunConfigSnapshot {
 	 */
 	dataFileCastNumbers?: boolean;
 	/**
+	 * The budgets the run declared, as sent (the engine stores the sanitized
+	 * request body). `loadConfigFromSnapshot` reads `latencyP99Ms` from it as the
+	 * line the live dashboard draws. A key can be absent, and a run recorded before
+	 * budgets existed has none.
+	 */
+	thresholds?: RunThresholds;
+	/**
 	 * Requested protocol the run executed with - `build_run_report_config` in
 	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
 	 * key to `"auto"` before this ever reaches the client, so it is always
@@ -2123,8 +2130,9 @@ export interface LoadTestConfig {
 	/**
 	 * Capacity only: the p99 budget the search looks for the edge of, in ms.
 	 * Prefilled from the client-side `sloThresholdMs` setting, so the number
-	 * the dashboard already annotates its charts with becomes the number the
-	 * search is steered by rather than a second, unrelated one.
+	 * the search is steered by is the one the user already chose rather than a
+	 * second, unrelated one. The live and stored dashboards draw it as the run's
+	 * SLO line (`runOwnSloMs`, `runSloMs`).
 	 */
 	slo_ms?: number;
 	/** Capacity only: how long each concurrency level is held before it is judged. */

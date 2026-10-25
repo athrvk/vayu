@@ -1038,6 +1038,31 @@ describe("pass/fail budgets", () => {
 		});
 	});
 
+	// The live charts draw the run's own p99 budget (#2939). Mutation check: drop
+	// `latencyP99Ms` from the `startRun` seed in the dialog and the first case fails.
+	it("hands the dashboard a load run's p99 budget, and no line without one", () => {
+		const startLoad = (runId: string) => {
+			fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+			succeedWith(runId);
+		};
+
+		const { unmount } = render(
+			<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />
+		);
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/p99 latency/i), { target: { value: "150" } });
+		startLoad("run_budget_1");
+		expect(useDashboardStore.getState().loadTestConfig?.latencyP99Ms).toBe(150);
+		unmount();
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		startLoad("run_budget_2");
+		expect(useDashboardStore.getState().loadTestConfig?.latencyP99Ms).toBeUndefined();
+	});
+
 	it("blocks Run on an out-of-range budget instead of dropping the field", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();

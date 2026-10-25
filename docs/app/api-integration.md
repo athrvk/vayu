@@ -2028,8 +2028,10 @@ response at a time and cannot assert a p99 or an error rate, so a run whose
 every assertion passed can still have missed its budget. `undefined` is a run
 that declared none - not a run that passed nothing - so a report without the
 section renders exactly as it did before budgets existed. The dialog seeds its
-p99 field from the client `sloThresholdMs` setting, which until then only
-annotated a chart. A Capacity discovery run does not send that seed (issue
+p99 field from the client `sloThresholdMs` setting. The live dashboard draws a
+run's `thresholds.latencyP99Ms` as its SLO line (`LoadTestRunConfig.latencyP99Ms`,
+set by the request builder, the collection runner and `loadConfigFromSnapshot`),
+and a run with no p99 budget draws none: the setting is never the line. A Capacity discovery run does not send that seed (issue
 #2816): the engine judges `latencyP99Ms` on the run's pooled histogram, which
 holds every over-budget level the search climbed through on purpose, so
 `thresholds` omits it and a run with no other budget reads "No budgets set". A

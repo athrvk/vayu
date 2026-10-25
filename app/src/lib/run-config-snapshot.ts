@@ -56,6 +56,7 @@ export function loadConfigFromSnapshot(snapshot: RunConfigSnapshot): LoadTestRun
 		rampUpDuration: duration(snapshot.rampUpDuration),
 		startConcurrency: count(snapshot.startConcurrency),
 		sloMs: count(snapshot.sloMs),
+		latencyP99Ms: count(snapshot.thresholds?.latencyP99Ms),
 		dataRowCount: count(scenario.dataRowCount) ?? count(snapshot.dataRowCount),
 		dataFileName: dataFile?.fileName,
 		dataFileHash: dataFile?.hash,

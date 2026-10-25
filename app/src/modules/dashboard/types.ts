@@ -202,7 +202,7 @@ export interface DashboardDerived {
 	/**
 	 * The p99 line (ms) the stored run declared for itself, from `runSloMs`; the
 	 * only SLO its charts and latency tiles draw. Absent for a run with neither a
-	 * capacity budget nor a p99 budget, and absent live. Distinct from
+	 * capacity budget nor a p99 budget, and absent live (the live view reads `runOwnSloMs` off the store). Distinct from
 	 * `breakpoint.sloMs`, which a non-capacity run judges against the Settings SLO.
 	 */
 	runSloMs?: number;

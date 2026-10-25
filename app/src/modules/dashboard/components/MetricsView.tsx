@@ -30,7 +30,7 @@ import { formatByteRateParts, formatNumber, formatPercent } from "@/lib/format-n
 import { CONCURRENCY_UNIT, isConcurrencySweepMode } from "@/constants/load-test-modes";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useClientSettingsStore, useDashboardStore } from "@/stores";
+import { runOwnSloMs, useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
 import { InfoChip } from "./shared";
@@ -163,10 +163,10 @@ function MetricsView({
 	// of an O(n) scan over the full historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
-	// The live view still draws the Settings SLO for a run that names none; the
-	// stored view does not (#2939), and this fallback is what the live path drops.
-	const settingSloMs = useClientSettingsStore((s) => s.sloThresholdMs);
-	const sloMs: number | undefined = breakpoint.sloMs ?? settingSloMs;
+	// The line drawn is the run's own, as in History (#2939): not `breakpoint.sloMs`,
+	// which is what a non-capacity run is judged against (the Settings SLO), and
+	// not the Settings SLO itself. A run that declared no p99 line draws none.
+	const sloMs = useDashboardStore((s) => runOwnSloMs(s.loadTestConfig));
 	const p99AtPeakMs = useDashboardStore((s) => s.p99AtPeakMs);
 	// When the windowed send and completion rates parted, folded per tick in the
 	// store like the aggregates above; the chip needs "for how long" and must not

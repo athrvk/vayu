@@ -177,18 +177,25 @@ consumes it.
   the flag with the breakpoint; History's `computeBreakpoint` sets it over its
   own series, where on a bucketed run it means the first bucket. The ramp's
   Saturation card's call-out names the same SLO ("p99 crossed 203ms (the 200ms
-  SLO) at 19 virtual users"). Which SLO that is, live: a `capacity` run's own
-  `sloMs` (from the start config), the Settings threshold in every other mode,
-  read by `MetricsView` off `breakpoint.sloMs` and handed to the charts as their
-  `sloMs` prop. A stored run draws only the line it declared for itself
-  (#2939): `runSloMs(report)` is `report.capacity.sloMs`, else the `limit` of its
+  SLO) at 19 virtual users"). Which SLO the breakpoint is judged
+  against, live: a `capacity` run's own `sloMs` (from the start config), the
+  Settings threshold in every other mode (`sloMsFor` in `dashboard-store`). The
+  line the charts draw is another question, and a run answers it for itself in
+  both views (#2939). Live, `runOwnSloMs(loadTestConfig)` is the capacity
+  `sloMs`, else the `latencyP99Ms` budget the start config carries (the
+  request builder and the collection runner copy it from the `thresholds` they
+  sent; `loadConfigFromSnapshot` reads it from the stored `thresholds` of an
+  agent-started run), else nothing; `MetricsView` hands it to the charts, the
+  legend and the HDR plot as their `sloMs`. Stored,
+  `runSloMs(report)` is `report.capacity.sloMs`, else the `limit` of its
   `latencyP99Ms` check (evaluated or not), else nothing, and `reportToDerived`
   carries it as `DashboardDerived.runSloMs`. With none, History draws no
   horizontal SLO line, no SLO legend entry and no coloured latency tile or HDR
   marker: the Settings SLO is a client preference, not a property of the run, so
   a p99 of 300ms against a 200ms setting is not a miss the run ever signed up
-  for. The stored ramp's breakpoint is still judged against the Settings
-  threshold, so `DashboardDerived.breakpoint.sloMs` is not the line to draw.
+  for; a live run with no p99 line is drawn the same way. A ramp's breakpoint is
+  still judged against the Settings threshold in both views, so
+  `breakpoint.sloMs` is not the line to draw.
 - **A capacity run draws the response-time-vs-concurrency scatter, live and in
   History, in place of the percentile card** (#2931). The search steps the user
   count up level by level, so the scatter is the picture of it; the gate is
