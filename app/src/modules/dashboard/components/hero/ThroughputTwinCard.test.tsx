@@ -59,20 +59,20 @@ describe("ThroughputTwinCard chip", () => {
 describe("ThroughputTwinCard queue chip", () => {
 	const queueChip = () => screen.queryByText(/^queue/);
 
-	// The bar is 1% of the run's median latency, never under 1 ms (#2801).
+	// The bar is 1% of the run's median latency, never under 0.5 ms (#2801).
 	it.each<[string, number, number | undefined, boolean]>([
 		["4.8 ms against a 300 ms median is material", 4.8, 300, true],
 		["0.3 ms against a 300 ms median is not", 0.3, 300, false],
-		["0.8 ms against a 20 ms median is below the 1 ms floor", 0.8, 20, false],
-		["1 ms against a 20 ms median meets the floor", 1, 20, true],
+		["0.8 ms against a 20 ms median is material", 0.8, 20, true],
+		["0.4 ms against a 20 ms median is under the 0.5 ms floor", 0.4, 20, false],
 		["2.9 ms against a 300 ms median is just under 1%", 2.9, 300, false],
 		["3 ms against a 300 ms median is exactly 1%", 3, 300, true],
-		["a missing median leaves the 1 ms floor", 1.5, undefined, true],
-		["a zero median leaves the 1 ms floor", 1.5, 0, true],
-		["a NaN median leaves the 1 ms floor", 1.5, Number.NaN, true],
-		["an infinite median leaves the 1 ms floor", 1.5, Number.POSITIVE_INFINITY, true],
-		["a missing median still hides a wait under the floor", 0.5, undefined, false],
-		["a NaN median still hides a wait under the floor", 0.5, Number.NaN, false],
+		["a missing median leaves the 0.5 ms floor", 1.5, undefined, true],
+		["a zero median leaves the 0.5 ms floor", 1.5, 0, true],
+		["a NaN median leaves the 0.5 ms floor", 1.5, Number.NaN, true],
+		["an infinite median leaves the 0.5 ms floor", 1.5, Number.POSITIVE_INFINITY, true],
+		["a missing median still hides a wait under the floor", 0.4, undefined, false],
+		["a NaN median still hides a wait under the floor", 0.4, Number.NaN, false],
 	])("%s", (_name, avgQueueWaitMs, medianLatency, shown) => {
 		draw(
 			<ThroughputTwinCard

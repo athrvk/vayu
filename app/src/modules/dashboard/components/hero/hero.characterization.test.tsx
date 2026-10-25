@@ -263,7 +263,7 @@ describe("HeroRow queue chip is judged against the run's median latency (#2801)"
 		expect(screen.getByText(/^queue/)).toBeInTheDocument();
 	});
 
-	// Over the 1 ms floor, so only the median keeps it hidden.
+	// Over the 0.5 ms floor, so only the median keeps it hidden.
 	it("hides 2 ms of queue on a 300 ms median", () => {
 		renderRow({ avgQueueWaitMs: 2, medianLatency: 300 });
 

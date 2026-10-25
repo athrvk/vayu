@@ -32,13 +32,13 @@ const STATUS_CHIP: Record<DispatchStatus, { chip: string; sentence: string }> = 
 	},
 };
 
-const QUEUE_CHIP_FLOOR_MS = 1;
+const QUEUE_CHIP_FLOOR_MS = 0.5;
 const QUEUE_CHIP_MEDIAN_SHARE = 0.01;
 
 /**
  * Queue wait is worth a chip when it is material against the run's own latency
  * (#2801): a fixed 5 ms bar hid 4.8 ms of queue on a 300 ms median. A median that is absent, zero or not a number (a live run before
- * its first completion) leaves the 1 ms floor.
+ * its first completion) leaves the 0.5 ms floor.
  */
 function showsQueueChip(avgQueueWaitMs?: number, medianLatency?: number): boolean {
 	if (avgQueueWaitMs === undefined) return false;
