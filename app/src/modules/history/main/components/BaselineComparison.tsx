@@ -18,7 +18,8 @@
  *
  * A failed run the engine could not fully record (#2895) draws no delta for a
  * figure it did not measure: its zeros would read as an improvement on the
- * baseline's real numbers.
+ * baseline's real numbers. When the flagged run is the baseline, the cell
+ * keeps the open run's figure and reads "baseline not recorded" (#2904).
  *
  * Under the deltas, one warning row per `comparability` entry: the two runs
  * must be the same experiment (same mode, virtual users, duration, ...) for a

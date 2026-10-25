@@ -68,7 +68,10 @@ inline constexpr auto COMPARED_METRICS = std::to_array<ComparedMetric> ({
  *   (a data file excepted).
  * - `deltas[]`: `{metric, base, target, delta, pctChange, direction}` per
  *   @ref COMPARED_METRICS; a value a report lacks is `null`, and so is every
- *   figure computed from it. `pctChange` is `null` against a zero base.
+ *   figure computed from it. A report whose `summary.summaryMissing` is `true`
+ *   has no recorded counts or latency, and one whose `summary.partial` is
+ *   `true` no recorded latency (#2904): those figures are `null` on that side,
+ *   judged per report. `pctChange` is `null` against a zero base.
  * - `statusCodes`: `{code: {base, target}}` over both runs' codes, a code one
  *   run never saw counting 0.
  */

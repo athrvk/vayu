@@ -628,7 +628,7 @@
               }
             },
             "deltas": {
-              "description": "One entry per compared metric, in this order. A value a report lacks is null, and so is every figure computed from it; pctChange is null against a zero base.",
+              "description": "One entry per compared metric, in this order. A value a report lacks is null, and so is every figure computed from it; so is a figure the report flags as unrecorded (summary.summaryMissing nulls the summary metrics and latency of that run, summary.partial its latency alone). pctChange is null against a zero base.",
               "type": "array",
               "items": {
                 "type": "object",
