@@ -10,17 +10,17 @@
  */
 
 /**
- * A failed load run the engine could not fully record (#2895) has an all-zero
- * latency block. The Performance tab must not draw it as measurements: one
- * "not recorded" line replaces the percentile tiles and the HDR plot card, for
- * both flags, and a run that recorded its summary keeps them.
+ * A failed load run the engine could not fully record (#2895) has no
+ * `latency` block (#2938). The Performance tab prints "-" in every percentile
+ * tile, never 0ms, and drops the HDR plot card, for both flags; a run that
+ * recorded its summary keeps its figures.
  *
- * Mutation-check: have `PerformanceTab` ignore `unrecordedFiguresOf(...).latency`
- * and the flagged cases fail on the 0 ms tiles and the HDR card.
+ * Mutation-check: revert `formatLatencyPartsOrDash` and the flagged cases read
+ * 0 ms in their tiles; draw the HDR card unconditionally and they fail on it.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import type { RunReport } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
@@ -34,7 +34,8 @@ const PerformanceTab = (await import("./PerformanceTab")).default;
 
 type Flags = Pick<RunReport["summary"], "partial" | "summaryMissing">;
 
-function makeReport(flags: Flags, latency: Partial<RunReport["latency"]>): RunReport {
+/** A flagged run omits `latency`; pass one only for a run that recorded it. */
+function makeReport(flags: Flags, latency?: Partial<NonNullable<RunReport["latency"]>>): RunReport {
 	return {
 		metadata: { runId: "run_1", runType: "load", status: "failed" },
 		summary: {
@@ -45,7 +46,9 @@ function makeReport(flags: Flags, latency: Partial<RunReport["latency"]>): RunRe
 			errorRate: 0,
 			...flags,
 		},
-		latency: { min: 0, max: 0, avg: 0, p50: 0, p90: 0, p95: 0, p99: 0, ...latency },
+		...(latency && {
+			latency: { min: 0, max: 0, avg: 0, p50: 0, p90: 0, p95: 0, p99: 0, ...latency },
+		}),
 	} as unknown as RunReport;
 }
 
@@ -65,22 +68,24 @@ describe("PerformanceTab unrecorded latency", () => {
 	it.each([
 		["summaryMissing", { summaryMissing: true }],
 		["partial", { partial: true }],
-	] as const)("says the latency was not recorded for a %s run", (_name, flags) => {
-		renderTab(makeReport(flags, {}));
+	] as const)("prints a dash in every tile for a %s run", (_name, flags) => {
+		renderTab(makeReport(flags));
 
 		expect(screen.getByText("Latency distribution")).toBeInTheDocument();
-		expect(screen.getAllByText("not recorded")).toHaveLength(1);
-		expect(screen.queryByText("P99")).toBeNull();
-		expect(screen.queryByText("Average")).toBeNull();
+		for (const label of ["Average", "P50 (Median)", "P90", "P95", "P99"]) {
+			const tile = screen.getByText(label).parentElement!;
+			expect(within(tile).getByText("-")).toBeInTheDocument();
+		}
 		expect(screen.queryByText(/^0\s?ms$/)).toBeNull();
+		expect(screen.queryByText("not recorded")).toBeNull();
 		expect(screen.queryByText("HDR percentile plot")).toBeNull();
 	});
 
 	it("draws the tiles and the HDR plot card for a run that recorded its summary", () => {
 		renderTab(makeReport({}, { avg: 2, p50: 2, p95: 3, p99: 4 }));
 
-		expect(screen.queryByText("not recorded")).toBeNull();
-		expect(screen.getByText("P99")).toBeInTheDocument();
+		expect(screen.queryByText("-")).toBeNull();
+		expect(within(screen.getByText("P99").parentElement!).getByText("4")).toBeInTheDocument();
 		expect(screen.getByText("Average")).toBeInTheDocument();
 		expect(screen.getByText("HDR percentile plot")).toBeInTheDocument();
 	});

@@ -174,11 +174,11 @@ export interface DashboardDerived {
 	avgInFlight?: number;
 	configuredConcurrency?: number;
 	backpressure: number;
-	// Latency
-	p99Latency: number;
-	meanLatency: number;
-	medianLatency: number;
-	p95Latency: number;
+	// Latency: absent for a stored run whose latency was not recorded (#2938)
+	p99Latency?: number;
+	meanLatency?: number;
+	medianLatency?: number;
+	p95Latency?: number;
 	// Timing
 	testDuration?: number;
 	elapsedSeconds: number;
