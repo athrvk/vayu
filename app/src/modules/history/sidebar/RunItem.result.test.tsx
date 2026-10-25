@@ -24,6 +24,10 @@
  * Failed assertions (#2820): drop `assertionsFailed` from `rowOutcome`'s input
  * and the glyph and accessible-name cases redden; drop it from `resultSubtitle`
  * and the line case reddens.
+ *
+ * Capacity (#2930): drop the `summary.capacity` guard in `resultSubtitle` and
+ * the capacity line case reddens; make `showsRunBounds` always true and the
+ * duration and virtual-user cases redden.
  */
 
 import { describe, it, expect } from "vitest";
@@ -85,6 +89,61 @@ describe("a load run's result line", () => {
 		);
 		expect(design.container.textContent).not.toContain("req/s");
 		expect(design.container.textContent).not.toContain("p95");
+	});
+});
+
+describe("a capacity run's row (#2930)", () => {
+	const CAPACITY_SUMMARY = {
+		url: "https://api.example.test/checkout",
+		method: "POST",
+		mode: "capacity",
+		duration: "300s",
+		concurrency: 500,
+	};
+	const FOUND = {
+		...RESULT,
+		capacity: { stopReason: "slo_exceeded", maxHealthyConcurrency: 41, kneeConcurrency: 51 },
+	};
+
+	it("reads what the search found instead of the run-average rate", () => {
+		const { container } = renderRow(
+			loadRun({ summary: CAPACITY_SUMMARY, resultSummary: FOUND })
+		);
+
+		expect(screen.getByText("held 41 · gave out at 51")).toBeInTheDocument();
+		expect(container.textContent).not.toContain("req/s");
+		expect(container.textContent).not.toContain("p95");
+	});
+
+	it("leaves out the deadline and ceiling the search was not run to, and keeps the mode", () => {
+		const { container } = renderRow(
+			loadRun({ summary: CAPACITY_SUMMARY, resultSummary: FOUND })
+		);
+
+		expect(container.textContent).not.toContain("300s");
+		expect(container.textContent).not.toContain("500 virtual users");
+		expect(screen.getByText("Capacity discovery")).toBeInTheDocument();
+	});
+
+	it("keeps the average-rate line and the bounds for a capacity row from an older engine", () => {
+		const { container } = renderRow(
+			loadRun({ summary: CAPACITY_SUMMARY, resultSummary: RESULT })
+		);
+
+		expect(screen.getByText("485 req/s · p95 42ms · 0.0% errors")).toBeInTheDocument();
+		expect(container.textContent).not.toContain("held");
+	});
+
+	it("keeps a load run's deadline and ceiling", () => {
+		renderRow(
+			loadRun({
+				summary: { ...CAPACITY_SUMMARY, mode: "constant_concurrency" },
+				resultSummary: RESULT,
+			})
+		);
+
+		expect(screen.getByText("300s")).toBeInTheDocument();
+		expect(screen.getByText("500 virtual users")).toBeInTheDocument();
 	});
 });
 

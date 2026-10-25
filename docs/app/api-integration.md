@@ -1068,7 +1068,10 @@ unbounded and are never read for one; once the run is terminal its row carries
 `assertionsFailed` (both or neither) on a scenario load run that made an exact
 assertion (#2820). The renderer reads `assertionsFailed` (the row's verdict and
 its result line); `assertionsPassed` has no renderer reader and is there for the
-MCP `list_runs` rows.
+MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
+(`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
+when the search found no such level, #2930), which the row's result line reads
+in place of the run-average `rps`; an engine that predates it sends none.
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept

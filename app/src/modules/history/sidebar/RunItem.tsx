@@ -298,6 +298,12 @@ export default function RunItem({
 	// not a hover row - it is what tells two runs of one url apart.
 	const comment = run.summary?.comment;
 
+	// A capacity search ends when it finds the limit, so its configured deadline
+	// and ceiling are bounds it was not run to, not what the run did (#2930).
+	const showsRunBounds = loadTestType !== "capacity";
+	const duration = showsRunBounds ? run.summary?.duration : undefined;
+	const concurrency = showsRunBounds ? run.summary?.concurrency : undefined;
+
 	const hasMeta =
 		(scenario &&
 			(scenario.stepCount != null ||
@@ -305,7 +311,7 @@ export default function RunItem({
 				scenario.recursive)) ||
 		(run.type === "load" &&
 			run.summary &&
-			(run.summary.duration || run.summary.concurrency || loadTestType || protocolLabel));
+			(duration || concurrency || loadTestType || protocolLabel));
 
 	return (
 		<RowContextMenu label="More actions for this run" actions={rowActions}>
@@ -525,16 +531,16 @@ export default function RunItem({
 								Sub-folders
 							</span>
 						)}
-						{run.type === "load" && run.summary?.duration && (
+						{run.type === "load" && duration && (
 							<span className="flex shrink-0 items-center gap-1">
 								<Clock className="size-icon-sm" />
-								{run.summary.duration}
+								{duration}
 							</span>
 						)}
-						{run.type === "load" && run.summary?.concurrency && (
+						{run.type === "load" && concurrency && (
 							<span className="flex shrink-0 items-center gap-1">
 								<Activity className="size-icon-sm" />
-								{formatConcurrency(run.summary.concurrency)}
+								{formatConcurrency(concurrency)}
 							</span>
 						)}
 						{run.type === "load" && loadTestType && (
