@@ -249,6 +249,28 @@ describe("HeroRow Send / Throughput pair on a finished run (#2882)", () => {
 	});
 });
 
+describe("HeroRow queue chip is judged against the run's median latency (#2801)", () => {
+	const renderRow = (over: Partial<DashboardDerived>) =>
+		render(
+			<TooltipProvider>
+				<HeroRow d={{ ...derived("constant_rps"), ...over }} />
+			</TooltipProvider>
+		);
+
+	it("shows 4.8 ms of queue on a 300 ms median", () => {
+		renderRow({ avgQueueWaitMs: 4.8, medianLatency: 300 });
+
+		expect(screen.getByText(/^queue/)).toBeInTheDocument();
+	});
+
+	// Over the 1 ms floor, so only the median keeps it hidden.
+	it("hides 2 ms of queue on a 300 ms median", () => {
+		renderRow({ avgQueueWaitMs: 2, medianLatency: 300 });
+
+		expect(screen.queryByText(/^queue/)).toBeNull();
+	});
+});
+
 describe("HeroRow latency card", () => {
 	const renderRow = (mode: DashboardDerived["mode"]) =>
 		render(
