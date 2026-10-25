@@ -69,6 +69,18 @@ describe("reportToDerived", () => {
 		});
 	});
 
+	// Mutation checked: dropping `capacity` from the return fails the first case.
+	describe("the search's result (#2816)", () => {
+		it("carries a capacity run's stop reason to the Saturation card", () => {
+			const capacity = { sloMs: 50, stopReason: "plateau", levels: [] };
+			expect(reportToDerived(baseReport({ capacity })).capacity).toBe(capacity);
+		});
+
+		it("carries none for a report with no capacity block", () => {
+			expect(reportToDerived(baseReport()).capacity).toBeUndefined();
+		});
+	});
+
 	describe("setup and cleanup overhead (#2894)", () => {
 		// Mutation checked: dropping `cleanupOverhead` from the return, or reading
 		// it from `s.setupOverhead`, fails the first case; defaulting setup to 0

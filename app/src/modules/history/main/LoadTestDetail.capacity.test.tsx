@@ -167,3 +167,40 @@ describe("a stored capacity run against its own SLO (#2816)", () => {
 		expect(isDanger()).toBe(false);
 	});
 });
+
+describe("a stored capacity run's Saturation card (#2816)", () => {
+	// Mutation-check: drop `capacity` from `reportToDerived`, or mount the ramp's
+	// card in HeroRow's capacity case, and these fail.
+	it("reads the stop reason the report stored, not the ticks", () => {
+		render(
+			withQueryClient(
+				<LoadTestDetail
+					report={report("capacity", {
+						...CAPACITY,
+						kneeConcurrency: 50,
+						kneeP99Ms: 60,
+					})}
+					runId="run_cap"
+				/>
+			)
+		);
+
+		expect(screen.getByText("⚠ degrading")).toBeTruthy();
+		expect(screen.getByText("(the 50ms SLO)", { exact: false })).toBeTruthy();
+		expect(screen.queryByText("✓ healthy")).toBeNull();
+	});
+
+	it("says no limit found, in words, for a search that ran out of ceiling", () => {
+		render(
+			withQueryClient(
+				<LoadTestDetail
+					report={report("capacity", { ...CAPACITY, stopReason: "cap_reached" })}
+					runId="run_cap"
+				/>
+			)
+		);
+
+		expect(screen.getByText("no limit found")).toBeTruthy();
+		expect(screen.queryByText("✓ healthy")).toBeNull();
+	});
+});
