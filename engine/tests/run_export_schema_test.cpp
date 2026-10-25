@@ -170,7 +170,9 @@ class RunExportSchemaTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
     }
 
-    void seed (const std::string& id, vayu::RunStatus status, const json& summary) {
+    /// A null @p summary stores none; @p with_samples false stores no result or
+    /// tick, as a run the engine died under has (its rows are written at the end).
+    void seed (const std::string& id, vayu::RunStatus status, const json& summary, bool with_samples = true) {
         vayu::db::Run run;
         run.id              = id;
         run.type            = vayu::RunType::Load;
@@ -186,7 +188,12 @@ class RunExportSchemaTest : public ::testing::Test {
         run.start_time = START_MS;
         run.end_time   = START_MS + 10000;
         db_->create_run (run);
-        db_->update_run_summary (id, summary.dump ());
+        if (!summary.is_null ()) {
+            db_->update_run_summary (id, summary.dump ());
+        }
+        if (!with_samples) {
+            return;
+        }
 
         vayu::db::Result result;
         result.run_id      = id;
@@ -278,6 +285,38 @@ TEST_F (RunExportSchemaTest, ARunStoredBeforeTheOverheadSplitValidates) {
     const json document = expect_valid (json{ { "runId", "run_pre_cleanup" } });
     EXPECT_FALSE (document["report"]["summary"].contains ("setupOverhead"));
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.1);
+}
+
+// #2905: the flags reach the document, and a run that carries one still has the
+// `latency` block the schema requires, all zeros. Mutation check: drop "partial"
+// or "summaryMissing" from SUMMARY_KEYS and the matching test fails; drop the
+// property from the schema and the validation does.
+TEST_F (RunExportSchemaTest, AReconciledRunCarriesItsPartialFlagAndAZeroLatency) {
+    seed ("run_partial", vayu::RunStatus::Failed,
+    json{ { "partial", true }, { "total_requests", 40 }, { "test_duration", 4.0 } },
+    /*with_samples=*/false);
+    const json document = expect_valid (json{ { "runId", "run_partial" } });
+    const json& report  = document["report"];
+    EXPECT_EQ (report["summary"].value ("partial", false), true);
+    EXPECT_FALSE (report["summary"].contains ("summaryMissing"));
+    EXPECT_EQ (report["summary"]["totalRequests"], 40);
+    EXPECT_DOUBLE_EQ (report["latency"].value ("p99", -1.0), 0.0);
+}
+
+TEST_F (RunExportSchemaTest, AFailedRunWithNoSummaryCarriesItsMissingFlagAndAZeroLatency) {
+    seed ("run_missing", vayu::RunStatus::Failed, json (), /*with_samples=*/false);
+    const json document = expect_valid (json{ { "runId", "run_missing" } });
+    const json& report  = document["report"];
+    EXPECT_EQ (report["summary"].value ("summaryMissing", false), true);
+    EXPECT_FALSE (report["summary"].contains ("partial"));
+    EXPECT_DOUBLE_EQ (report["latency"].value ("p99", -1.0), 0.0);
+}
+
+TEST_F (RunExportSchemaTest, ACompletedRunCarriesNeitherFlag) {
+    seed ("run_whole", vayu::RunStatus::Completed, healthy_summary ());
+    const json document = expect_valid (json{ { "runId", "run_whole" } });
+    EXPECT_FALSE (document["report"]["summary"].contains ("partial"));
+    EXPECT_FALSE (document["report"]["summary"].contains ("summaryMissing"));
 }
 
 TEST_F (RunExportSchemaTest, ARunWithErrorsAndAMissedBudgetValidates) {

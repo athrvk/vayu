@@ -549,6 +549,49 @@ TEST_F (RunExportTest, MarkdownIsTextMarkdownNamedAfterTheRun) {
     EXPECT_NE (text.find ("| Error rate "), std::string::npos) << text;
 }
 
+// #2905: a run whose summary is partial, or missing, says so in all three
+// formats; a completed run says neither. Mutation check: drop "partial" and
+// "summaryMissing" from SUMMARY_KEYS and the JSON and the two text formats fail.
+TEST_F (RunExportTest, AReconciledRunSaysSoInEveryFormat) {
+    struct Case {
+        std::string id;
+        vayu::RunStatus status;
+        json summary;
+        /// The summary flag the document carries, and the text both renderers
+        /// open with for it; both empty for a run that carries none.
+        std::string flag;
+        std::string notice;
+    };
+    const std::array<Case, 3> cases = { {
+    { "run_partial", vayu::RunStatus::Failed,
+    json{ { "partial", true }, { "total_requests", 40 }, { "test_duration", 4.0 } },
+    "partial", "Partial run:" },
+    { "run_missing", vayu::RunStatus::Failed, json (), "summaryMissing", "No summary was recorded" },
+    { "run_whole", vayu::RunStatus::Completed,
+    json{ { "total_requests", 10 }, { "test_duration", 60.0 } }, "", "" },
+    } };
+    for (const Case& c : cases) {
+        seed_run (c.id, vayu::RunType::Load, c.status,
+        json{ { "url", "https://x.test/a" }, { "method", "GET" } }, c.summary);
+        const json summary =
+        export_ok (json{ { "runId", c.id } }).second["report"]["summary"];
+        for (const std::string key : { "partial", "summaryMissing" }) {
+            EXPECT_EQ (summary.contains (key), key == c.flag) << c.id << " " << key;
+        }
+        for (const char* format : { "markdown", "html" }) {
+            const auto [status, envelope] = export_run_report_response (
+            *db_, json{ { "runId", c.id }, { "format", format } });
+            ASSERT_EQ (status, 200) << envelope.dump ();
+            const std::string text = envelope["text"].get<std::string> ();
+            const bool says_so =
+            !c.notice.empty () && text.find (c.notice) != std::string::npos;
+            EXPECT_EQ (says_so, !c.notice.empty ()) << c.id << " " << format;
+            EXPECT_EQ (text.find ("Partial run:") != std::string::npos, c.flag == "partial")
+            << c.id << " " << format;
+        }
+    }
+}
+
 TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheMarkdown) {
     seed_leak_run ("run_leak");
     seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);

@@ -970,6 +970,47 @@ TEST (RunExportHtmlTest, NoResponseRemainderIsOneRowWhenTypesStopAtTheCap) {
     EXPECT_EQ (html.find ("HTTP 0"), std::string::npos);
 }
 
+// #2905: the notice sits in the verdict's band, one paragraph per flag.
+// Mutation check: drop the notices loop from `verdict_section` and this fails.
+TEST (RunExportHtmlTest, AReconciledRunSaysSoInTheVerdictBand) {
+    const ordered_json healthy = read_document ("healthy-passed");
+    const std::string plain    = render_run_export_html (healthy);
+    EXPECT_EQ (plain.find ("Partial run"), std::string::npos);
+    EXPECT_EQ (plain.find ("No summary was recorded"), std::string::npos);
+
+    const auto band_of = [&] (bool partial, bool missing) {
+        ordered_json document = healthy;
+        if (partial) {
+            document["report"]["summary"]["partial"] = true;
+        }
+        if (missing) {
+            document["report"]["summary"]["summaryMissing"] = true;
+        }
+        const std::string html = render_run_export_html (document);
+        const auto open        = html.find ("<div class=\"band band-good\">");
+        const auto close       = html.find ("</div>", open);
+        return open == std::string::npos ? std::string () :
+                                           html.substr (open, close - open);
+    };
+    // The sentence carries an apostrophe, so the escaper is part of what is pinned.
+    const std::string PARTIAL = "<p>" +
+    escape_html (
+    "Partial run: the engine stopped before this run finished, so the "
+    "totals are the last saved tick's and every latency figure is 0, not "
+    "a measurement.") +
+    "</p>\n";
+    const std::string MISSING =
+    "<p>No summary was recorded for this run, so the counts "
+    "are not whole-run totals and the latency figures are "
+    "not measurements.</p>\n";
+
+    const std::string partial_band = band_of (true, false);
+    ASSERT_FALSE (partial_band.empty ());
+    EXPECT_TRUE (partial_band.ends_with (PARTIAL)) << partial_band;
+    EXPECT_TRUE (band_of (false, true).ends_with (MISSING));
+    EXPECT_TRUE (band_of (true, true).ends_with (PARTIAL + MISSING));
+}
+
 TEST (RunExportHtmlTest, PassAndFailAreAlwaysAWordBesideTheColour) {
     const auto word_after = [] (const std::string& html, std::string_view open) {
         const auto at = html.find (open);
