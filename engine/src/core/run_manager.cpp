@@ -1757,6 +1757,13 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         // The whole-run `tests` section above says only that something
         // failed, which over a sequence is not an answer.
         attach_step_test_totals (*inputs.scenario, validation.steps);
+        // The exact population, the figure the budget's `assertionsExact`
+        // reads (#2820). Absent, not zeros, for a run that asserted nothing.
+        if (const auto exact = exact_assertion_totals (*context, scenario_state.get ());
+        exact.total () > 0) {
+            (*inputs.scenario)["assertions"] = { { "passed", exact.passed },
+                { "failed", exact.failed } };
+        }
         // Read on the same edge and for the same reason: a completion
         // still in flight is a request this contract was exercised with
         // (issue #629). Empty for a run of an unbound collection, which

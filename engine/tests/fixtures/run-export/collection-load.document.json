@@ -102,7 +102,11 @@
       "failed": 34,
       "skipped": 0,
       "errored": 0,
-      "virtualUsers": 100
+      "virtualUsers": 100,
+      "assertions": {
+        "passed": 8352,
+        "failed": 68
+      }
     },
     "thresholdValidation": {
       "checks": [

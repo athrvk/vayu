@@ -1581,8 +1581,9 @@ snapshot in place breaks that**, and would have to invalidate the cache in
 `engine/include/vayu/http/run_summary_cache.hpp`.
 
 The list row's `resultSummary` on a terminal load run (#2130) *is* read from
-this results summary (`rps`, `latency.p95`, the `status_codes` error rate and
-the `thresholds` verdict; `build_load_result_summary` in
+this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
+`thresholds` verdict and, for a scenario load run, `scenario.assertions` as
+`assertionsPassed` / `assertionsFailed`; `build_load_result_summary` in
 `http/routes/runs.cpp`) and held in the same cache, which is sound for the
 same reason: each `update_run_summary` writer stores the summary before the
 terminal status, and nothing rewrites it after. **A change that writes the
@@ -1630,6 +1631,16 @@ written before the issue, and a scenario load run's, carries neither. The step
 row that ended an iteration short of the plan's end carries the same
 per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
 row.
+
+A scenario load run's `scenario` object (`build_scenario_load_summary` in
+`core/scenario_load.cpp`, then `collect_summary_inputs` in `core/run_manager.cpp`)
+adds **`assertions`**, `{passed, failed}` (issue #2820): the exact assertion
+population `exact_assertion_totals` reads, every `assert.*` outcome, required
+`extract.*` miss and inline `pm.test` call, never the deferred sampled replay
+under `tests`. Absent, never zeros, for a run that made none; a sequential
+collection run never writes it and nothing backfills a run stored before it. The
+report serves it as `scenario.assertions` and the list row as
+`assertionsPassed` / `assertionsFailed`.
 
 `latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
 plan skipped or one refused before the wire has no duration), exact nearest-rank over the full

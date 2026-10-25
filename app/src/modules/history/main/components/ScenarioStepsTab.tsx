@@ -56,6 +56,8 @@ export interface ScenarioStepsTabProps {
 	virtualUsers?: number;
 	iterationsCompleted?: number;
 	iterationsAbandoned?: number;
+	/** The sampled-replay card a deferred element row points at (`testValidationTitleOf`). */
+	replayCard?: string;
 }
 
 /**
@@ -83,6 +85,7 @@ export default function ScenarioStepsTab({
 	virtualUsers,
 	iterationsCompleted,
 	iterationsAbandoned,
+	replayCard,
 }: ScenarioStepsTabProps) {
 	if (steps.length === 0) return null;
 
@@ -235,7 +238,11 @@ export default function ScenarioStepsTab({
 										className="bg-muted/20"
 									>
 										<TableCell colSpan={8} className="py-1.5 pl-9">
-											<ElementTally element={element} className="text-xs" />
+											<ElementTally
+												element={element}
+												replayCard={replayCard}
+												className="text-xs"
+											/>
 										</TableCell>
 									</TableRow>
 								))}

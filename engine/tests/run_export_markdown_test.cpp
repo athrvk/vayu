@@ -216,6 +216,37 @@ TEST (RunExportMarkdownTest, TheVerdictSaysWhatTheDocumentDecidedNotWhatItRecomp
     EXPECT_NE (text.find ("**Passed** - 3 of 3 budgets met"), std::string::npos) << text;
 }
 
+// Mutation check: make `assertions_failed_text` answer empty and the first
+// three expectations fail.
+TEST (RunExportMarkdownTest, TheVerdictNamesFailedAssertionsWithAndWithoutErrors) {
+    ordered_json document         = read_document ("healthy-passed");
+    document["verdict"]["state"]  = "not_judged";
+    document["verdict"]["reason"] = "budgets_met_with_assertion_failures";
+    document["report"]["scenario"]["assertions"] = { { "passed", 0 }, { "failed", 4580 } };
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "**Not judged** - 3 of 3 budgets met, but 4,580 assertions failed\n"),
+    std::string::npos);
+
+    document["report"]["scenario"]["assertions"]["failed"] = 1;
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "budgets met, but 1 assertion failed\n"),
+    std::string::npos);
+
+    document["verdict"]["reason"]              = "budgets_met_with_errors";
+    document["report"]["summary"]["errorRate"] = 0.4;
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "budgets met, but 0.4% of requests errored, 1 assertion failed\n"),
+    std::string::npos);
+
+    document["report"]["scenario"]["assertions"]["failed"] = 0;
+    const std::string errors_only = render_run_export_markdown (document);
+    EXPECT_NE (errors_only.find ("budgets met, but 0.4% of requests errored\n"),
+    std::string::npos);
+    EXPECT_EQ (errors_only.find ("assertion"), std::string::npos);
+}
+
 TEST (RunExportMarkdownTest, NamesTheMissedBudgetsWithTheirFigures) {
     const std::string text =
     render_run_export_markdown (read_document ("errors-and-budget-failed"));

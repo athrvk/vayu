@@ -430,6 +430,30 @@ ReportText errored_text (const ordered& document) {
     return words (format_run_percent (rate) + "% of requests errored");
 }
 
+/// `68 assertions failed` from the scenario's exact assertion population
+/// (#2820), or empty when none did.
+ReportText assertions_failed_text (const ordered& document) {
+    const double failed =
+    number_at (document, { "report", "scenario", "assertions", "failed" }).value_or (0);
+    if (failed <= 0) {
+        return {};
+    }
+    return words (format_run_count (failed) +
+    (failed == 1 ? " assertion failed" : " assertions failed"));
+}
+
+/// What undercut met budgets when requests errored: the error rate, then the
+/// failed assertions when the run has any, as the app's `judgeRun` joins them.
+ReportText errors_undercut_text (const ordered& document) {
+    ReportText out = errored_text (document);
+    if (const ReportText assertions = assertions_failed_text (document);
+    !assertions.empty ()) {
+        out += ", ";
+        out += assertions;
+    }
+    return out;
+}
+
 /// The words after the verdict's label, chosen by the document's own `reason`.
 ReportText verdict_detail (const ordered& document, std::string_view reason) {
     if (reason == "budgets_met") {
@@ -440,7 +464,10 @@ ReportText verdict_detail (const ordered& document, std::string_view reason) {
         return missed.empty () ? ReportText ("budgets missed") : missed;
     }
     if (reason == "budgets_met_with_errors") {
-        return budgets_met_text (document) + ", but " + errored_text (document);
+        return budgets_met_text (document) + ", but " + errors_undercut_text (document);
+    }
+    if (reason == "budgets_met_with_assertion_failures") {
+        return budgets_met_text (document) + ", but " + assertions_failed_text (document);
     }
     if (reason == "no_budgets") {
         return "no budgets declared";

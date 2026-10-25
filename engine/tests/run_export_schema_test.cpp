@@ -69,6 +69,7 @@ json healthy_summary () {
         { "steps_executed", 20 }, { "passed", 20 }, { "failed", 0 },
         { "skipped", 0 }, { "errored", 0 }, { "steps_stored", 0 },
         { "steps_dropped", 0 }, { "virtual_users", 5 }, { "iterations_abandoned", 0 },
+        { "assertions", { { "passed", 18 }, { "failed", 2 } } },
         { "steps",
         json::array ({ { { "index", 0 }, { "name", "login" }, { "requestId", "req_1" },
         { "method", "POST" }, { "executed", 10 }, { "errors", 0 }, { "httpErrors", 0 },
@@ -265,6 +266,11 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // SUMMARY_KEYS and this fails, as does the validation of the required key.
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("setupOverhead", -1.0), 0.1);
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.05);
+    // A scenario load run's exact assertions (#2820), picked member by member.
+    // Mutation check: drop the `assertions` pick in `scenario_section` and this
+    // fails; drop it from the schema and the validation does.
+    EXPECT_EQ (document["report"]["scenario"].value ("assertions", json ()),
+    (json{ { "passed", 18 }, { "failed", 2 } }));
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 

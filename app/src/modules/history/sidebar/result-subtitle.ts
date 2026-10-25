@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { assertionsFailedPhrase } from "@/components/shared/run-assertions";
 import { formatErrorRate } from "@/components/shared/run-outcome";
 import { formatLatency, formatRate } from "@/lib/format-number";
 import type { LoadResultSummary } from "@/types";
@@ -12,13 +13,17 @@ import type { LoadResultSummary } from "@/types";
 /**
  * The line a finished load run's history row prints under its identity:
  * "485 req/s · p95 42ms · 0.0% errors". A figure the run did not record is left
- * out rather than zeroed, and a row that recorded none has no line at all.
+ * out rather than zeroed, and a row that recorded none has no line at all. A
+ * scenario run with failed assertions (#2820) ends it with "4,580 assertions
+ * failed", the one thing its HTTP-only error rate cannot say.
  */
 export function resultSubtitle(summary: LoadResultSummary): string | null {
-	const { rps, p95Ms, errorRate } = summary;
+	const { rps, p95Ms, errorRate, assertionsFailed } = summary;
 	const parts: string[] = [];
 	if (rps !== undefined) parts.push(`${formatRate(rps)} req/s`);
 	if (p95Ms !== undefined) parts.push(`p95 ${formatLatency(p95Ms)}`);
 	if (errorRate !== undefined) parts.push(`${formatErrorRate(errorRate)} errors`);
+	const assertions = assertionsFailedPhrase(assertionsFailed);
+	if (assertions) parts.push(assertions);
 	return parts.length > 0 ? parts.join(" · ") : null;
 }

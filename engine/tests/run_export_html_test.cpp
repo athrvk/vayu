@@ -277,6 +277,17 @@ TEST (RunExportHtmlTest, TheOnlyLinksAreToItsOwnSections) {
     }
 }
 
+TEST (RunExportHtmlTest, TheVerdictNamesFailedAssertions) {
+    ordered_json document         = read_document ("healthy-passed");
+    document["verdict"]["state"]  = "not_judged";
+    document["verdict"]["reason"] = "budgets_met_with_assertion_failures";
+    document["report"]["scenario"]["assertions"] = { { "passed", 0 }, { "failed", 4580 } };
+    EXPECT_NE (render_run_export_html (document).find (
+               "<strong>Not judged</strong> - 3 of 3 budgets met, but 4,580 "
+               "assertions failed</p>"),
+    std::string::npos);
+}
+
 TEST (RunExportHtmlTest, TheTargetUrlIsTextNeverALink) {
     const std::string html =
     render_run_export_html (read_document ("healthy-passed"));

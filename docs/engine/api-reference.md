@@ -4524,7 +4524,7 @@ breaking change bumps the integer and is noted here):
 | `run` | `id`, `reference`, `type` (`load`), `status`, `startTime`, `endTime`, `name` (the request name, or `null`), `comment` (or `null`), `baseline` |
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
-| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
+| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `status_seconds`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms; `status_seconds` is [as stored](#get-runsrunidmetrics) with any entry that is not `{second >= 0, span >= 1, counts}` of five counts >= 0 dropped, an empty list kept, and the key absent from a tick stored before issue #2866); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
@@ -4550,8 +4550,9 @@ file and the screen it came from agree. It adds no rule of its own:
 | `stopped` | `not_judged` | `stopped` |
 | `failed`, no budget missed | `failed` | `run_failed` |
 | A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
-| Every budget met, `summary.errorRate` 0 | `passed` | `budgets_met` |
-| Every budget met, some requests errored | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, `summary.errorRate` 0, no exact assertion failed | `passed` | `budgets_met` |
+| Every budget met, some requests errored (failed assertions too, if any) | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, no request errored, `scenario.assertions.failed > 0` (#2820) | `not_judged` | `budgets_met_with_assertion_failures` |
 | No budget declared | `not_judged` | `no_budgets` |
 
 `stoppedEarly` is `status == "stopped"`.
@@ -9100,6 +9101,7 @@ knob.
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
   "stepsExecuted": 1422, "passed": 1386, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
+  "assertions": { "passed": 444, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
@@ -9113,6 +9115,9 @@ knob.
       "unresolvedTokens": 0,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
+      "elements": [
+        { "id": "el_2", "kind": "assert.status", "passed": 444, "failed": 30, "skipped": 0, "deferred": 0 }
+      ],
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
@@ -9140,6 +9145,18 @@ top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
 not folded in; they are reported in `elements` and `tests`.
+
+**`assertions`** (#2820) is the run's exact assertion population,
+`{ passed, failed }`: every `assert.*` outcome, every required `extract.*` miss
+and every inline script's `pm.test` call, counted on each completion. It is the
+figure a `maxAssertionFailureRatePct` check reports as `assertionsExact`. It
+sits beside `passed` and `summary.errorRate` rather than inside them, both of
+which stay HTTP-only, so a run whose every assertion failed against `200`s reads
+an `errorRate` of 0 and a non-zero `assertions.failed`. The deferred replay of an
+un-inlined script is the sampled population (the step's `tests`, the report's
+`testValidation`) and is never in it. **Absent**, never `{0, 0}`, for a run that
+made no such assertion, for a sequential collection run and for a run stored
+before the field existed.
 
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead
@@ -10475,11 +10492,16 @@ run stored, never from its result rows, which are many and unbounded:
 | `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
+| `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion counts (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the sampled replay. Beside `errorRate`, not folded into it |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
 `verdict` is absent when the run declared no budgets - it was never judged,
-which is not the same claim as passing. A `pending` or `running` load row, and
+which is not the same claim as passing. The two assertion counts are absent
+for a single-request run, a scenario load run that made no assertion and one
+stored before #2820. A scenario load run whose every assertion failed against
+`200`s reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
+"assertionsPassed": 0, "assertionsFailed": 4580 }`. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
 carries no `resultSummary` at all. A collection run's row never carries one.
 
@@ -11363,6 +11385,14 @@ setting, echoed because the same counts describe a different run under it.
 Both are written by a collection run (design mode) only: a scenario load run's
 section carries neither, and a summary stored before issue #2526 carries
 neither either.
+
+`assertions` (#2820) is the other way round: a scenario load run's alone,
+`{ passed, failed }` over the exact population (every `assert.*` outcome,
+required `extract.*` miss and inline `pm.test` call, never the sampled replay
+`testValidation` reports). `passed` and `failed` above stay HTTP-only beside it.
+It is **absent** for a run that made no such assertion, a collection run in
+design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
+has the rest.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never
