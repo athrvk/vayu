@@ -2562,6 +2562,14 @@ export interface LoadTestMetrics {
 	throughput?: number;
 	backpressure?: number;
 	dropped_requests?: number;
+	/**
+	 * Requests a `constant_rps` pacer owed beyond its catch-up window and skipped
+	 * instead of bursting (issue #2911), and the schedule time they cover. Both
+	 * are cumulative like `dropped_requests` and absent from a tick stored by an
+	 * older engine.
+	 */
+	skipped_requests?: number;
+	stalled_ms?: number;
 	/** Mean queue wait over the whole run so far. */
 	avg_queue_wait_ms?: number;
 	// Run progress - feeds the iterations-mode ETA stat. requests_expected is 0
@@ -2898,6 +2906,13 @@ export interface RunReport {
 		/** Mean requests on the wire over `testDuration`; absent from a run stored before it (#2821). */
 		avgInFlight?: number;
 		droppedRequests?: number;
+		/**
+		 * `constant_rps` only (issue #2911): requests skipped after a generator
+		 * stall, and the schedule time they cover in milliseconds. Absent from a run
+		 * stored before the engine counted them, which reads as none.
+		 */
+		skippedRequests?: number;
+		stalledMs?: number;
 		avgQueueWaitMs?: number;
 		bytesSent?: number;
 		bytesReceived?: number;

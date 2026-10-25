@@ -59,6 +59,9 @@ interface RawSseMetrics {
 	throughput?: number;
 	backpressure?: number;
 	droppedRequests?: number;
+	/** `constant_rps` only (issue #2911); absent from an older engine. */
+	skippedRequests?: number;
+	stalledMs?: number;
 	avgQueueWaitMs?: number;
 	requestsSent?: number;
 	requestsExpected?: number;
@@ -115,6 +118,10 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		throughput: m.throughput || 0,
 		backpressure: m.backpressure || 0,
 		dropped_requests: m.droppedRequests || 0,
+		// Counts, so `|| 0` like the dropped count: an engine that predates them
+		// sent none, which is none skipped, not an unmeasured reading.
+		skipped_requests: m.skippedRequests || 0,
+		stalled_ms: m.stalledMs || 0,
 		avg_queue_wait_ms: m.avgQueueWaitMs || 0,
 		requests_sent: m.requestsSent || 0,
 		requests_expected: m.requestsExpected || 0,
@@ -338,6 +345,9 @@ export class SSEClient {
 			throughput: 0,
 			backpressure: 0,
 			dropped_requests: 0,
+			// Counts start at 0 for a frame that never arrived, like the dropped count.
+			skipped_requests: 0,
+			stalled_ms: 0,
 			avg_queue_wait_ms: 0,
 			requests_sent: 0,
 			requests_expected: 0,
