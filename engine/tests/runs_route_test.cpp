@@ -3311,9 +3311,9 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
     vayu::core::CapacityConfig search;
     search.slo_ms          = 100.0;
     search.max_concurrency = 256;
-    const std::vector<vayu::core::CapacityWindow> levels{ { 8, 900.0, 12.0, 0.0 },
-        { 16, 1700.0, 20.0, 0.5 }, { 32, 1750.0, 180.0, 2.0 },
-        { 32, 1720.0, 210.0, 3.5 } };
+    const std::vector<vayu::core::CapacityWindow> levels{ { 8, 900.0, 12.0, 0.0, 4500 },
+        { 16, 1700.0, 20.0, 0.5, 8500 }, { 32, 1750.0, 180.0, 2.0, 8750 },
+        { 32, 1720.0, 210.0, 3.5, 0 } };
     inputs.capacity = vayu::core::summarize_capacity (
     search, levels, vayu::core::capacity_stop::SLO_EXCEEDED);
     db_->update_run_summary (
@@ -3340,11 +3340,18 @@ TEST_F (RunsRouteTest, ReportCarriesWhatTheCapacitySearchFound) {
     EXPECT_DOUBLE_EQ (capacity["levels"][0]["rps"].get<double> (), 900.0);
     EXPECT_DOUBLE_EQ (capacity["levels"][0]["p99Ms"].get<double> (), 12.0);
     EXPECT_DOUBLE_EQ (capacity["levels"][1].at ("errorPct").get<double> (), 0.5);
+    // #2926: a level's completions reach the report, a 0 included.
+    // Mutation-check: drop the copy_optional_number of "samples" in
+    // read_capacity_section and these throw on the absent key.
+    EXPECT_EQ (capacity["levels"][0].at ("samples").get<size_t> (), 4500u);
+    EXPECT_EQ (capacity["levels"][1].at ("samples").get<size_t> (), 8500u);
+    EXPECT_EQ (capacity["levels"][3].at ("samples").get<size_t> (), 0u);
 }
 
-// A summary stored before #2815 measured no error share. The report leaves the
-// three keys out rather than reading them as 0%, which would call every level
-// of an old search clean.
+// A summary stored before #2815 measured no error share, and one before #2926
+// no level's completion count. The report leaves the keys out rather than
+// reading them as 0, which would call every level of an old search clean (and
+// its p99 a measurement of nothing).
 // Mutation-check: read the keys through `read_number` with a 0 default and the
 // absent keys come back as zeros.
 TEST_F (RunsRouteTest, ReportOmitsTheErrorShareAnOlderSummaryNeverStored) {
@@ -3363,6 +3370,7 @@ TEST_F (RunsRouteTest, ReportOmitsTheErrorShareAnOlderSummaryNeverStored) {
     section.erase ("knee_error_pct");
     for (auto& level : section["levels"]) {
         level.erase ("error_pct");
+        level.erase ("samples");
     }
     db_->update_run_summary ("run_capacity_old", stored.dump ());
 
@@ -3375,6 +3383,7 @@ TEST_F (RunsRouteTest, ReportOmitsTheErrorShareAnOlderSummaryNeverStored) {
     EXPECT_FALSE (capacity.contains ("maxErrorPct"));
     ASSERT_EQ (capacity["levels"].size (), 3u);
     EXPECT_FALSE (capacity["levels"][0].contains ("errorPct"));
+    EXPECT_FALSE (capacity["levels"][0].contains ("samples"));
 }
 
 // A search that ran out of room never watched the service give out, so the

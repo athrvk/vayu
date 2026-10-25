@@ -359,7 +359,8 @@ Notes:
   (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
   `sloMs` and `stepDuration` are that mode's own two fields, and
   `get_run_report` returns the search's findings under `capacity`, including
-  each level's `errorPct`, the `kneeErrorPct` and the `maxErrorPct` limit a
+  each level's `errorPct` and `samples` (the completions its p99 was read
+  from; 0 means it measured nothing), the `kneeErrorPct` and the `maxErrorPct` limit a
   level breaches above, beside the p99s. A `plateau` stop also carries
   `saturationConcurrency`, `saturationRps` and `saturationP99Ms`, the level
   where throughput stopped growing. Every shape

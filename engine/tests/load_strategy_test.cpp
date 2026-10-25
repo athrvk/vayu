@@ -2110,6 +2110,12 @@ TEST (CapacitySearchTest, AFastLevelWithAFailingShareIsJudgedOnItsErrors) {
     ASSERT_EQ (summary.levels.size (), 1u);
     EXPECT_NEAR (summary.levels.front ().p99_ms, 20.0, 0.02);
     EXPECT_NEAR (summary.levels.front ().error_pct, 100.0 / 3.0, 0.01);
+    // #2926: the row carries the completions its p99 was read from - ten
+    // counted ticks of five 503s and ten answers, each timed.
+    // Mutation-check: drop `level_samples_` from the history push and this
+    // reads 0.
+    EXPECT_EQ (summary.levels.front ().samples,
+    10u * (SEARCH_SAMPLES_A_TICK + (SEARCH_SAMPLES_A_TICK / 2)));
     EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY)
     << "a level over its error limit once is held and re-measured";
 }
@@ -2158,6 +2164,8 @@ TEST (CapacitySearchTest, ALevelOfOnlyRefusedConnectionsStillCloses) {
     ASSERT_EQ (summary.levels.size (), 1u);
     EXPECT_DOUBLE_EQ (summary.levels.front ().error_pct, 100.0);
     EXPECT_DOUBLE_EQ (summary.levels.front ().p99_ms, 0.0);
+    EXPECT_EQ (summary.levels.front ().samples, 0u)
+    << "the 0 p99 measured nothing, and the row says so (#2926)";
     EXPECT_EQ (search.level (), SEARCH_START_CONCURRENCY);
 }
 

@@ -9492,7 +9492,10 @@ target, read from one histogram; it is not a mean of 100 ms window percentiles,
 which a level with a periodic pause would pass. Its `rps` is the mean throughput
 over the same ticks, and its `error_pct` the share of the requests completed over
 them that were errors, by the one definition every surface reports (a status
-outside 2xx/3xx, or no response; a Stop-cancelled request is neither). A level
+outside 2xx/3xx, or no response; a Stop-cancelled request is neither). Its
+`samples` is the count of completions that histogram held; a level of only
+refused connections is judged on its errors with `samples` 0 and a `p99_ms` that
+measured nothing. A level
 **breaches** when its p99 exceeds `sloMs` *or* its error share exceeds 1%
 (`constants::capacity::ERROR_RATE_PCT`, no run-config knob): a target answering
 fast 503s is not sustaining the level. The search stops - and names the reason
@@ -11326,7 +11329,7 @@ event's first byte. A second copy would be a second number to keep true.
   "stopReason": "slo_exceeded",
   "maxHealthyConcurrency": 48, "maxHealthyRps": 23400, "p99AtMaxHealthyMs": 41.2,
   "kneeConcurrency": 64, "kneeP99Ms": 312.0, "kneeErrorPct": 0.4,
-  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4, "errorPct": 0 } ]
+  "levels": [ { "concurrency": 1, "rps": 980, "p99Ms": 1.4, "errorPct": 0, "samples": 4900 } ]
 }
 ```
 
@@ -11354,6 +11357,12 @@ information:
 - `maxErrorPct`, `kneeErrorPct` and `levels[].errorPct` are absent from a run
   stored before the search judged errors (#2815): it never measured an error
   share, and a 0 would call every level clean.
+- `levels[].samples` is the number of completions the level's histogram held
+  when the level was judged (#2926), i.e. what `p99Ms` was computed over. A
+  `0` means the level measured no latency (only refused connections), so its
+  `p99Ms` of 0 is "nothing measured", not "answered instantly". It is absent
+  from a run stored before the field existed, never `0`, for the same reason
+  as the error share.
 
 `levels[]` is one entry per level *judged*, in order - bounded by construction
 (a search holds tens of levels, not thousands). A level that breached once and

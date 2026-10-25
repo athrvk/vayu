@@ -57,8 +57,9 @@ CapacityConfig search () {
     return config;
 }
 
-CapacityWindow window (size_t concurrency, double rps, double p99_ms, double error_pct = 0.0) {
-    return CapacityWindow{ concurrency, rps, p99_ms, error_pct };
+CapacityWindow
+window (size_t concurrency, double rps, double p99_ms, double error_pct = 0.0, size_t samples = 0) {
+    return CapacityWindow{ concurrency, rps, p99_ms, error_pct, samples };
 }
 
 TEST (CapacityControllerTest, EmptyHistoryStartsAtStartConcurrency) {
@@ -329,6 +330,20 @@ TEST (CapacityControllerTest, PayloadCarriesTheErrorShareAndItsLimit) {
     EXPECT_DOUBLE_EQ (payload["knee_error_pct"].get<double> (), 70.0);
     EXPECT_DOUBLE_EQ (payload["levels"][1]["error_pct"].get<double> (), 60.0);
     EXPECT_EQ (payload["stop_reason"], "errors_exceeded");
+}
+
+// A level of only refused connections holds no completion, so its 0 is what
+// tells a reader its p99 measured nothing (#2926): the key is always written.
+TEST (CapacityControllerTest, PayloadCarriesTheCompletionsEachLevelWasJudgedOn) {
+    const auto summary = summarize_capacity (search (),
+    { window (10, 5000, 1.0, 0.0, 4800), window (20, 0, 0.0, 100.0, 0) },
+    stop::ERRORS_EXCEEDED);
+    const auto payload = build_capacity_summary_payload (summary);
+
+    ASSERT_EQ (payload["levels"].size (), 2u);
+    EXPECT_EQ (payload["levels"][0]["samples"], 4800u);
+    ASSERT_TRUE (payload["levels"][1].contains ("samples"));
+    EXPECT_EQ (payload["levels"][1]["samples"], 0u);
 }
 
 TEST (CapacityControllerTest, PayloadOmitsWhatWasNotObserved) {

@@ -209,8 +209,8 @@ constexpr auto CAPACITY_KEYS = std::to_array<std::string_view> (
 { "sloMs", "maxErrorPct", "stopReason", "maxHealthyConcurrency",
 "maxHealthyRps", "p99AtMaxHealthyMs", "kneeConcurrency", "kneeP99Ms",
 "kneeErrorPct", "saturationConcurrency", "saturationRps", "saturationP99Ms" });
-constexpr auto CAPACITY_LEVEL_KEYS =
-std::to_array<std::string_view> ({ "concurrency", "rps", "p99Ms", "errorPct" });
+constexpr auto CAPACITY_LEVEL_KEYS = std::to_array<std::string_view> (
+{ "concurrency", "rps", "p99Ms", "errorPct", "samples" });
 constexpr auto COVERAGE_KEYS =
 std::to_array<std::string_view> ({ "operationsTotal", "operationsCovered",
 "declaredResponsesTotal", "declaredResponsesHit", "declaredResponseCoveragePct",

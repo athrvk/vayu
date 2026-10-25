@@ -420,7 +420,8 @@
                   "concurrency": {"type": "number"},
                   "rps": {"type": "number"},
                   "p99Ms": {"type": "number"},
-                  "errorPct": {"type": "number"}
+                  "errorPct": {"type": "number"},
+                  "samples": {"type": "number"}
                 }
               }
             }

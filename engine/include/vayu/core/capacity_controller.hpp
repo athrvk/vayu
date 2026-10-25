@@ -46,6 +46,9 @@ struct CapacityWindow {
     /// Percentage (0-100) of the level's completions that were errors (#2815),
     /// judged against `max_error_pct`; 0 when nothing completed.
     double error_pct = 0.0;
+    /// Completions the level's histogram held when it was judged (#2926); 0
+    /// means `p99_ms` measured nothing (a level of only refused connections).
+    size_t samples = 0;
 };
 
 /// The search's tunables. The first five come off the run config; the rest are

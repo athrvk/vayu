@@ -1451,7 +1451,7 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
 
     history_.push_back ({ current_,
     rps_windows_ > 0 ? rps_sum_ / static_cast<double> (rps_windows_) : 0.0,
-    level_p99_ms_, level_error_pct_ });
+    level_p99_ms_, level_error_pct_, level_samples_ });
 
     const CapacityDecision decision = decide_next_level (config_, history_);
     switch (decision.action) {

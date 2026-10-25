@@ -186,8 +186,9 @@ const char* stop_reason) {
 nlohmann::json build_capacity_summary_payload (const CapacitySummary& summary) {
     nlohmann::json levels = nlohmann::json::array ();
     for (const auto& level : summary.levels) {
-        levels.push_back ({ { "concurrency", level.concurrency }, { "rps", level.rps },
-        { "p99_ms", level.p99_ms }, { "error_pct", level.error_pct } });
+        levels.push_back ({ { "concurrency", level.concurrency },
+        { "rps", level.rps }, { "p99_ms", level.p99_ms },
+        { "error_pct", level.error_pct }, { "samples", level.samples } });
     }
 
     nlohmann::json payload;
