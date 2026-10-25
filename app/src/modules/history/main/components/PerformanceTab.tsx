@@ -15,7 +15,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, InfoChip } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber, formatRate } from "@/lib/format-number";
-import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
+import { CONCURRENCY_UNIT, isConcurrencySweepMode } from "@/constants/load-test-modes";
 import { isRateLimitedRun, hasPercentileSignal } from "@/modules/dashboard/utils/metricsTransforms";
 import {
 	LatencyPercentilesChart,
@@ -61,8 +61,9 @@ export default function PerformanceTab({
 	const sloMs = useSloMs(derived.breakpoint);
 	// Stored ticks carry each second's merged percentiles (#2385), so the
 	// history percentile chart / scatter can render the same views as the live
-	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency
-	// scatter (capacity elbow), other modes → percentiles-over-time.
+	// dashboard. Mirror MetricsView's split: ramp_up and capacity →
+	// response-time-vs-concurrency scatter (capacity elbow), other modes →
+	// percentiles-over-time.
 	//
 	// The gate asks a predicate, not a series (#1190, the rule #1152 wrote into
 	// modules/dashboard/README.md). The chart below builds the percentile series
@@ -77,7 +78,7 @@ export default function PerformanceTab({
 	// one whose card this hides - is the case that scans every tick, and a
 	// loaded series runs to thousands of them.
 	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
-	const isRampUp = derived.mode === "ramp_up";
+	const showsConcurrencyScatter = isConcurrencySweepMode(derived.mode);
 	// A failed run the engine could not fully record has an all-zero latency
 	// block (#2895); drawing it would pass those zeros off as measurements.
 	const latencyUnrecorded = unrecordedFiguresOf(report.summary).latency;
@@ -105,11 +106,11 @@ export default function PerformanceTab({
 			)}
 
 			{/* Latency percentiles over time / response-time-vs-concurrency (W1).
-			    Mirror MetricsView's split: ramp_up → concurrency scatter (capacity
-			    elbow), other modes → percentiles-over-time. Both use the centralized
-			    uPlot charts, so live + history are identical. */}
+			    Mirror MetricsView's split: ramp_up and capacity → concurrency scatter
+			    (capacity elbow), other modes → percentiles-over-time. Both use the
+			    centralized uPlot charts, so live + history are identical. */}
 			{hasPercentileData &&
-				(isRampUp ? (
+				(showsConcurrencyScatter ? (
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
 							<div className="flex items-baseline justify-between">
@@ -121,6 +122,7 @@ export default function PerformanceTab({
 							<ResponseTimeVsConcurrencyChart
 								history={timeSeries}
 								breakpoint={derived.breakpoint}
+								kneeConcurrency={report.capacity?.kneeConcurrency}
 								syncKey={CHART_SYNC.history}
 							/>
 						</CardContent>

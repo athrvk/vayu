@@ -57,6 +57,7 @@ import {
 	concurrencyMeasureLabel,
 	formatConcurrency,
 	isClosedLoopMode,
+	isConcurrencySweepMode,
 } from "@/constants/load-test-modes";
 import { pluralize } from "../../../utils/format";
 import { useClientSettingsStore } from "@/stores";
@@ -102,10 +103,11 @@ function breakpointHover(breakpoint: Breakpoint, mode?: string): string | undefi
 
 /**
  * The vertical line where p99 first crossed the SLO, shared by the time-series
- * charts. A capacity elbow only means something on a ramp_up run, where load
- * rises under the line, so the other modes draw it on the percentile chart
- * alone; and a run whose first reading was already over the SLO never crossed
- * anything, which the horizontal SLO line on that chart says better.
+ * charts. A capacity elbow only means something where load rises under the
+ * line (ramp_up, and a capacity search stepping up), so the other modes draw it
+ * on the percentile chart alone; and a run whose first reading was already
+ * over the SLO never crossed anything, which the horizontal SLO line on that
+ * chart says better.
  */
 function breakpointMarker(
 	breakpoint: Breakpoint | null | undefined,
@@ -113,7 +115,7 @@ function breakpointMarker(
 	onPercentileChart = false
 ): Marker[] {
 	if (!breakpoint?.crossed || breakpoint.timeSeconds == null || breakpoint.atRunStart) return [];
-	if (mode !== "ramp_up" && !onPercentileChart) return [];
+	if (!isConcurrencySweepMode(mode) && !onPercentileChart) return [];
 	return [
 		{
 			orient: "vertical",

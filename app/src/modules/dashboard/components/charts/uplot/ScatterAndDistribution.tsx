@@ -29,17 +29,22 @@ import { hdrPercentileMarkers, pctToX, xToPctLabel } from "./hdrMarkers";
  * Response time vs virtual users - a scatter of (virtual users, p99), one point per
  * chart bucket. The flat-left headroom, the elbow (breakpoint) and the
  * steep-right saturation read against the origin. Amber marker at the
- * SLO-crossing user count.
+ * SLO-crossing user count. A finished capacity run adds a second vertical
+ * marker at its knee, the level the search gave out at; the live view has none,
+ * as the engine reports the knee in the final report only.
  */
 export function ResponseTimeVsConcurrencyChart({
 	history,
 	height,
 	breakpoint,
+	kneeConcurrency,
 	syncKey,
 }: {
 	history: LoadTestMetrics[];
 	height?: number;
 	breakpoint?: Breakpoint | null;
+	/** The capacity search's knee, from the stored report; absent draws no marker. */
+	kneeConcurrency?: number;
 	/** Join a chart group's focus channel - hovering a time chart highlights the
 	 *  dot for that tick, and hovering a dot moves the time charts' cursor. */
 	syncKey?: string;
@@ -84,8 +89,16 @@ export function ResponseTimeVsConcurrencyChart({
 				label: `~${formatConcurrency(breakpoint.concurrency)}`,
 			});
 		}
+		if (kneeConcurrency !== undefined) {
+			m.push({
+				orient: "vertical",
+				value: kneeConcurrency,
+				role: "destructive",
+				label: `knee ${formatConcurrency(kneeConcurrency)}`,
+			});
+		}
 		return m;
-	}, [breakpoint, sloMs]);
+	}, [breakpoint, kneeConcurrency, sloMs]);
 
 	if (data[0].length < 2) return null;
 	return (

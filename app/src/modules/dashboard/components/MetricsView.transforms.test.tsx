@@ -92,8 +92,8 @@ function props(ticks: LoadTestMetrics[]): MetricsViewProps {
 	return {
 		metrics,
 		historicalMetrics: ticks,
-		// Not ramp_up: that mode swaps the percentile card for the scatter, and
-		// the percentile transform is one of the three under test here.
+		// Not ramp_up or capacity: those modes swap the percentile card for the
+		// scatter, and the percentile transform is one of the three under test here.
 		mode: "constant_concurrency",
 		concurrency: 10,
 	};

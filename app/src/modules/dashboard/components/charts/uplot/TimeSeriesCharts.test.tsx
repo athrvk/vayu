@@ -320,6 +320,41 @@ describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
 	});
 });
 
+describe("ResponseTimeVsConcurrencyChart - knee marker (#2931)", () => {
+	const verticals = () => mockState.markers.filter((m) => m.orient === "vertical");
+
+	it("draws a destructive vertical line at the knee, apart from the breakpoint's", () => {
+		render(
+			<ResponseTimeVsConcurrencyChart
+				history={historyOf(4)}
+				kneeConcurrency={64}
+				breakpoint={{
+					crossed: true,
+					concurrency: 45,
+					timeSeconds: 2,
+					p99Ms: 227,
+					sloMs: 200,
+					atRunStart: false,
+				}}
+			/>
+		);
+		expect(verticals().map((m) => [m.value, m.label, m.role])).toEqual([
+			[45, "~45 virtual users", "warning"],
+			[64, "knee 64 virtual users", "destructive"],
+		]);
+	});
+
+	it("reads a knee of one in the singular", () => {
+		render(<ResponseTimeVsConcurrencyChart history={historyOf(4)} kneeConcurrency={1} />);
+		expect(verticals().map((m) => m.label)).toEqual(["knee 1 virtual user"]);
+	});
+
+	it("draws no line when no knee is given", () => {
+		render(<ResponseTimeVsConcurrencyChart history={historyOf(4)} />);
+		expect(verticals()).toEqual([]);
+	});
+});
+
 describe("RequestRateChart - what the secondary axis measures", () => {
 	it("names the ramp overlay's axis for the virtual users it counts", () => {
 		render(
@@ -455,7 +490,13 @@ describe("the breakpoint line on the time charts (#2698)", () => {
 		expect(verticalMarkers(chart, "ramp_up")).toHaveLength(1);
 	});
 
-	it.each(["constant_concurrency", "constant_rps", "iterations", "capacity", undefined])(
+	// A capacity run's percentile card is the scatter, so its crossing time shows
+	// on every time chart, as a ramp's does (#2931).
+	it.each(ALL)("draws the line on the %s chart of a capacity run", (chart) => {
+		expect(verticalMarkers(chart, "capacity")).toHaveLength(1);
+	});
+
+	it.each(["constant_concurrency", "constant_rps", "iterations", undefined])(
 		"draws it on the percentile chart alone in mode %s",
 		(mode) => {
 			expect(verticalMarkers("percentiles", mode)).toHaveLength(1);

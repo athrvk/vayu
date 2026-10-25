@@ -88,7 +88,7 @@ consumes it.
 - **Every chart buckets before it draws.**
   `components/charts/uplot/buildData.ts` owns the reduction: `bucketColumns` and
   `rebucket` for the time-series charts, `buildConcurrencyScatter` for the
-  ramp-up scatter, all at the user's `chartBucketSeconds`. This is the step that
+  ramp-up / capacity scatter, all at the user's `chartBucketSeconds`. This is the step that
   makes `constants/live-window.ts`'s retention cap a memory bound rather than a
   rendering one, and the scatter - one dot per tick, up to the 50,000-tick cap -
   was the one chart that argument did not cover (#1152).
@@ -166,7 +166,9 @@ consumes it.
 - **The dashed vertical line marks where p99 first crossed the SLO, and the
   horizontal one is the SLO itself** (#2698). The vertical line is labelled
   `p99 > SLO <threshold>`, never the observed p99, which is in its hover with the
-  load at the crossing. It is drawn on every time chart for a `ramp_up` run, on
+  load at the crossing. It is drawn on every time chart for a `ramp_up` or
+  `capacity` run (`isConcurrencySweepMode`; a capacity run's percentile card is
+  the scatter, so the time charts are where its crossing time shows), on
   the percentile chart alone for any other mode, and on none when
   `Breakpoint.atRunStart` is set: the first whole-second reading (a window
   between gates and an empty second are not readings) was already over the SLO,
@@ -180,6 +182,15 @@ consumes it.
   threshold in every other mode. Every SLO line and tile reads it back through
   `useSloMs(breakpoint)`, so the Settings value never moves a capacity run's
   lines.
+- **A capacity run draws the response-time-vs-concurrency scatter, live and in
+  History, in place of the percentile card** (#2931). The search steps the user
+  count up level by level, so the scatter is the picture of it; the gate is
+  `isConcurrencySweepMode` (`ramp_up` or `capacity`), asked by `MetricsView`,
+  `PerformanceTab` and the breakpoint line. Only the finished run's scatter
+  carries a **knee** marker (`kneeConcurrency`, from `report.capacity`, the
+  level the search gave out at, in the destructive role beside the amber
+  breakpoint line): the engine reports the knee in the final report alone, so
+  the live scatter has the SLO line and the breakpoint, nothing more.
 - **A capacity run's Saturation card reads the search's stop reason, and never
   says "healthy"** (#2816). `ramp_up` keeps `SaturationCard` ("healthy" /
   "degrading" off the ticks); `capacity` mounts `CapacitySaturationCard`, because
