@@ -233,6 +233,39 @@ describe("LoadTestService - the OS progress indicator", () => {
 	});
 
 	/*
+	 * #2914: a completed run reads 100% before the indicator is given up, so a
+	 * duration run whose last tick landed short of the duration does not end on
+	 * 99%. Stopped and failed runs did not reach the end and must not snap.
+	 *
+	 * Mutation check: drop the `status === "completed"` report in `handleClose`
+	 * and the first case reddens; make it unconditional and the stopped case
+	 * does.
+	 */
+	it("reports a completed run as whole just before clearing it", async () => {
+		loadTestService.startMonitoring("run_6");
+		mockReport.mockClear();
+
+		await closeStream("completed");
+
+		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, "run_6", 1);
+		expect(mockReport.mock.invocationCallOrder[0]).toBeLessThan(
+			mockClear.mock.invocationCallOrder[0] ?? 0
+		);
+	});
+
+	it.each(["stopped", "failed", null] as const)(
+		"does not snap a run that ended as %s to whole",
+		async (status) => {
+			loadTestService.startMonitoring("run_7");
+			mockReport.mockClear();
+
+			await closeStream(status);
+
+			expect(mockReport).not.toHaveBeenCalledWith(LOAD_RUN, "run_7", 1);
+		}
+	);
+
+	/*
 	 * The bar is painted before the awaited report fetch, which is the same
 	 * reason the notification prefers the frame to the stored row (#1415's
 	 * fourth criterion): a failure whose report could not be read is still a

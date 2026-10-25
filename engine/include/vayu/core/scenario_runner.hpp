@@ -399,7 +399,8 @@ struct ScenarioSummaryInputs {
     nlohmann::json lifecycle = nlohmann::json::object ();
     /// Every sent step's status code, kept in the same shape
     /// `RunSummaryInputs::status_codes` is (issue #1564): the denominator
-    /// `evaluate_thresholds`'s error-rate metric reads. A step the plan
+    /// `evaluate_thresholds`'s error-rate metric reads, and the summary's
+    /// stored `status_codes` the report reads (#2822). A step the plan
     /// skipped (a script's decision, or a row that would not bind) sent no
     /// request and is not in this map, on the same terms it is left out of
     /// `coverage` above.
@@ -438,12 +439,14 @@ struct ScenarioSummaryInputs {
 /**
  * @brief Serialize those results into the object stored in `runs.summary`.
  *
- * `total_requests`, `test_duration` and `rps` are the keys `apply_run_summary`
- * (`http/routes/runs.cpp`) already reads, and they matter here for one specific
- * reason: the report otherwise counts the *stored* rows, which a thinned run
- * would understate. Everything scenario-shaped sits under `scenario`, which the
- * report route surfaces as its own section - the counts have a reader, they are
- * not written into the store to be forgotten.
+ * `total_requests`, `status_codes`, `test_duration` and `rps` are the keys
+ * `apply_run_summary` (`http/routes/runs.cpp`) already reads, and they matter
+ * here for one specific reason: the report otherwise counts the *stored* rows,
+ * which a thinned run would understate and in which a skipped step is a
+ * status-0 row. All four describe the steps that sent; the steps themselves
+ * are `scenario.steps_executed`. Everything scenario-shaped sits under
+ * `scenario`, which the report route surfaces as its own section - the counts
+ * have a reader, they are not written into the store to be forgotten.
  */
 [[nodiscard]] nlohmann::json build_scenario_summary_payload (
 const ScenarioSummaryInputs& inputs);

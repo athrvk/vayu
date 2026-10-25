@@ -1442,6 +1442,14 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     [&driver] () { return driver.deferred_wait_ms (); },
     *type == LoadTestType::RampUp ? std::optional<int64_t> (duration_ms) : std::nullopt);
 
+    // The start-of-run figure is an upper bound: an abandoned iteration never
+    // sends its later steps (#2914). A natural end has retired every VU, and
+    // `submit_one` is `requests_sent`'s only writer, so the count is final
+    // here. A stopped run keeps the bound, which is what it fell short of.
+    if (max_iterations > 0 && !context->should_stop) {
+        context->requests_expected = context->requests_sent.load ();
+    }
+
     return state;
 }
 

@@ -9,6 +9,8 @@
  *      cannot be pinned open either.
  *   3. DELETE /runs/:id stops an active run and waits for its worker to finish
  *      writing before removing the rows, or refuses with a 409.
+ *   4. POST /runs/:id/stop answers a collection run's counts from its stored
+ *      summary, never from the collector it does not feed (#2822).
  *
  * Every timing assertion is an upper bound measured against an upstream that
  * holds the connection open for 30s, so the margins are wide: a regression here
@@ -36,6 +38,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/routes.hpp"
 #include "wait_until.hpp"
 
 namespace vayu::http::routes {
@@ -467,6 +470,115 @@ TEST_F (DeleteRunTest, StuckRunIsRefusedAndKeptIntact) {
     << "a refused delete must leave the run intact, not half-deleted";
 
     manager.unregister_run ("run_stuck");
+}
+
+// ---------------------------------------------------------------------------
+// POST /runs/:id/stop on an active run
+// ---------------------------------------------------------------------------
+
+class StopActiveRunTest : public DeleteRunTest {
+    protected:
+    void seed_running (const std::string& id, vayu::RunType type) {
+        vayu::db::Run run;
+        run.id              = id;
+        run.type            = type;
+        run.status          = vayu::RunStatus::Running;
+        run.config_snapshot = "{}";
+        run.start_time      = 1;
+        db->create_run (run);
+    }
+
+    // Far past the stand-in worker's reaction, which is what ends the wait.
+    static constexpr int SETTLE_GRACE_SECONDS = 20;
+};
+
+// Each answer is read through a non-const `json`: a key it lacks then reads as
+// null and fails one comparison, where a const lookup asserts and aborts the
+// whole binary.
+
+// A collection run's worker feeds no collector, so the collector says 0 after
+// steps ran (#2822). The answer is the summary the worker stored before it
+// cleared `is_running`: 31 sent of 40 steps, 2 of them a 500.
+// Mutation check: answer a Scenario run from `calculate_summary` again; this
+// and the no-summary test fail.
+TEST_F (StopActiveRunTest, CollectionRunAnswersItsStoredCounts) {
+    seed_running ("run_seq", vayu::RunType::Scenario);
+    auto context        = make_context ("run_seq");
+    context->is_running = true;
+
+    // Stands in for the scenario worker's ending: summary, then the terminal
+    // status, then `is_running` cleared.
+    std::thread worker ([this, context] () {
+        (void)vayu::tests::wait_until (
+        [&context] () { return context->should_stop.load (); });
+        db->update_run_summary ("run_seq",
+        R"({"total_requests":31,"status_codes":{"200":29,"500":2},)"
+        R"("latency":{"count":31,"avg":12.5},"scenario":{"steps_executed":40}})");
+        db->update_run_status ("run_seq", vayu::RunStatus::Stopped);
+        context->is_running = false;
+    });
+
+    auto body = vayu::http::routes::stop_active_run_response (
+    *db, *context, vayu::RunType::Scenario, SETTLE_GRACE_SECONDS);
+    worker.join ();
+
+    EXPECT_TRUE (context->should_stop.load ());
+    EXPECT_EQ (body["status"], "stopped");
+    EXPECT_EQ (body["runId"], "run_seq");
+    ASSERT_TRUE (body.contains ("summary")) << body.dump ();
+    auto& summary = body["summary"];
+    EXPECT_EQ (summary["totalRequests"], 31);
+    EXPECT_EQ (summary["errors"], 2);
+    EXPECT_EQ (summary["httpErrors"], 2);
+    EXPECT_EQ (summary["noResponse"], 0);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 2.0 * 100.0 / 31.0);
+    EXPECT_DOUBLE_EQ (summary["avgLatencyMs"].get<double> (), 12.5);
+    EXPECT_EQ (summary["stepsExecuted"], 40);
+}
+
+// The grace period ran out before the worker stored anything: no counts are
+// known, so the answer carries no summary rather than a summary of zeros, and
+// its status is the row's, not a `stopped` the run has not reached.
+TEST_F (StopActiveRunTest, CollectionRunWithNoStoredSummaryAnswersNone) {
+    seed_running ("run_slow", vayu::RunType::Scenario);
+    auto context        = make_context ("run_slow");
+    context->is_running = true;
+
+    // A grace of 0 is the timed-out wait without spending one.
+    auto body = vayu::http::routes::stop_active_run_response (
+    *db, *context, vayu::RunType::Scenario, 0);
+
+    EXPECT_TRUE (context->should_stop.load ());
+    EXPECT_FALSE (body.contains ("summary")) << body.dump ();
+    EXPECT_EQ (body["status"], "running");
+    EXPECT_EQ (body["runId"], "run_slow");
+    EXPECT_EQ (body["message"], "Stop signalled; read the report");
+}
+
+// A load run, a scenario load run included, still answers from its collector.
+// Mutation check: route a Load run down the collection branch; this fails.
+TEST_F (StopActiveRunTest, LoadRunAnswersFromItsCollector) {
+    seed_running ("run_load", vayu::RunType::Load);
+    auto context = make_context ("run_load");
+    for (int i = 0; i < 8; ++i) {
+        context->metrics_collector->record_success (200, 10.0, 0.0);
+    }
+    context->metrics_collector->record_success (503, 10.0, 0.0);
+    context->metrics_collector->record_error (vayu::ErrorCode::Timeout, "timed out");
+    // A summary the load path never reads here; a collector-blind answer
+    // would report it instead.
+    db->update_run_summary ("run_load", R"({"status_codes":{"200":1}})");
+
+    auto body = vayu::http::routes::stop_active_run_response (
+    *db, *context, vayu::RunType::Load, 0);
+
+    EXPECT_EQ (body["status"], "stopped");
+    ASSERT_TRUE (body.contains ("summary")) << body.dump ();
+    EXPECT_EQ (body["summary"]["totalRequests"], 10);
+    EXPECT_EQ (body["summary"]["errors"], 2);
+    EXPECT_EQ (body["summary"]["noResponse"], 1);
+    EXPECT_EQ (body["summary"]["cancelled"], 0);
+    EXPECT_FALSE (body["summary"].contains ("stepsExecuted"));
 }
 
 } // namespace
