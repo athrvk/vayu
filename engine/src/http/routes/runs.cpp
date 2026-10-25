@@ -11,6 +11,7 @@
  */
 
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -361,6 +362,10 @@ struct ReportExtras {
     // (`scenario_runner.cpp`, `scenario_load.cpp`). Empty for a run with no
     // `control.transaction` element, or one whose folder never closed.
     nlohmann::json transactions = nlohmann::json::array ();
+    // A scenario load run's exact assertion population (#2820). Empty for a run
+    // that asserted nothing, one stored before it and a sequential collection
+    // run, which leaves `scenario.assertions` out rather than reading "0 failed".
+    std::optional<vayu::core::AssertionTotals> scenario_assertions;
     // Non-zero means this run stored response headers and bodies verbatim.
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
@@ -479,6 +484,28 @@ std::optional<ThresholdOutcome> read_threshold_outcome (const nlohmann::json& su
     read_number (thresholds, "passed", outcome.passed);
     read_number (thresholds, "failed", outcome.failed);
     return outcome;
+}
+
+// The stored `summary.scenario.assertions` (#2820), or nothing unless both
+// counts are there. The one reader of it, for the report and the list row.
+std::optional<vayu::core::AssertionTotals> read_scenario_assertions (
+const nlohmann::json& summary) {
+    const auto scenario = summary.find ("scenario");
+    if (scenario == summary.end () || !scenario->is_object ()) {
+        return std::nullopt;
+    }
+    const auto stored = scenario->find ("assertions");
+    if (stored == scenario->end () || !stored->is_object ()) {
+        return std::nullopt;
+    }
+    const auto passed = stored->find ("passed");
+    const auto failed = stored->find ("failed");
+    if (passed == stored->end () || !passed->is_number_unsigned () ||
+    failed == stored->end () || !failed->is_number_unsigned ()) {
+        return std::nullopt;
+    }
+    return vayu::core::AssertionTotals{ .passed = passed->get<size_t> (),
+        .failed                                 = failed->get<size_t> () };
 }
 
 // Read a boolean out of a JSON object as an optional, so a key an older engine
@@ -817,6 +844,7 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         if (scenario.contains ("transactions") && scenario["transactions"].is_array ()) {
             extras.transactions = scenario["transactions"];
         }
+        extras.scenario_assertions = read_scenario_assertions (summary);
     }
 }
 
@@ -980,8 +1008,9 @@ ReportExtras& extras) {
 
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
- * error rate and budget verdict, read from the run's stored `summary` - the
- * load-run counterpart of a design row's `{statusCode, latencyMs}`.
+ * error rate, budget verdict and, for a scenario load run, its exact assertion
+ * counts (#2820), read from the run's stored `summary` - the load-run
+ * counterpart of a design row's `{statusCode, latencyMs}`.
  *
  * Each key is omitted when the summary does not record it, never zeroed: no
  * `verdict` means no budget judged the run, and how to show that is the
@@ -1015,6 +1044,10 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     }
     if (const auto thresholds = read_threshold_outcome (summary)) {
         outcome["verdict"] = thresholds->verdict ();
+    }
+    if (const auto assertions = read_scenario_assertions (summary)) {
+        outcome["assertionsPassed"] = assertions->passed;
+        outcome["assertionsFailed"] = assertions->failed;
     }
     return outcome;
 }
@@ -1369,7 +1402,7 @@ int64_t stop_wait_ms) {
         "run", "DELETE /runs/:id - Run is active, stopping it first: " + run_id);
         context->should_stop = true;
         // Wake the closed-loop controller so it observes should_stop without
-        // waiting out its 50ms safety-net timeout.
+        // waiting out its `CONTROLLER_TICK_MS` safety-net timeout.
         context->notify_refill ();
 
         // retain_run() is the worker's last act, after the final metrics flush
@@ -1659,6 +1692,11 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     // follow.
     if (!extras.transactions.empty ()) {
         section["transactions"] = extras.transactions;
+    }
+    // Beside `passed`, never folded into it: that count stays HTTP-only.
+    if (const auto& assertions = extras.scenario_assertions) {
+        section["assertions"] = { { "passed", assertions->passed },
+            { "failed", assertions->failed } };
     }
     return section;
 }

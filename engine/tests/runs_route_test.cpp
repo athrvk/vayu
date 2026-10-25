@@ -646,6 +646,37 @@ TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenSto
     EXPECT_FALSE (older["scenario"].contains ("stopOnError"));
 }
 
+// A scenario load run's exact assertion population (#2820) reaches the report's
+// `scenario` section; a summary without it (an older run, a sequential run, a
+// run that asserted nothing) grows none rather than "0 failed".
+// Mutation check: drop the `assertions` write in `build_scenario_report_section`
+// and the first half fails.
+TEST_F (RunsRouteTest, ScenarioReportCarriesTheStoredExactAssertions) {
+    seed ({ .id = "run_asserted" });
+    db_->update_run_summary ("run_asserted",
+    nlohmann::json{ { "scenario",
+                    { { "iterations", 4 }, { "steps_executed", 8 }, { "passed", 8 },
+                    { "assertions", { { "passed", 0 }, { "failed", 4 } } } } } }
+    .dump ());
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_asserted");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
+    EXPECT_EQ (body["scenario"].value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 4 } }));
+    EXPECT_EQ (body["scenario"]["passed"], 8)
+    << "the HTTP count is not redefined";
+
+    seed ({ .id = "run_unasserted", .start_time = 1 });
+    db_->update_run_summary ("run_unasserted",
+    nlohmann::json{ { "scenario", { { "iterations", 4 }, { "steps_executed", 8 } } } }
+    .dump ());
+    auto [plain_status, plain] =
+    vayu::http::routes::run_report_response (*db_, "run_unasserted");
+    ASSERT_EQ (plain_status, 200);
+    ASSERT_TRUE (plain.contains ("scenario")) << plain.dump ();
+    EXPECT_FALSE (plain["scenario"].contains ("assertions"));
+}
+
 // The sample cap stays for everything else - a design run has one row and a
 // load run's percentiles do not need per-request rows past a representative
 // few, so the report payload does not grow with an unbounded run's result
@@ -1375,8 +1406,12 @@ TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOther
 // the only place that defaults it.
 TEST (RunReportConfigTest, CarriesExpectContinueWhenSnapshotHasItAndOmitsItOtherwise) {
     const auto snapshot = [] (const char* flag) {
-        return json::parse (
-        std::string (R"({"mode":"once","defaultHeaders":{"expectContinue":)") + flag + "}}");
+        // Appends, not an operator+ chain: gcc 13 -O3 reports the chain's
+        // inlined memcpy as -Warray-bounds.
+        std::string text = R"({"mode":"once","defaultHeaders":{"expectContinue":)";
+        text += flag;
+        text += "}}";
+        return json::parse (text);
     };
 
     EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("true"))["expectContinue"],
@@ -2926,6 +2961,45 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
 
     for (const char* id : { "run_no_summary", "run_bad_summary", "run_other_keys" }) {
         EXPECT_FALSE (row_of (body, id).contains ("resultSummary")) << id;
+    }
+}
+
+// A terminal scenario load run's row carries its exact assertion counts
+// (#2820), so a row whose every assertion failed at 0% errors can say so; a
+// run that asserted nothing, or stored a malformed object, carries neither key.
+// Mutation check: drop the `assertionsFailed` write in
+// `build_load_result_summary` and the first row fails.
+TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
+    auto with_assertions        = nlohmann::json::parse (judged_summary (true));
+    with_assertions["scenario"] = { { "iterations", 4 },
+        { "assertions", { { "passed", 1 }, { "failed", 4 } } } };
+    seed ({ .id = "run_asserted", .start_time = 1 });
+    db_->update_run_summary ("run_asserted", with_assertions.dump ());
+
+    auto without_assertions = nlohmann::json::parse (judged_summary (true));
+    without_assertions["scenario"] = { { "iterations", 4 } };
+    seed ({ .id = "run_unasserted", .start_time = 2 });
+    db_->update_run_summary ("run_unasserted", without_assertions.dump ());
+
+    auto malformed = nlohmann::json::parse (judged_summary (true));
+    malformed["scenario"] = { { "assertions", { { "passed", 1 }, { "failed", "4" } } } };
+    seed ({ .id = "run_malformed", .start_time = 3 });
+    db_->update_run_summary ("run_malformed", malformed.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto asserted = row_of (body, "run_asserted")["resultSummary"];
+    EXPECT_EQ (asserted.value ("assertionsFailed", -1), 4) << asserted.dump ();
+    EXPECT_EQ (asserted.value ("assertionsPassed", -1), 1) << asserted.dump ();
+    EXPECT_EQ (asserted.size (), 6u) << asserted.dump ();
+
+    for (const char* id : { "run_unasserted", "run_malformed" }) {
+        const auto outcome = row_of (body, id)["resultSummary"];
+        EXPECT_EQ (outcome.size (), 4u) << id << ": " << outcome.dump ();
+        EXPECT_FALSE (outcome.contains ("assertionsFailed")) << id;
+        EXPECT_FALSE (outcome.contains ("assertionsPassed")) << id;
     }
 }
 

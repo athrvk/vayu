@@ -1028,7 +1028,8 @@ const std::function<bool ()>& submit_one,
 const std::function<size_t (int64_t)>& target_fn,
 const std::function<size_t ()>& budget_fn,
 const std::function<bool (int64_t)>& should_continue,
-const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn) {
+const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn,
+std::optional<int64_t> run_end_ms) {
     using clock     = std::chrono::steady_clock;
     auto start      = clock::now ();
     auto elapsed_ms = [&start] () {
@@ -1054,6 +1055,21 @@ const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn) {
     }
     update_peak (context);
 
+    auto refill_toward = [&] (size_t target) {
+        const size_t deficit =
+        compute_refill_deficit (target, context->in_flight (), budget_fn ());
+        for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
+            // A false return means the remaining candidates are all deferred
+            // or busy; retrying immediately just re-scans the same VUs for
+            // the same answer; `deferred_wait_ms_fn` picks it up next cycle.
+            if (!submit_one ()) {
+                break;
+            }
+        }
+        update_peak (context);
+    };
+
+    int64_t el = 0;
     while (!context->should_stop) {
         // `deferred_wait_ms_fn` answers only right after a cycle where
         // `submit_one` returned false because every eligible candidate was
@@ -1075,36 +1091,32 @@ const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn) {
         {
             std::unique_lock<std::mutex> lk (context->refill_mtx);
             if (defer_wait_ms) {
-                const auto bound =
-                std::chrono::milliseconds (std::min<int64_t> (50, *defer_wait_ms));
+                const auto bound = std::chrono::milliseconds (
+                std::min (CONTROLLER_TICK_MS, *defer_wait_ms));
                 context->refill_cv.wait_for (lk, bound, [&] () {
                     return context->should_stop.load () ||
                     context->in_flight () != in_flight_before;
                 });
             } else {
-                context->refill_cv.wait_for (lk, std::chrono::milliseconds (50), [&] () {
+                context->refill_cv.wait_for (
+                lk, std::chrono::milliseconds (CONTROLLER_TICK_MS), [&] () {
                     return context->should_stop.load () ||
                     context->in_flight () < target_fn (elapsed_ms ());
                 });
             }
         }
 
-        int64_t el = elapsed_ms ();
+        el = elapsed_ms ();
         if (context->should_stop || !should_continue (el)) {
             break;
         }
+        refill_toward (target_fn (el));
+    }
 
-        size_t deficit =
-        compute_refill_deficit (target_fn (el), context->in_flight (), budget_fn ());
-        for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
-            // A false return means the remaining candidates are all deferred
-            // or busy; retrying immediately just re-scans the same VUs for
-            // the same answer; `deferred_wait_ms_fn` picks it up next cycle.
-            if (!submit_one ()) {
-                break;
-            }
-        }
-        update_peak (context);
+    // Only a run the clock ended: a stop owes nothing more, and a loop that
+    // left before `run_end_ms` ended on its own predicate, not on time.
+    if (run_end_ms && !context->should_stop && el >= *run_end_ms) {
+        refill_toward (target_fn (*run_end_ms - 1));
     }
 }
 
@@ -1419,7 +1431,7 @@ class RampUpLoadStrategy : public LoadStrategy {
         maintain_concurrency (
         context, submit_one, target_fn,
         [] () { return std::numeric_limits<size_t>::max (); },
-        [duration_ms] (int64_t el) { return el < duration_ms; });
+        [duration_ms] (int64_t el) { return el < duration_ms; }, {}, duration_ms);
     }
 };
 

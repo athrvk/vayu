@@ -123,8 +123,21 @@ namespace detail {
 }
 
 /**
+ * @brief The longest the closed-loop controller (`maintain_concurrency`) waits
+ *        before it re-reads its concurrency target when no completion wakes it.
+ */
+inline constexpr int64_t CONTROLLER_TICK_MS = 50;
+
+/**
  * @brief Concurrency target on a linear ramp from @p start to @p target,
- *        reached at @p ramp_ms and held flat after it.
+ *        reached within one controller tick of @p ramp_ms and held flat after.
+ *
+ * A run whose `duration` equals its ramp never samples at or past @p ramp_ms:
+ * its last sample is the controller's final refill at `duration - 1`
+ * (`maintain_concurrency`'s `run_end_ms`). A target owed only from @p ramp_ms
+ * on is never asked for (1 -> 50 over 20s peaked at 49, #2913); treating the
+ * last tick of the ramp as its end covers that sample, and never answers past
+ * @p target.
  *
  * The interpolation is done in `double`, which is signed: `start > target` is a
  * legitimate profile (ramp down), and computing `target - start` in `size_t`
@@ -134,10 +147,14 @@ namespace detail {
  */
 [[nodiscard]] inline size_t
 ramp_target_concurrency (size_t start, size_t target, int64_t ramp_ms, int64_t elapsed_ms) {
-    if (ramp_ms <= 0 || elapsed_ms >= ramp_ms)
+    if (ramp_ms <= 0)
         return target;
+    // Before the end-of-ramp check, so a ramp no longer than one tick still
+    // seeds at `start` rather than at its target.
     if (elapsed_ms <= 0)
         return start;
+    if (elapsed_ms >= ramp_ms - CONTROLLER_TICK_MS)
+        return target;
 
     const double progress =
     static_cast<double> (elapsed_ms) / static_cast<double> (ramp_ms);

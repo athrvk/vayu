@@ -46,8 +46,20 @@ describe("summarise", () => {
 		expect(s).toContain("counts towards the total");
 	});
 
-	it("omits the tail when the ramp fills the whole run", () => {
-		expect(summarise({ ...base, mode: "ramp_up", duration: 30 })).not.toContain("remaining");
+	it("omits the tail and says nothing is left at the target when the ramp fills the whole run", () => {
+		const s = summarise({ ...base, mode: "ramp_up", duration: 30 });
+		expect(s).not.toContain("remaining");
+		expect(s).toContain("The ramp counts towards the total. No time is left at the target.");
+	});
+
+	it("does not claim the target is unreachable when time remains at it", () => {
+		expect(summarise({ ...base, mode: "ramp_up" })).not.toContain("No time is left");
+	});
+
+	it("leaves the no-time sentence to the blocking notice when the ramp outlasts the run", () => {
+		expect(summarise({ ...base, mode: "ramp_up", duration: 20 })).not.toContain(
+			"No time is left"
+		);
 	});
 
 	it("withholds the estimate while a validation error is live", () => {

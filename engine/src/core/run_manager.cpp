@@ -920,7 +920,8 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
 RunContext::~RunContext () {
     should_stop = true;
     // Wake the closed-loop controller so it observes should_stop without
-    // waiting for its 50ms safety-net timeout before the join below.
+    // waiting out its `CONTROLLER_TICK_MS` safety-net timeout before the
+    // join below.
     notify_refill ();
     // The worker joins these itself before it returns; the join here only
     // covers a context destroyed before its worker ever ran. The *worker*
@@ -1761,6 +1762,13 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         // The whole-run `tests` section above says only that something
         // failed, which over a sequence is not an answer.
         attach_step_test_totals (*inputs.scenario, validation.steps);
+        // The exact population, the figure the budget's `assertionsExact`
+        // reads (#2820). Absent, not zeros, for a run that asserted nothing.
+        if (const auto exact = exact_assertion_totals (*context, scenario_state.get ());
+        exact.total () > 0) {
+            (*inputs.scenario)["assertions"] = { { "passed", exact.passed },
+                { "failed", exact.failed } };
+        }
         // Read on the same edge and for the same reason: a completion
         // still in flight is a request this contract was exercised with
         // (issue #629). Empty for a run of an unbound collection, which

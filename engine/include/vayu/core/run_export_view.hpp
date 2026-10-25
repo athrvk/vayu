@@ -129,6 +129,10 @@ struct ReportView {
     ReportText title;
     ReportText reference;
     ReportVerdict verdict;
+    /// One sentence per way the run's figures are not whole-run measurements
+    /// (`summary.partial`, `summary.summaryMissing`, #2905), shown under the
+    /// verdict; empty for an ordinary run.
+    std::vector<ReportText> notices;
     ReportTable run;
     ReportTable results;
     ReportTable latency;
