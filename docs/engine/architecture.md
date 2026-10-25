@@ -292,10 +292,9 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
 - **Rate limiting**: none in the workers. A `constant_rps` run is paced by its pacing
   thread alone (`run_rate_limited`, see [Load Test Strategies](#load-test-strategies)). A
-  worker-side token bucket re-anchored on every take while the pacer's schedule is absolute,
-  so the two drifted apart and the wait for a token landed in each request's queue wait and
-  latency, 0 to 13 ms at 2 req/s (#2801); it was never armed after that and is gone (#2911),
-  so a worker takes whatever its queue holds, up to `max_concurrent`
+  second schedule in the worker would drift from the pacer's absolute one and put its wait
+  into each request's queue wait and latency (#2801, #2911), so a worker takes whatever its
+  queue holds, up to `max_concurrent`
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 

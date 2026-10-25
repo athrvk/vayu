@@ -397,8 +397,7 @@ std::string home_directory ();
  * is sending** (issue #1161):
  *
  * - the event loop's `curl_multi_poll (..., POLL_TIMEOUT_MS)`, which asks for a
- *   1 ms wait per iteration and gets ~15.6 ms without this, and the same poll
- *   a rate-limited worker parks in until its next token, as short as 1 ms;
+ *   1 ms wait per iteration and gets ~15.6 ms without this;
  * - the rate-limited pacing loop's `sleep_for` leg, which runs below ~500 RPS
  *   (above it the tick's remainder is spun out instead - see
  *   `wait_for_next_tick`), where a 2.5 ms sleep would likewise round to ~15.6.
