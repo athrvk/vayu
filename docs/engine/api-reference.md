@@ -9495,8 +9495,8 @@ them that were errors, by the one definition every surface reports (a status
 outside 2xx/3xx, or no response; a Stop-cancelled request is neither). Its
 `samples` is the count of completions that histogram held; a level of only
 refused connections is judged on its errors with `samples` 0 and a `p99_ms` that
-measured nothing. A level
-**breaches** when its p99 exceeds `sloMs` *or* its error share exceeds 1%
+measured nothing. A level **breaches** when its p99 exceeds `sloMs` *or* its
+error share exceeds 1%
 (`constants::capacity::ERROR_RATE_PCT`, no run-config knob): a target answering
 fast 503s is not sustaining the level. The search stops - and names the reason
 in the report - after **two consecutive** breaching judged levels (one

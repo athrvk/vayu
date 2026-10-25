@@ -340,8 +340,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 										// Index, not concurrency: a level the search
 										// re-measured after one bad window appears
 										// twice, and that repeat is the audit trail
-										// doing its job rather than a duplicate key. The label marks the
-										// second and later occurrences, so a repeat reads as a re-measure.
+										// doing its job rather than a duplicate key.
 										<tr
 											key={`${level.concurrency}-${index}`}
 											className="border-b border-rule last:border-b-0"
