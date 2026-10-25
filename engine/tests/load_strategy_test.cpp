@@ -2345,13 +2345,22 @@ std::vector<nlohmann::json> live_frames (const vayu::core::RunContext& context) 
 }
 
 /// The newest live frame's `capacity` block, or an empty object when it has
-/// none, so a caller's `value` reads its default instead of throwing.
+/// none, so a caller reads its default instead of throwing.
 nlohmann::json newest_capacity_block (const vayu::core::RunContext& context) {
     const auto frames = live_frames (context);
     if (frames.empty ()) {
         return nlohmann::json::object ();
     }
-    return frames.back ().value ("capacity", nlohmann::json::object ());
+    return frames.back ().contains ("capacity") ?
+    frames.back ().at ("capacity") :
+    nlohmann::json::object ();
+}
+
+/// A `capacity` block's numeric member, 0 when it has not got one. Read with
+/// `at` and `get`: GCC 13 at -O3 rejects `json::value` on a number here under
+/// -Werror=null-dereference.
+size_t block_count (const nlohmann::json& block, const char* key) {
+    return block.contains (key) ? block.at (key).get<size_t> () : 0;
 }
 
 } // namespace
@@ -2383,7 +2392,7 @@ TEST_F (LoadStrategyTest, LiveFramesCarryTheCapacitySearchState) {
     ASSERT_TRUE (vayu::tests::wait_until ([&] () {
         collector.record_success (200, 20.0, 0.0);
         (void)search.advance (SEARCH_STEP_MS);
-        return newest_capacity_block (*context).value ("levelsJudged", 0) == 1;
+        return block_count (newest_capacity_block (*context), "levelsJudged") == 1;
     }))
     << "no frame counted the judged level: "
     << newest_capacity_block (*context).dump ();
@@ -2406,7 +2415,7 @@ TEST_F (LoadStrategyTest, LiveFramesCarryTheCapacitySearchState) {
     EXPECT_EQ (last.at ("stopReason").get<std::string> (), summary.stop_reason)
     << "the final frame and the report disagree on why the search stopped: "
     << last.dump ();
-    EXPECT_EQ (last.value ("levelsJudged", 0), 1);
+    EXPECT_EQ (block_count (last, "levelsJudged"), 1U);
 }
 
 // A search that ends itself publishes its own reason, here the deadline.
@@ -2429,7 +2438,7 @@ TEST_F (LoadStrategyTest, TheFinalFrameCarriesTheSearchsOwnStopReason) {
     const auto last = newest_capacity_block (*context);
     EXPECT_EQ (last.at ("stopReason").get<std::string> (), vayu::core::capacity_stop::DEADLINE)
     << last.dump ();
-    EXPECT_EQ (last.value ("level", size_t{ 0 }), SEARCH_START_CONCURRENCY);
+    EXPECT_EQ (block_count (last, "level"), SEARCH_START_CONCURRENCY);
 }
 
 // Every other run's frames carry no `capacity` key at all, rather than a
