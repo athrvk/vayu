@@ -1481,6 +1481,78 @@ describe("pass/fail budgets", () => {
 				expect(started(onStart).carriedBudgets).toEqual(["custom.cart.p95"]);
 			});
 		});
+
+		/*
+		 * A capacity search climbs past the limit on purpose and the engine judges
+		 * a p99 on the pooled histogram, so the Settings seed is dormant there
+		 * (issue #2816) - shown, not sent, and not lost on a switch of mode.
+		 */
+		describe("the Settings p99 seed in Capacity discovery (#2816)", () => {
+			beforeEach(() => useClientSettingsStore.getState().setSloThresholdMs(200));
+
+			it("sends no p99 budget, and the run reads as unconfigured", () => {
+				// Mutation check: drop the `capacity` condition in `isUnsentSeed`
+				// and this reds with thresholds { latencyP99Ms: 200 }.
+				const { onStart } = open();
+				pickProfile("Capacity discovery");
+				const config = started(onStart);
+				expect(config.thresholds).toBeUndefined();
+				expect(config).not.toHaveProperty("carriedBudgets");
+			});
+
+			it("does not announce a prefilled budget that will not be sent", () => {
+				open();
+				pickProfile("Capacity discovery");
+				expect(carriedNotice()).not.toBeInTheDocument();
+				expect(trigger()).toHaveTextContent("No budgets");
+			});
+
+			it("says so beside the field, and keeps the value for another mode", () => {
+				const { onStart } = open();
+				pickProfile("Capacity discovery");
+				openBudgets();
+				expect(p99().value).toBe("200");
+				expect(screen.getByText(/does not send it/i)).toBeInTheDocument();
+				expect(screen.getByText(/judged over the whole run/i)).toBeInTheDocument();
+
+				pickProfile("Ramp-up");
+				expect(carriedNotice()).toHaveTextContent("Budgets prefilled: p99 latency");
+				expect(screen.queryByText(/judged over the whole run/i)).not.toBeInTheDocument();
+				const config = started(onStart);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 200 });
+				expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+			});
+
+			it("sends a p99 the user typed", () => {
+				const { onStart } = open();
+				pickProfile("Capacity discovery");
+				openBudgets();
+				fireEvent.change(p99(), { target: { value: "90" } });
+				expect(started(onStart).thresholds).toEqual({ latencyP99Ms: 90 });
+			});
+
+			it("sends a p99 the memo carried", () => {
+				seedMemo({ mode: "capacity", budgets: { latencyP99Ms: "150" } });
+				const { onStart } = open();
+				const config = started(onStart);
+				expect(config.thresholds).toEqual({ latencyP99Ms: 150 });
+				expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
+			});
+
+			it("does not remember the seed, so the next capacity run still withholds it", () => {
+				const first = open();
+				pickProfile("Capacity discovery");
+				started(first.onStart);
+				const memo = JSON.parse(
+					localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG) ?? "{}"
+				);
+				expect(memo.budgets).not.toHaveProperty("latencyP99Ms");
+
+				cleanup();
+				const second = open();
+				expect(started(second.onStart).thresholds).toBeUndefined();
+			});
+		});
 	});
 
 	it("hands the saved request to each budget's Copy for agent (#2047)", () => {

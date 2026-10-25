@@ -10,13 +10,22 @@ import { Label, Switch } from "@/components/ui";
 import { CopyForAgentButton, NumberField } from "@/components/shared";
 import { thresholdReference, type ThresholdOwner } from "@/lib/agent-reference";
 import { DisclosureCard } from "./DisclosureCard";
+import type { LoadTestConfig } from "@/types";
 import {
 	BUDGETS_EXPLAINER,
 	BUDGET_FIELDS,
+	CAPACITY_BUDGETS_NOTE,
+	CAPACITY_SEED_HINT,
 	summariseBudgets,
 	type BudgetDraft,
 	type CustomBudgetDraft,
 } from "./budgets";
+import {
+	SLO_SEEDED_KEY,
+	budgetsToSend,
+	isUnsentSeed,
+	type CarriedBudgets,
+} from "./carried-budgets";
 import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
 
 interface BudgetsSectionProps {
@@ -30,6 +39,9 @@ interface BudgetsSectionProps {
 	disabled: boolean;
 	/** The saved request the budgets belong to; "Copy for agent" is absent without it. */
 	referenceOwner?: ThresholdOwner;
+	mode: LoadTestConfig["mode"];
+	/** Where each still-carried field came from, so the Settings p99 seed can be told from a typed one. */
+	budgetSources: CarriedBudgets["fixed"];
 }
 
 /** The run's pass/fail limits: the fixed fields, the custom rows, and what a miss does. */
@@ -42,17 +54,29 @@ export function BudgetsSection({
 	onFailRunChange,
 	disabled,
 	referenceOwner,
+	mode,
+	budgetSources,
 }: BudgetsSectionProps) {
 	const [open, setOpen] = useState(false);
+	const seedUnsent = isUnsentSeed(mode, budgetSources);
+	const hintFor = (field: (typeof BUDGET_FIELDS)[number]) =>
+		field.key === SLO_SEEDED_KEY && seedUnsent
+			? CAPACITY_SEED_HINT
+			: (field.seededHint ?? field.hint);
 
 	return (
 		<DisclosureCard
 			open={open}
 			onOpenChange={setOpen}
 			title="Pass/fail budgets"
-			summary={summariseBudgets(budgets, customBudgets)}
+			summary={summariseBudgets(budgetsToSend(budgets, mode, budgetSources), customBudgets)}
 		>
 			<p className="text-label leading-relaxed text-muted-foreground">{BUDGETS_EXPLAINER}</p>
+			{mode === "capacity" && (
+				<p className="text-label leading-relaxed text-muted-foreground">
+					{CAPACITY_BUDGETS_NOTE}
+				</p>
+			)}
 			{BUDGET_FIELDS.map((field) => (
 				<NumberField
 					key={field.key}
@@ -65,7 +89,7 @@ export function BudgetsSection({
 					min={field.min}
 					max={field.max}
 					placeholder="No budget"
-					hint={field.seededHint ?? field.hint}
+					hint={hintFor(field)}
 					action={
 						referenceOwner && (
 							<CopyForAgentButton

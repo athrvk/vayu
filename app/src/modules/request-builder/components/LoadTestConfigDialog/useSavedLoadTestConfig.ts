@@ -45,9 +45,11 @@ export interface SavedLoadTestConfig {
 	 * Budgets are memoed as typed, blanks included, so a cleared field stays
 	 * cleared. A restored draft is also what tells the p99 prefill it has
 	 * already had its turn - without it, declining the SLO budget once would be
-	 * undone by the next dialog open.
+	 * undone by the next dialog open. Partial because a Capacity run leaves the
+	 * Settings p99 seed out (`budgetsToRemember`, issue #2816): written, it would
+	 * restore as the user's own and the next capacity run would send it.
 	 */
-	budgets: BudgetDraft;
+	budgets: Partial<BudgetDraft>;
 	/**
 	 * The request whose Start last changed the budgets above, so the next dialog
 	 * can say where carried-over budgets came from (issue #2194). Provenance for
@@ -101,9 +103,10 @@ export type LoadTestProfile = Pick<
  */
 export type RestoredLoadTestConfig = Omit<
 	SavedLoadTestConfig,
-	keyof LoadTestProfile | "maxInFlight"
+	keyof LoadTestProfile | "maxInFlight" | "budgets"
 > & {
 	profile: LoadTestProfile;
+	budgets: BudgetDraft;
 	maxInFlight: string;
 	/** Which budget fields were filled by the memo or the SLO seed, not the user. */
 	carried: CarriedBudgets;

@@ -174,21 +174,26 @@ class RunExportSchemaTest : public ::testing::Test {
 
     /// A null @p summary stores none; @p with_samples false stores no result or
     /// tick, as a run the engine died under has (its rows are written at the end).
-    void seed (const std::string& id, vayu::RunStatus status, const json& summary, bool with_samples = true) {
+    /// @p extra_config members overwrite the snapshot's own.
+    void seed (const std::string& id,
+    vayu::RunStatus status,
+    const json& summary,
+    bool with_samples        = true,
+    const json& extra_config = json::object ()) {
         vayu::db::Run run;
-        run.id              = id;
-        run.type            = vayu::RunType::Load;
-        run.status          = status;
-        run.config_snapshot = json{
-            { "url", "https://u:p@api.test/v1?api_key=k&page=2" }, { "method", "GET" },
-            { "headers", { { "Accept", "*/*" } } }, { "body", { { "mode", "none" } } },
-            { "auth", { { "mode", "none" } } }, { "requestName", "Orders" },
-            { "mode", "constant_rps" }, { "duration", "10s" },
+        run.id     = id;
+        run.type   = vayu::RunType::Load;
+        run.status = status;
+        json snapshot = json{ { "url", "https://u:p@api.test/v1?api_key=k&page=2" },
+            { "method", "GET" }, { "headers", { { "Accept", "*/*" } } },
+            { "body", { { "mode", "none" } } }, { "auth", { { "mode", "none" } } },
+            { "requestName", "Orders" }, { "mode", "constant_rps" }, { "duration", "10s" },
             { "concurrency", 5 }, { "rps", 10 }, { "dataRowCount", 2 },
-            { "dataFileName", "users.csv" }, { "dataFileCastNumbers", true }
-        }.dump ();
-        run.start_time = START_MS;
-        run.end_time   = START_MS + 10000;
+            { "dataFileName", "users.csv" }, { "dataFileCastNumbers", true } };
+        snapshot.update (extra_config);
+        run.config_snapshot = snapshot.dump ();
+        run.start_time      = START_MS;
+        run.end_time        = START_MS + 10000;
         db_->create_run (run);
         if (!summary.is_null ()) {
             db_->update_run_summary (id, summary.dump ());
@@ -308,6 +313,19 @@ TEST_F (RunExportSchemaTest, ARunStoredBeforeTheSkipCountersExportsZero) {
     const json document = expect_valid (json{ { "runId", "run_pre_skips" } });
     EXPECT_EQ (document["report"]["summary"].value ("skippedRequests", -1), 0);
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("stalledMs", -1.0), 0.0);
+}
+
+// #2925: a capacity run's step length and SLO sit in the configuration and
+// validate; the schema must hear of both, being closed at that level. Mutation
+// check: drop either from `CONFIGURATION_KEYS` and the presence checks fail;
+// drop either from the schema's configuration properties and the validation does.
+TEST_F (RunExportSchemaTest, ACapacityRunsConfigurationCarriesItsKnobsAndValidates) {
+    seed ("run_capacity", vayu::RunStatus::Completed, healthy_summary (), true,
+    json{ { "mode", "capacity" }, { "stepDuration", "5s" }, { "sloMs", 200 } });
+    const json document = expect_valid (json{ { "runId", "run_capacity" } });
+    const json& configuration = document["config"]["configuration"];
+    EXPECT_EQ (configuration.value ("stepDuration", ""), "5s");
+    EXPECT_EQ (configuration.value ("sloMs", 0), 200);
 }
 
 // #2894: a run stored before the split exports its one overhead as cleanup and

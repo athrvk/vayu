@@ -12,7 +12,8 @@
  *
  * Every reading rule is the app's, JavaScript semantics included: a value is
  * a number only when finite, a string only when non-empty, a flag only when
- * `true`; a number is spelled as `String(number)` spells it.
+ * `true`; a number is spelled as `String(number)` spells it. A figure the
+ * report flags as unrecorded reads as absent (`recorded_number_node`).
  */
 
 #include "vayu/core/run_compare.hpp"
@@ -387,9 +388,21 @@ ordered differences (const json& base, const json& target) {
 
 // --- deltas --------------------------------------------------------------------
 
+/// The metric's figure, or null where the report says the engine did not
+/// record it (#2904): `summary.summaryMissing` unrecords the counts and the
+/// latency block, `summary.partial` the latency block alone. Judged per
+/// report, so one unrecorded run nulls only its own side.
+const json* recorded_number_node (const json& report, const ComparedMetric& metric) {
+    const bool summary_missing = flag_at (report, { "summary", "summaryMissing" });
+    const bool unrecorded = metric.section == "latency" ?
+    summary_missing || flag_at (report, { "summary", "partial" }) :
+    summary_missing;
+    return unrecorded ? nullptr : number_node (report, { metric.section, metric.key });
+}
+
 ordered metric_delta (const ComparedMetric& metric, const json& base, const json& target) {
-    const json* b = number_node (base, { metric.section, metric.key });
-    const json* t = number_node (target, { metric.section, metric.key });
+    const json* b = recorded_number_node (base, metric);
+    const json* t = recorded_number_node (target, metric);
     ordered delta = nullptr;
     ordered pct   = nullptr;
     if (b != nullptr && t != nullptr) {

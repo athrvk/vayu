@@ -11,6 +11,7 @@
  * Centralized type definitions for the load test dashboard
  */
 
+import type { CapacityResult } from "@/components/shared/capacityStop";
 import type { RunOutcome } from "@/components/shared/run-outcome";
 import type { LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
@@ -198,6 +199,13 @@ export interface DashboardDerived {
 	startConcurrency?: number;
 	targetConcurrency?: number;
 	breakpoint: Breakpoint;
+	/**
+	 * What a finished capacity run's search found, from the report. Absent live
+	 * (the engine publishes the stop reason only in the report, which replaces
+	 * the live view once the run ends) and for every other mode; the Saturation
+	 * card of a capacity run reads it as "still searching" until it exists.
+	 */
+	capacity?: CapacityResult;
 	/**
 	 * Worst whole-second p99 (ms) among the ticks at the run's peak load; absent
 	 * where no per-tick series reached the peak, and the stat falls back to

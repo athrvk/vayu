@@ -199,6 +199,95 @@ describe("dashboard-store breakpoint SLO", () => {
 	});
 });
 
+describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
+	});
+
+	it("starts uncrossed against the run's own SLO, not the setting", () => {
+		useDashboardStore.getState().startRun("r", { mode: "capacity", sloMs: 50 });
+		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(50);
+	});
+
+	it("latches a 60 ms tick the 200 ms setting would have let through", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r", { mode: "capacity", sloMs: 50 });
+		s.addMetricsBatch([tick(1, 10), tick(2, 60)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			sloMs: 50,
+			p99Ms: 60,
+		});
+	});
+
+	it("does not follow the setting as it changes mid-run", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r", { mode: "capacity", sloMs: 50 });
+		useClientSettingsStore.setState({ sloThresholdMs: 500 });
+		s.addMetricsBatch([tick(1, 60)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({ crossed: true, sloMs: 50 });
+	});
+
+	it("falls back to the setting for a capacity config that carries no SLO", () => {
+		useDashboardStore.getState().startRun("r", { mode: "capacity" });
+		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(DEFAULT_SLO_THRESHOLD_MS);
+	});
+
+	it("ignores a stray sloMs in any other mode, where the setting still governs", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r", { mode: "ramp_up", sloMs: 50 });
+		s.addMetricsBatch([tick(1, 60)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: false,
+			sloMs: DEFAULT_SLO_THRESHOLD_MS,
+		});
+
+		useClientSettingsStore.setState({ sloThresholdMs: 500 });
+		s.addMetricsBatch([tick(2, 60)]);
+		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(500);
+	});
+
+	// A run an agent started streams ticks before its config is read from the row.
+	describe("a config that arrives after the ticks (setRunConfig)", () => {
+		it("re-judges the retained ticks against the run's own SLO", () => {
+			const s = useDashboardStore.getState();
+			s.startRun("r");
+			s.addMetricsBatch([tick(1, 10), tick(2, 60)]);
+			expect(useDashboardStore.getState().breakpoint.crossed).toBe(false);
+
+			s.setRunConfig({ mode: "capacity", sloMs: 50 }, null);
+			expect(useDashboardStore.getState().breakpoint).toMatchObject({
+				crossed: true,
+				sloMs: 50,
+				timeSeconds: 2,
+			});
+		});
+
+		it("moves an uncrossed breakpoint onto the run's SLO before the next tick", () => {
+			const s = useDashboardStore.getState();
+			s.startRun("r");
+			s.setRunConfig({ mode: "capacity", sloMs: 50 }, null);
+			expect(useDashboardStore.getState().breakpoint).toMatchObject({
+				crossed: false,
+				sloMs: 50,
+			});
+		});
+
+		it("leaves a ramp run's latched crossing alone", () => {
+			useClientSettingsStore.setState({ sloThresholdMs: 100 });
+			const s = useDashboardStore.getState();
+			s.startRun("r");
+			s.addMetricsBatch([tick(1, 150)]);
+			useClientSettingsStore.setState({ sloThresholdMs: 900 });
+			s.setRunConfig({ mode: "ramp_up" }, null);
+			expect(useDashboardStore.getState().breakpoint).toMatchObject({
+				crossed: true,
+				sloMs: 100,
+			});
+		});
+	});
+});
+
 describe("dashboard-store monitor samples", () => {
 	beforeEach(() => {
 		useDashboardStore.getState().startRun("r");

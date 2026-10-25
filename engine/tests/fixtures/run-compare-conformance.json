@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
+  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A report flagged `summary.summaryMissing` has its counts and latency read as absent, and one flagged `summary.partial` its latency alone, each side judged on its own (#2904). A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
   "cases": [
     {
       "name": "a clean regression",
@@ -1650,6 +1650,162 @@
             "direction": "lower-is-better"
           },
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a target with summaryMissing reads every figure as not recorded, the base keeps its own",
+      "base": {"latency":{"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},"summary":{"avgRps":100,"throughput":100,"errorRate":2,"totalRequests":6000}},
+      "target": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"summaryMissing":true,"avgRps":4,"throughput":3,"errorRate":100,"totalRequests":12}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":100,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":2,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a base with summaryMissing reads every figure as not recorded, the target keeps its own",
+      "base": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"summaryMissing":true,"avgRps":4,"throughput":3,"errorRate":100,"totalRequests":12}},
+      "target": {"latency":{"p50":15,"p90":27,"p95":30,"p99":80,"avg":18,"max":200},"summary":{"avgRps":90,"throughput":88,"errorRate":2,"totalRequests":5400}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":15,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":27,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":30,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":80,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":18,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":200,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":90,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":88,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":2,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":5400,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a partial target reads its latency as not recorded and keeps its counts",
+      "base": {"latency":{"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},"summary":{"avgRps":100,"throughput":100,"errorRate":2,"totalRequests":6000}},
+      "target": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"partial":true,"avgRps":50,"throughput":80,"errorRate":1,"totalRequests":3000}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":50,"delta":-50,"pctChange":-50,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":100,"target":80,"delta":-20,"pctChange":-20,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":2,"target":1,"delta":-1,"pctChange":-50,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":3000,"delta":-3000,"pctChange":-50,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "summaryMissing on both sides leaves nothing to compare",
+      "base": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"summaryMissing":true,"avgRps":4,"throughput":3,"errorRate":100,"totalRequests":12}},
+      "target": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"summaryMissing":true,"avgRps":4,"throughput":3,"errorRate":100,"totalRequests":12}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a base with summaryMissing against a partial target: the target's counts stand alone",
+      "base": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"summaryMissing":true,"avgRps":4,"throughput":3,"errorRate":100,"totalRequests":12}},
+      "target": {"latency":{"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},"summary":{"partial":true,"avgRps":50,"throughput":80,"errorRate":1,"totalRequests":3000}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":50,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":80,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":1,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":3000,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "flags that are not the boolean true leave every figure recorded",
+      "base": {"latency":{"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},"summary":{"avgRps":100,"throughput":100,"errorRate":2,"totalRequests":6000,"summaryMissing":false,"partial":false}},
+      "target": {"latency":{"p50":15,"p90":27,"p95":30,"p99":80,"avg":18,"max":200},"summary":{"avgRps":90,"throughput":88,"errorRate":2,"totalRequests":5400,"summaryMissing":1,"partial":"true"}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":15,"delta":5,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":27,"delta":9,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":30,"delta":10,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":80,"delta":40,"pctChange":100,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":18,"delta":6,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":200,"delta":100,"pctChange":100,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":90,"delta":-10,"pctChange":-10,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":100,"target":88,"delta":-12,"pctChange":-12,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":2,"target":2,"delta":0,"pctChange":0,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":5400,"delta":-600,"pctChange":-10,"direction":"neutral"}
         ],
         "statusCodes": {},
         "compressionNegotiationDiffers": false,

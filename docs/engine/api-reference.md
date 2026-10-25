@@ -4609,8 +4609,12 @@ answers. Its members:
 
   `delta` is `target - base` and `pctChange` is `delta / base * 100`. A value a
   report lacks is `null`, and so is every figure computed from it; `pctChange`
-  is `null` against a zero base. The base's own headline numbers are the
-  entries' `base` values.
+  is `null` against a zero base. So is a figure the report says the engine did
+  not record (#2904), judged per run: `summary.summaryMissing` (a failed run
+  with no summary) nulls that run's `summary.*` metrics and its latency, and
+  `summary.partial` (reconciled after a crash) nulls its latency alone, so the
+  other run's value stands and the `delta` is `null`. The base's own headline
+  numbers are the entries' `base` values.
 - `statusCodes`: `{code: {base, target}}` over every code either run saw, a
   code one run never saw counting `0`.
 
@@ -11654,7 +11658,12 @@ run that named none has no such key. `carriedBudgets` (issue #2195) is the list 
 keys the client sent as carried over from an earlier run rather than set for
 this one, echoed as sent and omitted when the run sent none (see
 [Carried-over budgets](#carried-over-budgets-carriedbudgets)); `GET /runs`'s
-`summary` does not carry it.
+`summary` does not carry it. A `capacity` run's own two knobs (issue #2925),
+`stepDuration` (the string the run was started with, as `duration` is) and
+`sloMs`, are echoed as sent, on a `capacity` run only and omitted when it left
+one at its default: the search's effective budget is the report's
+`capacity.sloMs`. A run of any other mode has neither key, whatever its
+snapshot holds. `POST /export/run-report` carries both in `config.configuration`.
 
 ### GET /runs/:runId/samples
 

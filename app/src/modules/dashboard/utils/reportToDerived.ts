@@ -160,6 +160,9 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		rampUpDurationSeconds: durationSeconds(cfg.rampUpDuration) ?? undefined,
 		startConcurrency: cfg.startConcurrency,
 		targetConcurrency: cfg.concurrency,
-		breakpoint: notCrossed(null),
+		// A capacity run names its own budget; every other report has no threshold
+		// until LoadTestDetail judges its stored series against the Settings SLO.
+		breakpoint: notCrossed(report.capacity?.sloMs ?? null),
+		capacity: report.capacity,
 	};
 }

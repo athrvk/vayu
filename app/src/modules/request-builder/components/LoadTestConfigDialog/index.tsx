@@ -41,10 +41,12 @@ import { useSavedLoadTestConfig, type LoadTestProfile } from "./useSavedLoadTest
 import { buildNotices } from "./notices";
 import {
 	budgetsChanged,
+	budgetsToRemember,
 	carriedThresholdKeys,
 	clearCarried,
 	describeCarried,
 	stillCarried,
+	withoutUnsentSeed,
 } from "./carried-budgets";
 import { RecordingSection } from "./RecordingSection";
 import { BudgetsSection } from "./BudgetsSection";
@@ -242,10 +244,18 @@ export default function LoadTestConfigDialog({
 		{ budgets: initial.budgets, customBudgets: initial.customBudgets },
 		{ budgets, customBudgets }
 	);
-	const carriedSummary = describeCarried(carried, budgets, customBudgets, initial.budgetsFrom);
+	// The notice and its Clear button speak only for what this mode sends: in
+	// Capacity the Settings p99 seed is dormant, so neither names it.
+	const judgedCarried = withoutUnsentSeed(carried, profile.mode);
+	const carriedSummary = describeCarried(
+		judgedCarried,
+		budgets,
+		customBudgets,
+		initial.budgetsFrom
+	);
 
 	const clearCarriedBudgets = () => {
-		const cleared = clearCarried(carried, budgets, customBudgets);
+		const cleared = clearCarried(judgedCarried, budgets, customBudgets);
 		setBudgets(cleared.budgets);
 		setCustomBudgets(cleared.customBudgets);
 	};
@@ -288,7 +298,7 @@ export default function LoadTestConfigDialog({
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
-			budgets,
+			budgets: budgetsToRemember(budgets, profile.mode, carried.fixed),
 			budgetsFrom: budgetsOriginToSave(),
 			customBudgets,
 			failRun,
@@ -308,6 +318,7 @@ export default function LoadTestConfigDialog({
 				monitor,
 				comment,
 				carriedBudgets: carriedThresholdKeys(carried, customBudgets),
+				budgetSources: carried.fixed,
 				scriptsOverride,
 				dataFile: dataFile.file,
 				isStreamingRequest,
@@ -447,6 +458,8 @@ export default function LoadTestConfigDialog({
 								onFailRunChange={setFailRun}
 								disabled={isStarting}
 								referenceOwner={referenceOwner}
+								mode={profile.mode}
+								budgetSources={carried.fixed}
 							/>
 
 							<MonitoringSection

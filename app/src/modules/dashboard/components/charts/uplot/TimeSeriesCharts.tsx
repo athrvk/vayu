@@ -60,6 +60,7 @@ import {
 } from "@/constants/load-test-modes";
 import { pluralize } from "../../../utils/format";
 import { useClientSettingsStore } from "@/stores";
+import { useSloMs } from "../../../hooks/useSloMs";
 
 const COUNT_ONLY: readonly ScaleKey[] = ["y"];
 const CONCURRENCY_ONLY: readonly ScaleKey[] = ["y2"];
@@ -139,10 +140,7 @@ export function LatencyPercentilesChart({
 	sleeps,
 }: BaseProps & { mode?: string }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const settingSloMs = useClientSettingsStore((s) => s.sloThresholdMs);
-	// The SLO the breakpoint was judged against, so the line and the marker
-	// agree even after the setting has changed; the setting where none was.
-	const sloMs = breakpoint?.sloMs ?? settingSloMs;
+	const sloMs = useSloMs(breakpoint);
 	const markers = useMemo<Marker[]>(
 		() => [
 			{

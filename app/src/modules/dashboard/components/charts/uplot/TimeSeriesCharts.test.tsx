@@ -272,6 +272,35 @@ describe("LatencyBreakdownChart - what the series are called", () => {
 	});
 });
 
+describe("ResponseTimeVsConcurrencyChart - the SLO line (#2816)", () => {
+	afterEach(() => useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS }));
+	const horizontals = () => mockState.markers.filter((m) => m.orient === "horizontal");
+
+	it("draws the SLO the breakpoint was judged against, not the setting", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 200 });
+		render(
+			<ResponseTimeVsConcurrencyChart
+				history={historyOf(4)}
+				breakpoint={{
+					crossed: false,
+					concurrency: null,
+					timeSeconds: null,
+					p99Ms: null,
+					sloMs: 50,
+					atRunStart: false,
+				}}
+			/>
+		);
+		expect(horizontals().map((m) => [m.value, m.label])).toEqual([[50, "SLO 50ms"]]);
+	});
+
+	it("draws the setting when the breakpoint holds none", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 450 });
+		render(<ResponseTimeVsConcurrencyChart history={historyOf(4)} breakpoint={null} />);
+		expect(horizontals().map((m) => [m.value, m.label])).toEqual([[450, "SLO 450ms"]]);
+	});
+});
+
 describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
 	it("names the breakpoint in virtual users", () => {
 		render(

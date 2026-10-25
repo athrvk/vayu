@@ -1287,10 +1287,25 @@ int64_t offset) {
     return { 200, body };
 }
 
+// A capacity run's own two knobs (issue #2925), as the run was started with
+// them: `stepDuration` the string (or number) the parser read, `sloMs` the
+// budget. Gated on the mode rather than on presence, so a run of another mode
+// never reports a knob it ignores. Absent when a capacity run left one at its
+// default - the effective SLO is the report's `capacity.sloMs`.
+void add_capacity_config (nlohmann::json& dst, const nlohmann::json& src) {
+    const auto mode = src.find ("mode");
+    if (mode == src.end () || *mode != "capacity") {
+        return;
+    }
+    add_if_present (dst, src, "stepDuration");
+    add_if_present (dst, src, "sloMs");
+}
+
 /**
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
  * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
- * bound and the budgets it carried (fifteen keys total) and, when the
+ * bound and the budgets it carried (fifteen keys total), a capacity run's
+ * `stepDuration` and `sloMs` (issue #2925) and, when the
  * snapshot carries them, `acceptEncoding` (issue #1488) and `expectContinue`
  * (issue #2516), built from an already-parsed config_snapshot. `rps`/
  * `targetRps` is the one rename (add_target_rps), so the caller applies it
@@ -1319,6 +1334,7 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
          "carriedBudgets" }) {
         add_if_present (config_obj, config, key);
     }
+    add_capacity_config (config_obj, config);
     add_http_version (config_obj, config);
     add_default_header_flag (config_obj, config, "acceptEncoding");
     add_default_header_flag (config_obj, config, "expectContinue");

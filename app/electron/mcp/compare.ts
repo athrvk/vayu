@@ -13,7 +13,9 @@
  *        labelled with which direction counts as an improvement, and
  *        reports in `comparability` where the two runs were not the same
  *        experiment (mode, virtual users, duration, status, ...). Defensive
- *        against missing fields so it works across run types.
+ *        against missing fields so it works across run types, and a figure the
+ *        report flags as unrecorded (`summary.summaryMissing`,
+ *        `summary.partial`, #2904) is `null` on that side, never a zero.
  *
  * **Mirrored by `app/src/lib/run-compare.ts`, which the history view's
  * vs-baseline strip uses.** Neither process can import the other's source:
@@ -438,6 +440,22 @@ const COMPARABILITY_RULES: ((base: Report, target: Report) => ComparabilityWarni
 	expectContinueWarning,
 ];
 
+/**
+ * A figure of the report's `latency` or `summary` block, or `null` where the
+ * engine did not record it (#2904): `summary.summaryMissing` (a failed run
+ * with no summary) leaves the counts and the latency block unreliable, and
+ * `summary.partial` (reconciled after a crash) leaves the latency block all
+ * zeros. A 0 read through here would be a measurement no run made, and a delta
+ * against it a regression no run showed. Read per side, so one unrecorded run
+ * nulls only its own column. Mirrors `unrecordedFiguresOf`
+ * (`modules/history/main/components/unrecorded-figures.ts`).
+ */
+function recordedNum(report: Report, section: "latency" | "summary", key: string): number | null {
+	if (bool(report, "summary", "summaryMissing")) return null;
+	if (section === "latency" && bool(report, "summary", "partial")) return null;
+	return num(report, section, key);
+}
+
 /** Compare two engine run reports and return a structured delta. */
 export function compareReports(
 	baseRunId: string,
@@ -446,34 +464,39 @@ export function compareReports(
 	target: Report
 ): RunComparison {
 	const latency = ["p50", "p90", "p95", "p99", "avg", "max"].map((p) =>
-		delta(`latency.${p}`, "lower-is-better", num(base, "latency", p), num(target, "latency", p))
+		delta(
+			`latency.${p}`,
+			"lower-is-better",
+			recordedNum(base, "latency", p),
+			recordedNum(target, "latency", p)
+		)
 	);
 	const throughput = [
 		delta(
 			"summary.avgRps",
 			"higher-is-better",
-			num(base, "summary", "avgRps"),
-			num(target, "summary", "avgRps")
+			recordedNum(base, "summary", "avgRps"),
+			recordedNum(target, "summary", "avgRps")
 		),
 		delta(
 			"summary.throughput",
 			"higher-is-better",
-			num(base, "summary", "throughput"),
-			num(target, "summary", "throughput")
+			recordedNum(base, "summary", "throughput"),
+			recordedNum(target, "summary", "throughput")
 		),
 	];
 	const reliability = [
 		delta(
 			"summary.errorRate",
 			"lower-is-better",
-			num(base, "summary", "errorRate"),
-			num(target, "summary", "errorRate")
+			recordedNum(base, "summary", "errorRate"),
+			recordedNum(target, "summary", "errorRate")
 		),
 		delta(
 			"summary.totalRequests",
 			"neutral",
-			num(base, "summary", "totalRequests"),
-			num(target, "summary", "totalRequests")
+			recordedNum(base, "summary", "totalRequests"),
+			recordedNum(target, "summary", "totalRequests")
 		),
 	];
 
