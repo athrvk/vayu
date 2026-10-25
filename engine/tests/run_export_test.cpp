@@ -482,6 +482,30 @@ TEST_F (RunExportTest, ADataFileReadWithNumbersCastIsNamedAndComparesAsADifferen
     EXPECT_EQ (differences, expected);
 }
 
+// A capacity run's own knobs (issue #2925) ride the export, and a load run's
+// export has neither. Mutation check: drop "stepDuration" or "sloMs" from
+// `CONFIGURATION_KEYS` and the capacity half reds; drop the mode gate in
+// `add_capacity_config` and the load half does.
+TEST_F (RunExportTest, ACapacityRunsConfigurationNamesItsStepDurationAndSlo) {
+    const json summary = { { "total_requests", 10 }, { "test_duration", 60.0 } };
+    seed_run ("run_capacity", vayu::RunType::Load, vayu::RunStatus::Completed,
+    json{ { "url", "https://x.test/a" }, { "method", "GET" },
+    { "mode", "capacity" }, { "stepDuration", "5s" }, { "sloMs", 200 } },
+    summary);
+    seed_run ("run_ramp", vayu::RunType::Load, vayu::RunStatus::Completed,
+    json{ { "url", "https://x.test/a" }, { "method", "GET" },
+    { "mode", "ramp_up" }, { "stepDuration", "5s" }, { "sloMs", 200 } },
+    summary);
+
+    const auto configuration = [this] (const char* run) {
+        return export_ok (json{ { "runId", run } }).second["config"]["configuration"];
+    };
+    EXPECT_EQ (configuration ("run_capacity").value ("stepDuration", ""), "5s");
+    EXPECT_EQ (configuration ("run_capacity").value ("sloMs", 0), 200);
+    EXPECT_FALSE (configuration ("run_ramp").contains ("stepDuration"));
+    EXPECT_FALSE (configuration ("run_ramp").contains ("sloMs"));
+}
+
 TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {
     seed_leak_run ("run_leak");
     seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);

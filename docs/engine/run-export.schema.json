@@ -96,7 +96,9 @@
             "dataFileName": {"type": "string"},
             "dataFileHash": {"type": "string"},
             "dataFileCastNumbers": {"type": "boolean"},
-            "carriedBudgets": {"$ref": "#/definitions/names"}
+            "carriedBudgets": {"$ref": "#/definitions/names"},
+            "stepDuration": {"type": ["string", "number"]},
+            "sloMs": {"type": "number"}
           }
         }
       }

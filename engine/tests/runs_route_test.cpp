@@ -1460,6 +1460,58 @@ TEST (RunReportConfigTest, CarriesIterationsOnlyWhenTheSnapshotHasThem) {
     EXPECT_FALSE (without.contains ("iterations"));
 }
 
+// A capacity run's own two knobs (issue #2925), echoed as the run was started
+// with them and only for that mode: a load run's snapshot never gets them.
+// Mutation check: drop `stepDuration` or `sloMs` from `add_capacity_config`
+// and the first half reds; drop its mode gate and the second half does.
+TEST (RunReportConfigTest, CarriesACapacityRunsStepDurationAndSloOnly) {
+    const auto capacity = vayu::http::routes::build_run_report_config (json::parse (
+    R"({"mode":"capacity","duration":"5m","stepDuration":"5s","sloMs":200})"));
+    EXPECT_EQ (capacity.value ("stepDuration", ""), "5s");
+    EXPECT_EQ (capacity.value ("sloMs", 0), 200);
+
+    // A capacity run that left both at their defaults has nothing to echo.
+    const auto defaults = vayu::http::routes::build_run_report_config (
+    json::parse (R"({"mode":"capacity","duration":"5m"})"));
+    EXPECT_FALSE (defaults.contains ("stepDuration"));
+    EXPECT_FALSE (defaults.contains ("sloMs"));
+
+    // The gate is the mode, not the keys: a snapshot of another mode that
+    // somehow holds them still reports neither.
+    for (const char* mode : { "constant_concurrency", "ramp_up", "iterations" }) {
+        const auto load = vayu::http::routes::build_run_report_config (json::parse (
+        std::string (R"({"mode":")") + mode + R"(","stepDuration":"5s","sloMs":200})"));
+        EXPECT_FALSE (load.contains ("stepDuration")) << mode;
+        EXPECT_FALSE (load.contains ("sloMs")) << mode;
+    }
+
+    // A snapshot with no mode, or a mode that is not text, is not capacity.
+    for (const char* snapshot : { R"({"sloMs":200})", R"({"mode":null,"sloMs":200})" }) {
+        EXPECT_FALSE (
+        vayu::http::routes::build_run_report_config (json::parse (snapshot)).contains ("sloMs"))
+        << snapshot;
+    }
+}
+
+// The same two keys through the report's metadata, which is what the route
+// serves. Mutation check: drop `add_capacity_config` from
+// `build_run_report_config` and this reds.
+TEST (RunReportMetadataTest, ConfigurationNamesACapacityRunsKnobs) {
+    vayu::db::Run run;
+    run.type = vayu::RunType::Load;
+    run.config_snapshot = R"({"mode":"capacity","stepDuration":"10s","sloMs":150})";
+    const auto capacity =
+    vayu::http::routes::build_report_metadata ("run_cap", run)["configuration"];
+    EXPECT_EQ (capacity.value ("stepDuration", ""), "10s");
+    EXPECT_EQ (capacity.value ("sloMs", 0), 150);
+
+    run.config_snapshot = R"({"mode":"ramp_up","duration":"1m"})";
+    const auto load     = vayu::http::routes::build_report_metadata (
+    "run_load", run)["configuration"];
+    EXPECT_FALSE (load.contains ("stepDuration"));
+    EXPECT_FALSE (load.contains ("sloMs"));
+}
+
 // `rps` is the POST /runs body's other spelling of `targetRps`; the report
 // names the rate one way, as the engine paced at it: `rps` first, `targetRps`
 // when `rps` is zero. Mutation check: put `targetRps` ahead of `rps` in
