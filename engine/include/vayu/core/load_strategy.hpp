@@ -182,7 +182,8 @@ std::optional<int64_t> run_end_ms = std::nullopt);
  * All of it is touched from the `maintain_concurrency` closures, which run on
  * the strategy thread and nowhere else - `target_fn` is evaluated inside the
  * refill condition-variable predicate, but a predicate runs on the waiting
- * thread, so there is one thread here and no lock is owed.
+ * thread, so there is one thread here and no lock is owed. What the metrics
+ * thread reads of it is copied out through `RunContext::CapacityProgress`.
  */
 class CapacitySearch {
     public:
@@ -203,22 +204,28 @@ class CapacitySearch {
 
     /// What the search found. The level still being measured when the run ended
     /// is dropped: `levels[]` holds judged windows only, and a partial one
-    /// would sit in the audit trail looking like a measurement.
-    [[nodiscard]] CapacitySummary finish () const;
+    /// would sit in the audit trail looking like a measurement. Publishes the
+    /// stop reason it reports to the live frame, so the run's last frame and
+    /// its report name the same one.
+    [[nodiscard]] CapacitySummary finish ();
 
     private:
     void open_level (size_t level, int64_t now_ms);
     void collect_tick ();
+    void publish_progress (const char* stop_reason, int64_t ended_steady_ms);
 
     CapacityConfig config_;
     std::shared_ptr<RunContext> context_;
     std::vector<CapacityWindow> history_;
     size_t current_           = 0;
     int64_t level_started_ms_ = 0;
-    uint64_t last_sequence_   = 0;
-    size_t ticks_seen_        = 0;
-    size_t rps_windows_       = 0;
-    double rps_sum_           = 0.0;
+    /// The same instant as `level_started_ms_`, on the clock the live frame
+    /// measures time in level with.
+    int64_t level_started_steady_ms_ = 0;
+    uint64_t last_sequence_          = 0;
+    size_t ticks_seen_               = 0;
+    size_t rps_windows_              = 0;
+    double rps_sum_                  = 0.0;
     /// The epoch this level's reset request was answered with; 0 until the
     /// level has settled and asked for one.
     uint64_t level_epoch_ = 0;
@@ -299,6 +306,15 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
  * whole duration instead.
  */
 [[nodiscard]] bool returns_at_send_deadline (const nlohmann::json& config);
+
+/**
+ * @brief Whether a run config selects `CapacityLoadStrategy`: the one run
+ *        whose live frame carries a `capacity` block (#2928).
+ *
+ * Read by the metrics thread before the strategy exists, so it answers false
+ * rather than throwing for a `mode` that is not a string.
+ */
+[[nodiscard]] bool runs_capacity_search (const nlohmann::json& config) noexcept;
 
 /**
  * @brief Why a run payload's top-level `elements` override cannot run, or
