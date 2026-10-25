@@ -1268,6 +1268,13 @@ collection run's per-step progress.
   newest tick. Each phase carries `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`; the live view
   turns them into the report's `timingBreakdown` shape for the waterfall and the percentile table,
   and shows the latency distribution's `count` as "N completions so far"
+- **Capacity state**: a capacity run's frames carry `capacity: {level, levelElapsedMs,
+  levelsJudged, stopReason?}` from tick 0 (issue #2928), and `mapSseMetrics()` passes it through
+  as `LoadTestMetrics.capacity` unchanged. Absent is "not a capacity run" (or an engine from
+  before #2928), never a zeroed level; `level` `0` is a search that has not opened its first level,
+  and `stopReason` appears only once the search has ended. A stored tick never carries it. No
+  renderer component reads it yet (the live card is #2929); until it lands the only reader is MCP
+  `get_live_metrics`
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
   for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
   on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row

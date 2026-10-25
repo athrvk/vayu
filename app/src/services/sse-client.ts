@@ -10,6 +10,7 @@
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { STEP_OUTCOMES } from "@/types";
 import type {
+	LiveCapacityState,
 	LiveLatencyDistribution,
 	LivePhaseDistributions,
 	LoadTestMetrics,
@@ -70,6 +71,8 @@ interface RawSseMetrics {
 	statusCodes?: Record<string, number>;
 	/** Gate frames only (issue #2866); `[]` when the gate closed no second. */
 	statusSeconds?: StatusSecondEntry[];
+	/** Capacity runs only (issue #2928); absent from every other run's frames. */
+	capacity?: LiveCapacityState;
 	/** Issue #1500 - see `LoadTestMetrics.custom_metrics`. */
 	customMetrics?: LoadTestMetrics["custom_metrics"];
 }
@@ -129,6 +132,8 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		// As sent: absent is "not a gate frame", and `[]` a gate that closed no
 		// second, which the status chart must tell apart.
 		status_seconds: m.statusSeconds,
+		// As sent: absent is "not a capacity run", never a zeroed level.
+		capacity: m.capacity,
 		custom_metrics: m.customMetrics,
 	};
 }
