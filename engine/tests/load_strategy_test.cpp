@@ -2403,7 +2403,7 @@ TEST_F (LoadStrategyTest, LiveFramesCarryTheCapacitySearchState) {
 
     EXPECT_EQ (summary.stop_reason, vayu::core::capacity_stop::STOPPED);
     const auto last = newest_capacity_block (*context);
-    EXPECT_EQ (last.value ("stopReason", ""), summary.stop_reason)
+    EXPECT_EQ (last.at ("stopReason").get<std::string> (), summary.stop_reason)
     << "the final frame and the report disagree on why the search stopped: "
     << last.dump ();
     EXPECT_EQ (last.value ("levelsJudged", 0), 1);
@@ -2427,7 +2427,7 @@ TEST_F (LoadStrategyTest, TheFinalFrameCarriesTheSearchsOwnStopReason) {
 
     EXPECT_EQ (summary.stop_reason, vayu::core::capacity_stop::DEADLINE);
     const auto last = newest_capacity_block (*context);
-    EXPECT_EQ (last.value ("stopReason", ""), vayu::core::capacity_stop::DEADLINE)
+    EXPECT_EQ (last.at ("stopReason").get<std::string> (), vayu::core::capacity_stop::DEADLINE)
     << last.dump ();
     EXPECT_EQ (last.value ("level", size_t{ 0 }), SEARCH_START_CONCURRENCY);
 }
