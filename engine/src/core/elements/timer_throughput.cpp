@@ -34,12 +34,11 @@
  *   re-derives that math.
  * - `perUser: false` (the default) shares one budget across every virtual
  *   user of a scenario load run through `SharedThroughputBudgets`, a token
- *   bucket whose fractional remainder carries between claims - the same
- *   accounting `load_pacing.hpp`'s `take_due_requests` does open-loop for the
- *   whole run, applied closed-loop to one scenario node. Under the sequential
- *   run a single virtual user makes the two cases indistinguishable (both
- *   read and write the one map `ElementContext::pacing_state` binds there),
- *   which is why `apply` below never has to know which case it is.
+ *   bucket whose fractional remainder carries between claims. Under the
+ *   sequential run a single virtual user makes the two cases
+ *   indistinguishable (both read and write the one map
+ *   `ElementContext::pacing_state` binds there), which is why `apply` below
+ *   never has to know which case it is.
  */
 
 #include "vayu/core/elements.hpp"

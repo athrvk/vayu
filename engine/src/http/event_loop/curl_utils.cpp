@@ -1518,8 +1518,11 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     // Progress callback. A bounded stream needs it whether or not the caller
     // asked for progress: it is where the duration cap is enforced, and a quiet
-    // stream produces no writes to enforce it from (issue #576).
-    if (data->progress || data->stream_bounds) {
+    // stream produces no writes to enforce it from (issue #576). A followed
+    // redirect needs it to count the bodies of the hops before the last (#2893);
+    // a negative `max_redirects` is libcurl's "no limit".
+    data->counts_redirect_bodies = request.follow_redirects && request.max_redirects != 0;
+    if (data->progress || data->stream_bounds || data->counts_redirect_bodies) {
         set_opt<CURLOPT_XFERINFOFUNCTION> (curl, progress_callback);
         set_opt<CURLOPT_XFERINFODATA> (curl, data);
         set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
@@ -1678,17 +1681,26 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     }
     response.transfer_attempted = curl_transfer_attempted (curl, result);
 
-    // Wire byte counts (body + headers), for throughput-in-bytes metrics.
-    curl_off_t dl_bytes = 0, ul_bytes = 0;
+    // Wire bytes over every hop, headers and body (#2893). HEADER_SIZE and
+    // REQUEST_SIZE accumulate across hops; SIZE_DOWNLOAD_T is the last hop's
+    // body alone, the earlier ones counted by track_hop_body, which reads it
+    // once more here for a next hop that failed before any progress call.
+    // REQUEST_SIZE already holds every body byte sent (POSTFIELDS, multipart
+    // and a streamed upload alike), so SIZE_UPLOAD_T added to it counts the
+    // last hop's body twice.
+    //   bytes_down = earlier hops' bodies + SIZE_DOWNLOAD_T + HEADER_SIZE
+    //   bytes_up   = REQUEST_SIZE
+    curl_off_t dl_bytes = 0;
     long header_bytes = 0, request_bytes = 0;
     get_info<CURLINFO_SIZE_DOWNLOAD_T> (curl, &dl_bytes);
-    get_info<CURLINFO_SIZE_UPLOAD_T> (curl, &ul_bytes);
     get_info<CURLINFO_HEADER_SIZE> (curl, &header_bytes);
     get_info<CURLINFO_REQUEST_SIZE> (curl, &request_bytes);
-    response.timing.bytes_down = static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
+    dl_bytes = std::max<curl_off_t> (0, dl_bytes);
+    track_hop_body (*data, dl_bytes);
+    response.timing.bytes_down = static_cast<size_t> (data->earlier_hops_body_down) +
+    static_cast<size_t> (dl_bytes) +
     static_cast<size_t> (std::max<long> (0, header_bytes));
-    response.timing.bytes_up = static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
-    static_cast<size_t> (std::max<long> (0, request_bytes));
+    response.timing.bytes_up = static_cast<size_t> (std::max<long> (0, request_bytes));
 
     // Set body. On a failed transfer this is whatever arrived before the
     // failure, which is also the truncated prefix when the body cap tripped.

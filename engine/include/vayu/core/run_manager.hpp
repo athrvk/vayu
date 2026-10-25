@@ -151,17 +151,6 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 }
 
 /**
- * @brief Set @p loop's token bucket from @p config: `open_loop_rate` and twice
- *        it as the burst, so both are 0 on every mode but `constant_rps`
- *        (#2396).
- *
- * `per_worker_config` splits a non-zero rate into a bucket per worker, which
- * throttles a closed-loop run below the concurrency it is labelled with.
- * `configure_event_loop`'s only source for the two fields.
- */
-void apply_open_loop_rate (vayu::http::EventLoopConfig& loop, const nlohmann::json& config);
-
-/**
  * @brief How long a load run's natural end waits on in-flight transfers before
  *        cancelling them: the longest a transfer can legitimately take, plus
  *        `STOP_DRAIN_GRACE_MS` (#2834).
@@ -744,10 +733,11 @@ struct RunContext {
      * The `eventLoopMaxPerHost` setting this load run read, and the per-host
      * limit each event-loop worker actually ran with (#2394,
      * `effective_max_per_host`). The second is above the first when the run's
-     * virtual users needed more connections per worker than the setting
-     * allows, which `build_run_warnings` reports. Both 0 until
-     * `configure_event_loop` writes them, before the first submission, on the
-     * run's worker thread that reads them at the end.
+     * concurrency, its own or the `eventLoopMaxConcurrent` default, needed
+     * more connections per worker than the setting allows, which
+     * `build_run_warnings` reports for a run that declared its own (#2801).
+     * Both 0 until `configure_event_loop` writes them, before the first
+     * submission, on the run's worker thread that reads them at the end.
      */
     size_t configured_max_per_host = 0;
     size_t effective_max_per_host  = 0;
@@ -1470,7 +1460,8 @@ struct RunSummaryInputs {
  * @brief The summary's `warnings` array for a finished run (issue #1503): an
  *        unresolved `{{token}}` that was sent anyway, and, for a scenario run,
  *        the steps whose `script.pre` did not run inline (#1938), and a
- *        per-host connection limit the run raised (#2394), and requests
+ *        per-host connection limit raised for the `concurrency` the run
+ *        declared (#2394, #2801), and requests
  *        re-sent on a new connection (#2799). Declared here
  *        so a test reaches the rule without driving a whole run.
  */

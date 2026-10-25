@@ -146,6 +146,7 @@ function renderModeCards(d: DashboardDerived) {
 						receivedWindow={d.receivedWindow}
 						status={d.dispatchStatus}
 						avgQueueWaitMs={d.avgQueueWaitMs}
+						medianLatency={d.medianLatency}
 					/>
 				</>
 			);

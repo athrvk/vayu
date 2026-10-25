@@ -133,12 +133,23 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     return total_size;
 }
 
+void track_hop_body (TransferData& data, curl_off_t body_now) {
+    if (body_now < data.hop_body_down) {
+        data.earlier_hops_body_down += data.hop_body_down;
+    }
+    data.hop_body_down = body_now;
+}
+
 int progress_callback (void* clientp,
 curl_off_t dltotal,
 curl_off_t dlnow,
 curl_off_t /*ultotal*/,
 curl_off_t /*ulnow*/) {
     auto* data = static_cast<TransferData*> (clientp);
+    if (data->counts_redirect_bodies) {
+        track_hop_body (*data, dlnow);
+    }
+
     if (data->progress) {
         data->progress (data->request_id, static_cast<size_t> (dlnow),
         static_cast<size_t> (dltotal));

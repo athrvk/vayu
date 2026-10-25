@@ -17,6 +17,11 @@
  * `checked:bg-primary` back and the resolved name changes, and so does the
  * verdict.
  *
+ * The track's edge is a second leg. `--primary-fill` is deep on purpose, so a
+ * lone track can sit under 3:1 against `--card` (aurora measures 2.98); the
+ * switch paints its reserved border with the brighter `--primary`, and that
+ * edge is held against the card instead.
+ *
  * Values are parsed out of `index.css`, so a retuned accent is measured rather
  * than assumed.
  */
@@ -79,6 +84,16 @@ function checkedFill(source: string, pattern: RegExp): string {
 	return m[1];
 }
 
+/** The colour token the switch paints on its checked border, read off its source. */
+const switchCheckedEdge = () =>
+	checkedFill(toggle, /"[^"]*data-\[state=checked\]:border-([a-z-]+)/);
+
+/** A scheme's own value for a token, else the plain `.dark` default's (`--card` lives only there). */
+function darkToken(body: string, token: string): Hsl | undefined {
+	const fallback = DARK_SCHEMES.find((s) => s.scheme === "default")!.body;
+	return declared(body, token) ?? declared(fallback, token);
+}
+
 const CONTROLS = [
 	{
 		name: "Checkbox",
@@ -93,11 +108,12 @@ const CONTROLS = [
 const BAR = 3.0;
 
 describe("the scan itself", () => {
-	it("found the dark schemes and both controls' checked fills", () => {
+	it("found the dark schemes and both controls' checked fills and the switch's edge", () => {
 		// A stylesheet that stopped matching would make every case below vacuous.
 		expect(DARK_SCHEMES.length).toBeGreaterThan(5);
 		expect(DARK_SCHEMES.map((s) => s.scheme)).toContain("default");
 		for (const control of CONTROLS) expect(control.fill().length).toBeGreaterThan(0);
+		expect(switchCheckedEdge().length).toBeGreaterThan(0);
 	});
 });
 
@@ -114,6 +130,24 @@ describe.each(CONTROLS)("$name's checked fill", ({ fill }) => {
 			expect(painted, `--${token} is not declared in this scheme`).toBeDefined();
 			const mark = declared(body, "primary-foreground")!;
 			expect(contrast(toRgb(mark), toRgb(painted!))).toBeGreaterThanOrEqual(BAR);
+		}
+	);
+});
+
+describe("Switch's checked edge", () => {
+	it("is the accent token, which brightens in dark", () => {
+		expect(switchCheckedEdge()).toBe("primary");
+	});
+
+	it.each(DARK_SCHEMES.map((s) => [s.scheme, s.body] as const))(
+		"clears 3:1 against the card at %s dark",
+		(_scheme, body) => {
+			const token = switchCheckedEdge();
+			const edge = darkToken(body, token);
+			const card = darkToken(body, "card");
+			expect(edge, `--${token} is not declared in this scheme`).toBeDefined();
+			expect(card, "--card is not declared in the default dark block").toBeDefined();
+			expect(contrast(toRgb(edge!), toRgb(card!))).toBeGreaterThanOrEqual(BAR);
 		}
 	);
 });
