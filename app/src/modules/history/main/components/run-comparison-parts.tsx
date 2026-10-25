@@ -19,6 +19,7 @@ import { formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { METRIC_LABELS, formatValue } from "./run-comparison-format";
 import { deltaVerdict, type ComparabilityWarning, type MetricDelta } from "@/lib/run-compare";
+import { NOT_RECORDED } from "./unrecorded-figures";
 
 /** The change between the two runs, coloured by what it means rather than by its sign. */
 export function DeltaChange({ metric }: { metric: MetricDelta }) {
@@ -41,7 +42,7 @@ export function DeltaChange({ metric }: { metric: MetricDelta }) {
 			<Arrow className="size-icon-sm shrink-0" />
 			{metric.pctChange === null
 				? metric.delta === null
-					? "vs no baseline value"
+					? `baseline ${NOT_RECORDED}`
 					: `${metric.delta > 0 ? "+" : ""}${formatValue(metric.metric, metric.delta)}`
 				: `${metric.pctChange > 0 ? "+" : ""}${formatPercent(metric.pctChange)}%`}
 		</span>
@@ -53,9 +54,9 @@ export function DeltaCell({ metric }: { metric: MetricDelta }) {
 		<div className="flex flex-col gap-0.5 min-w-0">
 			<span className="text-xs text-muted-foreground">{METRIC_LABELS[metric.metric]}</span>
 			{metric.target === null ? (
-				// Neither run recorded it. Saying so beats a 0 that reads as a
+				// This run did not record it. Saying so beats a 0 that reads as a
 				// measurement, and beats an em-dash with no explanation.
-				<span className="text-sm text-muted-foreground">not recorded</span>
+				<span className="text-sm text-muted-foreground">{NOT_RECORDED}</span>
 			) : (
 				<span className="flex items-baseline gap-1.5 min-w-0 flex-wrap">
 					<span className="text-sm font-medium text-foreground">

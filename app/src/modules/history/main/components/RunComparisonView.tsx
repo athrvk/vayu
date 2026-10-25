@@ -55,6 +55,7 @@ import type { Run, RunReport } from "@/types";
 import { comparableRuns } from "./comparable-runs";
 import { METRIC_LABELS, formatValue } from "./run-comparison-format";
 import { ComparabilityWarnings, DeltaChange } from "./run-comparison-parts";
+import { NOT_RECORDED } from "./unrecorded-figures";
 
 interface RunComparisonViewProps {
 	/** The open run's report - the "target" of the comparison. */
@@ -78,7 +79,7 @@ function runOptionLabel(run: Run): string {
 }
 
 function MetricValue({ metric, value }: { metric: string; value: number | null }) {
-	if (value === null) return <span className="text-muted-foreground">not recorded</span>;
+	if (value === null) return <span className="text-muted-foreground">{NOT_RECORDED}</span>;
 	return <span className="text-foreground">{formatValue(metric, value)}</span>;
 }
 
