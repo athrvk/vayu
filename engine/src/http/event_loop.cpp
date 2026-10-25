@@ -65,8 +65,4 @@ EventLoopStats EventLoop::stats () const {
     return impl_->stats ();
 }
 
-const EventLoopConfig& EventLoop::config () const {
-    return impl_->configuration ();
-}
-
 } // namespace vayu::http

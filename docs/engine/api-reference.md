@@ -4644,7 +4644,10 @@ The sections, in order:
    not whole-run totals, and that the latency figures are not measurements.
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
-4. `## Results`: requests, requests per second (`avgRps`, labelled as the
+4. `## Results`: requests, a `Skipped requests` row only when `summary.skippedRequests`
+   is above 0 (`625 requests skipped: the load generator stalled for 2.5 s`, from
+   `skippedRequests` and `stalledMs`, issue #2911; absent or `0` prints no row),
+   requests per second (`avgRps`, labelled as the
    whole run with the drain included), responses per second while sending
    (`completedWhileSending / sendingDurationSeconds`, issue #2882, only when
    the report has both), error rate with its split into HTTP errors and no
@@ -9453,10 +9456,15 @@ the default formula across the whole advertised RPS span (50k RPS → 500,000),
 which is why it is not the `concurrency` guard - a ceiling of 10,000 would
 reject explicitly what the engine already does implicitly. For the closed-loop
 modes the `concurrency` target *is* the in-flight bound, so `maxInFlight` is
-ignored there. It is also the only bound on a catch-up burst: when the pacing
-thread stalls (a host sleep, a blocked thread), its next tick submits every
-request the stall owed at once, up to the `maxInFlight` headroom (the rest are
-dropped), and nothing meters that burst per worker (#2801).
+ignored there. It is not what bounds a catch-up burst: when the pacing thread
+stalls (a host sleep, a blocked thread), its next tick sends what the schedule
+owed up to **100 ms past the instant the tick was due**
+(`MAX_CATCH_UP_BACKLOG`, `core/load_pacing.hpp`) and skips the rest (#2911).
+Skipped requests are never sent and are counted as `skippedRequests`, apart
+from the `maxInFlight` drops, with `stalledMs` the schedule time they cover
+(`skippedRequests ÷ targetRps`). What the tick does send still passes the
+`maxInFlight` headroom, and nothing meters it per worker (#2801). Ordinary
+timer jitter is far inside the window and is caught up in full at any rate.
 
 **Durations.** `duration` and `rampUpDuration` take a string holding a number
 with an optional unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix
@@ -9474,14 +9482,15 @@ when `targetRps × duration` is whole, the last request is owed at the deadline
 itself. Each tick submits `floor(targetRps × elapsed since the start)` minus
 what it has already taken, so a rate above 1000 is delivered as asked rather
 than floored to a multiple of 1000, and a late tick owes what the ticks it
-swallowed would have. Requests that come due while in-flight is at
+swallowed would have, sending up to the catch-up window above and skipping the
+older backlog (`skippedRequests`). Requests that come due while in-flight is at
 `maxInFlight` are **dropped at that instant**, not deferred: the run ends at its
 wall-clock `duration`, and `droppedRequests` (in the run summary and per-tick
-metrics) carries what the rate owed but could not issue. `sent + dropped` is
-therefore exactly `floor(targetRps × duration)`, the run's `requestsExpected`
-(200 req/s for 20 s: 4000; 33.3 req/s for 3 s: 99). A product that is whole in
-decimal is read as whole even where binary lands just below it (0.57 req/s for
-100 s owes 57).
+metrics) carries what the rate owed but could not issue. `sent + skipped +
+dropped` is therefore exactly `floor(targetRps × duration)`, the run's
+`requestsExpected` (200 req/s for 20 s: 4000; 33.3 req/s for 3 s: 99), for a
+run that reaches its deadline. A product that is whole in decimal is read as
+whole even where binary lands just below it (0.57 req/s for 100 s owes 57).
 
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
@@ -9764,6 +9773,8 @@ their second instead.
       "backpressure": 0,
       "error_rate": 0.33,
       "dropped_requests": 0,
+      "skipped_requests": 0,
+      "stalled_ms": 0,
       "bytes_sent": 48000,
       "bytes_received": 1920000,
       "status_codes": { "200": 1495, "404": 3, "500": 2 },
@@ -9885,7 +9896,7 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | Field | Folded value |
 |-------|--------------|
 | `timestamp`, `elapsed_seconds` | The last tick's |
-| `requests_completed`, `requests_failed`, `http_errors`, `no_response`, `cancelled`, `dropped_requests`, `bytes_sent`, `bytes_received` | The last tick's (run totals) |
+| `requests_completed`, `requests_failed`, `http_errors`, `no_response`, `cancelled`, `dropped_requests`, `skipped_requests`, `stalled_ms`, `bytes_sent`, `bytes_received` | The last tick's (run totals) |
 | `error_rate`, `send_rate`, `throughput` | The last tick's (run-long rates) |
 | `status_codes`, `custom_metrics` | The last tick's (cumulative maps) |
 | `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` | The **max** over the bucket, its worst second |
@@ -10022,6 +10033,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "currentRps":150.5,"currentSendRate":151.0,
        "sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
+       "skippedRequests":0,"stalledMs":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
        "windowAvgInFlight":6.7,"windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
        "latencySamples":15,"latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
@@ -10175,6 +10187,7 @@ no frame.
 | `activeConnections` | Transfers active in the curl workers at the sample, the stored tick's `current_concurrency`. Instantaneous: a virtual user in a timer wait holds none, so a run whose users wait in step reads 0 or the user count depending on where the sample lands. `windowAvgInFlight` is the mean |
 | `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight. The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
+| `skippedRequests` / `stalledMs` | `constant_rps` only (#2911): requests a stalled pacer owed beyond its 100 ms catch-up window and skipped (never sent, not in `droppedRequests`), and the schedule time they cover in ms, `skippedRequests ÷ targetRps`. `0` on every other mode |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued before the wire, inside the generator or in libcurl waiting for a connection slot (#2394), over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
@@ -10802,8 +10815,8 @@ zeros while the run sends and a growing prefix of the flush after. Its figures c
 run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive) reads:
 `summary.totalRequests`, `successfulRequests`, `failedRequests` with its `httpErrorRequests` /
 `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
-`errors.byStatusCode`, `droppedRequests`, `peakConcurrency`, `avgQueueWaitMs`, `bytesSent`,
-`bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput`,
+`errors.byStatusCode`, `droppedRequests`, `skippedRequests`, `stalledMs`, `peakConcurrency`,
+`avgQueueWaitMs`, `bytesSent`, `bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput`,
 `sendRate` and `avgInFlight` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
 still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
 (`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
@@ -10819,7 +10832,7 @@ report carries **`summary.partial: true`**. The figures are the run's up to that
 `totalRequests`, the success/failure split, `errorRate`, `statusCodes` and `errors.byStatusCode`
 (all from the tick's cumulative status distribution), `cancelledRequests`, `testDuration` (the
 tick's elapsed seconds), `avgRps` (completions over that time, not the tick's trailing rate),
-`sendRate`, `throughput`, `droppedRequests`, `bytesSent` and `bytesReceived`. What the tick does
+`sendRate`, `throughput`, `droppedRequests`, `skippedRequests`, `stalledMs`, `bytesSent` and `bytesReceived`. What the tick does
 not measure for the whole run reads as an older engine's summary does: `avgInFlight`,
 `connectionReplays`, `sendingDurationSeconds` and `completedWhileSending` are absent,
 `peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
@@ -10999,6 +11012,8 @@ named it.
     "cleanupOverhead": 0.03,
     "peakConcurrency": 100,
     "droppedRequests": 0,
+    "skippedRequests": 0,
+    "stalledMs": 0,
     "avgQueueWaitMs": 0.4,
     "avgInFlight": 4.2,
     "bytesSent": 192000,
@@ -11124,7 +11139,9 @@ flight. `rateControl.achievement` is
 `requestsSent / sendingDurationSeconds`. `rateControl.requestsSent` and
 `requestsExpected` are the run totals behind the live `metrics` frame's fields of
 the same name. A shortfall there is not only a slow generator: a request
-dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, and a Stop
+dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, a request a
+stalled pacer skipped (`summary.skippedRequests`, with the schedule time they
+cover in `summary.stalledMs`) was never sent either, and a Stop
 ends the sending early, so a stopped run's achievement is the share of its plan
 it reached. The app's Rate fidelity card instead divides by what the target
 owed up to now (`targetRps` times the time spent sending, capped at the
@@ -11135,6 +11152,24 @@ run in History from `requestsSent`, `sendingDurationSeconds` and the configured
 duration (issue #2805), while the stored `rateControl.achievement` stays the
 plan share and the card states it beside the figure ("stopped at 50% of the
 planned 60s"). A stopped report without the counts keeps its stored value.
+
+**Skips lower the achievement and are shown beside it** (issue #2911).
+`summary.skippedRequests` is the requests a `constant_rps` pacer owed beyond its
+100 ms catch-up window and chose not to send after a stall of the load generator
+itself, and `summary.stalledMs` the schedule time they cover
+(`skippedRequests ÷ targetRps`, in ms). They are the run's totals, stored as
+`skipped_requests` / `stalled_ms` in the [summary](db-schema.md#runs) and on every
+metric tick, and read as `0` from a summary stored before them (the run skipped
+nothing, it had no cap to skip under). `rateControl.achievement` is not adjusted
+for them: a skipped request was owed and never sent, so `requestsSent /
+requestsExpected` is the honest share of the plan, and the two counters are what
+tell a stall from a slow target. `sent + skipped + dropped` is
+`requestsExpected` for a run that reaches its deadline. The [run
+export](#post-exportrun-report) carries both in `report.summary` (optional in its
+schema, absent from a document written before them); its Markdown and HTML
+renderings print them as one `Skipped requests` row of the results table when
+`skippedRequests` is above 0, apart from `maxInFlight` drops, which they do not
+print (`droppedRequests` has no row).
 
 An `iterations` run, single-request or scenario, is the one exception: its
 loop returns on its last submission with the batch before it still in flight,
@@ -11424,7 +11459,7 @@ never closed. One entry per declared name that closed at least once, in the
 same shape `scenario.transactions` documents elsewhere on this page.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `avgInFlight`, `droppedRequests`,
-`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
+`skippedRequests`, `stalledMs`, `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
 `summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
 latency.
 

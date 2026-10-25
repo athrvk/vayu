@@ -21,7 +21,7 @@ The Vayu Engine is a high-performance C++ daemon that executes HTTP requests and
 │  │ (cpp-httplib)    │      │    (curl_multi)             │  │
 │  │  Port: 9876      │      │  • Multi-worker              │  │
 │  │                  │      │  • Lock-free SPSC queues     │  │
-│  └────────┬─────────┘      │  • Rate limiting             │  │
+│  └────────┬─────────┘      │  • Connection pooling        │  │
 │           │                └──────────┬──────────────────┘  │
 │           │                           │                      │
 │           ▼                           ▼                      │
@@ -290,16 +290,11 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: none on a load run. A `constant_rps` run is paced by its pacing
-  thread alone (`run_rate_limited`, see [Load Test Strategies](#load-test-strategies)), and
-  every loop a run builds has `EventLoopConfig::target_rps` 0 (#2801): a worker-side bucket
-  re-anchors on every take while the pacer's schedule is absolute, so the two drifted apart
-  and the wait for a token landed in each request's queue wait and latency, 0 to 13 ms at
-  2 req/s. The bucket itself (`RateLimiter`) remains for a caller that sets the field: the
-  rate is an **aggregate** budget split N ways across the workers' private buckets, with a
-  one-token burst floor, and a worker the bucket refuses with nothing in flight parks in
-  `curl_multi_poll` until its next token (at most `TOKEN_WAIT_CAP_MS`, cut short by a
-  submit, a stop or a bounded drain's deadline) instead of asking again in a loop (#1915)
+- **Rate limiting**: none in the workers. A `constant_rps` run is paced by its pacing
+  thread alone (`run_rate_limited`, see [Load Test Strategies](#load-test-strategies)). A
+  second schedule in the worker would drift from the pacer's absolute one and put its wait
+  into each request's queue wait and latency (#2801, #2911), so a worker takes whatever its
+  queue holds, up to `max_concurrent`
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 
@@ -1151,15 +1146,19 @@ throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open
 The mode chooses the loop, never the rate (#2396). `rps` / `targetRps` is `constant_rps`'s field
 alone: `POST /runs` refuses a positive one on any other mode, and `open_loop_rate`
 (`load_strategy.hpp`) answers 0 for every other mode, so a rate in a stored config does not open
-`constant_concurrency`'s loop. No mode gives the event-loop workers a token bucket (#2801). A body
+`constant_concurrency`'s loop. The event-loop workers hold no token bucket (#2801, #2911). A body
 with no `mode` is `constant_rps`, the way `LoadStrategy::create` reads it.
 
 ### 1. `constant_rps` (open-loop)
 
 Dispatches at a fixed `targetRps` regardless of how fast responses return. `maxInFlight` caps how
 many requests may be outstanding before new ones are dropped (and counted as `dropped_requests`).
-The pacing thread is the run's only limiter (#2801), so the backlog a stalled pacer pays in its
-next tick is bounded by `maxInFlight` alone, not metered per worker.
+The pacing thread is the run's only limiter (#2801). A stalled pacer's next tick sends what the
+schedule owed up to `MAX_CATCH_UP_BACKLOG` (100 ms) past the instant the tick was due and skips the
+rest (#2911): `split_tick_backlog` (`core/load_pacing.hpp`) makes the split, and the skips are
+counted apart from the drops (`MetricsCollector::record_skipped_batch`, with the schedule time they
+cover). What is sent still passes the `maxInFlight` headroom. `sent + skipped + dropped` is exactly
+`requests_owed_by (targetRps, duration)` for a run that reaches its deadline.
 
 ```json
 { "mode": "constant_rps", "targetRps": 1000, "duration": "60s", "maxInFlight": 10000 }

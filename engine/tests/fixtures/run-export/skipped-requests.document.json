@@ -1,0 +1,100 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_5c21e7",
+    "reference": "Vayu run \"Ping\" (run_5c21e7) - load test, GET /ping, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187830000,
+    "name": "Skipped",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": false,
+    "reason": "no_budgets"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/ping",
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_rps",
+      "duration": "30s",
+      "concurrency": 20,
+      "targetRps": 250,
+      "timeout": "30s",
+      "followRedirects": false,
+      "maxRedirects": 0,
+      "httpVersion": "h2",
+      "acceptEncoding": false
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 6865,
+      "successfulRequests": 6865,
+      "failedRequests": 0,
+      "httpErrorRequests": 0,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 0.0,
+      "totalDurationSeconds": 30.0,
+      "avgRps": 228.8,
+      "testDuration": 30.0,
+      "sendRate": 228.8,
+      "throughput": 228.8,
+      "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
+      "peakConcurrency": 14,
+      "droppedRequests": 10,
+      "skippedRequests": 625,
+      "stalledMs": 2500,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 600000,
+      "bytesReceived": 1197000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 39900
+    },
+    "latency": {
+      "min": 0.004,
+      "max": 41.0,
+      "avg": 6.3,
+      "median": 5.1,
+      "p50": 5.1,
+      "p75": 7.8,
+      "p90": 11.2,
+      "p95": 14.0,
+      "p99": 22.5,
+      "p999": 38.0
+    },
+    "statusCodes": {
+      "200": 6865
+    },
+    "errors": {
+      "total": 0,
+      "withDetails": 0,
+      "types": {}
+    },
+    "rateControl": {
+      "targetRps": 250,
+      "actualRps": 228.8,
+      "achievement": 91.5
+    }
+  },
+  "comparison": null,
+  "notCarried": []
+}

@@ -371,37 +371,6 @@ TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
 // The route refuses a rate on any other mode; these hold the executors for a
 // config that reaches them anyway (a stored or hand-built one).
 
-// The loop `configure_event_loop` builds carries no worker-side token bucket
-// on any mode: a closed-loop run's would throttle it (#2396), and a
-// `constant_rps` run's would drift against the pacing thread's schedule and
-// add the gap to every latency (#2801). A drift test needs 30 s or more to
-// separate, so this assertion on the loop's own config is the guard.
-// Mutation check: set `loop_config.target_rps = open_loop_rate (config)` in
-// `configure_event_loop` and both `constant_rps` configs read 100; from
-// `requested_rps`, every config does.
-TEST_F (LoadStrategyTest, NoRunArmsTheEventLoopsTokenBucket) {
-    vayu::db::Database db (TEST_DB_PATH);
-    db.seed_default_config ();
-    for (const nlohmann::json& config :
-    { nlohmann::json{ { "mode", "constant_rps" }, { "targetRps", 100.0 } },
-    nlohmann::json{ { "rps", 100.0 } },
-    nlohmann::json{ { "mode", "constant_concurrency" }, { "targetRps", 100.0 } },
-    nlohmann::json{ { "mode", "ramp_up" }, { "targetRps", 100.0 } },
-    nlohmann::json{ { "mode", "iterations" }, { "targetRps", 100.0 } },
-    nlohmann::json{ { "mode", "capacity" }, { "targetRps", 100.0 } },
-    nlohmann::json{ { "mode", "unknown" }, { "targetRps", 100.0 } } }) {
-        auto context =
-        std::make_shared<vayu::core::RunContext> ("run-loop-config", config);
-        vayu::core::configure_event_loop (db, context->config, context,
-        /*concurrency=*/4, /*timeout_ms=*/5000, /*configured_workers=*/2,
-        /*default_max_per_host=*/200);
-        ASSERT_NE (context->event_loop, nullptr) << config.dump ();
-        const auto& loop = context->event_loop->config ();
-        EXPECT_EQ (loop.target_rps, 0.0) << config.dump ();
-        EXPECT_EQ (loop.burst_size, 0.0) << config.dump ();
-    }
-}
-
 // The rate-limited path never sets `closed_loop` and sets `requests_expected`
 // to rate x duration. Mutation check: switch `ConstantLoadStrategy` on
 // `requested_rps` again and both expectations fail.
@@ -460,52 +429,6 @@ TEST_F (LoadStrategyTest, ConstantRpsRecordsPeakInFlightAtSubmission) {
     EXPECT_FALSE (context->closed_loop.load ()) << "ran the closed-loop path";
     EXPECT_GE (context->peak_in_flight.load (), 25u)
     << "constant_rps left peakConcurrency to the 1 Hz sample";
-}
-
-// Through `start_run`, so `configure_event_loop` builds the loop. One worker,
-// so a token bucket at 1 req/s with a burst of 2 lets about 6 complete,
-// drain included; unthrottled, 4 in flight against the local fast endpoint
-// complete about 9000 in the second on a Debug build. 20 sits between.
-// Mutation check: set `loop_config.target_rps` from `requested_rps` (and
-// `burst_size` to twice it) in `configure_event_loop` and this reads 6.
-TEST_F (LoadStrategyTest, ARampUpRunCarryingARateIsNotThrottledByTheEventLoop) {
-    vayu::db::Database db (TEST_DB_PATH);
-    db.init ();
-    auto workers = db.get_config_entry ("workers");
-    ASSERT_HAS_VALUE (workers) << "seed_default_config did not seed workers";
-    workers->value = "1";
-    db.save_config_entry (*workers);
-
-    vayu::db::Run row;
-    row.id              = "run-ramp-rate";
-    row.type            = vayu::RunType::Load;
-    row.status          = vayu::RunStatus::Pending;
-    row.config_snapshot = "{}";
-    row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::system_clock::now ().time_since_epoch ())
-                     .count ();
-    db.create_run (row);
-
-    const nlohmann::json config = { { "mode", "ramp_up" }, { "duration", "1s" },
-        { "rampUpDuration", "0" }, { "startConcurrency", 4 }, { "concurrency", 4 },
-        { "targetRps", 1.0 }, { "url", mock_server->fast_url () },
-        { "method", "GET" }, { "timeout", 5000 } };
-
-    vayu::core::RunManager run_manager;
-    ASSERT_TRUE (run_manager.start_run (row.id, config, db));
-    EXPECT_TRUE (vayu::tests::wait_until ([&] () {
-        const auto stored = db.get_run (row.id);
-        return stored && stored->status != vayu::RunStatus::Running &&
-        stored->status != vayu::RunStatus::Pending;
-    }))
-    << "the run never finished";
-    run_manager.shutdown (std::chrono::milliseconds (15000));
-
-    const auto stored = db.get_run (row.id);
-    ASSERT_HAS_VALUE (stored);
-    ASSERT_FALSE (stored->summary.empty ()) << "the run produced no summary";
-    const auto summary = nlohmann::json::parse (stored->summary);
-    EXPECT_GT (summary.value ("total_requests", size_t{ 0 }), 20u) << summary.dump ();
 }
 
 // A single-request load run's token-free fast path (issue #1540) never
@@ -847,10 +770,13 @@ TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     mc.record_success (404, 5.0, 0.0, "");
     mc.record_bytes (10, 1000);
     mc.record_drop_batch (3);
+    mc.record_skipped_batch (2, 200.0);
 
     vayu::core::MetricTickSample sample;
     sample.timestamp        = 12345;
     sample.dropped_requests = mc.dropped_requests ();
+    sample.skipped_requests = mc.skipped_requests ();
+    sample.stalled_ms       = mc.stalled_ms ();
     sample.bytes_sent       = mc.total_bytes_sent ();
     sample.bytes_received   = mc.total_bytes_received ();
     sample.status_codes     = mc.status_code_distribution ();
@@ -858,6 +784,8 @@ TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     auto payload = vayu::core::build_metric_tick_payload (sample);
     EXPECT_EQ (payload["timestamp"].get<int64_t> (), 12345);
     EXPECT_EQ (payload["dropped_requests"].get<size_t> (), 3u);
+    EXPECT_EQ (payload["skipped_requests"].get<size_t> (), 2u);
+    EXPECT_DOUBLE_EQ (payload["stalled_ms"].get<double> (), 200.0);
     EXPECT_EQ (payload["bytes_sent"].get<size_t> (), 10u);
     EXPECT_EQ (payload["bytes_received"].get<size_t> (), 1000u);
     ASSERT_TRUE (payload["status_codes"].is_object ());
@@ -1248,26 +1176,33 @@ TEST_F (LoadStrategyTest, SaturatedRunEndsAtDeadlineAndRecordsTheShortfall) {
 
     const size_t sent    = context->requests_sent.load ();
     const size_t dropped = context->metrics_collector->dropped_requests ();
+    const size_t skipped = context->metrics_collector->skipped_requests ();
 
     EXPECT_LT (elapsed_ms, 1500) << "run overshot its 1s wall-clock deadline";
     EXPECT_GT (dropped, 0u) << "a saturated run recorded no drops";
-    EXPECT_EQ (sent + dropped, static_cast<size_t> (RPS * DUR_S))
-    << "sent(" << sent << ") + dropped(" << dropped << ") does not account for the "
-    << (RPS * DUR_S) << " requests the rate owed";
+    EXPECT_EQ (sent + skipped + dropped, static_cast<size_t> (RPS * DUR_S))
+    << "sent(" << sent << ") + skipped(" << skipped << ") + dropped(" << dropped
+    << ") does not account for the " << (RPS * DUR_S) << " requests the rate owed";
 }
 
 namespace {
 
 // What an open-loop run accounted for.
 struct PacedRun {
-    size_t sent     = 0;
-    size_t dropped  = 0;
-    size_t expected = 0;
+    size_t sent       = 0;
+    size_t skipped    = 0;
+    size_t dropped    = 0;
+    size_t expected   = 0;
+    double stalled_ms = 0.0;
 };
 
-PacedRun run_constant_rps (double rps, const char* duration, const std::string& url) {
-    const nlohmann::json config = { { "mode", "constant_rps" },
+PacedRun run_constant_rps (double rps,
+const char* duration,
+const std::string& url,
+const nlohmann::json& extra = nlohmann::json::object ()) {
+    nlohmann::json config = { { "mode", "constant_rps" },
         { "duration", duration }, { "targetRps", rps } };
+    config.update (extra);
     auto context = std::make_shared<vayu::core::RunContext> ("test-rps-exact", config);
     vayu::http::EventLoopConfig loop_config;
     loop_config.max_concurrent = 2000;
@@ -1285,21 +1220,26 @@ PacedRun run_constant_rps (double rps, const char* duration, const std::string& 
     context->event_loop->stop (false);
 
     return { context->requests_sent.load (),
+        context->metrics_collector->skipped_requests (),
         context->metrics_collector->dropped_requests (),
-        context->requests_expected.load () };
+        context->requests_expected.load (), context->metrics_collector->stalled_ms () };
 }
 
+// A slow runner can stall the pacer past its catch-up window (#2911), so what
+// is exact is the sum, not `sent` alone.
 void expect_exactly (const PacedRun& run, size_t owed) {
     EXPECT_EQ (run.expected, owed) << "requests_expected";
-    EXPECT_EQ (run.sent, owed) << "dropped " << run.dropped;
+    EXPECT_EQ (run.sent + run.skipped + run.dropped, owed)
+    << "sent " << run.sent << ", skipped " << run.skipped << ", dropped " << run.dropped;
     EXPECT_EQ (run.dropped, 0u) << "an unsaturated run dropped requests";
 }
 
 } // namespace
 
-// An unsaturated constant_rps run sends floor(targetRps x duration), not one
-// fewer (#2910). Mutation check: accrue from per-tick deltas truncated with
-// `duration_cast<microseconds>` again, and each of these is one short.
+// An unsaturated constant_rps run accounts for floor(targetRps x duration),
+// not one fewer (#2910), as sent or skipped (#2911). Mutation check: accrue
+// from per-tick deltas truncated with `duration_cast<microseconds>` again, and
+// each of these is one short.
 TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDuration) {
     expect_exactly (run_constant_rps (200.0, "2s", mock_server->fast_url ()), 400);
 }
@@ -1316,6 +1256,29 @@ TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDurationBelowOne) {
 // 2.973s, and the 100th would be due after the deadline.
 TEST_F (LoadStrategyTest, ConstantRpsSendsTheFlooredProductOfAFractionalRate) {
     expect_exactly (run_constant_rps (33.3, "3s", mock_server->fast_url ()), 99);
+}
+
+// A pacer stalled past its catch-up window skips that backlog rather than
+// bursting it (#2911), and the skips close the books. The stall is injected:
+// an inline `script.pre` runs on the pacing thread and holds it 250 ms per
+// submission, so at 10 RPS the third tick wakes at least 400 ms after it was
+// due however fast the runner is; a slower runner only skips more.
+// Mutation check: drop the `record_skipped_batch` call from `pay_out_tick` and
+// the skips read 0 and the sum comes up short.
+TEST_F (LoadStrategyTest, AStalledPacerSkipsItsBacklogAndAccountsForEveryRequest) {
+    const nlohmann::json stall = { { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "kind", "script.pre" },
+    { "config",
+    { { "script", "const until = Date.now () + 250; while (Date.now () < until) {}" },
+    { "inline", true } } } } }) } };
+
+    const auto run = run_constant_rps (10.0, "1s", mock_server->fast_url (), stall);
+
+    expect_exactly (run, 10);
+    EXPECT_GT (run.skipped, 0u)
+    << "a 250 ms stall per submission skipped nothing";
+    EXPECT_DOUBLE_EQ (run.stalled_ms, static_cast<double> (run.skipped) * 100.0)
+    << "stalledMs is the skipped requests' share of the schedule at 10 RPS";
 }
 
 // Ramp down (start > target) is a legitimate profile. The size_t delta
@@ -2743,7 +2706,8 @@ nlohmann::json element_entry (const nlohmann::json& summary, const std::string& 
         return {};
     }
     for (const auto& entry : summary["elements"]) {
-        if (entry.value ("id", std::string ()) == element_id) {
+        const auto id = entry.find ("id");
+        if (id != entry.end () && *id == element_id) {
             return entry;
         }
     }

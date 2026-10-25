@@ -1105,7 +1105,99 @@ TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
         report.at ("rateControl").at ("achievement").get<double> ();
         EXPECT_NEAR (achievement,
         static_cast<double> (sent) * 100.0 / static_cast<double> (expected), 0.1);
-        EXPECT_GT (achievement, 95.0) << "the drain is back in the denominator";
+        // A pacer stall on a loaded runner skips requests (#2911) and lowers
+        // the achievement, so the bound counts them as owed: healthy reads
+        // about 100, a drain back in the denominator reads about 80.
+        const double skipped_pct = summary.value ("skipped_requests", 0.0) *
+        100.0 / static_cast<double> (expected);
+        EXPECT_GT (achievement + skipped_pct, 95.0)
+        << "the drain is back in the denominator";
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2911: a stalled pacer's skips are recorded in the collector and must reach
+// the stored tick, the summary, the report and the export, where `dropped` is
+// a different count with a different cause. An inline `script.pre` holds the
+// pacing thread 250 ms per submission, so at 10 RPS (a 100 ms schedule) the
+// third tick wakes at least 400 ms late however fast the runner is; a slower
+// runner only skips more. Mutation checks: drop `skippedRequests` from
+// `SUMMARY_KEYS` (run_export.cpp) and the export assertion fails; drop the
+// `skipped_requests` read in `apply_summary_totals` (runs.cpp) and the report
+// one does; drop it from `build_metric_tick_payload` and the tick one does.
+TEST (LoadClock, AStalledPacersSkipsReachTheTickSummaryReportAndExport) {
+    const std::string db_path = "test_load_clock_stalled_pacer.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "2s" },
+            { "targetRps", 10.0 }, { "timeout", 5000 }, { "workers", 1 },
+            { "requestElements",
+            nlohmann::json::array ({ nlohmann::json{ { "kind", "script.pre" },
+            { "config",
+            { { "script", "const until = Date.now () + 250; while (Date.now () < until) {}" },
+            { "inline", true } } } } }) } };
+        const std::string run_id = "run_load_stalled_pacer";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto summary = nlohmann::json::parse (stored->summary);
+        const auto skipped = summary.at ("skipped_requests").get<size_t> ();
+        ASSERT_GT (skipped, 0u) << "the stall skipped nothing: " << summary.dump ();
+        EXPECT_DOUBLE_EQ (summary.at ("stalled_ms").get<double> (),
+        static_cast<double> (skipped) * 100.0);
+        EXPECT_EQ (summary.at ("requests_sent").get<size_t> () + skipped +
+        summary.at ("dropped_requests").get<size_t> (),
+        summary.at ("requests_expected").get<size_t> ())
+        << summary.dump ();
+
+        // A tick is read mid-run, so it holds at most what the run ended with.
+        const auto rows = stored_rows (db, run_id);
+        ASSERT_FALSE (rows.empty ()) << "no tick was stored";
+        for (const auto& [timestamp, row] : rows) {
+            ASSERT_TRUE (row.contains ("skipped_requests")) << row.dump ();
+            ASSERT_TRUE (row.contains ("stalled_ms")) << row.dump ();
+            EXPECT_LE (row.at ("skipped_requests").get<size_t> (), skipped);
+            EXPECT_LE (row.at ("stalled_ms").get<double> (),
+            summary.at ("stalled_ms").get<double> ());
+        }
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& reported = report.at ("summary");
+        EXPECT_EQ (reported.at ("skippedRequests").get<size_t> (), skipped);
+        EXPECT_DOUBLE_EQ (reported.at ("stalledMs").get<double> (),
+        summary.at ("stalled_ms").get<double> ());
+        // The shortfall is shown beside the achievement, not folded into it.
+        const auto& rate = report.at ("rateControl");
+        EXPECT_NEAR (rate.at ("achievement").get<double> (),
+        static_cast<double> (rate.at ("requestsSent").get<size_t> ()) * 100.0 /
+        static_cast<double> (rate.at ("requestsExpected").get<size_t> ()),
+        0.01);
+
+        const auto [export_status, envelope] = vayu::http::routes::export_run_report_response (
+        db, nlohmann::json{ { "runId", run_id } });
+        ASSERT_EQ (export_status, 200) << envelope.dump ();
+        const auto document =
+        nlohmann::json::parse (envelope.at ("text").get<std::string> ());
+        const auto& exported = document.at ("report").at ("summary");
+        EXPECT_EQ (exported.at ("skippedRequests").get<size_t> (), skipped)
+        << exported.dump ();
+        EXPECT_DOUBLE_EQ (exported.at ("stalledMs").get<double> (),
+        summary.at ("stalled_ms").get<double> ());
 
         manager.shutdown ();
     }

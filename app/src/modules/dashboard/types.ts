@@ -188,6 +188,10 @@ export interface DashboardDerived {
 	cleanupOverhead?: number;
 	// Drops
 	droppedRequests: number;
+	/** `constant_rps` requests skipped after a generator stall (#2911); 0 where there were none. */
+	skippedRequests: number;
+	/** The schedule time the skipped requests cover, in milliseconds. */
+	stalledMs: number;
 	showDropped: boolean;
 	// Ramp / breakpoint
 	rampDeviationPct?: number;
@@ -243,6 +247,8 @@ export interface DisplayMetrics {
 	current_concurrency?: number; // Number of concurrent HTTP connections
 	window_avg_in_flight?: number | null; // Mean requests on the wire over the tick's window
 	dropped_requests?: number;
+	skipped_requests?: number;
+	stalled_ms?: number;
 	avg_queue_wait_ms?: number;
 	// Run progress - feeds the iterations-mode ETA stat (live only).
 	requests_sent?: number;

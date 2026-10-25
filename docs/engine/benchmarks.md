@@ -791,39 +791,42 @@ still tracks that Linux measurement.
 
 ### A rate-limited worker no longer spins between tokens (2026-10-12, engine 0.41.x, Linux)
 
-An event-loop worker asks its token bucket for a token before it looks at its
+> **Historical.** The worker-side token bucket this measurement is about was
+> removed in [#2911](https://github.com/athrvk/vayu/issues/2911) after #2801
+> stopped arming it on every run, so no symbol or test named here exists any
+> more; the numbers are kept as a record of what the park was worth while it
+> did.
+
+An event-loop worker asked its token bucket for a token before it looked at its
 queue. When the bucket refused it and nothing was in flight, `wait_for_work`
 skipped both of its parks - the `curl_multi_poll` is only for a worker with
 transfers, and the idle park only for an empty queue - so the loop asked the
 bucket again at once, for as long as the rate held items back, draining
 included (issue #1915). A low `targetRps` against a fast target was the worst
 case: almost every moment is spent waiting for the next token with nothing in
-flight. The worker now parks in `curl_multi_poll` until its next token
-(`RateLimiter::time_until_token_unlocked`), capped at
-`event_loop::TOKEN_WAIT_CAP_MS` (100 ms) and by a bounded drain's remaining
-time, so a drain deadline is met rather than overshot by the park; a submit or
-a stop wakes it as before.
+flight. The worker was changed to park in `curl_multi_poll` until its next
+token, capped at 100 ms and by a bounded drain's remaining time, so a drain
+deadline was met rather than overshot by the park; a submit or a stop woke it
+as before.
 
 One worker at 4 RPS with a one-token burst, nine requests submitted at once to
 the in-process mock's `/fast` (the first on the burst token, eight more 250 ms
-apart), whole-process `getrusage` sampled around the window
-(`RateLimiterTest.AWorkerWaitingForATokenWithNothingInFlightDoesNotSpin`;
-Debug build, a 4-vCPU cloud VM):
+apart), whole-process `getrusage` sampled around the window (Debug build, a
+4-vCPU cloud VM):
 
 | | CPU over the 2 s window | % of one core |
 |---|---:|---:|
 | Before | ~1,994 ms | ~100% |
 | After | 26-32 ms (3 runs) | ~1.5% |
 
-The pacing is unchanged: the window still lasts 2.0 s, and the
-`EnforcesTargetRPS` pair (100 RPS, one and four workers) holds its ±25%
-window either side. With the worker parked for a token 2 s away, `stop
-(false)` returned at once (the test bounds it at 0.5 s; a hand-timed run
-was well under a millisecond) and a bounded drain (`stop (true, 30 ms)`)
-ended at its deadline, 0.03 s. The park is bounded by the drain's remaining
-time as well as by `TOKEN_WAIT_CAP_MS`: without that clamp the same drain ran
-a whole 100 ms slice past its deadline (0.10 s), and with neither bound it
-waited out the 2 s token.
+The pacing was unchanged: the window still lasted 2.0 s, and a 100 RPS test on
+one and on four workers held its +/-25% window either side. With the worker
+parked for a token 2 s away, `stop (false)` returned at once (a hand-timed run
+was well under a millisecond) and a bounded drain (`stop (true, 30 ms)`) ended
+at its deadline, 0.03 s. The park was bounded by the drain's remaining time as
+well as by the 100 ms cap: without that clamp the same drain ran a whole 100 ms
+slice past its deadline (0.10 s), and with neither bound it waited out the 2 s
+token.
 
 ## Prior results (2026-07, CLI, unreconciled)
 
@@ -994,14 +997,20 @@ lost a sub-microsecond fraction every tick, and the last request with it). Rate
 fidelity therefore does not depend on the tick length (1ms above 1000 RPS, the
 request interval below it) - a late tick owes what the ticks it swallowed would
 have, and a rate like 1500 RPS is delivered as asked rather than floored to the
-nearest 1000. Comparing against wrk/vegeta at a fixed rate, `sent + dropped` is
+nearest 1000. A tick that wakes more than 100 ms after it was due sends only
+the first 100 ms of what it owes and skips the older backlog
+([#2911](https://github.com/athrvk/vayu/issues/2911)), so a pacer stall shows up
+as `skippedRequests` and `stalledMs` rather than as a burst at the target.
+Comparing against wrk/vegeta at a fixed rate, `sent + skipped + dropped` is
 exactly `floor(targetRps × duration)`: 4000 for 200 RPS over 20 s, 99 for
 33.3 RPS over 3 s. A product that is whole in decimal counts as whole even
 where binary lands just below it (0.57 RPS over 100 s owes 57). The report's
 rate fidelity is that same count since
 [#2392](https://github.com/athrvk/vayu/issues/2392): `rateControl.achievement`
 is `requestsSent / requestsExpected`, with `requestsExpected` the same
-`floor(targetRps × duration)`, so an unsaturated run reads 100, and `sendRate`
+`floor(targetRps × duration)`, so an unsaturated run reads 100 and a stalled one reads
+below it by the skipped share (`skippedRequests` and `stalledMs` sit beside it in the report
+summary, stored in the run summary and on every tick), and `sendRate`
 divides by the sending window, so neither is diluted by the drain that lets
 the last requests answer.
 
@@ -1016,7 +1025,7 @@ reset and climbed again (`avgQueueWaitMs` 4.79, p99 315.1 ms against the
 server's 300.8); with no bucket, 40 s at the same rate and target read
 0.29 ms, flat, and p99 301.8 ms, while 50 and 500 req/s still sent the rate they asked for. What the
 bucket also did was meter a catch-up burst after a pacing stall; that burst is
-now bounded by `maxInFlight` alone.
+now bounded by the pacer's 100 ms catch-up window (#2911) and `maxInFlight`.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)

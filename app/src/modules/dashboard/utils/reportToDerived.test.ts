@@ -425,6 +425,51 @@ describe("reportToDerived", () => {
 		expect(reportToDerived(withDrops).showDropped).toBe(true);
 	});
 
+	describe("skipped requests (#2911)", () => {
+		const withSummary = (extra: Partial<RunReport["summary"]>, mode = "constant_rps") =>
+			baseReport({
+				metadata: {
+					...baseReport().metadata!,
+					configuration: { ...baseReport().metadata!.configuration, mode },
+				},
+				summary: { ...baseReport().summary, ...extra },
+			});
+
+		// Mutation checked: dropping `skippedRequests` from reportToDerived's gate
+		// or return fails the first two cases.
+		it("shows the card for a rate-limited run that only skipped", () => {
+			const d = reportToDerived(withSummary({ skippedRequests: 30, stalledMs: 150 }));
+
+			expect(d.showDropped).toBe(true);
+			expect(d.droppedRequests).toBe(0);
+			expect(d.skippedRequests).toBe(30);
+			expect(d.stalledMs).toBe(150);
+		});
+
+		it("keeps both counts when the run dropped and skipped", () => {
+			const d = reportToDerived(withSummary({ droppedRequests: 4, skippedRequests: 30 }));
+
+			expect(d.showDropped).toBe(true);
+			expect(d.droppedRequests).toBe(4);
+			expect(d.skippedRequests).toBe(30);
+		});
+
+		it("does not show the card for skips on a mode that is not rate limited", () => {
+			const d = reportToDerived(withSummary({ skippedRequests: 30 }, "constant_concurrency"));
+
+			expect(d.showDropped).toBe(false);
+			expect(d.skippedRequests).toBe(30);
+		});
+
+		it("reads a report without the fields as none skipped", () => {
+			const d = reportToDerived(baseReport());
+
+			expect(d.showDropped).toBe(false);
+			expect(d.skippedRequests).toBe(0);
+			expect(d.stalledMs).toBe(0);
+		});
+	});
+
 	it("parses ramp config + does not mark dropped for ramp_up", () => {
 		const d = reportToDerived(
 			baseReport({

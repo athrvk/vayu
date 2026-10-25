@@ -1061,6 +1061,31 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesDroppedRequests) {
     EXPECT_EQ (stats["droppedRequests"].get<size_t> (), 42U);
 }
 
+// Skipped stall backlog (#2911) is its own counter: a drop does not move it
+// and a skip does not move the drops.
+TEST_F (MetricsCollectorTest, RecordSkippedBatchCountsApartFromDrops) {
+    collector->record_drop_batch (3);
+    collector->record_skipped_batch (190, 1900.0);
+    collector->record_skipped_batch (5, 50.0);
+
+    EXPECT_EQ (collector->skipped_requests (), 195U);
+    EXPECT_DOUBLE_EQ (collector->stalled_ms (), 1950.0);
+    EXPECT_EQ (collector->dropped_requests (), 3U);
+
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+    ASSERT_TRUE (stats.contains ("skippedRequests"));
+    ASSERT_TRUE (stats.contains ("stalledMs"));
+    EXPECT_EQ (stats["skippedRequests"].get<size_t> (), 195U);
+    EXPECT_DOUBLE_EQ (stats["stalledMs"].get<double> (), 1950.0);
+    EXPECT_EQ (stats["droppedRequests"].get<size_t> (), 3U);
+}
+
+TEST_F (MetricsCollectorTest, AFreshCollectorReportsNoSkips) {
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+    EXPECT_EQ (stats["skippedRequests"].get<size_t> (), 0U);
+    EXPECT_DOUBLE_EQ (stats["stalledMs"].get<double> (), 0.0);
+}
+
 // ============================================================================
 // Queue Wait Time Tests
 // ============================================================================

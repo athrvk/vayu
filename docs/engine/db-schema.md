@@ -1425,6 +1425,7 @@ under this column's own keys, plus `"partial": true`:
 {
   "partial": true, "total_requests": 40, "test_duration": 4.0, "rps": 10.0, "cancelled": 1,
   "send_rate": 11.0, "throughput": 10.0, "dropped_requests": 4,
+  "skipped_requests": 3, "stalled_ms": 300.0,
   "bytes_sent": 4000, "bytes_received": 40000, "status_codes": { "200": 38, "503": 2 }
 }
 ```
@@ -1443,7 +1444,8 @@ keeps `""`, design and collection runs are given nothing, and `has_warnings` sta
   "test_duration": 2.0, "setup_overhead": 0.25, "cleanup_overhead": 0.03,
   "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
   "completed_while_sending": 96,
-  "peak_concurrency": 8, "avg_in_flight": 4.2, "dropped_requests": 2, "queue_wait_avg": 1.5,
+  "peak_concurrency": 8, "avg_in_flight": 4.2, "dropped_requests": 2,
+  "skipped_requests": 0, "stalled_ms": 0.0, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
   "http_version_downgraded": 0, "connection_replays": 1,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
@@ -1536,6 +1538,17 @@ submitted in: load start to the moment it stopped submitting, before the end-of-
 does every threshold that reads them. A failed run stores its wall-clock `test_duration` in
 `sending_duration` too. Always written, zeros included: a summary with no `sending_duration` key
 predates the issue, and the report keeps that run's old rate-fidelity formula.
+
+`skipped_requests` and `stalled_ms` (issue #2911) are the requests a `constant_rps` pacer owed
+beyond its 100 ms catch-up window and skipped instead of bursting, and the schedule time they
+cover in milliseconds (`skipped_requests ÷ targetRps`). They are counted apart from
+`dropped_requests`, which is the `maxInFlight` cap's: for a run that reaches its deadline
+`requests_sent + skipped_requests + dropped_requests` is `requests_expected`. Always written,
+zeros included, by the completed and the failed run alike, and `0` on every mode but
+`constant_rps`; a summary stored before the issue has neither key and the report reads both as
+`0`. `requests_sent / requests_expected` (the report's `rateControl.achievement`) is not adjusted
+for them: the skips are what separate a stalled generator from a slow target. The metric ticks
+carry the same two cumulative keys.
 
 `completed_while_sending` (issue #2882) is `total_requests` as it stood when `sending_duration`
 ended, before the drain, so it is never above `total_requests`; the report's
@@ -1857,7 +1870,8 @@ metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schem
   "window_avg_latency_ms": 8.9, "window_avg_queue_wait_ms": 0.2,
   "current_concurrency": 10, "send_rate": 120.0,
   "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
-  "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
+  "dropped_requests": 0, "skipped_requests": 0, "stalled_ms": 0.0,
+  "bytes_sent": 4096, "bytes_received": 65536,
   "status_codes": { "200": 118, "0": 2 },
   "status_seconds": [ { "second": 0, "span": 1, "counts": [118, 0, 0, 0, 2] } ],
   "latency_p50_ms": 8.1, "latency_p95_ms": 20.4, "latency_p99_ms": 31.9

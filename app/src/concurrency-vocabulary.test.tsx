@@ -388,6 +388,8 @@ function derivedIn(mode: LoadMode): DashboardDerived {
 		setupOverhead: 0.1,
 		cleanupOverhead: 0.05,
 		droppedRequests: 0,
+		skippedRequests: 0,
+		stalledMs: 0,
 		showDropped: false,
 		rampDeviationPct: 2,
 		rampUpDurationSeconds: 10,

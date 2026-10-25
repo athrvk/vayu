@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstddef>
 #include <map>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -64,14 +65,19 @@ class MockTokenServer {
     public:
     MockTokenServer () {
         svr_.Post (".*", [this] (const httplib::Request& req, httplib::Response& res) {
-            const int hit      = ++hits_;
-            last_path_         = req.path;
-            last_target_       = req.target;
-            last_headers_      = req.headers;
-            last_body_         = req.body;
-            last_auth_         = req.get_header_value ("Authorization");
-            last_content_type_ = req.get_header_value ("Content-Type");
-            const auto form    = parse_form (req.body);
+            const int hit = ++hits_;
+            {
+                // A hung handler outlives its request, so a second request's
+                // handler runs beside it: the record is guarded.
+                const std::lock_guard<std::mutex> lock (record_mutex_);
+                last_path_         = req.path;
+                last_target_       = req.target;
+                last_headers_      = req.headers;
+                last_body_         = req.body;
+                last_auth_         = req.get_header_value ("Authorization");
+                last_content_type_ = req.get_header_value ("Content-Type");
+            }
+            const auto form = parse_form (req.body);
             const auto grant =
             form.count ("grant_type") ? form.at ("grant_type") : "";
 
@@ -154,24 +160,30 @@ class MockTokenServer {
 
     /// How long `/refresh-rejected-then-hang` takes to reject a refresh.
     static constexpr int SLOW_REFRESH_REJECT_MS = 2500;
-    const std::string& last_body () const {
+    std::string last_body () const {
+        const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_body_;
     }
-    const std::string& last_auth () const {
+    std::string last_auth () const {
+        const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_auth_;
     }
-    const std::string& last_content_type () const {
+    std::string last_content_type () const {
+        const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_content_type_;
     }
     /// The request target as sent: the path and any query, still encoded.
-    const std::string& last_target () const {
+    std::string last_target () const {
+        const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_target_;
     }
     /// How many lines of header @p name the last request carried.
     size_t header_count (const std::string& name) const {
+        const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_headers_.count (name);
     }
     std::string last_header (const std::string& name) const {
+        const std::lock_guard<std::mutex> lock (record_mutex_);
         const auto found = last_headers_.find (name);
         return found == last_headers_.end () ? "" : found->second;
     }
@@ -191,6 +203,7 @@ class MockTokenServer {
     int port_ = 0;
     std::atomic<int> hits_{ 0 };
     std::atomic<bool> released_{ false };
+    mutable std::mutex record_mutex_;
     std::string last_path_, last_target_, last_body_, last_auth_, last_content_type_;
     httplib::Headers last_headers_;
     std::thread thread_;

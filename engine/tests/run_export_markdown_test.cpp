@@ -56,9 +56,9 @@ using vayu::tests::read_bytes;
 using vayu::tests::read_document;
 
 /// Everything the golden pairs hold, in the order of the issue's list.
-constexpr auto CASES = std::to_array<std::string_view> (
-{ "healthy-passed", "errors-and-budget-failed", "stopped-early",
-"vs-baseline-regressed", "no-budgets", "collection-load", "hostile-text" });
+constexpr auto CASES = std::to_array<std::string_view> ({ "healthy-passed",
+"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed",
+"no-budgets", "collection-load", "hostile-text", "skipped-requests" });
 
 /// 6 KB: what an agent reads for one run without it crowding out the rest.
 constexpr std::size_t SIZE_LIMIT_BYTES = 6144;
@@ -255,6 +255,57 @@ TEST (RunExportMarkdownTest, NamesTheMissedBudgetsWithTheirFigures) {
                           "(15.0%)"),
     std::string::npos)
     << text;
+}
+
+// --- skipped requests (#2911) -----------------------------------------------------------
+
+constexpr std::string_view SKIPPED_ROW_START = "| Skipped requests";
+
+std::string skipped_row_of (const std::string& text) {
+    for (const std::string& line : lines_of (text)) {
+        if (line.starts_with (SKIPPED_ROW_START)) {
+            return line;
+        }
+    }
+    return {};
+}
+
+ordered_json skipped_document (double skipped, double stalled_ms) {
+    ordered_json document = read_document ("no-budgets");
+    document["report"]["summary"]["skippedRequests"] = skipped;
+    document["report"]["summary"]["stalledMs"]       = stalled_ms;
+    return document;
+}
+
+TEST (RunExportMarkdownTest, SaysHowManyRequestsAStalledGeneratorSkippedAndForHowLong) {
+    const std::string row = skipped_row_of (
+    render_run_export_markdown (read_document ("skipped-requests")));
+    EXPECT_NE (
+    row.find ("625 requests skipped: the load generator stalled for 2.5 s"), std::string::npos)
+    << row;
+}
+
+TEST (RunExportMarkdownTest, ASingleSkippedRequestIsSingular) {
+    const std::string row =
+    skipped_row_of (render_run_export_markdown (skipped_document (1, 4000)));
+    EXPECT_NE (
+    row.find ("1 request skipped: the load generator stalled for 4 s"), std::string::npos)
+    << row;
+}
+
+TEST (RunExportMarkdownTest, AStallTooShortForASecondDecimalIsNeverZeroSeconds) {
+    const std::string row =
+    skipped_row_of (render_run_export_markdown (skipped_document (1, 20)));
+    EXPECT_NE (
+    row.find ("1 request skipped: the load generator stalled for <0.1 s"), std::string::npos)
+    << row;
+}
+
+TEST (RunExportMarkdownTest, NoSkipsPrintNoRowWhetherTheKeyIsZeroOrAbsent) {
+    // Absent is a document written before #2911; 0 is a pacer that kept up.
+    EXPECT_EQ (
+    skipped_row_of (render_run_export_markdown (read_document ("no-budgets"))), "");
+    EXPECT_EQ (skipped_row_of (render_run_export_markdown (skipped_document (0, 0))), "");
 }
 
 TEST (RunExportMarkdownTest, ErrorRateIsTheReportsWithItsTwoKindsOfFailure) {

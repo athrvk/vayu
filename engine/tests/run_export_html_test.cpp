@@ -77,12 +77,12 @@ using vayu::utils::escape_html;
 /// Every document the Markdown goldens use, so the page is exercised on stopped
 /// runs, collection runs, comparisons and hostile text as well as the goldens.
 constexpr auto ALL_CASES = std::to_array<std::string_view> ({ "healthy-passed",
-"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed",
-"no-budgets", "collection-load", "hostile-text", "status-seconds" });
+"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed", "no-budgets",
+"collection-load", "hostile-text", "status-seconds", "skipped-requests" });
 
 /// The cases whose rendered page is pinned byte for byte.
 constexpr auto GOLDEN_CASES = std::to_array<std::string_view> (
-{ "healthy-passed", "errors-and-budget-failed", "status-seconds" });
+{ "healthy-passed", "errors-and-budget-failed", "status-seconds", "skipped-requests" });
 
 constexpr std::size_t SIZE_LIMIT_BYTES = 300000;
 

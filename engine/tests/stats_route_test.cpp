@@ -103,6 +103,8 @@ class StatsRouteTest : public ::testing::Test {
         sample.backpressure             = 2;
         sample.error_rate               = 0.0;
         sample.dropped_requests         = 1;
+        sample.skipped_requests         = 7;
+        sample.stalled_ms               = 700.0;
         sample.bytes_sent               = 512;
         sample.bytes_received           = 4096;
         sample.status_codes             = { { 200, 10 } };
@@ -191,6 +193,8 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "backpressure", nlohmann::json::value_t::number_unsigned },
         { "error_rate", nlohmann::json::value_t::number_float },
         { "dropped_requests", nlohmann::json::value_t::number_unsigned },
+        { "skipped_requests", nlohmann::json::value_t::number_unsigned },
+        { "stalled_ms", nlohmann::json::value_t::number_float },
         { "bytes_sent", nlohmann::json::value_t::number_unsigned },
         { "bytes_received", nlohmann::json::value_t::number_unsigned },
         { "status_codes", nlohmann::json::value_t::object },
@@ -211,6 +215,8 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
     // The values survive the round trip, not just the shape.
     EXPECT_EQ (entry["timestamp"].get<int64_t> (), 1000);
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
+    EXPECT_EQ (entry["skipped_requests"].get<size_t> (), 7u);
+    EXPECT_DOUBLE_EQ (entry["stalled_ms"].get<double> (), 700.0);
     EXPECT_DOUBLE_EQ (entry["current_rps"].get<double> (), 100.0);
     EXPECT_DOUBLE_EQ (entry["current_send_rate"].get<double> (), 101.0);
     EXPECT_DOUBLE_EQ (entry["window_avg_in_flight"].get<double> (), 3.5);
@@ -240,7 +246,7 @@ TEST_F (StatsRouteTest, StoredTickOfAnEmptySecondHasNoPercentileKeys) {
     for (const auto* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
         EXPECT_FALSE (entry.contains (key)) << key << ": " << entry.dump ();
     }
-    EXPECT_EQ (entry.size (), 22u)
+    EXPECT_EQ (entry.size (), 24u)
     << "only the three percentiles leave: " << entry.dump ();
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
 }

@@ -10,8 +10,8 @@
 /**
  * @file tests/process_cpu.hpp
  * @brief `process_cpu_ms` - this process's own CPU time, for the tests that
- *        catch a thread spinning a wait away instead of sleeping it (#1596,
- *        #1915). Such a bug changes no count a test could read, only CPU.
+ *        catch a thread spinning a wait away instead of sleeping it (#1596).
+ *        Such a bug changes no count a test could read, only CPU.
  */
 
 #include <cstdint>

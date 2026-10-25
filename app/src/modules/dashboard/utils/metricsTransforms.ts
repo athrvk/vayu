@@ -53,6 +53,22 @@ export function isRateLimitedRun(mode: string | undefined, targetRps: number | u
 	return mode === "constant_rps" && (targetRps ?? 0) > 0;
 }
 
+/**
+ * Whether the hero swaps Rate Fidelity for the Dropped requests card: a
+ * rate-limited run that lost requests, whether the in-flight cap dropped them
+ * or a generator stall skipped them (#2911). The live bundle (`MetricsView`)
+ * and the stored one (`reportToDerived`) both call this, so a run reads the
+ * same while it runs and after it ends.
+ */
+export function shouldShowDropped(
+	mode: string | undefined,
+	targetRps: number | undefined,
+	droppedRequests: number,
+	skippedRequests: number
+): boolean {
+	return isRateLimitedRun(mode, targetRps) && (droppedRequests > 0 || skippedRequests > 0);
+}
+
 /** Responses per second of each status class over the interval a point closes. */
 export interface StatusPoint {
 	time: number;

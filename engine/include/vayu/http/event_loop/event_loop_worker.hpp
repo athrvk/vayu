@@ -23,7 +23,6 @@
 
 #include "vayu/core/spsc_queue.hpp"
 #include "vayu/http/event_loop.hpp"
-#include "vayu/http/rate_limiter.hpp"
 
 // The platform socket header declares it; only a pointer crosses here.
 struct addrinfo;
@@ -168,10 +167,9 @@ class CurlHandlePool {
  * - Its own curl_multi handle for concurrent transfers
  * - A pending queue for incoming requests
  * - Active transfers map for in-flight requests
- * - Rate limiter for controlling throughput
  */
 // The analyzer would reorder the fields to save 84 padding bytes. Declaration
-// order here follows the lifecycle (queue, loop state, transfers, limiter,
+// order here follows the lifecycle (queue, loop state, transfers,
 // flags) and is what the constructor's initialization order hangs off; one
 // worker exists per thread, so the bytes saved would be a few hundred per
 // process for a reordering that costs the reader the grouping.
@@ -185,7 +183,7 @@ class EventLoopWorker {
      * @param num_workers How many workers `EventLoopImpl` created; together
      *   with @p worker_index this is the whole input to the pinning decision.
      */
-    explicit EventLoopWorker (const EventLoopConfig& cfg,
+    explicit EventLoopWorker (EventLoopConfig cfg,
     unsigned worker_index = 0,
     unsigned num_workers  = 1);
     ~EventLoopWorker ();
@@ -215,33 +213,19 @@ class EventLoopWorker {
 
     void run_loop ();
 
-    /// What one submit_pending_transfers pass did.
-    struct SubmitPass {
-        bool took_work = false; ///< Something came off the pending queue.
-        /// The pass stopped because the rate limiter refused a token while
-        /// work was queued; an empty queue never asks it for one.
-        bool rate_limited = false;
-    };
-
-    /// Submit what the pending queue holds, up to `max_concurrent` and up to
-    /// what the rate limiter allows. Worker-thread only. @p local_active is the
-    /// loop's cached active count, advanced as transfers are added.
-    SubmitPass submit_pending_transfers (size_t& local_active);
+    /// Submit what the pending queue holds, up to `max_concurrent`.
+    /// Worker-thread only. @p local_active is the loop's cached active count,
+    /// advanced as transfers are added.
+    /// @return whether anything came off the pending queue.
+    bool submit_pending_transfers (size_t& local_active);
 
     /// Deliver every transfer curl has finished. Worker-thread only.
     /// @return whether any completion was read.
     bool drain_completions ();
 
-    /// Park until there is IO, new work or - when @p rate_limited and items
-    /// are queued with nothing in flight - the limiter's next token. Spins
-    /// briefly before the idle park. Worker-thread only; called only when a
-    /// pass found nothing to do.
-    void wait_for_work (int still_running, bool rate_limited);
-
-    /// Park in curl_multi_poll until the rate limiter's next token, at most
-    /// TOKEN_WAIT_CAP_MS. submit() and stop() cut it short through
-    /// curl_multi_wakeup. Worker-thread only.
-    void wait_for_next_token ();
+    /// Park until there is IO or new work. Spins briefly before the idle park.
+    /// Worker-thread only; called only when a pass found nothing to do.
+    void wait_for_work (int still_running);
 
     /// Remove every in-flight easy handle from curl and complete it as
     /// cancelled. Worker-thread only - `active_transfers` and the handle pool
@@ -279,7 +263,6 @@ class EventLoopWorker {
     std::unordered_map<CURL*, std::unique_ptr<TransferData>> active_transfers;
 
     EventLoopConfig config;
-    RateLimiter rate_limiter;
 
     /**
      * The DNS cache every worker shares.

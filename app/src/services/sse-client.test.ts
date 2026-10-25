@@ -263,6 +263,16 @@ describe("mapSseMetrics", () => {
 		expect(m.no_response).toBe(0);
 	});
 
+	it("renames the skipped-request keys, and reads a frame without them as none (issue #2911)", () => {
+		const m = mapSseMetrics({ timestamp: 1, skippedRequests: 30, stalledMs: 150 });
+		expect(m.skipped_requests).toBe(30);
+		expect(m.stalled_ms).toBe(150);
+
+		const older = mapSseMetrics({ timestamp: 1, totalRequests: 0 });
+		expect(older.skipped_requests).toBe(0);
+		expect(older.stalled_ms).toBe(0);
+	});
+
 	it("renames customMetrics into custom_metrics (issue #1500)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,

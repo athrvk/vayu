@@ -404,6 +404,8 @@ std::to_array<std::pair<const char*, const char*>> ({
 { "send_rate", "send_rate" },
 { "throughput", "throughput" },
 { "dropped_requests", "dropped_requests" },
+{ "skipped_requests", "skipped_requests" },
+{ "stalled_ms", "stalled_ms" },
 { "bytes_sent", "bytes_sent" },
 { "bytes_received", "bytes_received" },
 });

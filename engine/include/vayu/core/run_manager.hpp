@@ -1131,6 +1131,10 @@ struct MetricTickSample {
     size_t backpressure     = 0;
     double error_rate       = 0.0; // Percent
     size_t dropped_requests = 0;
+    // Cumulative, apart from `dropped_requests`: what a stalled constant_rps
+    // pacer chose not to send, and the schedule time it covers (#2911).
+    size_t skipped_requests = 0;
+    double stalled_ms       = 0.0;
     size_t bytes_sent       = 0;
     size_t bytes_received   = 0;
     std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
@@ -1321,8 +1325,11 @@ struct RunSummaryInputs {
     double cleanup_overhead_s = 0.0;
     size_t peak_concurrency   = 0;
     // MetricsCollector::average_in_flight over `test_duration_s` (#2821).
-    double avg_in_flight     = 0.0;
-    size_t dropped_requests  = 0;
+    double avg_in_flight    = 0.0;
+    size_t dropped_requests = 0;
+    // The pacer's deliberate skips and the schedule time they cover (#2911).
+    size_t skipped_requests  = 0;
+    double stalled_ms        = 0.0;
     double queue_wait_avg_ms = 0.0;
     size_t bytes_sent        = 0;
     size_t bytes_received    = 0;

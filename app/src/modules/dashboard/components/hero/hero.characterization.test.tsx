@@ -100,6 +100,10 @@ describe("hero cards (characterization)", () => {
 			/>
 		));
 	it("DroppedRequestsCard", () => snap(<DroppedRequestsCard dropped={120} completed={880} />));
+	it("DroppedRequestsCard (skipped only)", () =>
+		snap(<DroppedRequestsCard dropped={0} completed={880} skipped={120} stalledMs={2400} />));
+	it("DroppedRequestsCard (dropped and skipped)", () =>
+		snap(<DroppedRequestsCard dropped={40} completed={880} skipped={80} stalledMs={1600} />));
 	it("AchievedThroughputCard", () =>
 		snap(<AchievedThroughputCard throughput={3940} configuredConcurrency={50} />));
 	it("ConcurrencyUtilCard", () =>
@@ -199,6 +203,8 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 		testDuration: 30,
 		elapsedSeconds: 10,
 		droppedRequests: 0,
+		skippedRequests: 0,
+		stalledMs: 0,
 		showDropped: false,
 		breakpoint: {
 			crossed: false,

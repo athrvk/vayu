@@ -247,9 +247,13 @@ struct ReportExtras {
     bool summary_missing    = false;
     double peak_concurrency = 0.0;
     double dropped_total    = 0.0;
-    double queue_wait_avg   = 0.0;
-    double bytes_sent       = 0.0;
-    double bytes_received   = 0.0;
+    // The pacer's deliberate skips and the schedule time they cover (#2911);
+    // 0 for a run stored before them, which skipped nothing.
+    double skipped_total  = 0.0;
+    double stalled_ms     = 0.0;
+    double queue_wait_avg = 0.0;
+    double bytes_sent     = 0.0;
+    double bytes_received = 0.0;
     // True once an authoritative status-code distribution replaced the one
     // derived from the sampled results - only then are successful/failed
     // recounted from it (a run with neither keeps the sampled figures).
@@ -658,6 +662,8 @@ ReportExtras& extras) {
         extras.avg_in_flight = summary["avg_in_flight"].get<double> ();
     }
     read_number (summary, "dropped_requests", extras.dropped_total);
+    read_number (summary, "skipped_requests", extras.skipped_total);
+    read_number (summary, "stalled_ms", extras.stalled_ms);
     read_number (summary, "queue_wait_avg", extras.queue_wait_avg);
     read_number (summary, "bytes_sent", extras.bytes_sent);
     read_number (summary, "bytes_received", extras.bytes_received);
@@ -1827,7 +1833,8 @@ nlohmann::json& summary) {
     { "throughput", report.throughput }, { "cleanupOverhead", report.cleanup_overhead_s },
     { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
     { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
-    { "avgQueueWaitMs", extras.queue_wait_avg },
+    { "skippedRequests", static_cast<size_t> (extras.skipped_total) },
+    { "stalledMs", extras.stalled_ms }, { "avgQueueWaitMs", extras.queue_wait_avg },
     { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
     { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
     { "throughputBytesPerSec",
@@ -2057,6 +2064,8 @@ ReportExtras& extras) {
     extras.peak_concurrency = static_cast<double> (context->peak_in_flight.load ());
     extras.avg_in_flight  = collector.average_in_flight (duration_s);
     extras.dropped_total  = static_cast<double> (collector.dropped_requests ());
+    extras.skipped_total  = static_cast<double> (collector.skipped_requests ());
+    extras.stalled_ms     = collector.stalled_ms ();
     extras.queue_wait_avg = collector.average_queue_wait ();
     extras.bytes_sent     = static_cast<double> (collector.total_bytes_sent ());
     extras.bytes_received = static_cast<double> (collector.total_bytes_received ());

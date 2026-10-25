@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Ping - Vayu run report</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f3f5f7;
+  --text: #1b1f24;
+  --muted: #4b5563;
+  --rule: #d0d7de;
+  --grid: #e4e8ec;
+  --axis: #6b7280;
+  --accent: #0b5cad;
+  --good-text: #17703a;
+  --good-bg: #e3f6e8;
+  --good-mark: #178040;
+  --bad-text: #b3261e;
+  --bad-bg: #fdeceb;
+  --bad-mark: #c9362d;
+  --rps: #0b7a75;
+  --vus: #6f42c1;
+  --p50: #4d8bd6;
+  --p95: #2368c4;
+  --p99: #0a2f66;
+  --c2xx: #178040;
+  --c4xx: #9a6700;
+  --c5xx: #c9362d;
+  --cnone: #7a3fc0;
+  --ref: #4b5563;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10151b;
+    --surface: #1a2129;
+    --text: #e6eaee;
+    --muted: #a6b0bb;
+    --rule: #2d3640;
+    --grid: #26303a;
+    --axis: #8a95a1;
+    --accent: #79b8ff;
+    --good-text: #56d37b;
+    --good-bg: #12301d;
+    --good-mark: #3fb868;
+    --bad-text: #ff8a80;
+    --bad-bg: #3a1614;
+    --bad-mark: #f0584d;
+    --rps: #3cc9c0;
+    --vus: #b392f0;
+    --p50: #3d73b8;
+    --p95: #6aa6f0;
+    --p99: #cfe3ff;
+    --c2xx: #3fb868;
+    --c4xx: #e3b341;
+    --c5xx: #f0584d;
+    --cnone: #c9a0ff;
+    --ref: #a6b0bb;
+  }
+}
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #f3f5f7;
+    --text: #1b1f24;
+    --muted: #4b5563;
+    --rule: #d0d7de;
+    --grid: #e4e8ec;
+    --axis: #6b7280;
+    --accent: #0b5cad;
+    --good-text: #17703a;
+    --good-bg: #e3f6e8;
+    --good-mark: #178040;
+    --bad-text: #b3261e;
+    --bad-bg: #fdeceb;
+    --bad-mark: #c9362d;
+    --rps: #0b7a75;
+    --vus: #6f42c1;
+    --p50: #4d8bd6;
+    --p95: #2368c4;
+    --p99: #0a2f66;
+    --c2xx: #178040;
+    --c4xx: #9a6700;
+    --c5xx: #c9362d;
+    --cnone: #7a3fc0;
+    --ref: #4b5563;
+  }
+}
+@page { margin: 14mm; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.brand { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.85rem; }
+.brand strong { font-size: 0.95rem; }
+.brand img { vertical-align: middle; margin-right: 0.4rem; }
+h1 { margin: 0 0 0.25rem; font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
+h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+section, footer { margin: 1.75rem 0; }
+a { color: var(--accent); }
+code, .reference { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.reference { margin: 0; color: var(--muted); }
+nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+.band { padding: 0.6rem 0.9rem; border-left: 0.4rem solid var(--axis); background: var(--surface); }
+.band p { margin: 0; }
+.band p + p { margin-top: 0.4rem; }
+.band strong { font-size: 1.25rem; }
+.band-good { border-color: var(--good-mark); background: var(--good-bg); }
+.band-good strong { color: var(--good-text); }
+.band-bad { border-color: var(--bad-mark); background: var(--bad-bg); }
+.band-bad strong { color: var(--bad-text); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 0.35rem 0.75rem 0.35rem 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+thead th { color: var(--muted); font-weight: 600; }
+tbody th { font-weight: 600; }
+td.tone-good { color: var(--good-text); }
+td.tone-bad { color: var(--bad-text); }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.5rem; margin: 0; }
+dl.facts div { display: contents; }
+dt { color: var(--muted); font-weight: 600; }
+dd { margin: 0; overflow-wrap: anywhere; }
+ul.plain { margin: 0; padding-left: 1.2rem; }
+figure { margin: 0 0 1.25rem; }
+figcaption { margin-bottom: 0.25rem; font-weight: 600; }
+.chart-note { color: var(--muted); font-size: 0.85rem; }
+svg.chart { display: block; width: 100%; height: auto; }
+svg .tick, svg .axis-title { fill: var(--muted); font-size: 11px; }
+svg .direct { fill: var(--text); font-size: 11px; }
+svg .grid { fill: none; stroke: var(--grid); stroke-width: 1; }
+svg .axis { fill: none; stroke: var(--axis); stroke-width: 1; }
+svg path.ref { fill: none; stroke: var(--ref); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .line { fill: none; stroke: var(--c); stroke-width: 1.6; stroke-linejoin: round; }
+svg .dot { fill: var(--c); }
+.s-rps { --c: var(--rps); }
+.s-vus { --c: var(--vus); }
+.s-p50 { --c: var(--p50); }
+.s-p95 { --c: var(--p95); }
+.s-p99 { --c: var(--p99); }
+.s-2xx { --c: var(--c2xx); }
+.s-4xx { --c: var(--c4xx); }
+.s-5xx { --c: var(--c5xx); }
+.s-none { --c: var(--cnone); }
+svg .line.s-p99 { stroke-width: 2.2; }
+svg .line.s-4xx { stroke-dasharray: 7 3; }
+svg .line.s-none { stroke-dasharray: 2 3; }
+@media (max-width: 40rem) { dl.facts { grid-template-columns: 1fr; } }
+@media print {
+  body { font-size: 11pt; }
+  nav { display: none; }
+  main { max-width: none; padding: 0; }
+  section, figure, footer { break-inside: avoid; }
+  #charts { break-inside: auto; }
+  .band { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="brand"><img src="data:image/png;base64,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" alt="" width="28" height="28"><strong>Vayu</strong> run report</p>
+<h1>Ping</h1>
+<p class="reference"><code>Vayu run &quot;Ping&quot; (run_5c21e7) - load test, GET /ping, 2026-10-05T08:10:00Z, completed</code></p>
+</header>
+<nav aria-label="Sections"><ul>
+<li><a href="#verdict">Verdict</a></li>
+<li><a href="#run">Run</a></li>
+<li><a href="#results">Results</a></li>
+<li><a href="#latency">Latency</a></li>
+<li><a href="#charts">Charts</a></li>
+</ul></nav>
+<section id="verdict" aria-labelledby="verdict-h">
+<h2 id="verdict-h">Verdict</h2>
+<div class="band">
+<p><strong>Not judged</strong> - no budgets declared</p>
+</div>
+</section>
+<section id="run" aria-labelledby="run-h">
+<h2 id="run-h">Run</h2>
+<dl class="facts">
+<div><dt>Target</dt><dd>GET https://api.example.test/ping</dd></div>
+<div><dt>Mode</dt><dd>constant rps</dd></div>
+<div><dt>Virtual users</dt><dd>20</dd></div>
+<div><dt>Target rate</dt><dd>250 req/s</dd></div>
+<div><dt>Duration</dt><dd>30 s</dd></div>
+<div><dt>Started</dt><dd>2026-10-05T08:10:00Z</dd></div>
+<div><dt>Engine version</dt><dd>1.14.0</dd></div>
+</dl>
+</section>
+<section id="results" aria-labelledby="results-h">
+<h2 id="results-h">Results</h2>
+<div class="scroll"><table aria-labelledby="results-h">
+<thead><tr><th scope="col">Metric</th><th scope="col">Value</th><th scope="col">Budget</th></tr></thead>
+<tbody>
+<tr><th scope="row">Requests</th><td>6,865</td><td>-</td></tr>
+<tr><th scope="row">Skipped requests</th><td>625 requests skipped: the load generator stalled for 2.5 s</td><td>-</td></tr>
+<tr><th scope="row">Requests per second (whole run, drain included)</th><td>229 req/s</td><td>-</td></tr>
+<tr><th scope="row">Error rate</th><td>0.0%</td><td>-</td></tr>
+<tr><th scope="row">Bytes in</th><td>1.1 MB</td><td>-</td></tr>
+<tr><th scope="row">Bytes out</th><td>585.9 KB</td><td>-</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="latency" aria-labelledby="latency-h">
+<h2 id="latency-h">Latency</h2>
+<div class="scroll"><table aria-labelledby="latency-h">
+<thead><tr><th scope="col">Measure</th><th scope="col">Latency (ms)</th><th scope="col">Budget</th></tr></thead>
+<tbody>
+<tr><th scope="row">min</th><td>&lt;0.01</td><td>-</td></tr>
+<tr><th scope="row">p50</th><td>5.1</td><td>-</td></tr>
+<tr><th scope="row">p90</th><td>11</td><td>-</td></tr>
+<tr><th scope="row">p95</th><td>14</td><td>-</td></tr>
+<tr><th scope="row">p99</th><td>23</td><td>-</td></tr>
+<tr><th scope="row">p999</th><td>38</td><td>-</td></tr>
+<tr><th scope="row">max</th><td>41</td><td>-</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="charts" aria-labelledby="charts-h">
+<h2 id="charts-h">Charts</h2>
+<p>This run recorded no time series, so there is nothing to chart.</p>
+
+</section>
+<footer>
+<p>Generated by Vayu 1.14.0. No request or response data is included.</p>
+</footer>
+</main>
+</body>
+</html>

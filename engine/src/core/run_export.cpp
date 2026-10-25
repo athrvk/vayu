@@ -161,10 +161,11 @@ const json& member (const json& source, std::string_view key) {
 constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
 { "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
 "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
-"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead", "cleanupOverhead",
-"peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
-"httpVersionDowngraded", "throughputBytesPerSec", "sendingDurationSeconds", "connectionReplays",
-"avgInFlight", "completedWhileSending", "partial", "summaryMissing" });
+"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead",
+"cleanupOverhead", "peakConcurrency", "droppedRequests", "avgQueueWaitMs",
+"bytesSent", "bytesReceived", "httpVersionDowngraded", "throughputBytesPerSec",
+"sendingDurationSeconds", "connectionReplays", "avgInFlight", "completedWhileSending",
+"partial", "summaryMissing", "skippedRequests", "stalledMs" });
 constexpr auto LATENCY_KEYS = std::to_array<std::string_view> (
 { "min", "max", "avg", "median", "p50", "p75", "p90", "p95", "p99", "p999" });
 constexpr auto RATE_CONTROL_KEYS = std::to_array<std::string_view> (

@@ -1603,6 +1603,8 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.peak_concurrency        = 8;
     inputs.avg_in_flight           = 3.25;
     inputs.dropped_requests        = 2;
+    inputs.skipped_requests        = 5;
+    inputs.stalled_ms              = 500.0;
     inputs.queue_wait_avg_ms       = 1.5;
     inputs.bytes_sent              = 1024;
     inputs.bytes_received          = 8192;
@@ -1651,6 +1653,10 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_DOUBLE_EQ (summary.value ("cleanupOverhead", -1.0), 0.125);
     EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 8u);
     EXPECT_EQ (summary["droppedRequests"].get<size_t> (), 2u);
+    // The pacer's skips (#2911). Mutation check: drop the `skipped_requests`
+    // or `stalled_ms` read in `apply_summary_totals` and these read 0.
+    EXPECT_EQ (summary["skippedRequests"].get<size_t> (), 5u);
+    EXPECT_DOUBLE_EQ (summary["stalledMs"].get<double> (), 500.0);
     EXPECT_DOUBLE_EQ (summary["avgQueueWaitMs"].get<double> (), 1.5);
     EXPECT_EQ (summary["bytesSent"].get<size_t> (), 1024u);
     EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 8192u);
@@ -2127,6 +2133,26 @@ TEST_F (RunsRouteTest, ReportFromAnOlderSummaryOmitsAvgInFlight) {
     vayu::http::routes::run_report_response (*db_, "run_pre_in_flight");
     ASSERT_EQ (status, 200);
     EXPECT_FALSE (body["summary"].contains ("avgInFlight")) << body["summary"].dump ();
+}
+
+// #2911: a summary stored before the pacer skipped anything has neither key,
+// and its report reads them as 0 rather than failing or inventing a stall.
+// Mutation check: make `apply_summary_totals` require the keys and the report
+// is not the 200 below.
+TEST_F (RunsRouteTest, ReportFromASummaryWithoutSkipsReadsThemAsZero) {
+    seed ({ .id = "run_pre_skips", .start_time = 1000 });
+    auto stored = vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_TRUE (stored.contains ("skipped_requests"));
+    stored.erase ("skipped_requests");
+    stored.erase ("stalled_ms");
+    db_->update_run_summary ("run_pre_skips", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_pre_skips");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary.value ("skippedRequests", size_t{ 99 }), 0u) << summary.dump ();
+    EXPECT_DOUBLE_EQ (summary.value ("stalledMs", -1.0), 0.0) << summary.dump ();
+    EXPECT_EQ (summary["droppedRequests"].get<size_t> (), 2u);
 }
 
 // #2894: a run stored before the split timed cleanup under `setup_overhead`.
