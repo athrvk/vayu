@@ -176,9 +176,10 @@ describe("BaselineComparison", () => {
 			baselinePage([run({ id: "run_baseline", baseline: true })])
 		);
 		mocked.getRunReport.mockResolvedValue(report({ p99: 50, avgRps: 100, errorRate: 1 }));
-		// A crash-reconciled run: its counts are the last tick's, its latency block is zeros.
+		// A crash-reconciled run: its counts are the last tick's, and the engine omits its latency (#2938).
 		const crashed = report({ p99: 0, avgRps: 100, errorRate: 1 });
 		crashed.summary.partial = true;
+		delete crashed.latency;
 
 		render(withQueryClient(<BaselineComparison report={crashed} runId="run_target" />));
 
