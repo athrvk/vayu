@@ -176,8 +176,8 @@ consumes it.
   drawn whether or not p99 reached it, carries the message. The store latches
   the flag with the breakpoint; History's `computeBreakpoint` sets it over its
   own series, where on a bucketed run it means the first bucket. The ramp's
-  Saturation card's call-out names the same line ("p99 crossed 203ms (the 200ms
-  SLO) at 19 virtual users"). Which line the breakpoint is judged
+  Saturation card's call-out names the same line ("p99 crossed 203ms (the 200ms threshold
+  in Settings) at 19 virtual users"). Which line the breakpoint is judged
   against, live: a `capacity` run's own `sloMs` (from the start config), the
   Settings threshold in every other mode (`sloJudgeFor` in `dashboard-store`). The
   line the charts draw is another question, and a run answers it for itself in
