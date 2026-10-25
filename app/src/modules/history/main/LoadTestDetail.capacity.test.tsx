@@ -207,6 +207,36 @@ describe("a stored capacity run against its own SLO (#2816)", () => {
 	});
 });
 
+describe("a stored run's crossing names whose line it was judged against (#2939)", () => {
+	// Mutation-check: drop `runSloMs(report)` from `computeBreakpoint` in
+	// `LoadTestDetail` and the matching-budget case reads Settings'; force the
+	// source to "run" in `sloSourceOf` and the two Settings cases fail.
+	it("calls the Settings threshold what it is when the run declared no p99 line", async () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 30 });
+		openPerformance(report("constant_concurrency"));
+
+		await screen.findByText("Latency distribution");
+		expect(labels("vertical")).toContain("p99 > 30ms (Settings)");
+	});
+
+	it("still judges by Settings, and says so, when the p99 budget is a different number", async () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 30 });
+		openPerformance(report("constant_concurrency", undefined, 350));
+
+		await screen.findByText("Latency distribution");
+		expect(labels("vertical")).toContain("p99 > 30ms (Settings)");
+		expect(labels("vertical")).not.toContain("p99 > SLO 30ms");
+	});
+
+	it("calls it the SLO where the judged number is the run's own p99 budget", async () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 30 });
+		openPerformance(report("constant_concurrency", undefined, 30));
+
+		await screen.findByText("Latency distribution");
+		expect(labels("vertical")).toContain("p99 > SLO 30ms");
+	});
+});
+
 describe("a stored capacity run's Saturation card (#2816)", () => {
 	// Mutation-check: drop `capacity` from `reportToDerived`, or mount the ramp's
 	// card in HeroRow's capacity case, and these fail.

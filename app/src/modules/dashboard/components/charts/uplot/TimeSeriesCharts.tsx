@@ -101,6 +101,16 @@ function breakpointHover(breakpoint: Breakpoint, mode?: string): string | undefi
 }
 
 /**
+ * The marker's words. Only a run's own line is an "SLO"; a Settings threshold
+ * the run never declared is named as the Settings one (#2939).
+ */
+function breakpointLabel({ sloMs, sloSource }: Breakpoint): string {
+	if (sloMs == null) return "p99 > SLO";
+	const line = formatLatency(sloMs);
+	return sloSource === "run" ? `p99 > SLO ${line}` : `p99 > ${line} (Settings)`;
+}
+
+/**
  * The vertical line where p99 first crossed the SLO, shared by the time-series
  * charts. A capacity elbow only means something where load rises under the
  * line (ramp_up, and a capacity search stepping up), so the other modes draw it
@@ -120,10 +130,7 @@ function breakpointMarker(
 			orient: "vertical",
 			value: breakpoint.timeSeconds,
 			role: "warning",
-			label:
-				breakpoint.sloMs != null
-					? `p99 > SLO ${formatLatency(breakpoint.sloMs)}`
-					: "p99 > SLO",
+			label: breakpointLabel(breakpoint),
 			hover: breakpointHover(breakpoint, mode),
 		},
 	];

@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { concurrencyUnit } from "@/constants/load-test-modes";
 import { STOP_REASONS, type CapacityResult } from "@/components/shared/capacityStop";
 import { TOOLTIPS } from "../tooltips";
-import type { Breakpoint } from "../../utils/computeBreakpoint";
+import type { Breakpoint, SloSource } from "../../utils/computeBreakpoint";
 import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { pluralize } from "../../utils/format";
 import { HeroCardShell } from "./HeroCardShell";
@@ -68,6 +68,11 @@ function AtLevel({ concurrency }: { concurrency: number | null | undefined }) {
 	);
 }
 
+/** What to call a line: "SLO" only when the run declared it, else the Settings threshold. */
+function lineName(sloSource: SloSource): string {
+	return sloSource === "run" ? "SLO" : "threshold in Settings";
+}
+
 /**
  * Where p99 went over the SLO. The ramp reads it off its ticks and the capacity
  * card off the search's knee; either may lack the figure, and the line then
@@ -76,17 +81,19 @@ function AtLevel({ concurrency }: { concurrency: number | null | undefined }) {
 function P99Crossed({
 	p99Ms,
 	sloMs,
+	sloSource,
 	concurrency,
 }: {
 	p99Ms: number | null | undefined;
 	sloMs: number | null | undefined;
+	sloSource: SloSource;
 	concurrency: number | null | undefined;
 }) {
-	const slo = sloMs == null ? null : formatLatency(sloMs);
+	const line = sloMs == null ? null : `the ${formatLatency(sloMs)} ${lineName(sloSource)}`;
 	return (
 		<Line>
 			p99 crossed {p99Ms != null && <Figure>{formatLatency(p99Ms)}</Figure>}
-			{slo !== null && (p99Ms == null ? `the ${slo} SLO` : ` (the ${slo} SLO)`)}
+			{line !== null && (p99Ms == null ? line : ` (${line})`)}
 			<AtLevel concurrency={concurrency} />
 		</Line>
 	);
@@ -117,6 +124,7 @@ export function SaturationCard({
 				<P99Crossed
 					p99Ms={breakpoint.p99Ms}
 					sloMs={breakpoint.sloMs}
+					sloSource={breakpoint.sloSource}
 					concurrency={breakpoint.concurrency}
 				/>
 			)}
@@ -194,6 +202,7 @@ function StopReasonLine({ capacity }: { capacity: CapacityResult }) {
 				<P99Crossed
 					p99Ms={capacity.kneeP99Ms}
 					sloMs={capacity.sloMs}
+					sloSource="run"
 					concurrency={capacity.kneeConcurrency}
 				/>
 			);
@@ -217,6 +226,7 @@ function LiveCrossing({ breakpoint }: { breakpoint: Breakpoint }) {
 		<P99Crossed
 			p99Ms={breakpoint.p99Ms}
 			sloMs={breakpoint.sloMs}
+			sloSource={breakpoint.sloSource}
 			concurrency={breakpoint.concurrency}
 		/>
 	);

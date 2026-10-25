@@ -281,6 +281,7 @@ describe("ResponseTimeVsConcurrencyChart - the SLO line (#2816, #2939)", () => {
 		timeSeconds: null,
 		p99Ms: null,
 		sloMs: 200,
+		sloSource: "run",
 		atRunStart: false,
 	};
 
@@ -314,6 +315,7 @@ describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
 					timeSeconds: 2,
 					p99Ms: 227,
 					sloMs: 200,
+					sloSource: "run",
 					atRunStart: false,
 				}}
 			/>
@@ -336,6 +338,7 @@ describe("ResponseTimeVsConcurrencyChart - knee marker (#2931)", () => {
 					timeSeconds: 2,
 					p99Ms: 227,
 					sloMs: 200,
+					sloSource: "run",
 					atRunStart: false,
 				}}
 			/>
@@ -425,6 +428,7 @@ describe("the breakpoint line on the time charts (#2698)", () => {
 		timeSeconds: 2,
 		p99Ms: 303,
 		sloMs: 200,
+		sloSource: "run",
 		atRunStart: false,
 	};
 
@@ -461,6 +465,14 @@ describe("the breakpoint line on the time charts (#2698)", () => {
 		const [marker] = verticalMarkers("percentiles", "ramp_up");
 		expect(marker.label).toBe("p99 > SLO 200ms");
 		expect(marker.label).not.toContain("303");
+	});
+
+	it("names a Settings-judged line as Settings', never an SLO the run did not use (#2939)", () => {
+		const [marker] = verticalMarkers("percentiles", "ramp_up", {
+			...CROSSED,
+			sloSource: "settings",
+		});
+		expect(marker.label).toBe("p99 > 200ms (Settings)");
 	});
 
 	it("leaves the SLO's number out of the label when none was in play", () => {
@@ -559,6 +571,7 @@ describe("LatencyPercentilesChart - the SLO line (#2698, #2939)", () => {
 					timeSeconds: null,
 					p99Ms: null,
 					sloMs: 450,
+					sloSource: "run",
 					atRunStart: false,
 				}}
 			/>
@@ -578,6 +591,7 @@ describe("LatencyPercentilesChart - the SLO line (#2698, #2939)", () => {
 					timeSeconds: 0,
 					p99Ms: 400,
 					sloMs: 200,
+					sloSource: "run",
 					atRunStart: true,
 				}}
 			/>

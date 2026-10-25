@@ -108,6 +108,7 @@ describe("centralized uPlot charts - smoke", () => {
 					timeSeconds: 3,
 					p99Ms: 104,
 					sloMs: 100,
+					sloSource: "run",
 					atRunStart: false,
 				}}
 			/>

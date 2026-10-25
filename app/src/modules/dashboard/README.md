@@ -176,10 +176,10 @@ consumes it.
   drawn whether or not p99 reached it, carries the message. The store latches
   the flag with the breakpoint; History's `computeBreakpoint` sets it over its
   own series, where on a bucketed run it means the first bucket. The ramp's
-  Saturation card's call-out names the same SLO ("p99 crossed 203ms (the 200ms
-  SLO) at 19 virtual users"). Which SLO the breakpoint is judged
+  Saturation card's call-out names the same line ("p99 crossed 203ms (the 200ms
+  SLO) at 19 virtual users"). Which line the breakpoint is judged
   against, live: a `capacity` run's own `sloMs` (from the start config), the
-  Settings threshold in every other mode (`sloMsFor` in `dashboard-store`). The
+  Settings threshold in every other mode (`sloJudgeFor` in `dashboard-store`). The
   line the charts draw is another question, and a run answers it for itself in
   both views (#2939). Live, `runOwnSloMs(loadTestConfig)` is the capacity
   `sloMs`, else the `latencyP99Ms` budget the start config carries (the
@@ -195,7 +195,13 @@ consumes it.
   a p99 of 300ms against a 200ms setting is not a miss the run ever signed up
   for; a live run with no p99 line is drawn the same way. A ramp's breakpoint is
   still judged against the Settings threshold in both views, so
-  `breakpoint.sloMs` is not the line to draw.
+  `breakpoint.sloMs` is not the line to draw. `Breakpoint.sloSource` says whose
+  number it is (`sloSourceOf`): `"run"` when the judged value equals the run's
+  own line (a capacity `sloMs`, or a p99 budget that is the same number as the
+  Settings threshold), else `"settings"`. Only a `"run"` line is worded an SLO:
+  the marker reads `p99 > SLO 50ms` or `p99 > 200ms (Settings)`, the Saturation
+  call-out `the 50ms SLO` or `the 200ms threshold in Settings`, and the
+  Breakpoint stat's sub-line `SLO 50ms` or `Settings 200ms` (#2939).
 - **A capacity run draws the response-time-vs-concurrency scatter, live and in
   History, in place of the percentile card** (#2931). The search steps the user
   count up level by level, so the scatter is the picture of it; the gate is

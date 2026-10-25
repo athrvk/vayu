@@ -171,6 +171,44 @@ describe("dashboard-store breakpoint SLO", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
 	});
 
+	it("judges a plain run against Settings and says so (#2939)", () => {
+		useDashboardStore.getState().startRun("r", { mode: "ramp_up" });
+		expect(useDashboardStore.getState().breakpoint.sloSource).toBe("settings");
+		useDashboardStore.getState().addMetricsBatch([tick(1, 250)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			sloMs: DEFAULT_SLO_THRESHOLD_MS,
+			sloSource: "settings",
+		});
+	});
+
+	it("keeps judging a ramp against Settings when it set a different p99 budget (#2939)", () => {
+		useDashboardStore.getState().startRun("r", { mode: "ramp_up", latencyP99Ms: 350 });
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			sloMs: DEFAULT_SLO_THRESHOLD_MS,
+			sloSource: "settings",
+		});
+	});
+
+	it("marks the source run only where the p99 budget is the judged number (#2939)", () => {
+		useDashboardStore
+			.getState()
+			.startRun("r", { mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS });
+		expect(useDashboardStore.getState().breakpoint.sloSource).toBe("run");
+	});
+
+	it("relabels the source when the config arrives after the ticks, keeping the verdict (#2939)", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r");
+		s.addMetricsBatch([tick(1, 250)]);
+		s.setRunConfig({ mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS }, null);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			timeSeconds: 1,
+			sloSource: "run",
+		});
+	});
+
 	it("a new run starts uncrossed against the SLO in force", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: 350 });
 		useDashboardStore.getState().startRun("r");
@@ -206,7 +244,10 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 
 	it("starts uncrossed against the run's own SLO, not the setting", () => {
 		useDashboardStore.getState().startRun("r", { mode: "capacity", sloMs: 50 });
-		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(50);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			sloMs: 50,
+			sloSource: "run",
+		});
 	});
 
 	it("latches a 60 ms tick the 200 ms setting would have let through", () => {
