@@ -9514,7 +9514,10 @@ p99 per level and a sequence has one per step.
 `concurrency` over `rampUpDuration`, then holds `concurrency` for the rest of
 `duration`. A `startConcurrency` **above** `concurrency` is a valid descending
 ramp. If `duration` is shorter than `rampUpDuration`, the run stops partway up
-(or down) the curve.
+(or down) the curve. A run whose `duration` equals `rampUpDuration` reaches
+`concurrency` at the end of the ramp, with no hold after it: when the run's
+time is up, the controller refills once more to the target its last instant is
+owed, so the peak does not depend on when it last woke (#2913).
 
 **Response bodies are capped.** A load-run request reads at most
 `maxResponseBodyBytes` (Settings → Data & retention, default 32MB) into memory.

@@ -131,7 +131,8 @@ const LoadDataSet* data);
 /**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the
  * in-flight deficit toward target(t) - woken per completion via refill_cv with
- * a 50ms safety-net timeout (drives ramp growth + bounds stop latency).
+ * a `CONTROLLER_TICK_MS` safety-net timeout (drives ramp growth + bounds stop
+ * latency).
  *
  * Shared by the single-request strategies and the scenario load executor, which
  * differ only in what @p submit_one submits: "another copy of the one request"
@@ -156,13 +157,21 @@ const LoadDataSet* data);
  *                     long as any user is deferred and the loop busy-spins
  *                     (issue #1596). Single-request strategies have no notion
  *                     of deferral and omit it.
+ * @param run_end_ms   the elapsed time at which @p should_continue turns false,
+ *                     for a run whose end is a time. When the loop ends there
+ *                     rather than on `should_stop`, it refills once more toward
+ *                     `target_fn (run_end_ms - 1)`: the target is otherwise
+ *                     read only when the loop wakes, and a run can end with no
+ *                     wake in its last tick, short of a ramp's target (#2913).
+ *                     `nullopt` for a run ended by anything but the clock.
  */
 void maintain_concurrency (std::shared_ptr<RunContext> context,
 const std::function<bool ()>& submit_one,
 const std::function<size_t (int64_t)>& target_fn,
 const std::function<size_t ()>& budget_fn,
 const std::function<bool (int64_t)>& should_continue,
-const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn = {});
+const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn = {},
+std::optional<int64_t> run_end_ms = std::nullopt);
 
 /**
  * The moving parts of a capacity search that the pure controller deliberately

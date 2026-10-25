@@ -918,7 +918,8 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
 RunContext::~RunContext () {
     should_stop = true;
     // Wake the closed-loop controller so it observes should_stop without
-    // waiting for its 50ms safety-net timeout before the join below.
+    // waiting out its `CONTROLLER_TICK_MS` safety-net timeout before the
+    // join below.
     notify_refill ();
     // The worker joins these itself before it returns; the join here only
     // covers a context destroyed before its worker ever ran. The *worker*

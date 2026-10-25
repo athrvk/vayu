@@ -146,7 +146,10 @@ export function summarise(
 	// ramp_up - the one case where the old prose was earning its keep.
 	const atTarget = duration - rampDuration;
 	const tail = atTarget > 0 ? ` then holds it for the remaining ${count(atTarget)}s` : "";
+	// Exactly zero, not "not above": a ramp longer than the run is a blocking
+	// error the form already names, and this sentence would misdescribe it.
+	const noHold = atTarget === 0 ? " No time is left at the target." : "";
 	return `Climbs from ${count(startConcurrency)} to ${virtualUsers(concurrency)} over ${count(rampDuration)}s${tail}, within a ${count(
 		duration
-	)}s run. The ramp counts towards the total.`;
+	)}s run. The ramp counts towards the total.${noHold}`;
 }

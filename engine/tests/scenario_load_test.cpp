@@ -2708,6 +2708,36 @@ TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
     EXPECT_GT (state->steps_executed.load (), 0u);
 }
 
+// #2913: the scenario controller shares the ramp, so a ramp as long as the run
+// reaches its last virtual user at the end rather than stopping one short.
+// `/hang` answers nothing while the run lasts, so no virtual user finishes a
+// step and the peak is what the controller started, with no completion to race
+// it. The final refill (`MaintainConcurrency` in load_strategy_test.cpp) is
+// what holds this when no wake lands in the ramp's last tick. Driven here
+// rather than through `run`, whose drain would wait out every held transfer.
+TEST_F (ScenarioLoadTest, ARampAsLongAsTheRunPeaksAtTheConfiguredUserCount) {
+    vayu::tests::SlowMockServer upstream;
+    const auto execution = plan_over ({ upstream.hang_url () });
+
+    const size_t VUS  = 8;
+    const json config = { { "mode", "ramp_up" }, { "duration", "1s" },
+        { "rampUpDuration", "1s" }, { "startConcurrency", 1 }, { "concurrency", VUS } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-ramp-end", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto state = vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (state->vus.size (), VUS);
+    EXPECT_EQ (context->peak_in_flight.load (), VUS);
+}
+
 // #2821: a virtual user in a think wait has nothing on the wire, so the run's
 // mean in flight is its share of time spent sending: two 20 ms steps around a
 // 200 ms think is about 0.17 of each user, under 2 of 10 here, and 10 if the

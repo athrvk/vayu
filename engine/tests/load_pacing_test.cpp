@@ -21,6 +21,7 @@
 #include <limits>
 #include <vector>
 
+using vayu::core::CONTROLLER_TICK_MS;
 using vayu::core::parse_duration_ms;
 using vayu::core::ramp_target_concurrency;
 using vayu::core::requests_owed_by;
@@ -133,6 +134,33 @@ TEST (RampTargetConcurrency, DegenerateRampsHoldTheTarget) {
     EXPECT_EQ (ramp_target_concurrency (1, 50, -1000, 500), 50u);
     EXPECT_EQ (ramp_target_concurrency (50, 50, 10000, 5000), 50u);
     EXPECT_EQ (ramp_target_concurrency (10, 0, 10000, 10000), 0u);
+}
+
+// #2913: a run whose duration equals its ramp is last sampled by the
+// controller's final refill, at `ramp_ms - 1`, within one tick of the end.
+// Mutation check: return `target` only from `ramp_ms` on and both in-window
+// climbs read 49. A descent truncates toward its target already, so it is
+// held here only for not passing it.
+TEST (RampTargetConcurrency, TheLastControllerTickOfTheRampIsAtTarget) {
+    constexpr int64_t RAMP_MS = 20000;
+    EXPECT_EQ (ramp_target_concurrency (1, 50, RAMP_MS, RAMP_MS - 1), 50u);
+    EXPECT_EQ (ramp_target_concurrency (1, 50, RAMP_MS, RAMP_MS - CONTROLLER_TICK_MS), 50u);
+    EXPECT_LT (
+    ramp_target_concurrency (1, 50, RAMP_MS, RAMP_MS - CONTROLLER_TICK_MS - 1), 50u);
+
+    EXPECT_EQ (ramp_target_concurrency (100, 10, RAMP_MS, RAMP_MS - CONTROLLER_TICK_MS), 10u);
+    EXPECT_EQ (ramp_target_concurrency (100, 10, RAMP_MS, RAMP_MS - 1), 10u);
+}
+
+// A ramp no longer than one tick is still seeded at its start and reaches its
+// target at the first wake after it.
+TEST (RampTargetConcurrency, ARampWithinOneTickSeedsAtStartThenHoldsTarget) {
+    EXPECT_EQ (ramp_target_concurrency (1, 50, CONTROLLER_TICK_MS, 0), 1u);
+    EXPECT_EQ (ramp_target_concurrency (1, 50, CONTROLLER_TICK_MS, 1), 50u);
+    EXPECT_EQ (ramp_target_concurrency (1, 50, 10, 0), 1u);
+    EXPECT_EQ (ramp_target_concurrency (1, 50, 10, 5), 50u);
+    EXPECT_EQ (ramp_target_concurrency (100, 10, 10, 0), 100u);
+    EXPECT_EQ (ramp_target_concurrency (100, 10, 10, 5), 10u);
 }
 
 // ============================================================================

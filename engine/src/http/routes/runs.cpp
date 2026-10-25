@@ -1396,7 +1396,7 @@ int64_t stop_wait_ms) {
         "run", "DELETE /runs/:id - Run is active, stopping it first: " + run_id);
         context->should_stop = true;
         // Wake the closed-loop controller so it observes should_stop without
-        // waiting out its 50ms safety-net timeout.
+        // waiting out its `CONTROLLER_TICK_MS` safety-net timeout.
         context->notify_refill ();
 
         // retain_run() is the worker's last act, after the final metrics flush
