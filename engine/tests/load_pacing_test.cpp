@@ -1,7 +1,8 @@
 /**
  * @file load_pacing_test.cpp
  * @brief Tests for the load-generation pacing cores: duration parsing, ramp
- *        interpolation, and the open-loop owed count.
+ *        interpolation, the open-loop owed count, and a stalled tick's
+ *        catch-up limit.
  *
  * These are the pure halves of three defects that were only reachable through a
  * live run: a duration whose unit was ignored, a ramp whose delta underflowed,
@@ -15,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -251,4 +253,130 @@ TEST (RequestsOwedBy, NonPositiveInputsOweNothing) {
     EXPECT_EQ (requests_owed_by (std::numeric_limits<double>::quiet_NaN (), 1s), 0u);
     EXPECT_EQ (requests_owed_by (1000.0, 0ns), 0u);
     EXPECT_EQ (requests_owed_by (1000.0, -1s), 0u);
+}
+
+// ============================================================================
+// split_tick_backlog
+// ============================================================================
+
+namespace {
+
+struct PacedTotals {
+    size_t submitted = 0;
+    size_t skipped   = 0;
+    size_t ticks     = 0;
+};
+
+// The strategy's loop with the clock replaced: tick i wakes `late (i)` after
+// the instant it was due, the next is due one tick after it woke, and the last
+// is clamped to the deadline. Every tick's payout must account for exactly
+// what it owed.
+template <typename Lateness>
+PacedTotals simulate_pacer (double rps, std::chrono::nanoseconds duration, Lateness late) {
+    const auto interval = std::chrono::microseconds (static_cast<int64_t> (1e6 / rps));
+    const std::chrono::nanoseconds tick =
+    std::max<std::chrono::nanoseconds> (interval, 1ms);
+    PacedTotals totals;
+    std::chrono::nanoseconds scheduled{ 0 };
+    size_t taken = 0;
+    for (size_t i = 0;; ++i) {
+        const auto now       = scheduled + late (i);
+        const auto accrue_to = std::min (now, duration);
+        const size_t owed    = requests_owed_by (rps, accrue_to);
+        const auto payout = vayu::core::split_tick_backlog (rps, owed, taken, scheduled);
+        EXPECT_EQ (payout.to_submit + payout.skipped, owed > taken ? owed - taken : 0)
+        << "tick " << i << " at " << rps << " RPS";
+        totals.submitted += payout.to_submit;
+        totals.skipped += payout.skipped;
+        totals.ticks++;
+        taken = std::max (taken, owed);
+        if (now >= duration) {
+            return totals;
+        }
+        scheduled = std::min (accrue_to + tick, duration);
+    }
+}
+
+} // namespace
+
+// A 2 s stall at 100 RPS owes 200 more than the tick itself: the tick sends
+// its own request plus the 100 ms window's 10 and skips the other 190.
+// Mutation check: return `{ owed - taken, 0 }` and all 201 are sent.
+TEST (SplitTickBacklog, ATwoSecondStallCatchesUpOneWindowAndSkipsTheRest) {
+    const size_t taken   = requests_owed_by (100.0, 10s); // 1000
+    const auto scheduled = 10s + 10ms;                    // one tick on
+    const auto woke      = scheduled + 2s;
+    const size_t owed    = requests_owed_by (100.0, woke); // 1201
+    const auto payout = vayu::core::split_tick_backlog (100.0, owed, taken, scheduled);
+    const size_t tick_own     = requests_owed_by (100.0, scheduled) - taken;
+    const double stalled_secs = static_cast<double> (payout.skipped) / 100.0;
+
+    EXPECT_EQ (tick_own, 1u);
+    EXPECT_EQ (payout.to_submit - tick_own, 10u)
+    << "more than 100 ms of backlog sent";
+    EXPECT_EQ (payout.skipped, 190u);
+    EXPECT_EQ (payout.to_submit + payout.skipped, owed - taken);
+    EXPECT_GE (stalled_secs, 1.9);
+    EXPECT_LE (stalled_secs, 2.0);
+}
+
+// Every tick 5 ms late is ordinary jitter at any rate: nothing is skipped and
+// the run still sends the whole product.
+TEST (SplitTickBacklog, FiveMillisecondJitterIsCaughtUpInFull) {
+    for (double rps : { 0.3, 0.5, 2.0, 15.0, 33.3, 100.0, 1000.0, 1500.0, 50000.0 }) {
+        const auto totals = simulate_pacer (rps, 10s,
+        [] (size_t i) { return i == 0 ? 0ns : std::chrono::nanoseconds (5ms); });
+        EXPECT_EQ (totals.skipped, 0u) << rps << " RPS";
+        EXPECT_EQ (totals.submitted, requests_owed_by (rps, 10s)) << rps << " RPS";
+    }
+}
+
+// The tick before woke a microsecond short of a due point, so this one, 5 ms
+// late, owes two at 15 RPS. Both are jitter, not backlog; a rule counting
+// `max (1, floor (rps x 0.1))` requests of debt would skip one of them.
+TEST (SplitTickBacklog, ALateTickOwingTwoAtALowRateSkipsNeither) {
+    const auto previous  = 1s - 1us;
+    const size_t taken   = requests_owed_by (15.0, previous); // 14
+    const auto scheduled = previous + 66666us;
+    const size_t owed    = requests_owed_by (15.0, scheduled + 5ms); // 16
+    ASSERT_EQ (owed - taken, 2u);
+
+    const auto payout = vayu::core::split_tick_backlog (15.0, owed, taken, scheduled);
+    EXPECT_EQ (payout.to_submit, 2u);
+    EXPECT_EQ (payout.skipped, 0u);
+}
+
+// At 0.5 RPS one request is two seconds of schedule; the one a tick owes is
+// sent however late the tick wakes, as long as it came due inside the window.
+TEST (SplitTickBacklog, ALowRateNeverSkipsTheOneRequestATickOwes) {
+    for (auto late : { 0ms, 5ms, 100ms, 1000ms, 1900ms }) {
+        const auto payout = vayu::core::split_tick_backlog (
+        0.5, requests_owed_by (0.5, 2s + late), 0, 2s);
+        EXPECT_EQ (payout.to_submit, 1u) << late.count () << "ms late";
+        EXPECT_EQ (payout.skipped, 0u) << late.count () << "ms late";
+    }
+}
+
+// Stalls of every size, the last running past the deadline: the ticks still
+// account for floor(rps x duration) exactly, sent or skipped.
+TEST (SplitTickBacklog, SubmittedPlusSkippedIsTheRunsProductExactly) {
+    const auto lateness = std::to_array<std::chrono::nanoseconds> (
+    { 0ns, 1ms, 5ms, 99ms, 101ms, 150ms, 2s, 333333ns, 0ns, 40ms });
+    for (double rps : { 0.5, 2.0, 15.0, 33.3, 100.0, 1500.0, 50000.0 }) {
+        const auto totals = simulate_pacer (rps, 30s, [&lateness] (size_t i) {
+            return i == 0 ? 0ns : lateness.at (i % lateness.size ());
+        });
+        EXPECT_EQ (totals.submitted + totals.skipped, requests_owed_by (rps, 30s))
+        << rps << " RPS over " << totals.ticks << " ticks";
+        EXPECT_GT (totals.skipped, 0u) << rps << " RPS: the 2 s stalls skipped nothing";
+    }
+}
+
+TEST (SplitTickBacklog, ATickOwingNothingPaysNothing) {
+    const auto payout = vayu::core::split_tick_backlog (100.0, 50, 50, 1s);
+    EXPECT_EQ (payout.to_submit, 0u);
+    EXPECT_EQ (payout.skipped, 0u);
+    const auto behind = vayu::core::split_tick_backlog (100.0, 40, 50, 1s);
+    EXPECT_EQ (behind.to_submit, 0u);
+    EXPECT_EQ (behind.skipped, 0u);
 }

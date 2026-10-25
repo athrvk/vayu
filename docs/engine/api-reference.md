@@ -9416,10 +9416,15 @@ the default formula across the whole advertised RPS span (50k RPS → 500,000),
 which is why it is not the `concurrency` guard - a ceiling of 10,000 would
 reject explicitly what the engine already does implicitly. For the closed-loop
 modes the `concurrency` target *is* the in-flight bound, so `maxInFlight` is
-ignored there. It is also the only bound on a catch-up burst: when the pacing
-thread stalls (a host sleep, a blocked thread), its next tick submits every
-request the stall owed at once, up to the `maxInFlight` headroom (the rest are
-dropped), and nothing meters that burst per worker (#2801).
+ignored there. It is not what bounds a catch-up burst: when the pacing thread
+stalls (a host sleep, a blocked thread), its next tick sends what the schedule
+owed up to **100 ms past the instant the tick was due**
+(`MAX_CATCH_UP_BACKLOG`, `core/load_pacing.hpp`) and skips the rest (#2911).
+Skipped requests are never sent and are counted as `skippedRequests`, apart
+from the `maxInFlight` drops, with `stalledMs` the schedule time they cover
+(`skippedRequests ÷ targetRps`). What the tick does send still passes the
+`maxInFlight` headroom, and nothing meters it per worker (#2801). Ordinary
+timer jitter is far inside the window and is caught up in full at any rate.
 
 **Durations.** `duration` and `rampUpDuration` take a string holding a number
 with an optional unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix
@@ -9437,14 +9442,15 @@ when `targetRps × duration` is whole, the last request is owed at the deadline
 itself. Each tick submits `floor(targetRps × elapsed since the start)` minus
 what it has already taken, so a rate above 1000 is delivered as asked rather
 than floored to a multiple of 1000, and a late tick owes what the ticks it
-swallowed would have. Requests that come due while in-flight is at
+swallowed would have, sending up to the catch-up window above and skipping the
+older backlog (`skippedRequests`). Requests that come due while in-flight is at
 `maxInFlight` are **dropped at that instant**, not deferred: the run ends at its
 wall-clock `duration`, and `droppedRequests` (in the run summary and per-tick
-metrics) carries what the rate owed but could not issue. `sent + dropped` is
-therefore exactly `floor(targetRps × duration)`, the run's `requestsExpected`
-(200 req/s for 20 s: 4000; 33.3 req/s for 3 s: 99). A product that is whole in
-decimal is read as whole even where binary lands just below it (0.57 req/s for
-100 s owes 57).
+metrics) carries what the rate owed but could not issue. `sent + skipped +
+dropped` is therefore exactly `floor(targetRps × duration)`, the run's
+`requestsExpected` (200 req/s for 20 s: 4000; 33.3 req/s for 3 s: 99), for a
+run that reaches its deadline. A product that is whole in decimal is read as
+whole even where binary lands just below it (0.57 req/s for 100 s owes 57).
 
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
@@ -9982,6 +9988,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "currentRps":150.5,"currentSendRate":151.0,
        "sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
+       "skippedRequests":0,"stalledMs":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
        "windowAvgInFlight":6.7,"windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
        "latencySamples":15,"latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
@@ -10135,6 +10142,7 @@ no frame.
 | `activeConnections` | Transfers active in the curl workers at the sample, the stored tick's `current_concurrency`. Instantaneous: a virtual user in a timer wait holds none, so a run whose users wait in step reads 0 or the user count depending on where the sample lands. `windowAvgInFlight` is the mean |
 | `backpressure` | In flight at the sample: requests sent but not yet settled (`RunContext::in_flight`), plus, on a **single-request** run only, every slot a `timer.think` wait still holds. A scenario run's timer waits are not counted, because its dispatcher treats a waiting virtual user as not in flight. The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a single-request think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
+| `skippedRequests` / `stalledMs` | `constant_rps` only (#2911): requests a stalled pacer owed beyond its 100 ms catch-up window and skipped (never sent, not in `droppedRequests`), and the schedule time they cover in ms, `skippedRequests ÷ targetRps`. `0` on every other mode |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued before the wire, inside the generator or in libcurl waiting for a connection slot (#2394), over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |

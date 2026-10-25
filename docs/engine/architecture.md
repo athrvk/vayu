@@ -1158,8 +1158,12 @@ with no `mode` is `constant_rps`, the way `LoadStrategy::create` reads it.
 
 Dispatches at a fixed `targetRps` regardless of how fast responses return. `maxInFlight` caps how
 many requests may be outstanding before new ones are dropped (and counted as `dropped_requests`).
-The pacing thread is the run's only limiter (#2801), so the backlog a stalled pacer pays in its
-next tick is bounded by `maxInFlight` alone, not metered per worker.
+The pacing thread is the run's only limiter (#2801). A stalled pacer's next tick sends what the
+schedule owed up to `MAX_CATCH_UP_BACKLOG` (100 ms) past the instant the tick was due and skips the
+rest (#2911): `split_tick_backlog` (`core/load_pacing.hpp`) makes the split, and the skips are
+counted apart from the drops (`MetricsCollector::record_skipped_batch`, with the schedule time they
+cover). What is sent still passes the `maxInFlight` headroom. `sent + skipped + dropped` is exactly
+`requests_owed_by (targetRps, duration)` for a run that reaches its deadline.
 
 ```json
 { "mode": "constant_rps", "targetRps": 1000, "duration": "60s", "maxInFlight": 10000 }

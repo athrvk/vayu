@@ -994,7 +994,11 @@ lost a sub-microsecond fraction every tick, and the last request with it). Rate
 fidelity therefore does not depend on the tick length (1ms above 1000 RPS, the
 request interval below it) - a late tick owes what the ticks it swallowed would
 have, and a rate like 1500 RPS is delivered as asked rather than floored to the
-nearest 1000. Comparing against wrk/vegeta at a fixed rate, `sent + dropped` is
+nearest 1000. A tick that wakes more than 100 ms after it was due sends only
+the first 100 ms of what it owes and skips the older backlog
+([#2911](https://github.com/athrvk/vayu/issues/2911)), so a pacer stall shows up
+as `skippedRequests` and `stalledMs` rather than as a burst at the target.
+Comparing against wrk/vegeta at a fixed rate, `sent + skipped + dropped` is
 exactly `floor(targetRps × duration)`: 4000 for 200 RPS over 20 s, 99 for
 33.3 RPS over 3 s. A product that is whole in decimal counts as whole even
 where binary lands just below it (0.57 RPS over 100 s owes 57). The report's
@@ -1016,7 +1020,7 @@ reset and climbed again (`avgQueueWaitMs` 4.79, p99 315.1 ms against the
 server's 300.8); with no bucket, 40 s at the same rate and target read
 0.29 ms, flat, and p99 301.8 ms, while 50 and 500 req/s still sent the rate they asked for. What the
 bucket also did was meter a catch-up burst after a pacing stall; that burst is
-now bounded by `maxInFlight` alone.
+now bounded by the pacer's 100 ms catch-up window (#2911) and `maxInFlight`.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)

@@ -10,10 +10,11 @@
 /**
  * @file load_pacing.hpp
  * @brief Pure cores for load-generation pacing: how long a run lasts, how many
- *        requests it owes right now, and what its concurrency target is on a
- *        ramp. Each is a total function over its inputs so the strategy thread
- *        - which has no catch above it - cannot be handed an out-of-range value
- *        it has to guess about.
+ *        requests it owes right now, how much of that a stalled tick still
+ *        sends, and what its concurrency target is on a ramp. Each is a total
+ *        function over its inputs so the strategy thread - which has no catch
+ *        above it - cannot be handed an out-of-range value it has to guess
+ *        about.
  */
 
 #include <algorithm>
@@ -181,6 +182,50 @@ requests_owed_by (double target_rps, std::chrono::nanoseconds elapsed) {
     const double seconds = std::chrono::duration<double> (elapsed).count ();
     const double owed = std::floor (target_rps * seconds * (1.0 + kProductSlack));
     return static_cast<size_t> (std::min (owed, kMaxOwed));
+}
+
+/**
+ * How far past its scheduled instant a stalled open-loop tick still pays the
+ * schedule (#2911). Requests the schedule owed later than this into the stall
+ * are skipped, not sent: a burst of seconds of backlog measures the pacer's
+ * stall, not the target.
+ */
+inline constexpr std::chrono::milliseconds MAX_CATCH_UP_BACKLOG{ 100 };
+
+/** What one open-loop tick does with the requests it owes. */
+struct TickPayout {
+    size_t to_submit = 0; ///< sent, subject to the maxInFlight headroom
+    size_t skipped   = 0; ///< owed more than MAX_CATCH_UP_BACKLOG into a stall
+};
+
+/**
+ * @brief Split what an open-loop tick owes into what it submits and what it
+ *        skips as stalled backlog.
+ *
+ * The tick submits what the schedule owes up to @p scheduled plus
+ * `MAX_CATCH_UP_BACKLOG` and skips the rest. Backlog is measured from the
+ * instant the tick was due rather than as a request count: at low rates the
+ * tick wakes just before or just after a due point, so its ordinary share is
+ * one or two requests whatever the rate, and only the time since the tick was
+ * due separates jitter from a stall.
+ *
+ * `to_submit + skipped == owed - taken`, so a caller advancing `taken` to
+ * @p owed accounts for every owed request exactly once.
+ *
+ * @param target_rps the run's rate; the same value @p owed was computed from
+ * @param owed       `requests_owed_by (target_rps, now)`, clamped to the deadline
+ * @param taken      what earlier ticks submitted, dropped or skipped
+ * @param scheduled  time since the start at which this tick was due
+ */
+[[nodiscard]] inline TickPayout
+split_tick_backlog (double target_rps, size_t owed, size_t taken, std::chrono::nanoseconds scheduled) {
+    if (owed <= taken) {
+        return {};
+    }
+    const size_t catch_up_limit =
+    std::max (requests_owed_by (target_rps, scheduled + MAX_CATCH_UP_BACKLOG), taken);
+    const size_t to_submit = std::min (owed, catch_up_limit) - taken;
+    return { to_submit, owed - taken - to_submit };
 }
 
 } // namespace vayu::core

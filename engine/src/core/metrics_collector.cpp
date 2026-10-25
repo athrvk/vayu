@@ -911,6 +911,11 @@ void MetricsCollector::record_drop_batch (size_t count) {
     dropped_requests_.fetch_add (count, std::memory_order_relaxed);
 }
 
+void MetricsCollector::record_skipped_batch (size_t count, double stalled_ms) {
+    skipped_requests_.fetch_add (count, std::memory_order_relaxed);
+    atomic_add_double (stalled_ms_, stalled_ms);
+}
+
 void MetricsCollector::record_unresolved_token (const std::vector<std::string>& names) {
     unresolved_token_requests_.fetch_add (1, std::memory_order_relaxed);
     if (names.empty ()) {
@@ -1513,7 +1518,9 @@ const Percentiles* window_percentiles) const {
     stats["status4xx"] = s4xx;
     stats["status5xx"] = s5xx;
     stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
-    stats["avgQueueWaitMs"] = average_queue_wait ();
+    stats["skippedRequests"] = skipped_requests ();
+    stats["stalledMs"]       = stalled_ms ();
+    stats["avgQueueWaitMs"]  = average_queue_wait ();
 
     // This run's custom metrics so far (issue #1500), on the same tick the
     // built-in phases ride rather than a second endpoint - they advance on

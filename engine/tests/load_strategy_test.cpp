@@ -1079,26 +1079,33 @@ TEST_F (LoadStrategyTest, SaturatedRunEndsAtDeadlineAndRecordsTheShortfall) {
 
     const size_t sent    = context->requests_sent.load ();
     const size_t dropped = context->metrics_collector->dropped_requests ();
+    const size_t skipped = context->metrics_collector->skipped_requests ();
 
     EXPECT_LT (elapsed_ms, 1500) << "run overshot its 1s wall-clock deadline";
     EXPECT_GT (dropped, 0u) << "a saturated run recorded no drops";
-    EXPECT_EQ (sent + dropped, static_cast<size_t> (RPS * DUR_S))
-    << "sent(" << sent << ") + dropped(" << dropped << ") does not account for the "
-    << (RPS * DUR_S) << " requests the rate owed";
+    EXPECT_EQ (sent + skipped + dropped, static_cast<size_t> (RPS * DUR_S))
+    << "sent(" << sent << ") + skipped(" << skipped << ") + dropped(" << dropped
+    << ") does not account for the " << (RPS * DUR_S) << " requests the rate owed";
 }
 
 namespace {
 
 // What an open-loop run accounted for.
 struct PacedRun {
-    size_t sent     = 0;
-    size_t dropped  = 0;
-    size_t expected = 0;
+    size_t sent       = 0;
+    size_t skipped    = 0;
+    size_t dropped    = 0;
+    size_t expected   = 0;
+    double stalled_ms = 0.0;
 };
 
-PacedRun run_constant_rps (double rps, const char* duration, const std::string& url) {
-    const nlohmann::json config = { { "mode", "constant_rps" },
+PacedRun run_constant_rps (double rps,
+const char* duration,
+const std::string& url,
+const nlohmann::json& extra = nlohmann::json::object ()) {
+    nlohmann::json config = { { "mode", "constant_rps" },
         { "duration", duration }, { "targetRps", rps } };
+    config.update (extra);
     auto context = std::make_shared<vayu::core::RunContext> ("test-rps-exact", config);
     vayu::http::EventLoopConfig loop_config;
     loop_config.max_concurrent = 2000;
@@ -1116,21 +1123,26 @@ PacedRun run_constant_rps (double rps, const char* duration, const std::string& 
     context->event_loop->stop (false);
 
     return { context->requests_sent.load (),
+        context->metrics_collector->skipped_requests (),
         context->metrics_collector->dropped_requests (),
-        context->requests_expected.load () };
+        context->requests_expected.load (), context->metrics_collector->stalled_ms () };
 }
 
+// A slow runner can stall the pacer past its catch-up window (#2911), so what
+// is exact is the sum, not `sent` alone.
 void expect_exactly (const PacedRun& run, size_t owed) {
     EXPECT_EQ (run.expected, owed) << "requests_expected";
-    EXPECT_EQ (run.sent, owed) << "dropped " << run.dropped;
+    EXPECT_EQ (run.sent + run.skipped + run.dropped, owed)
+    << "sent " << run.sent << ", skipped " << run.skipped << ", dropped " << run.dropped;
     EXPECT_EQ (run.dropped, 0u) << "an unsaturated run dropped requests";
 }
 
 } // namespace
 
-// An unsaturated constant_rps run sends floor(targetRps x duration), not one
-// fewer (#2910). Mutation check: accrue from per-tick deltas truncated with
-// `duration_cast<microseconds>` again, and each of these is one short.
+// An unsaturated constant_rps run accounts for floor(targetRps x duration),
+// not one fewer (#2910), as sent or skipped (#2911). Mutation check: accrue
+// from per-tick deltas truncated with `duration_cast<microseconds>` again, and
+// each of these is one short.
 TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDuration) {
     expect_exactly (run_constant_rps (200.0, "2s", mock_server->fast_url ()), 400);
 }
@@ -1147,6 +1159,29 @@ TEST_F (LoadStrategyTest, ConstantRpsSendsExactlyRateTimesDurationBelowOne) {
 // 2.973s, and the 100th would be due after the deadline.
 TEST_F (LoadStrategyTest, ConstantRpsSendsTheFlooredProductOfAFractionalRate) {
     expect_exactly (run_constant_rps (33.3, "3s", mock_server->fast_url ()), 99);
+}
+
+// A pacer stalled past its catch-up window skips that backlog rather than
+// bursting it (#2911), and the skips close the books. The stall is injected:
+// an inline `script.pre` runs on the pacing thread and holds it 250 ms per
+// submission, so at 10 RPS the third tick wakes at least 400 ms after it was
+// due however fast the runner is; a slower runner only skips more.
+// Mutation check: drop the `record_skipped_batch` call from `pay_out_tick` and
+// the skips read 0 and the sum comes up short.
+TEST_F (LoadStrategyTest, AStalledPacerSkipsItsBacklogAndAccountsForEveryRequest) {
+    const nlohmann::json stall = { { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "kind", "script.pre" },
+    { "config",
+    { { "script", "const until = Date.now () + 250; while (Date.now () < until) {}" },
+    { "inline", true } } } } }) } };
+
+    const auto run = run_constant_rps (10.0, "1s", mock_server->fast_url (), stall);
+
+    expect_exactly (run, 10);
+    EXPECT_GT (run.skipped, 0u)
+    << "a 250 ms stall per submission skipped nothing";
+    EXPECT_DOUBLE_EQ (run.stalled_ms, static_cast<double> (run.skipped) * 100.0)
+    << "stalledMs is the skipped requests' share of the schedule at 10 RPS";
 }
 
 // Ramp down (start > target) is a legitimate profile. The size_t delta

@@ -1179,6 +1179,28 @@ class ConstantLoadStrategy : public LoadStrategy {
     }
 
     /**
+     * Settle what one tick owes: the backlog a stall left beyond
+     * `MAX_CATCH_UP_BACKLOG` is skipped and recorded, the rest goes through
+     * `submit_due` and its maxInFlight cap. Returns how many were submitted.
+     */
+    static size_t pay_out_tick (const std::shared_ptr<RunContext>& context,
+    vayu::db::Database& db,
+    SubmissionRequest& live,
+    const TickPayout& payout,
+    double target_rps,
+    size_t max_pending) {
+        if (payout.skipped > 0) {
+            const double stalled_ms =
+            static_cast<double> (payout.skipped) * 1000.0 / target_rps;
+            context->metrics_collector->record_skipped_batch (payout.skipped, stalled_ms);
+        }
+        if (payout.to_submit == 0) {
+            return 0;
+        }
+        return submit_due (context, db, live, payout.to_submit, max_pending);
+    }
+
+    /**
      * Wait out the remainder of a tick. Oversleeping is self-correcting in
      * *rate* - the next tick accrues the extra elapsed time - so a run's
      * `sendRate` never showed what this function does; only a target
@@ -1229,8 +1251,9 @@ class ConstantLoadStrategy : public LoadStrategy {
     }
 
     /**
-     * Rate-limited mode: submit what each tick owes, drop what the in-flight
-     * cap refuses, and stop at the deadline.
+     * Rate-limited mode: submit what each tick owes, skip what a stall owed
+     * beyond the catch-up window, drop what the in-flight cap refuses, and
+     * stop at the deadline.
      */
     static void run_rate_limited (const std::shared_ptr<RunContext>& context,
     vayu::db::Database& db,
@@ -1242,8 +1265,8 @@ class ConstantLoadStrategy : public LoadStrategy {
         vayu::utils::log_info ("run", "  Duration: " + std::to_string (duration_ms) + " ms");
         vayu::utils::log_info ("run", "  Target RPS: " + std::to_string (target_rps));
 
-        // The same call the final accrual makes at the deadline, so an
-        // unsaturated run's sent + dropped is this count exactly.
+        // The same call the final accrual makes at the deadline, so a run's
+        // sent + skipped + dropped is this count exactly.
         const auto duration        = std::chrono::milliseconds (duration_ms);
         const size_t expected      = requests_owed_by (target_rps, duration);
         context->requests_expected = expected;
@@ -1266,7 +1289,8 @@ class ConstantLoadStrategy : public LoadStrategy {
 
         const auto test_start   = std::chrono::steady_clock::now ();
         const auto duration_end = test_start + duration;
-        size_t taken            = 0; // submitted + dropped
+        auto scheduled          = test_start; // when the current tick was due
+        size_t taken            = 0;          // submitted + dropped + skipped
         size_t submitted        = 0;
 
         while (!context->should_stop) {
@@ -1278,7 +1302,10 @@ class ConstantLoadStrategy : public LoadStrategy {
             const auto accrue_to = std::min (now, duration_end);
             const size_t owed = requests_owed_by (target_rps, accrue_to - test_start);
             if (owed > taken) {
-                submitted += submit_due (context, db, live, owed - taken, max_pending);
+                const TickPayout payout =
+                split_tick_backlog (target_rps, owed, taken, scheduled - test_start);
+                submitted +=
+                pay_out_tick (context, db, live, payout, target_rps, max_pending);
                 taken = owed;
             }
 
@@ -1288,8 +1315,9 @@ class ConstantLoadStrategy : public LoadStrategy {
 
             // The last request is owed at the deadline itself when the
             // product is whole, so the final wait ends there, not a tick past.
-            wait_for_next_tick (context,
-            std::min (accrue_to + std::chrono::microseconds (tick_us), duration_end));
+            scheduled =
+            std::min (accrue_to + std::chrono::microseconds (tick_us), duration_end);
+            wait_for_next_tick (context, scheduled);
         }
 
         vayu::utils::log_info ("run", "Submitted " + std::to_string (submitted) + " requests");

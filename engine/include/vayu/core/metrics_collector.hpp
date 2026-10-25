@@ -763,6 +763,23 @@ class MetricsCollector {
         return dropped_requests_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Record N requests an open-loop pacer skipped as stalled backlog
+     *        (#2911): owed further into a pacer stall than it catches up.
+     *        Never sent, and counted apart from the maxInFlight drops.
+     * @param count      Number of requests skipped
+     * @param stalled_ms The schedule time they cover, count / rate in ms
+     */
+    void record_skipped_batch (size_t count, double stalled_ms);
+
+    [[nodiscard]] size_t skipped_requests () const {
+        return skipped_requests_.load (std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] double stalled_ms () const {
+        return stalled_ms_.load (std::memory_order_relaxed);
+    }
+
     /** Accumulate wire bytes for a completed transfer (lock-free). */
     void record_bytes (size_t sent, size_t received) {
         total_bytes_sent_.fetch_add (sent, std::memory_order_relaxed);
@@ -1285,6 +1302,8 @@ class MetricsCollector {
     std::atomic<size_t> cancelled_{ 0 };
     std::atomic<double> total_latency_sum_{ 0.0 };
     std::atomic<size_t> dropped_requests_{ 0 };
+    std::atomic<size_t> skipped_requests_{ 0 };
+    std::atomic<double> stalled_ms_{ 0.0 };
     std::atomic<double> total_queue_wait_sum_{ 0.0 };
     // The two sums' denominator, bumped after them; see latency_samples().
     std::atomic<size_t> latency_samples_{ 0 };
