@@ -4596,8 +4596,12 @@ answers. Its members:
 
   `delta` is `target - base` and `pctChange` is `delta / base * 100`. A value a
   report lacks is `null`, and so is every figure computed from it; `pctChange`
-  is `null` against a zero base. The base's own headline numbers are the
-  entries' `base` values.
+  is `null` against a zero base. So is a figure the report says the engine did
+  not record (#2904), judged per run: `summary.summaryMissing` (a failed run
+  with no summary) nulls that run's `summary.*` metrics and its latency, and
+  `summary.partial` (reconciled after a crash) nulls its latency alone, so the
+  other run's value stands and the `delta` is `null`. The base's own headline
+  numbers are the entries' `base` values.
 - `statusCodes`: `{code: {base, target}}` over every code either run saw, a
   code one run never saw counting `0`.
 
