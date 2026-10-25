@@ -11302,8 +11302,18 @@ and never needed to (that one reports an empty `refreshes` array).
 
 `stepsStored` versus `stepsExecuted` is the honest reading of `results[]`: a run
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
-non-passing step among the ones kept. `summary.totalRequests` is the number of
-step executions, not the number of rows that survived.
+non-passing step among the ones kept. On a collection run (design mode)
+`stepsExecuted` counts **steps** and `summary.totalRequests` counts **requests
+sent** (issue #2822): a step the plan skipped (`control.if`,
+`control.throughput`, `pm.execution.skipRequest()`) is a step and not a request,
+while a request that got no response is one, under status `0`. `statusCodes`,
+`successfulRequests`, `failedRequests` and `errorRate` come from the
+distribution the runner stored over those same requests, never from the kept
+rows, where a skipped step is a status-`0` row: they describe the whole run past
+`maxScenarioStoredSteps` and agree with a `maxErrorRatePct` check's `actual`. A
+run in which every step was skipped reports `totalRequests` `0` and an empty
+`statusCodes`. A summary stored before #2822 has no distribution: its
+`totalRequests` is the step count and the split comes from the kept rows.
 
 `stepsNotRun` is how many plan positions errors cost the run - summed over
 every iteration an `errored` step ended, the positions after that step the
@@ -11325,6 +11335,13 @@ same shape `scenario.transactions` documents elsewhere on this page.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
 `summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
 latency.
+
+**A collection run's `summary` omits the load-only figures** (issue #2822). A
+sequential run feeds no load collector, so `sendRate`, `throughput`,
+`peakConcurrency`, `droppedRequests`, `avgQueueWaitMs`, `bytesSent`,
+`bytesReceived`, `throughputBytesPerSec`, `setupOverhead` and `cleanupOverhead`
+are absent rather than `0`; `avgRps` is requests sent over `testDuration`. A
+scenario load run is a `load` run and carries every one of them.
 
 **A collection run's `latency` block** (issue #2389) is the stored `latency` its runner wrote,
 over the [latency population](#latency-population) of the sequential path: every step whose

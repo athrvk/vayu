@@ -1588,28 +1588,36 @@ summary after the terminal status, or rewrites it later, breaks that** too.
 
 **A scenario run's `summary`** is a different shape, written by
 `vayu::core::build_scenario_summary_payload` (`core/scenario_runner.cpp`): the
-three keys `apply_run_summary` reads plus everything sequence-shaped under
+four keys `apply_run_summary` reads plus everything sequence-shaped under
 `scenario`, which the report serves as its own section.
 
 ```json
 {
-  "total_requests": 6, "test_duration": 1.8, "rps": 3.3,
+  "total_requests": 5, "status_codes": { "0": 1, "200": 4 },
+  "test_duration": 1.8, "rps": 2.8,
   "latency": {
     "count": 5, "min": 12.0, "max": 240.0, "avg": 71.6,
     "p50": 40.0, "p75": 60.0, "p90": 240.0, "p95": 240.0, "p99": 240.0, "p999": 240.0
   },
   "scenario": {
     "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
-    "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
+    "passed": 4, "failed": 0, "skipped": 1, "errored": 1,
     "steps_stored": 6, "steps_dropped": 0, "steps_not_run": 0,
     "stop_on_error": false
   }
 }
 ```
 
-`total_requests` is the number of **step executions**, and it is here precisely
-because the report would otherwise count the rows that survived
-`maxScenarioStoredSteps` and call that the run's size. `steps_dropped` is what
+`total_requests` is the number of **requests sent** and `status_codes` their
+distribution, in the load summary's shape (issue #2822): a step the plan skipped
+is in `scenario.steps_executed` and in neither, while a request that got no
+response is in both, under `"0"`. Both are here precisely because the report
+would otherwise read the rows that survived `maxScenarioStoredSteps`, call their
+count the run's size, and count a skipped step's status-`0` row as a failure.
+`status_codes` is written even when empty: `{}` is a run in which no step sent,
+and a summary with no `status_codes` key (a run stored before the issue, whose
+`total_requests` is the step count) reports its split from the stored rows.
+`rps` is requests sent over `test_duration`. `steps_dropped` is what
 that cap thinned - always successes, never a failure. `steps_not_run` is the
 plan positions errors cost (issue #2526): for every iteration an `errored` step
 ended, the positions after it the iteration had not attempted; an iteration

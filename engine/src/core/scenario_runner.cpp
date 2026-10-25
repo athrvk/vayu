@@ -468,14 +468,25 @@ LatencySummary summarize_latencies (std::vector<double> latencies) {
 }
 
 nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inputs) {
+    nlohmann::json codes = nlohmann::json::object ();
+    for (const auto& [code, count] : inputs.status_codes) {
+        codes[std::to_string (code)] = count;
+    }
+
     nlohmann::json summary;
-    // The three keys `apply_run_summary` reads. Without `total_requests` the
-    // report would count the rows that survived the store's cap and call that
-    // the run's size.
-    summary["total_requests"] = inputs.steps_executed;
+    // A request is a step that sent (#2822): a skipped step is in
+    // `scenario.steps_executed` and in neither of these. The report takes
+    // `status_codes` as the run's distribution and `total_requests` as its
+    // size, so the two count one population, and both are stored because the
+    // result rows stop at `maxScenarioStoredSteps`. Written even when empty:
+    // `{}` is a run in which no step sent, which the report must not read as
+    // an older summary that stored no distribution.
+    const auto requests_sent = vayu::count_status_failures (inputs.status_codes).total;
+    summary["total_requests"] = requests_sent;
+    summary["status_codes"]   = std::move (codes);
     summary["test_duration"]  = inputs.duration_s;
     summary["rps"]            = inputs.duration_s > 0 ?
-               static_cast<double> (inputs.steps_executed) / inputs.duration_s :
+               static_cast<double> (requests_sent) / inputs.duration_s :
                0.0;
 
     // The steps that sent, the same sample a latency budget judges. A run in

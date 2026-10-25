@@ -250,6 +250,11 @@ struct ReportExtras {
     // derived from the sampled results - only then are successful/failed
     // recounted from it (a run with neither keeps the sampled figures).
     bool status_codes_overridden = false;
+    // A sequential collection run (`RunType::Scenario`; a scenario load run is
+    // `Load`). It feeds no `MetricsCollector`, so the report omits the
+    // load-only figures, and its stored `status_codes` is authoritative even
+    // when empty (#2822).
+    bool sequential_run = false;
     // False when the stored summary says nothing was timed (`latency.count`
     // of 0 - a collection run in which no step sent), and for a live load run,
     // whose percentiles cannot be read yet. The report then leaves `latency`
@@ -586,7 +591,8 @@ ReportExtras& extras) {
  * `cleanup_overhead` was stored before the two were split, and its
  * `setup_overhead` measured cleanup: it is reported as that, and the setup
  * figure is left out rather than given a number nobody measured. A summary
- * with neither key (the sequential collection run's) keeps the zeros.
+ * with neither key is the sequential collection run's, whose report omits
+ * both (`add_load_summary_fields`).
  */
 void apply_summary_overheads (const nlohmann::json& summary, vayu::DetailedReport& report) {
     if (summary.contains ("cleanup_overhead")) {
@@ -735,15 +741,25 @@ std::map<int, size_t> read_status_codes (const nlohmann::json& codes) {
     return distribution;
 }
 
-/** The status-code map, which replaces the sampled one wholesale when stored. */
+/**
+ * The status-code map, which replaces the sampled one wholesale when stored.
+ * An empty map keeps the sampled one, except on a sequential collection run:
+ * there `{}` is a run in which no step sent, and its rows hold a status-0 row
+ * for every skipped step that would otherwise count as a failure. A summary
+ * stored before that run wrote the key keeps the rows (#2822).
+ */
 void apply_summary_status_codes (const nlohmann::json& summary,
 vayu::DetailedReport& report,
 ReportExtras& extras) {
-    if (summary.contains ("status_codes") &&
-    summary["status_codes"].is_object () && !summary["status_codes"].empty ()) {
-        report.status_codes = read_status_codes (summary["status_codes"]);
-        extras.status_codes_overridden = true;
+    if (!summary.contains ("status_codes") || !summary["status_codes"].is_object ()) {
+        return;
     }
+    const auto& codes = summary["status_codes"];
+    if (codes.empty () && !extras.sequential_run) {
+        return;
+    }
+    report.status_codes            = read_status_codes (codes);
+    extras.status_codes_overridden = true;
 }
 
 /** What sampling dropped, so the report can say what it is a sample of. */
@@ -1675,6 +1691,29 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
     }
 }
 
+/**
+ * The `summary` figures only a load run measures: the shared collector's rates,
+ * bytes and concurrency, and the overheads around load. A sequential collection
+ * run feeds none of them (`ScenarioSummaryInputs::latencies` says why), so its
+ * report leaves them out rather than writing a 0 that reads as measured (#2822).
+ */
+void add_load_summary_fields (const vayu::DetailedReport& report,
+const ReportExtras& extras,
+nlohmann::json& summary) {
+    summary.update ({ { "sendRate", report.send_rate },
+    { "throughput", report.throughput }, { "cleanupOverhead", report.cleanup_overhead_s },
+    { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
+    { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
+    { "avgQueueWaitMs", extras.queue_wait_avg },
+    { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
+    { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
+    { "throughputBytesPerSec",
+    report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } });
+    if (const auto& setup_overhead = report.setup_overhead_s) {
+        summary["setupOverhead"] = *setup_overhead;
+    }
+}
+
 /** The measured half of the report, section by section. */
 nlohmann::json build_report_body (const vayu::DetailedReport& report,
 const ReportExtras& extras,
@@ -1692,20 +1731,15 @@ double target_rps) {
         { "errorRate", report.error_rate },
         { "totalDurationSeconds", report.total_duration_s },
         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
-        { "sendRate", report.send_rate }, { "throughput", report.throughput },
-        { "cleanupOverhead", report.cleanup_overhead_s },
-        { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
-        { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
-        { "avgQueueWaitMs", extras.queue_wait_avg },
-        { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
-        { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
         // Sits in `summary` rather than `metadata.configuration` on purpose:
         // configuration is what was asked for, and this is what happened.
         // LoadTestDetail reads both and only trusts the requested-protocol
-        // label when this is 0.
-        { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
-        { "throughputBytesPerSec",
-        report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } };
+        // label when this is 0, which the app documents as "none recorded"
+        // and so is kept for a sequential run too.
+        { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) } };
+    if (!extras.sequential_run) {
+        add_load_summary_fields (report, extras, json_report["summary"]);
+    }
     if (const auto& sending = extras.sending) {
         json_report["summary"]["sendingDurationSeconds"] = sending->sending_duration_s;
         if (const auto& completed = sending->completed_while_sending) {
@@ -1717,9 +1751,6 @@ double target_rps) {
     }
     if (const auto& avg_in_flight = extras.avg_in_flight) {
         json_report["summary"]["avgInFlight"] = *avg_in_flight;
-    }
-    if (const auto& setup_overhead = report.setup_overhead_s) {
-        json_report["summary"]["setupOverhead"] = *setup_overhead;
     }
     if (extras.summary_partial) {
         json_report["summary"]["partial"] = true;
@@ -2001,6 +2032,7 @@ vayu::core::RunManager* live_runs) {
     // apart. Once a live load run's summary is stored it is the whole-run
     // answer, as it is for a finished run.
     ReportExtras extras;
+    extras.sequential_run = run->type == vayu::RunType::Scenario;
     if (live_load && run->summary.empty ()) {
         const auto context =
         live_runs != nullptr ? live_runs->get_run_or_retained (run_id) : nullptr;
@@ -2018,8 +2050,7 @@ vayu::core::RunManager* live_runs) {
 
     nlohmann::json json_report = build_report_body (report, extras, target_rps);
     json_report["metadata"]    = build_report_metadata (run_id, *run);
-    const size_t results_cap =
-    report_results_cap (results.size (), run->type == vayu::RunType::Scenario);
+    const size_t results_cap = report_results_cap (results.size (), extras.sequential_run);
     json_report["results"]       = build_report_results (results, results_cap);
     json_report["resultsStored"] = results.size ();
     json_report["resultsCap"]    = results_cap;
