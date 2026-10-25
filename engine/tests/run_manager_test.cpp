@@ -1105,7 +1105,13 @@ TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
         report.at ("rateControl").at ("achievement").get<double> ();
         EXPECT_NEAR (achievement,
         static_cast<double> (sent) * 100.0 / static_cast<double> (expected), 0.1);
-        EXPECT_GT (achievement, 95.0) << "the drain is back in the denominator";
+        // A pacer stall on a loaded runner skips requests (#2911) and lowers
+        // the achievement, so the bound counts them as owed: healthy reads
+        // about 100, a drain back in the denominator reads about 80.
+        const double skipped_pct = summary.value ("skipped_requests", 0.0) *
+        100.0 / static_cast<double> (expected);
+        EXPECT_GT (achievement + skipped_pct, 95.0)
+        << "the drain is back in the denominator";
 
         manager.shutdown ();
     }

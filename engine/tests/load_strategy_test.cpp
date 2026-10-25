@@ -2614,7 +2614,8 @@ nlohmann::json element_entry (const nlohmann::json& summary, const std::string& 
         return {};
     }
     for (const auto& entry : summary["elements"]) {
-        if (entry.value ("id", std::string ()) == element_id) {
+        const auto id = entry.find ("id");
+        if (id != entry.end () && *id == element_id) {
             return entry;
         }
     }
