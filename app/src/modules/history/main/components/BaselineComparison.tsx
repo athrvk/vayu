@@ -16,6 +16,10 @@
  * run *is* the baseline, or the baseline's report has not loaded. A strip that
  * rendered zeros would be a claim ("nothing changed") the app cannot support.
  *
+ * A failed run the engine could not fully record (#2895) draws no delta for a
+ * figure it did not measure: its zeros would read as an improvement on the
+ * baseline's real numbers.
+ *
  * Under the deltas, one warning row per `comparability` entry: the two runs
  * must be the same experiment (same mode, virtual users, duration, ...) for a
  * delta to mean "regressed", and a short stopped run never is (#2162).
@@ -37,6 +41,7 @@ import { useCopy } from "@/hooks/useCopy";
 import { useRunReportQuery } from "@/queries";
 import type { RunReport } from "@/types";
 import { ComparabilityWarnings, DeltaCell } from "./run-comparison-parts";
+import { unrecordedFiguresOf } from "./unrecorded-figures";
 import { usePinnedBaseline } from "./usePinnedBaseline";
 
 interface BaselineComparisonProps {
@@ -81,11 +86,13 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 
 	if (!comparison || !baselineRun || !target) return null;
 
-	const headline = [
-		...comparison.latency,
-		...comparison.throughput,
-		...comparison.reliability,
-	].filter((m) => (HEADLINE_METRICS as readonly string[]).includes(m.metric));
+	const unrecorded = unrecordedFiguresOf(report.summary);
+	// All three headline figures are unmeasured, so there is nothing to compare.
+	if (unrecorded.counts) return null;
+
+	const headline = [...comparison.latency, ...comparison.throughput, ...comparison.reliability]
+		.filter((m) => (HEADLINE_METRICS as readonly string[]).includes(m.metric))
+		.filter((m) => !(unrecorded.latency && m.metric.startsWith("latency.")));
 
 	return (
 		<div className="enter-fade p-3 border rounded-md bg-background/50">

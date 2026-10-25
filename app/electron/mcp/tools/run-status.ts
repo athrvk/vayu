@@ -71,7 +71,9 @@ function nextStepFor(status: unknown, pollSeconds: number): string {
 		return `still running; read again in ${pollSeconds} s, or stop_run`;
 	}
 	if (status === "completed") return "read get_run_report(runId)";
-	if (status === "failed") return "get_run_report has the numbers recorded before the failure";
+	if (status === "failed") {
+		return "get_run_report has what was recorded before the failure; summary.summaryMissing or summary.partial marks counts that were not fully saved";
+	}
 	return "get_run_report has the partial numbers; a stopped run carries no verdict";
 }
 

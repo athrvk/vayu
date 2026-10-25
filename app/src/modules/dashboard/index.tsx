@@ -139,7 +139,9 @@ export default function LoadTestDashboard() {
 				}
 				if (report) {
 					const isValidReport =
-						report.summary?.totalRequests > 0 || historicalMetrics.length === 0;
+						report.summary?.totalRequests > 0 ||
+						report.summary?.summaryMissing === true ||
+						historicalMetrics.length === 0;
 
 					if (isValidReport) {
 						setFinalReport(report);

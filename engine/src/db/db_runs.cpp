@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <expected>
 #include <functional>
@@ -389,6 +390,67 @@ RunHistoryCleared Database::clear_runs () {
     return cleared;
 }
 
+namespace {
+// Tick keys whose value is the run's total since load start, by the summary
+// key `build_run_summary_payload` stores the same figure under. Everything
+// else a tick holds (`current_rps`, the latency percentiles, the `window_*`
+// means, `current_concurrency`) describes its last second only and would be
+// misread as the run's.
+constexpr auto CUMULATIVE_TICK_KEYS =
+std::to_array<std::pair<const char*, const char*>> ({
+{ "requests_completed", "total_requests" },
+{ "elapsed_seconds", "test_duration" },
+{ "cancelled", "cancelled" },
+{ "send_rate", "send_rate" },
+{ "throughput", "throughput" },
+{ "dropped_requests", "dropped_requests" },
+{ "bytes_sent", "bytes_sent" },
+{ "bytes_received", "bytes_received" },
+});
+
+// The summary a run that died mid-flight is stored with (#2895): its last
+// tick's totals, flagged partial. Nothing when the payload carries no
+// completion count, since a summary without totals reports nothing truer than
+// no summary does.
+std::optional<std::string> partial_summary_from_tick (const std::string& payload) {
+    const auto tick = nlohmann::json::parse (payload, nullptr, /*allow_exceptions=*/false);
+    if (!tick.is_object () || !tick.contains ("requests_completed") ||
+    !tick["requests_completed"].is_number ()) {
+        return std::nullopt;
+    }
+
+    nlohmann::json summary = { { "partial", true } };
+    for (const auto& [tick_key, summary_key] : CUMULATIVE_TICK_KEYS) {
+        if (tick.contains (tick_key) && tick[tick_key].is_number ()) {
+            summary[summary_key] = tick[tick_key];
+        }
+    }
+    if (tick.contains ("status_codes") && tick["status_codes"].is_object ()) {
+        summary["status_codes"] = tick["status_codes"];
+    }
+    // Completions over the whole elapsed time, the figure `rps` holds in a
+    // finished run's summary; the tick's `current_rps` is its last second.
+    const double elapsed = summary.value ("test_duration", 0.0);
+    if (elapsed > 0) {
+        summary["rps"] = summary["total_requests"].get<double> () / elapsed;
+    }
+    return summary.dump ();
+}
+
+// One last-tick read per orphaned load run, and none for any other: this runs
+// inside `init ()`, before /health answers.
+std::optional<std::string> orphan_summary (Database& db, const Run& run) {
+    if (run.type != RunType::Load || !run.summary.empty ()) {
+        return std::nullopt;
+    }
+    const auto tick = db.get_last_metric_tick (run.id);
+    if (!tick) {
+        return std::nullopt;
+    }
+    return partial_summary_from_tick (tick->payload);
+}
+} // namespace
+
 size_t Database::reconcile_orphaned_runs () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
@@ -404,9 +466,14 @@ size_t Database::reconcile_orphaned_runs () {
     // indeterminate: `Run::end_time` defaults to 0 and both route inserts seed
     // it to start_time (seed_run_times in execution.cpp), while
     // update_run_end_time may since have refined it.
+    size_t summarised = 0;
     impl_->storage.transaction ([&] {
         for (auto& run : orphans) {
             run.status = RunStatus::Failed;
+            if (auto summary = orphan_summary (*this, run)) {
+                run.summary = std::move (*summary);
+                ++summarised;
+            }
             impl_->storage.update (run);
         }
         return true; // Commit
@@ -414,7 +481,8 @@ size_t Database::reconcile_orphaned_runs () {
 
     vayu::utils::log_info ("db",
     "Reconciled " + std::to_string (orphans.size ()) +
-    " run(s) left in-flight by a previous process (marked failed)");
+    " run(s) left in-flight by a previous process (marked failed)",
+    { { "partialSummaries", summarised } });
     return orphans.size ();
 }
 
@@ -457,6 +525,17 @@ Database::get_metric_ticks_since (const std::string& run_id, int64_t last_id) {
     return impl_->storage.get_all<MetricTick> (
     where (c (&MetricTick::run_id) == run_id && c (&MetricTick::id) > last_id),
     order_by (&MetricTick::id));
+}
+
+std::optional<MetricTick> Database::get_last_metric_tick (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto ticks =
+    impl_->storage.get_all<MetricTick> (where (c (&MetricTick::run_id) == run_id),
+    order_by (&MetricTick::id).desc (), sqlite_orm::limit (1));
+    if (ticks.empty ()) {
+        return std::nullopt;
+    }
+    return std::move (ticks.front ());
 }
 
 int64_t Database::count_metric_ticks (const std::string& run_id) {

@@ -16,6 +16,7 @@
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/run_compare.hpp"
+#include "vayu/core/status_seconds.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/utils/reentrant.hpp"
 
@@ -644,6 +645,29 @@ constexpr auto TICK_KEYS = std::to_array<std::string_view> ({ "elapsed_seconds",
 "requests_completed", "requests_failed", "current_rps", "current_concurrency",
 "throughput", "error_rate", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" });
 
+constexpr auto STATUS_SECOND_KEYS =
+std::to_array<std::string_view> ({ "second", "span", "counts" });
+
+/// A stored tick's `status_seconds` (#2866) onto @p picked: the key is written
+/// only when the tick stored an array, and an empty one is kept, because
+/// "this run counts by second" is a property of the whole series and a second
+/// that closed no entry must not read as a tick from before the key. An entry
+/// that fails `status_second_entry_from_json` is dropped, so the schema's
+/// bounds hold for whatever a stored row carries.
+void copy_status_seconds (const json& tick, ordered& picked) {
+    const json& stored = member (tick, "status_seconds");
+    if (!stored.is_array ()) {
+        return;
+    }
+    ordered entries = ordered::array ();
+    for (const json& entry : stored) {
+        if (status_second_entry_from_json (entry)) {
+            entries.push_back (pick (entry, STATUS_SECOND_KEYS));
+        }
+    }
+    picked["status_seconds"] = std::move (entries);
+}
+
 ordered time_series (const json& ticks) {
     ordered out = ordered::array ();
     if (!ticks.is_array ()) {
@@ -652,6 +676,7 @@ ordered time_series (const json& ticks) {
     for (const json& tick : ticks) {
         ordered picked         = pick (tick, TICK_KEYS);
         picked["status_codes"] = code_counts (member (tick, "status_codes"));
+        copy_status_seconds (tick, picked);
         out.push_back (std::move (picked));
     }
     return out;

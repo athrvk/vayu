@@ -413,6 +413,47 @@ TEST_F (RunExportSchemaTest, ATickOfAnEmptySecondValidates) {
     }
 }
 
+// #2888: a tick that counts statuses by completion second exports them, in
+// the shape the schema bounds, and an entry outside that shape is dropped
+// rather than failing the document. The first seeded tick is the pre-#2866
+// shape (no key) and the last closed no second (`[]`).
+// Mutation check: copy the entries unfiltered and the malformed entry fails
+// the validation; drop `status_seconds` from the schema's tick properties and
+// every tick that carries it fails the validation.
+TEST_F (RunExportSchemaTest, ATickWithStatusSecondsValidatesAndAMalformedEntryIsDropped) {
+    seed ("run_seconds", vayu::RunStatus::Completed, healthy_summary ());
+    const auto store = [&] (const vayu::core::MetricTickSample& sample, const json& extra) {
+        json payload = vayu::core::build_metric_tick_payload (sample);
+        for (const json& entry : extra) {
+            payload["status_seconds"].push_back (entry);
+        }
+        db_->add_metric_tick ({ 0, "run_seconds", sample.timestamp, payload.dump () });
+    };
+    vayu::core::MetricTickSample counted;
+    counted.timestamp          = START_MS + 2000;
+    counted.elapsed_seconds    = 2.0;
+    counted.requests_completed = 20;
+    counted.status_codes       = { { 200, 19 }, { 500, 1 } };
+    counted.status_seconds = { { 0, 1, { 9, 0, 0, 1, 0 } }, { 1, 2, { 10, 0, 0, 0, 0 } } };
+    store (counted,
+    json::array ({ { { "second", 2 }, { "span", 1 }, { "counts", { -1, 0, 0, 0, 0 } } } }));
+
+    vayu::core::MetricTickSample quiet;
+    quiet.timestamp          = START_MS + 3000;
+    quiet.elapsed_seconds    = 3.0;
+    quiet.requests_completed = 20;
+    quiet.status_codes       = { { 200, 19 }, { 500, 1 } };
+    store (quiet, json::array ());
+
+    const json document = expect_valid (json{ { "runId", "run_seconds" } });
+    const json& series  = document["timeSeries"];
+    ASSERT_EQ (series.size (), 3u) << document.dump (2);
+    EXPECT_FALSE (series[0].contains ("status_seconds")) << series[0].dump ();
+    EXPECT_EQ (series[1]["status_seconds"], json::parse (R"([{"second":0,"span":1,"counts":[9,0,0,1,0]},
+                     {"second":1,"span":2,"counts":[10,0,0,0,0]}])"));
+    EXPECT_EQ (series[2]["status_seconds"], json::array ());
+}
+
 TEST_F (RunExportSchemaTest, TheSchemaRefusesAMemberItDoesNotName) {
     seed ("run_healthy", vayu::RunStatus::Completed, healthy_summary ());
     auto [status, envelope] = vayu::http::routes::export_run_report_response (

@@ -208,9 +208,8 @@ for. `perUser: true` divides the rate into a per-user interval (`60000 / targetP
 whole milliseconds and floored at 1ms) and runs the identical per-VU pacing arithmetic `timer.pacing`
 uses, so N users produce N times the rate. `perUser: false` (the default) shares one token-bucket
 budget across every virtual user of a scenario load run instead, through `SharedThroughputBudgets`
-(`elements.hpp`) - the closed-loop counterpart of `load_pacing.hpp`'s `take_due_requests`, carrying
-the fractional remainder between claims the same way so the rate holds exactly over a long run, and
-banking at most one slot during an idle stretch rather than letting a run catch up in a burst. Unlike
+(`elements.hpp`), carrying the fractional remainder between claims so the rate holds exactly over a
+long run, and banking at most one slot during an idle stretch rather than letting a run catch up in a burst. Unlike
 `SharedPacingClocks`, this budget is mutex-guarded rather than lock-free: its state is a fractional
 balance beside a timestamp, which no single compare-exchange can swap as a unit. Under a sequential
 (non-load) run there is only one implicit user, so `perUser: true` and `perUser: false` behave

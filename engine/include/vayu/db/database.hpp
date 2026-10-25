@@ -852,12 +852,19 @@ class Database {
      * run here either. That lock is the whole
      * ownership check; rows carry no owner (issue #2422).
      *
+     * A load run with no stored summary and at least one metric tick is given
+     * one built from its last tick, marked `"partial": true` (#2895): only the
+     * tick's cumulative figures, never its one-second windows. A run that
+     * already has a summary keeps it; any other run is given none.
+     *
      * @return Number of rows reconciled.
      */
     size_t reconcile_orphaned_runs ();
 
     // Metric ticks - one wide row per tick; the current time-series storage.
     void add_metric_tick (const MetricTick& tick);
+    // The run's most recently written tick, or nothing when it wrote none.
+    std::optional<MetricTick> get_last_metric_tick (const std::string& run_id);
     // Ordered (timestamp, id) so a page boundary never splits a tick.
     std::vector<MetricTick>
     get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset);

@@ -24,7 +24,9 @@
 #include "task_queue.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/set_cookie.hpp"
 
 namespace {
@@ -76,6 +78,25 @@ class MethodEchoServer {
             res.set_header ("X-Hop", "first");
             res.set_redirect ("/repeated-headers");
         });
+        // A redirect hop with a body of its own, which libcurl reads off the
+        // wire and never hands to the write callback (#2893). `to` overrides
+        // where it points.
+        const auto moved = [] (int status) {
+            return [status] (const httplib::Request& req, httplib::Response& res) {
+                res.status = status;
+                res.set_header ("Location",
+                req.has_param ("to") ? req.get_param_value ("to") : "/landing");
+                res.set_content (std::string (kRedirectBodyBytes, 'r'), "text/plain");
+            };
+        };
+        svr.Get ("/moved-301", moved (301));
+        svr.Post ("/moved-301", moved (301));
+        svr.Post ("/moved-307", moved (307));
+        const auto landing = [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (std::string (kLandingBodyBytes, 'x'), "text/plain");
+        };
+        svr.Get ("/landing", landing);
+        svr.Post ("/landing", landing);
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -96,7 +117,9 @@ class MethodEchoServer {
         return "http://127.0.0.1:" + std::to_string (port) + path;
     }
 
-    static constexpr size_t kBigBodyBytes = size_t{ 256 } * 1024;
+    static constexpr size_t kBigBodyBytes      = size_t{ 256 } * 1024;
+    static constexpr size_t kRedirectBodyBytes = 200;
+    static constexpr size_t kLandingBodyBytes  = size_t{ 10 } * 1024;
 
     httplib::Server svr;
     std::thread thread;
@@ -575,6 +598,153 @@ TEST_F (CurlTransferTest, FailedTransferKeepsTheTimingAndBytesCurlMeasured) {
     << "curl measured the time spent before the timeout";
     EXPECT_GT (response.timing.bytes_up, 0u)
     << "the request headers went out and must be counted";
+}
+
+// ============================================================================
+// Wire bytes across redirect hops (#2893)
+// ============================================================================
+
+namespace {
+
+constexpr size_t kPostBodyBytes = size_t{ 10 } * 1024;
+
+/// Room for two hops' request lines and headers: a few hundred bytes from this
+/// client, far under the 10 KiB body whose copies the bounds below count.
+constexpr size_t kTwoHopsHeadersBound = 2048;
+
+vayu::Request text_post (const std::string& url) {
+    vayu::Request request;
+    request.method       = vayu::HttpMethod::POST;
+    request.url          = url;
+    request.body.mode    = vayu::BodyMode::Text;
+    request.body.content = std::string (kPostBodyBytes, 'p');
+    return request;
+}
+
+class RedirectBytesTest : public CurlTransferTest {
+    protected:
+    /// What the event loop measured for @p request, which must have answered
+    /// @p status.
+    vayu::Timing measure (const vayu::Request& request, int status) {
+        auto result = run_once (request);
+        if (!result.is_ok ()) {
+            ADD_FAILURE () << request.url << ": " << result.error ().message;
+            return {};
+        }
+        const auto& response = result.value ();
+        EXPECT_EQ (response.status_code, status)
+        << request.url << ": " << response.error_message;
+        return response.timing;
+    }
+
+    /// @p request sent once following its redirect and once stopping at it.
+    std::pair<vayu::Timing, vayu::Timing>
+    followed_and_alone (vayu::Request request, int redirect_status) {
+        const auto followed      = measure (request, 200);
+        request.follow_redirects = false;
+        return { followed, measure (request, redirect_status) };
+    }
+};
+
+} // namespace
+
+// A followed hop's body never reaches write_callback and libcurl zeroes
+// SIZE_DOWNLOAD_T when the next hop starts, so the count read at completion was
+// the last hop's body alone; its headers were already summed over both hops.
+// The two hops measured apart are the exact expectation, since the server
+// answers each the same way either time. Mutation check: drop
+// `counts_redirect_bodies` from the progress-callback condition in
+// `setup_easy_handle` and the followed count is short by the 200-byte body.
+TEST_F (RedirectBytesTest, AFollowedRedirectsBodyAndHeadersAreReceivedBytes) {
+    vayu::Request request;
+    request.method                  = vayu::HttpMethod::GET;
+    request.url                     = server->url ("/moved-301");
+    const auto [followed, redirect] = followed_and_alone (request, 301);
+    vayu::Request landing_request;
+    landing_request.method = vayu::HttpMethod::GET;
+    landing_request.url    = server->url ("/landing");
+    const auto landing     = measure (landing_request, 200);
+
+    EXPECT_GT (followed.bytes_down,
+    MethodEchoServer::kLandingBodyBytes + MethodEchoServer::kRedirectBodyBytes)
+    << "both bodies, and both hops' headers";
+    EXPECT_EQ (followed.bytes_down, redirect.bytes_down + landing.bytes_down);
+    EXPECT_EQ (followed.bytes_up, redirect.bytes_up + landing.bytes_up);
+}
+
+// A 307 sends the body again; REQUEST_SIZE counts both copies already, so
+// SIZE_UPLOAD_T added to it counted the last one a third time, and one POST
+// with no redirect twice. Mutation check: add SIZE_UPLOAD_T back to
+// `bytes_up` in `extract_response` and the two upper bounds and the sum fail.
+TEST_F (RedirectBytesTest, A307SendsAndCountsTheBodyOnBothHops) {
+    const auto [followed, redirect] =
+    followed_and_alone (text_post (server->url ("/moved-307")), 307);
+    const auto landing = measure (text_post (server->url ("/landing")), 200);
+
+    EXPECT_GE (redirect.bytes_up, kPostBodyBytes);
+    EXPECT_LT (redirect.bytes_up, 2 * kPostBodyBytes)
+    << "one hop sent the body once";
+    EXPECT_GE (followed.bytes_up, 2 * kPostBodyBytes);
+    EXPECT_LT (followed.bytes_up, (2 * kPostBodyBytes) + kTwoHopsHeadersBound);
+    EXPECT_EQ (followed.bytes_up, redirect.bytes_up + landing.bytes_up);
+    EXPECT_EQ (followed.bytes_down, redirect.bytes_down + landing.bytes_down);
+}
+
+// A 301 turns the POST into a bodyless GET, so the body went out once, on the
+// hop that was redirected, and SIZE_UPLOAD_T (the GET's, 0) never holds it.
+// Mutation check: read `bytes_up` from SIZE_UPLOAD_T and the body is lost; drop
+// the progress hook as above and the received count is short by the 301's body.
+TEST_F (RedirectBytesTest, A301SendsTheBodyOnlyOnTheRedirectedHop) {
+    const auto [followed, redirect] =
+    followed_and_alone (text_post (server->url ("/moved-301")), 301);
+    vayu::Request landing_request;
+    landing_request.method = vayu::HttpMethod::GET;
+    landing_request.url    = server->url ("/landing");
+    const auto landing     = measure (landing_request, 200);
+
+    EXPECT_GE (followed.bytes_up, kPostBodyBytes);
+    EXPECT_LT (followed.bytes_up, kPostBodyBytes + kTwoHopsHeadersBound);
+    EXPECT_GT (followed.bytes_up, redirect.bytes_up)
+    << "and the GET that followed";
+    EXPECT_EQ (followed.bytes_down, redirect.bytes_down + landing.bytes_down);
+}
+
+// A next hop refused before it connects gets no progress call, so the body of
+// the hop before it is still the last reading when libcurl zeroes the count.
+// Mutation check: drop the `track_hop_body` call from `extract_response` and
+// the failed transfer is short by the redirect's body.
+TEST_F (RedirectBytesTest, AHopRefusedBeforeItConnectsKeepsTheRedirectsBody) {
+    int closed_port = 0;
+    {
+        httplib::Server probe;
+        closed_port = probe.bind_to_any_port ("127.0.0.1");
+        std::thread runner ([&probe] () { probe.listen_after_bind (); });
+        probe.wait_until_ready ();
+        probe.stop ();
+        runner.join ();
+    }
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url (
+    "/moved-301?to=http://127.0.0.1:" + std::to_string (closed_port) + "/");
+
+    const auto refused       = measure (request, 0);
+    request.follow_redirects = false;
+    const auto redirect      = measure (request, 301);
+
+    EXPECT_EQ (refused.bytes_down, redirect.bytes_down)
+    << "the redirect's body and headers, and nothing from the refused hop";
+}
+
+// The fold itself, on readings the test controls: each hop climbs from 0, and
+// a drop closes the hop the reading before it measured.
+TEST (TrackHopBody, ADropClosesTheHopTheLastReadingMeasured) {
+    vayu::http::detail::TransferData data;
+    for (const curl_off_t reading : { 0, 500, 500, 0, 0, 100, 0, 30 }) {
+        vayu::http::detail::track_hop_body (data, reading);
+    }
+    EXPECT_EQ (data.earlier_hops_body_down, 600);
+    EXPECT_EQ (data.hop_body_down, 30) << "the current hop is not folded";
 }
 
 // A load stream's total is a backstop past its duration cap, so before #2835 a

@@ -65,6 +65,9 @@ class EventLoopImpl {
     size_t pending_count () const;
     size_t total_processed () const;
     EventLoopStats stats () const;
+    [[nodiscard]] const EventLoopConfig& configuration () const {
+        return config;
+    }
 
     std::atomic<bool> running{ false };
 

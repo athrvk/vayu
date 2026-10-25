@@ -33,6 +33,7 @@ import { StreamMetrics } from "@/modules/dashboard/components/charts/StreamMetri
 import { LatencyStat } from "@/modules/dashboard/components/stats/LatencyStat";
 import { TOOLTIPS } from "@/modules/dashboard/components/tooltips";
 import LatencyMetric from "./LatencyMetric";
+import { NOT_RECORDED, unrecordedFiguresOf } from "./unrecorded-figures";
 import MonitorSummary from "./MonitorSummary";
 import { PhaseAveragesCard } from "./PhaseAveragesCard";
 import HistoricalChartsSection from "./HistoricalChartsSection";
@@ -77,6 +78,9 @@ export default function PerformanceTab({
 	// loaded series runs to thousands of them.
 	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
 	const isRampUp = derived.mode === "ramp_up";
+	// A failed run the engine could not fully record has an all-zero latency
+	// block (#2895); drawing it would pass those zeros off as measurements.
+	const latencyUnrecorded = unrecordedFiguresOf(report.summary).latency;
 	// The figure the Rate fidelity card shows (a stopped run is judged by pace,
 	// #2805); the stored value covers a caller that hands over no derived figure.
 	const achievement = derived.rateAchievementPct ?? report.rateControl?.achievement ?? 0;
@@ -164,65 +168,72 @@ export default function PerformanceTab({
 					<CardTitle>Latency distribution</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<div className="grid grid-cols-2 @md:grid-cols-3 @3xl:grid-cols-6 gap-4">
-						<LatencyMetric label="Average" value={report.latency.avg} />
-						<LatencyMetric label="P50 (Median)" value={report.latency.p50} />
-						{report.latency.p75 !== undefined && (
-							<LatencyMetric label="P75" value={report.latency.p75} />
-						)}
-						<LatencyMetric label="P90" value={report.latency.p90} />
-						<LatencyMetric
-							label="P95"
-							value={report.latency.p95}
-							sloMs={sloMs}
-							severity="warning"
-						/>
-						<LatencyMetric
-							label="P99"
-							value={report.latency.p99}
-							sloMs={sloMs}
-							severity="danger"
-						/>
-						{report.latency.p999 !== undefined && (
+					{latencyUnrecorded ? (
+						<p className="text-sm text-muted-foreground">{NOT_RECORDED}</p>
+					) : (
+						<div className="grid grid-cols-2 @md:grid-cols-3 @3xl:grid-cols-6 gap-4">
+							<LatencyMetric label="Average" value={report.latency.avg} />
+							<LatencyMetric label="P50 (Median)" value={report.latency.p50} />
+							{report.latency.p75 !== undefined && (
+								<LatencyMetric label="P75" value={report.latency.p75} />
+							)}
+							<LatencyMetric label="P90" value={report.latency.p90} />
 							<LatencyMetric
-								label="P999"
-								value={report.latency.p999}
+								label="P95"
+								value={report.latency.p95}
+								sloMs={sloMs}
+								severity="warning"
+							/>
+							<LatencyMetric
+								label="P99"
+								value={report.latency.p99}
 								sloMs={sloMs}
 								severity="danger"
 							/>
-						)}
-					</div>
+							{report.latency.p999 !== undefined && (
+								<LatencyMetric
+									label="P999"
+									value={report.latency.p999}
+									sloMs={sloMs}
+									severity="danger"
+								/>
+							)}
+						</div>
+					)}
 				</CardContent>
 			</Card>
 
 			{/* The distribution's whole shape and its two ends. The tiles above stop
 			    at the tail percentiles; this is the curve between them, with the
 			    min and max the tiles do not carry. A card of its own so two cards do
-			    not share the title "Latency distribution". */}
-			<Card className="enter-fade">
-				<CardHeader>
-					<div className="flex items-baseline justify-between">
-						<CardTitle>
-							HDR percentile plot
-							<InfoChip tip={TOOLTIPS.latencyDistribution} />
-						</CardTitle>
-						<span className="text-micro font-mono text-muted-foreground">
-							from HdrHistogram
-						</span>
-					</div>
-				</CardHeader>
-				<CardContent>
-					<HdrPercentileChart report={report} sloMs={sloMs} />
-					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
-						<LatencyStat k="min" v={report.latency.min} />
-						<LatencyStat k="mean" v={report.latency.avg} />
-						<LatencyStat k="p50" v={report.latency.p50} />
-						<LatencyStat k="p95" v={report.latency.p95} />
-						<LatencyStat k="p99" v={report.latency.p99} />
-						<LatencyStat k="max" v={report.latency.max} />
-					</div>
-				</CardContent>
-			</Card>
+			    not share the title "Latency distribution". Absent for a run whose latency
+			    was not recorded: the card above already says so. */}
+			{!latencyUnrecorded && (
+				<Card className="enter-fade">
+					<CardHeader>
+						<div className="flex items-baseline justify-between">
+							<CardTitle>
+								HDR percentile plot
+								<InfoChip tip={TOOLTIPS.latencyDistribution} />
+							</CardTitle>
+							<span className="text-micro font-mono text-muted-foreground">
+								from HdrHistogram
+							</span>
+						</div>
+					</CardHeader>
+					<CardContent>
+						<HdrPercentileChart report={report} sloMs={sloMs} />
+						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
+							<LatencyStat k="min" v={report.latency.min} />
+							<LatencyStat k="mean" v={report.latency.avg} />
+							<LatencyStat k="p50" v={report.latency.p50} />
+							<LatencyStat k="p95" v={report.latency.p95} />
+							<LatencyStat k="p99" v={report.latency.p99} />
+							<LatencyStat k="max" v={report.latency.max} />
+						</div>
+					</CardContent>
+				</Card>
+			)}
 
 			{/* Per-phase averages: the phase histograms' means (every completion)
 			    when the run kept them, the retained trace sample's otherwise -

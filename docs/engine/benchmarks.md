@@ -402,8 +402,8 @@ What the table does show, on both arms equally, is the shape of `sleep_for` at
 at 400 RPS (2.5 ms nominal, 2.5 ms sleep - just over the 2000 us threshold
 above which the tick sleeps rather than spins) the median is 3.5-3.7 ms with a
 quarter of the gaps being the double-dispatch that pays the overshoot back.
-The rate is exact because `take_due_requests` accrues the debt; the
-*regularity* is bounded by the OS sleep granularity. That is a property of the
+The rate is exact because the pacer counts what is owed from the run's
+start; the *regularity* is bounded by the OS sleep granularity. That is a property of the
 spin threshold in `wait_for_next_tick`, not of the scope, and it predates it;
 [#1370](https://github.com/athrvk/vayu/issues/1370) moved it, and
 [The sleep a Windows tick cannot trust](#the-sleep-a-windows-tick-cannot-trust-2026-09-04-windows)
@@ -970,26 +970,53 @@ are read **per run**, so none needs a restart - and none is flagged
   not a ceiling. Before that, 4 workers at the default of 200 held a run to
   800 connections: every virtual user above 800 against an HTTP/1.1 target
   waited inside libcurl for a connection, and that wait was reported as
-  target latency. A run that raised it says so in its warnings
-  (`per_host_limit_raised`).
+  target latency. A run that asked for virtual users (its config carries
+  `concurrency`) and raised it says so in its warnings
+  (`per_host_limit_raised`, #2801).
 - `dnsCacheTimeout` - set it high (3600) for a fixed target; the hostname never
   needs re-resolution. Worth little on a warm run, since DNS cost per request
   amortises to ~0.005 ms over 60 s.
-- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`,
-  which is every run the app starts.
+- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`.
+  A `constant_rps` run the app starts sets none, so it reads this default as
+  its concurrency: the loop's `max_concurrent` and the per-host raise above
+  are sized from it (1000 on 4 workers is 250 per worker), with no
+  `per_host_limit_raised` warning, since the run has no virtual users to
+  cover (#2801).
 
-**How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound:
-each tick accrues `targetRps × elapsed` and dispatches the whole requests owed,
-carrying the fraction to the next tick. Rate fidelity therefore does not depend
-on the tick length (1ms above 1000 RPS, the request interval below it) - timer
-jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
-as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
-at a fixed rate, `sent + dropped` should equal `targetRps × duration`. The
-report's rate fidelity is that same count since
+**How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound.
+Request *k* (counting from 1) is owed at `k / targetRps`: nothing leaves at
+t = 0, the first request leaves one interval in, and when the product is whole
+the last is owed at the deadline itself, where the final tick lands. Each tick
+reads `floor(targetRps × elapsed)` off the time since the run started and
+dispatches the difference from what it has already taken
+([#2910](https://github.com/athrvk/vayu/issues/2910); summing per-tick deltas
+lost a sub-microsecond fraction every tick, and the last request with it). Rate
+fidelity therefore does not depend on the tick length (1ms above 1000 RPS, the
+request interval below it) - a late tick owes what the ticks it swallowed would
+have, and a rate like 1500 RPS is delivered as asked rather than floored to the
+nearest 1000. Comparing against wrk/vegeta at a fixed rate, `sent + dropped` is
+exactly `floor(targetRps × duration)`: 4000 for 200 RPS over 20 s, 99 for
+33.3 RPS over 3 s. A product that is whole in decimal counts as whole even
+where binary lands just below it (0.57 RPS over 100 s owes 57). The report's
+rate fidelity is that same count since
 [#2392](https://github.com/athrvk/vayu/issues/2392): `rateControl.achievement`
-is `requestsSent / requestsExpected`, with `requestsExpected` =
-`targetRps × duration`, and `sendRate` divides by the sending window, so
-neither is diluted by the drain that lets the last requests answer.
+is `requestsSent / requestsExpected`, with `requestsExpected` the same
+`floor(targetRps × duration)`, so an unsaturated run reads 100, and `sendRate`
+divides by the sending window, so neither is diluted by the drain that lets
+the last requests answer.
+
+The pacing thread is the only limiter on a `constant_rps` run
+([#2801](https://github.com/athrvk/vayu/issues/2801)). The event-loop workers
+used to hold a token bucket at the same rate as well, split `targetRps ÷
+workers`; the bucket re-anchors on every take while the pacer's schedule is
+absolute, so the two drifted, and a submission that reached its worker ahead of
+the worker's token waited inside the request's queue wait. At 2 req/s against
+a 300 ms mock on 4 workers that wait climbed from 0.2 ms to 12.9 ms over 34 s,
+reset and climbed again (`avgQueueWaitMs` 4.79, p99 315.1 ms against the
+server's 300.8); with no bucket, 40 s at the same rate and target read
+0.29 ms, flat, and p99 301.8 ms, while 50 and 500 req/s still sent the rate they asked for. What the
+bucket also did was meter a catch-up burst after a pacing stall; that burst is
+now bounded by `maxInFlight` alone.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)

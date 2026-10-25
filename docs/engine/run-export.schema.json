@@ -565,6 +565,26 @@
           "throughput": {"type": "number"},
           "error_rate": {"type": "number"},
           "status_codes": {"$ref": "#/definitions/codeCounts"},
+          "status_seconds": {
+            "description": "The responses that completed in the seconds the tick closed, by class (issue #2866). Absent on a tick stored before it; [] when the tick closed no second, which is still a run that counts by second. An entry that is not this shape is dropped by the export.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["second", "span", "counts"],
+              "properties": {
+                "second": {"description": "Seconds from load start.", "type": "integer", "minimum": 0},
+                "span": {"description": "Consecutive seconds the counts cover; counts / span is a rate.", "type": "integer", "minimum": 1},
+                "counts": {
+                  "description": "2xx, 3xx, 4xx, 5xx, then no response or a code outside 200-599.",
+                  "type": "array",
+                  "minItems": 5,
+                  "maxItems": 5,
+                  "items": {"type": "integer", "minimum": 0}
+                }
+              }
+            }
+          },
           "latency_p50_ms": {"description": "Absent, like p95 and p99, for a second in which nothing completed (issue #2386); a tick stored before that issue has 0 there instead.", "type": "number"},
           "latency_p95_ms": {"type": "number"},
           "latency_p99_ms": {"type": "number"}

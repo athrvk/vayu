@@ -1032,6 +1032,43 @@ TEST_F (FormPartWireTest, AFileTruncatedUnderTheHandleFailsTheTransfer) {
     EXPECT_TRUE (server_->parts ().empty ());
 }
 
+// ===========================================================================
+// The sent bytes of a body libcurl reads through a callback (#2893)
+// ===========================================================================
+
+/// Room for two hops' request lines, headers and multipart framing: well under
+/// a kilobyte each, far under one more copy of either body below.
+constexpr std::size_t TWO_HOPS_FRAMING_BOUND = 4096;
+
+// REQUEST_SIZE counts every byte libcurl sends, a body it reads through the
+// read callback or a mime part's included, on every hop: the 307 leg sends the
+// body twice and the count is the two copies plus framing. Mutation check: add
+// SIZE_UPLOAD_T back to `bytes_up` in `extract_response` and both counts exceed
+// the bound by one more copy of the body.
+TEST_F (BinaryBodyWireTest, AStreamedBodyIsCountedOnEachHopThatSentIt) {
+    RedirectingServer redirecting;
+    const std::string payload = binary_payload (LARGE);
+    const auto response       = submit (
+    binary_request (redirecting.url (), scratch_.write ("big.bin", payload)));
+    ASSERT_EQ (response.status_code, 200) << response.error_message;
+    ASSERT_TRUE (redirecting.landed () == payload);
+
+    EXPECT_GE (response.timing.bytes_up, 2 * payload.size ());
+    EXPECT_LT (response.timing.bytes_up, (2 * payload.size ()) + TWO_HOPS_FRAMING_BOUND);
+}
+
+TEST_F (FormPartWireTest, AMultipartBodyIsCountedOnEachHopThatSentIt) {
+    RedirectingServer redirecting;
+    const std::string payload = binary_payload (std::size_t{ 64 } * 1024);
+    const auto response       = submit (
+    form_part_request (redirecting.url (), scratch_.write ("data.bin", payload)));
+    ASSERT_EQ (response.status_code, 200) << response.error_message;
+    ASSERT_TRUE (redirecting.landed () == payload);
+
+    EXPECT_GE (response.timing.bytes_up, 2 * payload.size ());
+    EXPECT_LT (response.timing.bytes_up, (2 * payload.size ()) + TWO_HOPS_FRAMING_BOUND);
+}
+
 // A data file of many rows names many files. Each is approved at plan time
 // and none is kept open by the plan, so a run cannot run out of descriptors;
 // `fill` opens a row's file for that request alone, and every request sends
