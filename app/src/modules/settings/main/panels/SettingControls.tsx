@@ -693,7 +693,7 @@ export function NumberSettingRow({
 						// A placeholder is a sentence the width must hold: the wrapper
 						// shrink-wraps the input's intrinsic ~70px otherwise and cuts
 						// "Use default (30,000 ms)" to "Use defau".
-						placeholder && !compact && "w-64"
+						placeholder && !compact && "w-[16rem]"
 					)}
 				>
 					<Input

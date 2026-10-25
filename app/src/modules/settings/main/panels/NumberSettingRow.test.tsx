@@ -215,7 +215,7 @@ describe("NumberSettingRow", () => {
 
 			expect(field("A").className).toContain("max-w-[16rem]");
 			expect(field("A").className).not.toContain("max-w-[12rem]");
-			expect(field("A").parentElement?.className).toContain("w-64");
+			expect(field("A").parentElement?.className).toContain("w-[16rem]");
 		});
 
 		it("lets a compact input fill whatever holds it, at the denser type", () => {
