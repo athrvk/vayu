@@ -1951,6 +1951,25 @@ export interface LoadResultSummary {
 	 */
 	assertionsPassed?: number;
 	assertionsFailed?: number;
+	/**
+	 * What a **terminal capacity run's** search found (#2930): present on that
+	 * row alone, absent for every other mode and for a row an older engine sent.
+	 * `rps`, `p95Ms` and `errorRate` stay on the row, but they average a search
+	 * that stepped load up, so `resultSubtitle` prints these levels instead.
+	 *
+	 * `maxHealthyConcurrency` is the highest level that held its budgets and
+	 * `kneeConcurrency` the level that broke them; each is omitted, never
+	 * zeroed. A missing `maxHealthyConcurrency` beside a knee means the first
+	 * level already failed. `stopReason` is the key `STOP_REASONS` words.
+	 */
+	capacity?: LoadResultCapacity;
+}
+
+/** The levels a capacity search settled on - see {@link LoadResultSummary.capacity}. */
+export interface LoadResultCapacity {
+	stopReason: string;
+	maxHealthyConcurrency?: number;
+	kneeConcurrency?: number;
 }
 
 /** The `{data, pagination}` envelope the paginated `GET /runs` returns. */

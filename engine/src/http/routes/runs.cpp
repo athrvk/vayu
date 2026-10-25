@@ -518,6 +518,25 @@ void read_optional_bool (const nlohmann::json& obj, const char* key, std::option
     }
 }
 
+// A stored `capacity` section's headline in the report's names: why the search
+// stopped and, each only when stored, the highest level it held and the level
+// it broke at. The one reader of those keys, for the report's section and the
+// list row (#2930), so the two cannot disagree. Nothing when the section
+// carries no `levels`, the rule `read_capacity_section` documents.
+std::optional<nlohmann::json> read_capacity_headline (const nlohmann::json& stored) {
+    if (!stored.contains ("levels") || !stored["levels"].is_array ()) {
+        return std::nullopt;
+    }
+    nlohmann::json headline;
+    headline["stopReason"] =
+    stored.contains ("stop_reason") && stored["stop_reason"].is_string () ?
+    stored["stop_reason"].get<std::string> () :
+    std::string{};
+    copy_optional_number (stored, "max_healthy_concurrency", headline, "maxHealthyConcurrency");
+    copy_optional_number (stored, "knee_concurrency", headline, "kneeConcurrency");
+    return std::optional<nlohmann::json> (std::in_place, std::move (headline));
+}
+
 // Translate a stored `capacity` section (snake_case, like every stored section)
 // into the report's camelCase shape.
 //
@@ -531,7 +550,8 @@ void read_optional_bool (const nlohmann::json& obj, const char* key, std::option
 // says nothing a reader can act on, the same rule the thresholds section
 // follows.
 void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) {
-    if (!stored.contains ("levels") || !stored["levels"].is_array ()) {
+    auto headline = read_capacity_headline (stored);
+    if (!headline) {
         return;
     }
 
@@ -553,35 +573,25 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
         levels.push_back (std::move (reported));
     }
 
-    nlohmann::json capacity;
-    double slo_ms = 0.0;
+    nlohmann::json capacity = std::move (*headline);
+    double slo_ms           = 0.0;
     read_number (stored, "slo_ms", slo_ms);
     capacity["sloMs"] = slo_ms;
     copy_optional_number (stored, "max_error_pct", capacity, "maxErrorPct");
-    capacity["stopReason"] =
-    stored.contains ("stop_reason") && stored["stop_reason"].is_string () ?
-    stored["stop_reason"].get<std::string> () :
-    std::string{};
     capacity["levels"] = levels;
 
-    if (stored.contains ("max_healthy_concurrency")) {
-        size_t concurrency = 0;
-        double rps         = 0.0;
-        double p99_ms      = 0.0;
-        read_number (stored, "max_healthy_concurrency", concurrency);
+    if (capacity.contains ("maxHealthyConcurrency")) {
+        double rps    = 0.0;
+        double p99_ms = 0.0;
         read_number (stored, "max_healthy_rps", rps);
         read_number (stored, "p99_at_max_healthy_ms", p99_ms);
-        capacity["maxHealthyConcurrency"] = concurrency;
-        capacity["maxHealthyRps"]         = rps;
-        capacity["p99AtMaxHealthyMs"]     = p99_ms;
+        capacity["maxHealthyRps"]     = rps;
+        capacity["p99AtMaxHealthyMs"] = p99_ms;
     }
-    if (stored.contains ("knee_concurrency")) {
-        size_t concurrency = 0;
-        double p99_ms      = 0.0;
-        read_number (stored, "knee_concurrency", concurrency);
+    if (capacity.contains ("kneeConcurrency")) {
+        double p99_ms = 0.0;
         read_number (stored, "knee_p99_ms", p99_ms);
-        capacity["kneeConcurrency"] = concurrency;
-        capacity["kneeP99Ms"]       = p99_ms;
+        capacity["kneeP99Ms"] = p99_ms;
         copy_optional_number (stored, "knee_error_pct", capacity, "kneeErrorPct");
     }
     if (stored.contains ("saturation_concurrency")) {
@@ -1012,8 +1022,9 @@ ReportExtras& extras) {
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
  * error rate, budget verdict and, for a scenario load run, its exact assertion
- * counts (#2820), read from the run's stored `summary` - the load-run
- * counterpart of a design row's `{statusCode, latencyMs}`.
+ * counts (#2820) or, for a capacity run, the search's headline (#2930), read
+ * from the run's stored `summary` - the load-run counterpart of a design row's
+ * `{statusCode, latencyMs}`.
  *
  * Each key is omitted when the summary does not record it, never zeroed: no
  * `verdict` means no budget judged the run, and how to show that is the
@@ -1051,6 +1062,11 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     if (const auto assertions = read_scenario_assertions (summary)) {
         outcome["assertionsPassed"] = assertions->passed;
         outcome["assertionsFailed"] = assertions->failed;
+    }
+    if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
+        if (auto headline = read_capacity_headline (summary["capacity"])) {
+            outcome["capacity"] = std::move (*headline);
+        }
     }
     return outcome;
 }
@@ -1106,12 +1122,12 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
  * `config_snapshot`, wrapped in the
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
  * design run's row also carries `resultSummary` (statusCode + latencyMs), and a
- * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, each
- * only when recorded; #2130) - what a reader would otherwise fetch a report
- * per row to learn. A row whose run finished with warnings carries
- * `summary.hasWarnings: true` (#1527), read fresh off this page's own `Run`
- * rows rather than through `summaries` - see the comment at its call site
- * below for why.
+ * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, the
+ * assertion counts, capacity, each only when recorded; #2130) - what a reader
+ * would otherwise fetch a report per row to learn. A row whose run finished
+ * with warnings carries `summary.hasWarnings: true` (#1527), read fresh off
+ * this page's own `Run` rows rather than through `summaries` - see the comment
+ * at its call site below for why.
  *
  * `summaries` spares the poll the work it would otherwise repeat: this is the
  * endpoint a visible history surface re-asks every 5s, and each call used to

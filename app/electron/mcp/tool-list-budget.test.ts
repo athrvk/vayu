@@ -76,6 +76,10 @@
  * rows measure 144,608 / 141,882 / 212,522 / 208,125 B (writes off: reveal off
  * / on; writes on: reveal off / on), and the four caps went to 144,900 /
  * 142,200 / 212,800 / 208,400.
+ *
+ * #2930's `capacity` sentence in `list_runs` is paid once per row, 233 B. The
+ * rows measure 144,811 / 142,085 / 212,725 / 208,328 B, 72 to 115 B under the
+ * caps above, and the four caps went to 145,100 / 142,400 / 213,000 / 208,600.
  */
 
 import { describe, it, expect } from "vitest";
@@ -95,10 +99,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_900 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 142_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_800 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 208_400 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 145_100 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 142_400 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 213_000 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 208_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
