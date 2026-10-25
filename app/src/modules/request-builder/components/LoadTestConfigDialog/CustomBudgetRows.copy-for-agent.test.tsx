@@ -142,6 +142,8 @@ describe("Copy for agent on a fixed budget field", () => {
 	function renderSection(referenceOwner?: ThresholdOwner) {
 		render(
 			<BudgetsSection
+				mode="constant_concurrency"
+				budgetSources={{}}
 				budgets={emptyBudgetDraft()}
 				onBudgetsChange={() => {}}
 				customBudgets={[row()]}

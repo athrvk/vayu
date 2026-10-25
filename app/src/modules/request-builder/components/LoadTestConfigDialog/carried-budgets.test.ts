@@ -9,12 +9,17 @@ import { describe, it, expect } from "vitest";
 import { emptyBudgetDraft, type BudgetDraft, type CustomBudgetDraft } from "./budgets";
 import {
 	NO_CARRIED,
+	type CarriedBudgets,
 	budgetsChanged,
+	budgetsToRemember,
+	budgetsToSend,
 	carriedThresholdKeys,
 	clearCarried,
 	describeCarried,
 	findCarriedBudgets,
+	isUnsentSeed,
 	stillCarried,
+	withoutUnsentSeed,
 } from "./carried-budgets";
 
 const draft = (values: Partial<BudgetDraft> = {}): BudgetDraft => ({
@@ -196,5 +201,85 @@ describe("describeCarried", () => {
 
 	it("is null when nothing is carried", () => {
 		expect(describeCarried(NO_CARRIED, draft(), [], undefined)).toBeNull();
+	});
+});
+
+/**
+ * The Settings p99 seed is withheld from a capacity search (issue #2816): the
+ * engine judges the pooled histogram, which holds every over-budget level the
+ * search climbed through on purpose.
+ */
+describe("the Settings p99 seed in Capacity discovery", () => {
+	const SEED: CarriedBudgets["fixed"] = { latencyP99Ms: "slo" };
+	const MEMO: CarriedBudgets["fixed"] = { latencyP99Ms: "memo" };
+	const OTHER_MODES = ["constant_rps", "constant_concurrency", "ramp_up", "iterations"] as const;
+	const seeded = draft({ latencyP99Ms: "500", maxErrorRatePct: "2" });
+
+	describe("isUnsentSeed", () => {
+		it("holds for a seed in capacity", () => {
+			expect(isUnsentSeed("capacity", SEED)).toBe(true);
+		});
+
+		it("does not hold for a p99 the memo carried, or nothing carried", () => {
+			expect(isUnsentSeed("capacity", MEMO)).toBe(false);
+			expect(isUnsentSeed("capacity", {})).toBe(false);
+		});
+
+		it.each(OTHER_MODES)("does not hold in %s", (mode) => {
+			expect(isUnsentSeed(mode, SEED)).toBe(false);
+		});
+	});
+
+	describe("budgetsToSend", () => {
+		it("blanks the seed and nothing else in capacity", () => {
+			expect(budgetsToSend(seeded, "capacity", SEED)).toEqual(
+				draft({ latencyP99Ms: "", maxErrorRatePct: "2" })
+			);
+		});
+
+		it("keeps a memo or typed p99 in capacity", () => {
+			expect(budgetsToSend(seeded, "capacity", MEMO)).toBe(seeded);
+			expect(budgetsToSend(seeded, "capacity", {})).toBe(seeded);
+			expect(budgetsToSend(seeded, "capacity", undefined)).toBe(seeded);
+		});
+
+		it.each(OTHER_MODES)("keeps the seed in %s", (mode) => {
+			expect(budgetsToSend(seeded, mode, SEED)).toBe(seeded);
+		});
+	});
+
+	describe("budgetsToRemember", () => {
+		it("leaves the seed out of the memo, so it restores as a seed and not as the user's", () => {
+			const kept = budgetsToRemember(seeded, "capacity", SEED);
+			expect(kept).not.toHaveProperty("latencyP99Ms");
+			expect(findCarriedBudgets(kept, []).fixed).toEqual({
+				maxErrorRatePct: "memo",
+				latencyP99Ms: "slo",
+			});
+		});
+
+		it("writes a typed p99 as typed", () => {
+			expect(budgetsToRemember(seeded, "capacity", {})).toBe(seeded);
+		});
+
+		it.each(OTHER_MODES)("writes the seed as it stands in %s", (mode) => {
+			expect(budgetsToRemember(seeded, mode, SEED)).toBe(seeded);
+		});
+	});
+
+	describe("withoutUnsentSeed", () => {
+		const carried = findCarriedBudgets(undefined, []);
+
+		it("takes the seed out of the carried set in capacity, so the notice does not name it", () => {
+			const judged = withoutUnsentSeed(carried, "capacity");
+			expect(judged.fixed).toEqual({});
+			expect(describeCarried(judged, seeded, [], undefined)).toBeNull();
+		});
+
+		it("leaves a memo p99 and the other modes alone", () => {
+			const memo = findCarriedBudgets({ latencyP99Ms: "150" }, []);
+			expect(withoutUnsentSeed(memo, "capacity")).toBe(memo);
+			expect(withoutUnsentSeed(carried, "ramp_up")).toBe(carried);
+		});
 	});
 });

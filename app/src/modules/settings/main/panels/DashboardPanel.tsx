@@ -133,7 +133,7 @@ export default function DashboardPanel() {
 					<NumberSettingRow
 						anchor={SLO_THRESHOLD.anchor}
 						label={SLO_THRESHOLD.label}
-						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts of every run except Capacity discovery, which keeps the SLO it was started with. It also prefills the p99 budget and the Capacity discovery target when you open the load-test dialog."
+						description="The p99 latency at which a run is considered saturated. It marks the breakpoint stat, the Saturation card, and the SLO line on the latency charts of every run except Capacity discovery, which keeps the SLO it was started with. It also prefills the Capacity discovery target and the p99 budget when you open the load-test dialog, but a Capacity discovery run does not send that p99 budget: its search climbs past the limit on purpose, so a budget would judge how far it climbed."
 						value={String(sloThresholdMs)}
 						commit="change"
 						onCommit={(next) => setSloThresholdMs(parseInt(next, 10))}
