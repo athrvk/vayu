@@ -70,6 +70,11 @@
  * hundred bytes of their caps to 143,732 / 141,006 / 207,249 B (writes off:
  * reveal off / on; writes on: reveal on), and those caps went to 143,900 /
  * 141,200 / 207,500.
+ *
+ * #2820 named `assertionsPassed` and `assertionsFailed` in the `list_runs`
+ * description (+36 B, paid once). Master's writes-off / reveal-on row stood at
+ * 141,592 B against 141,600, so that one cap went to 141,700; the other three
+ * rows had room.
  */
 
 import { describe, it, expect } from "vitest";
@@ -90,7 +95,7 @@ interface Budget {
 
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_400 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_600 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_700 },
 	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_300 },
 	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_900 },
 ];
