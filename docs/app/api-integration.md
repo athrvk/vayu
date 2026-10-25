@@ -1032,6 +1032,17 @@ runner has no need for: `scenario.steps[]`
 plus `virtualUsers` and `iterationsAbandoned`. It stores no per-step `results`
 rows, so that array is the only per-step record such a run keeps.
 
+It also carries `scenario.assertions` (`{passed, failed}`, #2820) when the run
+made at least one exact assertion: every `assert.*` outcome, required `extract.*`
+miss and inline `pm.test` call, counted on every completion. It is a separate
+population from `passed` / `failed` and the report's error rate, which stay
+HTTP-only, so a run of `200`s that failed every assertion reads a 0% error rate
+and a non-zero `assertions.failed`. **Absent**, never `{0, 0}`, for a run with no
+such assertion, a collection run and a report stored before the field. Three
+renderer readers go through `exactAssertionsOf` (`components/shared/run-assertions.ts`):
+the verdict (`reportOutcome`), `RunKeyMetrics`' fourth tile and the Overview's
+Assertions card.
+
 A step's `errors` is the run's one error definition (a response outside 2xx/3xx,
 or no response) and equals `httpErrors + noResponse`. Only a `noResponse`
 execution ends its iteration; an HTTP error status does not. `httpErrors` and
@@ -1053,7 +1064,11 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A collection run's row carries no `resultSummary`. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
-[GET /runs](../engine/api-reference.md#get-runs)).
+[GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and
+`assertionsFailed` (both or neither) on a scenario load run that made an exact
+assertion (#2820). The renderer reads `assertionsFailed` (the row's verdict and
+its result line); `assertionsPassed` has no renderer reader and is there for the
+MCP `list_runs` rows.
 
 `composeRequest` (`POST /compose`, issue #226) resolves `{{variables}}` and
 `inherit` auth engine-side and returns the payload the other two accept
@@ -1897,7 +1912,9 @@ not broken down by type" (issue #2400). It reads `errorsDropped` only when
 `errors.types` sums to less than the no-response count, which is a run stored
 before the engine kept exact per-type counts or a design-mode run; on any other
 run the types are exact past the error store's cap and the note stays silent.
-The Test validation card also states the arithmetic from `summary.totalRequests`
+The Test validation card (titled **Sampled replay** when a scenario load report
+also carries `scenario.assertions`, which gets its own Assertions card counted on
+every response, #2820) also states the arithmetic from `summary.totalRequests`
 ("Tested N of M requests"), worded so it holds for requests that never got a
 response as well as for displaced ones; `samplesTested` counts responses and
 `testsPassed` / `testsFailed` count assertions, and the card's labels say so
@@ -2009,13 +2026,18 @@ every assertion passed can still have missed its budget. `undefined` is a run
 that declared none - not a run that passed nothing - so a report without the
 section renders exactly as it did before budgets existed. The dialog seeds its
 p99 field from the client `sloThresholdMs` setting, which until then only
-annotated a chart.
+annotated a chart. A Capacity discovery run does not send that seed (issue
+#2816): the engine judges `latencyP99Ms` on the run's pooled histogram, which
+holds every over-budget level the search climbed through on purpose, so
+`thresholds` omits it and a run with no other budget reads "No budgets set". A
+p99 typed in the dialog, or carried from the last Start, is sent in every mode.
 
 `LoadTestConfigDialog` also tells the engine which of those budgets the user did
 not set for this run (issue #2195): top-level `carriedBudgets: string[]` on
 `POST /runs` (`StartLoadTestRequest`), the `thresholds` keys still holding a
 value the memo or the SLO seed filled in and the user left alone, spelled as
-they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`). The engine
+they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`; the SLO seed
+only outside Capacity discovery, which does not send it). The engine
 only stores it and echoes it as `metadata.configuration.carriedBudgets`, which
 `ThresholdVerdict` reads to tag those rows "carried over"; the verdict itself is
 computed the same either way. The list is cut at the engine's 64-entry cap

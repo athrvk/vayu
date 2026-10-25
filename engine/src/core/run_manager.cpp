@@ -918,7 +918,8 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
 RunContext::~RunContext () {
     should_stop = true;
     // Wake the closed-loop controller so it observes should_stop without
-    // waiting for its 50ms safety-net timeout before the join below.
+    // waiting out its `CONTROLLER_TICK_MS` safety-net timeout before the
+    // join below.
     notify_refill ();
     // The worker joins these itself before it returns; the join here only
     // covers a context destroyed before its worker ever ran. The *worker*
@@ -1757,6 +1758,13 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         // The whole-run `tests` section above says only that something
         // failed, which over a sequence is not an answer.
         attach_step_test_totals (*inputs.scenario, validation.steps);
+        // The exact population, the figure the budget's `assertionsExact`
+        // reads (#2820). Absent, not zeros, for a run that asserted nothing.
+        if (const auto exact = exact_assertion_totals (*context, scenario_state.get ());
+        exact.total () > 0) {
+            (*inputs.scenario)["assertions"] = { { "passed", exact.passed },
+                { "failed", exact.failed } };
+        }
         // Read on the same edge and for the same reason: a completion
         // still in flight is a request this contract was exercised with
         // (issue #629). Empty for a run of an unbound collection, which
@@ -2767,10 +2775,10 @@ const GateReadings& gate) {
     // second in - reports zero instead of dereferencing null.
     const size_t active_now = context->active_transfer_count ();
 
-    // Sample the in-flight high-water mark. The closed-loop controller
-    // also updates this at submit granularity; open-loop modes
-    // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
-    // writers don't clobber each other.
+    // Sample the in-flight high-water mark. Every load strategy updates it
+    // after each submission batch (`update_peak` in load_strategy.cpp); this
+    // 1 Hz sample is the backstop. CAS-max so the two writers don't clobber
+    // each other.
     {
         size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
         while (backpressure > pk &&

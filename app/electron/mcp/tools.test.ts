@@ -534,6 +534,15 @@ describe("tool registry", () => {
 		expect(description).toContain("same failure definition");
 	});
 
+	// Mutation check (#2820): drop the assertionsPassed / assertionsFailed
+	// sentence from list_runs in reads.tools.ts and this fails.
+	test("list_runs names the assertion counts a scenario load row carries and says errorRate excludes them", () => {
+		const description = descriptionOf(TOOLS.find((t) => t.name === "list_runs"));
+		expect(description).toContain("`assertionsPassed` and `assertionsFailed`");
+		expect(description).toContain("never folded into errorRate");
+		expect(description).toContain("omitted for every other run");
+	});
+
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
 		const catalog = toolCatalog();
 		expect(catalog).toHaveLength(TOOLS.length);
@@ -5790,6 +5799,15 @@ describe("inline body bounds", () => {
 		}
 	});
 
+	// Mutation check (#2820): have boundRunReport or markPartialReport rebuild the
+	// report without its `scenario` section and this fails.
+	test("get_run_report hands a scenario load report's assertions through unchanged", async () => {
+		const scenario = { passed: 4590, failed: 0, assertions: { passed: 10, failed: 4580 } };
+		const out = await runReport(reported({ summary: { errorRate: 0 }, scenario, results: [] }));
+
+		expect(out.scenario).toEqual(scenario);
+	});
+
 	test("get_run_report keeps the engine's own bodyBytes when it already truncated", async () => {
 		const out = await runReport(
 			reported({
@@ -10726,6 +10744,26 @@ describe("run housekeeping tools", () => {
 			expect(pagination.hasMore).toBe(true);
 			expect(pagination.nextOffset).toBe(1);
 			expect(pagination.note).toMatch(/1 of 17 runs, starting at offset 0/);
+		});
+
+		// #2820: a guard on the pass-through. The handler adds no shaping that
+		// touches resultSummary, so no mutation of today's code reddens it; it
+		// fails if row shaping ever starts allow-listing the summary's keys.
+		test("a scenario load row's assertion counts reach the agent beside errorRate", async () => {
+			const resultSummary = {
+				rps: 485,
+				p95Ms: 42,
+				errorRate: 0,
+				assertionsPassed: 10,
+				assertionsFailed: 4580,
+			};
+			const client = fakeClient({
+				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_1", resultSummary }])),
+			});
+			const res = await dispatchTool("list_runs", {}, ctxWith(client));
+			const rows = (JSON.parse(firstText(res)) as { data: Array<Record<string, unknown>> })
+				.data;
+			expect(rows[0].resultSummary).toEqual(resultSummary);
 		});
 
 		test("the last page has a null next offset and no note", async () => {

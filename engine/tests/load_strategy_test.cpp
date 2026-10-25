@@ -13,6 +13,7 @@
 
 #include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/load_pacing.hpp"
 #include "vayu/core/load_strategy.hpp"
 
 #include <gtest/gtest.h>
@@ -20,6 +21,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -113,6 +117,9 @@ TEST_F (LoadStrategyTest, MaxInFlightCapDropsWhenTrueInFlightExceedsCap) {
     << "maxInFlight cap did not drop any requests; the cap is likely gated on "
        "EventLoop::pending_count() (submission-queue depth) instead of true "
        "in-flight (requests_sent - completed)";
+    // The peak counts what was submitted, never what the cap dropped: ten are
+    // in flight within ~33ms and none settles before 500ms (#2912).
+    EXPECT_EQ (context->peak_in_flight.load (), 10u);
 }
 
 // RunContext exposes the closed-loop refill primitives and a peak gauge.
@@ -197,6 +204,135 @@ TEST_F (LoadStrategyTest, RampUpTracksTargetWithoutOvershoot) {
     // After a full ramp to TARGET, peak settles at ~TARGET, never far above.
     EXPECT_LE (context->peak_in_flight.load (), TARGET + 10);
     EXPECT_GE (context->peak_in_flight.load (), TARGET - 5);
+}
+
+// #2913: a run as long as its ramp peaks at the configured count. `/hang`
+// answers nothing while the run lasts, so in-flight only climbs and the peak
+// is what the controller submitted, with no completion to race it. The
+// controller's final refill (`MaintainConcurrency` below) is what holds this
+// when no wake lands in the ramp's last tick.
+TEST_F (LoadStrategyTest, ARampAsLongAsTheRunPeaksAtTheConfiguredCount) {
+    const size_t TARGET   = 50;
+    nlohmann::json config = {
+        { "mode", "ramp_up" },
+        { "duration", "2s" },
+        { "rampUpDuration", "2s" },
+        { "startConcurrency", 1 },
+        { "concurrency", TARGET },
+    };
+
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ramp-equal", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->hang_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    ASSERT_NE (strategy, nullptr);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->peak_in_flight.load (), TARGET);
+}
+
+namespace {
+
+constexpr size_t FINAL_REFILL_START   = 1;
+constexpr size_t FINAL_REFILL_TARGET  = 50;
+constexpr int64_t FINAL_REFILL_RUN_MS = 200;
+
+/// A `submit_one` that sends nothing: it counts, and bumps `requests_sent` the
+/// way a real submission does. Nothing it submits ever completes, so
+/// `in_flight ()` is exactly what the controller has submitted. The first call
+/// (the seed's) sleeps out the whole run and then runs @p after_seed, so the
+/// controller's first wake already reads the run as over: no wake lands in the
+/// ramp at all. A sleep only bounds elapsed time from below, so a slower
+/// runner reaches the same state.
+struct CountingSubmitter {
+    std::shared_ptr<vayu::core::RunContext> context;
+    std::function<void ()> after_seed;
+    size_t submitted = 0;
+
+    bool operator() () {
+        if (submitted == 0) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (FINAL_REFILL_RUN_MS));
+            if (after_seed) {
+                after_seed ();
+            }
+        }
+        ++submitted;
+        ++context->requests_sent;
+        return true;
+    }
+};
+
+size_t final_refill_ramp (int64_t elapsed_ms) {
+    return vayu::core::ramp_target_concurrency (
+    FINAL_REFILL_START, FINAL_REFILL_TARGET, FINAL_REFILL_RUN_MS, elapsed_ms);
+}
+
+size_t unbounded_budget () {
+    return std::numeric_limits<size_t>::max ();
+}
+
+} // namespace
+
+// #2913: the controller reads its target only when it wakes, so a run whose
+// last wake fell before the ramp's final tick ended short of the target. Here
+// no wake lands inside the run, and the final refill at the run's last instant
+// alone takes it to the target, and no further. Mutation check: drop the final
+// refill in `maintain_concurrency` and only the seed's one is submitted.
+TEST (MaintainConcurrency, ARunTheClockEndsIsRefilledToTheTargetAtItsLastInstant) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-final-refill", nlohmann::json{ { "mode", "ramp_up" } });
+    CountingSubmitter submitter{ context, {} };
+
+    vayu::core::maintain_concurrency (
+    context, std::ref (submitter), final_refill_ramp, unbounded_budget,
+    [] (int64_t el) { return el < FINAL_REFILL_RUN_MS; }, {}, FINAL_REFILL_RUN_MS);
+
+    EXPECT_EQ (submitter.submitted, FINAL_REFILL_TARGET);
+    EXPECT_EQ (context->peak_in_flight.load (), FINAL_REFILL_TARGET);
+}
+
+// The final refill is owed only to a run the clock ended. A loop that leaves
+// on its own predicate before `run_end_ms` (an exhausted budget, say) sends
+// nothing after it. Mutation check: drop the `el >= *run_end_ms` guard and
+// the whole target is submitted.
+TEST (MaintainConcurrency, ARunItsOwnPredicateEndsEarlyGetsNoFinalRefill) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-no-final-refill", nlohmann::json{ { "mode", "ramp_up" } });
+    CountingSubmitter submitter{ context, {} };
+    size_t checks = 0;
+
+    // Run end an hour out: the predicate, never the clock, ends this loop.
+    constexpr int64_t HOUR_MS = 3600000;
+    vayu::core::maintain_concurrency (
+    context, std::ref (submitter), final_refill_ramp, unbounded_budget,
+    [&checks] (int64_t) { return checks++ == 0; }, {}, HOUR_MS);
+
+    EXPECT_EQ (submitter.submitted, 1u);
+}
+
+// A stop owes nothing more, even once the run's end has passed.
+TEST (MaintainConcurrency, AStoppedRunGetsNoFinalRefill) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-stopped-final-refill", nlohmann::json{ { "mode", "ramp_up" } });
+    CountingSubmitter submitter{ context,
+        [&context] () { context->should_stop = true; } };
+
+    vayu::core::maintain_concurrency (
+    context, std::ref (submitter), final_refill_ramp, unbounded_budget,
+    [] (int64_t el) { return el < FINAL_REFILL_RUN_MS; }, {}, FINAL_REFILL_RUN_MS);
+
+    EXPECT_EQ (submitter.submitted, 1u);
 }
 
 // Behavior-change check: duration < ramp runs a partial ramp for the full
@@ -291,6 +427,39 @@ TEST_F (LoadStrategyTest, ConstantConcurrencyCarryingARateStaysClosedLoop) {
     EXPECT_EQ (context->requests_expected.load (), 0u)
     << "ran the open-loop path";
     EXPECT_GT (context->requests_sent.load (), 0u);
+}
+
+// The open-loop pacer records the in-flight high-water mark itself (#2912),
+// not only through the 1 Hz sample, which a direct `execute` never starts.
+// At 100 RPS against a target that holds every answer 500ms, nothing settles
+// for the first 500ms, so ~50 are in flight at every submission after that,
+// however slow the runner (a late tick submits its backlog at once). Healthy
+// reads ~50, broken reads 0; 25 sits between. Mutation check: drop the
+// `update_peak` call in `submit_due` and this reads 0.
+TEST_F (LoadStrategyTest, ConstantRpsRecordsPeakInFlightAtSubmission) {
+    const nlohmann::json config = { { "mode", "constant_rps" },
+        { "duration", "1s" }, { "targetRps", 100.0 } };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-rps-peak", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    ASSERT_NE (strategy, nullptr);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_FALSE (context->closed_loop.load ()) << "ran the closed-loop path";
+    EXPECT_GE (context->peak_in_flight.load (), 25u)
+    << "constant_rps left peakConcurrency to the 1 Hz sample";
 }
 
 // Through `start_run`, so `configure_event_loop` builds the loop. One worker,

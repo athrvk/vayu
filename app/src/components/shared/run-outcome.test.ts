@@ -12,6 +12,10 @@
  * Mutation check: make `judgeRun` answer `passed` for a missed budget and the
  * missed-budget, verdict-only and failed-status rows redden; drop the
  * `errors` branch of the met case and the met-with-errors row reddens.
+ *
+ * Failed assertions (#2820): make `judgeRun` ignore `assertionsFailed` and every
+ * assertion row, and both wrapper tests, redden; make `reportOutcome` or
+ * `rowOutcome` stop passing it and only that wrapper's test reddens.
  */
 
 import { describe, it, expect } from "vitest";
@@ -171,6 +175,61 @@ const CASES: Array<[name: string, input: RunOutcomeInput, expected: unknown]> = 
 		{ status: "completed", errorRate: 3 },
 		{ outcome: "not-judged", reason: "No budgets set. 3.0% errors" },
 	],
+	// A run whose assertions all failed against 200s has 0% errors and its latency
+	// budget met: never green, and not "failed" either, which is a declared line.
+	[
+		"budgets met at 0% errors but assertions failed is not a pass",
+		{
+			status: "completed",
+			thresholdValidation: budgets(["latencyP95Ms", true]),
+			errorRate: 0,
+			assertionsFailed: 4580,
+		},
+		{ outcome: "not-judged", reason: "The budget was met, but 4,580 assertions failed" },
+	],
+	[
+		"budgets met with both errors and failed assertions names both",
+		{
+			status: "completed",
+			thresholdValidation: THREE_MET,
+			errorRate: 15.1,
+			assertionsFailed: 2,
+		},
+		{
+			outcome: "not-judged",
+			reason: "All 3 budgets met, but 15.1% errors, 2 assertions failed",
+		},
+	],
+	[
+		"a row verdict of passed with failed assertions is not a pass",
+		{ status: "completed", verdict: "passed", errorRate: 0, assertionsFailed: 7 },
+		{ outcome: "not-judged", reason: "All budgets met, but 7 assertions failed" },
+	],
+	[
+		"no budgets, 0% errors and failed assertions",
+		{ status: "completed", errorRate: 0, assertionsFailed: 4580 },
+		{ outcome: "not-judged", reason: "No budgets set. 0.0% errors, 4,580 assertions failed" },
+	],
+	[
+		"a single failed assertion is singular",
+		{ status: "completed", errorRate: 0, assertionsFailed: 1 },
+		{ outcome: "not-judged", reason: "No budgets set. 0.0% errors, 1 assertion failed" },
+	],
+	[
+		"failed assertions with no error rate recorded",
+		{ status: "completed", assertionsFailed: 3 },
+		{ outcome: "not-judged", reason: "No budgets set. 3 assertions failed" },
+	],
+	[
+		"zero failed assertions changes nothing",
+		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0, assertionsFailed: 0 },
+		{ outcome: "passed", reason: "All 3 budgets met" },
+	],
+	[
+		"a missed budget stays failed and does not take the assertion count",
+		{ status: "completed", thresholdValidation: TWO_OF_FOUR_MISSED, assertionsFailed: 9 },
+		{ outcome: "failed", reason: "2 of 4 budgets missed: p95, throughput" },
+	],
 	["a pending run has nothing to say", { status: "pending" }, null],
 	["a running run has nothing to say", { status: "running", errorRate: 50 }, null],
 	["a status this build does not know has nothing to say", { status: "queued" }, null],
@@ -224,6 +283,25 @@ describe("reportOutcome", () => {
 		});
 	});
 
+	it("reads the report's exact assertions, so a clean-HTTP run with failures is not a pass", () => {
+		const withFailures = report({
+			thresholdValidation: THREE_MET,
+			scenario: { assertions: { passed: 10, failed: 4580 } },
+		} as Partial<RunReport>);
+		expect(reportOutcome(withFailures)).toEqual({
+			outcome: "not-judged",
+			reason: "All 3 budgets met, but 4,580 assertions failed",
+		});
+	});
+
+	it("leaves a scenario report with no assertions block as it was", () => {
+		const without = report({
+			thresholdValidation: THREE_MET,
+			scenario: { passed: 3 },
+		} as Partial<RunReport>);
+		expect(reportOutcome(without)?.outcome).toBe("passed");
+	});
+
 	it("says nothing for a missing report, or one that does not say how the run ended", () => {
 		expect(reportOutcome(undefined)).toBeNull();
 		expect(reportOutcome(null)).toBeNull();
@@ -260,6 +338,24 @@ describe("rowOutcome", () => {
 				row({ resultSummary: { rps: 485, p95Ms: 42, errorRate: 0, verdict: "failed" } })
 			)
 		).toEqual({ outcome: "failed", reason: "Budgets missed" });
+	});
+
+	it("reads the row's failed assertions, the same verdict the report gives", () => {
+		expect(
+			rowOutcome(
+				row({
+					resultSummary: {
+						errorRate: 0,
+						verdict: "passed",
+						assertionsPassed: 10,
+						assertionsFailed: 4580,
+					},
+				})
+			)
+		).toEqual({
+			outcome: "not-judged",
+			reason: "All budgets met, but 4,580 assertions failed",
+		});
 	});
 
 	it("says nothing for a load row with no summary, so the status glyph stays", () => {

@@ -549,6 +549,49 @@ TEST_F (RunExportTest, MarkdownIsTextMarkdownNamedAfterTheRun) {
     EXPECT_NE (text.find ("| Error rate "), std::string::npos) << text;
 }
 
+// #2905: a run whose summary is partial, or missing, says so in all three
+// formats; a completed run says neither. Mutation check: drop "partial" and
+// "summaryMissing" from SUMMARY_KEYS and the JSON and the two text formats fail.
+TEST_F (RunExportTest, AReconciledRunSaysSoInEveryFormat) {
+    struct Case {
+        std::string id;
+        vayu::RunStatus status;
+        json summary;
+        /// The summary flag the document carries, and the text both renderers
+        /// open with for it; both empty for a run that carries none.
+        std::string flag;
+        std::string notice;
+    };
+    const std::array<Case, 3> cases = { {
+    { "run_partial", vayu::RunStatus::Failed,
+    json{ { "partial", true }, { "total_requests", 40 }, { "test_duration", 4.0 } },
+    "partial", "Partial run:" },
+    { "run_missing", vayu::RunStatus::Failed, json (), "summaryMissing", "No summary was recorded" },
+    { "run_whole", vayu::RunStatus::Completed,
+    json{ { "total_requests", 10 }, { "test_duration", 60.0 } }, "", "" },
+    } };
+    for (const Case& c : cases) {
+        seed_run (c.id, vayu::RunType::Load, c.status,
+        json{ { "url", "https://x.test/a" }, { "method", "GET" } }, c.summary);
+        const json summary =
+        export_ok (json{ { "runId", c.id } }).second["report"]["summary"];
+        for (const std::string key : { "partial", "summaryMissing" }) {
+            EXPECT_EQ (summary.contains (key), key == c.flag) << c.id << " " << key;
+        }
+        for (const char* format : { "markdown", "html" }) {
+            const auto [status, envelope] = export_run_report_response (
+            *db_, json{ { "runId", c.id }, { "format", format } });
+            ASSERT_EQ (status, 200) << envelope.dump ();
+            const std::string text = envelope["text"].get<std::string> ();
+            const bool says_so =
+            !c.notice.empty () && text.find (c.notice) != std::string::npos;
+            EXPECT_EQ (says_so, !c.notice.empty ()) << c.id << " " << format;
+            EXPECT_EQ (text.find ("Partial run:") != std::string::npos, c.flag == "partial")
+            << c.id << " " << format;
+        }
+    }
+}
+
 TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheMarkdown) {
     seed_leak_run ("run_leak");
     seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);
@@ -598,7 +641,12 @@ TEST_F (RunExportTest, RefusesAMalformedBody) {
 
 // --- the builder, without a database -----------------------------------------
 
-RunExportRun judged_run (const std::string& status, const json& thresholds, double error_rate) {
+/// @p assertions is the scenario's exact population (`{passed, failed}`); null
+/// leaves the report without a `scenario` section, as a single-request run has.
+RunExportRun judged_run (const std::string& status,
+const json& thresholds,
+double error_rate,
+const json& assertions = json ()) {
     RunExportRun run;
     run.id     = "run_v";
     run.status = status;
@@ -606,6 +654,9 @@ RunExportRun judged_run (const std::string& status, const json& thresholds, doub
     json{ { "summary", { { "totalRequests", 10 }, { "errorRate", error_rate } } } };
     if (!thresholds.is_null ()) {
         run.report["thresholdValidation"] = thresholds;
+    }
+    if (!assertions.is_null ()) {
+        run.report["scenario"] = { { "assertions", assertions } };
     }
     return run;
 }
@@ -645,6 +696,41 @@ TEST (RunExportBuilder, VerdictFollowsTheBudgetsAndTheStatus) {
         EXPECT_EQ (verdict["state"], c.state) << c.status << " " << c.reason;
         EXPECT_EQ (verdict["reason"], c.reason) << c.status;
         EXPECT_EQ (verdict["stoppedEarly"], c.status == "stopped");
+    }
+}
+
+/// A failed exact assertion keeps met budgets from reading `passed`, as
+/// `judgeRun` does (#2820). Mutation check: drop `any_assertion_failed` from
+/// `verdict_section` and the first two rows answer `passed`/`budgets_met`.
+TEST (RunExportBuilder, FailedAssertionsKeepMetBudgetsFromPassing) {
+    const json met = { { "checks", json::array ({ { { "metric", "latencyP99Ms" } } }) },
+        { "passed", 1 }, { "failed", 0 }, { "verdict", "passed" } };
+    const json some_failed = { { "passed", 8352 }, { "failed", 68 } };
+    const json none_failed = { { "passed", 8420 }, { "failed", 0 } };
+    struct Case {
+        std::string status;
+        json thresholds;
+        double error_rate;
+        json assertions;
+        std::string state;
+        std::string reason;
+    };
+    const auto cases = std::to_array<Case> ({
+    { "completed", met, 0.0, some_failed, "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.0, json{ { "passed", 0 }, { "failed", 4580 } },
+    "not_judged", "budgets_met_with_assertion_failures" },
+    { "completed", met, 0.4, some_failed, "not_judged", "budgets_met_with_errors" },
+    { "completed", met, 0.0, none_failed, "passed", "budgets_met" },
+    { "completed", met, 0.0, json (), "passed", "budgets_met" },
+    { "completed", met, 0.0, json::object (), "passed", "budgets_met" },
+    { "completed", json (), 0.0, some_failed, "not_judged", "no_budgets" },
+    { "stopped", met, 0.0, some_failed, "not_judged", "stopped" },
+    });
+    for (const Case& c : cases) {
+        const json verdict =
+        verdict_of (judged_run (c.status, c.thresholds, c.error_rate, c.assertions));
+        EXPECT_EQ (verdict["state"], c.state) << c.reason << " " << c.assertions;
+        EXPECT_EQ (verdict["reason"], c.reason) << c.assertions;
     }
 }
 

@@ -1511,8 +1511,11 @@ TEST_F (ScenarioRunnerTest, ThinningIsDisclosedRatherThanPresentedAsComplete) {
     EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 6u);
     EXPECT_EQ (scenario["steps_stored"].get<size_t> (), 3u);
     EXPECT_EQ (scenario["steps_dropped"].get<size_t> (), 3u);
-    // The report counts the run's real size, not the rows that survived.
-    EXPECT_EQ (summary_of (run_id)["total_requests"].get<size_t> (), 6u);
+    // The report counts the run's real size, not the rows that survived, and
+    // reads its distribution from the summary for the same reason (#2822).
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 6u);
+    EXPECT_EQ (summary["status_codes"], (json{ { "200", 6 } })) << summary.dump ();
 }
 
 // ============================================================================
@@ -1796,6 +1799,45 @@ TEST_F (ScenarioRunnerTest, SkipRequestSendsNothingAndIsNeverCountedAsAPass) {
     EXPECT_EQ (scenario["passed"].get<size_t> (), 1u);
     EXPECT_EQ (scenario["failed"].get<size_t> (), 0u);
     EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// #2822: a skipped step is a step, not a request. The summary counts the
+// requests that went out and stores their distribution, so the report has no
+// reason to read the skipped step's status-0 row as a failure.
+// Mutation check: store `total_requests = steps_executed` in
+// `build_scenario_summary_payload` and the total fails.
+TEST_F (ScenarioRunnerTest, ASkippedStepIsInNeitherTheRequestCountNorTheDistribution) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", R"(pm.execution.skipRequest();)");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    ASSERT_EQ (server_->requests ().size (), 2u);
+
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["scenario"]["steps_executed"].get<size_t> (), 4u);
+    EXPECT_EQ (summary["scenario"]["skipped"].get<size_t> (), 2u);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 2u);
+    EXPECT_EQ (summary["status_codes"], (json{ { "200", 2 } })) << summary.dump ();
+}
+
+// The other side of the same line: a request that went out and got no answer
+// is a request, recorded under status 0 like the load path records it.
+// Mutation check: count only 2xx in the tally; the status 0 entry goes missing.
+TEST_F (ScenarioRunnerTest, ARefusedConnectionIsAStatusZeroRequestInTheSummary) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    // Nothing listens on port 1; the send fails to connect rather than hanging.
+    seed_request ("req_dead", 1, "", "", "", "http://127.0.0.1:1/never");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 2u);
+    EXPECT_EQ (summary["status_codes"], (json{ { "0", 1 }, { "200", 1 } }))
+    << summary.dump ();
 }
 
 TEST_F (ScenarioRunnerTest, SkipRequestInATestScriptFailsTheStepRatherThanPretending) {
@@ -2085,11 +2127,16 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     inputs.steps_not_run        = 7;
     inputs.stop_on_error        = true;
     inputs.duration_s           = 2.0;
+    // Nine of the eleven steps sent; the other two are counted as steps only.
+    inputs.status_codes = { { 200, 6 }, { 500, 2 }, { 0, 1 } };
 
     auto summary = vayu::core::build_scenario_summary_payload (inputs);
-    EXPECT_EQ (summary["total_requests"].get<size_t> (), 11u);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 9u);
+    EXPECT_EQ (summary["status_codes"],
+    (nlohmann::json{ { "0", 1 }, { "200", 6 }, { "500", 2 } }))
+    << summary.dump ();
     EXPECT_DOUBLE_EQ (summary["test_duration"].get<double> (), 2.0);
-    EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 5.5);
+    EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 4.5);
 
     const auto& scenario = summary["scenario"];
     EXPECT_EQ (scenario["iterations"].get<size_t> (), 4u);
@@ -2122,9 +2169,27 @@ TEST (ScenarioSummaryPayload, CoverageIsItsOwnSectionAndAbsentWhenNotMeasured) {
     EXPECT_FALSE (summary["scenario"].contains ("coverage"));
 }
 
+// A run in which no step sent stores an empty distribution rather than none:
+// the report reads an absent key as a summary stored before #2822 and falls
+// back to the rows. Mutation check: write `status_codes` only when non-empty
+// and this fails.
+TEST (ScenarioSummaryPayload, ARunInWhichNoStepSentStoresAnEmptyDistribution) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 3;
+    inputs.skipped        = 3;
+    inputs.duration_s     = 1.0;
+    const auto summary    = vayu::core::build_scenario_summary_payload (inputs);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 0u);
+    ASSERT_TRUE (summary.contains ("status_codes")) << summary.dump ();
+    EXPECT_TRUE (summary["status_codes"].is_object ());
+    EXPECT_TRUE (summary["status_codes"].empty ());
+    EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 0.0);
+}
+
 TEST (ScenarioSummaryPayload, AZeroLengthRunReportsNoRateRatherThanDividingByZero) {
     vayu::core::ScenarioSummaryInputs inputs;
     inputs.steps_executed = 3;
+    inputs.status_codes   = { { 200, 3 } };
     auto summary          = vayu::core::build_scenario_summary_payload (inputs);
     EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 0.0);
 }

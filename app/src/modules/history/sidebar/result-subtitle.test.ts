@@ -26,6 +26,11 @@ afterAll(restoreIntl);
 
 import { resultSubtitle } from "./result-subtitle";
 
+/**
+ * Mutation check (#2820): drop the `assertionsFailed` push in `resultSubtitle`
+ * and the three assertion rows redden.
+ */
+
 describe("resultSubtitle", () => {
 	it.each([
 		[{ rps: 485.2, p95Ms: 42, errorRate: 0 }, "485 req/s · p95 42ms · 0.0% errors"],
@@ -35,6 +40,14 @@ describe("resultSubtitle", () => {
 		[{ errorRate: 0.01 }, "<0.1% errors"],
 		[{ verdict: "passed" as const }, null],
 		[{}, null],
+		[
+			{ rps: 485, p95Ms: 42, errorRate: 0, assertionsPassed: 10, assertionsFailed: 4580 },
+			"485 req/s · p95 42ms · 0.0% errors · 4,580 assertions failed",
+		],
+		[{ errorRate: 0, assertionsFailed: 1 }, "0.0% errors · 1 assertion failed"],
+		[{ assertionsFailed: 4580 }, "4,580 assertions failed"],
+		// Zero failed is not worth a clause, and passed alone is never printed.
+		[{ errorRate: 0, assertionsPassed: 10, assertionsFailed: 0 }, "0.0% errors"],
 	])("%j reads %j", (summary, line) => {
 		expect(resultSubtitle(summary)).toBe(line);
 	});

@@ -712,6 +712,65 @@ TEST_F (ScenarioLoadTest, AnErroredStepEndsItsIterationWithoutStrandingTheVirtua
     EXPECT_EQ (state->steps_errored.load (), 3u);
 }
 
+// #2914: every iteration abandons at step 0, so step 1 is never sent. The
+// start-of-run expected count (iterations x steps = 20) is only an upper bound;
+// a natural end settles it to what was sent, so progress reaches 100%.
+// Mutation check: drop the settling assignment at the end of
+// `execute_scenario_load` and `requestsExpected` stays 20.
+TEST_F (ScenarioLoadTest, AnAbandonedIterationSettlesTheExpectedCountToWhatWasSent) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ "http://127.0.0.1:1/unreachable", server.url ("/s1") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 10 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    EXPECT_EQ (state->iterations_abandoned.load (), 10u);
+    EXPECT_EQ (context_->requests_sent.load (), 10u);
+    EXPECT_EQ (context_->requests_expected.load (), context_->requests_sent.load ())
+    << "a natural end left the upper bound in place, so progress stops short "
+       "of 100%";
+}
+
+// #2914: a stopped run keeps the start-of-run upper bound, which is what it
+// fell short of. Mutation check: drop the `should_stop` guard on the settling
+// assignment and `requestsExpected` drops to the sent count.
+TEST_F (ScenarioLoadTest, AStoppedIterationsRunKeepsTheExpectedUpperBound) {
+    vayu::tests::SlowMockServer upstream;
+    auto execution = plan_over ({ upstream.hang_url (), upstream.hang_url () });
+    for (auto& step : execution.plan.steps) {
+        step.request.timeout_ms = 120000;
+    }
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1000 },
+        { "concurrency", 2 } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-stop-expected", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    std::thread stopper ([&context] () {
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&context] () { return context->event_loop->active_count () >= 2; }))
+        << "both virtual users never had a transfer in flight";
+        context->should_stop = true;
+        context->notify_refill ();
+    });
+    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto state = vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+    stopper.join ();
+    context->event_loop->stop (false);
+
+    ASSERT_GT (context->requests_sent.load (), 0u)
+    << "nothing was sent; nothing is proven";
+    EXPECT_EQ (context->requests_expected.load (), 2000u)
+    << "a stopped run's expected count was settled to what it sent";
+}
+
 // #2136: a step a user Stop cancelled neither ran nor failed. It is counted as
 // cancelled and moves no step tally - no step error, no abandoned iteration,
 // no coverage send - while its virtual user is still released.
@@ -2117,6 +2176,72 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsPmTestCallsAreTalliedSeparatelyFromItsE
     EXPECT_EQ (summary["steps"][0]["elements"][0]["failed"], 1);
 }
 
+// #2820: the exact population reaches the report, beside the HTTP figures it is
+// not folded into. The second step asserts text no `/echo` body holds, so each
+// iteration fails it once while every response is a 200. Mutation check: drop
+// the `assertions` write in `collect_summary_inputs` and the key is missing.
+TEST_F (ScenarioLoadTest, AFailingAssertContainsReachesTheReportsScenarioAssertions) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo"), server.url ("/echo") });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { json{ { "id", "el_contains" }, { "kind", "assert.contains" }, { "enabled", true },
+    { "config", { { "field", "body" }, { "text", "never in the body" } } } } });
+
+    constexpr size_t ITERATIONS = 4;
+    const json report           = run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
+    const json& scenario = report.at ("scenario");
+    EXPECT_EQ (scenario.value ("assertions", json ()),
+    (json{ { "passed", 0 }, { "failed", ITERATIONS } }))
+    << scenario.dump ();
+    EXPECT_DOUBLE_EQ (report.at ("summary").at ("errorRate").get<double> (), 0.0);
+    EXPECT_EQ (scenario.at ("passed").get<size_t> (), 2 * ITERATIONS)
+    << "`passed` stays the HTTP count";
+}
+
+// An inline script's `pm.test` is in the exact population; an un-inlined one is
+// the deferred replay's, reported under `testValidation` and kept out of it.
+// Mutation check: add `validation.run` to the figure in `collect_summary_inputs`
+// and `failed` reads 6.
+TEST_F (ScenarioLoadTest, ScenarioAssertionsCountAnInlinePmTestAndNotADeferredOne) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo"), server.url ("/echo") });
+    const std::string failing =
+    "pm.test('fails', function () { pm.expect(1).to.equal(2); });";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_inline", "script.post", failing,
+    /*inline_script=*/true) });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_deferred", "script.post", failing) });
+
+    constexpr size_t ITERATIONS = 3;
+    const json report =
+    run_to_report (json{ { "mode", "iterations" }, { "iterations", ITERATIONS },
+                   { "concurrency", 1 }, { "response_sample_rate", 1 } },
+    execution);
+    EXPECT_EQ (report.at ("scenario").value ("assertions", json ()),
+    (json{ { "passed", 0 }, { "failed", ITERATIONS } }))
+    << report.at ("scenario").dump ();
+    ASSERT_TRUE (report.contains ("testValidation"))
+    << "the deferred replay never ran";
+    EXPECT_GT (report["testValidation"].value ("testsFailed", 0), 0)
+    << report["testValidation"].dump ();
+}
+
+// A run that asserted nothing has no figure, never `{0, 0}`. Mutation check:
+// drop the `total () > 0` guard in `collect_summary_inputs` and the key appears.
+TEST_F (ScenarioLoadTest, AScenarioRunThatAssertedNothingHasNoScenarioAssertions) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/echo"), server.url ("/echo") });
+
+    const json report = run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    ASSERT_TRUE (report.contains ("scenario")) << report.dump ();
+    EXPECT_FALSE (report.at ("scenario").contains ("assertions"))
+    << report.at ("scenario").dump ();
+}
+
 // ============================================================================
 // Data rows in load mode (issue #449)
 // ============================================================================
@@ -2581,6 +2706,36 @@ TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
     << "in-flight exceeded the virtual-user count, so a VU sent two steps at "
        "once";
     EXPECT_GT (state->steps_executed.load (), 0u);
+}
+
+// #2913: the scenario controller shares the ramp, so a ramp as long as the run
+// reaches its last virtual user at the end rather than stopping one short.
+// `/hang` answers nothing while the run lasts, so no virtual user finishes a
+// step and the peak is what the controller started, with no completion to race
+// it. The final refill (`MaintainConcurrency` in load_strategy_test.cpp) is
+// what holds this when no wake lands in the ramp's last tick. Driven here
+// rather than through `run`, whose drain would wait out every held transfer.
+TEST_F (ScenarioLoadTest, ARampAsLongAsTheRunPeaksAtTheConfiguredUserCount) {
+    vayu::tests::SlowMockServer upstream;
+    const auto execution = plan_over ({ upstream.hang_url () });
+
+    const size_t VUS  = 8;
+    const json config = { { "mode", "ramp_up" }, { "duration", "1s" },
+        { "rampUpDuration", "1s" }, { "startConcurrency", 1 }, { "concurrency", VUS } };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-scenario-ramp-end", config);
+    context->scenario = std::make_shared<const vayu::core::ScenarioExecution> (execution);
+    context->event_loop = std::make_unique<vayu::http::EventLoop> ();
+    context->event_loop->start ();
+
+    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto state = vayu::core::execute_scenario_load (
+    context, *db_, *context->scenario, std::move (base_scopes));
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (state->vus.size (), VUS);
+    EXPECT_EQ (context->peak_in_flight.load (), VUS);
 }
 
 // #2821: a virtual user in a think wait has nothing on the wire, so the run's

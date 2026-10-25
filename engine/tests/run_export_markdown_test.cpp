@@ -216,6 +216,37 @@ TEST (RunExportMarkdownTest, TheVerdictSaysWhatTheDocumentDecidedNotWhatItRecomp
     EXPECT_NE (text.find ("**Passed** - 3 of 3 budgets met"), std::string::npos) << text;
 }
 
+// Mutation check: make `assertions_failed_text` answer empty and the first
+// three expectations fail.
+TEST (RunExportMarkdownTest, TheVerdictNamesFailedAssertionsWithAndWithoutErrors) {
+    ordered_json document         = read_document ("healthy-passed");
+    document["verdict"]["state"]  = "not_judged";
+    document["verdict"]["reason"] = "budgets_met_with_assertion_failures";
+    document["report"]["scenario"]["assertions"] = { { "passed", 0 }, { "failed", 4580 } };
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "**Not judged** - 3 of 3 budgets met, but 4,580 assertions failed\n"),
+    std::string::npos);
+
+    document["report"]["scenario"]["assertions"]["failed"] = 1;
+    EXPECT_NE (render_run_export_markdown (document).find (
+               "budgets met, but 1 assertion failed\n"),
+    std::string::npos);
+
+    document["verdict"]["reason"]              = "budgets_met_with_errors";
+    document["report"]["summary"]["errorRate"] = 0.4;
+    EXPECT_NE (
+    render_run_export_markdown (document).find (
+    "budgets met, but 0.4% of requests errored, 1 assertion failed\n"),
+    std::string::npos);
+
+    document["report"]["scenario"]["assertions"]["failed"] = 0;
+    const std::string errors_only = render_run_export_markdown (document);
+    EXPECT_NE (errors_only.find ("budgets met, but 0.4% of requests errored\n"),
+    std::string::npos);
+    EXPECT_EQ (errors_only.find ("assertion"), std::string::npos);
+}
+
 TEST (RunExportMarkdownTest, NamesTheMissedBudgetsWithTheirFigures) {
     const std::string text =
     render_run_export_markdown (read_document ("errors-and-budget-failed"));
@@ -319,6 +350,54 @@ TEST (RunExportMarkdownTest, AStoppedRunSaysHowFarItGot) {
     std::string::npos)
     << text;
     EXPECT_NE (text.find ("<= 80 ms - not evaluated"), std::string::npos) << text;
+}
+
+constexpr std::string_view PARTIAL_NOTICE =
+"Partial run: the engine stopped before this run finished, so the totals are "
+"the "
+"last saved tick's and every latency figure is 0, not a measurement.";
+constexpr std::string_view SUMMARY_MISSING_NOTICE =
+"No summary was recorded for this run, so the counts are not whole-run totals "
+"and "
+"the latency figures are not measurements.";
+
+/// The verdict line of a rendered report, `**Passed** - ...` up to its newline.
+std::string verdict_line_of (const std::string& text) {
+    const auto at = text.find ("**");
+    return at == std::string::npos ? std::string () :
+                                     text.substr (at, text.find ('\n', at) - at);
+}
+
+// #2905: a reconciled or summaryless run says its figures are not a
+// measurement, directly under the verdict. Mutation check: drop the notices
+// loop from `verdict_block` and this fails.
+TEST (RunExportMarkdownTest, AReconciledRunSaysSoUnderTheVerdict) {
+    const ordered_json healthy = read_document ("healthy-passed");
+    const std::string plain    = render_run_export_markdown (healthy);
+    const std::string verdict  = verdict_line_of (plain);
+    ASSERT_FALSE (verdict.empty ());
+    EXPECT_EQ (plain.find ("Partial run"), std::string::npos) << plain;
+    EXPECT_EQ (plain.find ("No summary was recorded"), std::string::npos) << plain;
+
+    const auto rendered = [&] (bool partial, bool missing) {
+        ordered_json document = healthy;
+        if (partial) {
+            document["report"]["summary"]["partial"] = true;
+        }
+        if (missing) {
+            document["report"]["summary"]["summaryMissing"] = true;
+        }
+        return render_run_export_markdown (document);
+    };
+    const std::string partial = std::string (PARTIAL_NOTICE);
+    const std::string missing = std::string (SUMMARY_MISSING_NOTICE);
+    EXPECT_NE (rendered (true, false).find (verdict + "\n\n" + partial + "\n\n## Run"),
+    std::string::npos);
+    EXPECT_NE (rendered (false, true).find (verdict + "\n\n" + missing + "\n\n## Run"),
+    std::string::npos);
+    EXPECT_NE (rendered (true, true).find (verdict + "\n\n" + partial + "\n\n" + missing + "\n\n## Run"),
+    std::string::npos);
+    EXPECT_EQ (rendered (true, false).find (missing), std::string::npos);
 }
 
 TEST (RunExportMarkdownTest, TheStoppedRunReadsItsPlannedDurationLikeTheRunDoes) {

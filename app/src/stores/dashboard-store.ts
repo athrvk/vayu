@@ -11,6 +11,7 @@ import { create } from "zustand";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 import {
 	breakpointAt,
+	computeBreakpoint,
 	notCrossed,
 	type Breakpoint,
 } from "@/modules/dashboard/utils/computeBreakpoint";
@@ -56,6 +57,22 @@ export interface LoadTestRunConfig {
 	dataFileHash?: string;
 	/** Whether its numbers were read as numbers (issue #2540); absent means read as text. */
 	dataFileCastNumbers?: boolean;
+	/** A capacity run's own p99 budget (ms), the search's stop line; absent in every other mode. */
+	sloMs?: number;
+}
+
+/**
+ * The SLO (ms) a run's breakpoint is judged against: a capacity run's own, which
+ * its search stopped on, and the Settings SLO for every other mode. A capacity
+ * run judged by the Settings line would draw one budget on the Capacity summary
+ * and another on the Saturation card and the chart.
+ */
+function runOwnSloMs(config: LoadTestRunConfig | null): number | undefined {
+	return config?.mode === "capacity" ? config.sloMs : undefined;
+}
+
+function sloMsFor(config: LoadTestRunConfig | null): number {
+	return runOwnSloMs(config) ?? useClientSettingsStore.getState().sloThresholdMs;
 }
 
 /**
@@ -227,16 +244,21 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			requestInfo: requestInfo ?? null,
 			sourceRequestId: sourceRequestId ?? null,
 			peakConcurrency: 0,
-			breakpoint: notCrossed(useClientSettingsStore.getState().sloThresholdMs),
+			breakpoint: notCrossed(sloMsFor(config ?? null)),
 			p99AtPeakMs: undefined,
 			dispatchLagSinceSeconds: null,
 		}),
 
 	setRunConfig: (config, requestInfo) =>
-		set((state) => ({
-			loadTestConfig: config,
-			requestInfo: requestInfo ?? state.requestInfo,
-		})),
+		set((state) => {
+			const patch = { loadTestConfig: config, requestInfo: requestInfo ?? state.requestInfo };
+			// A run started elsewhere (an MCP agent's) streams ticks before its config
+			// is read, so they were judged against the Settings SLO. A capacity run's
+			// own line replaces that verdict, from the ticks still retained.
+			const ownSloMs = runOwnSloMs(config);
+			if (ownSloMs === undefined || ownSloMs === state.breakpoint.sloMs) return patch;
+			return { ...patch, breakpoint: computeBreakpoint(state.historicalMetrics, ownSloMs) };
+		}),
 
 	stopRun: () =>
 		set({
@@ -284,7 +306,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			// restarts whenever the peak rises, and the lag streak restarts whenever
 			// the windowed rates agree again - so we walk each batch entry exactly
 			// once, never the full history.
-			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
+			const sloMs = sloMsFor(state.loadTestConfig);
 			let lagSince = state.dispatchLagSinceSeconds;
 			let peakReading = { peak: state.peakConcurrency, p99Ms: state.p99AtPeakMs };
 			// An uncrossed breakpoint names the SLO it is being judged against, so a

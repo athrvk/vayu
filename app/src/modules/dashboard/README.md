@@ -173,9 +173,32 @@ consumes it.
   so there was no crossing, and the percentile chart's horizontal SLO line,
   drawn whether or not p99 reached it, carries the message. The store latches
   the flag with the breakpoint; History's `computeBreakpoint` sets it over its
-  own series, where on a bucketed run it means the first bucket. The Saturation
-  card's call-out names the same SLO ("p99 crossed 203ms (the 200ms SLO) at 19
-  virtual users").
+  own series, where on a bucketed run it means the first bucket. The ramp's
+  Saturation card's call-out names the same SLO ("p99 crossed 203ms (the 200ms
+  SLO) at 19 virtual users"). Which SLO that is: a `capacity` run's own `sloMs` (live, from
+  the start config; stored, from `report.capacity.sloMs`), the Settings
+  threshold in every other mode. Every SLO line and tile reads it back through
+  `useSloMs(breakpoint)`, so the Settings value never moves a capacity run's
+  lines.
+- **A capacity run's Saturation card reads the search's stop reason, and never
+  says "healthy"** (#2816). `ramp_up` keeps `SaturationCard` ("healthy" /
+  "degrading" off the ticks); `capacity` mounts `CapacitySaturationCard`, because
+  a search that ran out of ceiling has not shown the target healthy. The engine
+  records why a search ended only in the report, so `DashboardDerived.capacity`
+  is set by `reportToDerived` and absent live: a live run reads **searching**
+  (the ticks' p99 crossing the run's SLO shown beneath as evidence, and any error
+  count) until the dashboard swaps to the report, where the stop reason is read
+  from the same `STOP_REASONS` table the Capacity summary words its badge from
+  (`components/shared/capacityStop.ts`). `slo_exceeded` and `errors_exceeded`
+  read **degrading** ("p99 crossed 230ms (the 200ms SLO) at 41 virtual users",
+  "12.5% of requests failed at 30 virtual users", from the knee the search
+  recorded, so a search whose first level already broke the budget still names
+  it); `plateau` reads **saturated** at the engine's `saturation*` level;
+  `cap_reached`, `deadline` and `stopped` read **no limit found**, in the neutral
+  foreground colour, because a floor is not a verdict. A report without the
+  section, or a reason this build has no words for, reads **no result**. Errors
+  that were not the stop reason never colour the card but are named on a line of
+  their own ("3 errors"), so the card cannot turn on without saying why.
 - **A tick's rates and means cover its trailing second, and the run-cumulative
   ones stay on the hero cards** (#2393). The engine reads one trailing window
   (at least a second) per tick, and a live frame and a stored row carry the
@@ -193,6 +216,15 @@ consumes it.
   has the figure, and a tick with no window latency (absent or `null`) adds no
   point to the latency chart. The ETA reads the live `current_rps`, so it
   follows the last second rather than the last 100 ms.
+- **The Progress card counts requests sent, against the requests the run
+  expects** (#2914). `requests_sent / requests_expected` is dispatches, not
+  completions, so the card reads "N / M sent" and the bar can lead the
+  responses by the in-flight tail. A scenario iterations run that ends on its
+  own settles `requests_expected` to the sent count (the engine, so the last
+  tick reads 100%). The taskbar and Dock indicator reads the same fraction per
+  flush, and `LoadTestService.handleClose` reports 1 for a run whose frame says
+  `completed` just before it clears the indicator; a stopped or failed run is
+  never snapped.
 - **Virtual user utilisation and the Active virtual users chart read the mean on
   the wire, not the instant** (#2821). `current_concurrency` counts the curl
   workers' active transfers at the sample, and a virtual user in a timer wait

@@ -147,6 +147,18 @@ export const BUDGETS_EXPLAINER =
 	"The run is judged against the budgets set here. Blank fields are skipped; with every field blank the run is measured but not judged.";
 
 /**
+ * Capacity discovery climbs past the limit on purpose, and the engine judges a
+ * latency budget over the run's pooled histogram, every level included
+ * (issue #2816).
+ */
+export const CAPACITY_BUDGETS_NOTE =
+	"In Capacity discovery a latency budget is judged over the whole run, every level the search climbed through included, so it measures how far the search went, not the capacity it found.";
+
+/** The p99 field's hint while the Settings seed in it is not sent. */
+export const CAPACITY_SEED_HINT =
+	"Starts from Settings › Dashboard › SLO threshold, but a Capacity discovery run does not send it. Type a value to set a p99 budget for this run.";
+
+/**
  * The first budget the engine would reject, phrased for the dialog.
  *
  * Blank is always fine - budgets are opt-in, and clearing a field is how a user

@@ -30,6 +30,7 @@ import { formatNumber, formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { Callout } from "./Callout";
 import { SampleRetentionNote } from "./SampleRetentionNote";
+import { TEST_VALIDATION_TITLE } from "./run-assertions";
 import type { RunReport } from "@/types/domain";
 
 export interface TestValidationSummaryProps {
@@ -50,6 +51,11 @@ export interface TestValidationSummaryProps {
 	 * nothing about the denominator rather than guess one (never "of 0").
 	 */
 	totalRequests?: number;
+	/**
+	 * The card's title; `testValidationTitleOf` answers it (#2820), retitling the
+	 * card when `ExactAssertionsSummary` sits beside it.
+	 */
+	title?: string;
 	className?: string;
 }
 
@@ -74,6 +80,7 @@ export function TestValidationSummary({
 	failures,
 	failuresTotal,
 	totalRequests,
+	title = TEST_VALIDATION_TITLE,
 	className,
 }: TestValidationSummaryProps) {
 	const hasFailures = failures !== undefined && failures.length > 0;
@@ -86,7 +93,7 @@ export function TestValidationSummary({
 	return (
 		<Card className={className}>
 			<CardHeader>
-				<CardTitle>Test validation</CardTitle>
+				<CardTitle>{title}</CardTitle>
 			</CardHeader>
 			<CardContent>
 				{testValidation && (

@@ -22,7 +22,7 @@ import { ConcurrencyUtilCard } from "./ConcurrencyUtilCard";
 import { ProgressCard } from "./ProgressCard";
 import { ThroughputCard } from "./ThroughputCard";
 import { CurrentConcurrencyCard } from "./CurrentConcurrencyCard";
-import { SaturationCard } from "./SaturationCard";
+import { CapacitySaturationCard, SaturationCard } from "./SaturationCard";
 import { LatencyPercentilesCard } from "./LatencyPercentilesCard";
 
 export function HeroRow({ d }: { d: DashboardDerived }) {
@@ -107,7 +107,12 @@ function renderModeCards(d: DashboardDerived) {
 						currentConcurrency={activeConcurrency}
 						configuredConcurrency={d.configuredConcurrency}
 					/>
-					<SaturationCard breakpoint={d.breakpoint} failedRequests={d.failedRequests} />
+					<CapacitySaturationCard
+						capacity={d.capacity}
+						isCompleted={d.isCompleted}
+						breakpoint={d.breakpoint}
+						failedRequests={d.failedRequests}
+					/>
 				</>
 			);
 		case "ramp_up":

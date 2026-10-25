@@ -1271,6 +1271,12 @@ Between ticks the loop blocks on `refill_cv` with a 50ms safety-net timeout, wok
 completion (`notify_refill`) - the actual wait, not a poll, so a run with headroom to fill sends
 again within the tick rather than a full 50ms later.
 
+The target is read only when the loop wakes, so a run can end with no wake in its last tick. A
+caller whose run ends on the clock (both `ramp_up` callers) passes that end as `run_end_ms`, and a
+loop the clock ended refills once more toward the target at `run_end_ms - 1`; a stop, or a loop
+that left on its own predicate first, sends nothing after it. That last refill is why a ramp as
+long as the run reaches `concurrency` (#2913).
+
 A scenario run's virtual users add a second reason `in_flight` can sit below target: a VU a
 `timer.pacing` or `timer.think` element deferred (issue #1498) is not in flight either, so the
 plain `target − in_flight` predicate above cannot tell "wait for a completion" and "wait for this

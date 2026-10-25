@@ -20,6 +20,7 @@
 #include <array>
 #include <chrono>
 #include <future>
+#include <map>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -37,6 +38,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/core/spec_coverage.hpp"
+#include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -642,6 +644,37 @@ TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenSto
     ASSERT_TRUE (older.contains ("scenario")) << older.dump ();
     EXPECT_FALSE (older["scenario"].contains ("stepsNotRun"));
     EXPECT_FALSE (older["scenario"].contains ("stopOnError"));
+}
+
+// A scenario load run's exact assertion population (#2820) reaches the report's
+// `scenario` section; a summary without it (an older run, a sequential run, a
+// run that asserted nothing) grows none rather than "0 failed".
+// Mutation check: drop the `assertions` write in `build_scenario_report_section`
+// and the first half fails.
+TEST_F (RunsRouteTest, ScenarioReportCarriesTheStoredExactAssertions) {
+    seed ({ .id = "run_asserted" });
+    db_->update_run_summary ("run_asserted",
+    nlohmann::json{ { "scenario",
+                    { { "iterations", 4 }, { "steps_executed", 8 }, { "passed", 8 },
+                    { "assertions", { { "passed", 0 }, { "failed", 4 } } } } } }
+    .dump ());
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_asserted");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
+    EXPECT_EQ (body["scenario"].value ("assertions", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 4 } }));
+    EXPECT_EQ (body["scenario"]["passed"], 8)
+    << "the HTTP count is not redefined";
+
+    seed ({ .id = "run_unasserted", .start_time = 1 });
+    db_->update_run_summary ("run_unasserted",
+    nlohmann::json{ { "scenario", { { "iterations", 4 }, { "steps_executed", 8 } } } }
+    .dump ());
+    auto [plain_status, plain] =
+    vayu::http::routes::run_report_response (*db_, "run_unasserted");
+    ASSERT_EQ (plain_status, 200);
+    ASSERT_TRUE (plain.contains ("scenario")) << plain.dump ();
+    EXPECT_FALSE (plain["scenario"].contains ("assertions"));
 }
 
 // The sample cap stays for everything else - a design run has one row and a
@@ -1373,8 +1406,12 @@ TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOther
 // the only place that defaults it.
 TEST (RunReportConfigTest, CarriesExpectContinueWhenSnapshotHasItAndOmitsItOtherwise) {
     const auto snapshot = [] (const char* flag) {
-        return json::parse (
-        std::string (R"({"mode":"once","defaultHeaders":{"expectContinue":)") + flag + "}}");
+        // Appends, not an operator+ chain: gcc 13 -O3 reports the chain's
+        // inlined memcpy as -Warray-bounds.
+        std::string text = R"({"mode":"once","defaultHeaders":{"expectContinue":)";
+        text += flag;
+        text += "}}";
+        return json::parse (text);
     };
 
     EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("true"))["expectContinue"],
@@ -1673,7 +1710,8 @@ TEST_F (RunsRouteTest, ScenarioReportOmitsLatencyWhenNoStepSent) {
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_nothing_sent");
     ASSERT_EQ (status, 200);
     EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
-    EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 1u);
+    // The one step sent nothing, so the run made no request (#2822).
+    EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 0u);
 
     seed ({ .id = "run_old_scenario", .type = vayu::RunType::Scenario, .start_time = 1000 });
     seed_result ("run_old_scenario", 200, 7.0);
@@ -1683,6 +1721,162 @@ TEST_F (RunsRouteTest, ScenarioReportOmitsLatencyWhenNoStepSent) {
     ASSERT_EQ (old_status, 200);
     ASSERT_TRUE (old_body.contains ("latency"));
     EXPECT_DOUBLE_EQ (old_body["latency"]["max"].get<double> (), 7.0);
+}
+
+// A sequential collection run's stored summary, built as the runner builds it:
+// `status_codes` is the tally of the steps that sent, and a budget is judged
+// off that same tally (`execute_scenario_run`'s threshold inputs).
+std::string sequential_summary (size_t steps_executed,
+const std::map<int, size_t>& status_codes,
+const json& thresholds = json ()) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = steps_executed;
+    inputs.duration_s     = 2.0;
+    inputs.status_codes   = status_codes;
+    if (!thresholds.is_null ()) {
+        vayu::core::RunSummaryInputs judged;
+        judged.total_requests = vayu::count_status_failures (status_codes).total;
+        judged.status_codes = status_codes;
+        inputs.thresholds =
+        vayu::core::evaluate_thresholds (json{ { "thresholds", thresholds } }, judged);
+    }
+    return vayu::core::build_scenario_summary_payload (inputs).dump ();
+}
+
+// #2822, the audit's R5 shape: four iterations of a six-step collection whose
+// controllers skipped nine steps. 31 requests went out and none failed; the
+// stored rows hold the nine skips as status-0 rows. The report counts requests,
+// not rows, and agrees with the budget judged off the same tally.
+// Mutation check: restore `total_requests = steps_executed` in
+// `build_scenario_summary_payload` and the total fails; drop the stored
+// `status_codes` and the failure count and error rate fail.
+TEST_F (RunsRouteTest, ScenarioReportCountsASkippedStepAsNeitherARequestNorAFailure) {
+    seed ({ .id = "run_r5", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    for (int i = 0; i < 31; ++i) {
+        seed_result ("run_r5", 200, 5.0);
+    }
+    for (int i = 0; i < 9; ++i) {
+        seed_result ("run_r5", 0, 0.0);
+    }
+    db_->update_run_summary ("run_r5",
+    sequential_summary (40, { { 200, 31 } }, json{ { "maxErrorRatePct", 1 } }));
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_r5");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 31u);
+    EXPECT_EQ (summary["successfulRequests"].get<size_t> (), 31u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 0u);
+    EXPECT_EQ (summary["noResponseRequests"].get<size_t> (), 0u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 0.0);
+    EXPECT_DOUBLE_EQ (summary["avgRps"].get<double> (), 15.5);
+    EXPECT_EQ (body["statusCodes"], json::array ({ json::array ({ 200, 31 }) }));
+    EXPECT_EQ (body["scenario"]["stepsExecuted"].get<size_t> (), 40u);
+
+    ASSERT_TRUE (body.contains ("thresholdValidation")) << body.dump ();
+    const auto& check = body["thresholdValidation"]["checks"].at (0);
+    EXPECT_DOUBLE_EQ (check["actual"].get<double> (), summary["errorRate"].get<double> ());
+}
+
+// The audit's R8 shape: 40 steps of which 16 failed (10 x 404, 6 x 500), with a
+// store capped at 20 rows that kept 7 of the failures. The distribution and the
+// error rate are the whole run's, not the kept rows' over the whole total.
+// Mutation check: drop `status_codes_overridden = true` from
+// `apply_summary_status_codes` and the distribution and error rate fail.
+TEST_F (RunsRouteTest, ScenarioReportReadsTheWholeRunsDistributionPastTheStoredStepCap) {
+    seed ({ .id = "run_r8", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    const std::array<std::pair<int, int>, 3> kept{ { { 200, 13 }, { 404, 3 }, { 500, 4 } } };
+    for (const auto& [code, count] : kept) {
+        for (int i = 0; i < count; ++i) {
+            seed_result ("run_r8", code, 5.0);
+        }
+    }
+    db_->update_run_summary (
+    "run_r8", sequential_summary (40, { { 200, 24 }, { 404, 10 }, { 500, 6 } }));
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_r8");
+    ASSERT_EQ (status, 200);
+    size_t distributed = 0;
+    for (const auto& entry : body["statusCodes"]) {
+        distributed += entry[1].get<size_t> ();
+    }
+    EXPECT_EQ (distributed, 40u) << body["statusCodes"].dump ();
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 40u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 16u);
+    EXPECT_EQ (summary["httpErrorRequests"].get<size_t> (), 16u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 40.0);
+    // `results` stays the kept rows; only the counts stopped reading them.
+    EXPECT_EQ (body["results"].size (), 20u);
+}
+
+// A run in which every step was skipped stores an empty distribution, which is
+// that run's answer and not a missing one: no request, no failure. A summary
+// stored before the distribution was (no `status_codes` key) keeps the report
+// it always had, from the rows.
+// Mutation check: require a non-empty map for a sequential run in
+// `apply_summary_status_codes` and the first half fails on `failedRequests`.
+TEST_F (RunsRouteTest, ScenarioReportOfAnAllSkippedRunCountsNoRequestAndNoFailure) {
+    seed ({ .id = "run_all_skipped", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    for (int i = 0; i < 3; ++i) {
+        seed_result ("run_all_skipped", 0, 0.0);
+    }
+    db_->update_run_summary ("run_all_skipped", sequential_summary (3, {}));
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_all_skipped");
+    ASSERT_EQ (status, 200);
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 0u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 0u);
+    EXPECT_EQ (summary["noResponseRequests"].get<size_t> (), 0u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 0.0);
+    EXPECT_TRUE (body["statusCodes"].empty ()) << body["statusCodes"].dump ();
+    EXPECT_EQ (body["scenario"]["stepsExecuted"].get<size_t> (), 3u);
+
+    seed ({ .id = "run_older_engine", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    seed_result ("run_older_engine", 200, 5.0);
+    seed_result ("run_older_engine", 0, 0.0);
+    db_->update_run_summary ("run_older_engine",
+    R"({"total_requests":2,"test_duration":1.0,"rps":2.0,"scenario":{"steps_executed":2}})");
+    auto [old_status, old_body] =
+    vayu::http::routes::run_report_response (*db_, "run_older_engine");
+    ASSERT_EQ (old_status, 200);
+    EXPECT_EQ (old_body["summary"]["totalRequests"].get<size_t> (), 2u);
+    EXPECT_EQ (old_body["summary"]["failedRequests"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (old_body["summary"]["errorRate"].get<double> (), 50.0);
+}
+
+// A sequential collection run feeds no `MetricsCollector`, so the figures only
+// a load run measures are left out of its report rather than written as 0. A
+// scenario load run is a `Load` run and keeps them.
+// Mutation check: call `add_load_summary_fields` whatever the run type and the
+// sequential half fails.
+TEST_F (RunsRouteTest, ScenarioReportOmitsTheLoadOnlyFiguresAScenarioLoadRunKeeps) {
+    constexpr std::array<const char*, 10> load_only{ "sendRate", "throughput",
+        "cleanupOverhead", "setupOverhead", "peakConcurrency", "droppedRequests",
+        "avgQueueWaitMs", "bytesSent", "bytesReceived", "throughputBytesPerSec" };
+
+    seed ({ .id = "run_sequential", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    db_->update_run_summary ("run_sequential", sequential_summary (2, { { 200, 2 } }));
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_sequential");
+    ASSERT_EQ (status, 200);
+    for (const char* key : load_only) {
+        EXPECT_FALSE (body["summary"].contains (key))
+        << key << ": " << body["summary"].dump ();
+    }
+    EXPECT_DOUBLE_EQ (body["summary"]["avgRps"].get<double> (), 1.0);
+
+    seed ({ .id = "run_scenario_load", .start_time = 1000 });
+    auto load_summary = vayu::core::build_run_summary_payload (summary_inputs ());
+    load_summary["scenario"] = { { "virtual_users", 4 }, { "steps_executed", 100 } };
+    db_->update_run_summary ("run_scenario_load", load_summary.dump ());
+    auto [load_status, load_body] =
+    vayu::http::routes::run_report_response (*db_, "run_scenario_load");
+    ASSERT_EQ (load_status, 200);
+    for (const char* key : load_only) {
+        EXPECT_TRUE (load_body["summary"].contains (key)) << key;
+    }
+    EXPECT_EQ (load_body["summary"]["bytesReceived"].get<size_t> (), 8192u);
 }
 
 // #2136: a healthy run stopped with requests in flight reports what the Stop
@@ -2741,6 +2935,45 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
 
     for (const char* id : { "run_no_summary", "run_bad_summary", "run_other_keys" }) {
         EXPECT_FALSE (row_of (body, id).contains ("resultSummary")) << id;
+    }
+}
+
+// A terminal scenario load run's row carries its exact assertion counts
+// (#2820), so a row whose every assertion failed at 0% errors can say so; a
+// run that asserted nothing, or stored a malformed object, carries neither key.
+// Mutation check: drop the `assertionsFailed` write in
+// `build_load_result_summary` and the first row fails.
+TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
+    auto with_assertions        = nlohmann::json::parse (judged_summary (true));
+    with_assertions["scenario"] = { { "iterations", 4 },
+        { "assertions", { { "passed", 1 }, { "failed", 4 } } } };
+    seed ({ .id = "run_asserted", .start_time = 1 });
+    db_->update_run_summary ("run_asserted", with_assertions.dump ());
+
+    auto without_assertions = nlohmann::json::parse (judged_summary (true));
+    without_assertions["scenario"] = { { "iterations", 4 } };
+    seed ({ .id = "run_unasserted", .start_time = 2 });
+    db_->update_run_summary ("run_unasserted", without_assertions.dump ());
+
+    auto malformed = nlohmann::json::parse (judged_summary (true));
+    malformed["scenario"] = { { "assertions", { { "passed", 1 }, { "failed", "4" } } } };
+    seed ({ .id = "run_malformed", .start_time = 3 });
+    db_->update_run_summary ("run_malformed", malformed.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto asserted = row_of (body, "run_asserted")["resultSummary"];
+    EXPECT_EQ (asserted.value ("assertionsFailed", -1), 4) << asserted.dump ();
+    EXPECT_EQ (asserted.value ("assertionsPassed", -1), 1) << asserted.dump ();
+    EXPECT_EQ (asserted.size (), 6u) << asserted.dump ();
+
+    for (const char* id : { "run_unasserted", "run_malformed" }) {
+        const auto outcome = row_of (body, id)["resultSummary"];
+        EXPECT_EQ (outcome.size (), 4u) << id << ": " << outcome.dump ();
+        EXPECT_FALSE (outcome.contains ("assertionsFailed")) << id;
+        EXPECT_FALSE (outcome.contains ("assertionsPassed")) << id;
     }
 }
 

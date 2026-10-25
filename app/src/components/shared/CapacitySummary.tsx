@@ -35,51 +35,9 @@ import { cn } from "@/lib/utils";
 import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_LABEL, concurrencyUnit } from "@/constants/load-test-modes";
 import type { RunReport } from "@/types/domain";
+import { STOP_REASONS, type CapacityResult } from "./capacityStop";
 
-/**
- * Why the search stopped, in words, and whether that reading is bad news.
- *
- * `slo_exceeded` and `errors_exceeded` observed the target give out, on latency
- * and on failed requests; `plateau` observed throughput stop climbing. The rest
- * ended on a bound the *caller* set, which is not a fault. Unknown reasons
- * render under their raw key rather than vanishing: a newer sidecar may stop
- * for a reason this build has no words for, and the levels below still say what
- * happened.
- */
-const STOP_REASONS: Record<string, { label: string; detail: string; degraded: boolean }> = {
-	slo_exceeded: {
-		label: "Latency budget exceeded",
-		detail: "p99 stayed above the budget across two consecutive windows.",
-		degraded: true,
-	},
-	errors_exceeded: {
-		label: "Errors exceeded the limit",
-		detail: "More requests failed than the limit allows across two consecutive windows.",
-		degraded: true,
-	},
-	plateau: {
-		label: "Throughput plateaued",
-		detail: "More virtual users stopped buying more throughput.",
-		degraded: true,
-	},
-	cap_reached: {
-		label: "Reached the virtual user ceiling",
-		detail: "The target held its budget all the way up. Raise the ceiling to find the limit.",
-		degraded: false,
-	},
-	deadline: {
-		label: "Ran out of time",
-		detail: "The run's deadline passed before the search found a limit.",
-		degraded: false,
-	},
-	stopped: {
-		label: "Stopped by hand",
-		detail: "The run was stopped before the search reached a conclusion.",
-		degraded: false,
-	},
-};
-
-type Capacity = NonNullable<RunReport["capacity"]>;
+type Capacity = CapacityResult;
 
 /** The engine's limit when the report carries it, the generic wording for a run stored without. */
 function stopDetail(capacity: Capacity, fallback: string): string {
@@ -291,7 +249,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 					variant="chip"
 					className={cn(
 						"font-medium",
-						stop?.degraded
+						stop && stop.finding !== "none"
 							? "bg-warning/10 text-warning-text"
 							: "bg-status-success/10 text-status-success-text"
 					)}

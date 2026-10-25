@@ -267,6 +267,9 @@ std::string verdict_block (const ReportView& view) {
     if (!verdict.stopped_early.empty ()) {
         out += '\n' + markdown_text (verdict.stopped_early) + '\n';
     }
+    for (const ReportText& notice : view.notices) {
+        out += '\n' + markdown_text (notice) + '\n';
+    }
     return out;
 }
 

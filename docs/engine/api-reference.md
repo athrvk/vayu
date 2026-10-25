@@ -4524,7 +4524,7 @@ breaking change bumps the integer and is noted here):
 | `run` | `id`, `reference`, `type` (`load`), `status`, `startTime`, `endTime`, `name` (the request name, or `null`), `comment` (or `null`), `baseline` |
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
-| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
+| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates, and a scenario load run's exact `assertions`), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
 | `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `status_seconds`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms; `status_seconds` is [as stored](#get-runsrunidmetrics) with any entry that is not `{second >= 0, span >= 1, counts}` of five counts >= 0 dropped, an empty list kept, and the key absent from a tick stored before issue #2866); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
@@ -4550,11 +4550,24 @@ file and the screen it came from agree. It adds no rule of its own:
 | `stopped` | `not_judged` | `stopped` |
 | `failed`, no budget missed | `failed` | `run_failed` |
 | A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
-| Every budget met, `summary.errorRate` 0 | `passed` | `budgets_met` |
-| Every budget met, some requests errored | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, `summary.errorRate` 0, no exact assertion failed | `passed` | `budgets_met` |
+| Every budget met, some requests errored (failed assertions too, if any) | `not_judged` | `budgets_met_with_errors` |
+| Every budget met, no request errored, `scenario.assertions.failed > 0` (#2820) | `not_judged` | `budgets_met_with_assertion_failures` |
 | No budget declared | `not_judged` | `no_budgets` |
 
 `stoppedEarly` is `status == "stopped"`.
+
+**A summary that is not a whole-run measurement** (issues #2895, #2905).
+`report.summary` carries two optional booleans, each present only when `true`
+(the `GET /runs/:runId/report` flags of the same name): `partial` for a run the
+engine died under and reconciled at the next start, whose counts are its last
+saved tick's, and `summaryMissing` for a failed load run that stored no summary,
+whose counts are not whole-run totals. In both, `report.latency` is still
+present (the schema requires it) but is not a measurement: all zeros for a
+crashed run, and for a failed run with no summary whatever its sampled results
+held.
+The verdict is not changed by either; the Markdown and HTML reports word it
+(below).
 
 `comparison` diffs the run (the target) against `baseRunId` the way the app's
 vs-baseline strip and the MCP `compare_runs` tool do (`compareReports`): the
@@ -4625,7 +4638,10 @@ The sections, in order:
    `**Passed** - 3 of 3 budgets met`,
    `**Failed** - p95 <= 30 ms missed (41 ms)` (every missed budget, or `not
    evaluated` for one the run could not measure), `**Not judged** - no budgets
-   declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows.
+   declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows,
+   and for a run with `summary.partial` or `summary.summaryMissing` one
+   sentence each follows that, saying the totals are the last saved tick's or
+   not whole-run totals, and that the latency figures are not measurements.
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
 4. `## Results`: requests, requests per second (`avgRps`, labelled as the
@@ -4682,7 +4698,8 @@ It holds the Markdown report's sections in the same order (title and reference
 line, verdict, run, results, latency with its budgets, errors, comparison,
 warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
 description list for the run - from the same reading of the document, so the two
-cannot word a verdict differently. Above the title sits a one-line brand
+cannot word a verdict differently; the partial and missing-summary sentences
+sit in the verdict's band, one paragraph each. Above the title sits a one-line brand
 (the Vayu mark at 28 px, then the wordmark `Vayu run report`, muted; the mark has
 an empty `alt` because the wordmark names the product). The mark is
 `shared/icon_png/vayu_icon_64x64.png`, embedded as a base64 `data:` URI
@@ -9104,6 +9121,7 @@ knob.
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
   "stepsExecuted": 1422, "passed": 1386, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
+  "assertions": { "passed": 444, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
@@ -9117,6 +9135,9 @@ knob.
       "unresolvedTokens": 0,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
+      "elements": [
+        { "id": "el_2", "kind": "assert.status", "passed": 444, "failed": 30, "skipped": 0, "deferred": 0 }
+      ],
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
@@ -9144,6 +9165,18 @@ top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
 not folded in; they are reported in `elements` and `tests`.
+
+**`assertions`** (#2820) is the run's exact assertion population,
+`{ passed, failed }`: every `assert.*` outcome, every required `extract.*` miss
+and every inline script's `pm.test` call, counted on each completion. It is the
+figure a `maxAssertionFailureRatePct` check reports as `assertionsExact`. It
+sits beside `passed` and `summary.errorRate` rather than inside them, both of
+which stay HTTP-only, so a run whose every assertion failed against `200`s reads
+an `errorRate` of 0 and a non-zero `assertions.failed`. The deferred replay of an
+un-inlined script is the sampled population (the step's `tests`, the report's
+`testValidation`) and is never in it. **Absent**, never `{0, 0}`, for a run that
+made no such assertion, for a sequential collection run and for a run stored
+before the field existed.
 
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead
@@ -9501,7 +9534,10 @@ p99 per level and a sequence has one per step.
 `concurrency` over `rampUpDuration`, then holds `concurrency` for the rest of
 `duration`. A `startConcurrency` **above** `concurrency` is a valid descending
 ramp. If `duration` is shorter than `rampUpDuration`, the run stops partway up
-(or down) the curve.
+(or down) the curve. A run whose `duration` equals `rampUpDuration` reaches
+`concurrency` at the end of the ramp, with no hold after it: when the run's
+time is up, the controller refills once more to the target its last instant is
+owed, so the peak does not depend on when it last woke (#2913).
 
 **Response bodies are capped.** A load-run request reads at most
 `maxResponseBodyBytes` (Settings → Data & retention, default 32MB) into memory.
@@ -10092,8 +10128,8 @@ data: {"stepsPerIteration":4,"iterations":3,"stepsExpected":12}
 `iterations` is how many passes the engine resolved - a data set's row count
 where the run named no explicit count of its own. `stepsExpected` is
 `stepsPerIteration * iterations`, an upper bound rather than a promise, on the
-same terms as the load path's `requestsExpected` above: an errored step can
-end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
+same terms as a scenario load run's `requestsExpected` while it runs (the live
+frame table below): an errored step can end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
 `POST /runs/:id/stop` ends the run, `setNextRequest` can walk
 an iteration in fewer steps than the plan holds, and the
 `maxStepsPerIteration` cap can end one that walks in more. It rides the same
@@ -10150,7 +10186,7 @@ no frame.
 | `cumulativeLatency` | **Gate frames only** (issue #2782), the final frame included: the run-so-far latency distribution, `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms, p999Ms, maxMs, count}`, over the same completions as the `cumulative*Ms` keys. `null` until something has completed, never zeros. The final frame merges the last window after the drain, so its figures are the report's [`latency`](#get-runsrunidreport) block. Absent from every other frame |
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
-| `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
+| `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
@@ -10479,11 +10515,16 @@ run stored, never from its result rows, which are many and unbounded:
 | `p95Ms` | 95th-percentile latency in milliseconds, the report's `latency.p95` |
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
+| `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion counts (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the sampled replay. Beside `errorRate`, not folded into it |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
 `verdict` is absent when the run declared no budgets - it was never judged,
-which is not the same claim as passing. A `pending` or `running` load row, and
+which is not the same claim as passing. The two assertion counts are absent
+for a single-request run, a scenario load run that made no assertion and one
+stored before #2820. A scenario load run whose every assertion failed against
+`200`s reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
+"assertionsPassed": 0, "assertionsFailed": 4580 }`. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
 carries no `resultSummary` at all. A collection run's row never carries one.
 
@@ -10625,8 +10666,10 @@ recorded before this issue.
 
 ### POST /runs/:runId/stop
 
-Stop a running load test. The engine signals the run, waits up to 5s for its
-worker to settle, and answers with a summary of what the run actually did.
+Stop a running load test or collection run. The engine signals the run, waits up
+to 5s for its worker to settle, and answers with a summary of what the run
+actually did. A collection run's summary is optional; see
+[Stopping a collection run](#stopping-a-collection-run) below.
 
 **Stop discards, it does not drain.** The queued backlog is thrown away rather
 than sent, and transfers already in flight are cancelled (removed from curl and
@@ -10687,6 +10730,43 @@ run reaches `stopped` with its trace and its true event count together; the
 stream's `complete` event carries `"reason": "stopped"`. A stream that had
 already terminated keeps the reason it recorded rather than being rewritten as a
 user stop.
+
+#### Stopping a collection run
+
+A sequential collection run (a `scenario` run, issue #2822) feeds no load
+collector, so its answer is read from the summary its worker stores once it has
+stopped, the same one the [report](#get-runsrunidreport) reads:
+
+```json
+{
+  "status": "stopped",
+  "runId": "run_1234567890",
+  "summary": {
+    "totalRequests": 31,
+    "errors": 2,
+    "httpErrors": 2,
+    "noResponse": 0,
+    "errorRate": 6.45,
+    "avgLatencyMs": 12.5,
+    "stepsExecuted": 40
+  }
+}
+```
+
+`totalRequests` is **requests sent** and `stepsExecuted` is **steps**, as in the
+report: a step the plan skipped is a step and not a request. `errors`,
+`httpErrors`, `noResponse` and `errorRate` come from the stored status-code
+distribution over those requests, and `avgLatencyMs` is the stored latency
+block's `avg` (`0` when no step sent). There is no `cancelled`: a collection
+run keeps no count of what its stop cancelled. `status` is the run's stored
+status.
+
+**The summary is absent when the worker has not stored one** within the 5s,
+or could not store it. The answer is then
+`{"status": "<stored status>", "runId": ..., "message": "Stop signalled; read
+the report"}`, usually with `status` `running`. The stop still stands: read the
+run's report once it reports a terminal status. A scenario **load** run is a
+`load` run and answers from its collector as above.
 
 ### GET /runs/:runId/report
 
@@ -11306,8 +11386,18 @@ and never needed to (that one reports an empty `refreshes` array).
 
 `stepsStored` versus `stepsExecuted` is the honest reading of `results[]`: a run
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
-non-passing step among the ones kept. `summary.totalRequests` is the number of
-step executions, not the number of rows that survived.
+non-passing step among the ones kept. On a collection run (design mode)
+`stepsExecuted` counts **steps** and `summary.totalRequests` counts **requests
+sent** (issue #2822): a step the plan skipped (`control.if`,
+`control.throughput`, `pm.execution.skipRequest()`) is a step and not a request,
+while a request that got no response is one, under status `0`. `statusCodes`,
+`successfulRequests`, `failedRequests` and `errorRate` come from the
+distribution the runner stored over those same requests, never from the kept
+rows, where a skipped step is a status-`0` row: they describe the whole run past
+`maxScenarioStoredSteps` and agree with a `maxErrorRatePct` check's `actual`. A
+run in which every step was skipped reports `totalRequests` `0` and an empty
+`statusCodes`. A summary stored before #2822 has no distribution: its
+`totalRequests` is the step count and the split comes from the kept rows.
 
 `stepsNotRun` is how many plan positions errors cost the run - summed over
 every iteration an `errored` step ended, the positions after that step the
@@ -11319,6 +11409,14 @@ Both are written by a collection run (design mode) only: a scenario load run's
 section carries neither, and a summary stored before issue #2526 carries
 neither either.
 
+`assertions` (#2820) is the other way round: a scenario load run's alone,
+`{ passed, failed }` over the exact population (every `assert.*` outcome,
+required `extract.*` miss and inline `pm.test` call, never the sampled replay
+`testValidation` reports). `passed` and `failed` above stay HTTP-only beside it.
+It is **absent** for a run that made no such assertion, a collection run in
+design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
+has the rest.
+
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never
 `[]`, for a run with no `control.transaction` element or one whose folder
@@ -11329,6 +11427,13 @@ same shape `scenario.transactions` documents elsewhere on this page.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
 `summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
 latency.
+
+**A collection run's `summary` omits the load-only figures** (issue #2822). A
+sequential run feeds no load collector, so `sendRate`, `throughput`,
+`peakConcurrency`, `droppedRequests`, `avgQueueWaitMs`, `bytesSent`,
+`bytesReceived`, `throughputBytesPerSec`, `setupOverhead` and `cleanupOverhead`
+are absent rather than `0`; `avgRps` is requests sent over `testDuration`. A
+scenario load run is a `load` run and carries every one of them.
 
 **A collection run's `latency` block** (issue #2389) is the stored `latency` its runner wrote,
 over the [latency population](#latency-population) of the sequential path: every step whose
@@ -11399,10 +11504,15 @@ included; a virtual user in a timer wait between requests has none, and a
 request cancelled or refused before the wire adds nothing. With no think time
 it equals the virtual user count, and over that count it is the run's
 utilisation. `peakConcurrency` beside it is the high-water mark of the
-instantaneous in-flight gauge, sampled once a second for a scenario run, so on a
-run whose users wait in step it can read the user count or 0 depending on where
-the samples landed; `avgInFlight` is the figure that does not alias. Present for
-a load run stored since the issue, `0` included; **absent** for a run stored
+instantaneous in-flight gauge (the live stream's `backpressure`), which the load
+generator reads after each batch of submissions in every mode: the closed-loop
+controller behind `constant_concurrency`, `ramp_up`, `iterations`, `capacity`
+and every scenario run, and the open-loop pacer behind `constant_rps` (issue
+#2912). The once-a-second metrics sample is a backstop writer. The peak is the
+most requests ever in flight at once, so on a run whose users wait in step it
+can read the full user count though most of the run had far fewer in flight;
+`avgInFlight` is the figure that measures utilisation. `avgInFlight` is present
+for a load run stored since issue #2821, `0` included; **absent** for a run stored
 before it, a collection (design-mode) run, and a run reported from its sampled
 results, never a `0` nobody measured.
 

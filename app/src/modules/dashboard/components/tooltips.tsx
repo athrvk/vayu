@@ -31,7 +31,7 @@ export const TOOLTIPS = {
 	achievedThroughput:
 		"Requests per second emerging from the configured virtual users. In closed-loop testing the rate is an output, not a target - the server's response time determines what RPS you actually achieve. Throughput per virtual user below shows what each one produced per second.",
 	progress:
-		"Progress through the configured iteration count. The bar fills as requests complete; ETA is computed from current throughput. Once 100%, the load test stops automatically.",
+		"Requests sent so far, up to the requests the configured iterations would send. The bar fills as requests are sent, not as responses come back; ETA is projected from current throughput. The run ends on its own when its iterations finish.",
 	currentConcurrency:
 		"Virtual users active at this instant: each is waiting on a response or holding a think timer. On a finished run the card shows the peak instead, since nothing is active once it ends. The configured ramp climbs the number of virtual users linearly from the starting count to the target over the ramp duration. Ramp lag is the percentage of the configured curve that the generator failed to deliver - non-zero values mean the server is too slow to absorb the planned number of virtual users.",
 
@@ -69,7 +69,7 @@ export const TOOLTIPS = {
 	latencyPercentiles:
 		"Tail latency since the run started - 95 (p95) or 99 (p99) of every 100 timed requests finished in this time or less. A timed request got an answer or timed out; cancelled and never-sent requests are out. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
 	saturation:
-		"Whether the server has reached its capacity ceiling. 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero. 'degrading' means p99 has crossed the threshold or errors started - the call-out shows the number of virtual users at which the degradation began (the breakpoint).",
+		"Whether the server has reached its capacity ceiling. In a ramp, 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero, and 'degrading' means p99 has crossed the threshold or errors started; the call-out shows the number of virtual users at which that began (the breakpoint). A Capacity discovery run reads what ended its search and never says 'healthy': 'searching' until the search stops, 'degrading' when p99 or errors went over their limit, 'saturated' when more virtual users stopped adding throughput, and 'no limit found' when the search ran out of ceiling, time or patience before the target gave out. Errors that did not end the search are counted on their own line.",
 
 	// ---- Hero card #3 (universal) ----
 	errorRate:

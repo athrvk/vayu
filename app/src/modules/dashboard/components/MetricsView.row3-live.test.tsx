@@ -28,7 +28,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useClientSettingsStore } from "@/stores";
+import { useClientSettingsStore, useDashboardStore } from "@/stores";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import type { DisplayMetrics } from "../types";
 import { LATENCY, PHASES, tick } from "../utils/liveDistributions.testkit";
@@ -98,6 +98,21 @@ describe("MetricsView latency distribution card", () => {
 		renderView([GATE, tick(2.1)]);
 
 		expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "250");
+	});
+
+	// A capacity run's plot judges its p95/p99 markers against the run's own SLO
+	// (#2816). Mutation check: read the setting unconditionally in
+	// `LiveDistributionRow` and this fails.
+	it("passes a capacity run's own SLO to the plot, not the setting", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 250 });
+		useDashboardStore.getState().startRun("r", { mode: "capacity", sloMs: 50 });
+		try {
+			renderView([GATE, tick(2.1)]);
+
+			expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "50");
+		} finally {
+			useDashboardStore.getState().startRun("r");
+		}
 	});
 
 	it("prints the footer figures, none of them a dash", () => {

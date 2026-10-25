@@ -14,6 +14,7 @@
  * names them. Pure, so the rules are tested without rendering.
  */
 
+import type { LoadTestConfig } from "@/types";
 import {
 	BUDGET_FIELDS,
 	customBudgetKey,
@@ -46,6 +47,55 @@ const isBlank = (value: string | undefined) => (value ?? "").trim() === "";
 
 /** The one budget Settings seeds on a first run: the Dashboard's SLO threshold. */
 export const SLO_SEEDED_KEY = "latencyP99Ms" satisfies BudgetKey;
+
+/**
+ * Whether the Settings p99 seed is dormant for this mode. A capacity search
+ * climbs past the limit on purpose, and the engine judges `latencyP99Ms` over
+ * the run's pooled histogram, every over-budget level included, so a verdict on
+ * the seed would read how far the search climbed (issue #2816). A p99 the user
+ * typed, or the memo carried, is theirs and still travels.
+ */
+export function isUnsentSeed(
+	mode: LoadTestConfig["mode"],
+	fixed: CarriedBudgets["fixed"]
+): boolean {
+	return mode === "capacity" && fixed[SLO_SEEDED_KEY] === "slo";
+}
+
+/** The carried set as this mode will send it: the dormant seed is not carried, it is not there. */
+export function withoutUnsentSeed(
+	carried: CarriedBudgets,
+	mode: LoadTestConfig["mode"]
+): CarriedBudgets {
+	if (!isUnsentSeed(mode, carried.fixed)) return carried;
+	const { [SLO_SEEDED_KEY]: _seed, ...fixed } = carried.fixed;
+	return { ...carried, fixed };
+}
+
+/** The budgets Start sends: the draft with the mode's dormant seed blanked. */
+export function budgetsToSend(
+	budgets: BudgetDraft,
+	mode: LoadTestConfig["mode"],
+	fixed: CarriedBudgets["fixed"] | undefined
+): BudgetDraft {
+	if (!isUnsentSeed(mode, fixed ?? {})) return budgets;
+	return { ...budgets, [SLO_SEEDED_KEY]: "" };
+}
+
+/**
+ * The budgets the memo keeps. A dormant seed is left out rather than written:
+ * a written p99 restores as the user's own (`memo`), so the next capacity run
+ * would send the number this one withheld.
+ */
+export function budgetsToRemember(
+	budgets: BudgetDraft,
+	mode: LoadTestConfig["mode"],
+	fixed: CarriedBudgets["fixed"]
+): Partial<BudgetDraft> {
+	if (!isUnsentSeed(mode, fixed)) return budgets;
+	const { [SLO_SEEDED_KEY]: _seed, ...rest } = budgets;
+	return rest;
+}
 
 /**
  * The fields the restore filled from somewhere other than the user: a non-blank
