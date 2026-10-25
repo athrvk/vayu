@@ -402,8 +402,8 @@ What the table does show, on both arms equally, is the shape of `sleep_for` at
 at 400 RPS (2.5 ms nominal, 2.5 ms sleep - just over the 2000 us threshold
 above which the tick sleeps rather than spins) the median is 3.5-3.7 ms with a
 quarter of the gaps being the double-dispatch that pays the overshoot back.
-The rate is exact because `take_due_requests` accrues the debt; the
-*regularity* is bounded by the OS sleep granularity. That is a property of the
+The rate is exact because the pacer counts what is owed from the run's
+start; the *regularity* is bounded by the OS sleep granularity. That is a property of the
 spin threshold in `wait_for_next_tick`, not of the scope, and it predates it;
 [#1370](https://github.com/athrvk/vayu/issues/1370) moved it, and
 [The sleep a Windows tick cannot trust](#the-sleep-a-windows-tick-cannot-trust-2026-09-04-windows)
@@ -978,18 +978,27 @@ are read **per run**, so none needs a restart - and none is flagged
 - `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`,
   which is every run the app starts.
 
-**How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound:
-each tick accrues `targetRps × elapsed` and dispatches the whole requests owed,
-carrying the fraction to the next tick. Rate fidelity therefore does not depend
-on the tick length (1ms above 1000 RPS, the request interval below it) - timer
-jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
-as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
-at a fixed rate, `sent + dropped` should equal `targetRps × duration`. The
-report's rate fidelity is that same count since
+**How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound.
+Request *k* (counting from 1) is owed at `k / targetRps`: nothing leaves at
+t = 0, the first request leaves one interval in, and when the product is whole
+the last is owed at the deadline itself, where the final tick lands. Each tick
+reads `floor(targetRps × elapsed)` off the time since the run started and
+dispatches the difference from what it has already taken
+([#2910](https://github.com/athrvk/vayu/issues/2910); summing per-tick deltas
+lost a sub-microsecond fraction every tick, and the last request with it). Rate
+fidelity therefore does not depend on the tick length (1ms above 1000 RPS, the
+request interval below it) - a late tick owes what the ticks it swallowed would
+have, and a rate like 1500 RPS is delivered as asked rather than floored to the
+nearest 1000. Comparing against wrk/vegeta at a fixed rate, `sent + dropped` is
+exactly `floor(targetRps × duration)`: 4000 for 200 RPS over 20 s, 99 for
+33.3 RPS over 3 s. A product that is whole in decimal counts as whole even
+where binary lands just below it (0.57 RPS over 100 s owes 57). The report's
+rate fidelity is that same count since
 [#2392](https://github.com/athrvk/vayu/issues/2392): `rateControl.achievement`
-is `requestsSent / requestsExpected`, with `requestsExpected` =
-`targetRps × duration`, and `sendRate` divides by the sending window, so
-neither is diluted by the drain that lets the last requests answer.
+is `requestsSent / requestsExpected`, with `requestsExpected` the same
+`floor(targetRps × duration)`, so an unsaturated run reads 100, and `sendRate`
+divides by the sending window, so neither is diluted by the drain that lets
+the last requests answer.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)

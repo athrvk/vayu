@@ -54,6 +54,12 @@
  * 137,599 / 134,873 B writes off and 204,965 / 200,568 B writes on, and the
  * caps went to 137,900 / 135,200 and 205,300 / 200,900.
  *
+ * #2895's `summary.partial` / `summary.summaryMissing` sentence in
+ * `get_run_report` and the two keys in its output schema took the rows to
+ * 143,949 / 141,223 B writes off and 211,863 / 207,466 B writes on; the caps
+ * went to 144,300 / 141,600 and 212,200 / 207,800 (one measurement plus a few
+ * hundred bytes).
+ *
  * #2443 (the paged whole-list reads) added the envelope schema and the `q` /
  * `limit` / `offset` / `fields` arguments to four tools; the caps sit about 1%
  * above that measurement.
@@ -66,9 +72,10 @@
  * 141,200 / 207,500.
  *
  * #2820's `assertionsPassed` / `assertionsFailed` sentence in `list_runs` is
- * paid once per row, 290 B: 143,732 / 141,006 / 211,646 / 207,249 B became
- * 144,022 / 141,296 / 211,936 / 207,539, and the four caps went to 144,100 /
- * 141,400 / 212,000 / 207,700.
+ * paid once per row, 290 B. With the descriptions master gained meanwhile the
+ * rows measure 144,608 / 141,882 / 212,522 / 208,125 B (writes off: reveal off
+ * / on; writes on: reveal off / on), and the four caps went to 144,900 /
+ * 142,200 / 212,800 / 208,400.
  */
 
 import { describe, it, expect } from "vitest";
@@ -88,10 +95,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_100 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 141_400 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_000 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 207_700 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 144_900 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 142_200 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 212_800 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 208_400 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -15,18 +15,27 @@
  * 100.0% here and the tile is the only place that says otherwise at a glance.
  */
 
+import type { ReactNode } from "react";
 import { Activity, CheckCircle, TrendingUp, XCircle } from "lucide-react";
 import { exactAssertionsOf } from "@/components/shared";
 import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
 import type { RunReport } from "@/types";
+import { NOT_RECORDED, unrecordedFiguresOf } from "./unrecorded-figures";
 
 function successRateOf(summary: RunReport["summary"]): number {
 	if (summary.totalRequests <= 0) return 0;
 	return ((summary.totalRequests - summary.failedRequests) / summary.totalRequests) * 100;
 }
 
+/** A figure, or the placeholder where the engine did not record it (#2895). */
+function Figure({ recorded, children }: { recorded: boolean; children: ReactNode }) {
+	if (recorded) return <>{children}</>;
+	return <span className="text-sm font-normal text-muted-foreground">{NOT_RECORDED}</span>;
+}
+
 export default function RunKeyMetrics({ report }: { report: RunReport }) {
 	const assertionsFailed = exactAssertionsOf(report)?.failed ?? 0;
+	const unrecorded = unrecordedFiguresOf(report.summary);
 	return (
 		<div
 			className={
@@ -44,7 +53,9 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 					<span className="text-xs text-muted-foreground">P99 latency</span>
 				</div>
 				<p className="text-lg font-bold text-foreground">
-					{formatLatency(report.latency.p99)}
+					<Figure recorded={!unrecorded.latency}>
+						{formatLatency(report.latency.p99)}
+					</Figure>
 				</p>
 			</div>
 			<div className="bg-muted/50 p-3">
@@ -53,7 +64,9 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 					<span className="text-xs text-muted-foreground">Total requests</span>
 				</div>
 				<p className="text-lg font-bold text-foreground">
-					{formatNumber(report.summary.totalRequests)}
+					<Figure recorded={!unrecorded.counts}>
+						{formatNumber(report.summary.totalRequests)}
+					</Figure>
 				</p>
 			</div>
 			<div className="bg-muted/50 p-3">
@@ -62,7 +75,9 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 					<span className="text-xs text-muted-foreground">Success rate</span>
 				</div>
 				<p className="text-lg font-bold text-foreground">
-					{formatPercent(successRateOf(report.summary))}%
+					<Figure recorded={!unrecorded.counts}>
+						{formatPercent(successRateOf(report.summary))}%
+					</Figure>
 				</p>
 			</div>
 			{assertionsFailed > 0 && (

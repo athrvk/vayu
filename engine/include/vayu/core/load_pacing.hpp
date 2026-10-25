@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -147,36 +148,39 @@ ramp_target_concurrency (size_t start, size_t target, int64_t ramp_ms, int64_t e
 }
 
 /**
- * @brief Open-loop pacing: accrue @p elapsed_us worth of requests at
- *        @p target_rps and take the whole ones, carrying the fraction in
- *        @p debt for the next tick.
+ * @brief Open-loop pacing: the whole requests a constant @p target_rps has
+ *        owed by @p elapsed into the run, `floor(target_rps x elapsed)`.
  *
- * Replaces `batch_size = size_t(target_rps / 1000.0)` submitted per 1ms tick,
- * which truncated every rate above 1000 to the nearest 1000 (1500 RPS delivered
- * 1000, 2500 delivered 2000). Carrying the fractional remainder makes the
- * delivered count track @p target_rps at any rate and at any tick length, so
- * timer jitter is corrected on the following tick rather than lost.
+ * Request k (counting from 1) is owed at `k / target_rps`, so a run of length
+ * D owes `floor(target_rps x D)` in all. The pacer asks this of the absolute
+ * time since the run started and submits the difference from what it has
+ * already taken (#2910): a per-tick delta lost its sub-microsecond remainder
+ * every tick, and a run sent one request short. A run's `requests_expected`
+ * is this same call at its duration, so the final accrual, clamped to the
+ * deadline, owes exactly that count whatever the rounding.
  *
- * @param debt        carried fraction of a request, in [0, 1); updated in place
+ * A rate and a duration written in decimal can multiply to a whole number that
+ * binary lands just below (0.57 req/s x 100 s is 56.99999999999999), so the
+ * product is read with a few ulps of slack. Parsing the rate, converting the
+ * span and multiplying round once each, half an ulp apiece, so the slack only
+ * ever reaches a product that is whole in decimal.
+ *
  * @param target_rps  requested rate; <= 0 owes nothing
- * @param elapsed_us  microseconds since the last call; <= 0 owes nothing
- * @return whole requests due now
+ * @param elapsed     time since the run started; <= 0 owes nothing
  */
 [[nodiscard]] inline size_t
-take_due_requests (double& debt, double target_rps, int64_t elapsed_us) {
-    if (!(target_rps > 0.0) || elapsed_us <= 0)
+requests_owed_by (double target_rps, std::chrono::nanoseconds elapsed) {
+    if (!(target_rps > 0.0) || elapsed.count () <= 0)
         return 0;
 
-    debt += target_rps * (static_cast<double> (elapsed_us) / 1000000.0);
-    double whole = std::floor (debt);
-    if (!(whole > 0.0))
-        return 0;
-    debt -= whole;
+    constexpr double kProductSlack = 8 * std::numeric_limits<double>::epsilon ();
+    // Bounds the cast for any rate the caller passes; a run inside
+    // MAX_TARGET_RPS and an int64 nanosecond span stays orders below it.
+    constexpr double kMaxOwed = 1e18;
 
-    // A tick can only ever owe what a caller could plausibly submit; the clamp
-    // exists so an absurd rate/elapsed pair cannot overflow the cast.
-    constexpr double kMaxDuePerTick = 1e9;
-    return static_cast<size_t> (std::min (whole, kMaxDuePerTick));
+    const double seconds = std::chrono::duration<double> (elapsed).count ();
+    const double owed = std::floor (target_rps * seconds * (1.0 + kProductSlack));
+    return static_cast<size_t> (std::min (owed, kMaxOwed));
 }
 
 } // namespace vayu::core

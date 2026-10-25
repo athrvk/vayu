@@ -11,8 +11,9 @@
  *        that it loads and runs nothing (its one image is a `data:` URI, the
  *        Vayu mark, pinned to the icon file), escapes every string it writes,
  *        stays small for a run of any length without losing a spike, draws
- *        its axes from zero and its status chart from per-tick differences,
- *        reads in light, dark and print, and matches its goldens.
+ *        its axes from zero and its status chart from the per-second counts a
+ *        row carries (#2888) or, for a run stored before them, from per-tick
+ *        differences, reads in light, dark and print, and matches its goldens.
  *
  * The golden cases are `tests/fixtures/run-export/<case>.document.json` and
  * `<case>.golden.html`; a deliberate change to the page is regenerated and its
@@ -28,8 +29,10 @@
  * drift case reds; drop `img-src data:` from the policy and the policy case
  * reds; write the run's comment without `escape_html` and the hostile-text case
  * reds; thin a series by taking every Nth sample and the spike case reds; feed
- * the status chart the cumulative counts and the per-interval case reds; take
- * a dark text token below 4.5:1 and the contrast case reds.
+ * the status chart the cumulative counts and the per-interval case reds; make
+ * `counts_by_second` return false and the status-seconds golden and
+ * the counted-seconds cases red; take a dark text token below 4.5:1 and the
+ * contrast case reds.
  */
 
 #include <gtest/gtest.h>
@@ -53,6 +56,7 @@
 #include "chart_decode.hpp"
 #include "optional_assert.hpp"
 #include "run_export_fixtures.hpp"
+#include "run_export_schema_support.hpp"
 #include "vayu/core/run_export_html.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/text_escape.hpp"
@@ -72,13 +76,13 @@ using vayu::utils::escape_html;
 
 /// Every document the Markdown goldens use, so the page is exercised on stopped
 /// runs, collection runs, comparisons and hostile text as well as the goldens.
-constexpr auto ALL_CASES = std::to_array<std::string_view> (
-{ "healthy-passed", "errors-and-budget-failed", "stopped-early",
-"vs-baseline-regressed", "no-budgets", "collection-load", "hostile-text" });
+constexpr auto ALL_CASES = std::to_array<std::string_view> ({ "healthy-passed",
+"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed",
+"no-budgets", "collection-load", "hostile-text", "status-seconds" });
 
 /// The cases whose rendered page is pinned byte for byte.
-constexpr auto GOLDEN_CASES =
-std::to_array<std::string_view> ({ "healthy-passed", "errors-and-budget-failed" });
+constexpr auto GOLDEN_CASES = std::to_array<std::string_view> (
+{ "healthy-passed", "errors-and-budget-failed", "status-seconds" });
 
 constexpr std::size_t SIZE_LIMIT_BYTES = 300000;
 
@@ -607,6 +611,161 @@ TEST (RunExportHtmlTest, AClassIsDrawnForEveryCodeInItsRange) {
     EXPECT_NEAR (drawn_values (panel, "4xx")[0], 2.0, 0.3);
     EXPECT_NEAR (drawn_values (panel, "5xx")[1], 2.0, 0.3);
     EXPECT_NEAR (drawn_values (panel, "none")[1], 1.0, 0.3);
+}
+
+// --- the status chart counted by second (#2888) -------------------------------------------
+
+/// `{second, span, counts}` as a row stores it; @p counts is 2xx, 3xx, 4xx, 5xx, no response.
+ordered_json status_entry (int second, int span, const std::array<int, 5>& counts) {
+    return { { "second", second }, { "span", span }, { "counts", counts } };
+}
+
+/// A row whose gate closed @p entries. Its cumulative `status_codes` are
+/// @p cumulative_200 responses, which differenced would disagree with the entries.
+ordered_json counted_tick (double seconds,
+const std::vector<ordered_json>& entries,
+int cumulative_200 = 10) {
+    ordered_json row = tick (seconds, 10, 5, { { "200", cumulative_200 } });
+    row["status_seconds"] = entries;
+    return row;
+}
+
+/// The values each class is drawn at, in the status panel of a document of @p ticks.
+std::string counted_html (const std::vector<ordered_json>& ticks) {
+    return render_run_export_html (with_ticks ("healthy-passed", ticks));
+}
+
+void expect_values (std::string_view panel,
+std::string_view style,
+const std::vector<double>& expected) {
+    const std::vector<double> values = drawn_values (panel, style);
+    ASSERT_EQ (values.size (), expected.size ()) << style;
+    for (std::size_t at = 0; at < values.size (); ++at) {
+        EXPECT_NEAR (values[at], expected[at], 0.3) << style << " #" << at;
+    }
+}
+
+// The cumulative counts below gain 10, 30 and 10 between rows, which is what
+// the old reading would draw; the entries say 20 a second throughout.
+// Mutation check: make `counts_by_second` return false and this reds.
+TEST (RunExportHtmlTest, TheStatusChartDrawsTheCountedSecondsNotTheRowsDifference) {
+    const std::string html =
+    counted_html ({ counted_tick (1, { status_entry (0, 1, { 20, 0, 0, 0, 0 }) }, 10),
+    counted_tick (2, { status_entry (1, 1, { 20, 0, 0, 0, 0 }) }, 40),
+    counted_tick (3, { status_entry (2, 1, { 20, 0, 0, 0, 0 }) }, 50) });
+    expect_values (status_panel (html), "2xx", { 20, 20, 20 });
+}
+
+TEST (RunExportHtmlTest, TheCountedStatusChartSaysItIsPerSecondAndTheOldOneStaysPerTick) {
+    const std::string counted =
+    counted_html ({ counted_tick (1, { status_entry (0, 1, { 20, 0, 0, 0, 0 }) }) });
+    for (const char* wording : { ">Responses per second</text>",
+         "<figcaption>Responses per second by class</figcaption>",
+         "aria-label=\"Responses per second by class\"", " resp/s" }) {
+        EXPECT_NE (counted.find (wording), std::string::npos) << wording;
+    }
+    for (const char* old : { ">Responses per tick</text>",
+         "Responses per interval by class", " responses" }) {
+        EXPECT_EQ (counted.find (old), std::string::npos) << old;
+    }
+
+    const std::string before_the_key =
+    counted_html ({ tick (1, 10, 5, { { "200", 10 } }) });
+    EXPECT_NE (before_the_key.find (">Responses per tick</text>"), std::string::npos);
+    EXPECT_NE (before_the_key.find ("Responses per interval by class"), std::string::npos);
+    EXPECT_EQ (before_the_key.find ("Responses per second by class"), std::string::npos);
+}
+
+TEST (RunExportHtmlTest, ACountedEntryFoldsItsClassesAndDividesByItsSpan) {
+    const std::string html       = counted_html ({ counted_tick (1,
+          { status_entry (0, 2, { 20, 10, 4, 2, 6 }), status_entry (2, 1, { 1, 1, 0, 0, 0 }) }) });
+    const std::string_view panel = status_panel (html);
+    expect_values (panel, "2xx", { 15, 2 });
+    expect_values (panel, "4xx", { 2, 0 });
+    expect_values (panel, "5xx", { 1, 0 });
+    expect_values (panel, "none", { 3, 0 });
+}
+
+TEST (RunExportHtmlTest, ACountedPointSitsAtTheEndOfItsSpan) {
+    const std::string html = counted_html ({ counted_tick (1,
+    { status_entry (0, 1, { 5, 0, 0, 0, 0 }), status_entry (1, 3, { 90, 0, 0, 0, 0 }) }) });
+    // Second 1 spanning 3 seconds ends at 4, where its 30 a second peaks.
+    EXPECT_NE (html.find ("2xx/3xx: min 5 resp/s, max 30 resp/s, peak at 4 s"),
+    std::string::npos);
+}
+
+TEST (RunExportHtmlTest, ASecondIsDrawnOnceAndInOrderWhateverRowCarriedIt) {
+    const std::string html = counted_html (
+    { counted_tick (1,
+      { status_entry (1, 1, { 20, 0, 0, 0, 0 }), status_entry (0, 1, { 10, 0, 0, 0, 0 }) }),
+    counted_tick (2, { status_entry (1, 1, { 30, 0, 0, 0, 0 }) }) });
+    expect_values (status_panel (html), "2xx", { 10, 30 });
+}
+
+// Choosing per row would draw the key-less row's cumulative count as well as
+// the entries, counting the same responses twice.
+TEST (RunExportHtmlTest, OneRowWithEntriesDecidesForEveryRow) {
+    const std::string html = counted_html ({ tick (1, 10, 5, { { "200", 500 } }),
+    counted_tick (2,
+    { status_entry (0, 1, { 7, 0, 0, 0, 0 }), status_entry (1, 1, { 9, 0, 0, 0, 0 }) }, 507) });
+    expect_values (status_panel (html), "2xx", { 7, 9 });
+}
+
+TEST (RunExportHtmlTest, ARunThatClosedNoSecondDrawsNoStatusChart) {
+    const std::string html =
+    counted_html ({ counted_tick (1, {}, 10), counted_tick (2, {}, 30) });
+    EXPECT_EQ (charts_of (html).find ("chart-status"), std::string::npos);
+    EXPECT_EQ (charts_of (html).find ("Responses per"), std::string::npos);
+}
+
+TEST (RunExportHtmlTest, AMalformedEntryIsSkippedAndAZeroSpanNeverDivides) {
+    const ordered_json bad_span     = { { "second", 0 }, { "span", 0 },
+            { "counts", { 9, 0, 0, 0, 0 } } };
+    const ordered_json short_counts = { { "second", 1 }, { "span", 1 },
+        { "counts", { 9, 0, 0, 0 } } };
+    const ordered_json negative     = { { "second", 2 }, { "span", 1 },
+            { "counts", { -9, 0, 0, 0, 0 } } };
+    const std::string html          = counted_html ({ counted_tick (1,
+             { bad_span, short_counts, negative, status_entry (3, 1, { 4, 0, 0, 0, 0 }),
+             status_entry (4, 1, { 6, 0, 0, 0, 0 }) }) });
+    expect_values (status_panel (html), "2xx", { 4, 6 });
+}
+
+TEST (RunExportHtmlTest, ACountedClassThatSawNothingIsNeitherDrawnNorLabelled) {
+    const std::string charts = charts_of (
+    counted_html ({ counted_tick (1, { status_entry (0, 1, { 20, 5, 0, 0, 0 }) }) }));
+    for (const char* absent : { ">4xx</text>", ">5xx</text>",
+         ">No response</text>", "s-4xx", "s-5xx", "s-none" }) {
+        EXPECT_EQ (charts.find (absent), std::string::npos) << absent;
+    }
+    EXPECT_NE (charts.find (">2xx/3xx</text>"), std::string::npos);
+}
+
+// A row can close two seconds, so a status line may hold more points than the
+// run has rows and be thinned while the row count is under the bound.
+TEST (RunExportHtmlTest, TheThinnedNoteCountsTheStatusLinesPointsToo) {
+    const auto thinned_note = [] (std::size_t rows, std::size_t entries_per_row) {
+        std::vector<ordered_json> ticks;
+        int second = 0;
+        for (std::size_t row = 0; row < rows; ++row) {
+            std::vector<ordered_json> entries;
+            entries.reserve (entries_per_row);
+            for (std::size_t at = 0; at < entries_per_row; ++at) {
+                entries.push_back (status_entry (second++, 1, { 10, 0, 0, 0, 0 }));
+            }
+            ticks.push_back (counted_tick (static_cast<double> (row + 1), entries));
+        }
+        return counted_html (ticks).find (
+               "Each line is drawn from at most 480 points") != std::string::npos;
+    };
+    EXPECT_FALSE (thinned_note (300, 1));
+    EXPECT_TRUE (thinned_note (300, 2));
+}
+
+TEST (RunExportHtmlTest, TheStatusSecondsFixtureValidatesAgainstTheSchema) {
+    EXPECT_EQ (vayu::tests::run_export_schema_errors (
+               vayu::tests::load_run_export_schema (), read_document ("status-seconds")),
+    "");
 }
 
 TEST (RunExportHtmlTest, TheP95BudgetIsALabelledLineOnlyWhenTheRunDeclaredOne) {

@@ -494,7 +494,12 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   late. A metrics thread more than 128 s behind reads two seconds that share a slot as the
   older one; neither case loses or double-counts a response. The collector's origin is
   `set_load_start`, given the instant `RunContext::load_start_steady_ms` holds, and nothing is
-  counted per second before it
+  counted per second before it. The run export is a third consumer, after the app's chart and
+  the metrics route's `maxPoints` fold: `run_export.cpp` copies each tick's entries that
+  `status_second_entry_from_json` accepts, so the document's `timeSeries` carries the same
+  per-second counts, and `run_export_html.cpp` draws its status chart from them as responses
+  per second, falling back to differencing the cumulative `status_codes` only for a run whose
+  rows carry none (#2888)
 - **Batch DB writes**: Per-request results written after test completion; the metrics thread
   persists one wide `metric_ticks` row per second during the run (the complete tick object,
   built once at write time), and the whole-run `runs.summary` is written once at completion.
@@ -857,7 +862,10 @@ See [Database Schema](db-schema.md) for the full column list.
    it writes a terminal status) - nothing else would ever move them off those
    statuses, so `GET /runs` reported them as running forever. They are marked
    `failed`; `end_time` is left as recorded, since when the process died is
-   unknowable at restart.
+   unknowable at restart. A load run that stored no summary but wrote metric
+   ticks is given one from its last tick in the same transaction, flagged
+   `partial` (#2895), so its report shows the totals it reached rather than
+   zeros (see [Database Schema](db-schema.md#runs)).
 2. **Pruning**: run history is trimmed per kind - load and collection runs to
    `maxRunsRetained`, design Sends to `maxDesignRunsRetained` (#2429) - and every
    kind to `runRetentionDays`.
