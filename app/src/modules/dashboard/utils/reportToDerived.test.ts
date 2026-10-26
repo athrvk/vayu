@@ -69,6 +69,30 @@ describe("reportToDerived", () => {
 		});
 	});
 
+	// Mutation checked: dropping `runSloMs` from the return fails the first two cases.
+	describe("the run's own SLO line (#2939)", () => {
+		it("is a p99 budget's limit, not the breakpoint's threshold", () => {
+			const thresholdValidation = {
+				checks: [{ metric: "latencyP99Ms", limit: 350, actual: 400, passed: false }],
+				passed: 0,
+				failed: 1,
+				verdict: "failed" as const,
+			};
+			const d = reportToDerived(baseReport({ thresholdValidation }));
+			expect(d.runSloMs).toBe(350);
+			expect(d.breakpoint.sloMs).toBeNull();
+		});
+
+		it("is a capacity run's sloMs", () => {
+			const capacity = { sloMs: 50, stopReason: "plateau", levels: [] };
+			expect(reportToDerived(baseReport({ capacity })).runSloMs).toBe(50);
+		});
+
+		it("is absent for a report that declared neither", () => {
+			expect(reportToDerived(baseReport()).runSloMs).toBeUndefined();
+		});
+	});
+
 	// Mutation checked: dropping `capacity` from the return fails the first case.
 	describe("the search's result (#2816)", () => {
 		it("carries a capacity run's stop reason to the Saturation card", () => {

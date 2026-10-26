@@ -27,8 +27,6 @@ import { LatencyStat } from "./stats/LatencyStat";
 import { PhasePercentiles } from "./charts/PhasePercentiles";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 import { HdrPercentileChart } from "./charts/uplot";
-import { useSloMs } from "../hooks/useSloMs";
-import type { Breakpoint } from "../utils/computeBreakpoint";
 import { pluralize } from "../utils/format";
 import { latestGateFrame, liveDistributions } from "../utils/liveDistributions";
 
@@ -41,12 +39,11 @@ function Placeholder({ title }: { title: string }) {
 
 export function LiveDistributionRow({
 	history,
-	breakpoint,
+	sloMs,
 }: {
 	history: LoadTestMetrics[];
-	breakpoint: Breakpoint;
+	sloMs?: number;
 }) {
-	const sloMs = useSloMs(breakpoint);
 	const frame = useMemo(() => latestGateFrame(history), [history]);
 	const { latency, phases } = useMemo(() => liveDistributions(frame), [frame]);
 

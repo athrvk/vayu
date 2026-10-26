@@ -17,7 +17,6 @@ import type { LoadTestMetrics, RunReport } from "@/types";
 import { type Breakpoint } from "../../../utils/computeBreakpoint";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import { useClientSettingsStore } from "@/stores";
-import { useSloMs } from "../../../hooks/useSloMs";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
@@ -37,12 +36,15 @@ export function ResponseTimeVsConcurrencyChart({
 	history,
 	height,
 	breakpoint,
+	sloMs,
 	kneeConcurrency,
 	syncKey,
 }: {
 	history: LoadTestMetrics[];
 	height?: number;
 	breakpoint?: Breakpoint | null;
+	/** The run's SLO line (ms); absent draws no horizontal line (#2939). */
+	sloMs?: number;
 	/** The capacity search's knee, from the stored report; absent draws no marker. */
 	kneeConcurrency?: number;
 	/** Join a chart group's focus channel - hovering a time chart highlights the
@@ -71,16 +73,16 @@ export function ResponseTimeVsConcurrencyChart({
 		},
 	];
 
-	const sloMs = useSloMs(breakpoint);
 	const markers = useMemo<Marker[]>(() => {
-		const m: Marker[] = [
-			{
+		const m: Marker[] = [];
+		if (sloMs !== undefined) {
+			m.push({
 				orient: "horizontal",
 				value: sloMs,
 				role: SCATTER_LEGEND.slo.role,
 				label: `SLO ${formatLatency(sloMs)}`,
-			},
-		];
+			});
+		}
 		if (breakpoint?.crossed && breakpoint.concurrency != null) {
 			m.push({
 				orient: "vertical",

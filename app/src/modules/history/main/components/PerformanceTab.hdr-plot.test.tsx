@@ -20,7 +20,8 @@
  *
  * Mutation-check: drop the card from `PerformanceTab.tsx` and every case
  * fails; feed the footer `report.latency.p50` for the max and the footer case
- * fails; drop `sloMs` from the plot in `PerformanceTab` and the SLO case fails.
+ * fails; drop `sloMs` from the plot in `PerformanceTab` and the SLO case fails; fall
+ * back to the Settings SLO there and the no-SLO case fails.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -56,11 +57,17 @@ function makeReport(latency: Partial<RunReport["latency"]>): RunReport {
 }
 
 // `runId` is left off so the uPlot time-series charts stay out of the tree.
-function renderTab(report: RunReport) {
+function renderTab(report: RunReport, runSloMs?: number) {
 	return render(
 		<PerformanceTab
 			report={report}
-			derived={{ mode: "constant_concurrency", targetRps: 0 } as unknown as DashboardDerived}
+			derived={
+				{
+					mode: "constant_concurrency",
+					targetRps: 0,
+					runSloMs,
+				} as unknown as DashboardDerived
+			}
 			timeSeries={[]}
 			monitorSamples={[]}
 		/>
@@ -79,13 +86,19 @@ describe("PerformanceTab HDR percentile plot", () => {
 		expect(screen.getByText("from HdrHistogram")).toBeInTheDocument();
 	});
 
-	it("hands the plot the user's SLO so its markers judge against it (#2263)", () => {
+	it("hands the plot the run's SLO so its markers judge against it (#2263)", () => {
+		renderTab(makeReport({ min: 1, max: 90, avg: 10, p50: 8, p90: 30, p95: 40, p99: 70 }), 37);
+
+		expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "37");
+	});
+
+	it("hands it no SLO for a run that declared none, whatever Settings holds (#2939)", () => {
 		const before = useClientSettingsStore.getState().sloThresholdMs;
 		useClientSettingsStore.setState({ sloThresholdMs: 37 });
 		try {
 			renderTab(makeReport({ min: 1, max: 90, avg: 10, p50: 8, p90: 30, p95: 40, p99: 70 }));
 
-			expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "37");
+			expect(screen.getByTestId("hdr-plot")).not.toHaveAttribute("data-slo-ms");
 		} finally {
 			useClientSettingsStore.setState({ sloThresholdMs: before });
 		}

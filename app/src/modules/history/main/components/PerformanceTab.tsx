@@ -25,8 +25,8 @@ import {
 } from "@/modules/dashboard/components/charts/uplot";
 import { ChartLegend } from "@/modules/dashboard/components/charts/ChartLegend";
 import {
-	PERCENTILE_ENTRIES,
-	SCATTER_ENTRIES,
+	percentileLegend,
+	scatterLegend,
 } from "@/modules/dashboard/components/charts/uplot/legend";
 import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePercentiles";
 import { StreamMetrics } from "@/modules/dashboard/components/charts/StreamMetrics";
@@ -38,7 +38,6 @@ import MonitorSummary from "./MonitorSummary";
 import { PhaseAveragesCard } from "./PhaseAveragesCard";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import { useHostSleeps } from "@/stores/host-sleep-store";
-import { useSloMs } from "@/modules/dashboard/hooks/useSloMs";
 import type { PerformanceTabProps } from "../../types";
 
 export default function PerformanceTab({
@@ -58,7 +57,10 @@ export default function PerformanceTab({
 	// run id rather than drilled from `LoadTestDetail`: Overview states them and
 	// this tab marks them, and neither derives anything the other must match.
 	const hostSleeps = useHostSleeps(runId);
-	const sloMs = useSloMs(derived.breakpoint);
+	// The run's own line, never the Settings SLO: a run that declared none draws
+	// no SLO line and judges no tile by one (#2939).
+	const sloMs = derived.runSloMs;
+	const hasSlo = sloMs !== undefined;
 	// Stored ticks carry each second's merged percentiles (#2385), so the
 	// history percentile chart / scatter can render the same views as the live
 	// dashboard. Mirror MetricsView's split: ramp_up and capacity →
@@ -115,13 +117,14 @@ export default function PerformanceTab({
 						<CardHeader className="pb-2">
 							<div className="flex items-baseline justify-between">
 								<CardTitle>Response time vs {CONCURRENCY_UNIT}</CardTitle>
-								<ChartLegend entries={SCATTER_ENTRIES} />
+								<ChartLegend entries={scatterLegend(hasSlo)} />
 							</div>
 						</CardHeader>
 						<CardContent>
 							<ResponseTimeVsConcurrencyChart
 								history={timeSeries}
 								breakpoint={derived.breakpoint}
+								sloMs={sloMs}
 								kneeConcurrency={report.capacity?.kneeConcurrency}
 								syncKey={CHART_SYNC.history}
 							/>
@@ -132,7 +135,7 @@ export default function PerformanceTab({
 						<CardHeader className="pb-2">
 							<div className="flex items-baseline justify-between">
 								<CardTitle>Response time percentiles over time</CardTitle>
-								<ChartLegend entries={PERCENTILE_ENTRIES} />
+								<ChartLegend entries={percentileLegend(hasSlo)} />
 							</div>
 						</CardHeader>
 						<CardContent>
@@ -142,6 +145,7 @@ export default function PerformanceTab({
 								syncKey={CHART_SYNC.history}
 								mode={derived.mode}
 								breakpoint={derived.breakpoint}
+								sloMs={sloMs}
 								anomalies={anomalies}
 								sleeps={hostSleeps}
 							/>

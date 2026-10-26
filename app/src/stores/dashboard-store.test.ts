@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { useDashboardStore, deriveRunProgress } from "./dashboard-store";
+import { useDashboardStore, deriveRunProgress, runOwnSloMs } from "./dashboard-store";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import { useClientSettingsStore } from "./client-settings-store";
 import { DEFAULT_SLO_THRESHOLD_MS } from "@/constants/client-settings";
@@ -171,6 +171,44 @@ describe("dashboard-store breakpoint SLO", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
 	});
 
+	it("judges a plain run against Settings and says so (#2939)", () => {
+		useDashboardStore.getState().startRun("r", { mode: "ramp_up" });
+		expect(useDashboardStore.getState().breakpoint.sloSource).toBe("settings");
+		useDashboardStore.getState().addMetricsBatch([tick(1, 250)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			sloMs: DEFAULT_SLO_THRESHOLD_MS,
+			sloSource: "settings",
+		});
+	});
+
+	it("keeps judging a ramp against Settings when it set a different p99 budget (#2939)", () => {
+		useDashboardStore.getState().startRun("r", { mode: "ramp_up", latencyP99Ms: 350 });
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			sloMs: DEFAULT_SLO_THRESHOLD_MS,
+			sloSource: "settings",
+		});
+	});
+
+	it("marks the source run only where the p99 budget is the judged number (#2939)", () => {
+		useDashboardStore
+			.getState()
+			.startRun("r", { mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS });
+		expect(useDashboardStore.getState().breakpoint.sloSource).toBe("run");
+	});
+
+	it("relabels the source when the config arrives after the ticks, keeping the verdict (#2939)", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r");
+		s.addMetricsBatch([tick(1, 250)]);
+		s.setRunConfig({ mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS }, null);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: true,
+			timeSeconds: 1,
+			sloSource: "run",
+		});
+	});
+
 	it("a new run starts uncrossed against the SLO in force", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: 350 });
 		useDashboardStore.getState().startRun("r");
@@ -206,7 +244,10 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 
 	it("starts uncrossed against the run's own SLO, not the setting", () => {
 		useDashboardStore.getState().startRun("r", { mode: "capacity", sloMs: 50 });
-		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(50);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			sloMs: 50,
+			sloSource: "run",
+		});
 	});
 
 	it("latches a 60 ms tick the 200 ms setting would have let through", () => {
@@ -284,6 +325,51 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 				crossed: true,
 				sloMs: 100,
 			});
+		});
+	});
+});
+
+describe("dashboard-store run's own SLO (issue #2939)", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
+	});
+
+	it("is the p99 budget the run was started with", () => {
+		useDashboardStore.getState().startRun("r", { mode: "constant_rps", latencyP99Ms: 120 });
+		expect(runOwnSloMs(useDashboardStore.getState().loadTestConfig)).toBe(120);
+	});
+
+	it("is none for a run with no budget, whatever the setting is", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 350 });
+		useDashboardStore.getState().startRun("r", { mode: "constant_rps" });
+		expect(runOwnSloMs(useDashboardStore.getState().loadTestConfig)).toBeUndefined();
+		useDashboardStore.getState().startRun("r");
+		expect(runOwnSloMs(useDashboardStore.getState().loadTestConfig)).toBeUndefined();
+	});
+
+	it("is a capacity run's sloMs ahead of its p99 budget", () => {
+		expect(runOwnSloMs({ mode: "capacity", sloMs: 50, latencyP99Ms: 120 })).toBe(50);
+		expect(runOwnSloMs({ mode: "capacity", latencyP99Ms: 120 })).toBe(120);
+		// A stray sloMs outside capacity is no run's line.
+		expect(runOwnSloMs({ mode: "ramp_up", sloMs: 50 })).toBeUndefined();
+	});
+
+	it("follows a config that arrives after the run started (setRunConfig)", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r");
+		s.setRunConfig({ mode: "constant_rps", latencyP99Ms: 120 }, null);
+		expect(runOwnSloMs(useDashboardStore.getState().loadTestConfig)).toBe(120);
+	});
+
+	// The judge is unchanged: a p99 budget draws a line, it does not move the
+	// breakpoint, which a non-capacity run still judges against the setting.
+	it("leaves a non-capacity breakpoint judged against the setting", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r", { mode: "ramp_up", latencyP99Ms: 120 });
+		s.addMetricsBatch([tick(1, 150)]);
+		expect(useDashboardStore.getState().breakpoint).toMatchObject({
+			crossed: false,
+			sloMs: DEFAULT_SLO_THRESHOLD_MS,
 		});
 	});
 });

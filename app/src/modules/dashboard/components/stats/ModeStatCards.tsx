@@ -89,12 +89,13 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 
 /**
  * Breakpoint - concurrency at which p99 first crossed the SLO threshold. An
- * uncrossed run says so and names the SLO (from the breakpoint, not the current
- * setting), since "-" reads as "not measured". The SLO goes in the sub-line:
- * "not crossed" alone fills most of a card's value row.
+ * uncrossed run says so and names the line (from the breakpoint, not the current
+ * setting), since "-" reads as "not measured": "SLO" for a run's own, "Settings"
+ * for the Settings threshold (#2939). It goes in the sub-line: "not crossed"
+ * alone fills most of a card's value row.
  */
 export function BreakpointStat({ d }: { d: DashboardDerived }) {
-	const { crossed, concurrency, sloMs } = d.breakpoint;
+	const { crossed, concurrency, sloMs, sloSource } = d.breakpoint;
 	const reached = crossed && concurrency !== null;
 	// A null SLO means no tick was ever judged (report-only History, run not started):
 	// "not crossed" would assert a result nobody measured, so that stays "-".
@@ -103,7 +104,11 @@ export function BreakpointStat({ d }: { d: DashboardDerived }) {
 		<StatCard
 			label="Breakpoint"
 			value={value}
-			sub={!reached && sloMs ? `SLO ${formatLatency(sloMs)}` : undefined}
+			sub={
+				!reached && sloMs
+					? `${sloSource === "run" ? "SLO" : "Settings"} ${formatLatency(sloMs)}`
+					: undefined
+			}
 			infoTip={TOOLTIPS.breakpoint}
 		/>
 	);

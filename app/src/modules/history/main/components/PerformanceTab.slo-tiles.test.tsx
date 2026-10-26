@@ -10,17 +10,18 @@
  */
 
 /**
- * The latency tiles judge against the user's SLO, not against their own name
+ * The latency tiles judge against the run's own SLO, not against their own name
  * (#2245). P95 / P99 / P999 used to be warning and danger unconditionally, so a
- * run whose p99 was 3 ms drew a red tile.
+ * run whose p99 was 3 ms drew a red tile. A run that declared no SLO has
+ * nothing to be judged by, and the client's Settings SLO is not one (#2939).
  *
- * The SLO is set through the store in every case rather than read as the
- * default, so a tile comparing against a constant of its own fails here.
+ * The SLO arrives as `derived.runSloMs` in every case rather than as a default,
+ * so a tile comparing against a constant of its own fails here.
  *
  * Mutation-check: restore `variant="danger"` on the P99 tile (or drop the
  * `value > sloMs` comparison in `LatencyMetric`) and the under-SLO cases fail;
- * hard-code the threshold in `PerformanceTab` and the "reads the store" cases
- * fail.
+ * hard-code the threshold in `PerformanceTab` and the "reads the run's SLO"
+ * case fails; fall back to the Settings SLO there and the "no SLO" case fails.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -52,11 +53,17 @@ function makeReport(latency: Partial<RunReport["latency"]>): RunReport {
 }
 
 // `runId` is left off so the uPlot time-series charts stay out of the tree.
-function renderTab(latency: Partial<RunReport["latency"]>) {
+function renderTab(latency: Partial<RunReport["latency"]>, runSloMs: number | null = 200) {
 	return render(
 		<PerformanceTab
 			report={makeReport(latency)}
-			derived={{ mode: "constant_concurrency", targetRps: 0 } as unknown as DashboardDerived}
+			derived={
+				{
+					mode: "constant_concurrency",
+					targetRps: 0,
+					runSloMs: runSloMs ?? undefined,
+				} as unknown as DashboardDerived
+			}
 			timeSeries={[]}
 			monitorSamples={[]}
 		/>
@@ -79,8 +86,10 @@ const isWarning = (label: string) => {
 };
 
 describe("PerformanceTab latency tiles against the SLO", () => {
+	// A Settings SLO no case reads: one that leaked in would colour the cases it
+	// sits under and neutralise the ones it sits over.
 	beforeEach(() => {
-		useClientSettingsStore.setState({ sloThresholdMs: 200 });
+		useClientSettingsStore.setState({ sloThresholdMs: 1 });
 	});
 
 	it("leaves every tile neutral when the run is inside the SLO", () => {
@@ -116,15 +125,23 @@ describe("PerformanceTab latency tiles against the SLO", () => {
 		expect(isDanger("P99")).toBe(true);
 	});
 
-	it("reads the threshold from the store, in both directions", () => {
-		useClientSettingsStore.setState({ sloThresholdMs: 2 });
-		const { unmount } = renderTab({ p95: 2.5, p99: 3 });
+	it("reads the run's SLO, in both directions", () => {
+		const { unmount } = renderTab({ p95: 2.5, p99: 3 }, 2);
 		expect(isDanger("P99")).toBe(true);
 		unmount();
 
-		useClientSettingsStore.setState({ sloThresholdMs: 5 });
-		renderTab({ p95: 2.5, p99: 3 });
+		renderTab({ p95: 2.5, p99: 3 }, 5);
 		expect(isDanger("P99")).toBe(false);
+	});
+
+	it("leaves every tile neutral for a run with no SLO, however slow and whatever Settings holds", () => {
+		renderTab({ p95: 250, p99: 900, p999: 1500 }, null);
+
+		for (const label of ["P95", "P99", "P999"]) {
+			expect(isDanger(label), `${label} danger`).toBe(false);
+			expect(isWarning(label), `${label} warning`).toBe(false);
+			expect(tile(label).figure.className).toContain("text-foreground");
+		}
 	});
 
 	it("never colours the tiles that carry no verdict, however slow", () => {

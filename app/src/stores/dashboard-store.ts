@@ -13,7 +13,9 @@ import {
 	breakpointAt,
 	computeBreakpoint,
 	notCrossed,
+	sloSourceOf,
 	type Breakpoint,
+	type SloSource,
 } from "@/modules/dashboard/utils/computeBreakpoint";
 import { foldLagStreak } from "@/modules/dashboard/utils/dispatchLag";
 import { foldPeakReading } from "@/modules/dashboard/utils/p99AtPeak";
@@ -59,20 +61,48 @@ export interface LoadTestRunConfig {
 	dataFileCastNumbers?: boolean;
 	/** A capacity run's own p99 budget (ms), the search's stop line; absent in every other mode. */
 	sloMs?: number;
+	/** The `latencyP99Ms` threshold the run declared (ms); absent when it set none. */
+	latencyP99Ms?: number;
 }
 
-/**
- * The SLO (ms) a run's breakpoint is judged against: a capacity run's own, which
- * its search stopped on, and the Settings SLO for every other mode. A capacity
- * run judged by the Settings line would draw one budget on the Capacity summary
- * and another on the Saturation card and the chart.
- */
-function runOwnSloMs(config: LoadTestRunConfig | null): number | undefined {
+/** A capacity run's own p99 budget, the line its search stops on; no other mode has one. */
+function capacitySloMs(config: LoadTestRunConfig | null): number | undefined {
 	return config?.mode === "capacity" ? config.sloMs : undefined;
 }
 
-function sloMsFor(config: LoadTestRunConfig | null): number {
-	return runOwnSloMs(config) ?? useClientSettingsStore.getState().sloThresholdMs;
+/**
+ * The p99 line (ms) the live charts, latency tiles and HDR markers draw: the
+ * run's own, which mirrors `runSloMs(report)` for a stored run (#2939). A
+ * capacity run's `sloMs` (the line its search stopped on), else its
+ * `latencyP99Ms` budget, else `undefined`. The Settings SLO is a client
+ * preference, not a property of the run, so it is never the answer.
+ */
+export function runOwnSloMs(config: LoadTestRunConfig | null): number | undefined {
+	return capacitySloMs(config) ?? config?.latencyP99Ms;
+}
+
+interface SloJudge {
+	sloMs: number;
+	sloSource: SloSource;
+}
+
+/**
+ * The line a run's breakpoint is judged against, and whose it is: a capacity
+ * run's own, which its search stopped on, else the Settings threshold. A
+ * capacity run judged by the Settings line would draw one budget on the
+ * Capacity summary and another on the Saturation card and the chart. A ramp
+ * stays Settings-judged even when the run set a p99 budget, so `sloSource` is
+ * "run" only where the two are the same number (#2939). This is the judge only;
+ * what the charts draw is {@link runOwnSloMs}, as History's is.
+ */
+function sloJudgeFor(config: LoadTestRunConfig | null): SloJudge {
+	const sloMs = capacitySloMs(config) ?? useClientSettingsStore.getState().sloThresholdMs;
+	return { sloMs, sloSource: sloSourceOf(sloMs, runOwnSloMs(config)) };
+}
+
+/** The breakpoint of a run no tick has crossed yet, judged by `judge`. */
+function uncrossedBy(judge: SloJudge): Breakpoint {
+	return notCrossed(judge.sloMs, judge.sloSource);
 }
 
 /**
@@ -223,7 +253,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	requestInfo: null,
 	sourceRequestId: null,
 	peakConcurrency: 0,
-	breakpoint: notCrossed(null),
+	breakpoint: notCrossed(null, "settings"),
 	p99AtPeakMs: undefined,
 	dispatchLagSinceSeconds: null,
 	liveWindowSeconds: initialLiveWindowSeconds(),
@@ -244,7 +274,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			requestInfo: requestInfo ?? null,
 			sourceRequestId: sourceRequestId ?? null,
 			peakConcurrency: 0,
-			breakpoint: notCrossed(sloMsFor(config ?? null)),
+			breakpoint: uncrossedBy(sloJudgeFor(config ?? null)),
 			p99AtPeakMs: undefined,
 			dispatchLagSinceSeconds: null,
 		}),
@@ -253,11 +283,23 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		set((state) => {
 			const patch = { loadTestConfig: config, requestInfo: requestInfo ?? state.requestInfo };
 			// A run started elsewhere (an MCP agent's) streams ticks before its config
-			// is read, so they were judged against the Settings SLO. A capacity run's
-			// own line replaces that verdict, from the ticks still retained.
-			const ownSloMs = runOwnSloMs(config);
-			if (ownSloMs === undefined || ownSloMs === state.breakpoint.sloMs) return patch;
-			return { ...patch, breakpoint: computeBreakpoint(state.historicalMetrics, ownSloMs) };
+			// is read, so they were judged against the Settings threshold. A capacity
+			// run's own line replaces that verdict, from the ticks still retained.
+			const judge = sloJudgeFor(config);
+			const { breakpoint } = state;
+			if (judge.sloMs !== breakpoint.sloMs) {
+				if (capacitySloMs(config) === undefined) return patch;
+				const rejudged = computeBreakpoint(
+					state.historicalMetrics,
+					judge.sloMs,
+					runOwnSloMs(config)
+				);
+				return { ...patch, breakpoint: rejudged };
+			}
+			// The same number can be the run's budget or only the Settings default, and
+			// the config says which; the verdict itself does not move.
+			if (judge.sloSource === breakpoint.sloSource) return patch;
+			return { ...patch, breakpoint: { ...breakpoint, sloSource: judge.sloSource } };
 		}),
 
 	stopRun: () =>
@@ -306,22 +348,25 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			// restarts whenever the peak rises, and the lag streak restarts whenever
 			// the windowed rates agree again - so we walk each batch entry exactly
 			// once, never the full history.
-			const sloMs = sloMsFor(state.loadTestConfig);
+			const judge = sloJudgeFor(state.loadTestConfig);
 			let lagSince = state.dispatchLagSinceSeconds;
 			let peakReading = { peak: state.peakConcurrency, p99Ms: state.p99AtPeakMs };
-			// An uncrossed breakpoint names the SLO it is being judged against, so a
+			// An uncrossed breakpoint names the line it is being judged against, so a
 			// threshold changed mid-run is followed until the first crossing latches.
 			let bp =
-				state.breakpoint.crossed || state.breakpoint.sloMs === sloMs
+				state.breakpoint.crossed ||
+				(state.breakpoint.sloMs === judge.sloMs &&
+					state.breakpoint.sloSource === judge.sloSource)
 					? state.breakpoint
-					: notCrossed(sloMs);
+					: uncrossedBy(judge);
 			// Stops at the first whole-second reading, which an uncrossed run reaches
 			// within its opening ticks - this is not a scan of the retained buffer.
 			let seenReading = !bp.crossed && state.historicalMetrics.some(hasSecondPercentiles);
 			for (const m of batch) {
 				peakReading = foldPeakReading(peakReading, m);
 				lagSince = foldLagStreak(lagSince, m);
-				if (!bp.crossed) bp = breakpointAt(m, sloMs, !seenReading) ?? bp;
+				if (!bp.crossed)
+					bp = breakpointAt(m, judge.sloMs, judge.sloSource, !seenReading) ?? bp;
 				seenReading ||= hasSecondPercentiles(m);
 			}
 

@@ -78,6 +78,26 @@ describe("loadConfigFromSnapshot", () => {
 		});
 	});
 
+	// The engine stores the request body as sent, so an agent-started run's p99
+	// budget is `thresholds.latencyP99Ms`; the live charts draw it (#2939).
+	// Mutation check: drop `latencyP99Ms` from `loadConfigFromSnapshot`.
+	it("copies the p99 budget out of the thresholds, and nothing from the other budgets", () => {
+		expect(
+			loadConfigFromSnapshot({
+				mode: "constant_rps",
+				thresholds: { latencyP99Ms: 150, maxErrorRatePct: 1 },
+			})
+		).toStrictEqual({ mode: "constant_rps", latencyP99Ms: 150 });
+		expect(loadConfigFromSnapshot({ thresholds: { maxErrorRatePct: 1 } })).toStrictEqual({});
+	});
+
+	it("drops a thresholds block of the wrong shape", () => {
+		expect(loadConfigFromSnapshot({ thresholds: null } as never)).toStrictEqual({});
+		expect(
+			loadConfigFromSnapshot({ thresholds: { latencyP99Ms: "150" } } as never)
+		).toStrictEqual({});
+	});
+
 	it("falls back to the engine's rps key for the target rate", () => {
 		expect(loadConfigFromSnapshot({ rps: 40 }).targetRps).toBe(40);
 		expect(loadConfigFromSnapshot({ targetRps: 10, rps: 40 }).targetRps).toBe(10);

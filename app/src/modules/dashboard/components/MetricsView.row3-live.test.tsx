@@ -93,11 +93,26 @@ describe("MetricsView latency distribution card", () => {
 		});
 	});
 
-	it("passes the SLO setting to the plot", () => {
+	// The plot's markers are judged against the run's own p99 line (#2939), never
+	// the Settings SLO. Mutation check: fall back to the setting in `MetricsView`
+	// and the second case fails.
+	it("passes the run's p99 budget to the plot", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 250 });
+		useDashboardStore.getState().startRun("r", { latencyP99Ms: 120 });
+		try {
+			renderView([GATE, tick(2.1)]);
+
+			expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "120");
+		} finally {
+			useDashboardStore.getState().startRun("r");
+		}
+	});
+
+	it("passes no SLO to the plot for a run that declared none, whatever the setting", () => {
 		useClientSettingsStore.setState({ sloThresholdMs: 250 });
 		renderView([GATE, tick(2.1)]);
 
-		expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "250");
+		expect(screen.getByTestId("hdr-plot")).not.toHaveAttribute("data-slo-ms");
 	});
 
 	// A capacity run's plot judges its p95/p99 markers against the run's own SLO

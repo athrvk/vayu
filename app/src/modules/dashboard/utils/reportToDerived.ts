@@ -10,7 +10,8 @@ import { durationSeconds } from "@/constants/load-test";
 import type { DashboardDerived, ReceivedWindow, StoppedAt } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
-import { notCrossed } from "./computeBreakpoint";
+import { notCrossed, sloSourceOf } from "./computeBreakpoint";
+import { runSloMs } from "./runSloMs";
 import { dispatchStatus } from "./dispatchLag";
 import { shouldShowDropped } from "./metricsTransforms";
 import { liveRateFidelity } from "./rateFidelity";
@@ -90,6 +91,8 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 	const targetRps = report.rateControl?.targetRps ?? cfg.targetRps;
 	const actualRps = report.rateControl?.actualRps ?? s.avgRps;
 	const stopped = stoppedRunFidelity(report, targetRps);
+	const ownSloMs = runSloMs(report);
+	const capacitySloMs = report.capacity?.sloMs ?? null;
 	// The report's own percentage when it has one, so this card and the History
 	// tile state one definition (#2392); a report without `rateControl` is
 	// judged by the ratio the card always drew.
@@ -161,8 +164,9 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		startConcurrency: cfg.startConcurrency,
 		targetConcurrency: cfg.concurrency,
 		// A capacity run names its own budget; every other report has no threshold
-		// until LoadTestDetail judges its stored series against the Settings SLO.
-		breakpoint: notCrossed(report.capacity?.sloMs ?? null),
+		// until LoadTestDetail judges its stored series against the Settings threshold.
+		breakpoint: notCrossed(capacitySloMs, sloSourceOf(capacitySloMs, ownSloMs)),
+		runSloMs: ownSloMs,
 		capacity: report.capacity,
 	};
 }

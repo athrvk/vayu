@@ -104,13 +104,27 @@ function legendOf(container: HTMLElement, title: string | RegExp) {
 	};
 }
 
-function renderTab(mode: string, withSendRate = true, runReport: RunReport = report) {
+/** The run's own SLO the Performance tab is handed; the legend and the line follow it (#2939). */
+const SLO_MS = 200;
+
+function renderTab(
+	mode: string,
+	withSendRate = true,
+	runReport: RunReport = report,
+	runSloMs: number | null = SLO_MS
+) {
 	charts.clear();
 	return render(
 		<PerformanceTab
 			report={runReport}
 			runId="run_1"
-			derived={{ mode, targetRps: 0 } as unknown as DashboardDerived}
+			derived={
+				{
+					mode,
+					targetRps: 0,
+					runSloMs: runSloMs ?? undefined,
+				} as unknown as DashboardDerived
+			}
 			timeSeries={Array.from({ length: 6 }, (_, i) => tick(i, withSendRate))}
 			monitorSamples={[]}
 		/>
@@ -126,6 +140,19 @@ describe("PerformanceTab chart legends (#2697)", () => {
 		expect(chart?.series.map((s) => [s.label, s.role])).toEqual(
 			labels.slice(0, 3).map((label, i) => [label, roles[i]])
 		);
+		expect(chart?.markers?.map((m) => [m.orient, m.label])).toEqual([
+			["horizontal", "SLO 200ms"],
+		]);
+	});
+
+	it("keys no SLO, and draws no line, for a run that declared none (#2939)", () => {
+		const { labels, chart } = legendOf(
+			renderTab("constant_rps", true, report, null),
+			PERCENTILES_TITLE
+		);
+
+		expect(labels).toEqual(["p50", "p95", "p99"]);
+		expect(chart?.markers ?? []).toEqual([]);
 	});
 
 	it("keys the throughput card with throughput and send rate, and no target or ramp pair", () => {
@@ -144,23 +171,29 @@ describe("PerformanceTab chart legends (#2697)", () => {
 		expect(chart?.series.map((s) => s.label)).toEqual(["throughput"]);
 	});
 
-	it("keys the ramp_up scatter p99 and SLO, and shows no percentile card", () => {
-		const container = renderTab("ramp_up");
-		const { labels, chart } = legendOf(container, SCATTER_TITLE);
+	it.each(["ramp_up", "capacity"])(
+		"keys the %s scatter p99 and SLO, and shows no percentile card (#2931)",
+		(mode) => {
+			const container = renderTab(mode);
+			const { labels, chart } = legendOf(container, SCATTER_TITLE);
 
-		expect(labels).toEqual(["p99", "SLO"]);
-		expect(chart?.series.map((s) => s.label)).toContain("p99");
-		expect(container.textContent).not.toContain(PERCENTILES_TITLE);
-	});
+			expect(labels).toEqual(["p99", "SLO"]);
+			expect(chart?.series.map((s) => s.label)).toContain("p99");
+			expect(chart?.markers?.map((m) => m.label)).toContain("SLO 200ms");
+			expect(container.textContent).not.toContain(PERCENTILES_TITLE);
+		}
+	);
 
-	it("keys the capacity scatter p99 and SLO, and shows no percentile card (#2931)", () => {
-		const container = renderTab("capacity");
-		const { labels, chart } = legendOf(container, SCATTER_TITLE);
+	it.each(["ramp_up", "capacity"])(
+		"keys the %s scatter p99 alone, with no SLO line, when the run declared none (#2939)",
+		(mode) => {
+			const { labels, chart } = legendOf(renderTab(mode, true, report, null), SCATTER_TITLE);
 
-		expect(labels).toEqual(["p99", "SLO"]);
-		expect(chart?.series.map((s) => s.label)).toContain("p99");
-		expect(container.textContent).not.toContain(PERCENTILES_TITLE);
-	});
+			expect(labels).toEqual(["p99"]);
+			expect(chart?.series.map((s) => s.label)).toContain("p99");
+			expect(chart?.markers?.map((m) => m.label) ?? []).toEqual([]);
+		}
+	);
 
 	describe("the capacity scatter's knee marker (#2931)", () => {
 		const withKnee = (kneeConcurrency?: number) =>
