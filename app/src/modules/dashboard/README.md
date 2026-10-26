@@ -181,7 +181,8 @@ consumes it.
   is on every frame.
 - **The dashed vertical line marks where p99 first crossed the SLO, and the
   horizontal one is the SLO itself** (#2698). The vertical line is labelled
-  `p99 > SLO <threshold>`, never the observed p99, which is in its hover with the
+  `p99 > SLO <threshold>` (`p99 > <threshold> threshold in Settings` where the run
+  declared no line), never the observed p99, which is in its hover with the
   load at the crossing. It is drawn on every time chart for a `ramp_up` or
   `capacity` run (`isConcurrencySweepMode`; a capacity run's percentile card is
   the scatter, so the time charts are where its crossing time shows), on
@@ -207,17 +208,20 @@ consumes it.
   `latencyP99Ms` check (evaluated or not), else nothing, and `reportToDerived`
   carries it as `DashboardDerived.runSloMs`. With none, History draws no
   horizontal SLO line, no SLO legend entry and no coloured latency tile or HDR
-  marker: the Settings SLO is a client preference, not a property of the run, so
+  marker: the Settings p99 threshold is a client preference, not a property of the run, so
   a p99 of 300ms against a 200ms setting is not a miss the run ever signed up
   for; a live run with no p99 line is drawn the same way. A ramp's breakpoint is
   still judged against the Settings threshold in both views, so
   `breakpoint.sloMs` is not the line to draw. `Breakpoint.sloSource` says whose
   number it is (`sloSourceOf`): `"run"` when the judged value equals the run's
   own line (a capacity `sloMs`, or a p99 budget that is the same number as the
-  Settings threshold), else `"settings"`. Only a `"run"` line is worded an SLO:
-  the marker reads `p99 > SLO 50ms` or `p99 > 200ms (Settings)`, the Saturation
-  call-out `the 50ms SLO` or `the 200ms threshold in Settings`, and the
-  Breakpoint stat's sub-line `SLO 50ms` or `Settings 200ms` (#2939).
+  Settings threshold), else `"settings"`. Only a `"run"` line is worded an SLO,
+  and `sloLineName` (`utils/computeBreakpoint.ts`) is the one place that decides:
+  the marker reads `p99 > SLO 50ms` or `p99 > 200ms threshold in Settings`, the
+  Saturation call-out `the 50ms SLO` or `the 200ms threshold in Settings`, and
+  the Breakpoint stat's sub-line `SLO 50ms` or `threshold in Settings 200ms`.
+  The Settings value is the Dashboard panel's "p99 threshold" (#2939); the word
+  SLO only ever means a run's own budget.
 - **A capacity run draws the response-time-vs-concurrency scatter, live and in
   History, in place of the percentile card** (#2931). The search steps the user
   count up level by level, so the scatter is the picture of it; the gate is

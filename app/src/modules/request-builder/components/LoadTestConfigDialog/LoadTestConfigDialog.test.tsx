@@ -1279,7 +1279,7 @@ describe("pass/fail budgets", () => {
 			).toBeInTheDocument();
 			expect(screen.queryByText(/as before/i)).not.toBeInTheDocument();
 			expect(
-				screen.getByText(/Starts from Settings › Dashboard › SLO threshold/)
+				screen.getByText(/Starts from Settings › Dashboard › p99 threshold/)
 			).toBeInTheDocument();
 		});
 
@@ -1300,11 +1300,11 @@ describe("pass/fail budgets", () => {
 			expect(carriedNotice()).toHaveTextContent("carried over from your last load test");
 		});
 
-		it("says a first-run p99 came from the SLO setting rather than from a past run", () => {
+		it("says a first-run p99 came from the p99 threshold setting rather than from a past run", () => {
 			useClientSettingsStore.getState().setSloThresholdMs(200);
 			open();
 			expect(carriedNotice()).toHaveTextContent(
-				"Budgets prefilled: p99 latency at most 200 ms (from Settings › Dashboard › SLO threshold). They will judge this run."
+				"Budgets prefilled: p99 latency at most 200 ms (from Settings › Dashboard › p99 threshold). They will judge this run."
 			);
 			expect(carriedNotice()).not.toHaveTextContent(/last load test/);
 		});
@@ -1415,7 +1415,7 @@ describe("pass/fail budgets", () => {
 				expect(config.thresholds).toEqual({ latencyP99Ms: 150, maxErrorRatePct: 2 });
 			});
 
-			it("includes the p99 the SLO setting seeded", () => {
+			it("includes the p99 the threshold setting seeded", () => {
 				useClientSettingsStore.getState().setSloThresholdMs(200);
 				const { onStart } = open();
 				expect(started(onStart).carriedBudgets).toEqual(["latencyP99Ms"]);

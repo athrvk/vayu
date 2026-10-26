@@ -7,7 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { computeBreakpoint, DEFAULT_SLO_MS, notCrossed, sloSourceOf } from "./computeBreakpoint";
+import {
+	computeBreakpoint,
+	DEFAULT_SLO_MS,
+	notCrossed,
+	sloLineName,
+	sloSourceOf,
+} from "./computeBreakpoint";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -207,6 +213,11 @@ describe("breakpoint sloSource (#2939)", () => {
 		// A ramp with a 350ms p99 budget is still judged against Settings' 200ms.
 		const bp = computeBreakpoint(crossing, 200, 350);
 		expect(bp).toMatchObject({ sloMs: 200, sloSource: "settings" });
+	});
+
+	it("words the line an SLO only where the run declared it", () => {
+		expect(sloLineName("run")).toBe("SLO");
+		expect(sloLineName("settings")).toBe("threshold in Settings");
 	});
 
 	it("is carried by notCrossed and an empty series", () => {

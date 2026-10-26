@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { concurrencyUnit } from "@/constants/load-test-modes";
 import { STOP_REASONS, type CapacityResult } from "@/components/shared/capacityStop";
 import { TOOLTIPS } from "../tooltips";
-import type { Breakpoint, SloSource } from "../../utils/computeBreakpoint";
+import { sloLineName, type Breakpoint, type SloSource } from "../../utils/computeBreakpoint";
 import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { pluralize } from "../../utils/format";
 import { HeroCardShell } from "./HeroCardShell";
@@ -68,11 +68,6 @@ function AtLevel({ concurrency }: { concurrency: number | null | undefined }) {
 	);
 }
 
-/** What to call a line: "SLO" only when the run declared it, else the Settings threshold. */
-function lineName(sloSource: SloSource): string {
-	return sloSource === "run" ? "SLO" : "threshold in Settings";
-}
-
 /**
  * Where p99 went over the SLO. The ramp reads it off its ticks and the capacity
  * card off the search's knee; either may lack the figure, and the line then
@@ -89,7 +84,7 @@ function P99Crossed({
 	sloSource: SloSource;
 	concurrency: number | null | undefined;
 }) {
-	const line = sloMs == null ? null : `the ${formatLatency(sloMs)} ${lineName(sloSource)}`;
+	const line = sloMs == null ? null : `the ${formatLatency(sloMs)} ${sloLineName(sloSource)}`;
 	return (
 		<Line>
 			p99 crossed {p99Ms != null && <Figure>{formatLatency(p99Ms)}</Figure>}

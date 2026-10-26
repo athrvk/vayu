@@ -91,7 +91,7 @@ describe("the settings path rule", () => {
 	});
 
 	it("passes the chevron the guide asks for", () => {
-		expect(hasAsciiPathSeparator("Settings › Dashboard › SLO threshold")).toBe(false);
+		expect(hasAsciiPathSeparator("Settings › Dashboard › p99 threshold")).toBe(false);
 	});
 });
 

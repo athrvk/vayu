@@ -2086,8 +2086,8 @@ p99 typed in the dialog, or carried from the last Start, is sent in every mode.
 `LoadTestConfigDialog` also tells the engine which of those budgets the user did
 not set for this run (issue #2195): top-level `carriedBudgets: string[]` on
 `POST /runs` (`StartLoadTestRequest`), the `thresholds` keys still holding a
-value the memo or the SLO seed filled in and the user left alone, spelled as
-they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`; the SLO seed
+value the memo or the Settings p99 threshold seed filled in and the user left alone, spelled as
+they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`; the threshold seed
 only outside Capacity discovery, which does not send it). The engine
 only stores it and echoes it as `metadata.configuration.carriedBudgets`, which
 `ThresholdVerdict` reads to tag those rows "carried over"; the verdict itself is

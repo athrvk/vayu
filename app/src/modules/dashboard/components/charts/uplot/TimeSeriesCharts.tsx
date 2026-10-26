@@ -23,7 +23,7 @@ import {
 	buildPercentileChartData,
 	type RampOverlay,
 } from "../../../utils/metricsTransforms";
-import type { Breakpoint } from "../../../utils/computeBreakpoint";
+import { sloLineName, type Breakpoint } from "../../../utils/computeBreakpoint";
 import type { Anomaly } from "../../../utils/detectAnomalies";
 import type { HostSleep } from "@/stores/host-sleep-store";
 import { runAnnotations } from "./annotations";
@@ -102,12 +102,14 @@ function breakpointHover(breakpoint: Breakpoint, mode?: string): string | undefi
 
 /**
  * The marker's words. Only a run's own line is an "SLO"; a Settings threshold
- * the run never declared is named as the Settings one (#2939).
+ * the run never declared is named as the threshold in Settings (#2939).
  */
 function breakpointLabel({ sloMs, sloSource }: Breakpoint): string {
 	if (sloMs == null) return "p99 > SLO";
 	const line = formatLatency(sloMs);
-	return sloSource === "run" ? `p99 > SLO ${line}` : `p99 > ${line} (Settings)`;
+	return sloSource === "run"
+		? `p99 > ${sloLineName(sloSource)} ${line}`
+		: `p99 > ${line} ${sloLineName(sloSource)}`;
 }
 
 /**

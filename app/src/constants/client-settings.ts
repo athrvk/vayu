@@ -8,7 +8,7 @@
 /**
  * Client settings - option lists, defaults, and guards for the renderer-only
  * preferences held in the client-settings store (editor behavior, chart
- * granularity, SLO threshold, live refresh rate, auto-save). These arrays are
+ * granularity, p99 threshold, live refresh rate, auto-save). These arrays are
  * the single source of truth: the store defaults, the settings pickers, and the
  * runtime clamps all derive from them.
  */
@@ -62,7 +62,7 @@ export const CHART_GRANULARITY_OPTIONS: readonly LabeledOption<number>[] = [
 ];
 export const DEFAULT_CHART_BUCKET_SECONDS = 0.5;
 
-/** Capacity SLO - the p99 latency at which the breakpoint/saturation triggers. */
+/** The Dashboard p99 threshold - the p99 latency at which the breakpoint/saturation triggers. */
 export const SLO_THRESHOLD_MIN_MS = 1;
 export const SLO_THRESHOLD_MAX_MS = 60_000;
 export const DEFAULT_SLO_THRESHOLD_MS = 200;

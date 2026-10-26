@@ -91,7 +91,7 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		minInclusive: false,
 		max: MAX_LATENCY_MS,
 		seededHint:
-			"Starts from Settings › Dashboard › SLO threshold. Clear it to run without a latency budget.",
+			"Starts from Settings › Dashboard › p99 threshold. Clear it to run without a latency budget.",
 	},
 	{
 		key: "maxErrorRatePct",
@@ -156,7 +156,7 @@ export const CAPACITY_BUDGETS_NOTE =
 
 /** The p99 field's hint while the Settings seed in it is not sent. */
 export const CAPACITY_SEED_HINT =
-	"Starts from Settings › Dashboard › SLO threshold, but a Capacity discovery run does not send it. Type a value to set a p99 budget for this run.";
+	"Starts from Settings › Dashboard › p99 threshold, but a Capacity discovery run does not send it. Type a value to set a p99 budget for this run.";
 
 /**
  * The first budget the engine would reject, phrased for the dialog.
