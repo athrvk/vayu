@@ -11025,14 +11025,14 @@ report carries **`summary.partial: true`**. The figures are the run's up to that
 (all from the tick's cumulative status distribution), `cancelledRequests`, `testDuration` (the
 tick's elapsed seconds), `avgRps` (completions over that time, not the tick's trailing rate),
 `sendRate`, `throughput`, `droppedRequests`, `skippedRequests`, `stalledMs`, `bytesSent` and `bytesReceived`. What the tick does
-not measure for the whole run reads as an older engine's summary does: `avgInFlight`,
-`connectionReplays`, `sendingDurationSeconds` and `completedWhileSending` are absent,
-`peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
+not measure for the whole run is absent rather than `0`: `avgInFlight`,
+`connectionReplays`, `sendingDurationSeconds`, `completedWhileSending`, `peakConcurrency` and
+`avgQueueWaitMs` (issue #2963), while `setupOverhead` and `httpVersionDowngraded` are `0`,
 `sampling` is absent, and the report has **no `latency` block** (issue #2938): the percentiles come from
 the stored `results` rows, of which such a run has none, so omitting the block says "not recorded"
 where a block of zeros would read as steps that answered instantly. A failed load run with no summary at all, because it wrote no
 tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
-counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist. Both keys are absent, never `false`, on every other report. A client that shows a
+counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist, and no `peakConcurrency` or `avgQueueWaitMs`. Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it
 as measured.
 

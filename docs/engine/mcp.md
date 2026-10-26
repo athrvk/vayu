@@ -524,10 +524,11 @@ Notes:
   `summary.partial: true` is a run reconciled after an engine crash, whose counts,
   `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last saved
   tick's (a floor under the real totals) while `latency` is absent, not zero
-  (#2938), and `peakConcurrency` and `avgQueueWaitMs` are 0, none recorded;
-  `summary.summaryMissing: true` is a failed run with no summary at all (a crash
-  before the first tick, or a worker failure), whose counts are not whole-run
-  totals (a sample's, often 0) and no `latency` block is written. Both are absent
+  (#2938), and `peakConcurrency` and `avgQueueWaitMs` are absent, not recorded
+  (#2963); `summary.summaryMissing: true` is a failed run with no summary at all
+  (a crash before the first tick, or a worker failure), whose counts are not
+  whole-run totals (a sample's, often 0) and no `latency` block,
+  `peakConcurrency` or `avgQueueWaitMs` is written. Both are absent
   otherwise, never false; the tool description and `outputSchema` name them, and
   a failed run's `get_run` `nextStep` points at them. The app draws the same two reports as a notice and "not recorded".
   `progress` is `elapsedMs / plannedDurationMs` clamped to 0..1 for a run whose

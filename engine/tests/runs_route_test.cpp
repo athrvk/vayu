@@ -2769,7 +2769,9 @@ int64_t wall_clock_ms () {
 // check: drop the `run.summary` write in `reconcile_orphaned_runs` and the
 // report answers totalRequests 0 with no `partial`; delete the
 // `latency_measured = false` line for a flagged run and the report writes a
-// block of zeros, so the `latency` assertion fails.
+// block of zeros, so the `latency` assertion fails; drop the flag guard on
+// `peakConcurrency` / `avgQueueWaitMs` in `add_load_summary_fields` and both
+// read 0 (#2963).
 TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPartial) {
     // Recent: the restart's init() prunes by the real retention defaults.
     seed ({ .id = "run_crashed", .status = vayu::RunStatus::Running, .start_time = wall_clock_ms () });
@@ -2797,6 +2799,8 @@ TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPa
     EXPECT_FALSE (summary.contains ("avgInFlight"));
     EXPECT_FALSE (summary.contains ("connectionReplays"));
     EXPECT_FALSE (summary.contains ("sendingDurationSeconds"));
+    EXPECT_FALSE (summary.contains ("peakConcurrency")) << summary.dump ();
+    EXPECT_FALSE (summary.contains ("avgQueueWaitMs")) << summary.dump ();
     // No row was flushed, so there is no latency to report: absent, not zero.
     EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
 
@@ -2818,7 +2822,8 @@ TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPa
 // has a load summary to miss. Mutation check: drop the `summary_missing`
 // assignment in `run_report_response` and the first assertion fails; delete
 // the `latency_measured = false` line beside it and the `latency` assertions
-// fail.
+// fail; drop the flag guard on `peakConcurrency` / `avgQueueWaitMs` in
+// `add_load_summary_fields` and both read 0 (#2963).
 TEST_F (RunsRouteTest, ReportOfAFailedLoadRunWithNoSummarySaysItIsMissing) {
     seed ({ .id = "run_no_summary", .status = vayu::RunStatus::Failed, .start_time = 1000 });
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_summary");
@@ -2827,6 +2832,8 @@ TEST_F (RunsRouteTest, ReportOfAFailedLoadRunWithNoSummarySaysItIsMissing) {
     << body["summary"].dump ();
     EXPECT_FALSE (body["summary"].contains ("partial"));
     EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
+    EXPECT_FALSE (body["summary"].contains ("peakConcurrency"));
+    EXPECT_FALSE (body["summary"].contains ("avgQueueWaitMs"));
 
     seed ({ .id = "run_design_failed",
     .type       = vayu::RunType::Design,
@@ -2855,7 +2862,8 @@ TEST_F (RunsRouteTest, SummaryMissingReportOmitsLatencyDespiteSampledRows) {
 }
 
 // A run that stored its own summary carries neither flag, whether it completed
-// or failed: the keys are present only when true.
+// or failed: the keys are present only when true. The figures a flagged run
+// leaves out (#2963) are still written for it.
 TEST_F (RunsRouteTest, ReportOfARunWithItsOwnSummaryCarriesNeitherFlag) {
     for (const auto run_status : { vayu::RunStatus::Completed, vayu::RunStatus::Failed }) {
         const std::string id = "run_" + std::string (vayu::to_string (run_status));
@@ -2869,6 +2877,8 @@ TEST_F (RunsRouteTest, ReportOfARunWithItsOwnSummaryCarriesNeitherFlag) {
         EXPECT_FALSE (summary.contains ("partial")) << id;
         EXPECT_FALSE (summary.contains ("summaryMissing")) << id;
         EXPECT_EQ (summary["totalRequests"].get<size_t> (), 100u) << id;
+        EXPECT_EQ (summary.value ("peakConcurrency", size_t{ 0 }), 8u) << id;
+        EXPECT_DOUBLE_EQ (summary.value ("avgQueueWaitMs", -1.0), 1.5) << id;
     }
 }
 
