@@ -68,6 +68,7 @@ import {
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
+import { finishedRunFiguresText, liveRunProgressText } from "./scenario-run-header";
 import {
 	emptyStepListReason,
 	emptyStepSummary,
@@ -129,6 +130,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const liveAppendEpoch = useScenarioRunStore((s) => (s.runId === run.id ? s.appendEpoch : 0));
 	const isStreaming = useScenarioRunStore((s) => s.runId === run.id && s.isStreaming);
 	const streamError = useScenarioRunStore((s) => (s.runId === run.id ? s.error : null));
+	const livePlan = useScenarioRunStore((s) => (s.runId === run.id ? s.plan : null));
 
 	const storedSteps = useMemo(() => stepRowsFromReport(report), [report]);
 	const usingStored = storedSteps.length > 0;
@@ -172,6 +174,18 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const isLive = isStreaming || inProgress;
 
 	const { stop, isStopping } = useStopRun(run.id);
+
+	// While live, where the run is against its plan; once it has ended, what it
+	// did. Never both: the report of a run still in flight holds no final figures.
+	const liveProgress = isLive
+		? liveRunProgressText(
+				livePlan,
+				steps[steps.length - 1],
+				STEP_OUTCOMES.reduce((total, outcome) => total + summary.counts[outcome], 0)
+			)
+		: null;
+	const finishedFigures =
+		!isLive && report && scenario ? finishedRunFiguresText(report.summary) : null;
 
 	// One iteration is the common case and "Iteration 1" on every row is noise;
 	// more than one and which pass a step belongs to is the whole point.
@@ -290,6 +304,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					</span>
 				)}
 
+				{liveProgress && (
+					<span className="text-xs text-muted-foreground">{liveProgress}</span>
+				)}
+
 				{scenario && (
 					<span className="text-xs text-muted-foreground">
 						{formatNumber(scenario.iterationsCompleted)} of{" "}
@@ -298,6 +316,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						{formatNumber(scenario.stepsExecuted)}{" "}
 						{pluralize(scenario.stepsExecuted, "step")}
 					</span>
+				)}
+
+				{finishedFigures && (
+					<span className="text-xs text-muted-foreground">{finishedFigures}</span>
 				)}
 
 				{/* A sibling, not a clause of the tally: a run that did less than

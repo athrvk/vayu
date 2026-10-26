@@ -169,6 +169,9 @@ class ScenarioRunService {
 	 */
 	private handlePlan(plan: ScenarioRunPlanEvent): void {
 		this.stepsExpected = plan.stepsExpected;
+		// The whole frame, not just the length: the run tab's header reads the
+		// iteration count from it while the run is live.
+		useScenarioRunStore.getState().setPlan(plan);
 		this.reportProgress();
 	}
 
