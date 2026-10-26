@@ -110,6 +110,11 @@
  * aliases (three write tools) took the writes-on rows to 214,955 / 210,558 B;
  * those two caps went to 215,300 / 210,900 and the writes-off rows are
  * untouched.
+ *
+ * #2446's `offset` and `pagination` envelope on `get_mock_activity` (its output
+ * schema was a bare `{data}` list) and the `limit` ceiling on
+ * `get_live_metrics` took all four rows up by about 800 B: 146,936 / 144,210 /
+ * 215,751 / 211,354 B. The caps went to 147,200 / 144,500 / 216,100 / 211,700.
  */
 
 import { describe, it, expect } from "vitest";
@@ -129,10 +134,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 146_200 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 143_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 215_300 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 210_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_200 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 144_500 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 216_100 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 211_700 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

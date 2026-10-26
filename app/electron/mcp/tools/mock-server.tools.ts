@@ -17,13 +17,47 @@ import {
 	callEngine,
 	callEngineStructured,
 	engineErrorResult,
+	isRecord,
 	jsonResult,
+	optionalOffset,
+	optionalPageLimit,
 	requireStr,
 	withCaveat,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
 import { mockActivitySchema, mockRoutesSchema, mockServerListSchema } from "./output-schemas.js";
 import { mockServerCaveat, mockServerStartPayload } from "./mock-server.js";
+import { PAGE_CURSOR_SENTENCE, pagedRead } from "./run-housekeeping.js";
+
+/**
+ * The engine's per-mock activity ring (`MAX_ACTIVITY_ENTRIES`) and the most
+ * `GET /mock/:id/activity?limit=` answers. The route pages by `limit` alone, so
+ * this tool reads the whole ring and slices it: asking for exactly the ring's
+ * size makes that read complete rather than a truncation.
+ */
+const MOCK_ACTIVITY_RING = 200;
+const DEFAULT_MOCK_ACTIVITY_LIMIT = 50;
+
+/**
+ * The `{data, pagination}` page at @p offset of the engine's whole-ring answer.
+ * An answer that is not a `{data: [...]}` object passes through, as every other
+ * paged read treats an unexpected body.
+ */
+function pageOfActivity(ring: unknown, limit: number, offset: number): unknown {
+	if (!isRecord(ring) || !Array.isArray(ring.data)) return ring;
+	const data = ring.data.slice(offset, offset + limit);
+	return {
+		...ring,
+		data,
+		pagination: {
+			total: ring.data.length,
+			limit,
+			offset,
+			returned: data.length,
+			hasMore: offset + data.length < ring.data.length,
+		},
+	};
+}
 
 export const MOCK_SERVER_TOOLS: McpTool[] = [
 	{
@@ -142,7 +176,9 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.mockServer, idArg: "mockId" },
 		description: (config) =>
-			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty." +
+			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Returns a {data, pagination} envelope of at most 50 entries by default (200 max); `offset` counts from the newest entry, so traffic arriving between pages shifts it. The engine keeps the latest 200 entries per mock, so `pagination.total` never exceeds 200. " +
+			PAGE_CURSOR_SENTENCE +
+			" Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty." +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get mock server activity",
@@ -156,17 +192,37 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 				.number()
 				.int()
 				.min(1)
-				.max(200)
+				.max(MOCK_ACTIVITY_RING)
 				.optional()
-				.describe("At most this many entries (default 50, max 200)."),
+				.describe(
+					`At most this many entries (default ${DEFAULT_MOCK_ACTIVITY_LIMIT}, max ${MOCK_ACTIVITY_RING}).`
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("How many entries to skip from the newest, for paging (default 0)."),
 		},
 		outputSchema: mockActivitySchema,
 		handler: async (args, ctx, signal) => {
-			const limit = args.limit as number | undefined;
 			const mockId = requireStr(args, "mockId");
-			return callEngineStructured(
+			const limit = optionalPageLimit(
+				args,
+				"limit",
+				DEFAULT_MOCK_ACTIVITY_LIMIT,
+				MOCK_ACTIVITY_RING
+			);
+			const offset = optionalOffset(args, "offset");
+			return pagedRead(
 				ctx,
-				() => ctx.client.getMockServerActivity(mockId, limit ?? 50, signal),
+				async () =>
+					pageOfActivity(
+						await ctx.client.getMockServerActivity(mockId, MOCK_ACTIVITY_RING, signal),
+						limit,
+						offset
+					),
+				"activity entries",
 				await runOutputShape(ctx, signal)
 			);
 		},

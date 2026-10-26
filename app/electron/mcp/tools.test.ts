@@ -5677,6 +5677,34 @@ describe("get_live_metrics limit", () => {
 		).not.toThrow();
 	});
 
+	test("rejects a limit above the live buffer without calling the engine", async () => {
+		const client = metricsClient();
+		const res = await dispatchTool(
+			"get_live_metrics",
+			{ runId: "run_1", limit: 3001 },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/"limit" must be 3000 or less/);
+		expect(client.getLiveMetricsSnapshot).not.toHaveBeenCalled();
+	});
+
+	test("accepts a limit of exactly the live buffer", async () => {
+		const client = metricsClient();
+		const res = await dispatchTool(
+			"get_live_metrics",
+			{ runId: "run_1", limit: 3000 },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.getLiveMetricsSnapshot).toHaveBeenCalledWith(
+			"run_1",
+			3000,
+			undefined,
+			undefined
+		);
+	});
+
 	test("the input schema rejects a non-positive limit too", () => {
 		const shape = TOOLS.find((t) => t.name === "get_live_metrics")!.inputSchema as Record<
 			string,
@@ -5686,6 +5714,8 @@ describe("get_live_metrics limit", () => {
 		expect(shape.limit.safeParse(-3).success).toBe(false);
 		expect(shape.limit.safeParse(2.5).success).toBe(false);
 		expect(shape.limit.safeParse(10).success).toBe(true);
+		expect(shape.limit.safeParse(3000).success).toBe(true);
+		expect(shape.limit.safeParse(3001).success).toBe(false);
 		expect(shape.limit.safeParse(undefined).success).toBe(true);
 	});
 });
@@ -10723,23 +10753,108 @@ describe("mock server tools", () => {
 		expect(client.getMockServerRoutes).not.toHaveBeenCalled();
 	});
 
-	test("activity defaults its limit to 50 and forwards an explicit one", async () => {
-		const client = fakeClient();
-		const defaulted = await dispatchTool(
-			"get_mock_activity",
-			{ mockId: "mock_1" },
-			ctxWith(client)
-		);
-		expect(defaulted.isError).toBeFalsy();
-		expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 50, undefined);
+	/**
+	 * The engine route pages by `limit` alone and keeps 200 entries, so the tool
+	 * always reads the whole ring and slices it: `offset` and the envelope are
+	 * this layer's.
+	 */
+	describe("get_mock_activity paging", () => {
+		/** 120 entries, newest first: `p119` ... `p0`. */
+		const ring = Array.from({ length: 120 }, (_, i) => ({
+			at_ms: 120 - i,
+			method: "GET",
+			path: `/p${119 - i}`,
+			status: 200,
+		}));
+		const ringClient = () =>
+			fakeClient({ getMockServerActivity: vi.fn().mockResolvedValue({ data: ring }) });
+		const pageOf = async (args: Record<string, unknown>, client = ringClient()) => {
+			const res = await dispatchTool(
+				"get_mock_activity",
+				{ mockId: "mock_1", ...args },
+				ctxWith(client)
+			);
+			expect(res.isError).toBeFalsy();
+			return JSON.parse(firstText(res)) as {
+				data: { path: string }[];
+				pagination: Record<string, unknown>;
+			};
+		};
 
-		const limited = await dispatchTool(
-			"get_mock_activity",
-			{ mockId: "mock_1", limit: 10 },
-			ctxWith(client)
-		);
-		expect(limited.isError).toBeFalsy();
-		expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 10, undefined);
+		test("reads the whole 200-entry ring whatever the limit, and defaults to 50 entries", async () => {
+			const client = ringClient();
+			const page = await pageOf({}, client);
+			expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 200, undefined);
+			expect(page.data).toHaveLength(50);
+			expect(page.data[0].path).toBe("/p119");
+			expect(page.pagination).toMatchObject({
+				total: 120,
+				limit: 50,
+				offset: 0,
+				returned: 50,
+				hasMore: true,
+				nextOffset: 50,
+			});
+			expect(page.pagination.note).toMatch(/offset: 50/);
+
+			const limited = ringClient();
+			await pageOf({ limit: 10 }, limited);
+			expect(limited.getMockServerActivity).toHaveBeenCalledWith("mock_1", 200, undefined);
+		});
+
+		test("offset skips from the newest entry and the last page says it is the last", async () => {
+			const second = await pageOf({ limit: 50, offset: 50 });
+			expect(second.data.map((e) => e.path)).toEqual(ring.slice(50, 100).map((e) => e.path));
+			expect(second.pagination).toMatchObject({ offset: 50, returned: 50, hasMore: true });
+
+			const last = await pageOf({ limit: 50, offset: 100 });
+			expect(last.data).toHaveLength(20);
+			expect(last.pagination).toMatchObject({
+				total: 120,
+				offset: 100,
+				returned: 20,
+				hasMore: false,
+				nextOffset: null,
+			});
+			expect(last.pagination.note).toBeUndefined();
+
+			const past = await pageOf({ offset: 500 });
+			expect(past.data).toEqual([]);
+			expect(past.pagination).toMatchObject({ total: 120, returned: 0, hasMore: false });
+		});
+
+		test("an empty ring is an empty page, not a missing envelope", async () => {
+			const page = await pageOf({}, fakeClient());
+			expect(page.data).toEqual([]);
+			expect(page.pagination).toMatchObject({ total: 0, returned: 0, hasMore: false });
+		});
+
+		test.each([
+			[{ limit: 201 }, /"limit" must be 200 or less/],
+			[{ limit: 0 }, /"limit" must be a whole number greater than 0/],
+			[{ offset: -1 }, /"offset" must be a whole number of 0 or more/],
+			[{ offset: 1.5 }, /"offset" must be a whole number of 0 or more/],
+		])("refuses %j without calling the engine", async (args, message) => {
+			const client = ringClient();
+			const res = await dispatchTool(
+				"get_mock_activity",
+				{ mockId: "mock_1", ...args },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(message);
+			expect(client.getMockServerActivity).not.toHaveBeenCalled();
+		});
+
+		test("the page validates against the declared output schema", async () => {
+			const res = await dispatchTool(
+				"get_mock_activity",
+				{ mockId: "mock_1", limit: 5 },
+				ctxWith(ringClient())
+			);
+			const tool = TOOLS.find((t) => t.name === "get_mock_activity")!;
+			expect(() => tool.outputSchema!.parse(res.structuredContent)).not.toThrow();
+		});
 	});
 
 	test("activity surfaces an unknown mock id as a tool error", async () => {
@@ -16386,7 +16501,7 @@ describe("secret withholding", () => {
 			activity.data[3],
 		]);
 		const revealed = await read("get_mock_activity", client, REVEAL, { mockId: "mock_1" });
-		expect(revealed.body).toEqual(activity);
+		expect(revealed.body).toMatchObject(activity);
 	});
 
 	test("a failed secret lookup fails the read closed, naming the lookup and returning nothing", async () => {
