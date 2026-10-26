@@ -368,7 +368,7 @@ jobs:
             # minutes) where it previously ran nothing. That is the deliberate
             # trade - the alternative is a guard that cannot fire on its own
             # input - and it is bounded by how rare those pull requests are and
-            # by the list being two literal paths rather than a glob.
+            # by the list being a few literal paths rather than a glob.
             #
             # Not free-standing either. `ROOT_READING_GUARDS` in
             # `app/src/lib/routed-inputs.testkit.ts` names the same two files,
@@ -381,6 +381,7 @@ jobs:
               - 'install.sh'
               - 'scripts/perf/measure-app.mjs'
               - '.github/workflows/release.yml'
+              - 'SECURITY.md'
             engine:
               - 'engine/**'
               - 'VERSION'

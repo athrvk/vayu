@@ -9,7 +9,10 @@ days.
 ## What Vayu defends and what it does not
 
 Vayu runs a local C++ engine daemon and an Electron UI on `127.0.0.1`. It is a
-desktop tool, not a multi-tenant service.
+desktop tool, not a multi-tenant service: a host shared with other logged-in
+users is out of scope. The loopback ports (`9876` for the engine, `9877` for MCP)
+and any mock server or inbox you start belong to the machine, not to one user,
+and the owner-only file modes under "Data at rest" protect files, not ports.
 
 Vayu does not defend the engine against other programs running under your
 account: they can already read the database. A web page open in your browser is
@@ -35,40 +38,60 @@ app's main process makes the writes, and only for a folder you chose in the
 system folder picker or a file that reached the window through a file dialog
 or a drop; the UI window cannot name either.
 
-A script's `pm.cookies.jar().set` is held to the request's own site: it refuses
-a `Domain` unrelated to the request host, and a single-label one such as `com`.
-It can still set a cookie for a multi-label public suffix such as `co.uk`,
-because Vayu vendors no public-suffix list (accepted, #2731). Scripts in a
-collection someone shared with you run with your own cookies and secrets, so
-read them before you press Send.
+Scripts in a collection someone shared with you, or in a file you import, run
+with your own cookies and secrets (the Postman model), and `pm.sendRequest` from
+one reaches any host you can, your LAN included, except the two ports above.
+Read them before you press Send. Importing scripts is a choice: "Import
+pre-request & test scripts" in the import dialog is ticked by default and the
+dialog does not warn, so untick it for a file you do not trust.
+
+`pm.cookies.jar()` is held to the request's own site for reads and writes alike:
+the request host, its parents and subdomains, and hosts the script called
+through `pm.sendRequest`. A read outside it answers `undefined` or an empty
+list, a write outside it stores nothing, and each leaves a console warning. The
+`Domain` of a `set` is checked on its own: a single-label one such as `com` is
+refused unless it is the request host. Vayu vendors no public-suffix list, so a
+script can still set a cookie for a multi-label suffix such as `co.uk` or
+`github.io` (accepted, #2731).
 
 A mock server or webhook inbox you start is different: it exists to be called
 from pages, so every page in the browser can reach it and, by default, read
 what it answers (CORS `*`, never with your cookies). Starting one with
-`allowedOrigins` restricts reading to the origins you list, and since a mock
-replays saved examples verbatim, do not save examples from production responses
-into a collection you mock.
+`allowedOrigins` restricts reading to the origins you list, but those replies
+carry `Access-Control-Allow-Credentials`, so "never with your cookies" holds only
+for the default, and the listener still answers every request: the list decides
+who may read the reply, not who may send. A mock binds to loopback only. An
+inbox can bind past loopback only through an explicit `bind` plus
+`confirmNonLoopback` from the app or the API, never from an MCP agent, and once
+it does, anyone on that network can post to it. Since a mock replays saved
+examples verbatim, do not save examples from production responses into a
+collection you mock.
 
 ## Renderer posture
 
 The UI window runs with `nodeIntegration` off, `contextIsolation` and the
 sandbox on, and a preload that exposes named methods only. Behind that: a
-Content-Security-Policy on the app document (no `unsafe-eval`, no form
-submission; the renderer may connect only to itself and the engine on
-`127.0.0.1:9876`), all device permissions denied for the app and for OAuth
-sign-in windows, a chart tooltip built from text rather than markup, an HTML
-response preview in a `sandbox=""` frame that runs no script and loads nothing
-from the network, and Electron fuses that disable `ELECTRON_RUN_AS_NODE`,
-`NODE_OPTIONS` and `--inspect` on packaged builds. The app document is served
-from an origin of its own, `vayu-app://app`, rather than from a local file, so
-the policy's `self` means that origin and no file on disk. The one exception is
-the first launch after upgrading from a version that served it from a file:
-saved settings are read from the old local-file origin once, by a hidden page
-that runs no script of its own, has no preload and may load nothing, and copied
-into the new one. The channels that read a file by a path the window names read
-only files you picked, dropped or opened through the app, and the one that
-reports a file's size answers only for those or for files under a folder you
-allowed.
+Content-Security-Policy on the app document (scripts only from the app's own
+origin plus a hash of one inline script, so neither `unsafe-eval` nor
+`unsafe-inline` for script, though styles may be inline; no form submission; the
+renderer may connect only to itself and to the engine on `127.0.0.1`, on the
+port the app picked from a fixed list (9876, or 9880-9889 if 9876 is taken); the
+MCP port and every other local port are outside it), all device permissions
+denied for the app and for OAuth sign-in windows, a chart tooltip built from
+text rather than markup, an HTML response preview in a `sandbox=""` frame that
+runs no script and loads nothing from the network, and Electron fuses that
+disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` on packaged
+builds. The app document is served from an origin of its own, `vayu-app://app`,
+rather than from a local file, so the policy's `self` means that origin and no
+file on disk. The one exception is the first launch after upgrading from a
+version that served it from a file: saved settings are read from the old
+local-file origin once, by a hidden page that runs no script of its own, has no
+preload and may load nothing, and copied into the new one. The channels that
+read a file by a path the window names read only files you picked, dropped or
+opened through the app, and the one that reports a file's size answers only for
+those or for files under a folder you allowed. The engine does not take the
+renderer's word for file access either: a binary body or a form file part is
+sent only if the file is under a folder you allowed or is one you picked.
 
 ## Data at rest
 
@@ -87,7 +110,7 @@ else (symlinks are skipped). The data directory is `chmod`ed `0700` whatever
 The `umask` of `077` the engine sets covers the whole process, so a file it
 creates anywhere else, including a path you chose, is `0600` too.
 The app's own log files (`app_*.log`, and `mcp_*.log` from the standalone MCP
-server) are created the same way, `0600` in a `0700` folder.
+server) are created `0600`, in that same `logs` folder.
 On Windows the data directory gets a protected ACL for your account, SYSTEM and
 Administrators, which files created afterwards inherit; files that already
 existed keep their old ACL. A user who can act as you, or read your disk
@@ -96,7 +119,7 @@ offline, still reads everything.
 ## Agents (MCP)
 
 Tools an MCP client calls receive the same data the UI shows, except your
-secrets: unless you turn on **Reveal secrets to agents** in Settings → MCP (off
+secrets: unless you turn on **Reveal secrets to agents** in Settings > MCP (off
 by default), an agent reads no secret through any tool. The values of variables
 marked secret, the credentials in auth blocks, the values of credential-bearing
 headers (`Authorization`, `Cookie`, `X-Api-Key` and the like), the password and
@@ -111,10 +134,10 @@ credential header's value, the token or key Vayu itself placed in the URL's
 query or a header, or the value of a credential query parameter (`api_key`,
 `token` and the like) in a request's URL appears, whatever encoding it went
 out in. If Vayu cannot read the values it masks against, the agent gets an
-error in place of the record, never a partly masked one. Requests an agent sends still use the
-real values; the engine fills them in. Clearing a variable's secret flag, the
-one write that would hand the value back on the next read, is refused while
-reveal is off.
+error in place of the record, never a partly masked one. Requests an agent sends
+still use the real values; the engine fills them in. Clearing a variable's
+secret flag, the one write that would hand the value back on the next read, is
+refused while reveal is off.
 
 An agent can also ask which tab and environment you have open (`get_app_focus`).
 The answer is names and ids only - a tab's type, id and saved name, and the
@@ -169,11 +192,19 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   (`run_request`, `run_collection_smoke`, `run_collection`, `start_load_run`)
   refuse any host that is not explicitly allowlisted. The check runs against the
   **resolved** host (after `{{variable}}` substitution), so a variable-built URL
-  cannot slip past it. A fresh install cannot be used to send traffic anywhere until the user opts
-  in per host. A run's `monitor.url` is a second host with its own check: a
-  loopback or private-network endpoint needs no entry, but link-local
-  (`169.254.0.0/16`, `fe80::/10`) and cloud-metadata addresses
-  (`169.254.169.254`, `fd00:ec2::254`) do, like any public host.
+  cannot slip past it. A fresh install cannot be used to send traffic anywhere
+  until the user opts in per host. The allowlist and the caps bind the runs an
+  MCP agent starts (the engine's `targetPolicy`), not the app's own Send. The
+  engine re-applies the same allowlist to the URL a pre-request script rewrites
+  and to OAuth token endpoints (#2521), and refuses `pm.sendRequest` in a run an
+  agent started; where a request redirects is the remaining gap (see
+  [Network behaviour](#network-behaviour)). A run's `monitor.url` is a second
+  host with its own check: a loopback or private-network endpoint needs no
+  entry, but link-local (`169.254.0.0/16`, `fe80::/10`) and cloud-metadata
+  addresses (`169.254.169.254`, `fd00:ec2::254`) do, like any public host. So an
+  agent can make Vayu fetch any private-network address and read the metric text
+  back; matching is textual, so a name that resolves to a private address needs
+  an entry too.
 - **Hard load caps (enforcement).** `start_load_run` rejects requests whose RPS,
   concurrency, or duration exceed configured ceilings. Together with the
   allowlist, these are the real limits on what load an agent can generate. An
@@ -227,7 +258,9 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 reach the engine's REST API on `127.0.0.1:9876`; the MCP endpoint on `:9877`
 proxies the same capability behind *more* guards (allowlist, caps, confirmation,
 per-tool control) and adds DNS-rebinding protection so a browser tab cannot reach
-it. It grants no capability a local process did not already have.
+it. It grants no capability a local process did not already have. On a host
+shared with other users that includes their processes, which is why such a host
+is out of scope (see the first section).
 
 **Residual risk the user accepts by allowlisting a host:** once a host is on the
 allowlist, an agent may send it single requests and (within caps, after the
@@ -242,8 +275,14 @@ trust the connected agent and understand it can reach arbitrary endpoints.
 ## Network behaviour
 
 Vayu runs entirely on your machine. There is no account, no cloud and no
-telemetry, and nothing leaves your computer unless you send it: a request to a
-host you chose, an export you saved, or a reply to an MCP agent you connected.
+telemetry, and apart from the update check below nothing leaves your computer
+unless you send it: a request to a host you chose, an export you saved, or a
+reply to an MCP agent you connected.
+
+The update check: a packaged app asks GitHub Releases for a newer version about
+a minute after launch and every 6 hours after, on every platform. Windows and
+the Linux AppImage then download it in the background; macOS and the Linux
+`.deb` only tell you. There is no setting to turn the check off.
 
 On a cross-host redirect the engine drops `Authorization` and `Cookie`, as curl
 does; every other header you set, including API-key headers, follows the
@@ -251,6 +290,17 @@ redirect, and a configured client certificate stays attached. The API Key editor
 says so; turn off follow-redirects on a request whose key must stay on one host.
 The MCP host allowlist is checked against the URL you send, not against where it
 redirects.
+
+**What an imported file can do.** Import never sends a request itself, but the
+file can make the engine fetch. A multi-file OpenAPI document may name `http(s)`
+URLs in an external `$ref`, and one you picked from disk may name sibling files;
+Vayu reads both while it builds the preview, before you confirm. A fetched
+`$ref` follows no redirect and refuses loopback and link-local targets other than
+the host and port the document itself came from, but it does not refuse
+private-network or public hosts, so import only specs you trust. A sibling file
+must sit under the folder of the file you picked. A Postman or Insomnia file can
+carry scripts, auth, variables and environments of its own (see the scripts note
+under "What Vayu defends").
 
 After a download on Windows or the Linux AppImage, the in-app updater contacts
 `api.github.com` for the installer's attestation and `tuf-repo-cdn.sigstore.dev`
@@ -270,6 +320,11 @@ to a commit SHA, and only the final publish job can write to the release. They
 are not code-signed, so macOS and Windows will warn on first
 launch, and `install.sh` strips the macOS quarantine attribute for that reason.
 
+The install command fetches `install.sh` from `athrvk.github.io/vayu/install.sh`,
+which GitHub Pages builds from `master`. The `gh attestation verify` inside it is
+therefore only as trustworthy as that script, and it runs only when an
+authenticated `gh` is present.
+
 **The in-app updater checks the attestation too.** On Windows and the Linux
 AppImage the updater downloads in the background and installs nothing until the
 installer's build-provenance attestation verifies against Sigstore's public-good
@@ -278,7 +333,8 @@ release being installed. Otherwise it refuses, tells you why, and offers the
 release page. Pinning the tag, not just the workflow, is what refuses an older
 genuine installer re-uploaded under a newer release. The `latest*.yml` update
 feeds are attested like every other asset, so
-`gh attestation verify latest.yml --repo athrvk/vayu` covers them as well. On
+`gh attestation verify latest.yml --repo athrvk/vayu` covers them as well, but
+the updater verifies the installer's attestation, not the feed's. On
 macOS and the Linux `.deb` the app downloads nothing and only points to the
 release page.
 
@@ -293,6 +349,7 @@ The check fails closed: it never installs because it could not look. The
 trusted-root refresh follows the system proxy like the attestation lookup does,
 so a network that reaches the internet only through one is not refused for that
 reason.
+
 If you find a way to break any statement in this document, report it privately
 through GitHub Security Advisories.
 
