@@ -1580,7 +1580,7 @@ assertions (`assertionsFailed`, #2820: `scenario.assertions.failed` on a report,
   `maxAssertionFailureRatePct` and broke it is already **failed**); the reason
   names the count ("No budgets set. 0.0% errors, 4,580 assertions failed", "The
   budget was met, but 4,580 assertions failed"; "1 assertion failed" in the
-  singular). The success rate and `passed` stay HTTP-based.
+  singular). The success rate stays HTTP-based.
 - **`null`** - still pending or running, or no report: the banner renders
   nothing, because "Not judged" over a report that has not arrived is a claim
   about a run nobody has looked at.

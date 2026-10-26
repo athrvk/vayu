@@ -833,11 +833,12 @@ TEST_F (ScenarioLoadTest, AStepTheStopCancelledMovesNoStepTally) {
 }
 
 // A step that answered 500 is an error in its own row of the breakdown, but a
-// response arrived, so the iteration goes on to the next step (#2134). The
-// summary counts it as `failed`, never `errored`, which stays the
-// iteration-abort count. Mutation checks: drop the `record_failed_status`
-// call in the completion callback and the error counts read 0; make an HTTP
-// error status set `errored` there and `/s2` is never reached.
+// response arrived, so the iteration goes on to the next step (#2134). With no
+// assertion to fail it is a `passed` step, never `failed` or `errored` (#2824):
+// the status is the step's `httpErrors`, not its outcome. Mutation checks: drop
+// the `record_failed_status` call in the completion callback and the error
+// counts read 0; make an HTTP error status set `errored` there and `/s2` is
+// never reached.
 TEST_F (ScenarioLoadTest, AStepAnsweringAnHttpErrorCountsAsAnErrorWithoutEndingItsIteration) {
     ScenarioMockServer server;
     const auto execution =
@@ -867,8 +868,9 @@ TEST_F (ScenarioLoadTest, AStepAnsweringAnHttpErrorCountsAsAnErrorWithoutEndingI
     EXPECT_EQ (summary["steps_executed"], 9);
     EXPECT_EQ (summary["errored"], 0);
     EXPECT_EQ (summary["iterations_abandoned"], 0);
-    EXPECT_EQ (summary["failed"], 3);
-    EXPECT_EQ (summary["passed"], 6) << "a 500 was counted as a passed step";
+    EXPECT_EQ (summary["failed"], 0)
+    << "a 500 no assertion judged failed its step";
+    EXPECT_EQ (summary["passed"], 9);
     const auto& failing = summary["steps"][1];
     EXPECT_EQ (failing["errors"], 3);
     EXPECT_EQ (failing["httpErrors"], 3);
@@ -902,6 +904,87 @@ TEST_F (ScenarioLoadTest, AStepWithNoResponseCountsAsNoResponseAndEndsItsIterati
     EXPECT_EQ (unanswered["errors"], 2);
     EXPECT_EQ (unanswered["noResponse"], 2);
     EXPECT_EQ (unanswered["httpErrors"], 0);
+}
+
+// One definition of the step outcomes for both runners (#2824). Rows alternate
+// gold and silver: a silver iteration skips step 0 and sends step 1 to a 500
+// that both of its `assert.status` elements reject, and step 2 answers 500 with
+// nothing asserting on it every time. The four outcomes are disjoint and sum to
+// `steps_executed`, which counts every step reached, a skipped one included;
+// a step's `executed` counts only the steps that ran. Two failed assertions in
+// one execution are one `failed` step. Mutation check: restore `failed` as the
+// sum of every step's `httpErrors` in `build_scenario_load_summary` and it
+// reads 6.
+TEST_F (ScenarioLoadTest, LoadStepOutcomesAreDisjointAndSumToStepsExecuted) {
+    ScenarioMockServer server;
+    auto execution = plan_over (
+    { server.url ("/s0"), server.url ("/{{data.path}}"), server.url ("/fail500") });
+    with_data (execution,
+    { json{ { "tier", "gold" }, { "path", "s1" } },
+    json{ { "tier", "silver" }, { "path", "fail500" } } });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_if" }, { "kind", "control.if" }, { "enabled", true },
+    { "config", { { "condition", "{{data.tier}} == gold" } } } } });
+    const auto status_ok = [] (const std::string& id) {
+        return json{ { "id", id }, { "kind", "assert.status" }, { "enabled", true },
+            { "config", { { "in", json::array ({ 200 }) } } } };
+    };
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { status_ok ("el_status"), status_ok ("el_status_again") });
+
+    constexpr size_t ITERATIONS = 4;
+    auto state                  = run (json{ { "mode", "iterations" },
+                                       { "iterations", ITERATIONS }, { "concurrency", 1 } },
+                     execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    const auto count = [&summary] (const char* key) {
+        return summary.at (key).get<size_t> ();
+    };
+
+    EXPECT_EQ (count ("steps_executed"), 3 * ITERATIONS) << summary.dump ();
+    EXPECT_EQ (count ("skipped"), ITERATIONS / 2) << summary.dump ();
+    EXPECT_EQ (count ("failed"), ITERATIONS / 2)
+    << "one failed execution per silver iteration, however many assertions "
+       "failed in it, and never the unasserted 500s: "
+    << summary.dump ();
+    EXPECT_EQ (count ("errored"), 0u) << summary.dump ();
+    EXPECT_EQ (count ("passed"), 8u) << summary.dump ();
+    EXPECT_EQ (count ("passed") + count ("failed") + count ("errored") + count ("skipped"),
+    count ("steps_executed"));
+
+    size_t ran = 0;
+    for (const auto& step : summary.at ("steps")) {
+        ran += step.at ("executed").get<size_t> ();
+    }
+    EXPECT_EQ (ran + count ("skipped"), count ("steps_executed")) << summary.dump ();
+    EXPECT_EQ (summary["steps"][2]["httpErrors"], ITERATIONS)
+    << "an unasserted 500 is still the step's HTTP error";
+    EXPECT_EQ (state->inline_tests_failed.load (), ITERATIONS)
+    << "both assertions fail in each silver iteration";
+}
+
+// An execution with no response is `errored` and nothing else (#2824), whatever
+// its assertions said, as the sequential runner's `classify_step` decides it.
+// Mutation check: drop the `!errored` guard where the completion counts
+// `steps_failed` and `failed` reads 2.
+TEST_F (ScenarioLoadTest, AnExecutionWithNoResponseIsErroredAndNotAlsoFailed) {
+    auto execution = plan_over ({ "http://127.0.0.1:1/unreachable" });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_pre", "script.pre",
+    "pm.test('fails', function () { pm.expect(1).to.equal(2); });", /*inline_script=*/true) });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    ASSERT_EQ (state->inline_tests_failed.load (), 2u)
+    << "the pre-request assertion never ran, so this proves nothing";
+    EXPECT_EQ (summary["errored"], 2) << summary.dump ();
+    EXPECT_EQ (summary["failed"], 0) << summary.dump ();
+    EXPECT_EQ (summary["passed"], 0) << summary.dump ();
+    EXPECT_EQ (summary["steps_executed"], 2) << summary.dump ();
 }
 
 // ============================================================================
@@ -2196,8 +2279,10 @@ TEST_F (ScenarioLoadTest, AFailingAssertContainsReachesTheReportsScenarioAsserti
     (json{ { "passed", 0 }, { "failed", ITERATIONS } }))
     << scenario.dump ();
     EXPECT_DOUBLE_EQ (report.at ("summary").at ("errorRate").get<double> (), 0.0);
-    EXPECT_EQ (scenario.at ("passed").get<size_t> (), 2 * ITERATIONS)
-    << "`passed` stays the HTTP count";
+    // The step outcomes count executions (#2824): each iteration's second
+    // step failed an assertion, though every response was a 200.
+    EXPECT_EQ (scenario.at ("passed").get<size_t> (), ITERATIONS) << scenario.dump ();
+    EXPECT_EQ (scenario.at ("failed").get<size_t> (), ITERATIONS) << scenario.dump ();
 }
 
 // An inline script's `pm.test` is in the exact population; an un-inlined one is

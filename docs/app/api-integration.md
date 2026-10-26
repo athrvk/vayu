@@ -1034,10 +1034,11 @@ rows, so that array is the only per-step record such a run keeps.
 
 It also carries `scenario.assertions` (`{passed, failed}`, #2820) when the run
 made at least one exact assertion: every `assert.*` outcome, required `extract.*`
-miss and inline `pm.test` call, counted on every completion. It is a separate
-population from `passed` / `failed` and the report's error rate, which stay
-HTTP-only, so a run of `200`s that failed every assertion reads a 0% error rate
-and a non-zero `assertions.failed`. **Absent**, never `{0, 0}`, for a run with no
+miss and inline `pm.test` call, counted on every completion. It counts
+assertions, where `scenario.failed` counts step executions in which one failed
+(#2824, once however many), and the report's error rate stays HTTP-only, so a
+run of `200`s that failed every assertion reads a 0% error rate and a non-zero
+`assertions.failed`. **Absent**, never `{0, 0}`, for a run with no
 such assertion, a collection run and a report stored before the field. Three
 renderer readers go through `exactAssertionsOf` (`components/shared/run-assertions.ts`):
 the verdict (`reportOutcome`), `RunKeyMetrics`' fourth tile and the Overview's

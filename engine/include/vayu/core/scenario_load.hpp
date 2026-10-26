@@ -456,6 +456,14 @@ struct ScenarioLoadState {
     /// `skipped` key in place of the constant `0` every scenario load run
     /// reported before this.
     std::atomic<size_t> steps_skipped{ 0 };
+    /// Step executions whose response arrived and at least one of whose
+    /// inline assertions did not hold (#2824): the summary's `failed`, the
+    /// sequential run's `StepOutcome::Failed`. Counted once per execution
+    /// however many assertions failed in it, and never for a skipped or an
+    /// `errored` one, so `passed`, `failed`, `skipped` and `errored` stay
+    /// disjoint. A deferred script's tests replay after the run and are not
+    /// in it.
+    std::atomic<size_t> steps_failed{ 0 };
     /// Per-step, per-element pass/fail/skip tallies (issue #1495), written by
     /// the same completion that writes `steps` above - see the class comment.
     StepElementTallies element_tallies;
@@ -563,10 +571,12 @@ struct ScenarioLoadState {
 /**
  * @brief The `scenario` object a scenario load run stores in `runs.summary`.
  *
- * Shares `iterations`, `iterations_completed`, `steps_executed` and `errored`
- * with the design-mode payload (`build_scenario_summary_payload`) so the report
- * route reads one shape for both run kinds; `virtual_users`, `abandoned` and
- * `steps` are this mode's own.
+ * Shares `iterations`, `iterations_completed`, `steps_executed` and the four
+ * outcomes with the design-mode payload (`build_scenario_summary_payload`) so
+ * the report route reads one shape for both run kinds, under one definition
+ * (#2824): `passed + failed + skipped + errored == steps_executed`, and
+ * `steps_executed` is every step reached, skipped ones included.
+ * `virtual_users`, `abandoned` and `steps` are this mode's own.
  */
 [[nodiscard]] nlohmann::json
 build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan& plan);
