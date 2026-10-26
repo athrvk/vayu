@@ -9,8 +9,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -27,6 +29,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/transport_policy.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::http::routes {
 // Declared in import.cpp; returns {http_status, json_body}. No server owns
@@ -104,12 +107,34 @@ class MockSpecServer {
                 return true;
             });
         });
+
+        // One chunk, then nothing until the test opens the gate (or the
+        // deadline passes). A fetch can only return while the body is
+        // unfinished by abandoning it: reading to the end needs the server to
+        // go on, and only the gate does that. Unlike a byte count on `/chunked`
+        // this does not depend on how much the kernel's socket buffers take.
+        svr_.Get ("/stalled", [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider ("application/octet-stream",
+            [this] (size_t offset, httplib::DataSink& sink) {
+                if (offset == 0) {
+                    const std::string chunk (CHUNK_BYTES, 'y');
+                    return sink.write (chunk.data (), chunk.size ());
+                }
+                std::unique_lock lock (gate_mutex_);
+                gate_cv_.wait_for (
+                lock, vayu::tests::WAIT_DEADLINE, [this] { return gate_open_; });
+                body_finished_.store (true);
+                sink.done ();
+                return true;
+            });
+        });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] { svr_.listen_after_bind (); });
         while (!svr_.is_running ())
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
     }
     ~MockSpecServer () {
+        open_gate ();
         svr_.stop ();
         if (thread_.joinable ())
             thread_.join ();
@@ -125,6 +150,17 @@ class MockSpecServer {
     size_t served () const {
         return served_.load ();
     }
+    /// Whether `/stalled` went on to the end of its body.
+    bool body_finished () const {
+        return body_finished_.load ();
+    }
+    void open_gate () {
+        {
+            const std::lock_guard lock (gate_mutex_);
+            gate_open_ = true;
+        }
+        gate_cv_.notify_all ();
+    }
     std::string url (const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
@@ -134,6 +170,10 @@ class MockSpecServer {
     int port_ = 0;
     std::thread thread_;
     std::atomic<size_t> served_{ 0 };
+    std::mutex gate_mutex_;
+    std::condition_variable gate_cv_;
+    bool gate_open_ = false;
+    std::atomic<bool> body_finished_{ false };
 };
 
 /// The request body for one fetch, with or without a stated bound.
@@ -504,13 +544,14 @@ TEST (ImportFetchStream, StopsFetchingOnceTheListenerHasGone) {
     MockSpecServer mock;
     Recorder recorder (false); // The socket died after the first frame.
 
-    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/chunked")),
+    vayu::http::routes::import_fetch_stream (fetch_body (mock.url ("/stalled")),
     vayu::http::TransportPolicy{}, nullptr, recorder.emitter ());
 
-    // The 4 MiB body is abandoned rather than read to the end for nobody. One
-    // event went out - the one whose write revealed the listener was gone.
+    // The body is abandoned rather than read to the end for nobody. One event
+    // went out - the one whose write revealed the listener was gone - and the
+    // fetch returned while the server was still holding the rest back.
     EXPECT_EQ (recorder.events.size (), 1U);
-    EXPECT_LT (mock.served (), CHUNKED_TOTAL_BYTES / 2);
+    EXPECT_FALSE (mock.body_finished ());
 }
 
 TEST (ImportFetchBounds, AFetchIsBoundedByAStallRatherThanByATotal) {
