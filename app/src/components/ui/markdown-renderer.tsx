@@ -30,10 +30,10 @@
  * note used to say was missing: beside `contextIsolation: true` and
  * `nodeIntegration: false`, `electron/main.ts` now installs
  * `electron/window-navigation.ts` on the main window, which refuses a navigation
- * that is not the app's own document and denies `window.open`. There is still no
- * CSP. Keep this override anyway - a refused navigation is a link that silently
- * does nothing, where a button reaches the user's browser, which is what they
- * meant.
+ * that is not the app's own document and denies `window.open`; the app document
+ * also carries a Content-Security-Policy (`electron/renderer-csp.ts`). Keep this
+ * override anyway - a refused navigation is a link that silently does nothing,
+ * where a button reaches the user's browser, which is what they meant.
  *
  * **2. `react-markdown`, not `marked`.** It builds React elements from an AST
  * rather than an HTML string, so there is no `dangerouslySetInnerHTML` and no
