@@ -232,6 +232,20 @@ struct ScriptContext {
     const nlohmann::json* response_events = nullptr;
 
     /**
+     * @brief The redirect hops `response` was reached through, read as
+     *        `pm.response.redirects`, or null where the producer does not record
+     *        them (issue #2949).
+     *
+     * Points at `Response::redirect_hops`, which only `Client::send` fills.
+     * The load path follows redirects without recording the chain, so a
+     * deferred `tests` script and a streamed run's script get null - an
+     * **absent** `pm.response.redirects`, not an empty array: `[]` there would
+     * read as "nothing was redirected", a claim no one measured. A non-null
+     * pointer to an empty vector is the recorded "no redirect".
+     */
+    const std::vector<RedirectHop>* redirect_hops = nullptr;
+
+    /**
      * @brief Whether this script runs inside an ordered sequence, and may
      *        therefore redirect it (issue #355).
      *

@@ -232,6 +232,23 @@ nlohmann::json get_script_completions () {
     "() { pm.expect(pm.response.events.length).to.equal(3); }); }" },
     { "sortText", "1_pm_response_eventsTruncated" } });
 
+    completions.push_back ({ { "label", "pm.response.redirects" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.redirects" }, { "detail", "object[] | undefined" },
+    { "documentation",
+    "The redirects this response was reached through, in the order they were "
+    "followed, as { code, status, url, schemeDowngrade, headers } entries: the "
+    "3xx status and reason phrase, the URL of the request that hop answered "
+    "(an auth query parameter's value blanked), whether its Location left "
+    "https for http, and the hop's own headers (get()/has() as on "
+    "pm.response.headers). An empty array means nothing was "
+    "redirected.\n\nAbsent - not empty - where the chain was not recorded: a "
+    "load run's deferred script and a streamed request's. Vayu-specific, not "
+    "Postman.\n\nExample:\nconst leaked = (pm.response.redirects || "
+    "[]).filter(function (hop) { return hop.schemeDowngrade; });\n"
+    "pm.test('no https-to-http redirect', function () { "
+    "pm.expect(leaked).to.be.empty; });" },
+    { "sortText", "1_pm_response_redirects" } });
+
     completions.push_back ({ { "label", "pm.response.headers" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.headers" }, { "detail", "object" },
     { "documentation",

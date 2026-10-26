@@ -1608,6 +1608,16 @@ declare const pm: {
 		 */
 		reason(): string;
 		/**
+		 * The redirects this response was reached through, in the order they were followed, as { code, status, url, schemeDowngrade, headers } entries: the 3xx status and reason phrase, the URL of the request that hop answered (an auth query parameter's value blanked), whether its Location left https for http, and the hop's own headers (get()/has() as on pm.response.headers). An empty array means nothing was redirected.
+		 * 
+		 * Absent - not empty - where the chain was not recorded: a load run's deferred script and a streamed request's. Vayu-specific, not Postman.
+		 * 
+		 * Example:
+		 * const leaked = (pm.response.redirects || []).filter(function (hop) { return hop.schemeDowngrade; });
+		 * pm.test('no https-to-http redirect', function () { pm.expect(leaked).to.be.empty; });
+		 */
+		redirects: { [key: string]: any }[] | undefined;
+		/**
 		 * The body's size in bytes - pm.response.size().body, under the name Postman scripts read it by.
 		 */
 		responseSize: number;

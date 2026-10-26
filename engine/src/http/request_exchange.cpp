@@ -1057,6 +1057,9 @@ ExchangeInputs inputs) {
                 auto post_ctx = vayu::runtime::ScriptContext::for_test (
                 outcome.request, outcome.response);
                 bind (post_ctx, &post_cookie_writes);
+                // `client.send` recorded these, so an empty list here is a
+                // chain that was not redirected, not one that went unmeasured.
+                post_ctx.redirect_hops = &outcome.response.redirect_hops;
                 return execute_script (engine, script, post_ctx, "Post-request");
             });
         },

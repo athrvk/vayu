@@ -1775,6 +1775,62 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
     JS_NewBool (ctx, node->value ("eventsTruncated", false) ? 1 : 0));
 }
 
+// One hop's received headers in the shape `pm.response.headers` has: lower-cased
+// names, a repeated name folded with ", ", get()/has() and no mutators. The fold
+// is what `ingest_header_line` does to the final response, so a hop and the
+// response read the same way; a hop's `Set-Cookie` lines therefore join like the
+// response's do.
+JSValue hop_headers_object (JSContext* ctx, const std::vector<HeaderLine>& lines) {
+    Headers folded;
+    for (const auto& line : lines) {
+        auto [it, inserted] =
+        folded.try_emplace (vayu::utils::ascii_lower (line.name), line.value);
+        if (!inserted) {
+            it->second += ", " + line.value;
+        }
+    }
+    JSValue headers = JS_NewObject (ctx);
+    install_header_methods (ctx, headers, /*mutators=*/false);
+    for (const auto& [key, value] : folded) {
+        define_header_entry (ctx, headers, key, value);
+    }
+    return headers;
+}
+
+/**
+ * Bind `pm.response.redirects`, the 3xx responses followed on the way to this
+ * one, or bind nothing when the producer did not record them (issue #2949).
+ *
+ * Each entry is `{ code, status, url, schemeDowngrade, headers }`, named as
+ * `pm.response` names the same facts: `code` is the number and `status` the
+ * reason phrase. `url` is the request that hop answered, with an
+ * auth-query parameter's value blanked, and `schemeDowngrade` marks a Location
+ * that left `https` for `http`. An empty array is a recorded "nothing was
+ * redirected"; absence is "not recorded" - see `ScriptContext::redirect_hops`.
+ */
+void install_response_redirects (JSContext* ctx,
+JSValue response,
+const std::vector<RedirectHop>* hops) {
+    if (!hops) {
+        return;
+    }
+    JSValue redirects = JS_NewArray (ctx);
+    uint32_t index    = 0;
+    for (const auto& hop : *hops) {
+        JSValue entry = JS_NewObject (ctx);
+        JS_SetPropertyStr (ctx, entry, "code", JS_NewInt32 (ctx, hop.status_code));
+        JS_SetPropertyStr (ctx, entry, "status",
+        JS_NewStringLen (ctx, hop.status_text.data (), hop.status_text.size ()));
+        JS_SetPropertyStr (ctx, entry, "url",
+        JS_NewStringLen (ctx, hop.url.data (), hop.url.size ()));
+        JS_SetPropertyStr (ctx, entry, "schemeDowngrade",
+        JS_NewBool (ctx, hop.scheme_downgrade ? 1 : 0));
+        JS_SetPropertyStr (ctx, entry, "headers", hop_headers_object (ctx, hop.header_lines));
+        JS_SetPropertyUint32 (ctx, redirects, index++, entry);
+    }
+    JS_SetPropertyStr (ctx, response, "redirects", redirects);
+}
+
 } // namespace
 
 void setup_pm_response (JSContext* ctx, JSValue pm) {
@@ -1861,6 +1917,9 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         // without its markers cannot tell a whole stream from its prefix, and
         // the three are one fact about one arrival set.
         install_response_events (ctx, response, data->response_events);
+
+        // pm.response.redirects - the followed 3xx hops, where recorded.
+        install_response_redirects (ctx, response, data->redirect_hops);
 
         // pm.response.to.have chain for Postman-compatible assertions
         JS_SetPropertyStr (

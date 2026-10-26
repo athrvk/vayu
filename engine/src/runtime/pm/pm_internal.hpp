@@ -185,7 +185,10 @@ struct ContextData {
     /// The stream's stored `events` trace node `pm.response.events` reads, or
     /// null - see `ScriptContext::response_events`, which owns the rationale.
     const nlohmann::json* response_events = nullptr;
-    bool has_error                        = false;
+    /// The hops `pm.response.redirects` reads, or null - see
+    /// `ScriptContext::redirect_hops`, which owns the rationale.
+    const std::vector<RedirectHop>* redirect_hops = nullptr;
+    bool has_error                                = false;
     std::string error_message;
 
     /**
