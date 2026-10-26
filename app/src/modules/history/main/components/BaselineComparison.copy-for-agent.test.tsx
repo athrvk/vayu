@@ -97,7 +97,14 @@ beforeEach(() => {
 	mocked.getRun.mockResolvedValue(loadedTarget);
 	mocked.listRuns.mockResolvedValue({
 		data: [baselineRow],
-		pagination: { total: 1, limit: 20, offset: 0, hasMore: false, returned: 1 },
+		pagination: {
+			total: 1,
+			limit: 20,
+			offset: 0,
+			hasMore: false,
+			returned: 1,
+			nextBefore: null,
+		},
 	});
 	mocked.getRunReport.mockResolvedValue(report(50));
 });

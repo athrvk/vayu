@@ -100,6 +100,7 @@ function page(rows: Run[]) {
 			offset: 0,
 			hasMore: false,
 			returned: rows.length,
+			nextBefore: null,
 		},
 	};
 }

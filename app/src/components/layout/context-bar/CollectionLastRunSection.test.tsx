@@ -59,6 +59,7 @@ const envelope = (runs: Run[]): RunListResponse => ({
 		offset: 0,
 		hasMore: false,
 		returned: runs.length,
+		nextBefore: null,
 	},
 });
 

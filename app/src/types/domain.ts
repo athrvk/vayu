@@ -2021,6 +2021,11 @@ export interface RunListResponse {
 		offset: number;
 		hasMore: boolean;
 		returned: number;
+		/**
+		 * The `before` cursor naming this page's last row, `null` on the last page.
+		 * Pass it back unchanged: the engine owns its spelling (`<startTime>:<id>`).
+		 */
+		nextBefore: string | null;
 	};
 }
 
@@ -2028,6 +2033,13 @@ export interface RunListResponse {
 export interface RunListParams {
 	limit?: number;
 	offset?: number;
+	/**
+	 * Keyset cursor: the page starts after the row it names. Take it from the
+	 * previous page's `pagination.nextBefore`. The engine refuses it beside a
+	 * non-zero `offset`, so `listRuns` leaves its default `offset` off when one
+	 * is set.
+	 */
+	before?: string;
 	type?: Run["type"];
 	status?: Run["status"];
 	requestId?: string;
