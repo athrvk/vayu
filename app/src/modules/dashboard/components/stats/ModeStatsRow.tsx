@@ -159,7 +159,7 @@ function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label={closedLoop ? `Peak ${CONCURRENCY_UNIT}` : "Peak in-flight requests"}
-			value={formatNumber(d.peakConcurrency)}
+			value={orDash(d.peakConcurrency, formatNumber)}
 			sub={
 				<>
 					backpressure{" "}

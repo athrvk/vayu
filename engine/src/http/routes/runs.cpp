@@ -1891,22 +1891,28 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
  * bytes and concurrency, and the overheads around load. A sequential collection
  * run feeds none of them (`ScenarioSummaryInputs::latencies` says why), so its
  * report leaves them out rather than writing a 0 that reads as measured (#2822).
+ * A run the engine could not fully record (`summary_partial`, `summary_missing`)
+ * has no peak concurrency or queue wait either: a tick does not carry them and
+ * no summary means none was kept, so they are left out the same way (#2963).
  */
 void add_load_summary_fields (const vayu::DetailedReport& report,
 const ReportExtras& extras,
 nlohmann::json& summary) {
     summary.update ({ { "sendRate", report.send_rate },
     { "throughput", report.throughput }, { "cleanupOverhead", report.cleanup_overhead_s },
-    { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
     { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
     { "skippedRequests", static_cast<size_t> (extras.skipped_total) },
-    { "stalledMs", extras.stalled_ms }, { "avgQueueWaitMs", extras.queue_wait_avg },
+    { "stalledMs", extras.stalled_ms },
     { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
     { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
     { "throughputBytesPerSec",
     report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } });
     if (const auto& setup_overhead = report.setup_overhead_s) {
         summary["setupOverhead"] = *setup_overhead;
+    }
+    if (!extras.summary_partial && !extras.summary_missing) {
+        summary["peakConcurrency"] = static_cast<size_t> (extras.peak_concurrency);
+        summary["avgQueueWaitMs"] = extras.queue_wait_avg;
     }
 }
 

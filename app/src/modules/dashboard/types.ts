@@ -151,7 +151,8 @@ export interface DashboardDerived {
 	 */
 	dispatchStatus?: DispatchStatus;
 	currentRps: number;
-	avgQueueWaitMs: number;
+	/** Absent for a stored run that recorded none (`summary.partial` / `summaryMissing`, #2963). */
+	avgQueueWaitMs?: number;
 	// Counts
 	totalRequests: number;
 	/** Errors by the one definition: `httpErrors + noResponse` (issue #2124). */
@@ -164,7 +165,8 @@ export interface DashboardDerived {
 	requestsExpected: number;
 	requestsSent: number;
 	// Concurrency
-	peakConcurrency: number;
+	/** Absent for a stored run that recorded none (`summary.partial` / `summaryMissing`, #2963). */
+	peakConcurrency?: number;
 	currentConcurrency: number;
 	/**
 	 * Mean requests on the wire: the trailing window's on a live tick, the whole

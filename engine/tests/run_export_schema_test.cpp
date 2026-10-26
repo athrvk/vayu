@@ -347,7 +347,9 @@ TEST_F (RunExportSchemaTest, ARunStoredBeforeTheOverheadSplitValidates) {
 // `latency` section, which the schema no longer requires. Mutation check: drop
 // "partial" or "summaryMissing" from SUMMARY_KEYS and the matching test fails;
 // drop the property from the schema and the validation does; put "latency" back
-// in the report's `required` and both fail validation.
+// in the report's `required` and both fail validation. #2963: nor does it carry
+// `peakConcurrency` or `avgQueueWaitMs`; put either back in the summary's
+// `required` and both fail validation.
 TEST_F (RunExportSchemaTest, AReconciledRunCarriesItsPartialFlagAndNoLatency) {
     seed ("run_partial", vayu::RunStatus::Failed,
     json{ { "partial", true }, { "total_requests", 40 }, { "test_duration", 4.0 } },
@@ -358,6 +360,8 @@ TEST_F (RunExportSchemaTest, AReconciledRunCarriesItsPartialFlagAndNoLatency) {
     EXPECT_FALSE (report["summary"].contains ("summaryMissing"));
     EXPECT_EQ (report["summary"]["totalRequests"], 40);
     EXPECT_FALSE (report.contains ("latency")) << report.dump ();
+    EXPECT_FALSE (report["summary"].contains ("peakConcurrency"));
+    EXPECT_FALSE (report["summary"].contains ("avgQueueWaitMs"));
 }
 
 TEST_F (RunExportSchemaTest, AFailedRunWithNoSummaryCarriesItsMissingFlagAndNoLatency) {
@@ -367,6 +371,8 @@ TEST_F (RunExportSchemaTest, AFailedRunWithNoSummaryCarriesItsMissingFlagAndNoLa
     EXPECT_EQ (report["summary"].value ("summaryMissing", false), true);
     EXPECT_FALSE (report["summary"].contains ("partial"));
     EXPECT_FALSE (report.contains ("latency")) << report.dump ();
+    EXPECT_FALSE (report["summary"].contains ("peakConcurrency"));
+    EXPECT_FALSE (report["summary"].contains ("avgQueueWaitMs"));
 }
 
 TEST_F (RunExportSchemaTest, ACompletedRunCarriesNeitherFlag) {
@@ -374,6 +380,8 @@ TEST_F (RunExportSchemaTest, ACompletedRunCarriesNeitherFlag) {
     const json document = expect_valid (json{ { "runId", "run_whole" } });
     EXPECT_FALSE (document["report"]["summary"].contains ("partial"));
     EXPECT_FALSE (document["report"]["summary"].contains ("summaryMissing"));
+    EXPECT_EQ (document["report"]["summary"].value ("peakConcurrency", 0), 5);
+    EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("avgQueueWaitMs", -1.0), 0.2);
 }
 
 TEST_F (RunExportSchemaTest, ARunWithErrorsAndAMissedBudgetValidates) {

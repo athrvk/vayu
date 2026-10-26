@@ -115,7 +115,7 @@
             "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
             "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
             "avgRps", "testDuration", "sendRate", "throughput", "cleanupOverhead",
-            "peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
+            "droppedRequests", "bytesSent", "bytesReceived",
             "httpVersionDowngraded", "throughputBytesPerSec"
           ],
           "properties": {
@@ -133,11 +133,11 @@
             "throughput": {"type": "number"},
             "setupOverhead": {"description": "Seconds from the load run's start to load start, the instant testDuration counts from: the run's configuration and its script.setup pass (issue #2894). Absent for a run stored before it, whose stored figure measured cleanup and is reported as cleanupOverhead.", "type": "number"},
             "cleanupOverhead": {"description": "Seconds from the end of load to the run's background threads joined, before the summary is written (issue #2894). A run stored before it reported this figure as setupOverhead.", "type": "number"},
-            "peakConcurrency": {"type": "number"},
+            "peakConcurrency": {"description": "The most requests in flight at once. Absent where none was recorded: summary.partial or summary.summaryMissing (issue #2963).", "type": "number"},
             "droppedRequests": {"description": "Requests the maxInFlight cap refused at the instant they came due. Apart from skippedRequests; sent + skipped + dropped is the schedule's count for a constant_rps run that reaches its deadline.", "type": "number"},
             "skippedRequests": {"description": "Requests a constant_rps pacer chose not to send because its tick woke more than 100 ms late (issue #2911): the backlog past the catch-up cap is skipped, not sent in one burst. 0 when the load generator kept up; they lower rateControl.achievement, which is requestsSent over requestsExpected. Absent for a document written before it.", "type": "integer", "minimum": 0},
             "stalledMs": {"description": "The schedule time the skipped requests cover, skippedRequests over the target rate in milliseconds (issue #2911): how long the load generator stalled. Absent for a document written before it.", "type": "number", "minimum": 0},
-            "avgQueueWaitMs": {"type": "number"},
+            "avgQueueWaitMs": {"description": "Mean time a request queued before the wire. Absent where none was recorded: summary.partial or summary.summaryMissing (issue #2963).", "type": "number"},
             "bytesSent": {"type": "number"},
             "bytesReceived": {"type": "number"},
             "httpVersionDowngraded": {"type": "number"},

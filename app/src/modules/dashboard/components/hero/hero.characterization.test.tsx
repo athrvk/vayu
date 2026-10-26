@@ -488,6 +488,23 @@ describe("HeroRow utilisation card per mode and run state (#2821)", () => {
 		expect(out).toContain("10of 10 active");
 	});
 
+	// Mutation checked: formatting the value with `?? 0` instead of `orDash` in
+	// ConcurrencyUtilCard or CurrentConcurrencyCard fails the matching case.
+	it.each([
+		{ mode: "constant_concurrency", shown: ["-of 10 active", "-% utilisation"] },
+		{ mode: "ramp_up", shown: ["Peak virtual users-targeting"] },
+	] as const)(
+		"$mode: a finished run whose peak was not recorded shows a dash, not 0 (#2963)",
+		({ mode, shown }) => {
+			const out = cardText({
+				...wave({ isCompleted: true, avgInFlight: undefined, peakConcurrency: undefined }),
+				mode,
+			});
+			for (const text of shown) expect(out).toContain(text);
+			expect(out).not.toMatch(/NaN|\b0of\b|users0/);
+		}
+	);
+
 	it("falls back to the instant for a live frame without the mean", () => {
 		const out = cardText(wave({ currentConcurrency: 6, avgInFlight: undefined }));
 		expect(out).toContain("6of 10 active");
