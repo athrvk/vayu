@@ -105,8 +105,8 @@ struct ReportTable {
     /// One line of words saying what the figures are of (`All steps pooled.`);
     /// empty for a table that needs none. Braced so the many `{ headers, rows }`
     /// initialisers do not trip -Wmissing-field-initializers.
-    // NOLINTNEXTLINE(readability-redundant-member-init): the braces are the
-    // default member initializer that keeps -Wmissing-field-initializers quiet.
+    // The braces keep -Wmissing-field-initializers quiet on `{ headers, rows }`.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     ReportText caption{};
 };
 
