@@ -16,13 +16,23 @@
  * Mutation-check: make `testValidationTitleOf` always answer "Test validation"
  * and the retitled case fails; always "Sampled replay" and the other two fail;
  * hard-code the pointer in `ElementTally` and the replay-card case fails.
+ *
+ * `replayScopeOf` (#2824): count every element kind instead of `script.*` and the
+ * extractor case fails; count steps rather than the ones that deferred and the
+ * step-count case fails; answer a scope for zero responses and the absent cases
+ * fail.
  */
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { RunReport } from "@/types";
 import { ElementTally } from "./ElementTally";
-import { exactAssertionsOf, testValidationTitleOf } from "./run-assertions";
+import {
+	deferredResponsesOf,
+	exactAssertionsOf,
+	replayScopeOf,
+	testValidationTitleOf,
+} from "./run-assertions";
 
 const withAssertions = {
 	scenario: { assertions: { passed: 3, failed: 1 } },
@@ -75,5 +85,69 @@ describe("ElementTally's deferred pointer", () => {
 	it("names Test validation by default", () => {
 		render(<ElementTally element={deferred} />);
 		expect(screen.getByText(/results in Test validation$/)).toBeInTheDocument();
+	});
+});
+
+describe("replayScopeOf", () => {
+	const element = (kind: string, deferred?: number) => ({
+		id: kind,
+		kind,
+		passed: 0,
+		failed: 0,
+		skipped: 0,
+		deferred,
+	});
+	const step = (index: number, elements: ReturnType<typeof element>[]) => ({
+		index,
+		name: `step ${index}`,
+		requestId: `req_${index}`,
+		method: "GET",
+		executed: 100,
+		errors: 0,
+		latency: { min: 1, p50: 1, p95: 1, p99: 1, max: 1 },
+		elements,
+	});
+	const reportOf = (steps: ReturnType<typeof step>[], assertions?: object) =>
+		({ scenario: { steps, assertions } }) as unknown as RunReport;
+
+	it("sums the deferred script responses and counts the steps that carried one", () => {
+		const report = reportOf(
+			[
+				step(0, [element("assert.status", 0), element("extract.json", 5)]),
+				step(1, [element("script.post", 2_270)]),
+				step(2, [element("script.post", 30)]),
+				step(3, []),
+			],
+			{ passed: 1, failed: 0 }
+		);
+
+		expect(replayScopeOf(report)).toEqual({
+			responses: 2_300,
+			steps: 2,
+			assertionsCounted: true,
+		});
+	});
+
+	it("reports the Assertions card as absent when the run has none", () => {
+		const report = reportOf([step(0, [element("script.post", 10)])]);
+		expect(replayScopeOf(report)?.assertionsCounted).toBe(false);
+	});
+
+	it.each([
+		["a step with no deferred script", reportOf([step(0, [element("assert.status", 9)])])],
+		["a report stored before `deferred`", reportOf([step(0, [element("script.post")])])],
+		["a step with no elements", reportOf([step(0, [])])],
+		["a single-request report", {} as RunReport],
+		["no report", undefined],
+	])("is undefined for %s", (_name, report) => {
+		expect(replayScopeOf(report)).toBeUndefined();
+	});
+
+	it("deferredResponsesOf ignores non-script elements", () => {
+		expect(
+			deferredResponsesOf({
+				elements: [element("script.post", 7), element("timer.delay", 3)],
+			})
+		).toBe(7);
 	});
 });

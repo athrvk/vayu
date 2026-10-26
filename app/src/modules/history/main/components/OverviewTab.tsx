@@ -32,6 +32,7 @@ import {
 	ThresholdVerdict,
 	TransactionsSummary,
 	exactAssertionsOf,
+	replayScopeOf,
 	stoppedRunOf,
 	testValidationTitleOf,
 	CancelledRequestsNote,
@@ -184,7 +185,11 @@ export default function OverviewTab({
 				sampling={report.sampling}
 				failures={testFailures?.messages}
 				failuresTotal={testFailures?.total}
-				totalRequests={report.summary.totalRequests}
+				// A sequence's requests mostly carry no script, so the run's total is
+				// no denominator for the replay (#2824); a scenario report with no
+				// deferred script states none rather than that one.
+				totalRequests={report.scenario ? undefined : report.summary.totalRequests}
+				replayScope={replayScopeOf(report)}
 				title={testValidationTitleOf(report)}
 			/>
 
