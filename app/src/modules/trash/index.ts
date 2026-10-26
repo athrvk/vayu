@@ -8,7 +8,7 @@
 /**
  * Trash Module
  *
- * Where a deleted collection, request or environment goes, and how it comes
+ * Where a deleted collection, request, environment or saved example goes, and how it comes
  * back.
  *
  * The engine's delete has been soft since issue #988 - the row is stamped with
@@ -18,7 +18,7 @@
  * there is nothing a detail pane would hold.
  *
  * The undo toast a delete raises (`hooks/useTrashUndo.ts`, called by the
- * collections tree and the Variables view) is the other half of the same
+ * collections tree, the Variables view and the Examples panel) is the other half of the same
  * feature and deliberately lives with the deletes rather than here: it belongs
  * to the action, and its window is seconds. This view is the durable half - the
  * retention window is where a restore stays possible for days.

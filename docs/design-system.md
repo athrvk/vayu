@@ -3609,14 +3609,16 @@ Three shapes, and each has a component rather than a recipe to copy:
 
 Two lanes, decided once here rather than per module (issue #1683/#1689):
 
-- **Collections, requests and environments go to Trash, with Undo.** Deleting
-  any of them is recoverable for the retention window Settings shows - the undo
+- **Collections, requests, environments and saved examples go to Trash, with
+  Undo.** Deleting any of them is recoverable for the retention window Settings shows - the undo
   toast (`hooks/useTrashUndo.ts`, one for every Trash-bound delete) handles the
   immediate "I clicked the wrong row", and Trash's own restore handles
-  everything after that. Environments joined in #2970 (item 1 of #2431), and
-  their delete still opens `DeleteConfirmDialog` first, with copy that points at
-  the Trash rather than calling the delete final: the one Trash-bound delete
-  that asks.
+  everything after that. Environments joined in #2970 (item 1 of #2431) and
+  saved examples in #2971 (item 2), and their deletes still open
+  `DeleteConfirmDialog` first, with copy that points at the Trash rather than
+  calling the delete final: the Trash-bound deletes that ask. Only a *saved*
+  example is trashed: an imported one is a spec-sync tombstone, its dialog keeps
+  the sync and re-import wording, and no Undo follows.
 - **Everything else confirms and deletes permanently**: history runs,
   load-test examples, inbox listeners and their captures, certificates. The
   owner decided this deliberately (#1683) - a second Trash lane for every other

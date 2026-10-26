@@ -52,6 +52,10 @@ function collectionEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 	};
 }
 
+function exampleEntry(over: Partial<TrashEntry> = {}): TrashEntry {
+	return collectionEntry({ id: "x1", kind: "example", name: "Happy path", ...over });
+}
+
 function environmentEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 	return collectionEntry({
 		id: "e1",
@@ -156,18 +160,31 @@ describe("the list", () => {
 	it("writes the kind out, rather than leaving it to a decorative icon", () => {
 		// The glyph is aria-hidden, so without this a screen reader gets a name
 		// and a date and no way to tell a deleted folder from a deleted request.
-		// All three kinds, so a ternary that falls through to one of them fails
-		// on the kind it mislabels (#2970).
+		// Every kind, so a ternary that falls through to one of them fails on
+		// the kind it mislabels (#2970, #2971).
 		state.items = [
 			collectionEntry(),
 			collectionEntry({ id: "r1", kind: "request", name: "Charge" }),
 			environmentEntry(),
+			exampleEntry(),
 		];
 		renderTrash();
 
 		expect(screen.getByText(/^Collection · Deleted/)).toBeInTheDocument();
 		expect(screen.getByText(/^Request · Deleted/)).toBeInTheDocument();
 		expect(screen.getByText(/^Environment · Deleted/)).toBeInTheDocument();
+		expect(screen.getByText(/^Example · Deleted/)).toBeInTheDocument();
+	});
+
+	it("labels an example and draws it with the bookmark, not as a request", () => {
+		state.items = [exampleEntry()];
+		renderTrash();
+
+		expect(screen.getByText(/^Example · Deleted/)).toBeInTheDocument();
+		expect(rowFor("x1")?.querySelector("svg.lucide-bookmark")).not.toBeNull();
+		expect(rowFor("x1")?.querySelector("svg.lucide-file-json")).toBeNull();
+		// An example takes nothing with it, so the row has no "with ..." tail.
+		expect(rowFor("x1")?.textContent).not.toMatch(/with/);
 	});
 
 	it("draws an environment with the glyph the Variables view gives one", () => {
@@ -233,10 +250,14 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(screen.getByText("Trash is empty")).toBeInTheDocument();
-		// Every kind a delete sends here, environments included (#2970).
+		// Every kind a delete sends here, environments (#2970) and examples (#2971)
+		// included - and the sentence before them is gone.
 		expect(
-			screen.getByText(/^Deleted collections, requests and environments wait here/)
+			screen.getByText(/^Deleted collections, requests, environments and examples wait here/)
 		).toBeInTheDocument();
+		expect(
+			screen.queryByText(/^Deleted collections, requests and environments wait here/)
+		).not.toBeInTheDocument();
 	});
 
 	it("shows a failure as a failure, not as an empty trash", () => {
@@ -322,6 +343,35 @@ describe("restore", () => {
 				"error"
 			)
 		);
+	});
+});
+
+describe("restoring an example", () => {
+	it.each([
+		["its request is in the trash", "Request 'r1' is in the trash, so restore that first"],
+		[
+			"its request already holds the most examples",
+			"Request 'r1' already holds the maximum of 100 examples - delete one first",
+		],
+	])("repeats the engine's 409 verbatim when %s", async (_why, message) => {
+		state.items = [exampleEntry()];
+		restore.mockRejectedValue(new Error(message));
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Restore Happy path" }));
+
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith(message, "error"));
+		expect(restore).toHaveBeenCalledWith("x1");
+	});
+
+	it("confirms a purge as a single row, not a cascade", async () => {
+		state.items = [exampleEntry()];
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete Happy path forever" }));
+
+		expect(await screen.findByText('Delete "Happy path" forever?')).toBeInTheDocument();
+		expect(screen.queryByText(/and everything inside it/)).not.toBeInTheDocument();
 	});
 });
 

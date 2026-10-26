@@ -31,6 +31,7 @@ import { requestExamplesSchema } from "./output-schemas.js";
 import {
 	boundExampleBodies,
 	describeExample,
+	describeExampleDeleteOutcome,
 	exampleWritePayload,
 	MAX_EXAMPLES_BODY_BYTES,
 } from "./examples.js";
@@ -185,7 +186,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		description:
 			"Delete one saved example from a request. " +
 			GUARDED_WRITE_SENTENCE +
-			", and confirmation: if the client supports elicitation the user is prompted with the example's name and what a mock server loses; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a mock server for this collection stops answering with it once it is restarted.",
+			", and confirmation: if the client supports elicitation the user is prompted with the example's name and what a mock server loses; otherwise call once for a preview, then again with `confirmed: true`. A saved example (`origin: 'user'`) goes to Vayu's Trash - list_trash shows it, restore_trash_entry puts it back. An imported one (`origin: 'import'`) is not trashed: it becomes a spec-sync tombstone with no restore, and only re-importing the document brings it back. Either way a mock server for this collection stops answering with it once it is restarted.",
 		annotations: {
 			title: "Delete saved example",
 			readOnlyHint: false,
@@ -221,8 +222,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				return errorResult(unknownIdText(ID_KINDS.example, exampleId), "not_found");
 			}
 			const subject = describeExample(exampleId, stored);
-			const consequence =
-				"A mock server for this collection stops answering with it once it is restarted. This cannot be undone.";
+			const consequence = describeExampleDeleteOutcome(stored);
 			const unconfirmed = await confirmDestructive(args, ctx, {
 				message: `Delete the saved example ${subject}?\n\n${consequence}`,
 				acceptTitle: "Delete the example",
