@@ -1733,7 +1733,8 @@ in the trash at that launch is not moved.
 (`engine_<stamp>.log`, `cli_<stamp>.log`), one JSON record per line, plus a
 text rendering on the console; the Electron app's own port of the same record
 and redaction rule (`electron/log.ts`, issue #1558) writes `app_<stamp>.log`
-alongside them. `logLevel` is the floor for every one of those files,
+alongside them. `logLevel` (default `info`) is the floor for the engine's and
+the app's files, `vayu-cli` always writing at that default;
 `maxLogFileBytes` its rotation cap, and the newest 10 per-prefix files survive
 a start. Every
 route's request line comes from one hook, `install_request_logger`

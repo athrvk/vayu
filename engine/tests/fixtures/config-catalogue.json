@@ -211,7 +211,7 @@
   {
     "advanced": false,
     "category": "observability",
-    "default_value": "debug",
+    "default_value": "info",
     "depends_on": "",
     "key": "logLevel",
     "max_value": "",

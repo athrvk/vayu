@@ -75,9 +75,11 @@ constexpr int RETAINED_FILES = 10;
 /// Default value of the `maxLogFileBytes` config entry: the size one log file
 /// may reach before it is rotated once to `.log.1`. 0 means unlimited.
 constexpr int DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
-/// Default value of the `logLevel` config entry. `debug` preserves the
-/// behaviour the file sink had before it was filtered at all.
-constexpr const char* DEFAULT_LEVEL = "debug";
+/// Default value of the `logLevel` config entry, and the level
+/// `Logger::default_file_level` derives the logger's own from. `info`, not
+/// `debug`: every 2xx request line and every database write is a debug record,
+/// which fills a long session's file; `debug` is one `logLevel` entry away.
+constexpr const char* DEFAULT_LEVEL = "info";
 } // namespace logging
 
 /**
