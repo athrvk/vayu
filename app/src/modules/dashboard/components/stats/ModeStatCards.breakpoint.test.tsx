@@ -41,7 +41,7 @@ describe("BreakpointStat", () => {
 	it("names the Settings threshold, not an SLO, when the run declared none (#2939)", () => {
 		const text = renderStat(notCrossed(200, "settings")).textContent;
 		expect(text).toContain("not crossed");
-		expect(text).toContain("Settings 200ms");
+		expect(text).toContain("threshold in Settings 200ms");
 		expect(text).not.toContain("SLO");
 	});
 

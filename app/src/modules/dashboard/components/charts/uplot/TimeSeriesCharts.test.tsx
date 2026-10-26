@@ -467,12 +467,13 @@ describe("the breakpoint line on the time charts (#2698)", () => {
 		expect(marker.label).not.toContain("303");
 	});
 
-	it("names a Settings-judged line as Settings', never an SLO the run did not use (#2939)", () => {
+	it("names a Settings-judged line the threshold in Settings, never an SLO the run did not use (#2939)", () => {
 		const [marker] = verticalMarkers("percentiles", "ramp_up", {
 			...CROSSED,
 			sloSource: "settings",
 		});
-		expect(marker.label).toBe("p99 > 200ms (Settings)");
+		expect(marker.label).toBe("p99 > 200ms threshold in Settings");
+		expect(marker.label).not.toContain("SLO");
 	});
 
 	it("leaves the SLO's number out of the label when none was in play", () => {

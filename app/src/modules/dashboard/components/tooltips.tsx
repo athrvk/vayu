@@ -73,7 +73,7 @@ export const TOOLTIPS = {
 	latencyPercentilesPooled:
 		"The tail of every request across all steps, pooled into one distribution: the slowest step sets it. A finished run's Steps tab has each step's own percentiles. Mean and median (sub-text) are misleading on heavy-tailed distributions.",
 	saturation:
-		"Whether the server has reached its capacity ceiling. In a ramp, 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero, and 'degrading' means p99 has crossed the threshold or errors started; the call-out shows the number of virtual users at which that began (the breakpoint). A Capacity discovery run reads what ended its search and never says 'healthy': 'searching' until the search stops, 'degrading' when p99 or errors went over their limit, 'saturated' when more virtual users stopped adding throughput, and 'no limit found' when the search ran out of ceiling, time or patience before the target gave out. Errors that did not end the search are counted on their own line.",
+		"Whether the server has reached its capacity ceiling. In a ramp, 'healthy' means p99 latency is below the run's p99 budget (SLO), or when the run set none, the threshold in Settings, and the error rate is near zero, and 'degrading' means p99 has crossed that line or errors started; the call-out shows the number of virtual users at which that began (the breakpoint). A Capacity discovery run reads what ended its search and never says 'healthy': 'searching' until the search stops, 'degrading' when p99 or errors went over their limit, 'saturated' when more virtual users stopped adding throughput, and 'no limit found' when the search ran out of ceiling, time or patience before the target gave out. Errors that did not end the search are counted on their own line.",
 
 	// ---- Hero card #3 (universal) ----
 	errorRate:
@@ -97,9 +97,9 @@ export const TOOLTIPS = {
 	meanIterTime:
 		"Average wall-clock time per iteration. Closely tracks p50 latency in closed-loop tests; divergence indicates queueing or other generator overhead.",
 	breakpoint:
-		'The number of virtual users at which p99 latency first crossed the configured SLO threshold (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly. "not crossed" means p99 stayed under the SLO for the whole run, so the ceiling is above the load tested.',
+		'The number of virtual users at which p99 latency first crossed the run\'s p99 budget (SLO), or when the run set none, the threshold in Settings (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly. "not crossed" means p99 stayed under that line for the whole run, so the ceiling is above the load tested.',
 	p99AtPeak:
-		"The worst one-second p99 while the run was at its most virtual users. Unlike the breakpoint, which is read where p99 first crossed the SLO, this is the tail latency the full load produced. Until a second at that peak has a reading, it shows the run's p99 so far.",
+		"The worst one-second p99 while the run was at its most virtual users. Unlike the breakpoint, which is read where p99 first crossed the run's SLO or the threshold in Settings, this is the tail latency the full load produced. Until a second at that peak has a reading, it shows the run's p99 so far.",
 
 	// ---- Chart cards ----
 	throughputOverTime:
@@ -109,7 +109,7 @@ export const TOOLTIPS = {
 	percentilesOverTime:
 		"p50 / p95 / p99 latency of each second of the run. p50 is what most users felt; p99 is the tail - heavy-tail divergence shows up as p99 climbing while p50 stays flat. At wider chart intervals each point shows the worst second in its interval. Sourced from HdrHistogram snapshots merged over each second.",
 	responseTimeVsConcurrency:
-		"Scatter plot - each dot is one second of the run. X axis is the number of virtual users at the end of that second; Y is that second's p99 latency. A flat left region means the server has headroom; the elbow (knee) is the breakpoint; the steep right region means the server is saturated. The amber vertical line marks where p99 first crossed the SLO threshold. On a finished capacity run a red line marks the knee, the level the search gave out at.",
+		"Scatter plot - each dot is one second of the run. X axis is the number of virtual users at the end of that second; Y is that second's p99 latency. A flat left region means the server has headroom; the elbow (knee) is the breakpoint; the steep right region means the server is saturated. The amber vertical line marks where p99 first crossed the run's p99 budget (SLO), or when the run set none, the threshold in Settings. On a finished capacity run a red line marks the knee, the level the search gave out at.",
 	statusCodesOverTime:
 		"Responses per second by status class, stacked: the plotted height is the running total, and hovering shows each class's own rate (classes with none in that interval are left out). A healthy run is a solid 2xx field; 4xx/5xx or connection-error bands rising out of it pinpoint when failures happened. Each response is counted in the second it completed, so where a tick fell does not move it; a point appears about a second after its second ends, and the last partial second of a run draws no point. Runs recorded by older versions are estimated from the change in the run's status-code totals between its once-a-second readings.",
 

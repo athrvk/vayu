@@ -15,6 +15,15 @@ export const DEFAULT_SLO_MS = 200;
 export type SloSource = "run" | "settings";
 
 /**
+ * What a label calls a line: "SLO" only where the run declared it, else the
+ * Settings p99 threshold (#2939). Every surface that words a breakpoint's line
+ * goes through this so they cannot drift.
+ */
+export function sloLineName(sloSource: SloSource): string {
+	return sloSource === "run" ? "SLO" : "threshold in Settings";
+}
+
+/**
  * Whose line `judgedMs` is. It is the run's when it equals the run's own p99
  * line (`runOwnSloMs` live, `runSloMs(report)` stored); the Settings threshold
  * is a client preference, so any other value is Settings'. A run with a p99
@@ -49,7 +58,7 @@ export interface Breakpoint {
 	/**
 	 * Whose line `sloMs` is: the run's own (a capacity budget or a p99 budget) or
 	 * the client's Settings threshold. Only the first is an "SLO" the run declared;
-	 * a label for the second says "Settings", not "SLO" (#2939).
+	 * a label for the second says "threshold in Settings", not "SLO" (#2939).
 	 */
 	sloSource: SloSource;
 	/**

@@ -86,7 +86,7 @@ function BucketNote({ ticksPerBucket }: { ticksPerBucket: number }) {
 		>
 			Latency and concurrency show the worst second in it, counts and rates their value at its
 			end. Events are judged point to point, so a slowdown has to span two points to be named;
-			the breakpoint still marks the first point holding a second over the SLO.
+			the breakpoint still marks the first point holding a second over its p99 line.
 		</Callout>
 	);
 }

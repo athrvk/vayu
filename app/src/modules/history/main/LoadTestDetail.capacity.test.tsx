@@ -216,7 +216,7 @@ describe("a stored run's crossing names whose line it was judged against (#2939)
 		openPerformance(report("constant_concurrency"));
 
 		await screen.findByText("Latency distribution");
-		expect(labels("vertical")).toContain("p99 > 30ms (Settings)");
+		expect(labels("vertical")).toContain("p99 > 30ms threshold in Settings");
 	});
 
 	it("still judges by Settings, and says so, when the p99 budget is a different number", async () => {
@@ -224,7 +224,7 @@ describe("a stored run's crossing names whose line it was judged against (#2939)
 		openPerformance(report("constant_concurrency", undefined, 350));
 
 		await screen.findByText("Latency distribution");
-		expect(labels("vertical")).toContain("p99 > 30ms (Settings)");
+		expect(labels("vertical")).toContain("p99 > 30ms threshold in Settings");
 		expect(labels("vertical")).not.toContain("p99 > SLO 30ms");
 	});
 

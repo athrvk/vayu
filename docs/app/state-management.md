@@ -1191,7 +1191,7 @@ the pre-paint script chose.
 
 #### `client-settings-store.ts` - Renderer Preferences
 
-Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, reduced motion, the notification preferences and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
+Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the p99 threshold, the live refresh rate, auto-save preferences, reduced motion, the notification preferences and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
 
 **State:**
 ```typescript
@@ -1285,7 +1285,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
   loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run; `runOwnSloMs(loadTestConfig)` (capacity `sloMs`, else the `latencyP99Ms` budget, else undefined) is the SLO line the live charts draw
   requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
   peakConcurrency: number                      // Running max (monotonic)
-  breakpoint: Breakpoint                       // SLO crossing (latched on first breach); carries the sloMs it was judged against (a capacity run's own `loadTestConfig.sloMs`, read through `setRunConfig` too for a run started by an MCP agent; the Settings threshold in every other mode), its `sloSource` (`"run"` only where that number is the run's own p99 line, else `"settings"`, which the labels word as "Settings", not "SLO") and atRunStart (no reading under it came first)
+  breakpoint: Breakpoint                       // SLO crossing (latched on first breach); carries the sloMs it was judged against (a capacity run's own `loadTestConfig.sloMs`, read through `setRunConfig` too for a run started by an MCP agent; the Settings threshold in every other mode), its `sloSource` (`"run"` only where that number is the run's own p99 line, else `"settings"`, which the labels word as "threshold in Settings", not "SLO") and atRunStart (no reading under it came first)
 }
 ```
 

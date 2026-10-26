@@ -116,7 +116,7 @@ export function ProfileFields({
 					onChange={set("sloMs")}
 					min={limits.SLO_MS.MIN}
 					max={limits.SLO_MS.MAX}
-					hint="The p99 the search looks for the edge of. Prefilled from your SLO setting."
+					hint="The p99 the search looks for the edge of. Prefilled from your p99 threshold setting."
 				/>
 			)}
 

@@ -259,9 +259,9 @@ export const APP_SETTINGS = [
 	{
 		anchor: "slo-threshold",
 		panel: "dashboard",
-		label: "SLO threshold",
+		label: "p99 threshold",
 		searchText: "The p99 latency at which a run is considered saturated.",
-		keywords: ["capacity", "breakpoint", "saturation", "budget"],
+		keywords: ["slo", "capacity", "breakpoint", "saturation", "budget"],
 	},
 
 	// Load testing

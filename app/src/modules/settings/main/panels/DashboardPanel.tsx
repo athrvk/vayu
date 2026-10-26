@@ -10,7 +10,7 @@
  *
  * Behavioral preferences for live test dashboards and charts, in two topics:
  * the live charts (retention window, time granularity, refresh rate) and
- * capacity (the SLO threshold that drives breakpoint/saturation of a ramp-up
+ * capacity (the p99 threshold that drives breakpoint/saturation of a ramp-up
  * run; a Capacity run uses the SLO it was started with). Client-side
  * only (localStorage-backed); consumed by the charts, the dashboard store, and
  * the live metrics service.

@@ -26,7 +26,7 @@ import {
 	type CustomBudgetDraft,
 } from "./budgets";
 
-/** `memo`: the last Start wrote it. `slo`: the Dashboard's SLO threshold seeded it. */
+/** `memo`: the last Start wrote it. `slo`: the Dashboard's p99 threshold seeded it. */
 export type CarriedSource = "memo" | "slo";
 
 /** What a restore filled in, as the dialog opened. */
@@ -45,7 +45,7 @@ export const NO_CARRIED: CarriedBudgets = { fixed: {}, customIds: [] };
 
 const isBlank = (value: string | undefined) => (value ?? "").trim() === "";
 
-/** The one budget Settings seeds on a first run: the Dashboard's SLO threshold. */
+/** The one budget Settings seeds on a first run: the Dashboard's p99 threshold. */
 export const SLO_SEEDED_KEY = "latencyP99Ms" satisfies BudgetKey;
 
 /**
@@ -199,7 +199,7 @@ export function budgetsChanged(
 /** Where the memo's budgets came from when the memo does not say. */
 export const UNNAMED_ORIGIN = "your last load test";
 
-export const SLO_SOURCE_NOTE = "(from Settings › Dashboard › SLO threshold)";
+export const SLO_SOURCE_NOTE = "(from Settings › Dashboard › p99 threshold)";
 
 /**
  * The notice's sentence, or null when nothing carried is left. A memo value is

@@ -1015,7 +1015,7 @@ describe("pass/fail budgets", () => {
 
 		expect(screen.getByText(BUDGETS_EXPLAINER)).toBeInTheDocument();
 		// Nothing seeds p99 here, so the Settings hint would be false.
-		expect(screen.queryByText(/SLO threshold/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/p99 threshold/)).not.toBeInTheDocument();
 	});
 
 	it("sends no thresholds at all when nothing is declared", () => {

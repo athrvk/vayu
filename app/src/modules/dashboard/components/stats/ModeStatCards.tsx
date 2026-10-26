@@ -22,6 +22,7 @@ import {
 import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
+import { sloLineName } from "../../utils/computeBreakpoint";
 import { computeEta } from "../../utils/computeEta";
 import { StatCard } from "./StatCard";
 
@@ -90,8 +91,8 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 /**
  * Breakpoint - concurrency at which p99 first crossed the SLO threshold. An
  * uncrossed run says so and names the line (from the breakpoint, not the current
- * setting), since "-" reads as "not measured": "SLO" for a run's own, "Settings"
- * for the Settings threshold (#2939). It goes in the sub-line: "not crossed"
+ * setting), since "-" reads as "not measured": "SLO" for a run's own, "threshold
+ * in Settings" for the Settings p99 threshold (#2939). It goes in the sub-line: "not crossed"
  * alone fills most of a card's value row.
  */
 export function BreakpointStat({ d }: { d: DashboardDerived }) {
@@ -105,9 +106,7 @@ export function BreakpointStat({ d }: { d: DashboardDerived }) {
 			label="Breakpoint"
 			value={value}
 			sub={
-				!reached && sloMs
-					? `${sloSource === "run" ? "SLO" : "Settings"} ${formatLatency(sloMs)}`
-					: undefined
+				!reached && sloMs ? `${sloLineName(sloSource)} ${formatLatency(sloMs)}` : undefined
 			}
 			infoTip={TOOLTIPS.breakpoint}
 		/>
