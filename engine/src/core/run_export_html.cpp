@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <string>
@@ -121,6 +122,7 @@ nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 1rem 0 0;
 .band-bad strong { color: var(--bad-text); }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+caption { padding: 0 0 0.35rem; color: var(--muted); text-align: left; }
 th, td { padding: 0.35rem 0.75rem 0.35rem 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 thead th { color: var(--muted); font-weight: 600; }
 tbody th { font-weight: 600; }
@@ -200,10 +202,15 @@ std::string row_markup (const ReportRow& row) {
     return out + "</tr>\n";
 }
 
-/// @p table, labelled by the heading with id @p heading_id.
+/// @p table, labelled by the heading with id @p heading_id, with its caption
+/// when it has one.
 std::string table_markup (const ReportTable& table, std::string_view heading_id) {
     std::string out = "<div class=\"scroll\"><table aria-labelledby=\"" +
-    escape_html (heading_id) + "\">\n<thead><tr>";
+    escape_html (heading_id) + "\">\n";
+    if (!table.caption.empty ()) {
+        out += "<caption>" + text_of (table.caption) + "</caption>\n";
+    }
+    out += "<thead><tr>";
     for (const std::string& header : table.headers) {
         out += "<th scope=\"col\">" + escape_html (header) + "</th>";
     }
@@ -280,6 +287,35 @@ Section comparison_section (const ReportComparison& comparison) {
     return section;
 }
 
+/// @p lines, each non-empty one a paragraph.
+std::string paragraphs_markup (std::initializer_list<const ReportText*> lines) {
+    std::string out;
+    for (const ReportText* line : lines) {
+        if (!line->empty ()) {
+            out += "<p>" + text_of (*line) + "</p>\n";
+        }
+    }
+    return out;
+}
+
+Section capacity_section (const ReportCapacity& capacity) {
+    std::string body = "<p><strong>" + text_of (capacity.stop) +
+    "</strong> - " + text_of (capacity.headline) + "</p>\n" +
+    paragraphs_markup ({ &capacity.knee, &capacity.detail, &capacity.limits });
+    if (!capacity.levels.rows.empty ()) {
+        body += table_markup (capacity.levels, "capacity-h");
+    }
+    return section_of ("capacity", "Capacity", body);
+}
+
+Section sequence_section (const ReportSequence& sequence) {
+    std::string body = paragraphs_markup ({ &sequence.iterations });
+    if (!sequence.steps.rows.empty ()) {
+        body += table_markup (sequence.steps, "sequence-h");
+    }
+    return section_of ("sequence", "Sequence", body);
+}
+
 /// The sections that come from the view, in the Markdown report's order.
 std::vector<Section> view_sections (const ReportView& view) {
     std::vector<Section> sections;
@@ -289,6 +325,16 @@ std::vector<Section> view_sections (const ReportView& view) {
     section_of ("results", "Results", table_markup (view.results, "results-h")));
     sections.push_back (
     section_of ("latency", "Latency", table_markup (view.latency, "latency-h")));
+    if (view.capacity) {
+        sections.push_back (capacity_section (*view.capacity));
+    }
+    if (view.sequence) {
+        sections.push_back (sequence_section (*view.sequence));
+    }
+    if (!view.transactions.rows.empty ()) {
+        sections.push_back (section_of ("transactions", "Transactions",
+        table_markup (view.transactions, "transactions-h")));
+    }
     if (!view.errors.rows.empty ()) {
         sections.push_back (
         section_of ("errors", "Errors", table_markup (view.errors, "errors-h")));

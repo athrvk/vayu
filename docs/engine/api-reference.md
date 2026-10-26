@@ -4772,13 +4772,18 @@ in a browser, attach to a ticket or print: `<title> <UTC start>.run.html`
 the document, so it can say nothing the document does not.
 
 It holds the Markdown report's sections in the same order (title and reference
-line, verdict, run, results, latency with its budgets, errors, comparison,
-warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
-description list for the run - from the same reading of the document, so the two
-cannot word a verdict differently, except that it does not yet draw the
-Markdown report's Capacity, Sequence and Transactions sections (#2819); the
-partial and missing-summary sentences sit in the verdict's band, one paragraph
-each. Above the title sits a one-line brand
+line, verdict, run, results, latency with its budgets, a capacity search's
+result, a scenario's sequence and transactions, errors, comparison, warnings),
+written as semantic HTML - one `h1`, tables with `th scope`, a description list
+for the run - from the same reading of the document, so the two cannot word a
+verdict or a capacity result differently. Capacity, Sequence and Transactions
+(#2819) are sections of paragraphs and tables like the rest, each present only
+when the document has it: the capacity sentences are paragraphs above the levels
+table, the iteration line is the paragraph above the steps table, and a level or
+assertion count past its limit carries the same word beside its colour (`(over
+budget)`, `18 failed`). A table's one-line caption (a scenario run's latency
+table, `All steps pooled.`) is its `<caption>`; the partial and missing-summary
+sentences sit in the verdict's band, one paragraph each. Above the title sits a one-line brand
 (the Vayu mark at 28 px, then the wordmark `Vayu run report`, muted; the mark has
 an empty `alt` because the wordmark names the product). The mark is
 `shared/icon_png/vayu_icon_64x64.png`, embedded as a base64 `data:` URI
@@ -4831,8 +4836,9 @@ in colour). Pass and fail are always a word beside the colour (`Passed`,
 `Failed`, `Not judged`, `met`, `missed`); the palette holds 4.5:1 for text and
 3:1 for graphics in both schemes (`run_export_html_test.cpp` measures it).
 
-`engine/tests/fixtures/run-export/<case>.golden.html` pins the bytes for two
-shapes of run, regenerated like the Markdown goldens.
+`engine/tests/fixtures/run-export/<case>.golden.html` pins the bytes for six
+shapes of run, among them a capacity search and a scenario run, regenerated like
+the Markdown goldens.
 
 **Errors:**
 
