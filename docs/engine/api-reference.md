@@ -8939,7 +8939,8 @@ is not an outcome: a step that answered 4xx or 5xx with every assertion holding
 is `passed`, and the summary's `failedRequests` counts it. The four outcomes
 are disjoint and sum to `stepsExecuted`, a skipped step included, and a
 [scenario load run](#scenario-load-runs) reports them under the same
-definition. A transport failure
+arithmetic, with one difference: on a load run `errored` is an execution that
+got no response, so a thrown script is not counted there. A transport failure
 continues the iteration like a script error does, as Postman's and Newman's
 runners do by default; a later step that reads a response that never arrived
 errors on its own row. A step that errored while the iteration continues has its own flow control

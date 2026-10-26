@@ -3441,7 +3441,7 @@ export interface RunReport {
 		failed: number;
 		/** Steps a controller or `pm.execution.skipRequest()` stopped before the wire. */
 		skipped: number;
-		/** Step executions that got no response, or whose script threw (the steps' `noResponse` on a load run). */
+		/** Step executions that got no response, plus a collection run's thrown scripts (a load run counts only the steps' `noResponse`). */
 		errored: number;
 		/**
 		 * A scenario *load* run's exact assertion population (#2820): every
