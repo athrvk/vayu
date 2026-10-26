@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -269,6 +270,28 @@ TEST_F (IfMatchServerTest, GetRequestByIdAnswersTheTagAPutWouldJudge) {
     ASSERT_EQ (read.status, 200) << read.body.dump ();
     EXPECT_EQ (read.etag, tag);
     EXPECT_TRUE (send ("GET", "/requests/req_missing").etag.empty ());
+}
+
+// MCP's merges read collections and environments from their list, which
+// carries no per-row header, and build the tag from the row's `updatedAt`.
+TEST_F (IfMatchServerTest, AListRowCarriesTheTagAPutWouldJudge) {
+    for (const Resource resource : { Resource::Collection, Resource::Environment }) {
+        const std::string path = seed (resource).first;
+        ASSERT_EQ (send ("PUT", path, {}, rename ("Moved")).status, 200);
+        const std::string list_path = path.substr (0, path.rfind ('/'));
+        const std::string id        = path.substr (path.rfind ('/') + 1);
+
+        const Answer list = send ("GET", list_path);
+        ASSERT_TRUE (list.body.is_array ()) << list.body.dump ();
+        const auto row = std::find_if (list.body.begin (), list.body.end (),
+        [&id] (const json& r) { return r.value ("id", "") == id; });
+        ASSERT_NE (row, list.body.end ()) << list_path;
+
+        const Answer answer =
+        send ("PUT", path, { { "If-Match", tag_of (*row) } }, rename ("After"));
+        EXPECT_EQ (answer.status, 200) << list_path << ": " << answer.body.dump ();
+        EXPECT_EQ (stored_name (resource, path), "After");
+    }
 }
 
 } // namespace
