@@ -55,7 +55,7 @@ export function liveRunProgressText(
  * printing zeros as measurements.
  */
 export function finishedRunFiguresText(summary: RunReport["summary"]): string {
-	if (unrecordedFiguresOf(summary).counts) {
+	if (unrecordedFiguresOf({ summary }).counts) {
 		return `Duration, requests sent and error rate: ${NOT_RECORDED}`;
 	}
 	const parts = [
