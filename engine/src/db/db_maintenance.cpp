@@ -2204,6 +2204,12 @@ int Database::applied_synchronous () const {
     return impl_->storage.pragma.synchronous ();
 }
 
+std::optional<int64_t> Database::applied_journal_size_limit () const {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    std::string error;
+    return read_pragma_int (impl_->connection, "PRAGMA journal_size_limit;", error);
+}
+
 int Database::applied_busy_timeout_ms () const {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.pragma.busy_timeout ();

@@ -1316,6 +1316,13 @@ constexpr int TEMP_STORE = 2;
 constexpr size_t MMAP_SIZE_BYTES = 268435456;
 /// WAL autocheckpoint frequency in pages
 constexpr int WAL_AUTOCHECKPOINT = 1000;
+/// `journal_size_limit` in bytes (64 MiB): the size the `-wal` file is cut back
+/// to once a checkpoint has emptied it and the next write restarts the log.
+/// The autocheckpoint is passive and never shrinks the file, so one large
+/// transaction (a run prune, a big import) would otherwise leave its
+/// high-water mark on disk for the rest of the engine session; only a clean
+/// shutdown or the startup VACUUM gives it back (#2433).
+constexpr int64_t JOURNAL_SIZE_LIMIT_BYTES = 67108864;
 /// SQLite busy timeout in milliseconds (10 seconds)
 constexpr int BUSY_TIMEOUT_MS = 10000;
 /// SQLite synchronous mode (0=OFF, 1=NORMAL, 2=FULL), the default for
