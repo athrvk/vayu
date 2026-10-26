@@ -256,6 +256,15 @@ rejected result as a broken tool and hides the body.
 `output-schema.conformance.test.ts` fails a read tool that is on neither side
 of that line, and an exception that stops being true.
 
+**Argument names are uniform** (#2446), held by
+`schema-naming.conformance.test.ts` over every tool's top-level inputs: an id
+is named for what it identifies (`requestId`, `runId`, `entryId`, `itemId`),
+never a bare `id`, and a `limit` comes with an `offset`. The exceptions are
+listed in the test with their reasons: the deprecated `id` aliases on
+`restore_trash_entry`, `purge_trash_entry` and `move_item` (#2962 retires them),
+and `get_live_metrics`, which answers the tail of a ring buffer and so has
+nothing to page from.
+
 The four categories partition tools by what they can do - and thus which gate
 applies: **read** (inspection; returns workspace data, with secrets withheld unless the
 user enables reveal - see [Secret values](#secret-values), which also covers

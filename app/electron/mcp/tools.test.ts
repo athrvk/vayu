@@ -5599,6 +5599,25 @@ describe("start_load_run scenario runs", () => {
 	});
 });
 
+/**
+ * Descriptions that once said something the tools no longer do (#2446): a
+ * format the engine reads that the description left out, and a sentence that
+ * denied a call the tool answers.
+ */
+describe("description claims that must stay true", () => {
+	const describe_ = (name: string) => descriptionOf(TOOLS.find((t) => t.name === name));
+
+	test("import_document names every format the engine reads, JMeter included", () => {
+		expect(describe_("import_document")).toMatch(/a JMeter test plan/);
+	});
+
+	test("list_requests does not claim a sub-collection's requests need no separate call", () => {
+		const text = describe_("list_requests");
+		expect(text).not.toMatch(/no separate call/i);
+		expect(text).toMatch(/calling this again with the sub-collection id/);
+	});
+});
+
 describe("get_live_metrics limit", () => {
 	function metricsClient() {
 		return fakeClient({
