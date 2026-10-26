@@ -27,7 +27,6 @@ const BARE_ARRAY = "answers a bare JSON array; an outputSchema is object-rooted"
 const EXCEPTIONS: Readonly<Record<string, string>> = {
 	list_environments: BARE_ARRAY,
 	list_client_certificates: BARE_ARRAY,
-	get_live_metrics: BARE_ARRAY,
 	export_run_report:
 		"answers the document's own text (Markdown by default), not a JSON object, so there is nothing to wrap",
 };

@@ -194,7 +194,9 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
 		stopRun: vi.fn().mockResolvedValue({ message: "Run stopped" }),
-		getLiveMetricsSnapshot: vi.fn().mockResolvedValue([{ currentRps: 100 }]),
+		getLiveMetricsSnapshot: vi
+			.fn()
+			.mockResolvedValue({ ticks: [{ currentRps: 100 }], completed: false }),
 		consumeStreamEvents: vi
 			.fn()
 			.mockResolvedValue({ events: [], completed: true, capReached: false }),
@@ -5507,7 +5509,9 @@ describe("start_load_run scenario runs", () => {
 
 describe("get_live_metrics limit", () => {
 	function metricsClient() {
-		return fakeClient({ getLiveMetricsSnapshot: vi.fn().mockResolvedValue([]) });
+		return fakeClient({
+			getLiveMetricsSnapshot: vi.fn().mockResolvedValue({ ticks: [], completed: false }),
+		});
 	}
 
 	/**
@@ -5541,6 +5545,44 @@ describe("get_live_metrics limit", () => {
 		const bare = metricsClient();
 		await dispatchTool("get_live_metrics", { runId: "run_1" }, ctxWith(bare));
 		expect(bare.getLiveMetricsSnapshot).toHaveBeenCalledWith("run_1", 10, undefined, undefined);
+	});
+
+	/**
+	 * The reader's `complete` event is the only thing that tells a finished run
+	 * from a read that ran out of budget, so the tool must carry it and may
+	 * caveat the final tick only when the run ended.
+	 */
+	test("carries completed:false with no note while the run is still going", async () => {
+		const client = fakeClient({
+			getLiveMetricsSnapshot: vi
+				.fn()
+				.mockResolvedValue({ ticks: [{ currentRps: 5 }], completed: false }),
+		});
+		const res = await dispatchTool("get_live_metrics", { runId: "run_1" }, ctxWith(client));
+		expect(res.structuredContent).toEqual({ ticks: [{ currentRps: 5 }], completed: false });
+	});
+
+	test("carries completed:true and the empty-window note once the run ended", async () => {
+		const client = fakeClient({
+			getLiveMetricsSnapshot: vi.fn().mockResolvedValue({
+				ticks: [{ currentRps: 5, latencyP50Ms: 0 }],
+				completed: true,
+			}),
+		});
+		const res = await dispatchTool("get_live_metrics", { runId: "run_1" }, ctxWith(client));
+		expect(res.structuredContent).toMatchObject({
+			ticks: [{ currentRps: 5, latencyP50Ms: 0 }],
+			completed: true,
+		});
+		const note = (res.structuredContent as { note: string }).note;
+		expect(note).toMatch(/latency window may be empty/);
+		expect(note).toMatch(/get_run_report/);
+		expect(firstText(res)).toContain(note);
+		expect(() =>
+			TOOLS.find((t) => t.name === "get_live_metrics")!.outputSchema!.parse(
+				res.structuredContent
+			)
+		).not.toThrow();
 	});
 
 	test("the input schema rejects a non-positive limit too", () => {
@@ -17585,6 +17627,7 @@ describe("every structured read answers structuredContent its outputSchema accep
 			wraps: "getMockServerActivity",
 		},
 		{ tool: "list_webhook_inboxes", args: {}, has: ["data"], wraps: "listInboxes" },
+		{ tool: "get_live_metrics", args: { runId: "run_1" }, has: ["ticks", "completed"] },
 	];
 
 	/** Held by the paged-read and comparison cases above, not by a row here. */

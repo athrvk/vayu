@@ -428,6 +428,63 @@ describe("EngineClient.consumeStreamEvents", () => {
 	});
 });
 
+/**
+ * The budgeted live-metrics read (issue #2955). The tick list alone cannot say
+ * whether the run ended, so the reader reports the relay's own `complete`.
+ */
+describe("EngineClient.getLiveMetricsSnapshot", () => {
+	const encoder = new TextEncoder();
+	const metrics = (n: number) => `event: metrics\ndata: {"tick":${n}}\n\n`;
+	const complete = `event: complete\ndata: {"reason":"completed"}\n\n`;
+
+	function client(fetchImpl: typeof fetch) {
+		return new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+	}
+
+	/** A body that delivers @p chunks; it closes after them unless @p stayOpen, which only the signal ends. */
+	function sseFetch(chunks: string[], stayOpen = false): typeof fetch {
+		return vi.fn((_url: string | URL | Request, opts?: RequestInit) =>
+			Promise.resolve(
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+							if (!stayOpen) return controller.close();
+							opts?.signal?.addEventListener("abort", () =>
+								controller.error(
+									new DOMException("The operation was aborted.", "AbortError")
+								)
+							);
+						},
+					}),
+					{ status: 200, headers: { "content-type": "text/event-stream" } }
+				)
+			)
+		) as unknown as typeof fetch;
+	}
+
+	it("reports completed after a complete event, and keeps the last `limit` ticks", async () => {
+		const snapshot = await client(
+			sseFetch([metrics(1), metrics(2), metrics(3), complete])
+		).getLiveMetricsSnapshot("run_s", 2);
+		expect(snapshot).toEqual({ ticks: [{ tick: 2 }, { tick: 3 }], completed: true });
+	});
+
+	it("reports not completed when the budget ends a read of a run still going", async () => {
+		const snapshot = await client(sseFetch([metrics(1)], true)).getLiveMetricsSnapshot(
+			"run_s",
+			10,
+			60
+		);
+		expect(snapshot).toEqual({ ticks: [{ tick: 1 }], completed: false });
+	});
+
+	it("reports not completed when the stream closes without a complete event", async () => {
+		const snapshot = await client(sseFetch([metrics(1)])).getLiveMetricsSnapshot("run_s");
+		expect(snapshot).toEqual({ ticks: [{ tick: 1 }], completed: false });
+	});
+});
+
 /*
  * Run housekeeping (#755). What these pin is the *URL*: the engine ignores a
  * filter it cannot parse and answers the unfiltered page, so a misspelled query

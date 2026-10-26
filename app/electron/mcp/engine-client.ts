@@ -72,6 +72,12 @@ const CONFIG_PROBE_TIMEOUT_MS = 2_000;
 /** A single decoded live-metrics tick (shape mirrors the engine SSE payload). */
 export type MetricsTick = Record<string, unknown>;
 
+/** What {@link EngineClient.getLiveMetricsSnapshot} read: the ticks, and whether the run had ended. */
+export interface LiveMetricsSnapshot {
+	ticks: MetricsTick[];
+	completed: boolean;
+}
+
 /**
  * Page size `GET /runs` uses when a caller states none. The engine's own default
  * is 50; 100 is what this client has always asked for and what the `vayu://runs`
@@ -1000,18 +1006,22 @@ export class EngineClient {
 	 * offset 0), collects `metrics` ticks until the run completes or `budgetMs`
 	 * elapses, and returns the last `limit` ticks. This keeps `tools/call`
 	 * request/response - MCP tools do not stream.
+	 *
+	 * `completed` is the relay's own `event: complete`, so a read that ran out of
+	 * budget on a live run is never reported as a finished one (issue #2955).
 	 */
 	async getLiveMetricsSnapshot(
 		runId: string,
 		limit = 10,
 		budgetMs = 1500,
 		signal?: AbortSignal
-	): Promise<MetricsTick[]> {
+	): Promise<LiveMetricsSnapshot> {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), budgetMs);
 		// Stop on our time budget or the caller's cancellation, whichever first.
 		const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 		const ticks: MetricsTick[] = [];
+		let completed = false;
 		try {
 			const res = await this.fetchImpl(
 				`${this.baseUrl}/runs/${encodeURIComponent(runId)}/live`,
@@ -1029,12 +1039,11 @@ export class EngineClient {
 					text
 				);
 			}
-			if (!res.body) return ticks;
+			if (!res.body) return { ticks, completed };
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = "";
-			let done = false;
-			while (!done) {
+			while (!completed) {
 				const chunk = await reader.read();
 				if (chunk.done) break;
 				buffer += decoder.decode(chunk.value, { stream: true });
@@ -1044,7 +1053,7 @@ export class EngineClient {
 					const parsed = parseSseEvent(evt);
 					if (!parsed) continue;
 					if (parsed.event === "complete") {
-						done = true;
+						completed = true;
 						break;
 					}
 					if (parsed.event === "metrics" && parsed.data) {
@@ -1065,7 +1074,7 @@ export class EngineClient {
 		} finally {
 			clearTimeout(timer);
 		}
-		return ticks.slice(-limit);
+		return { ticks: ticks.slice(-limit), completed };
 	}
 
 	/**
