@@ -411,6 +411,21 @@ tracking issue.
   move to cpp-httplib 0.59.0 (2026-10-08): 5 of 10 raced without it, 10 of 10
   passed with it, the same stack, with `parse_status_line` again
   byte-identical. What is left is upstream in libstdc++.
+- **#2684** - `windows-asan` failed seven ajv and tv4 tests with
+  `RangeError: Maximum call stack size exceeded`, QuickJS's soft stack check
+  against the script's budget. Same family as #959: frame size, not the
+  library. `library_call_config ()` (`tests/library_call_config.hpp`, #2861 for
+  lodash and moment) had already raised the budget to 512 KB, and an ajv
+  `compile()` and tv4 still overflowed it at `/Od` under ASan; the `-O0` GCC
+  measurement in `engine/vendor/ajv/README.md` (48 to 64 KB) does not carry to
+  MSVC. **Fixed in the tests, not the engine**: the production budgets are
+  unchanged, and `vayu_tests` now links with `/STACK:8388608` on MSVC
+  (`tests/CMakeLists.txt`) because the 1 MiB a Windows main thread reserves by
+  default is below what the budget needs once frames are that large. That
+  reserve is address space, committed lazily, and is what quickjs-ng links its
+  own executables with. On MSVC `LIBRARY_CALL_STACK_BYTES` is 2 MiB; every test
+  that uses it runs the engine on the gtest main thread, which is the thread
+  `/STACK` sizes (a `std::thread` gets the default again).
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable

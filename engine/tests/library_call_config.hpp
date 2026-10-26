@@ -21,11 +21,18 @@ namespace vayu::tests {
 /// Stack budget for a test that loads or calls into a bundled library and
 /// asserts what it answers. MSVC at /Od under ASan overflowed the default
 /// 256 KB inside lodash and moment (`_.get`, `_.isEqual`, `.format`, and the
-/// first `require`), so those answers would depend on a frame size, not on the
-/// library. The stack-budget behaviour itself is pinned by
+/// first `require`), and 512 KB inside ajv's compile() and tv4 (#2684), so
+/// those answers would depend on a frame size, not on the library. The
+/// stack-budget behaviour itself is pinned by
 /// RequireShelfLibrariesLoadUnderAShallowInterpreterStack and the restore test
-/// after it. Half of the 1 MB stack a Windows thread has.
+/// after it. On MSVC the budget is a quarter of the 8 MiB `vayu_tests` reserves
+/// for its main thread (`/STACK` in tests/CMakeLists.txt), where every test
+/// using it runs; elsewhere 512 KB has always been enough.
+#if defined(_MSC_VER)
+inline constexpr std::size_t LIBRARY_CALL_STACK_BYTES = std::size_t{ 2048 } * 1024;
+#else
 inline constexpr std::size_t LIBRARY_CALL_STACK_BYTES = std::size_t{ 512 } * 1024;
+#endif
 
 [[nodiscard]] inline vayu::runtime::ScriptConfig library_call_config () {
     vayu::runtime::ScriptConfig config;
