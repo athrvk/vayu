@@ -1664,7 +1664,7 @@ TEST (LoadClock, GateFramesCarryTheScenarioSequenceTheSummaryEndsOn) {
                 EXPECT_FALSE (frame.contains ("scenario")) << frame.dump ();
                 continue;
             }
-            sequence_frames += frame.contains ("scenario") ? 1 : 0;
+            sequence_frames += frame.contains ("scenario") ? 1u : 0u;
         }
         EXPECT_GE (sequence_frames, 2u) << "no gate frame before the final one";
 
