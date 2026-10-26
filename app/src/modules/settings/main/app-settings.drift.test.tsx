@@ -53,7 +53,8 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 // The panels reach outside Settings for three things, none of them the subject:
 // the engine's run store, its cookie jar, and the Electron updater bridge.
 vi.mock("@/queries/runs", () => ({
-	useAllRunsQuery: () => ({ data: [] }),
+	useRunsCountQuery: () => ({ data: 0 }),
+	useFetchClearPlan: () => vi.fn(),
 	useInvalidateRuns: () => vi.fn(),
 }));
 vi.mock("@/queries", () => ({

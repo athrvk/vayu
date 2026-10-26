@@ -587,7 +587,7 @@ describe("flattenRunPages", () => {
  * `RunListResponse`, and `RequestBuilderProvider` mounts it for every open
  * request tab - so with one request tab open, deleting a run threw a TypeError
  * inside the mutation's own `onSuccess`: the engine had deleted the run, but the
- * row lingered, the all-runs patch and the report eviction never ran, and the
+ * row lingered, the count refresh and the report eviction never ran, and the
  * user saw "Couldn't delete run".
  *
  * Fixed at the root (its own key family) with a shape guard as the belt. The
@@ -600,7 +600,7 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 			pages: [page([runRow("r1"), runRow("r2")], { total: 2 })],
 			pageParams: [0],
 		});
-		client.setQueryData(queryKeys.runs.allRuns(), [runRow("r1"), runRow("r2")]);
+		client.setQueryData(queryKeys.runs.count(), 2);
 		return client;
 	}
 
@@ -634,7 +634,7 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 		);
 	});
 
-	it("deletes cleanly with a last-design-run cache present, and patches every cache", async () => {
+	it("deletes cleanly with a last-design-run cache present, and refreshes every cache", async () => {
 		const client = seededClient();
 		client.setQueryData(queryKeys.runs.report("r1"), { summary: {} });
 		deleteRun.mockResolvedValue(undefined);
@@ -661,7 +661,7 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 		expect(list.pages[0].data.map((r) => r.id)).toEqual(["r2"]);
 		expect(list.pages[0].pagination.total).toBe(1);
 		// The two patches that used to be skipped because the first one threw.
-		expect(client.getQueryData(queryKeys.runs.allRuns())).toEqual([runRow("r2")]);
+		expect(client.getQueryState(queryKeys.runs.count())?.isInvalidated).toBe(true);
 		expect(client.getQueryData(queryKeys.runs.report("r1"))).toBeUndefined();
 	});
 
@@ -699,7 +699,7 @@ describe("useInvalidateRuns", () => {
 		const keys = spy.mock.calls.map(([filters]) => filters?.queryKey);
 		for (const key of [
 			queryKeys.runs.lists(),
-			queryKeys.runs.allRuns(),
+			queryKeys.runs.counts(),
 			queryKeys.runs.recentDesigns(),
 			queryKeys.runs.lastCollectionRuns(),
 			queryKeys.runs.baselines(),

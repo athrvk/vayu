@@ -328,10 +328,10 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).not.toContainEqual(queryKeys.prefetch.allRequests());
 	});
 
-	test("a run invalidates both list families", () => {
+	test("a run invalidates the history list and the Settings counts", () => {
 		const { keys } = keysFor({ entity: "run" });
 		expect(keys).toContainEqual(queryKeys.runs.lists());
-		expect(keys).toContainEqual(queryKeys.runs.allRuns());
+		expect(keys).toContainEqual(queryKeys.runs.counts());
 	});
 
 	test("a run invalidates the compare picker's per-request lists", () => {

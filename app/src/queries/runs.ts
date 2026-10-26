@@ -27,7 +27,13 @@ import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { isRunInProgress } from "@/lib/run-status";
 import { HISTORY_SERIES_MAX_POINTS, RUNS_PAGE_LIMIT } from "@/config/network";
-import type { Run, RunListResponse, RunOrigin, StartScenarioRunRequest } from "@/types";
+import type {
+	Run,
+	RunListParams,
+	RunListResponse,
+	RunOrigin,
+	StartScenarioRunRequest,
+} from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
@@ -226,15 +232,58 @@ export function useRunSearchQuery(q: string) {
 }
 
 /**
- * Fetch every run (all pages) as a flat list. For callers that need the whole
- * set rather than a polled page - counting and clearing history in Settings.
- * Not polled; rows carry the compact summary so it stays cheap.
+ * How many runs the engine holds, read off the `pagination.total` of a one-row
+ * page. Settings prints the number and nothing else, so the rows themselves are
+ * never fetched. Not polled; every run write invalidates `runs.counts()`.
  */
-export function useAllRunsQuery() {
+export function useRunsCountQuery() {
 	return useQuery({
-		queryKey: queryKeys.runs.allRuns(),
-		queryFn: () => apiService.listAllRuns(),
+		queryKey: queryKeys.runs.count(),
+		queryFn: () => countRuns({}),
 	});
+}
+
+type RunCountFilter = Pick<RunListParams, "baseline" | "status">;
+
+async function countRuns(filter: RunCountFilter): Promise<number> {
+	const page = await apiService.listRuns({ ...filter, limit: 1 });
+	return page.pagination.total;
+}
+
+/** What Clear run history will do, as counts: the engine keeps pins and live runs (#2429). */
+export interface ClearCounts {
+	total: number;
+	pinned: number;
+	/** Running or pending runs that are not pinned (a pin is counted once, as pinned). */
+	inFlight: number;
+}
+
+/**
+ * Read the counts the Clear run history dialog states, fresh, from four one-row
+ * pages: the total, the pinned runs, and the unpinned running and pending ones.
+ * Fetched when the user asks to clear, not on open - the dialog is the only
+ * reader, and the engine's own pass still has the last word.
+ */
+export function clearPlanOptions() {
+	return {
+		queryKey: queryKeys.runs.clearPlan(),
+		queryFn: async (): Promise<ClearCounts> => {
+			const [total, pinned, running, pending] = await Promise.all([
+				countRuns({}),
+				countRuns({ baseline: true }),
+				countRuns({ baseline: false, status: "running" }),
+				countRuns({ baseline: false, status: "pending" }),
+			]);
+			return { total, pinned, inFlight: running + pending };
+		},
+		staleTime: 0,
+	};
+}
+
+/** The fetcher for {@link clearPlanOptions}, always answered by the engine, never the cache. */
+export function useFetchClearPlan() {
+	const queryClient = useQueryClient();
+	return () => queryClient.fetchQuery(clearPlanOptions());
 }
 
 /**
@@ -676,11 +725,8 @@ export function useDeleteRunMutation() {
 					};
 				}
 			);
-			// Keep the all-runs (Settings) cache in step.
-			queryClient.setQueryData<Run[]>(
-				queryKeys.runs.allRuns(),
-				(old) => old?.filter((r) => r.id !== deletedId) ?? old
-			);
+			// Settings' stored-run count.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.counts() });
 			// Remove report from cache
 			queryClient.removeQueries({
 				queryKey: queryKeys.runs.report(deletedId),
@@ -764,7 +810,7 @@ export function useSetRunBaselineMutation() {
 
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
- * all-runs Settings query, the per-request Recent sends and per-collection
+ * Settings counts, the per-request Recent sends and per-collection
  * Last run lists, the per-request baseline lookups, the compare picker's
  * per-request lists and the per-request last-design lookups, which are their
  * own families and would otherwise survive a cleared history.
@@ -774,7 +820,7 @@ export function useInvalidateRuns() {
 
 	return () => {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-		queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.counts() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });

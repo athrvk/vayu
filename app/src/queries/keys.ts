@@ -118,7 +118,13 @@ export const queryKeys = {
 		// `lists()` as `InfiniteData`.
 		searches: () => [...queryKeys.runs.all, "search"] as const,
 		search: (q: string) => [...queryKeys.runs.searches(), q] as const,
-		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
+		// Counts read off the `pagination.total` of a one-row page (Settings'
+		// "N stored runs" and the Clear run history dialog). Plain numbers and
+		// small objects, not `RunListResponse`, so they sit outside `lists()`;
+		// `counts()` is the prefix a run write invalidates.
+		counts: () => [...queryKeys.runs.all, "count"] as const,
+		count: () => [...queryKeys.runs.counts(), "total"] as const,
+		clearPlan: () => [...queryKeys.runs.counts(), "clearPlan"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,
 		report: (id: string) => [...queryKeys.runs.all, "report", id] as const,

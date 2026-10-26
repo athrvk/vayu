@@ -1146,8 +1146,6 @@ flag and is recorded as usual; see
 // Paginated, filtered history (newest first). Rows carry a compact `summary`
 // (url/method/mode/duration/concurrency/comment), not the full configSnapshot.
 apiService.listRuns(params?: RunListParams): Promise<RunListResponse>
-// Every page as a flat list (Settings' count + clear).
-apiService.listAllRuns(params?): Promise<Run[]>
 apiService.getRun(id): Promise<Run>            // full configSnapshot
 apiService.getRunReport(id): Promise<RunReport>
 // Response headers/bodies captured for a run's samples. Its own request, not

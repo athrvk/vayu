@@ -55,7 +55,8 @@ vi.mock("@/queries", () => ({
 // shared shell - so the things they reach outside Settings are stubbed: the
 // engine's run store and cookie jar, and the Electron updater bridge.
 vi.mock("@/queries/runs", () => ({
-	useAllRunsQuery: () => ({ data: [] }),
+	useRunsCountQuery: () => ({ data: 0 }),
+	useFetchClearPlan: () => vi.fn(),
 	useInvalidateRuns: () => vi.fn(),
 }));
 vi.mock("./panels/UpdatesCard", () => ({ UpdatesCard: () => null }));
