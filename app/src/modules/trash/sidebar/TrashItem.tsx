@@ -5,7 +5,17 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { Check, Copy, Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import {
+	Check,
+	Cloud,
+	Copy,
+	Folder,
+	FileJson,
+	Loader2,
+	RotateCcw,
+	Trash2,
+	type LucideIcon,
+} from "lucide-react";
 
 import { Button, IconSwap, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
@@ -24,21 +34,38 @@ interface TrashItemProps {
 }
 
 /**
- * What a delete took with it, as a phrase - "and 3 requests", "and 2
- * collections, 11 requests" - or nothing at all when the entry stood alone.
- *
- * The counts are the engine's, over the cohort that single delete stamped, and
- * they are the one thing a trash row says that the tree could never have shown:
- * a collection in the trash looks exactly like an empty one otherwise, and
- * restoring it is a different-sized act depending on the answer.
+ * How each kind reads on a row. A `Record` over the union, not a ternary: a kind
+ * the engine adds fails to compile here until it has a glyph and a word, rather
+ * than rendering as whichever kind the ternary's last branch named. The
+ * environment's glyph is the one the Variables view draws for an environment.
  */
-function cascadeSummary(entry: TrashEntry): string | null {
+const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string }> = {
+	collection: { icon: Folder, label: "Collection" },
+	request: { icon: FileJson, label: "Request" },
+	environment: { icon: Cloud, label: "Environment" },
+};
+
+/**
+ * What a delete took with it, as a phrase - "with 3 requests", "with 2
+ * collections, 11 requests", "with 12 variables" - or nothing at all when the
+ * entry stood alone.
+ *
+ * The counts are the engine's, over the cohort that single delete stamped (or,
+ * for an environment, the variables on its own row), and they are the one thing
+ * a trash row says that the tree could never have shown: a collection in the
+ * trash looks exactly like an empty one otherwise, and restoring it is a
+ * different-sized act depending on the answer.
+ */
+function contentsSummary(entry: TrashEntry): string | null {
 	const parts: string[] = [];
 	if (entry.collections > 0) {
 		parts.push(`${entry.collections} ${pluralize(entry.collections, "collection")}`);
 	}
 	if (entry.requests > 0) {
 		parts.push(`${entry.requests} ${pluralize(entry.requests, "request")}`);
+	}
+	if (entry.variables) {
+		parts.push(`${entry.variables} ${pluralize(entry.variables, "variable")}`);
 	}
 	return parts.length > 0 ? `with ${parts.join(", ")}` : null;
 }
@@ -62,8 +89,8 @@ export default function TrashItem({
 	isRestoring,
 	isPurging,
 }: TrashItemProps) {
-	const KindIcon = entry.kind === "collection" ? Folder : FileJson;
-	const cascade = cascadeSummary(entry);
+	const { icon: KindIcon, label: kindLabel } = KIND_DISPLAY[entry.kind];
+	const contents = contentsSummary(entry);
 	const busy = isRestoring || isPurging;
 	const { copy, copied } = useCopy({ feedback: "icon" });
 
@@ -99,9 +126,8 @@ export default function TrashItem({
 					 * know which shape means which.
 					 */}
 					<p className="text-xs text-muted-foreground">
-						{entry.kind === "collection" ? "Collection" : "Request"} · Deleted{" "}
-						<TimeValue value={entry.deletedAt} style="relative" />
-						{cascade ? `, ${cascade}` : ""}
+						{kindLabel} · Deleted <TimeValue value={entry.deletedAt} style="relative" />
+						{contents ? `, ${contents}` : ""}
 					</p>
 				</div>
 

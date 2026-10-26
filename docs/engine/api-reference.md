@@ -1052,7 +1052,7 @@ governs what a run measures rather than what it keeps:
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
-| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections and requests deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
+| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests and environments deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
@@ -2142,13 +2142,14 @@ the full kind table.
 
 ## Trash
 
-What deleting a collection or a request now does, and how to undo it
-(issue #988). `DELETE /collections/:id` and `DELETE /requests/:id` stamp rows
-instead of removing them; every other read surface filters stamped rows out, so
-the tree the app sees is unchanged, and these three endpoints are the whole of
-what the stamp buys.
+What deleting a collection, a request or an environment now does, and how to
+undo it (issue #988; environments #2970). `DELETE /collections/:id`,
+`DELETE /requests/:id` and `DELETE /environments/:id` stamp rows instead of
+removing them; every other read surface filters stamped rows out, so the tree
+and the environment list the app sees are unchanged, and these three endpoints
+are the whole of what the stamp buys.
 
-Two rules decide what a restore puts back:
+Two rules decide what a restore of a collection or request puts back:
 
 - **Cohort.** One delete stamps its whole subtree with one timestamp, and a
   restore clears exactly the rows carrying the timestamp of the row it was
@@ -2160,6 +2161,13 @@ Two rules decide what a restore puts back:
   such root - `collectionId` is required - so restoring one whose collection is
   in the trash is a `409` naming the collection to restore first.
 
+An environment needs neither: it owns no rows and hangs under nothing, so its
+delete stamps one row, it is always a root, and its restore is unconditional.
+**A trashed environment is never active.** The delete clears `isActive` in the
+same write, so the active slot is free for another environment, and a restore
+brings it back inactive: making it active again is a `PUT` with
+`isActive: true`, the client's choice rather than the trash's.
+
 Rows sit in the trash until they are purged: explicitly through
 `DELETE /trash/:id`, or by the startup sweep once they are older than
 `trashRetentionDays` (default 30; `0` keeps them forever).
@@ -2168,7 +2176,7 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count.
+`collections` and `requests` count. Every deleted environment is a root.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2189,20 +2197,35 @@ a user asked to delete, never what their cascade took with them; that is what
       "parentId": null,
       "collections": 2,
       "requests": 14
+    },
+    {
+      "id": "env_1234567890",
+      "kind": "environment",
+      "name": "Staging",
+      "deletedAt": 1787745500000,
+      "parentId": null,
+      "collections": 0,
+      "requests": 0,
+      "variables": 6
     }
   ],
-  "total": 1
+  "total": 2
 }
 ```
 
-`kind` is `"collection"` or `"request"`. `parentId` is a collection's parent
-(`null` at the tree root) or a request's owning collection. An empty trash is
-`{"items": [], "total": 0}`, never a `404`.
+`kind` is `"collection"`, `"request"` or `"environment"`. `parentId` is a
+collection's parent (`null` at the tree root), a request's owning collection, or
+`null` for an environment. `collections` and `requests` are `0` for a request
+and an environment. `variables` is carried by an environment entry only - the
+number of variables its stored map holds - and is absent, not `0`, on the other
+two kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
 
 ### POST /trash/:id/restore
 
-Put a deleted collection or request back, with everything the same delete took.
-Takes no body.
+Put a deleted collection, request or environment back, with everything the
+same delete took. Takes no body. An environment comes back exactly as it was
+deleted except that it is inactive (see [Trash](#trash)), and its answer
+carries `variables` like its list entry.
 
 **Response:** the entry that was restored, plus what happened to it:
 ```json
@@ -2228,8 +2251,8 @@ Takes no body.
 
 ### DELETE /trash/:id
 
-Destroy a deleted collection or request for good, with its whole subtree -
-requests, and the examples they own. This is the hard cascade soft delete
+Destroy a deleted collection, request or environment for good, with its whole
+subtree - requests, and the examples they own; an environment is its one row. This is the hard cascade soft delete
 replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
@@ -4853,7 +4876,7 @@ the Markdown goldens.
 
 ### GET /environments
 
-List all environments.
+List every environment, except those in the [trash](#trash) (#2970).
 
 **Response:**
 ```json
@@ -4947,15 +4970,28 @@ A storage failure answers `507`, `503` or `500`, never `400` - see
 
 ### DELETE /environments/:id
 
-Delete an environment.
+Delete an environment. **The delete is soft** (#2970): the row is stamped
+`deleted_at`, its `isActive` is cleared in the same write, and
+[`GET /trash`](#get-trash) lists it until a purge. From then on every route here
+treats the id as missing - `GET /environments` leaves it out, `PUT` and a second
+`DELETE` are a `404`, `POST /export/postman-environment` is a `404`, and an
+`environmentId` naming it composes and sends as an id naming nothing: an empty
+scope, so its `{{names}}` stay unresolved.
+
+Restore it with [`POST /trash/:id/restore`](#post-trashidrestore), which brings
+it back inactive; destroy it for good with [`DELETE /trash/:id`](#delete-trashid),
+which is also what the startup sweep does once `trashRetentionDays` has passed.
 
 **Response:**
 ```json
 {
-  "message": "Environment deleted successfully",
-  "id": "env_1234567890"
+  "success": true
 }
 ```
+
+**Errors:** `404` if no live environment has that id, a trashed one included.
+A storage failure answers `507`, `503` or `500` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ## Global Variables
 

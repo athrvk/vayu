@@ -17,15 +17,14 @@ import {
 	useCreateRequestMutation,
 	useDeleteRequestMutation,
 	useUpdateRequestMutation,
-	useRestoreTrashMutation,
 	useMockServersQuery,
 	useStopMockServerMutation,
 	requestDetailOptions,
 } from "@/queries";
-import { restoreNotice } from "@/modules/trash";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
 import { useCopy } from "@/hooks/useCopy";
 import { useStableCallback } from "@/hooks/useStableCallback";
+import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { collectionReference } from "@/lib/agent-reference";
 import { withoutBodyFileTrust } from "@/lib/file-trust";
 import type {
@@ -139,12 +138,12 @@ export function useTreeCrud({
 	const createRequestMutation = useCreateRequestMutation();
 	const deleteRequestMutation = useDeleteRequestMutation();
 	const updateRequestMutation = useUpdateRequestMutation();
-	const restoreTrashMutation = useRestoreTrashMutation();
 	const queryClient = useQueryClient();
 	const stopMockServerMutation = useStopMockServerMutation();
 	const { data: mockServers = [] } = useMockServersQuery();
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
+	const offerUndo = useTrashUndo();
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
@@ -468,84 +467,6 @@ export function useTreeCrud({
 			};
 		},
 		[openTab]
-	);
-
-	/**
-	 * Take the delete back.
-	 *
-	 * The engine's delete is soft (issue #988), so this is a restore of the row
-	 * that was just stamped - not a re-creation - and the whole subtree a
-	 * collection's delete took comes back with it.
-	 *
-	 * The failure path is the reason this is not a bare `mutateAsync`. Undo can
-	 * genuinely fail: the toast outlives its own click by design, and by then
-	 * the item's parent collection may itself have been deleted (a 409 naming
-	 * it) or the retention purge may have swept it (a 404). The engine's message
-	 * says which and what to do next, so it is surfaced as it stands - an undo
-	 * that silently does nothing is the one outcome worse than no undo.
-	 */
-	const undoDelete = useCallback(
-		async (entityId: string, name: string, restoreClientState: () => void) => {
-			try {
-				const restored = await restoreTrashMutation.mutateAsync(entityId);
-				// Only after the engine has actually put the rows back: reopening
-				// a tab for a request the restore refused would be a pane pointed
-				// at a row that is still in the trash.
-				restoreClientState();
-				/*
-				 * An undo can put the folder back somewhere new: if its parent
-				 * went to the trash too while this toast was up - and the
-				 * "never" duration setting keeps a toast up until it is
-				 * dismissed - the engine restores it as a tree root. Same
-				 * sentence the Trash view's Restore raises, from the same
-				 * function, because a field one caller reads and the other
-				 * drops is how the two answers drift apart.
-				 */
-				const notice = restoreNotice(restored, name);
-				if (notice) showToast({ message: notice, variant: "info" });
-			} catch (error) {
-				const fallback = `Couldn't restore "${name}"`;
-				showToast(
-					error instanceof Error ? `${fallback} - ${error.message}` : fallback,
-					"error"
-				);
-			}
-		},
-		[restoreTrashMutation, showToast]
-	);
-
-	/**
-	 * Say where it went, and offer it straight back.
-	 *
-	 * No explicit duration: the toast takes the `info` default, scaled by the
-	 * user's own notification setting, exactly as the drag-and-drop undo beside
-	 * it does. A longer hardcoded window would override a preference the user
-	 * set - including "never", which means "wait for me" - and it would be
-	 * buying something the feature already has: this toast is the fast path, and
-	 * the Trash view is the same undo with the retention window behind it, so a
-	 * missed toast costs a click rather than the data.
-	 *
-	 * The undo itself is offered no undo. Deleting it again is one click away in
-	 * the tree it just came back to.
-	 */
-	const offerUndo = useCallback(
-		(
-			entityId: string,
-			name: string,
-			kind: "collection" | "request",
-			restoreClientState: () => void
-		) => {
-			showToast({
-				message: `Moved "${name}" to the Trash`,
-				variant: "info",
-				action: {
-					label: "Undo",
-					altText: `Undo deleting the ${kind} ${name}`,
-					onClick: () => void undoDelete(entityId, name, restoreClientState),
-				},
-			});
-		},
-		[showToast, undoDelete]
 	);
 
 	// `name` comes from the confirm dialog's own target rather than a lookup: by

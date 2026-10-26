@@ -8,23 +8,25 @@
 /**
  * Trash Queries
  *
- * The read side of the engine's soft delete (issue #988): deleting a collection
- * or a request stamps the row and keeps it, and these are how the app sees what
- * it stamped.
+ * The read side of the engine's soft delete (issue #988): deleting a collection,
+ * a request or an environment (#2970) stamps the row and keeps it, and these
+ * are how the app sees what it stamped.
  *
  * **Both mutations invalidate across the live/deleted boundary, in opposite
- * directions.** A restore puts rows back into the tree, so it invalidates the
- * collection and request caches as well as this list; a purge only destroys
- * rows that were already filtered out of every live read, so it invalidates
- * nothing but this list. The delete mutations in `collections.ts` are the third
- * side of the same triangle - they invalidate `trash.all`, because a delete is
- * what *adds* an entry here.
+ * directions.** A restore puts rows back into the tree and the Variables view,
+ * so it invalidates the collection, request and environment caches as well as
+ * this list; a purge only destroys rows that were already filtered out of every
+ * live read, so it invalidates nothing but this list. The delete mutations in
+ * `collections.ts` and `environments.ts` are the third side of the same
+ * triangle - they invalidate `trash.all`, because a delete is what *adds* an
+ * entry here.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiService } from "@/services/api";
 import { invalidateAllRequestLists } from "./collections";
+import { invalidateCompositions } from "./compose-invalidation";
 import { queryKeys } from "./keys";
 import type { ListTrashResponse } from "@/types";
 
@@ -54,6 +56,13 @@ export function useTrashQuery() {
  * warm-cache pass over every collection's requests, and a restored collection
  * is one it has never seen.
  *
+ * `environments.all` (list and details) goes too, unconditionally: the answer
+ * names the entry's kind, but a restore is rare enough that branching on it
+ * buys nothing. A restored environment's variables can resolve again, so every
+ * composition is dropped, as `useUpdateEnvironmentMutation` does. The restore
+ * never re-activates it (the engine returns it inactive), so the session's
+ * active environment is left alone.
+ *
  * A failure invalidates the list too (issue #1438). The row this acted on is
  * one the list said existed, so the likeliest failure is that it no longer
  * does - an agent purged it, or restored it, between the drawer's last read and
@@ -70,6 +79,8 @@ export function useRestoreTrashMutation() {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			invalidateAllRequestLists(queryClient);
+			queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+			invalidateCompositions(queryClient);
 		},
 		onError: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });

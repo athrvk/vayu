@@ -148,6 +148,26 @@ const nlohmann::json& json) {
     return update_environment_response (db, id, json, nullptr);
 }
 
+/**
+ * Testable core of DELETE /environments/:id - a soft delete (#2970): the row
+ * is stamped and deactivated, `GET /trash` lists it, and every read here
+ * answers 404 for it, a second delete included. The existence check and the
+ * stamp are one lock scope, so of two racing deletes only one answers 200.
+ */
+std::pair<int, nlohmann::json>
+delete_environment_response (vayu::db::Database& db, const std::string& id) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock ([&] {
+        if (!db.get_environment (id)) {
+            result = error_response (404, "Environment not found");
+            return;
+        }
+        db.delete_environment (id);
+        result = { 200, nlohmann::json{ { "success", true } } };
+    });
+    return result;
+}
+
 void register_environment_routes (RouteContext& ctx) {
     /**
      * GET /environments
@@ -241,20 +261,28 @@ void register_environment_routes (RouteContext& ctx) {
 
     /**
      * DELETE /environments/:id
-     * Deletes an environment by ID.
+     * Moves an environment to the trash (#2970): restorable through
+     * `POST /trash/:id/restore` until a purge or retention destroys it.
+     * Returns: {success: true}, or 404 if no live environment has that id.
      */
     ctx.server.Delete (R"(/environments/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string id = req.matches[1];
-
-        auto existing = ctx.db.get_environment (id);
-        if (!existing) {
-            send_error (res, 404, "Environment not found");
-            return;
+        const std::string id = req.matches[1];
+        try {
+            auto [status, body] = delete_environment_response (ctx.db, id);
+            if (status != 200) {
+                vayu::utils::log_warning ("http", "DELETE /environments/:id failed",
+                { { "status", status }, { "id", id }, { "error", error_message_of (body) } });
+            } else {
+                vayu::utils::log_info ("http", "Deleted environment", { { "id", id } });
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("http",
+            "DELETE /environments/:id - Error: " + std::string (e.what ()));
+            send_exception (res, e);
         }
-
-        ctx.db.delete_environment (id);
-        res.set_content (R"({"success": true})", "application/json");
     });
 }
 

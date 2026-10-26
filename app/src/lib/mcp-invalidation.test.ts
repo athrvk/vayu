@@ -133,16 +133,29 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.trash.all);
 	});
 
-	test("a purge that named both families still leaves one trash invalidation per event", () => {
-		// `purge_trash_entry` and `restore_trash_entry` declare `collection` and
-		// `request`, so the drawer is covered whichever event is read first; each
-		// invalidator takes the key once, not once per family it could belong to.
+	test("a deleted environment reaches the Trash drawer's list", () => {
+		// `delete_environment` declares the `environment` family alone and, since
+		// #2970, stamps a row the drawer lists - the same reason the request
+		// family takes this key. Mutation check: drop the trash line from the
+		// `environment` invalidator and this fails.
+		const { keys } = keysFor({ entity: "environment" });
+		expect(keys).toContainEqual(queryKeys.trash.all);
+	});
+
+	test("a purge that named every family still leaves one trash invalidation per event", () => {
+		// `purge_trash_entry` and `restore_trash_entry` declare `collection`,
+		// `request` and `environment`, so the drawer is covered whichever event is
+		// read first; each invalidator takes the key once, not once per family it
+		// could belong to.
 		expect(familyOf(keysFor({ entity: "collection" }).keys, queryKeys.trash.all)).toEqual([
 			queryKeys.trash.all,
 		]);
 		expect(
 			familyOf(keysFor({ entity: "request", requestId: "req_3" }).keys, queryKeys.trash.all)
 		).toEqual([queryKeys.trash.all]);
+		expect(familyOf(keysFor({ entity: "environment" }).keys, queryKeys.trash.all)).toEqual([
+			queryKeys.trash.all,
+		]);
 	});
 
 	test("a named request drops that request's compositions and no other's", () => {

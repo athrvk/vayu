@@ -179,7 +179,9 @@ scattered strings land the same way.
   real verb matching the title ("Delete environment", never "OK" or "Yes").
   Recoverable actions (anything that lands in Trash) skip the confirm dialog
   entirely and use an undo toast instead - a dialog for a reversible action
-  is friction with no purpose.
+  is friction with no purpose. The environment delete is the one exception
+  today: it moved to the Trash in #2970 and kept its dialog, whose body says
+  the Trash can restore it instead of calling the delete final.
 - **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format: the
   label, then the chord in a `TooltipHint` beside it, no parentheses
   (`Send request`  `⌘↵`). `TooltipShortcutLabel` renders it for the rail, the
@@ -230,7 +232,7 @@ scattered strings land the same way.
 | "Request failed" | "No response after 30s. The server at api.example.com accepted the connection but didn't reply. Raise the timeout in Settings › Network & connectivity or check the server." |
 | "Failed to fetch" | "Couldn't connect to localhost:3000 (ECONNREFUSED). Nothing is listening on that port - is your server running?" |
 | "No collections yet" | Heading: "No collections yet". Body: "Requests live in collections; your first one is created for you." Buttons: [New request] [Import]. |
-| "Are you sure?" / [OK] | Title: "Delete 'Prod API'?" Body: "Its 12 variables are removed. Requests that use them will send the literal `{{baseUrl}}`. This can't be undone." Buttons: [Cancel] [Delete environment]. |
+| "Are you sure?" / [OK] | Title: "Delete 'Prod API'?" Body: "Its 12 variables go with it. Requests that use them will send the literal `{{baseUrl}}`. You can restore it from Trash." Buttons: [Cancel] [Delete environment]. |
 | "Variable not found" | "`{{authToken}}` isn't defined in 'Staging' or globals. It will be sent as literal text." |
 | Static "Save" button | "Save" (disabled when clean) → "Saving…" → "Saved" (fades after 2s). On failure: "Couldn't save - disk full. Changes kept in this tab." |
 

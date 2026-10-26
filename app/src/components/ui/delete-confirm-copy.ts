@@ -17,10 +17,10 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 /**
  * The suffix a deletion needs beyond "removed permanently" (issue #1689).
  *
- * `"default"` covers a single leaf: an environment, a run, an inbox. `"cascade"`
- * is for a container that takes its contents with it - a trashed collection, a
- * folder - and says so, because "removed permanently" alone reads as the one
- * row, not everything under it.
+ * `"default"` covers a single leaf: a run, an inbox, a request purged from the
+ * Trash. `"cascade"` is for a container that takes its contents with it - a
+ * trashed collection, a folder - and says so, because "removed permanently"
+ * alone reads as the one row, not everything under it.
  */
 export type DeleteScope = "default" | "cascade";
 
@@ -50,18 +50,21 @@ export function deleteConfirmCopy(
 /**
  * The description an environment's delete dialog needs beyond the generic
  * template (docs/ux-writing.md's calibration example for this exact flow):
- * how many variables go with it, and that requests using them fall back to
- * sending the literal `{{token}}` text rather than failing to send at all.
- * Both environment-delete call sites (the header's own dialog and the
- * sidebar row menu's) build their description from this one function so
- * their copy can never drift apart.
+ * how many variables go with it, that requests using them fall back to
+ * sending the literal `{{token}}` text rather than failing to send at all, and
+ * that the Trash can give it back - the delete is soft since #2970, so the
+ * generic "removed permanently" sentence would be false here. Both
+ * environment-delete call sites (the header's own dialog and the sidebar row
+ * menu's) build their description from this one function so their copy can
+ * never drift apart.
  */
 export function environmentDeleteDescription(environment: {
 	variables: Record<string, unknown>;
 }): string {
 	const count = Object.keys(environment.variables).length;
 	return (
-		`Its ${count} ${pluralize(count, "variable")} ${pluralize(count, "is", "are")} removed. ` +
-		"Requests that use them will send the literal `{{variableName}}` text. This can't be undone."
+		`Its ${count} ${pluralize(count, "variable")} ${pluralize(count, "goes", "go")} with it. ` +
+		"Requests that use them will send the literal `{{variableName}}` text. " +
+		"You can restore it from Trash."
 	);
 }

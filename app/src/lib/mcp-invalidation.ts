@@ -48,8 +48,8 @@ const INVALIDATORS: Record<
 	 * `trash` because a delete is what *adds* a row to it and a restore or purge
 	 * is what takes one away - `delete_collection` declares this family alone,
 	 * and `restore_trash_entry` and `purge_trash_entry` declare it beside
-	 * `request` (issue #1438). The list is the only read of that family, so
-	 * without this an agent's delete never appears in an open Trash drawer and a
+	 * `request` and `environment` (issue #1438). The list is the only read of that
+	 * family, so without this an agent's delete never appears in an open Trash drawer and a
 	 * row it purged stays there until the drawer is closed and reopened; clicking
 	 * Restore on that phantom row 404s.
 	 *
@@ -111,8 +111,8 @@ const INVALIDATORS: Record<
 	 * `trash` for the same reason the `collection` family takes it:
 	 * `delete_request` declares this family alone and stamps a row the Trash
 	 * drawer lists, and `restore_trash_entry` / `purge_trash_entry` declare it
-	 * beside `collection` (issue #1438). Unguarded, because the two trash tools
-	 * name no request and the event says which family changed, never how - so a
+	 * beside `collection` and `environment` (issue #1438). Unguarded, because the two
+	 * trash tools name no request and the event says which family changed, never how - so a
 	 * `create_request` pays a refetch of a short list that the drawer has to be
 	 * open to mount at all. That is this map's standing trade, taken here for the
 	 * same reason the `run` family takes it: a stale answer is a lie, a refetch
@@ -169,10 +169,17 @@ const INVALIDATORS: Record<
 	 * query key, or - worse - an `update_globals` that declared `environment`
 	 * and left the globals card showing the pre-write values, which is exactly
 	 * the "written but never read" wiring bug this map exists to prevent.
+	 *
+	 * `trash` for the reason the `request` family takes it: `delete_environment`
+	 * declares this family alone and stamps a row the Trash drawer lists (#2970),
+	 * and the two trash tools declare it so a restored environment reappears in
+	 * the Variables view. Unguarded, so an `update_environment` pays a refetch of
+	 * the trash list while the drawer is open - the same standing trade.
 	 */
 	environment: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		invalidateCompositions(queryClient);
 	},
 

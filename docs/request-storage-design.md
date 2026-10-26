@@ -298,6 +298,19 @@ caller that wants those rows recoverable leaves them out of the sync payload and
 deletes them with `DELETE /requests/:id`, which is soft like every other delete
 a person makes.
 
+**An environment goes to the same trash** (#2970), by the simplest form of the
+same mechanism. `DELETE /environments/:id` stamps `deleted_at` on its one row
+and every read (`GET /environments`, composition, a run's variable scopes, the
+Postman export) filters the stamp out, so an `environmentId` naming a trashed
+environment resolves as one naming nothing. It owns no rows, so there is no
+cohort to keep and no subtree to walk; it hangs under no collection, so it is
+always a trash root and its restore can never be refused or re-parented. The one
+field a delete rewrites is `is_active`: a trashed environment gives up the
+active slot in the same write, so the at-most-one-active rule never has to
+reason about a row nobody can see, and a restore brings it back inactive rather
+than taking the slot from whatever was activated since. A purge, explicit or by
+retention, removes the row.
+
 ### 6. Response Viewer
 
 The Response Viewer shows the **RESOLVED** request in the "Raw Request" tab:

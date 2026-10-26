@@ -3972,6 +3972,7 @@ export type McpDataEntity =
 	/** One collection row and nothing under it: a create, an update, an unbind. */
 	| "collectionRow"
 	| "request"
+	/** Environments and the globals beside them, and the trash an environment delete adds to. */
 	| "environment"
 	| "run"
 	| "cookie"

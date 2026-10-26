@@ -12,10 +12,11 @@
  *
  * Deleting a collection used to be irreversible, with the confirm dialog as the
  * entire safety net: one misclick destroyed a subtree and nothing in the engine
- * could give it back. `Database::delete_collection` and `delete_request` now
- * stamp rows instead of removing them, and these three routes are the whole of
- * what that stamp is for - the list of what is recoverable, the undo, and the
- * one deliberate way to make a delete permanent before retention does.
+ * could give it back. `Database::delete_collection`, `delete_request` and
+ * `delete_environment` (#2970) now stamp rows instead of removing them, and
+ * these three routes are the whole of what that stamp is for - the list of what
+ * is recoverable, the undo, and the one deliberate way to make a delete
+ * permanent before retention does.
  *
  * The trash lists *roots* - the rows a user asked to delete - and never what a
  * cascade took with them, because "restore this" is a question about the thing
@@ -36,13 +37,17 @@ namespace {
 /// One trash entry as the wire carries it. `parentId` is a collection's parent
 /// and a request's owning collection - the same edge under two names in the
 /// tables, one name here, since a client restoring either asks the same
-/// question of it.
+/// question of it; an environment's is always `null`. `variables` is an
+/// environment's alone: the other kinds omit the key rather than send 0.
 nlohmann::json trash_entry_json (const vayu::db::TrashEntry& entry) {
     nlohmann::json item{ { "id", entry.id }, { "kind", entry.kind },
         { "name", entry.name }, { "deletedAt", entry.deleted_at },
         { "collections", entry.collections }, { "requests", entry.requests } };
     item["parentId"] = entry.parent_id.has_value () ? nlohmann::json (*entry.parent_id) :
                                                       nlohmann::json (nullptr);
+    if (entry.variables.has_value ()) {
+        item["variables"] = *entry.variables;
+    }
     return item;
 }
 
@@ -137,7 +142,9 @@ void register_trash_routes (RouteContext& ctx) {
      * of the roots whose name holds `q`, in the `{data, pagination}` envelope
      * (#2443).
      * Returns: {items: [{id, kind, name, deletedAt, parentId, collections,
-     * requests}], total}, or that envelope; 400 for a bad `limit` or `offset`.
+     * requests, variables?}], total}, or that envelope; 400 for a bad `limit`
+     * or `offset`. `kind` is collection, request or environment, and only an
+     * environment carries `variables`.
      */
     ctx.server.Get ("/trash", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
@@ -153,8 +160,9 @@ void register_trash_routes (RouteContext& ctx) {
 
     /**
      * POST /trash/:id/restore
-     * Puts a deleted collection or request back, with everything the same
-     * delete took. Takes no body.
+     * Puts a deleted collection, request or environment back, with
+     * everything the same delete took. A restored environment comes back
+     * inactive. Takes no body.
      * Returns: the restored entry, 404 if the trash does not hold that id, or
      * 409 for a request whose collection is itself deleted or gone.
      */
@@ -179,8 +187,9 @@ void register_trash_routes (RouteContext& ctx) {
 
     /**
      * DELETE /trash/:id
-     * Destroys a deleted collection or request for good, with its whole
-     * subtree. There is no undo for this one - it is the undo's counterpart.
+     * Destroys a deleted collection, request or environment for good, with
+     * its whole subtree. There is no undo for this one - it is the undo's
+     * counterpart.
      * Returns: the purged entry, or 404 if the trash does not hold that id.
      */
     ctx.server.Delete (R"(/trash/([^/]+))",

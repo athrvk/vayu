@@ -245,7 +245,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		description:
 			"Delete an environment and every variable in it. " +
 			GUARDED_WRITE_SENTENCE +
-			", and confirmation: if the client supports elicitation the user is prompted with the environment's name and how many variables go with it; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a saved request that referenced those variables keeps its {{placeholders}} with nothing to resolve them.",
+			", and confirmation: if the client supports elicitation the user is prompted with the environment's name and how many variables go with it; otherwise call once for a preview, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back (inactive), until the retention window (`trashRetentionDays`, 30 days by default) runs out. While it is in the Trash, a saved request that referenced those variables keeps its {{placeholders}} with nothing to resolve them.",
 		annotations: {
 			title: "Delete environment",
 			readOnlyHint: false,
@@ -280,13 +280,13 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			}
 			const subject = describeEnvironment(environmentId, environment);
 			const unconfirmed = await confirmDestructive(args, ctx, {
-				message: `Delete ${subject}?\n\nEvery variable in it goes with it. This cannot be undone.`,
+				message: `Delete ${subject}?\n\nIt goes to Vayu's Trash with every variable in it, where it can be restored.`,
 				acceptTitle: "Delete the environment",
 				acceptDescription: "Confirm to delete this environment and its variables.",
 				declined: "Environment not deleted - the user declined.",
 				preview:
 					"AWAITING CONFIRMATION - nothing was deleted.\n\n" +
-					`This would delete ${subject}, along with every variable in it. This cannot be undone.\n\n` +
+					`This would delete ${subject}, along with every variable in it. It would go to Vayu's Trash - list_trash shows it there, and restore_trash_entry puts it back.\n\n` +
 					"This is a preview. To delete it, call delete_environment again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;

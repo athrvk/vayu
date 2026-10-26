@@ -223,11 +223,11 @@ export default function TrashList() {
 								title="Trash is empty"
 								description={
 									retention
-										? `Deleted collections and requests wait here first. ${retention}`
+										? `Deleted collections, requests and environments wait here first. ${retention}`
 										: // No promise of an eventual purge while the window
 											// is still unknown: at `trashRetentionDays: 0` there
 											// is no automatic removal to promise.
-											"Deleted collections and requests wait here."
+											"Deleted collections, requests and environments wait here."
 								}
 							/>
 						)}

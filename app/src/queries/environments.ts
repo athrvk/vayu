@@ -132,7 +132,10 @@ export function useSetActiveEnvironmentMutation() {
 }
 
 /**
- * Delete an environment
+ * Delete an environment. A soft delete (#2970): the engine moves it to the
+ * Trash and clears its active flag, so `trash.all` is invalidated for an open
+ * Trash view to list it - the same cross-boundary invalidation the collection
+ * and request deletes make.
  */
 export function useDeleteEnvironmentMutation() {
 	const queryClient = useQueryClient();
@@ -149,6 +152,7 @@ export function useDeleteEnvironmentMutation() {
 			queryClient.removeQueries({
 				queryKey: queryKeys.environments.detail(deletedId),
 			});
+			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 			/*
 			 * Deleting the active environment has to clear the session id, and it
 			 * belongs here rather than in either delete flow: the switcher only
