@@ -536,6 +536,24 @@ export function readAuthArg(args: Record<string, unknown>): AuthRecord | undefin
 }
 
 /**
+ * The column names a run's `data` rows declare: every row's keys, first seen
+ * first. All rows, not the first - rows may be ragged, and the engine binds the
+ * union. A non-object row has no columns, and an empty key is skipped because
+ * `POST /compose` refuses an empty `dataColumns` entry with a `400`.
+ */
+function dataColumnNames(data: unknown): string[] {
+	if (!Array.isArray(data)) return [];
+	const names = new Set<string>();
+	for (const row of data) {
+		if (!isRecord(row)) continue;
+		for (const key of Object.keys(row)) {
+			if (key !== "") names.add(key);
+		}
+	}
+	return [...names];
+}
+
+/**
  * Build the request half of a `POST /runs` body - everything except the load
  * shape (mode, duration, concurrency…).
  *
@@ -568,6 +586,13 @@ export function readAuthArg(args: Record<string, unknown>): AuthRecord | undefin
  * into the count itself - "allInline" drops it to 0, "allDeferred" counts
  * every enabled `script.pre` regardless of its own mark - so the caller only
  * has to check whether the count is non-zero, not re-read the override too.
+ *
+ * **A run's `data` rows tell composition which bare names are columns.** The
+ * engine leaves a bare `{{email}}` written for the per-iteration bind only when
+ * it is told `email` is a bound column; otherwise a same-named environment
+ * variable answers at composition and the row's value never wins (issue #2956,
+ * #1007). So `dataColumns` is the union of every row's keys, the same set the
+ * engine binds against, and is left off when there are no rows.
  */
 export async function composeLoadRunRequest(
 	args: Record<string, unknown>,
@@ -605,6 +630,8 @@ export async function composeLoadRunRequest(
 		if (Object.keys(overrides).length > 0) composeBody.request = overrides;
 	}
 	composeBody.environmentId = await resolveEnvironmentId(args, ctx, signal);
+	const dataColumns = dataColumnNames(args.data);
+	if (dataColumns.length > 0) composeBody.dataColumns = dataColumns;
 
 	const payload = await composeViaEngine(ctx.client, composeBody, signal);
 

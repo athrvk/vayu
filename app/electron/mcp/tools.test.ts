@@ -43,6 +43,7 @@ import {
 } from "./tools.js";
 import type { McpHost } from "./tools/contract.js";
 import { engineCode } from "./tools/failure.js";
+import { composeLoadRunRequest } from "./tools/compose.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
@@ -6853,6 +6854,72 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(composeBody.deferDynamicVariables).toBe(true);
+	});
+
+	describe("start_load_run tells /compose which bare names are data columns (issue #2956)", () => {
+		// Without `dataColumns` the engine cannot tell a bare `{{email}}` meant
+		// for the row from one meant for the environment, and the environment
+		// variable of the same name answers at composition.
+		const composedWith = async (data: unknown) => {
+			const client = fakeClient();
+			await composeLoadRunRequest(
+				{ url: "https://api.example.com", data },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			return (client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		};
+
+		test("sends the union of every row's keys, first seen first", async () => {
+			// Ragged rows: the engine binds the union, so the second row's `plan`
+			// and the third row's `region` must not be lost to a first-row read.
+			const composeBody = await composedWith([
+				{ email: "a@example.com", id: 1 },
+				{ email: "b@example.com", plan: "pro" },
+				{ id: 3, region: "eu" },
+			]);
+
+			expect(composeBody.dataColumns).toEqual(["email", "id", "plan", "region"]);
+		});
+
+		test("skips a row that is not an object, and an empty key", async () => {
+			const composeBody = await composedWith([
+				"stray",
+				null,
+				["array"],
+				{ email: "a@example.com", "": "unnamed" },
+			]);
+
+			expect(composeBody.dataColumns).toEqual(["email"]);
+		});
+
+		test.each([
+			["no data", undefined],
+			["an empty data array", []],
+			["rows with no keys", [{}, {}]],
+			["rows that are not objects", ["x", 1]],
+		])("sends no dataColumns key for %s", async (_label, data) => {
+			const composeBody = await composedWith(data);
+
+			expect("dataColumns" in composeBody).toBe(false);
+		});
+
+		test("reaches the engine through the tool, from the parsed data argument", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				parseArgs("start_load_run", {
+					url: "https://api.example.com",
+					confirmed: true,
+					data: [{ email: "a@example.com" }],
+				}),
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+
+			expect(res.isError).toBeFalsy();
+			const composeBody = (client.composeRequest as ReturnType<typeof vi.fn>).mock
+				.calls[0][0];
+			expect(composeBody.dataColumns).toEqual(["email"]);
+		});
 	});
 
 	test("start_load_run forwards thresholds under the engine's own metric keys", async () => {

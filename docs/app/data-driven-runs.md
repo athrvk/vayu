@@ -505,6 +505,9 @@ run:
   listens on loopback, so every client that sees it runs on the machine it is
   true of; the standalone stdio server has no record of paths and never names
   one.
+  A single target's `data` rows on `start_load_run` also name their columns
+  (the union across every row) to composition, so a bare `{{email}}` takes the
+  row's value over a same-named environment variable, as it does in the app.
 
 A sub-collection with no contract of its own uses the nearest ancestor's, the
 same way a variable defined on a parent collection is in scope below it.
