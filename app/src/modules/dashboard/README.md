@@ -146,6 +146,15 @@ consumes it.
   `buildPercentileChartData` and `rebucket(..., "max")` use, keeps a bucket
   null only when every second in it was empty. A row an older engine stored
   holds `0` for such a second and still reads as `0`: nothing rewrites it.
+- **A scenario load run's sequence is read the same way** (#2823). The engine
+  sends `scenario` (iterations and each step's `executed` / `errors`, no
+  latency) on gate frames alone, so `utils/liveScenario.ts` takes the latest
+  frame carrying it, and `MetricsView` hands `LiveSequencePanel` (Row 1.5) the
+  block itself: a stable reference between gates, which is what keeps the
+  memo'd panel off the 10 Hz tick. The same block marks the run's latency
+  figures as pooled (`pooledLatency: {}` on the derived bundle; the steps
+  carry no p99 live, so only History can name the slowest step). A run whose
+  frames carry no block renders exactly as before.
 - **Row 3 reads the latest gate frame from `historicalMetrics`, never the newest
   tick** (#2782). The two cards used to be placeholders until the report
   arrived (#2261); they now draw the run-so-far data. The run-so-far latency

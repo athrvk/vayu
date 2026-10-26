@@ -151,3 +151,8 @@ export * from "./row-actions";
 
 // The 2px line a drag draws at the edge it would drop on, either axis
 export * from "./DropIndicator";
+
+// "SEQUENCE" where a method would sit, and the step cells a scenario load run's
+// table is drawn from - History's Steps tab and the live dashboard's sequence panel (#2823)
+export * from "./SequenceBadge";
+export * from "./ScenarioStepCells";

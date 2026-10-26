@@ -13,6 +13,8 @@
  * bundle, and composes the rows:
  *   Row 1   - HeroRow        (mode-adaptive: 2 cards + universal Error Rate; the
  *                             throughput-led modes add a p95/p99 latency card)
+ *   Row 1.5 - LiveSequencePanel  (a scenario load run only: iterations and each
+ *                             step's counts, from the latest gate frame)
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
  *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up and capacity: Response-time-vs-concurrency scatter)
@@ -52,6 +54,8 @@ import { cumulativePercentiles, hasSecondPercentiles } from "../utils/tickPercen
 import { errorBreakdown } from "../utils/errorBreakdown";
 import { liveDispatchStatus } from "../utils/dispatchLag";
 import { liveRateFidelity } from "../utils/rateFidelity";
+import { latestScenarioProgress } from "../utils/liveScenario";
+import { pooledTitle } from "../utils/pooledLatency";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import {
@@ -73,6 +77,7 @@ import {
 } from "./charts/uplot/legend";
 import { hasSendRate } from "./charts/uplot/buildData";
 import { LiveDistributionRow } from "./LiveDistributionRow";
+import LiveSequencePanel from "./LiveSequencePanel";
 
 function MetricsView({
 	metrics,
@@ -185,6 +190,13 @@ function MetricsView({
 			? historicalMetrics[historicalMetrics.length - 1].elapsed_seconds
 			: 0;
 
+	// A scenario load run's sequence, from the latest gate frame that carries it:
+	// the block rides gate frames alone, so the newest tick would flicker. The
+	// block keeps its identity between gates, which keeps the panel from
+	// re-rendering at the tick rate.
+	const sequence = useMemo(() => latestScenarioProgress(historicalMetrics), [historicalMetrics]);
+	const isSequence = sequence !== undefined;
+
 	// Derived bundle - computed once, consumed by HeroRow + ModeStatsRow.
 	const derived = useMemo<DashboardDerived | null>(() => {
 		if (!metrics || typeof metrics.requests_completed === "undefined") return null;
@@ -241,6 +253,8 @@ function MetricsView({
 			meanLatency: metrics.avg_latency_ms ?? 0,
 			medianLatency: cumulative.p50,
 			p95Latency: cumulative.p95,
+			// Live steps carry no latency, so the card can say "pooled" but not which step.
+			pooledLatency: isSequence ? {} : undefined,
 			elapsedSeconds: lastElapsedSeconds,
 			droppedRequests,
 			skippedRequests,
@@ -257,6 +271,7 @@ function MetricsView({
 		metrics,
 		lastElapsedSeconds,
 		loadMode,
+		isSequence,
 		targetRps,
 		concurrency,
 		runDurationSeconds,
@@ -276,6 +291,9 @@ function MetricsView({
 		<div className="@container p-5 flex flex-col gap-3.5">
 			{/* Row 1 - Hero */}
 			<HeroRow d={derived} />
+
+			{/* Row 1.5 - the sequence, for a scenario load run */}
+			{sequence && <LiveSequencePanel progress={sequence} />}
 
 			{/* Row 2 - Throughput over time */}
 			{chartWindow.length > 1 && (
@@ -352,7 +370,10 @@ function MetricsView({
 						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
-									Response time vs {CONCURRENCY_UNIT}
+									{pooledTitle(
+										`Response time vs ${CONCURRENCY_UNIT}`,
+										isSequence
+									)}
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
 								</h3>
 								<ChartLegend entries={SCATTER_ENTRIES} />
@@ -369,7 +390,7 @@ function MetricsView({
 						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
-									Response time percentiles over time
+									{pooledTitle("Response time percentiles over time", isSequence)}
 									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
 								</h3>
 								<ChartLegend entries={PERCENTILE_ENTRIES} />
@@ -468,7 +489,11 @@ function MetricsView({
 			)}
 
 			{/* Row 3 - run-so-far latency distribution + request timing */}
-			<LiveDistributionRow history={historicalMetrics} breakpoint={breakpoint} />
+			<LiveDistributionRow
+				history={historicalMetrics}
+				breakpoint={breakpoint}
+				pooled={isSequence}
+			/>
 
 			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />

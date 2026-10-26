@@ -22,7 +22,6 @@ import {
 	GitCompareArrows,
 } from "lucide-react";
 import {
-	Badge,
 	Button,
 	Tabs,
 	TabsContent,
@@ -36,6 +35,7 @@ import { formatConcurrency } from "@/constants/load-test-modes";
 import {
 	MethodBadge,
 	RunOutcomeBanner,
+	SequenceBadge,
 	TabBreadcrumb,
 	TruncatedText,
 	reportOutcome,
@@ -263,16 +263,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			<div className="flex items-center gap-3 bg-muted/50 p-3">
 				{isScenarioLoad ? (
 					<>
-						{/* Not a `MethodBadge`: SEQUENCE is not a method, and the
-						    primitive would tint it in the OPTIONS colour (the
-						    `getMethodColor` fallback) and truncate it at the
-						    seven-character method column. It keeps the neutral
-						    outline chip, minus a `font-bold` the code font has no
-						    face for - `Badge`'s own `font-semibold` is the weight
-						    the mono step documents (#1199). */}
-						<Badge variant="outline" className="font-mono shrink-0">
-							SEQUENCE
-						</Badge>
+						<SequenceBadge />
 						<TruncatedText className="text-sm text-foreground flex-1">
 							{sequenceLabel}
 						</TruncatedText>

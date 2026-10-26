@@ -30,6 +30,7 @@ import { HdrPercentileChart } from "./charts/uplot";
 import { useSloMs } from "../hooks/useSloMs";
 import type { Breakpoint } from "../utils/computeBreakpoint";
 import { pluralize } from "../utils/format";
+import { pooledTitle } from "../utils/pooledLatency";
 import { latestGateFrame, liveDistributions } from "../utils/liveDistributions";
 
 /** The HDR chart's own height; the placeholder holds the same space. */
@@ -42,9 +43,12 @@ function Placeholder({ title }: { title: string }) {
 export function LiveDistributionRow({
 	history,
 	breakpoint,
+	pooled = false,
 }: {
 	history: LoadTestMetrics[];
 	breakpoint: Breakpoint;
+	/** A scenario load run: the distribution pools every step (#2823). */
+	pooled?: boolean;
 }) {
 	const sloMs = useSloMs(breakpoint);
 	const frame = useMemo(() => latestGateFrame(history), [history]);
@@ -56,7 +60,7 @@ export function LiveDistributionRow({
 			<Card pad="sm" className="min-w-0">
 				<div className="flex items-baseline justify-between mb-3">
 					<h3 className="text-xs font-semibold text-foreground">
-						Latency distribution
+						{pooledTitle("Latency distribution", pooled)}
 						<InfoChip tip={TOOLTIPS.latencyDistribution} />
 						<span className="ml-2 text-label font-normal text-muted-foreground">
 							HDR percentile plot

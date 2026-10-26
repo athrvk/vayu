@@ -69,6 +69,26 @@ describe("mapSseMetrics", () => {
 		]);
 	});
 
+	it("maps a scenario load gate frame's sequence block as sent (issue #2823)", () => {
+		const scenario = {
+			iterations: 12,
+			iterationsCompleted: 9,
+			iterationsAbandoned: 1,
+			stepsExecuted: 30,
+			steps: [
+				{ index: 0, name: "Log in", executed: 12, errors: 0 },
+				{ index: 1, name: "List orders", executed: 10, errors: 2 },
+			],
+		};
+		expect(mapSseMetrics({ timestamp: 1, scenario }).scenario).toEqual(scenario);
+	});
+
+	it("leaves the sequence block absent on a frame without one (issue #2823)", () => {
+		// Absent is "not a gate frame" or "not a scenario load"; a zeroed block
+		// would draw a sequence panel for a run that has none.
+		expect(mapSseMetrics({ timestamp: 1, totalRequests: 5 }).scenario).toBeUndefined();
+	});
+
 	it("keeps a null second and a null cumulative as null, not 0 (issue #2385)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,

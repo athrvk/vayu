@@ -11,6 +11,7 @@ import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { STEP_OUTCOMES } from "@/types";
 import type {
 	LiveLatencyDistribution,
+	LiveScenarioProgress,
 	LivePhaseDistributions,
 	LoadTestMetrics,
 	MonitorSample,
@@ -54,6 +55,8 @@ interface RawSseMetrics {
 	/** Gate frames only (issue #2782); `null` until a completion, phases absent with the histograms off. */
 	cumulativeLatency?: LiveLatencyDistribution | null;
 	cumulativePhases?: LivePhaseDistributions | null;
+	/** Gate frames of a scenario load run only (issue #2823). */
+	scenario?: LiveScenarioProgress;
 	avgLatencyMs?: number;
 	sendRate?: number;
 	throughput?: number;
@@ -110,6 +113,9 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		// (or, for the phases, "histograms off"), and a 0 would read as measured.
 		cumulative_latency: m.cumulativeLatency,
 		cumulative_phases: m.cumulativePhases,
+		// As sent: absent is "not a gate frame" or "not a scenario load", and a
+		// zeroed block would draw a sequence panel for a run that has none.
+		scenario: m.scenario,
 		avg_latency_ms: m.avgLatencyMs || 0,
 		bytes_sent: m.bytesSent || 0,
 		bytes_received: m.bytesReceived || 0,

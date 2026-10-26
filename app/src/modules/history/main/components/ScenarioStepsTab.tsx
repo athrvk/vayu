@@ -29,7 +29,6 @@
  */
 
 import { Fragment } from "react";
-import { AlertTriangle } from "lucide-react";
 import {
 	Card,
 	Table,
@@ -38,11 +37,14 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
 } from "@/components/ui";
-import { ElementTally, MethodBadge, TruncatedText } from "@/components/shared";
+import {
+	ElementTally,
+	ErrorsCell,
+	ExecutedCell,
+	ScenarioFacts,
+	StepLabelCell,
+} from "@/components/shared";
 import { formatLatency, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunScenarioStepStat } from "@/types";
@@ -58,26 +60,6 @@ export interface ScenarioStepsTabProps {
 	iterationsAbandoned?: number;
 	/** The sampled-replay card a deferred element row points at (`testValidationTitleOf`). */
 	replayCard?: string;
-}
-
-/**
- * The Errors tally, with its split on hover. `httpErrors` and `noResponse` are
- * absent from a report stored before the engine reported them, and a tally with
- * no split is shown as the bare count rather than as a split of zeros.
- */
-function ErrorsCell({ step }: { step: RunScenarioStepStat }) {
-	const count = <span>{formatNumber(step.errors)}</span>;
-	const { httpErrors, noResponse } = step;
-	if (step.errors === 0 || httpErrors === undefined || noResponse === undefined) return count;
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>{count}</TooltipTrigger>
-			<TooltipContent>
-				{formatNumber(httpErrors)} {pluralize(httpErrors, "HTTP error")},{" "}
-				{formatNumber(noResponse)} no response
-			</TooltipContent>
-		</Tooltip>
-	);
 }
 
 export default function ScenarioStepsTab({
@@ -96,35 +78,11 @@ export default function ScenarioStepsTab({
 
 	return (
 		<div className="space-y-4">
-			<div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm p-3 border rounded-md bg-background/50">
-				{virtualUsers !== undefined && (
-					<div className="flex items-center gap-2">
-						<span className="text-muted-foreground">Virtual users:</span>
-						<span className="text-foreground font-mono">
-							{formatNumber(virtualUsers)}
-						</span>
-					</div>
-				)}
-				{iterationsCompleted !== undefined && (
-					<div className="flex items-center gap-2">
-						<span className="text-muted-foreground">Iterations completed:</span>
-						<span className="text-foreground font-mono">
-							{formatNumber(iterationsCompleted)}
-						</span>
-					</div>
-				)}
-				{/* Only when non-zero: a run that lost nothing should not be made to
-				    display a zero next to a word like "abandoned". */}
-				{!!iterationsAbandoned && (
-					<div className="flex items-center gap-2">
-						<AlertTriangle className="size-icon shrink-0 text-status-warning-text" />
-						<span className="text-muted-foreground">Iterations abandoned:</span>
-						<span className="text-foreground font-mono">
-							{formatNumber(iterationsAbandoned)}
-						</span>
-					</div>
-				)}
-			</div>
+			<ScenarioFacts
+				virtualUsers={virtualUsers}
+				iterationsCompleted={iterationsCompleted}
+				iterationsAbandoned={iterationsAbandoned}
+			/>
 
 			{/* Wide content scrolls inside its own box rather than pushing the
 			    page sideways. A `Card`, because the table's `border-rule` rows
@@ -148,43 +106,20 @@ export default function ScenarioStepsTab({
 						{steps.map((step) => (
 							<Fragment key={step.index}>
 								<TableRow>
-									<TableHead scope="row" className="font-normal text-foreground">
-										<div className="flex items-center gap-2 min-w-0">
-											<span className="text-xs text-muted-foreground font-mono shrink-0">
-												{step.index + 1}
-											</span>
-											<MethodBadge method={step.method} />
-											<TruncatedText className="text-foreground min-w-0">
-												{step.name || step.requestId}
-											</TruncatedText>
-										</div>
-									</TableHead>
-									<TableCell className="text-right font-mono">
-										{formatNumber(step.executed)}
-										{/* A step the sequence reached fewer times than the
-										    first one did is the visible shape of an earlier
-										    step erroring out. */}
-										{step.executed < expectedPerStep && (
-											<span
-												className="ml-1 text-xs text-muted-foreground"
-												title={`${formatNumber(
-													expectedPerStep - step.executed
-												)} iterations ended before reaching this step`}
-											>
-												({formatNumber(expectedPerStep - step.executed)}{" "}
-												short)
-											</span>
-										)}
-									</TableCell>
-									<TableCell
-										className={
-											step.errors > 0
-												? "text-right font-mono text-status-error-text"
-												: "text-right font-mono text-muted-foreground"
-										}
-									>
-										<ErrorsCell step={step} />
-									</TableCell>
+									<StepLabelCell
+										index={step.index}
+										method={step.method}
+										name={step.name || step.requestId}
+									/>
+									<ExecutedCell
+										executed={step.executed}
+										expectedPerStep={expectedPerStep}
+									/>
+									<ErrorsCell
+										errors={step.errors}
+										httpErrors={step.httpErrors}
+										noResponse={step.noResponse}
+									/>
 									<TableCell className="text-right font-mono">
 										{step.tests ? (
 											<span
