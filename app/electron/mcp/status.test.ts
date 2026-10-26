@@ -98,7 +98,9 @@ describe("buildMcpStatus", () => {
 	const inUse: McpStartError = { code: "EADDRINUSE", message: "Another program holds it." };
 
 	it("reports the failure while the server is enabled and not listening", () => {
-		expect(buildMcpStatus({ listener: null, enabled: true, error: inUse })).toEqual({
+		expect(
+			buildMcpStatus({ listener: null, enabled: true, error: inUse, corruptCopy: null })
+		).toEqual({
 			running: false,
 			url: MCP_ENDPOINT_URL,
 			enabled: true,
@@ -108,25 +110,63 @@ describe("buildMcpStatus", () => {
 
 	it("carries no error key once a later start succeeded and the error was cleared", () => {
 		// `startMcp` resets the error before it tries; this is the state it leaves.
-		const status = buildMcpStatus({ listener: listening(), enabled: true, error: null });
+		const status = buildMcpStatus({
+			listener: listening(),
+			enabled: true,
+			error: null,
+			corruptCopy: null,
+		});
 		expect(status).toEqual({ running: true, url: "http://127.0.0.1:9877/mcp", enabled: true });
 		expect("error" in status).toBe(false);
 	});
 
 	it("drops a stale error rather than report a running server as failed", () => {
-		expect(buildMcpStatus({ listener: listening(), enabled: true, error: inUse }).error).toBe(
-			undefined
-		);
+		expect(
+			buildMcpStatus({
+				listener: listening(),
+				enabled: true,
+				error: inUse,
+				corruptCopy: null,
+			}).error
+		).toBe(undefined);
 	});
 
 	it("reads running from the listener, not from its existence", () => {
-		expect(buildMcpStatus({ listener: closed, enabled: true, error: null }).running).toBe(
-			false
-		);
+		expect(
+			buildMcpStatus({ listener: closed, enabled: true, error: null, corruptCopy: null })
+				.running
+		).toBe(false);
+	});
+
+	it("names the kept copy of an unreadable settings file, running or not (#2433)", () => {
+		const corruptCopy = "C:/data/mcp-config.json.corrupt-1700000000000";
+		const down = buildMcpStatus({ listener: null, enabled: false, error: null, corruptCopy });
+		const up = buildMcpStatus({
+			listener: listening(),
+			enabled: true,
+			error: null,
+			corruptCopy,
+		});
+
+		expect(down.corruptCopy).toBe(corruptCopy);
+		expect(up.corruptCopy).toBe(corruptCopy);
+	});
+
+	it("carries no corruptCopy key when the file was readable", () => {
+		const status = buildMcpStatus({
+			listener: listening(),
+			enabled: true,
+			error: null,
+			corruptCopy: null,
+		});
+		expect("corruptCopy" in status).toBe(false);
 	});
 
 	it("passes the enabled flag through untouched", () => {
-		expect(buildMcpStatus({ listener: null, enabled: false, error: null }).enabled).toBe(false);
+		expect(
+			buildMcpStatus({ listener: null, enabled: false, error: null, corruptCopy: null })
+				.enabled
+		).toBe(false);
 	});
 });
 

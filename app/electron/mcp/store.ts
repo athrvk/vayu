@@ -14,6 +14,7 @@
  *        variables.
  */
 
+import { appLogger } from "../app-log.js";
 import { createJsonStore, type JsonStore } from "../json-store.js";
 import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./config.js";
 
@@ -33,8 +34,19 @@ let store: JsonStore<McpStoreShape> | null = null;
 // launch until they found and deleted a hidden file. Both readers below resolve
 // safe defaults from an empty store (locked-down safety config, server on).
 function getStore(): JsonStore<McpStoreShape> {
-	store ??= createJsonStore<McpStoreShape>("mcp-config");
+	store ??= createJsonStore<McpStoreShape>("mcp-config", undefined, (msg, fields) =>
+		appLogger().warn("main", msg, fields)
+	);
 	return store;
+}
+
+/**
+ * Where an unreadable mcp-config.json was kept when the first Settings change
+ * replaced it (#2433), or null. Settings shows it: the reset to locked-down
+ * defaults is otherwise silent.
+ */
+export function mcpConfigCorruptCopy(): string | null {
+	return getStore().corruptCopy();
 }
 
 /**

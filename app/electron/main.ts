@@ -140,6 +140,7 @@ import {
 	effectiveSafety,
 	loadMcpEnabled,
 	saveMcpEnabled,
+	mcpConfigCorruptCopy,
 } from "./mcp/store.js";
 import type { McpConnectClient } from "./mcp/connect.js";
 import { McpListener } from "./mcp/listener.js";
@@ -1201,7 +1202,12 @@ async function runStartMcp() {
 }
 
 function currentMcpStatus(enabled: boolean) {
-	return buildMcpStatus({ listener: mcpListener, enabled, error: mcpStartError });
+	return buildMcpStatus({
+		listener: mcpListener,
+		enabled,
+		error: mcpStartError,
+		corruptCopy: mcpConfigCorruptCopy(),
+	});
 }
 
 /**

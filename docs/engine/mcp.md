@@ -2845,7 +2845,7 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, error? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`). |
+| `mcp:status`        | `{ running, url, enabled, error?, corruptCopy? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
@@ -2947,6 +2947,11 @@ call fails. Both exist for the same reason: each control commits a whole field
 computed from what is displayed - adding a host persists the displayed allowlist
 plus the new entry - so a placeholder shown here would be written over the real
 config by the very next edit.
+
+An unreadable `mcp-config.json` looks, on screen, like a config nobody ever set,
+so the panel says otherwise: once the first change has set the old file aside
+(`corruptCopy` in `mcp:status`, re-read by the panel after each change), a
+warning above the cards gives the copy's full path.
 
 ## Configuration
 
