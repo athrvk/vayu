@@ -34,7 +34,7 @@ import {
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
 import { useToastStore, useTabsStore } from "@/stores";
-import { useAllRunsQuery, useInvalidateRuns } from "@/queries/runs";
+import { useRunsCountQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { appSetting } from "../app-settings";
@@ -44,7 +44,7 @@ import { StartAtLoginCard } from "./StartAtLoginCard";
 import { CookiesCard } from "./CookiesCard";
 import { WorkspaceBackupCard } from "./WorkspaceBackupCard";
 import { useSettingsStore } from "@/modules/settings/settings-store";
-import type { EngineSettingsCategory, Run } from "@/types";
+import type { EngineSettingsCategory, RunListParams } from "@/types";
 
 /** Where the retention knobs the runs on this card obey actually live. */
 const RETENTION_CATEGORY: EngineSettingsCategory = "data_retention";
@@ -57,27 +57,54 @@ const STORAGE_PATHS = appSetting("storage-paths");
 const RESET = appSetting("reset-app-settings");
 const SAVE_DELAY_LABEL = "Save delay";
 
-/**
- * What `DELETE /runs` will do with the stored runs, read ahead of the call so
- * the dialog and the button say only what is true. The engine keeps a pinned
- * baseline and a run still running or pending (#2429); the engine's own pass
- * has the last word, since either can change between this read and the call.
- */
-function planClear(runs: readonly Run[]) {
-	const pinned = runs.filter((r) => r.baseline).length;
-	const inFlight = runs.filter(
-		(r) => !r.baseline && (r.status === "running" || r.status === "pending")
-	).length;
-	return { pinned, inFlight, clearable: runs.length - pinned - inFlight };
+interface ClearPlan {
+	stored: number;
+	pinned: number;
+	inFlight: number;
+	clearable: number;
 }
 
-type ClearPlan = ReturnType<typeof planClear>;
+/** One `limit=1` read: the envelope's `total` is the count, no rows are downloaded. */
+async function countRuns(filter: Pick<RunListParams, "baseline" | "status"> = {}) {
+	return (await apiService.listRuns({ ...filter, limit: 1 })).pagination.total;
+}
+
+/**
+ * What `DELETE /runs` will do with the stored runs, read when Clear is pressed
+ * so the dialog says only what is true. The engine keeps a pinned baseline and
+ * a run still running or pending (#2429); the engine's own pass has the last
+ * word, since either can change between this read and the call.
+ *
+ * Counts, not rows (#2979): opening Settings must not download the history, so
+ * what is kept is asked of the engine's filters. `status` takes one value, hence
+ * two in-flight reads; `baseline=false` keeps a pinned run that is also running
+ * out of the in-flight count, as the engine's own exemption does.
+ */
+async function readClearPlan(): Promise<ClearPlan> {
+	const [stored, pinned, running, pending] = await Promise.all([
+		countRuns(),
+		countRuns({ baseline: true }),
+		countRuns({ baseline: false, status: "running" }),
+		countRuns({ baseline: false, status: "pending" }),
+	]);
+	const inFlight = running + pending;
+	return { stored, pinned, inFlight, clearable: Math.max(0, stored - pinned - inFlight) };
+}
+
+type ClearPhase = "idle" | "reading" | "clearing";
 
 /** Why Clear run history is unavailable, or `false` when it is not. */
-function clearBlockedReason(stored: number, plan: ClearPlan, clearing: boolean) {
-	if (clearing) return "Clearing the run history";
-	if (stored === 0) return "No stored runs to clear";
-	return plan.clearable === 0 && "Only pinned baselines and runs in progress are stored";
+function clearBlockedReason(stored: number, phase: ClearPhase) {
+	if (phase === "clearing") return "Clearing the run history";
+	if (phase === "reading") return "Checking which runs are kept";
+	return stored === 0 && "No stored runs to clear";
+}
+
+/** What Clear run history says when the read finds nothing it may remove. */
+function nothingClearable({ stored }: ClearPlan): string {
+	return stored === 0
+		? "No stored runs to clear"
+		: "Only pinned baselines and runs in progress are stored";
 }
 
 function clearDescription({ pinned, inFlight, clearable }: ClearPlan): string {
@@ -120,14 +147,17 @@ export default function GeneralPanel() {
 	const setAutoSave = useClientSettingsStore((s) => s.setAutoSave);
 	const resetAll = useClientSettingsStore((s) => s.resetAll);
 
-	// The whole history (all pages) - this panel counts and clears every run,
-	// not just a polled page.
-	const { data: runs = [] } = useAllRunsQuery();
+	// A count, not the history: the panel only needs how many runs there are
+	// until the user asks to clear them (#2979).
+	const { data: stored = 0 } = useRunsCountQuery();
 	const invalidateRuns = useInvalidateRuns();
 	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
 	const showToast = useToastStore((s) => s.showToast);
-	const plan = planClear(runs);
-	const [clearing, setClearing] = useState(false);
+	const [phase, setPhase] = useState<ClearPhase>("idle");
+	const clearing = phase === "clearing";
+	// Kept apart from `confirmClear` so the description does not change under
+	// the dialog while it animates out.
+	const [plan, setPlan] = useState<ClearPlan | null>(null);
 	const [confirmClear, setConfirmClear] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
 	const setSelectedCategory = useSettingsStore((s) => s.setSelectedCategory);
@@ -148,10 +178,33 @@ export default function GeneralPanel() {
 	 * collection, a request) already routes through this dialog, which also
 	 * focuses Cancel first so a reflexive Enter does not wipe the history.
 	 */
+	const reviewClear = async () => {
+		setPhase("reading");
+		try {
+			const read = await readClearPlan();
+			if (read.clearable === 0) {
+				showToast(nothingClearable(read), "info");
+				// The count on screen was stale, or the button would not have been live.
+				invalidateRuns();
+				return;
+			}
+			setPlan(read);
+			setConfirmClear(true);
+		} catch (error) {
+			showToast(
+				error instanceof Error
+					? `Couldn't read the run history - ${error.message}`
+					: "Couldn't read the run history",
+				"error"
+			);
+		} finally {
+			setPhase("idle");
+		}
+	};
+
 	const clearHistory = async () => {
 		setConfirmClear(false);
-		if (plan.clearable === 0) return;
-		setClearing(true);
+		setPhase("clearing");
 		try {
 			const { deletedIds } = await apiService.clearRuns();
 			// Only the tabs of runs the engine says went: tabs persist, so one left
@@ -170,7 +223,7 @@ export default function GeneralPanel() {
 			// A failure can still land after some batches were committed, so the
 			// list is re-read either way.
 			invalidateRuns();
-			setClearing(false);
+			setPhase("idle");
 		}
 	};
 
@@ -257,19 +310,19 @@ export default function GeneralPanel() {
 				<CardContent>
 					<div className="flex items-center justify-between gap-4">
 						<p className="text-sm text-muted-foreground">
-							{runs.length === 0
+							{stored === 0
 								? "No stored runs."
-								: `${runs.length} stored ${pluralize(runs.length, "run")}.`}
+								: `${stored} stored ${pluralize(stored, "run")}.`}
 						</p>
-						<DisabledHint reason={clearBlockedReason(runs.length, plan, clearing)}>
+						<DisabledHint reason={clearBlockedReason(stored, phase)}>
 							<Button
 								variant="outline"
 								size="sm"
-								onClick={() => setConfirmClear(true)}
-								disabled={plan.clearable === 0 || clearing}
+								onClick={() => void reviewClear()}
+								disabled={stored === 0 || phase !== "idle"}
 								className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 							>
-								{clearing ? (
+								{phase !== "idle" ? (
 									<Loader2 className="size-icon animate-spin" />
 								) : (
 									<Database className="size-icon" />
@@ -405,7 +458,7 @@ export default function GeneralPanel() {
 				onOpenChange={setConfirmClear}
 				title="Clear run history?"
 				confirmLabel="Clear history"
-				description={clearDescription(plan)}
+				description={plan ? clearDescription(plan) : ""}
 				onConfirm={clearHistory}
 				isDeleting={clearing}
 			/>

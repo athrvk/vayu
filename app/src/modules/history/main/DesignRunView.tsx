@@ -286,7 +286,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 
 				// A resend is a new run, so History has to hear about it.
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-				queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+				queryClient.invalidateQueries({ queryKey: queryKeys.runs.count() });
 				// And so does the request's Recent sends list, which is not
 				// polled - a replay from here is one of its rows. Only when the
 				// run links a request: a detached replay belongs to none.

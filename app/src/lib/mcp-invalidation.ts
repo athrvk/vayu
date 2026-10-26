@@ -178,7 +178,7 @@ const INVALIDATORS: Record<
 
 	/*
 	 * The history list polls on its own, so this is about immediacy there - but
-	 * `allRuns` (Settings' count) and the four small per-request/per-collection
+	 * `count` (Settings' stored-run count) and the four small per-request/per-collection
 	 * families are not polled at all, and an MCP write left them stale
 	 * indefinitely. They are covered at their prefixes rather than per row: a
 	 * run write can change what any of them answers (a delete may have taken the
@@ -203,7 +203,7 @@ const INVALIDATORS: Record<
 	 */
 	run: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.count() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });

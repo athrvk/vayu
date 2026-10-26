@@ -57,7 +57,7 @@ export {
 	usePrefetchRuns,
 	useRunSearchQuery,
 	RUN_SEARCH_LIMIT,
-	useAllRunsQuery,
+	useRunsCountQuery,
 	flattenRunPages,
 	runsTotal,
 	useRunQuery,

@@ -226,14 +226,15 @@ export function useRunSearchQuery(q: string) {
 }
 
 /**
- * Fetch every run (all pages) as a flat list. For callers that need the whole
- * set rather than a polled page - counting and clearing history in Settings.
- * Not polled; rows carry the compact summary so it stays cheap.
+ * How many runs are stored - Settings' "N stored runs". One `limit=1` read of
+ * the list envelope, whose `pagination.total` is the unfiltered count, so the
+ * answer costs one request and one row however long the history is (#2979).
+ * Not polled.
  */
-export function useAllRunsQuery() {
+export function useRunsCountQuery() {
 	return useQuery({
-		queryKey: queryKeys.runs.allRuns(),
-		queryFn: () => apiService.listAllRuns(),
+		queryKey: queryKeys.runs.count(),
+		queryFn: async () => (await apiService.listRuns({ limit: 1 })).pagination.total,
 	});
 }
 
@@ -676,11 +677,8 @@ export function useDeleteRunMutation() {
 					};
 				}
 			);
-			// Keep the all-runs (Settings) cache in step.
-			queryClient.setQueryData<Run[]>(
-				queryKeys.runs.allRuns(),
-				(old) => old?.filter((r) => r.id !== deletedId) ?? old
-			);
+			// Settings' stored-run count.
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.count() });
 			// Remove report from cache
 			queryClient.removeQueries({
 				queryKey: queryKeys.runs.report(deletedId),
@@ -764,7 +762,7 @@ export function useSetRunBaselineMutation() {
 
 /**
  * Invalidate every runs list (trigger refetch) - the polled infinite list, the
- * all-runs Settings query, the per-request Recent sends and per-collection
+ * stored-run count Settings shows, the per-request Recent sends and per-collection
  * Last run lists, the per-request baseline lookups, the compare picker's
  * per-request lists and the per-request last-design lookups, which are their
  * own families and would otherwise survive a cleared history.
@@ -774,7 +772,7 @@ export function useInvalidateRuns() {
 
 	return () => {
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-		queryClient.invalidateQueries({ queryKey: queryKeys.runs.allRuns() });
+		queryClient.invalidateQueries({ queryKey: queryKeys.runs.count() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });

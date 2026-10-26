@@ -35,6 +35,7 @@ import {
 	useStartScenarioRunMutation,
 	RECENT_DESIGN_RUN_LIMIT,
 	useRunsQuery,
+	useRunsCountQuery,
 	usePrefetchRuns,
 	flattenRunPages,
 	runsPollInterval,
@@ -587,12 +588,51 @@ describe("flattenRunPages", () => {
  * `RunListResponse`, and `RequestBuilderProvider` mounts it for every open
  * request tab - so with one request tab open, deleting a run threw a TypeError
  * inside the mutation's own `onSuccess`: the engine had deleted the run, but the
- * row lingered, the all-runs patch and the report eviction never ran, and the
+ * row lingered, the count refresh and the report eviction never ran, and the
  * user saw "Couldn't delete run".
  *
  * Fixed at the root (its own key family) with a shape guard as the belt. The
  * three tests below pin the two halves separately, so reverting either is red.
  */
+/**
+ * Settings' "N stored runs" is one `limit=1` read of the envelope's `total`
+ * (#2979), not a download of the history.
+ */
+describe("useRunsCountQuery", () => {
+	it("asks for one row and answers the envelope's total, not the rows it got", async () => {
+		listRuns.mockResolvedValue(page([runRow("r1")], { total: 2000, limit: 1, hasMore: true }));
+
+		const { result } = renderHook(() => useRunsCountQuery(), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		await waitFor(() => expect(result.current.data).toBe(2000));
+		expect(listRuns).toHaveBeenCalledTimes(1);
+		expect(listRuns).toHaveBeenCalledWith({ limit: 1 });
+	});
+
+	it("keys the count outside the infinite-list prefix", () => {
+		const lists = queryKeys.runs.lists() as readonly unknown[];
+		const count = queryKeys.runs.count() as readonly unknown[];
+		// The delete patch walks `lists()` as `InfiniteData`; a bare number there throws.
+		expect(count.slice(0, lists.length)).not.toEqual([...lists]);
+	});
+
+	it("is re-read after a delete, so the count follows the history down", async () => {
+		const client = makeClient();
+		listRuns.mockResolvedValueOnce(page([runRow("r1")], { total: 2, limit: 1 }));
+		const count = renderHook(() => useRunsCountQuery(), { wrapper: wrapper(client) });
+		await waitFor(() => expect(count.result.current.data).toBe(2));
+
+		listRuns.mockResolvedValue(page([runRow("r2")], { total: 1, limit: 1 }));
+		deleteRun.mockResolvedValue(undefined);
+		const del = renderHook(() => useDeleteRunMutation(), { wrapper: wrapper(client) });
+		await del.result.current.mutateAsync("r1");
+
+		await waitFor(() => expect(count.result.current.data).toBe(1));
+	});
+});
+
 describe("useDeleteRunMutation with a foreign cache shape under the runs prefix", () => {
 	function seededClient() {
 		const client = makeClient();
@@ -600,7 +640,6 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 			pages: [page([runRow("r1"), runRow("r2")], { total: 2 })],
 			pageParams: [0],
 		});
-		client.setQueryData(queryKeys.runs.allRuns(), [runRow("r1"), runRow("r2")]);
 		return client;
 	}
 
@@ -660,8 +699,7 @@ describe("useDeleteRunMutation with a foreign cache shape under the runs prefix"
 		};
 		expect(list.pages[0].data.map((r) => r.id)).toEqual(["r2"]);
 		expect(list.pages[0].pagination.total).toBe(1);
-		// The two patches that used to be skipped because the first one threw.
-		expect(client.getQueryData(queryKeys.runs.allRuns())).toEqual([runRow("r2")]);
+		// The report eviction that used to be skipped because the patch threw.
 		expect(client.getQueryData(queryKeys.runs.report("r1"))).toBeUndefined();
 	});
 
@@ -699,7 +737,7 @@ describe("useInvalidateRuns", () => {
 		const keys = spy.mock.calls.map(([filters]) => filters?.queryKey);
 		for (const key of [
 			queryKeys.runs.lists(),
-			queryKeys.runs.allRuns(),
+			queryKeys.runs.count(),
 			queryKeys.runs.recentDesigns(),
 			queryKeys.runs.lastCollectionRuns(),
 			queryKeys.runs.baselines(),

@@ -2118,9 +2118,16 @@ click; refetching either removes it or proves it real.
     (dedupe by id guards the momentary double-row a head insertion can cause
     across two refetched pages). **`runsTotal(data)`** - the server's total from
     the first page.
-- **`useAllRunsQuery()`** - Every run (all pages) as a flat list, for callers
-  that need the whole set rather than a polled page (Settings' count + clear).
-  Not polled.
+- **`useRunsCountQuery()`** - How many runs are stored, for Settings' "N stored
+  runs": one `limit=1` read of the list envelope, answering its
+  `pagination.total`, so opening Settings costs one request and one row however
+  long the history is (#2979). Not polled. *Clear run history* does not read
+  rows either: when it is pressed it asks `limit=1` counts for the pinned
+  baselines and the running / pending runs (`baseline=true`, and
+  `baseline=false` with each `status`), which is all its dialog needs to say what
+  goes and what is kept. The `count()` key sits outside `runs.lists()`, because
+  it caches a bare number and the delete patch walks that prefix as
+  `InfiniteData`.
 - **`useLastDesignRunQuery(requestId)`** - The most recent completed design run
   for a request, in **one** filtered call
   (`?requestId=&type=design&status=completed&limit=1`) - the server sorts
@@ -2223,8 +2230,8 @@ click; refetching either removes it or proves it real.
   returns a boolean rather than throwing - the dashboard's Stop button reports
   the refusal itself.
 - **`useDeleteRunMutation()`** - Delete a run. Patches every infinite-list cache
-  variant in place (drops the row, decrements the mirrored `total`) plus the
-  all-runs cache, and evicts the run's report. The list updater shape-guards
+  variant in place (drops the row, decrements the mirrored `total`), invalidates
+  the stored-run count, and evicts the run's report. The list updater shape-guards
   (`!Array.isArray(old.pages)`) as a belt to `lastDesign`'s braces. The
   `recentDesigns()` and `lastCollectionRuns()` families are **invalidated rather
   than patched**: a deleted run gives no way back to the request or collection
@@ -2346,7 +2353,7 @@ runs: {
   baseline: (requestId) => ["runs", "baseline", requestId],
   requestRuns: () => ["runs", "requestRun"],              // prefix: invalidate every request's compare picker
   requestRun: (requestId) => ["runs", "requestRun", requestId],
-  allRuns: () => ["runs", "allRuns"],
+  count: () => ["runs", "count"],                         // Settings' stored-run count, a bare number
   detail: (id) => ["runs", "detail", id],
   report: (id) => ["runs", "report", id],
   timeSeries: (id) => ["runs", "timeSeries", id],          // prefix: every read of the run's tick series
@@ -2485,7 +2492,7 @@ to keys through `lib/mcp-invalidation.ts`:
 | `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it: a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place. So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all. The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546) |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
-| `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
+| `run` | `runs.lists()`, `runs.count()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all`, `requestDefaults.all` | `requestDefaults` is a second endpoint over the same entries rather than a slice of the first: five of them (`negotiateCompression`, `loadNegotiateCompression`, `sendExpectContinue`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own and the engine resolves the answer, so the declared set is re-read rather than derived here - which is why `useUpdateConfigMutation` drops both keys. At the root, because design and load are separate cache entries and one write can move both (#1438) |
 | `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from |

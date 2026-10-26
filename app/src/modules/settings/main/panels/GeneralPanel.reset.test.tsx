@@ -39,7 +39,7 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 }
 
 vi.mock("@/queries/runs", () => ({
-	useAllRunsQuery: () => ({ data: [] }),
+	useRunsCountQuery: () => ({ data: 0 }),
 	useInvalidateRuns: () => vi.fn(),
 }));
 
