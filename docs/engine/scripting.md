@@ -2428,6 +2428,7 @@ reports success for something that never happened.
 |------|-------|--------------|
 | Either method | A single Send (`POST /execute`) | Throws - there is no next request |
 | Either method | A load run's deferred `tests` script, and a scenario load run's deferred per-step script | Throws - the script runs after the run finished, against a recorded response, and cannot redirect a sequence that already happened |
+| Either method | A scenario load run's inline `script.pre` / `script.post` | Throws - a load run's sequence is redirected by `control.*` elements only, and the step counts as `errored` (#2947) |
 | `skipRequest()` | A test script inside a collection run | Throws - the request has already gone out; there is nothing left to skip |
 | `setNextRequest()` | Anywhere | `TypeError` - the argument is required. Omitting it is not a synonym for `null` |
 | `setNextRequest(3)`, `setNextRequest('')` | Anywhere | `TypeError` - a target is a non-empty string, or `null` |

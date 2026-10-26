@@ -120,7 +120,7 @@ export function ErrorsCell(props: { errors: number; httpErrors?: number; noRespo
  * drawn when its caller has one; abandoned only when non-zero, since a run that
  * lost nothing should not be made to display a zero next to a word like
  * "abandoned"; likewise cut short, the third way an iteration ends: neither
- * finished nor lost to an errored step, but still running at the deadline or a
+ * finished nor lost to a step that got no response, but still running at the deadline or a
  * Stop.
  */
 export function ScenarioFacts({

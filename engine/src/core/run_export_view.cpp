@@ -1398,7 +1398,7 @@ std::optional<ReportCapacity> capacity_of (const ordered& document) {
 
 /// `2,105 iterations started, 2,100 completed, 3 abandoned, 2 cut short`. The
 /// cut-short count is derived as the app derives it: started and neither
-/// completed nor abandoned by an errored step, clamped at none.
+/// completed nor abandoned by a step that got no response, clamped at none.
 ReportText iterations_text (const ordered& scenario) {
     const auto started = number_at (scenario, { "iterations" });
     if (!started) {

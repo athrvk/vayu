@@ -350,9 +350,10 @@ struct ReportExtras {
     std::optional<size_t> steps_not_run;
     std::optional<bool> stop_on_error;
     // Load-mode scenario runs only. `virtual_users` is what `concurrency` meant
-    // for this run; `iterations_abandoned` is how many an errored step ended
-    // before the plan's last step, which is what explains a breakdown that
-    // thins towards the end of the sequence.
+    // for this run; `iterations_abandoned` is how many a step with no response
+    // (or a jump the run could not honour) ended before the plan's last step,
+    // which is what explains a breakdown that thins towards the end of the
+    // sequence.
     size_t virtual_users        = 0;
     size_t iterations_abandoned = 0;
     // Per-step latency and counts, verbatim from the summary. Empty for a
