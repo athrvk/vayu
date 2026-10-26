@@ -22,7 +22,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,33 @@ describe("a corrupt mcp-config.json", () => {
 			safety: { ...DEFAULT_MCP_SAFETY_CONFIG, maxRps: 42 },
 		});
 		expect(loadPersistedSafety().maxRps).toBe(42);
+	});
+});
+
+describe("the copy of an unreadable mcp-config.json (#2433)", () => {
+	it("is kept beside the new file by the first save, and reported", async () => {
+		seedStore('{"safety": {"allowlist": ["api.example.com"');
+		const { savePersistedSafety, mcpConfigCorruptCopy } = await importStore();
+		expect(mcpConfigCorruptCopy()).toBeNull();
+
+		savePersistedSafety({ ...DEFAULT_MCP_SAFETY_CONFIG, maxRps: 42 });
+
+		const [kept] = readdirSync(fake.userData).filter((f) => f.includes(".corrupt-"));
+		expect(mcpConfigCorruptCopy()).toBe(join(fake.userData, kept));
+		expect(readFileSync(join(fake.userData, kept), "utf8")).toBe(
+			'{"safety": {"allowlist": ["api.example.com"'
+		);
+		expect(JSON.parse(storeFile()).safety.maxRps).toBe(42);
+	});
+
+	it("is not made, or reported, for a readable file", async () => {
+		seedStore(JSON.stringify({ enabled: false }));
+		const { savePersistedSafety, mcpConfigCorruptCopy } = await importStore();
+
+		savePersistedSafety({ ...DEFAULT_MCP_SAFETY_CONFIG, maxRps: 42 });
+
+		expect(mcpConfigCorruptCopy()).toBeNull();
+		expect(readdirSync(fake.userData).filter((f) => f.includes(".corrupt-"))).toEqual([]);
 	});
 });
 

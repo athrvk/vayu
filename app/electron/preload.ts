@@ -133,6 +133,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		url: string;
 		enabled: boolean;
 		error?: { code: "EADDRINUSE" | "EACCES" | "other"; message: string };
+		corruptCopy?: string;
 	}> => ipcRenderer.invoke("mcp:status"),
 	getMcpSafety: () => ipcRenderer.invoke("mcp:getSafety"),
 	getMcpTools: () => ipcRenderer.invoke("mcp:getTools"),

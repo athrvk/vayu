@@ -2773,6 +2773,12 @@ applying it live and writing it to disk. The same sanitizer runs over the
 persisted file on load and over the CLI's `VAYU_MCP_*` variables, so no path
 reaches the guards with a cap outside that range.
 
+A `mcp-config.json` that does not parse (or parses to something other than an
+object) loads as the locked-down defaults rather than failing the start. The
+first write over it renames it to `mcp-config.json.corrupt-<epoch-ms>` in the
+same folder, so the allowlist and caps in it can be copied back by hand. One
+copy is kept: corrupting the file again replaces the earlier copy (issue #2433).
+
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
@@ -2843,7 +2849,7 @@ The IPC surface:
 
 | IPC handler         | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| `mcp:status`        | `{ running, url, enabled, error? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`). |
+| `mcp:status`        | `{ running, url, enabled, error?, corruptCopy? }`; `error` is `{ code, message }` while enabled and the last start failed (`EADDRINUSE`, `EACCES`, `other`); `corruptCopy` is the path an unreadable `mcp-config.json` was kept at once a change has replaced it. |
 | `mcp:getSafety`     | Live `McpSafetyConfig`, or the persisted one when off.      |
 | `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
 | `mcp:setEnabled`    | Start/stop the server, persist the preference; returns the status, and a retry (`true`) re-attempts a failed bind. |
@@ -2948,6 +2954,11 @@ call fails. Both exist for the same reason: each control commits a whole field
 computed from what is displayed - adding a host persists the displayed allowlist
 plus the new entry - so a placeholder shown here would be written over the real
 config by the very next edit.
+
+An unreadable `mcp-config.json` looks, on screen, like a config nobody ever set,
+so the panel says otherwise: once the first change has set the old file aside
+(`corruptCopy` in `mcp:status`, re-read by the panel after each change), a
+warning above the cards gives the copy's full path.
 
 ## Configuration
 

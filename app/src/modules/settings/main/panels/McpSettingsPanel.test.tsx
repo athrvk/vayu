@@ -156,6 +156,52 @@ describe("McpSettingsPanel load failures", () => {
 });
 
 /**
+ * An unreadable mcp-config.json loads as locked-down defaults, which looks
+ * exactly like a user who never configured anything (#2433). The main process
+ * keeps the old file as a `.corrupt-<ms>` copy once the first change replaces it
+ * and reports the path in `mcp:status`; the panel is the only place the user can
+ * learn why their allowlist is empty.
+ */
+describe("McpSettingsPanel unreadable settings file", () => {
+	const COPY = "/home/me/.config/Vayu/mcp-config.json.corrupt-1700000000000";
+	const NOTICE = /your mcp settings file was unreadable/i;
+
+	it("says nothing when the settings file was readable", async () => {
+		await renderPanel();
+
+		expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
+	});
+
+	it("names where the old file is kept, even while the server is off", async () => {
+		getMcpStatus.mockResolvedValue({
+			...STATUS,
+			running: false,
+			enabled: false,
+			corruptCopy: COPY,
+		});
+
+		await renderPanel();
+
+		expect(screen.getByText(NOTICE)).toBeInTheDocument();
+		expect(screen.getByText(COPY)).toBeInTheDocument();
+	});
+
+	it("shows the notice once the first change has set the file aside", async () => {
+		await renderPanel();
+		expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
+		// The copy exists only after this write, so a status read at mount lacks it.
+		getMcpStatus.mockResolvedValue({ ...STATUS, corruptCopy: COPY });
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("switch", { name: /allow write operations/i }));
+		});
+
+		expect(await screen.findByText(COPY)).toBeInTheDocument();
+		expect(screen.getByText(NOTICE)).toBeInTheDocument();
+	});
+});
+
+/**
  * The endpoint is the main process's to know: it is built there from
  * `MCP_HOST` / `MCP_PORT` / `MCP_PATH` and reported over `mcp:status`. This
  * panel used to keep its own `http://127.0.0.1:9877/mcp` literal as a fallback -
