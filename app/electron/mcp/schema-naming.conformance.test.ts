@@ -33,11 +33,11 @@ import { TOOLS } from "./tools.js";
  * old argument so a client holding the old schema keeps working. #2962 retires
  * them and empties this list.
  */
-const DEPRECATED_ID_ALIASES: Readonly<Record<string, string>> = {
-	restore_trash_entry: "`entryId`; `id` is a deprecated alias (#2962)",
-	purge_trash_entry: "`entryId`; `id` is a deprecated alias (#2962)",
-	move_item: "`itemId`; `id` is a deprecated alias (#2962)",
-};
+const DEPRECATED_ID_ALIASES: ReadonlySet<string> = new Set([
+	"restore_trash_entry",
+	"purge_trash_entry",
+	"move_item",
+]);
 
 /** Tools with a `limit` and no `offset`, each with why a page position has nothing to count from. */
 const LIMIT_WITHOUT_OFFSET: Readonly<Record<string, string>> = {
@@ -55,13 +55,13 @@ describe("tool argument names", () => {
 
 	test("no tool takes a bare `id` outside the deprecated aliases", () => {
 		const bare = TOOLS.filter(
-			(tool) => inputKeys(tool).includes("id") && !(tool.name in DEPRECATED_ID_ALIASES)
+			(tool) => inputKeys(tool).includes("id") && !DEPRECATED_ID_ALIASES.has(tool.name)
 		).map((tool) => tool.name);
 		expect(bare).toEqual([]);
 	});
 
 	test("every deprecated alias is a tool that still takes `id`", () => {
-		for (const name of Object.keys(DEPRECATED_ID_ALIASES)) {
+		for (const name of DEPRECATED_ID_ALIASES) {
 			const tool = TOOLS.find((t) => t.name === name);
 			expect(tool, name).toBeDefined();
 			expect(inputKeys(tool!), name).toContain("id");
