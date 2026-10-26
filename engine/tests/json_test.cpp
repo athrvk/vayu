@@ -689,7 +689,7 @@ TEST (JsonTest, SerializesRun) {
     vayu::db::Run run;
     run.id              = "run_123";
     run.type            = vayu::RunType::Load;
-    run.status          = vayu::RunStatus::Running;
+    run.status          = vayu::RunStatus::Completed;
     run.start_time      = 1000;
     run.end_time        = 2000;
     run.config_snapshot = R"({"rps": 100, "headers": {"X": "1"}})";
@@ -700,7 +700,7 @@ TEST (JsonTest, SerializesRun) {
 
     EXPECT_EQ (json["id"], "run_123");
     EXPECT_EQ (json["type"], "load");
-    EXPECT_EQ (json["status"], "running");
+    EXPECT_EQ (json["status"], "completed");
     EXPECT_EQ (json["startTime"], 1000);
     EXPECT_EQ (json["endTime"], 2000);
     EXPECT_EQ (json["configSnapshot"]["rps"], 100);
@@ -708,6 +708,36 @@ TEST (JsonTest, SerializesRun) {
     EXPECT_FALSE (json.contains ("summary"));
     EXPECT_EQ (json["requestId"], "req_1");
     EXPECT_EQ (json["environmentId"], "env_1");
+}
+
+// #2953: the stored end_time of a live run is its start_time (the crash-path
+// seed), which is not an end. Every status answers for itself, so a new
+// terminal status cannot silently inherit the seed.
+TEST (JsonTest, RunEndTimeIsNullUntilTerminal) {
+    struct Case {
+        vayu::RunStatus status;
+        bool terminal;
+    };
+    const std::vector<Case> cases{ { vayu::RunStatus::Pending, false },
+        { vayu::RunStatus::Running, false }, { vayu::RunStatus::Completed, true },
+        { vayu::RunStatus::Failed, true }, { vayu::RunStatus::Stopped, true } };
+
+    for (const auto& c : cases) {
+        vayu::db::Run run;
+        run.id         = "run_end";
+        run.status     = c.status;
+        run.start_time = 1000;
+        run.end_time   = c.terminal ? 2000 : 1000;
+
+        const auto json = serialize (run);
+
+        SCOPED_TRACE (vayu::to_string (c.status));
+        if (c.terminal) {
+            EXPECT_EQ (json["endTime"], 2000);
+        } else {
+            EXPECT_TRUE (json["endTime"].is_null ());
+        }
+    }
 }
 
 // ============================================================================

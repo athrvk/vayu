@@ -117,6 +117,15 @@ const vayu::http::FileAccessPolicy& files);
 [[nodiscard]] Json serialize_run_origin (const vayu::db::Run& run);
 
 /**
+ * @brief A run's `endTime` as every run JSON emits it (#2953): the stored value
+ * once the status is terminal, `null` before. The column is seeded with
+ * `start_time` when a run starts (so a crashed run keeps a sane row), which a
+ * client would read as a run that took no time. The one copy, so the list row,
+ * the single-run payload and the report metadata cannot drift.
+ */
+[[nodiscard]] Json serialize_run_end_time (const vayu::db::Run& run);
+
+/**
  * @brief Parse a stored variables blob (collections/environments/globals
  * `variables` column) into an in-memory Environment.
  *

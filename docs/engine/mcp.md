@@ -512,8 +512,11 @@ Notes:
   `running` (after the withhold and the trace bounds, so a report that took the
   bounds' early return is marked too) and leaves both keys out for a terminal
   run, so the key's presence is the whole signal. `get_run` is the cheap read for
-  "is it done": `terminal` comes from the status, never from `endTime`, because
-  the engine seeds `endTime` to `startTime` on a row that has not finished.
+  "is it done": `terminal` comes from the status, never from `endTime`. The
+  engine stores `end_time` as `startTime` on a row that has not finished (a seed
+  kept for a run a crash kills) but emits `endTime: null` for a `pending` or
+  `running` run (#2953), so `get_run`, `list_runs` and the report all agree; the
+  status is still the signal that survives an engine that predates that.
   A failed load run the engine could not fully record is a different statement,
   made inside `summary` and not to be read as the top-level `partial` (#2895):
   `summary.partial: true` is a run reconciled after an engine crash, whose counts,

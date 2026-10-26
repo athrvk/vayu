@@ -10656,6 +10656,13 @@ data the app shows as "Not judged" rather than passed or failed. `errorRate`
 uses the same failure definition as the report's `summary.errorRate`, over the
 stored status-code distribution, and is omitted when no distribution is stored.
 
+`endTime` is `null` while a row's `status` is `pending` or `running` and the
+stored value once it is `completed`, `failed` or `stopped` (#2953). The database
+seeds the column with `startTime` when a run starts, which would read as a run
+that took no time; a client takes "still going" from the `null`, and the same
+rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
+`PUT /runs/:runId/baseline` row.
+
 **Response (envelope):**
 ```json
 {
@@ -10707,7 +10714,8 @@ Get details for a specific run.
 
 **Response:** The run object shown in `GET /runs` (`id`, `requestId`,
 `environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`,
-`baseline`, `origin`).
+`baseline`, `origin`). `endTime` is `null` until the run's `status` is
+`completed`, `failed` or `stopped`, as on the list row.
 
 For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
@@ -10913,7 +10921,8 @@ given the totals of its last persisted tick instead (see "A run the engine died 
 
 A report read while the run is `pending` or `running` is therefore **partial**: `metadata.status`
 says the run is still in flight, and `thresholdValidation` is absent even when the run declared
-budgets, because the verdict is computed from the summary written at the end. Read
+budgets, because the verdict is computed from the summary written at the end, and
+`metadata.endTime` is `null` (#2953), not the run's start time the database seeded it with. Read
 `metadata.status` before treating a report as final.
 
 A design or scenario run stores its `results` rows just before its status flips, and a client

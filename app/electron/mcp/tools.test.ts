@@ -11227,8 +11227,8 @@ describe("run status reads (#2436)", () => {
 			type: "load",
 			status: "running",
 			startTime: START,
-			// What the engine writes for a row that has not finished.
-			endTime: START,
+			// What the engine answers for a run that has not finished (#2953).
+			endTime: null,
 			configSnapshot: {
 				url: "https://api.example.com/users",
 				mode: "constant_rps",
@@ -11301,12 +11301,19 @@ describe("run status reads (#2436)", () => {
 			expect(stopped.nextStep).toMatch(/partial numbers.*no verdict/);
 		});
 
-		test("a running row whose endTime is non-zero is still not terminal", async () => {
-			// endTime is seeded to startTime, so `> 0` would call every run done.
-			const out = await getRun(runRow({ status: "running", endTime: START }));
-			expect(out.terminal).toBe(false);
-			expect(out.endTime).toBeNull();
-		});
+		// An engine that predates #2953 answers the stored seed (endTime = startTime)
+		// for a live run, so the status decides, never `endTime > 0`.
+		test.each([
+			["null", null],
+			["the start time an older engine stored", START],
+		])(
+			"a running row whose endTime is %s is not terminal and has no end",
+			async (_label, endTime) => {
+				const out = await getRun(runRow({ status: "running", endTime }));
+				expect(out.terminal).toBe(false);
+				expect(out.endTime).toBeNull();
+			}
+		);
 
 		test("a duration-bound run reports its progress, clamped to 0..1", async () => {
 			const half = await getRun(runRow());

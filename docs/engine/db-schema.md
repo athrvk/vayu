@@ -1363,7 +1363,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `status`          | TEXT    | `"pending"` / `"running"` / `"completed"` / `"failed"` / `"stopped"` |
 | `config_snapshot` | TEXT    | JSON: the run's request as composed, credentials withheld (see below) |
 | `start_time`      | INTEGER | Unix ms                                                     |
-| `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
+| `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`); the API emits it only once terminal (below) |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
 | `baseline`        | INTEGER | `1` when the run is pinned as a baseline. NOT NULL DEFAULT `0`               |
 | `has_warnings`    | INTEGER | `1` when `summary.warnings` is non-empty. NOT NULL DEFAULT `0`               |
@@ -1380,6 +1380,12 @@ the instance lock before the database opens, so no live engine owns the rows it 
 however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
 future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
 (`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
+
+The stored seed is never what an API client reads for a live run: `GET /runs`, `GET
+/runs/:runId`, the report's `metadata.endTime` and the baseline row emit `endTime: null`
+while `status` is `pending` or `running` and the column once it is terminal, through
+`vayu::json::serialize_run_end_time` (#2953). A run a crash left behind is `failed` after
+reconciliation, so it reports the seed it kept.
 
 **`baseline`** is the pin set by
 [`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the
