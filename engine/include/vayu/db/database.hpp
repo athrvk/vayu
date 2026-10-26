@@ -1194,6 +1194,13 @@ class Database {
     std::optional<int64_t> applied_journal_size_limit () const; // db_maintenance.cpp
 
     /**
+     * @brief SQLite's `mmap_size` on this database's connection in bytes (0 is
+     * unmapped), read back from SQLite; nothing if it would not answer. SQLite
+     * clamps the request, so this is what is in force (#2433).
+     */
+    std::optional<int64_t> applied_mmap_size () const; // db_maintenance.cpp
+
+    /**
      * @brief SQLite's busy timeout on this database's connection, in
      * milliseconds, read back from SQLite: the constructor's
      * `startup_busy_timeout` until `init` applies `dbBusyTimeout`.
