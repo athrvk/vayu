@@ -2930,8 +2930,9 @@ Trash drawer and a restored environment reappears in the Variables view. A
 saved example needs no family of its own (#2971): `delete_request_example`
 declares `request`, whose invalidator takes the trash list and the named
 request's detail key, under which the Examples list sits, so the drawer and an
-open Examples panel both refetch; the trash tools' `request` covers a restored
-example the same way.
+open Examples panel both refetch. A restored example reaches the panel through
+the trash tools' `collection` family, whose invalidator takes `requests.all`
+(the Examples key sits under it); their `request` family names no row.
 
 **One field on the event is not a hint at all.** `startedRun` rides the `run`
 event of the two tools that *create* a run - `start_load_run` and
