@@ -396,45 +396,6 @@ export function requireStr(args: Record<string, unknown>, key: string): string {
 }
 
 /**
- * A required id argument whose name moved off the bare `id` (#2446), with the
- * old name still answering until #2962 retires it. `key` wins when both are
- * sent. `viaLegacyId` is for {@link deprecatedIdCaveat}: a caller still on `id`
- * is told to move, in the answer it reads.
- */
-export function requireRenamedId(
-	args: Record<string, unknown>,
-	key: string
-): { id: string; viaLegacyId: boolean } {
-	const named = str(args, key);
-	if (named !== undefined && named !== "") return { id: named, viaLegacyId: false };
-	const legacy = str(args, "id");
-	if (legacy !== undefined && legacy !== "") return { id: legacy, viaLegacyId: true };
-	throw new ToolArgError(`"${key}" is required.`);
-}
-
-/** The schema entry for the deprecated `id` that {@link requireRenamedId} still reads. */
-export function deprecatedIdInput(replacement: string) {
-	return z
-		.string()
-		.optional()
-		.describe(`DEPRECATED, use \`${replacement}\`: accepted until #2962 retires it.`);
-}
-
-/** The note a result carries when its call named the id by the deprecated `id` (#2962 retires it). */
-export function deprecatedIdCaveat(
-	result: ToolResult,
-	key: string,
-	viaLegacyId: boolean
-): ToolResult {
-	return viaLegacyId
-		? withCaveat(
-				result,
-				`Deprecated: this call named the id as "id". Send it as "${key}" - "id" is accepted for now and is removed in #2962.`
-			)
-		: result;
-}
-
-/**
  * An optional array-of-strings argument. A non-array, or an array carrying
  * anything but strings, is the caller's mistake rather than an empty selection:
  * silently dropping the bad entries would answer a different question than the

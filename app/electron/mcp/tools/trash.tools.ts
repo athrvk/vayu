@@ -17,14 +17,12 @@ import {
 	callEngine,
 	confirmDestructive,
 	confirmedInput,
-	deprecatedIdCaveat,
-	deprecatedIdInput,
 	echoShape,
 	engineErrorResult,
 	errorResult,
 	isRecord,
 	jsonResult,
-	requireRenamedId,
+	requireStr,
 	ToolArgError,
 	withCaveat,
 	writesDisabled,
@@ -78,16 +76,12 @@ export const TRASH_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			entryId: z
-				.string()
-				.optional()
-				.describe("Trash entry ID to restore (from list_trash). Required."),
-			id: deprecatedIdInput("entryId"),
+			entryId: z.string().describe("Trash entry ID to restore (from list_trash)."),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const { id, viaLegacyId } = requireRenamedId(args, "entryId");
+			const id = requireStr(args, "entryId");
 			let restored: Record<string, unknown>;
 			try {
 				const value = await ctx.client.restoreTrashEntry(id, signal);
@@ -105,15 +99,14 @@ export const TRASH_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			const result = jsonResult(echoShape(ctx)(restored));
-			const noted = deprecatedIdCaveat(result, "entryId", viaLegacyId);
 			// A moved folder is worth telling the caller about - it is not where it
 			// used to be, even though the restore itself succeeded.
 			return restored.reparentedToRoot === true
 				? withCaveat(
-						noted,
+						result,
 						"\n\nRestored at the top level: its original parent is gone or itself in the trash, so it came back as a tree root rather than where it was."
 					)
-				: noted;
+				: result;
 		},
 	},
 	{
@@ -132,17 +125,13 @@ export const TRASH_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			entryId: z
-				.string()
-				.optional()
-				.describe("Trash entry ID to destroy for good (from list_trash). Required."),
-			id: deprecatedIdInput("entryId"),
+			entryId: z.string().describe("Trash entry ID to destroy for good (from list_trash)."),
 			confirmed: confirmedInput("actually purge this trash entry for good"),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const { id, viaLegacyId } = requireRenamedId(args, "entryId");
+			const id = requireStr(args, "entryId");
 			// Read what the purge destroys before asking, the same reasoning
 			// delete_collection reads its cascade first: an unreadable entry is a
 			// refusal, never a prompt carrying a name and counts nobody verified.
@@ -165,11 +154,7 @@ export const TRASH_TOOLS: McpTool[] = [
 					"This is a preview. To purge it, call purge_trash_entry again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return deprecatedIdCaveat(
-				await callEngine(ctx, () => ctx.client.purgeTrashEntry(id, signal)),
-				"entryId",
-				viaLegacyId
-			);
+			return callEngine(ctx, () => ctx.client.purgeTrashEntry(id, signal));
 		},
 	},
 ];

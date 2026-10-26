@@ -16,11 +16,8 @@ import { secretsShape, withholdReorderRows, withheldPointer } from "../withhold.
 import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngine,
-	deprecatedIdCaveat,
-	deprecatedIdInput,
 	engineErrorResult,
 	errorResult,
-	requireRenamedId,
 	requireStr,
 	str,
 	ToolArgError,
@@ -61,11 +58,7 @@ export const MOVE_TOOLS: McpTool[] = [
 			type: z
 				.enum(["collection", "request"])
 				.describe("What is being moved: a collection (folder) or a saved request."),
-			itemId: z
-				.string()
-				.optional()
-				.describe("ID of the collection or request to move. Required."),
-			id: deprecatedIdInput("itemId"),
+			itemId: z.string().describe("ID of the collection or request to move."),
 			parentId: z
 				.string()
 				.nullable()
@@ -91,7 +84,7 @@ export const MOVE_TOOLS: McpTool[] = [
 			if (type !== "collection" && type !== "request") {
 				return errorResult('"type" must be "collection" or "request".', "input");
 			}
-			const { id, viaLegacyId } = requireRenamedId(args, "itemId");
+			const id = requireStr(args, "itemId");
 			// Read off the raw value rather than through `str`, which answers
 			// `undefined` for a non-string: a `position: 0` would then default to
 			// "last" and land the row at the opposite end of the one it named.
@@ -111,14 +104,10 @@ export const MOVE_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			const withhold = secretsShape(ctx, withholdReorderRows);
-			return deprecatedIdCaveat(
-				await callEngine(
-					ctx,
-					() => ctx.client.reorder(batch, signal),
-					(answer) => withhold(presentReorderCollections(answer, ctx))
-				),
-				"itemId",
-				viaLegacyId
+			return callEngine(
+				ctx,
+				() => ctx.client.reorder(batch, signal),
+				(answer) => withhold(presentReorderCollections(answer, ctx))
 			);
 		},
 	},
