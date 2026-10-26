@@ -1857,7 +1857,12 @@ some and `headers` when there are not (`resolveHeaderLines`); Save as example
 stores the folded map.
 
 `redirects` is the redirect responses the send followed (issue #2461): one
-`{ status, statusText, headerLines }` per 3xx, in arrival order. `headers` and
+`{ status, statusText, headerLines, url?, schemeDowngrade? }` per 3xx, in arrival
+order. `url` is the request that hop answered, as libcurl resolved it, with the
+values of credential query parameters blanked engine-side; `schemeDowngrade` is
+true when that request went over `https` and the next over `http` (issue #2949).
+Both are absent on a hop from an engine or a stored trace from before the
+field, and a reader treats absent as unknown. `headers` and
 `headerLines` hold the final response only, so a `Set-Cookie` on the `302` that
 answers a login is readable nowhere else. The live body always carries the key
 (`[]` when nothing was followed, and always for `followRedirects: false`); the
@@ -1872,6 +1877,14 @@ redirects**, one sub-heading per hop that set a cookie ("302 Found, to /home":
 the hop's status, and its `Location` when it sent one) over that hop's table,
 each `Set-Cookie` line parsed on its own. The empty state ("No cookies in
 response") shows only when neither group has a cookie; the tab carries no count.
+A hop with `schemeDowngrade: true` is announced above both groups by a warning
+`Callout` ("Redirected from https to http") listing each such hop as
+"301 Moved Permanently from https://api.example.com/start, to /plain" - the
+resolved `url` when the engine sent one, then the `Location` - whether or not
+the hop set a cookie, because the common downgrade is a bare `301`. The same
+"from <url>" labels the hop's cookie sub-heading. libcurl drops `Authorization`
+and `Cookie` across a scheme, host or port change; an API key sent as a header
+is not withheld, which is what the notice says.
 The rows say what the server sent and never that the jar stored it, because curl
 drops a hop's cookie when the redirect changes origin. `GET /cookies` and the
 Settings cookie card are what the jar holds.

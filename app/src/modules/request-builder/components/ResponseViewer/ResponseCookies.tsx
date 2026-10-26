@@ -18,6 +18,11 @@
  * server sent, never that the jar stored it: a cross-origin hop's cookie is
  * dropped by curl, so "stored" would be a claim this tab cannot back.
  *
+ * A hop that went from `https` to `http` (`schemeDowngrade`, issue #2949) is
+ * announced above both groups whether or not it set a cookie: the common
+ * downgrade is a bare `301` with nothing to list, and this tab is the only
+ * reader of the hops.
+ *
  * Parsing lives in `parse-set-cookie.ts`; the three defects it fixes are
  * documented there. The visible consequence was that `attrs` had always been
  * parsed and never rendered, so Path, HttpOnly, Secure and SameSite - the
@@ -25,7 +30,7 @@
  * away. They have a column now.
  */
 
-import { EmptyState, HeaderValue } from "@/components/shared";
+import { Callout, EmptyState, HeaderValue } from "@/components/shared";
 import {
 	Eyebrow,
 	Table,
@@ -70,10 +75,30 @@ interface HopCookies {
 	cookies: ParsedCookie[];
 }
 
+/**
+ * "302 Found, to /home": what answered and where it sent the client. `url` is
+ * the request the hop answered, resolved by libcurl; the `Location` beside it
+ * may be relative. A hop from an engine before #2949 has no `url`.
+ */
 function hopLabel(hop: RedirectHop): string {
 	const location = hop.headerLines.find((line) => line.name.toLowerCase() === "location");
 	const answer = `${hop.status} ${hop.statusText}`.trim();
-	return location?.value ? `${answer}, to ${location.value}` : answer;
+	const from = hop.url ? `${answer} from ${hop.url}` : answer;
+	return location?.value ? `${from}, to ${location.value}` : from;
+}
+
+function DowngradeNotice({ hops }: { hops: RedirectHop[] }) {
+	return (
+		<Callout severity="warning" title="Redirected from https to http">
+			The next request went out in clear text. Authorization and Cookie are withheld on this
+			change; an API key sent as a header is not.
+			<ul className="mt-1.5 space-y-0.5 font-mono break-all">
+				{hops.map((hop, i) => (
+					<li key={i}>{hopLabel(hop)}</li>
+				))}
+			</ul>
+		</Callout>
+	);
 }
 
 /** The hops that set a cookie, in the order they arrived; a hop that set none has nothing to list. */
@@ -128,8 +153,10 @@ function CookieTable({ cookies }: { cookies: ParsedCookie[] }) {
 export default function ResponseCookies({ headers, headerLines, redirects }: ResponseCookiesProps) {
 	const cookies = headerLines ? cookiesFromLines(headerLines) : cookiesFromFolded(headers);
 	const hops = hopsWithCookies(redirects);
+	const downgrades = (redirects ?? []).filter((hop) => hop.schemeDowngrade === true);
+	const noCookies = cookies.length === 0 && hops.length === 0;
 
-	if (cookies.length === 0 && hops.length === 0) {
+	if (noCookies && downgrades.length === 0) {
 		return <EmptyState variant="inline" title="No cookies in response" />;
 	}
 
@@ -151,6 +178,8 @@ export default function ResponseCookies({ headers, headerLines, redirects }: Res
 		 * hover.
 		 */
 		<div className="p-4 overflow-auto h-full space-y-6">
+			{downgrades.length > 0 && <DowngradeNotice hops={downgrades} />}
+			{noCookies && <EmptyState variant="inline" title="No cookies in response" />}
 			{cookies.length > 0 && (
 				<section className="space-y-2">
 					{grouped && <Eyebrow>Set by this response</Eyebrow>}

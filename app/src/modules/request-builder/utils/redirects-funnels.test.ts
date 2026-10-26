@@ -29,8 +29,16 @@ const HOPS: RedirectHop[] = [
 			{ name: "Set-Cookie", value: "hop=1; Path=/" },
 			{ name: "Location", value: "/next" },
 		],
+		url: "https://api.example.com/start?token=",
+		schemeDowngrade: true,
 	},
-	{ status: 301, statusText: "Moved Permanently", headerLines: [] },
+	{
+		status: 301,
+		statusText: "Moved Permanently",
+		headerLines: [],
+		url: "http://api.example.com/next",
+		schemeDowngrade: false,
+	},
 ];
 
 const executeResult = (node: Record<string, unknown> = {}): SanityResult =>
@@ -69,6 +77,11 @@ describe("fixture guard", () => {
 	it("holds hops that carry a cookie, so parity compares something", () => {
 		expect(HOPS.length).toBeGreaterThan(0);
 		expect(HOPS[0].headerLines.some((l) => l.name === "Set-Cookie")).toBe(true);
+	});
+
+	it("holds both values of the downgrade flag and a url on every hop (#2949)", () => {
+		expect(HOPS.map((h) => h.schemeDowngrade)).toEqual([true, false]);
+		expect(HOPS.every((h) => !!h.url)).toBe(true);
 	});
 });
 

@@ -2308,11 +2308,20 @@ export interface HeaderLine {
  * `headerLines` of the answer hold the last hop only, so a `Set-Cookie` or
  * `Location` here is readable nowhere else. It reports what the server sent,
  * not what the cookie jar kept.
+ *
+ * `url` and `schemeDowngrade` are issue #2949, and absent on a hop from an
+ * engine or a stored trace from before it. `url` is the request the hop
+ * answered as libcurl resolved it (a relative `Location` already joined), with
+ * the values of credential query parameters blanked by the engine; `""` when
+ * libcurl reported none. `schemeDowngrade` is true when that request went over
+ * `https` and the next over `http`.
  */
 export interface RedirectHop {
 	status: number;
 	statusText: string;
 	headerLines: HeaderLine[];
+	url?: string;
+	schemeDowngrade?: boolean;
 }
 
 export interface HttpResponse {
