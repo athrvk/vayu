@@ -6,7 +6,7 @@
  */
 
 import { formatNumber } from "@/lib/format-number";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, Clock, Pin } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
 import { ApiError } from "@/services";
@@ -103,7 +103,12 @@ export default function HistoryList() {
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
 
-	const navigateToRunDetail = (runId: string) => openTab({ type: "run", entityId: runId });
+	// The row-handler props below are stable on purpose: `RunItem` is memoised, and
+	// one fresh function per render would make every row re-render anyway.
+	const navigateToRunDetail = useCallback(
+		(runId: string) => openTab({ type: "run", entityId: runId }),
+		[openTab]
+	);
 	const navigateToHistory = () => activateDrawerView("history");
 
 	// Debounce the search box into the server-side `q` param so a search covers
@@ -132,7 +137,8 @@ export default function HistoryList() {
 		filterStatus === "all" ? undefined : filterStatus
 	);
 	const deleteRunMutation = useDeleteRunMutation();
-	const setBaselineMutation = useSetRunBaselineMutation();
+	// `mutateAsync` is stable across renders; the mutation object is not.
+	const { mutateAsync: setBaseline } = useSetRunBaselineMutation();
 	const showToast = useToastStore((s) => s.showToast);
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -235,38 +241,39 @@ export default function HistoryList() {
 		.filter(Boolean)
 		.join(" ");
 
-	const handleDeleteClick = (runId: string, event?: React.MouseEvent) => {
+	const handleDeleteClick = useCallback((runId: string, event?: React.MouseEvent) => {
 		// Absent when the row's menu is what asked: a menu selection is not a
 		// click on the card behind it, so there is nothing to stop.
 		event?.stopPropagation();
 		setDeleteConfirmRunId(runId);
-	};
+	}, []);
 
 	/**
 	 * Pin or unpin without a confirmation step: unlike a delete, both
 	 * directions are one click away from being undone, and the pin is visible
 	 * on the row either way.
 	 */
-	const handleToggleBaseline = async (
-		runId: string,
-		baseline: boolean,
-		event?: React.MouseEvent
-	) => {
-		event?.stopPropagation();
-		setPinningId(runId);
-		try {
-			await setBaselineMutation.mutateAsync({ runId, baseline });
-		} catch {
-			// Same reason the delete path toasts: a silent rejection leaves the
-			// row exactly as it was, which reads as the click not registering.
-			showToast(
-				baseline ? "Couldn't pin this run as the baseline." : "Couldn't unpin this run.",
-				"error"
-			);
-		} finally {
-			setPinningId(null);
-		}
-	};
+	const handleToggleBaseline = useCallback(
+		async (runId: string, baseline: boolean, event?: React.MouseEvent) => {
+			event?.stopPropagation();
+			setPinningId(runId);
+			try {
+				await setBaseline({ runId, baseline });
+			} catch {
+				// Same reason the delete path toasts: a silent rejection leaves the
+				// row exactly as it was, which reads as the click not registering.
+				showToast(
+					baseline
+						? "Couldn't pin this run as the baseline."
+						: "Couldn't unpin this run.",
+					"error"
+				);
+			} finally {
+				setPinningId(null);
+			}
+		},
+		[setBaseline, showToast]
+	);
 
 	const handleConfirmDelete = async () => {
 		if (!deleteConfirmRunId) return;
@@ -510,7 +517,11 @@ export default function HistoryList() {
 
 						{!isLoading &&
 							runGroups.map((group) => (
-								<div key={group.runs[0]?.id ?? group.label} className="space-y-1">
+								// Keyed by the day, not by its first run: a run landing at
+								// the head of "Today" would change the key and remount every
+								// row of the group, memoised or not. A day is one contiguous
+								// group in either sort, so the label is unique.
+								<div key={group.label} className="space-y-1">
 									{/*
 									 * The day-group header replaces the per-row relative
 									 * timestamp ("8h ago" repeated down a page of same-day
