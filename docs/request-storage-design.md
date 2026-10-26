@@ -225,9 +225,10 @@ resolution happens on the way in or out, because it records what a server
 answered rather than what a client should send. `order` is part of the contract -
 a mock server serves the first example of a matched request.
 
-Reached through `GET /requests/:id/examples`, written today only by import
-(nested on the request item of `POST /import/apply`, so the whole tree lands in
-one transaction), and shown read-only in the request builder's **Examples** tab.
+Reached through `GET /requests/:id/examples`. Written by import (nested on the
+request item of `POST /import/apply`, so the whole tree lands in one transaction)
+or by **Save as example** on a response. The request builder's **Examples** tab
+lists them and can remove one; an example is never edited in place.
 Deleting the request - or the collection above it - takes its examples with it,
 in the sense the next section describes: they stay on the row while the request
 is in the trash, unreachable because every read of them checks the owner first,
