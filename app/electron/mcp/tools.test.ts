@@ -2042,56 +2042,18 @@ describe("trash tools", () => {
 		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
 	});
 
-	test("restore_trash_entry answers the deprecated `id` and says to send `entryId`", async () => {
-		const client = fakeClient({
-			restoreTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, restored: true }),
-		});
-		const ctx = ctxWith(client, { allowWrites: true });
-		const legacy = await dispatchTool("restore_trash_entry", { id: "col_9" }, ctx);
-		expect(legacy.isError).toBeFalsy();
-		expect(client.restoreTrashEntry).toHaveBeenCalledWith("col_9", undefined);
-		expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
-			/Deprecated.*"entryId".*#2962/s
-		);
-		// The named parameter carries no note.
-		const named = await dispatchTool("restore_trash_entry", { entryId: "col_9" }, ctx);
-		expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
-	});
-
-	test("restore_trash_entry and purge_trash_entry name `entryId` when the id is missing", async () => {
+	test("restore_trash_entry and purge_trash_entry name `entryId` when the id is missing, bare `id` or not", async () => {
 		const client = fakeClient();
 		const ctx = ctxWith(client, { allowWrites: true });
 		for (const tool of ["restore_trash_entry", "purge_trash_entry"]) {
-			const res = await dispatchTool(tool, {}, ctx);
-			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toBe('"entryId" is required.');
+			for (const args of [{}, { id: "col_9", confirmed: true }]) {
+				const res = await dispatchTool(tool, args, ctx);
+				expect(res.isError, tool).toBe(true);
+				expect(firstText(res), tool).toBe('"entryId" is required.');
+			}
 		}
 		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
-	});
-
-	test("purge_trash_entry answers the deprecated `id` and says to send `entryId`", async () => {
-		const client = fakeClient({
-			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
-			purgeTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, purged: true }),
-		});
-		const ctx = ctxWith(client, { allowWrites: true });
-		const legacy = await dispatchTool(
-			"purge_trash_entry",
-			{ id: "col_9", confirmed: true },
-			ctx
-		);
-		expect(legacy.isError).toBeFalsy();
-		expect(client.purgeTrashEntry).toHaveBeenCalledWith("col_9", undefined);
-		expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
-			/Deprecated.*"entryId".*#2962/s
-		);
-		const named = await dispatchTool(
-			"purge_trash_entry",
-			{ entryId: "col_9", confirmed: true },
-			ctx
-		);
-		expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
 	});
 
 	test("purge_trash_entry previews the entry's name and counts, and purges nothing", async () => {
@@ -2964,34 +2926,14 @@ describe("document CRUD parity", () => {
 			});
 		});
 
-		test("move_item answers the deprecated `id` and says to send `itemId`", async () => {
-			const client = moveClient();
-			const ctx = ctxWith(client, { allowWrites: true });
-			const legacy = await dispatchTool(
-				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2" },
-				ctx
-			);
-			expect(legacy.isError).toBeFalsy();
-			expect(callArgs(client.reorder)[0]).toEqual({
-				moves: [{ type: "request", id: "req_1", order: 2, collectionId: "col_2" }],
-			});
-			expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
-				/Deprecated.*"itemId".*#2962/s
-			);
-			const named = await dispatchTool(
-				"move_item",
-				{ type: "request", itemId: "req_1", collectionId: "col_2" },
-				ctx
-			);
-			expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
-		});
-
-		test("move_item names `itemId` when the id is missing", async () => {
+		test.each([
+			["absent", { type: "request", collectionId: "col_2" }],
+			["sent as the bare `id`", { type: "request", id: "req_1", collectionId: "col_2" }],
+		])("move_item names `itemId` when the id is %s", async (_label, args) => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "request", collectionId: "col_2" },
+				args,
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBe(true);

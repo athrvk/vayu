@@ -109,7 +109,8 @@
  * #2446's renamed `entryId` / `itemId` arguments and their deprecated `id`
  * aliases (three write tools) took the writes-on rows to 214,955 / 210,558 B;
  * those two caps went to 215,300 / 210,900 and the writes-off rows are
- * untouched.
+ * untouched. #2962 removed the aliases again; the caps only bound growth and
+ * stay where they were.
  *
  * #2446's `offset` and `pagination` envelope on `get_mock_activity` (its output
  * schema was a bare `{data}` list) and the `limit` ceiling on
