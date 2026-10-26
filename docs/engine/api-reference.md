@@ -9027,7 +9027,9 @@ is not an outcome: a step that answered 4xx or 5xx with every assertion holding
 is `passed`, and the summary's `failedRequests` counts it. The four outcomes
 are disjoint and sum to `stepsExecuted`, a skipped step included, and a
 [scenario load run](#scenario-load-runs) reports them under the same
-arithmetic and the same definitions, a thrown inline script included (#2947).
+arithmetic and the same outcome for a no-response step and a thrown inline
+script (#2947); a step's flow control (`control.switch`, a jump the run cannot
+honour) is read differently on the two (#2974).
 What differs there is the effect on the iteration: only a step that got no
 response ends it, so a load run's `errored` is not the sum of its steps'
 `noResponse`, and `iterationsAbandoned` is its iteration-abort count. A transport failure
