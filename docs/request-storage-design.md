@@ -225,9 +225,10 @@ resolution happens on the way in or out, because it records what a server
 answered rather than what a client should send. `order` is part of the contract -
 a mock server serves the first example of a matched request.
 
-Reached through `GET /requests/:id/examples`, written today only by import
-(nested on the request item of `POST /import/apply`, so the whole tree lands in
-one transaction), and shown read-only in the request builder's **Examples** tab.
+Reached through `GET /requests/:id/examples`. Written by import (nested on the
+request item of `POST /import/apply`, so the whole tree lands in one transaction)
+or by **Save as example** on a response. The request builder's **Examples** tab
+lists them and can remove one; an example is never edited in place.
 Deleting the request - or the collection above it - takes its examples with it,
 in the sense the next section describes: they stay on the row while the request
 is in the trash, unreachable because every read of them checks the owner first,
@@ -297,6 +298,19 @@ where restoring one puts back a request the current document cannot explain. A
 caller that wants those rows recoverable leaves them out of the sync payload and
 deletes them with `DELETE /requests/:id`, which is soft like every other delete
 a person makes.
+
+**An environment goes to the same trash** (#2970), by the simplest form of the
+same mechanism. `DELETE /environments/:id` stamps `deleted_at` on its one row
+and every read (`GET /environments`, composition, a run's variable scopes, the
+Postman export) filters the stamp out, so an `environmentId` naming a trashed
+environment resolves as one naming nothing. It owns no rows, so there is no
+cohort to keep and no subtree to walk; it hangs under no collection, so it is
+always a trash root and its restore can never be refused or re-parented. The one
+field a delete rewrites is `is_active`: a trashed environment gives up the
+active slot in the same write, so the at-most-one-active rule never has to
+reason about a row nobody can see, and a restore brings it back inactive rather
+than taking the slot from whatever was activated since. A purge, explicit or by
+retention, removes the row.
 
 ### 6. Response Viewer
 

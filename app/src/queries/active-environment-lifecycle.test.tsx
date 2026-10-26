@@ -110,6 +110,30 @@ describe("deleting an environment clears it from the session", () => {
 	});
 });
 
+describe("deleting an environment refreshes the Trash", () => {
+	it("invalidates the trash list and nothing else, since the delete is soft (#2970)", async () => {
+		// The engine stamps the row and the Trash lists it, so an open Trash view
+		// has to refetch. The environment list and detail are patched and
+		// removed in place, not invalidated. Mutation check: drop the trash
+		// invalidation from the delete's `onSuccess` and this fails.
+		deleteEnvironment.mockResolvedValue(undefined);
+		const client = makeClient();
+		const invalidated: string[] = [];
+		const real = client.invalidateQueries.bind(client);
+		vi.spyOn(client, "invalidateQueries").mockImplementation((filters) => {
+			invalidated.push(((filters?.queryKey ?? []) as string[]).join("/"));
+			return real(filters);
+		});
+
+		const { result } = renderHook(() => useDeleteEnvironmentMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync("e1");
+
+		expect(invalidated).toEqual([queryKeys.trash.all.join("/")]);
+	});
+});
+
 describe("rehydrate validation", () => {
 	it("clears a stored id the engine's environment list does not contain", async () => {
 		useSessionStore.setState({ activeEnvironmentId: "gone" });

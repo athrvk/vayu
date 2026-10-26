@@ -7,8 +7,8 @@
 
 /**
  * @file tests/trash_test.cpp
- * @brief Soft delete for collections and requests, and the three trash routes
- *        on top of it (issue #988).
+ * @brief Soft delete for collections, requests (issue #988) and environments
+ *        (#2970), and the three trash routes on top of it.
  *
  * What is pinned here is what a soft delete can silently get wrong, and each of
  * these fails on a plausible implementation of the same feature:
@@ -53,6 +53,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/list_page.hpp"
+#include "vayu/utils/json.hpp"
 
 using nlohmann::json;
 
@@ -73,6 +74,14 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// Defined in environments.cpp / postman_export.cpp.
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+delete_environment_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json>
+export_postman_environment_response (vayu::db::Database& db, const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace vayu::db {
@@ -147,6 +156,31 @@ class TrashTest : public ::testing::Test {
         e.created_at = 1;
         e.updated_at = 1;
         db_->save_request_example (e);
+    }
+
+    void make_environment (const std::string& id,
+    const std::string& variables = "{}",
+    bool is_active               = false) {
+        Environment env;
+        env.id          = id;
+        env.name        = "Env " + id;
+        env.description = "staging";
+        env.variables   = variables;
+        env.is_active   = is_active;
+        env.created_at  = 1;
+        env.updated_at  = 1;
+        db_->save_environment (env);
+    }
+
+    /// What `GET /environments` writes for @p id, or "" when it lists no such
+    /// row - the text a restore must give back unchanged.
+    std::string served_environment (const std::string& id) {
+        for (const auto& env : db_->get_environments ()) {
+            if (env.id == id) {
+                return vayu::json::serialize (env).dump ();
+            }
+        }
+        return {};
     }
 
     /// The trash entry for @p id, so an assertion can name the row it means
@@ -828,6 +862,206 @@ TEST_F (TrashTest, RetentionIsConfiguredAndSeededAtThirtyDays) {
     db_->save_config_entry (*seeded);
     EXPECT_EQ (db_->purge_expired_trash_configured (), 0);
     EXPECT_EQ (db_->get_trash ().size (), 1U);
+}
+
+// ---------------------------------------------------------------------------
+// Environments (#2970): no owner, no cohort, no re-parent - and never active
+// while in the trash
+// ---------------------------------------------------------------------------
+
+/// How many `environments` rows carry @p id, stamped ones included - read past
+/// every filter `Database` applies, so a purge is seen to remove the row.
+int64_t environment_rows (const std::string& id) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
+        sqlite3_close (handle);
+        ADD_FAILURE () << "could not open " << TEST_DB_PATH;
+        return -1;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    int64_t count      = -1;
+    if (sqlite3_prepare_v2 (handle, "SELECT COUNT(*) FROM environments WHERE id = ?1",
+        -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text (stmt, 1, id.c_str (), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step (stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int64 (stmt, 0);
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return count;
+}
+
+// Mutation check: drop the `is_null (deleted_at)` filter from
+// `get_environment` and every read below finds the row again.
+TEST_F (TrashTest, ADeletedEnvironmentIsAbsentFromEveryReadSurface) {
+    make_environment ("env_1", R"({"host":{"value":"a.test","enabled":true}})");
+    make_environment ("env_2");
+
+    auto [deleted_status, deleted_body] =
+    routes::delete_environment_response (*db_, "env_1");
+    ASSERT_EQ (deleted_status, 200) << deleted_body.dump ();
+    EXPECT_EQ (deleted_body, (json{ { "success", true } }));
+
+    EXPECT_FALSE (db_->get_environment ("env_1").has_value ());
+    EXPECT_EQ (served_environment ("env_1"), "");
+    EXPECT_EQ (db_->get_environments ().size (), 1U)
+    << "the live one is still listed";
+    EXPECT_EQ (environment_rows ("env_1"), 1) << "stamped, not removed";
+
+    auto [put_status, put_body] =
+    routes::update_environment_response (*db_, "env_1", json{ { "name", "Back" } });
+    EXPECT_EQ (put_status, 404);
+    EXPECT_EQ (error_field (put_body, "message"), "Environment not found");
+    auto [again_status, again_body] = routes::delete_environment_response (*db_, "env_1");
+    EXPECT_EQ (again_status, 404) << "a second delete finds nothing live";
+    EXPECT_EQ (error_field (again_body, "message"), "Environment not found");
+    auto [export_status, export_body] = routes::export_postman_environment_response (
+    *db_, json{ { "environmentId", "env_1" } });
+    EXPECT_EQ (export_status, 404);
+    EXPECT_EQ (error_field (export_body, "message"), "Environment not found");
+}
+
+TEST_F (TrashTest, ADeletedEnvironmentIsARootCountingItsVariables) {
+    // Two variables as every reader sees them; the bare string is no variable
+    // to `parse_variables`, so it is not counted either.
+    make_environment ("env_1",
+    R"({"host":{"value":"a.test","enabled":true},"token":{"value":"t","enabled":false},"junk":"bare"})");
+    db_->delete_environment ("env_1");
+
+    auto entry = entry_for ("env_1");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->kind, "environment");
+    EXPECT_EQ (entry->name, "Env env_1");
+    EXPECT_GT (entry->deleted_at, 0);
+    EXPECT_FALSE (entry->parent_id.has_value ());
+    EXPECT_EQ (entry->collections, 0);
+    EXPECT_EQ (entry->requests, 0);
+    ASSERT_HAS_VALUE (entry->variables);
+    EXPECT_EQ (*entry->variables, 2);
+}
+
+// `variables` is an environment's alone: a collection or request entry carries
+// no such key, not a 0 a client would render as "0 variables".
+TEST_F (TrashTest, TheListRouteCarriesAnEnvironmentsVariablesAndOnlyThere) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_collection ("col_2", "Other");
+    make_environment ("env_1", R"({"host":{"value":"a.test","enabled":true}})");
+    db_->delete_request ("req_1");
+    db_->delete_collection ("col_2");
+    db_->delete_environment ("env_1");
+
+    const auto body = routes::trash_list_body (*db_);
+    ASSERT_EQ (body["total"], 3);
+    int environments = 0;
+    for (const auto& item : body["items"]) {
+        if (item["kind"] == "environment") {
+            ++environments;
+            EXPECT_EQ (item["id"], "env_1");
+            EXPECT_EQ (item["name"], "Env env_1");
+            EXPECT_TRUE (item["parentId"].is_null ());
+            EXPECT_EQ (item["collections"], 0);
+            EXPECT_EQ (item["requests"], 0);
+            EXPECT_EQ (item["variables"], 1);
+            EXPECT_GT (item["deletedAt"].get<int64_t> (), 0);
+        } else {
+            EXPECT_FALSE (item.contains ("variables")) << item.dump ();
+        }
+    }
+    EXPECT_EQ (environments, 1);
+}
+
+// Mutation check: make `delete_environment` remove the row again and the
+// restore is a 404.
+TEST_F (TrashTest, RestoringAnEnvironmentServesItByteForByteAsBefore) {
+    make_environment ("env_1",
+    R"({"host":{"value":"a.test","enabled":true,"secret":false,"type":"string","createdAt":7}})");
+    const std::string before = served_environment ("env_1");
+    ASSERT_NE (before, "");
+    db_->delete_environment ("env_1");
+
+    auto [status, body] = routes::trash_restore_response (*db_, "env_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["kind"], "environment");
+    EXPECT_EQ (body["variables"], 1);
+    EXPECT_TRUE (body["restored"].get<bool> ());
+    EXPECT_FALSE (body["reparentedToRoot"].get<bool> ());
+
+    EXPECT_EQ (served_environment ("env_1"), before);
+    EXPECT_FALSE (entry_for ("env_1").has_value ()) << "it has left the trash";
+}
+
+TEST_F (TrashTest, TrashingTheActiveEnvironmentClearsItAndRestoreDoesNotTakeItBack) {
+    make_environment ("env_dev", "{}", /*is_active=*/true);
+    make_environment ("env_prod");
+    db_->delete_environment ("env_dev");
+
+    const auto active_ids = [this] {
+        std::vector<std::string> ids;
+        for (const auto& env : db_->get_environments ()) {
+            if (env.is_active) {
+                ids.push_back (env.id);
+            }
+        }
+        return ids;
+    };
+    EXPECT_TRUE (active_ids ().empty ())
+    << "a trashed environment is never active";
+
+    make_environment ("env_prod", "{}", /*is_active=*/true);
+    EXPECT_EQ (active_ids (), std::vector<std::string>{ "env_prod" });
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("env_dev"));
+    auto restored = db_->get_environment ("env_dev");
+    ASSERT_HAS_VALUE (restored);
+    EXPECT_FALSE (restored->is_active)
+    << "activating it is the client's choice";
+    EXPECT_EQ (active_ids (), std::vector<std::string>{ "env_prod" });
+}
+
+TEST_F (TrashTest, PurgingAnEnvironmentRemovesTheRow) {
+    make_environment ("env_1", R"({"host":{"value":"a.test","enabled":true}})");
+    db_->delete_environment ("env_1");
+
+    auto [status, body] = routes::trash_purge_response (*db_, "env_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["kind"], "environment");
+    EXPECT_EQ (body["variables"], 1);
+    EXPECT_TRUE (body["purged"].get<bool> ());
+
+    EXPECT_EQ (environment_rows ("env_1"), 0);
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    auto [restore_status, restore_body] = routes::trash_restore_response (*db_, "env_1");
+    EXPECT_EQ (restore_status, 404) << "nothing left to restore";
+}
+
+TEST_F (TrashTest, RestoringOrPurgingALiveEnvironmentIsA404) {
+    make_environment ("env_1");
+
+    EXPECT_EQ (routes::trash_restore_response (*db_, "env_1").first, 404);
+    EXPECT_EQ (routes::trash_purge_response (*db_, "env_1").first, 404);
+    EXPECT_EQ (environment_rows ("env_1"), 1)
+    << "a mistyped id destroys nothing";
+    EXPECT_TRUE (db_->get_environment ("env_1").has_value ());
+}
+
+// Mutation check: drop the environment branch from `purge_trash_entry_locked`
+// and the sweep throws on the first expired environment.
+TEST_F (TrashTest, RetentionPurgesAnEnvironmentPastTheWindowAndLeavesALiveOne) {
+    make_environment ("env_trashed");
+    make_environment ("env_live");
+    db_->delete_environment ("env_trashed");
+    auto entry = entry_for ("env_trashed");
+    ASSERT_HAS_VALUE (entry);
+
+    EXPECT_EQ (db_->purge_expired_trash (30, entry->deleted_at + (29 * DAY_MS)), 0);
+    EXPECT_EQ (environment_rows ("env_trashed"), 1);
+
+    EXPECT_EQ (db_->purge_expired_trash (30, entry->deleted_at + (31 * DAY_MS)), 1);
+    EXPECT_EQ (environment_rows ("env_trashed"), 0);
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    EXPECT_TRUE (db_->get_environment ("env_live").has_value ());
 }
 
 } // namespace

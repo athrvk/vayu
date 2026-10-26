@@ -369,7 +369,9 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("variables", &Environment::variables), // JSON: {key: {value, enabled}}
     make_column ("is_active", &Environment::is_active),
     make_column ("created_at", &Environment::created_at),
-    make_column ("updated_at", &Environment::updated_at)),
+    make_column ("updated_at", &Environment::updated_at),
+    // Soft delete (#2970), the `collections.deleted_at` shape: NULL is live.
+    make_column ("deleted_at", &Environment::deleted_at)),
 
     // ─────────────── EXECUTION ENGINE TABLES ───────────────
 

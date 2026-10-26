@@ -724,16 +724,19 @@ apiService.restoreTrashEntry(id): Promise<RestoreTrashResponse> // POST   /trash
 apiService.purgeTrashEntry(id): Promise<PurgeTrashResponse>     // DELETE /trash/:id
 ```
 
-What `deleteCollection` and `deleteRequest` now do is a soft delete (issue
-#988): the engine stamps the row instead of removing it, and these three read
-that stamp back. No transformer on any of the three - a trash entry is the
-engine's own summary of a deleted row (a name, a stamp and two counts), not a
-stored record the app reshapes, so the wire shape is the only shape.
+What `deleteCollection`, `deleteRequest` and `deleteEnvironment` (#2970) now do
+is a soft delete (issue #988): the engine stamps the row instead of removing
+it, and these three read that stamp back. No transformer on any of the three -
+a trash entry is the engine's own summary of a deleted row (a name, a stamp and
+its counts), not a stored record the app reshapes, so the wire shape is the
+only shape.
 
 `listTrash` returns **roots only** - the row a user actually asked to delete,
 never a descendant the same cascade took with it. A deleted collection's whole
 subtree is represented by that one root entry, with `collections` / `requests`
-counting what that delete took along.
+counting what that delete took along. `kind` is `"collection"`, `"request"` or
+`"environment"`; an environment entry is always a root, counts `0` for both,
+and alone carries `variables`, how many variables it holds.
 
 `restoreTrashEntry` puts one deleted root back, with everything the same
 delete took, and answers with the entry plus `restored: true` and
@@ -743,7 +746,9 @@ instead. It rejects with a `404` for an id the trash does not hold (a live row,
 or one already purged) and a `409` for a request whose collection is itself
 deleted or gone - a request has no root to land on the way a collection does,
 so the engine's message names the collection to restore first; surface
-`ApiError.message` rather than inventing wording for it.
+`ApiError.message` rather than inventing wording for it. A restored environment
+comes back with every variable but inactive: the delete cleared its active flag
+and the restore does not set it again.
 
 `purgeTrashEntry` is the hard purge the soft delete deferred - it destroys the
 row for good, with its whole subtree, and there is no undo. It answers with the
@@ -788,8 +793,13 @@ apiService.listEnvironments(): Promise<Environment[]>
 apiService.getEnvironment(id): Promise<Environment>
 apiService.createEnvironment(data): Promise<Environment> // POST /environments
 apiService.updateEnvironment(data): Promise<Environment> // PUT  /environments/:id
-apiService.deleteEnvironment(id): Promise<void>
+apiService.deleteEnvironment(id): Promise<void>         // DELETE /environments/:id
 ```
+
+`deleteEnvironment` is a soft delete (#2970): the engine moves the environment
+to the Trash and clears its active flag in the same write, and every
+environment read stops returning it. `restoreTrashEntry` (above) brings it
+back, inactive.
 
 #### Global Variables
 

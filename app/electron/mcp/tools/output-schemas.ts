@@ -235,7 +235,7 @@ export const exportDocumentSchema = z.looseObject({
 	contentBytes: optNum,
 });
 
-/** `list_trash`: a root's id and whether it is a collection or a request. */
+/** `list_trash`: a root's id and its kind - a collection, a request or an environment. */
 export const trashPageSchema = pagedEnvelopeSchema(z.looseObject({ id: optStr, kind: optStr }));
 
 export const requestExamplesSchema = z.looseObject({

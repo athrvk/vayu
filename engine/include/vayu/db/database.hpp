@@ -66,7 +66,9 @@ namespace vayu::db {
  *     back;
  * 8 - `collections.spec_file` and `collections.data_file`, the files a
  *     collection's Spec and Data tabs are bound to (#2765);
- * 9 - `requests.timeout_ms`, a request's own timeout (#2937).
+ * 9 - `requests.timeout_ms`, a request's own timeout (#2937);
+ *     `environments.deleted_at`, the environment trash (#2970, folded into
+ *     the same unreleased version).
  */
 inline constexpr int SCHEMA_VERSION = 9;
 
@@ -175,22 +177,29 @@ struct DesignResultOutcome {
  */
 struct TrashEntry {
     std::string id;
-    /// "collection" or "request" - the two tables the trash spans, so a client
-    /// knows which shape it is looking at without a second read.
+    /// "collection", "request" or "environment" - the three tables the trash
+    /// spans, so a client knows which shape it is looking at without a second
+    /// read. Every dispatch on it names all three and throws on anything else.
     std::string kind;
     std::string name;
     /// When the delete ran, in Unix ms. Also the cohort key - see
     /// `Collection::deleted_at`.
     int64_t deleted_at = 0;
     /// The collection this row hung under: a collection's parent (absent at the
-    /// tree root), a request's owning collection (always present).
+    /// tree root), a request's owning collection (always present). Absent for
+    /// an environment, which hangs under nothing.
     std::optional<std::string> parent_id;
     /// Descendants *this delete* took with it - the cohort, and therefore
     /// exactly what a restore puts back. A purge may take more (a row an
     /// earlier delete left inside the same subtree), which is the one place
-    /// these counts are a floor rather than the whole. Both 0 for a request.
+    /// these counts are a floor rather than the whole. Both 0 for a request
+    /// and an environment.
     int64_t collections = 0;
     int64_t requests    = 0;
+    /// How many variables an environment holds, as `parse_variables` reads its
+    /// blob. Set for an environment only: absent, not 0, for the other kinds,
+    /// and the wire omits the key the same way.
+    std::optional<int64_t> variables;
 };
 
 /// What a restore or a purge acted on - the entry as it was, plus whether the
@@ -433,6 +442,7 @@ class Database {
 
     /// Every deleted root, newest first. A root is a stamped row whose owner is
     /// *not* stamped: the thing the user deleted, never what its cascade took.
+    /// A deleted environment has no owner, so it is always a root (#2970).
     std::vector<TrashEntry> get_trash ();
 
     /**
@@ -446,6 +456,10 @@ class Database {
      * A collection whose parent is gone or itself deleted comes back at the tree
      * root (`parent_id` cleared) - the rule the issue names, and the only place
      * a restore rewrites anything but the stamp.
+     *
+     * An environment comes back unconditionally and inactive (#2970): it has
+     * no owner to check, and its delete cleared `is_active`, which a restore
+     * does not set again - activating it is the client's choice to make.
      */
     std::expected<TrashOutcome, RestoreFailure> restore_deleted (const std::string& id);
 
@@ -686,10 +700,14 @@ class Database {
      */
     void with_lock (const std::function<void ()>& fn); // database.cpp
 
-    // db_environments.cpp
+    // db_environments.cpp. The reads see live rows only (#2970): every
+    // composition, script scope and export reaches an environment through
+    // `get_environment`, so a trashed one is missing to all of them at once.
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();
     std::optional<Environment> get_environment (const std::string& id);
+    /// Stamps the environment as deleted and clears `is_active` (#2970); the
+    /// row stays for `GET /trash` until a restore or a purge.
     void delete_environment (const std::string& id);
 
     /**
@@ -1274,8 +1292,9 @@ class Database {
     SubtreeRows rows = SubtreeRows::All); // db_collections.cpp
 
     /**
-     * @brief Destroy a collection subtree or a single request outright -
-     *        examples, requests, then collections, deepest first.
+     * @brief Destroy a collection subtree, a single request or a single
+     *        environment outright - examples, requests, then collections,
+     *        deepest first.
      *
      * The hard cascade soft delete replaced (issue #988), kept as the one
      * definition purge and retention both reach for. A collection purge takes
@@ -1284,8 +1303,18 @@ class Database {
      * restore applies to a collection whose parent is gone. The caller must
      * already hold the DB mutex.
      */
-    void purge_collection_locked (const std::string& id); // db_collections.cpp
-    void purge_request_locked (const std::string& id);    // db_requests.cpp
+    void purge_collection_locked (const std::string& id);  // db_collections.cpp
+    void purge_request_locked (const std::string& id);     // db_requests.cpp
+    void purge_environment_locked (const std::string& id); // db_environments.cpp
+
+    /**
+     * @brief Destroy the trash entry @p entry names, by its kind - the one
+     *        dispatch an explicit purge and the retention sweep share, so a
+     *        kind the trash gains cannot be purged by one and missed by the
+     *        other. Throws `std::logic_error` on a kind it does not know. The
+     *        caller must already hold the DB mutex.
+     */
+    void purge_trash_entry_locked (const TrashEntry& entry); // db_collections.cpp
 
     /**
      * @brief The trash entry for one deleted row, or nothing when @p id names
@@ -1311,19 +1340,23 @@ class Database {
     bool owner_is_absent_locked (const std::optional<std::string>& owner_id); // database.cpp
 
     /**
-     * @brief The two halves of `restore_deleted`, split by what a row can come
-     *        back to: a request needs a live collection and refuses without
-     *        one, a collection re-parents to the tree root instead.
+     * @brief The three shapes of `restore_deleted`, split by what a row can
+     *        come back to: a request needs a live collection and refuses
+     *        without one, a collection re-parents to the tree root instead, and
+     *        an environment needs nothing.
      *
-     * Named steps rather than one function with both shapes inside it (#1033's
+     * Named steps rather than one function with every shape inside it (#1033's
      * rule, and what `readability-function-cognitive-complexity` reports).
-     * Both take an entry `trash_entry_locked` already proved deleted, and both
-     * require the DB mutex.
+     * Each takes an entry `trash_entry_locked` already proved deleted, and each
+     * requires the DB mutex.
      */
-    // Both defined in db_collections.cpp, beside restore_deleted.
+    // The first two are defined in db_collections.cpp, beside restore_deleted.
     std::expected<TrashOutcome, RestoreFailure> restore_request_locked (
     const TrashEntry& entry);
     TrashOutcome restore_collection_locked (const TrashEntry& entry);
+    /// Clears the stamp and nothing else: no owner, no cohort, no re-parent,
+    /// and `is_active` stays false (#2970).
+    TrashOutcome restore_environment_locked (const TrashEntry& entry); // db_environments.cpp
 
     /**
      * @brief Clear `is_active` on every environment except @p keep_id.

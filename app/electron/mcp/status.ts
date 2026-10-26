@@ -41,6 +41,11 @@ export interface McpStatus {
 	enabled: boolean;
 	/** Present only while the server is enabled and failed to start. */
 	error?: McpStartError;
+	/**
+	 * Where an unreadable `mcp-config.json` was kept after Settings replaced it
+	 * (#2433). Independent of `running`: a disabled server still lost its config.
+	 */
+	corruptCopy?: string;
 }
 
 /** The slice of `McpListener` these answers read. */
@@ -86,6 +91,7 @@ export function buildMcpStatus(state: {
 	listener: McpListenerState | null;
 	enabled: boolean;
 	error: McpStartError | null;
+	corruptCopy: string | null;
 }): McpStatus {
 	const running = state.listener?.isRunning() ?? false;
 	const status: McpStatus = {
@@ -94,6 +100,7 @@ export function buildMcpStatus(state: {
 		enabled: state.enabled,
 	};
 	if (state.error && !running) status.error = state.error;
+	if (state.corruptCopy) status.corruptCopy = state.corruptCopy;
 	return status;
 }
 

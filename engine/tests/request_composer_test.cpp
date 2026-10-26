@@ -2043,6 +2043,28 @@ TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
     EXPECT_EQ (payload["url"], "https://x.test/{{missing}}");
 }
 
+// A trashed environment is that same unknown id (#2970): its variables answer
+// nothing until it is restored.
+TEST_F (RequestComposerTest, ATrashedEnvironmentDegradesToAnEmptyScope) {
+    seed_environment ("env_1", R"({"host":{"value":"env.test","enabled":true}})");
+    const json body = { { "request", { { "method", "GET" }, { "url", "https://{{host}}/" } } },
+        { "environmentId", "env_1" } };
+
+    auto [live_status, live] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (live_status, 200) << live.dump ();
+    ASSERT_EQ (live["url"], "https://env.test/");
+
+    db_->delete_environment ("env_1");
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["url"], "https://{{host}}/");
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("env_1"));
+    auto [restored_status, restored] = vayu::http::compose_request_core (*db_, body);
+    ASSERT_EQ (restored_status, 200) << restored.dump ();
+    EXPECT_EQ (restored["url"], "https://env.test/");
+}
+
 } // namespace
 
 // --- URL text by component (issue #2465) -------------------------------------

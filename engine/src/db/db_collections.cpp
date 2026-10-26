@@ -20,6 +20,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -29,6 +30,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/utils/invariant.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
 using namespace sqlite_orm;
@@ -263,7 +265,7 @@ std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
         const auto& collection = collections.front ();
         const int64_t stamp = vayu::utils::invariant_value (collection.deleted_at, STAMPED);
         TrashEntry entry{ collection.id, "collection", collection.name, stamp,
-            collection.parent_id, 0, 0 };
+            collection.parent_id, 0, 0, std::nullopt };
         // The counts are the *cohort's*, not the subtree's: what this delete
         // took is what restoring it puts back, and a row an earlier delete
         // already held is neither.
@@ -286,7 +288,20 @@ std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
         const auto& request = requests.front ();
         return TrashEntry{ request.id, "request", request.name,
             vayu::utils::invariant_value (request.deleted_at, STAMPED),
-            request.collection_id, 0, 0 };
+            request.collection_id, 0, 0, std::nullopt };
+    }
+
+    auto environments = impl_->storage.get_all<Environment> (
+    where (c (&Environment::id) == id && is_not_null (&Environment::deleted_at)));
+    if (!environments.empty ()) {
+        const auto& environment = environments.front ();
+        // Counted through the reader composition uses, so the number is the
+        // variables a restore gives back to every `{{name}}` that names one.
+        const auto variables = static_cast<int64_t> (
+        vayu::json::parse_variables (environment.variables).size ());
+        return TrashEntry{ environment.id, "environment", environment.name,
+            vayu::utils::invariant_value (environment.deleted_at, STAMPED),
+            std::nullopt, 0, 0, variables };
     }
     return std::nullopt;
 }
@@ -327,6 +342,11 @@ std::vector<TrashEntry> Database::get_trash () {
             continue;
         }
         push_root (entries, request.id);
+    }
+    // Nothing owns an environment, so every stamped one is a root.
+    for (const auto& environment_id : impl_->storage.select (
+         &Environment::id, where (is_not_null (&Environment::deleted_at)))) {
+        push_root (entries, environment_id);
     }
 
     // Newest first - what a trash view shows at the top - with `id` as the
@@ -429,9 +449,34 @@ const std::string& id) {
         return std::unexpected (RestoreFailure{
         RestoreRefusal::NotFound, "Nothing in the trash with id '" + id + "'" });
     }
-    return entry->kind == "request" ?
-    restore_request_locked (*entry) :
-    std::expected<TrashOutcome, RestoreFailure>{ restore_collection_locked (*entry) };
+    if (entry->kind == "request") {
+        return restore_request_locked (*entry);
+    }
+    if (entry->kind == "collection") {
+        return restore_collection_locked (*entry);
+    }
+    if (entry->kind == "environment") {
+        return restore_environment_locked (*entry);
+    }
+    throw std::logic_error (
+    "Trash entry '" + id + "' has unknown kind '" + entry->kind + "'");
+}
+
+void Database::purge_trash_entry_locked (const TrashEntry& entry) {
+    if (entry.kind == "collection") {
+        purge_collection_locked (entry.id);
+        return;
+    }
+    if (entry.kind == "request") {
+        purge_request_locked (entry.id);
+        return;
+    }
+    if (entry.kind == "environment") {
+        purge_environment_locked (entry.id);
+        return;
+    }
+    throw std::logic_error (
+    "Trash entry '" + entry.id + "' has unknown kind '" + entry.kind + "'");
 }
 
 std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
@@ -446,11 +491,7 @@ std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
     // read and restorable by nothing, so "the cohort" is the wrong unit here
     // even though it is the right one for a restore. A live collection is not
     // taken; see purge_collection_locked.
-    if (entry->kind == "collection") {
-        purge_collection_locked (id);
-    } else {
-        purge_request_locked (id);
-    }
+    purge_trash_entry_locked (*entry);
     vayu::utils::log_info (
     "db", "Purged item from trash", { { "kind", entry->kind }, { "id", id } });
     return TrashOutcome{ std::move (*entry), false };
@@ -464,29 +505,22 @@ int64_t Database::purge_expired_trash (int retention_days, int64_t now) {
 
     const int64_t cutoff =
     now - (static_cast<int64_t> (retention_days) * 24 * 60 * 60 * 1000);
-    std::vector<std::pair<std::string, std::string>> expired; // (kind, id)
-    for (const auto& entry : get_trash ()) {
+    std::vector<TrashEntry> expired;
+    for (auto& entry : get_trash ()) {
         if (entry.deleted_at <= cutoff) {
-            expired.emplace_back (entry.kind, entry.id);
+            expired.push_back (std::move (entry));
         }
     }
 
     int64_t purged = 0;
-    for (const auto& [kind, id] : expired) {
+    for (const auto& entry : expired) {
         // A root purged as part of an ancestor's subtree is already gone. It
-        // cannot happen to a *root* by construction, but the walk below is what
+        // cannot happen to a *root* by construction, but the re-read is what
         // says so rather than assuming it.
-        if (kind == "collection") {
-            if (impl_->storage.count<Collection> (where (c (&Collection::id) == id)) == 0) {
-                continue;
-            }
-            purge_collection_locked (id);
-        } else {
-            if (impl_->storage.count<Request> (where (c (&Request::id) == id)) == 0) {
-                continue;
-            }
-            purge_request_locked (id);
+        if (!trash_entry_locked (entry.id)) {
+            continue;
         }
+        purge_trash_entry_locked (entry);
         ++purged;
     }
     if (purged > 0) {

@@ -52,7 +52,8 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
-import { useSaveStore, useSessionStore } from "@/stores";
+import { useSaveStore, useSessionStore, useToastStore } from "@/stores";
+import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
 import {
@@ -301,6 +302,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const startSaving = useSaveStore((s) => s.startSaving);
 	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
 	const failSave = useSaveStore((s) => s.failSave);
+	const showToast = useToastStore((s) => s.showToast);
+	const offerUndo = useTrashUndo();
 
 	const [variables, setVariables] = useState<VariableRowData[]>([]);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -702,15 +705,24 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	);
 
 	// Environment-specific handlers
-	const handleDeleteEnvironment = () => {
-		if (type === "environment" && environment) {
-			deleteEnvironmentMutation.mutate(environment.id, {
-				onSuccess: () => {
-					setShowDeleteConfirm(false);
-					setSelectedCategory(null);
-				},
-			});
+	const handleDeleteEnvironment = async () => {
+		if (type !== "environment" || !environment) return;
+		const { id, name } = environment;
+		try {
+			await deleteEnvironmentMutation.mutateAsync(id);
+		} catch (error) {
+			// A toast, not `failSave`: a delete is not an unsaved edit (`save-store.ts`).
+			// The dialog stays open, so the delete can be retried or cancelled.
+			const fallback = "Couldn't delete the environment";
+			showToast(
+				error instanceof Error ? `${fallback} - ${error.message}` : fallback,
+				"error"
+			);
+			return;
 		}
+		setShowDeleteConfirm(false);
+		setSelectedCategory(null);
+		offerUndo(id, name, "environment");
 	};
 
 	const handleSetActiveEnvironment = () => {

@@ -312,6 +312,13 @@ engine's environment list does not contain. That guard keys on the query's
 empty list too, and clearing on that would discard a good selection whenever
 the app started before the engine did.
 
+A delete is soft since #2970 - the environment goes to the Trash - and the id
+stays cleared through a restore. The engine clears `is_active` in the same
+write that stamps the row and a restore clears only the stamp, so a restored
+environment comes back inactive; neither `useRestoreTrashMutation` nor the
+delete's Undo toast writes `activeEnvironmentId`. Making it active again is
+the user's choice, through the switcher or **Set active**.
+
 `activeCollectionId` was **removed** in v2. It had a reader (the resolver's
 fallback scope) and no writer, so it was permanently null on a fresh install
 and, on an older one, rehydrated a collection the user had long left and
@@ -2026,19 +2033,23 @@ rewrite, each written as the kind it is.
 
 #### Trash
 
-The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`
-and `useDeleteRequestMutation` stamp a row rather than removing it, and these
-are how the app sees what got stamped (`queries/trash.ts`).
+The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`,
+`useDeleteRequestMutation` and `useDeleteEnvironmentMutation` (#2970) stamp a
+row rather than removing it, and these are how the app sees what got stamped
+(`queries/trash.ts`).
 
 - **`useTrashQuery()`** - Every deleted root, newest first (`GET /trash`). No
-  `staleTime`: the list changes only through the two mutations below, the two
-  delete mutations above, and the startup retention purge, so the default is
+  `staleTime`: the list changes only through the two mutations below, the three
+  delete mutations, and the startup retention purge, so the default is
   already the cheapest correct answer.
 - **`useRestoreTrashMutation()`** - Put one deleted root back
   (`POST /trash/:id/restore`). Invalidates `trash.all`, `collections.all` and
   every request list through `invalidateAllRequestLists` - the same coarse
   invalidation `useDeleteCollectionMutation` does, and for the same reason (see
-  the cascade delete note below).
+  the cascade delete note below) - plus `environments.all` and every
+  composition (`invalidateCompositions`), whatever kind came back: a restored
+  environment reappears in the Variables tree and its variables can resolve
+  again. It leaves `activeEnvironmentId` alone (see the session store above).
 - **`usePurgeTrashMutation()`** - Destroy one deleted root for good
   (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
   already stopped serving these rows when they were stamped, so purging them
@@ -2083,7 +2094,10 @@ click; refetching either removes it or proves it real.
 - **`useSetActiveEnvironmentMutation()`** - The only writer of the active
   environment; PUTs `isActive` and mirrors it into `session-store`, rolling the
   store back if the engine refuses
-- **`useDeleteEnvironmentMutation()`**
+- **`useDeleteEnvironmentMutation()`** - A soft delete into the Trash (#2970).
+  Patches the environment out of the list cache, removes its detail cache,
+  clears `activeEnvironmentId` when it was the active one, and invalidates
+  `trash.all` so an open Trash view lists it
 - **`useUpdateGlobalsMutation()`**
 
 #### Runs & History
@@ -2488,10 +2502,10 @@ to keys through `lib/mcp-invalidation.ts`:
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry`. A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
+| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry` (the two trash tools declare `request` and `environment` too). A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
 | `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it: a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place. So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all. The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546) |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
-| `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
+| `environment` | `environments.all`, `globals.all`, `trash.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader. `trash.all` because `delete_environment` declares this family alone and, since #2970, stamps a row the drawer lists; `restore_trash_entry` and `purge_trash_entry` declare it beside `collection` and `request`, so a restored environment reappears in the Variables tree. An `update_environment` pays a refetch of the trash list while the drawer is open - the trade the `request` family takes |
 | `run` | `runs.lists()`, `runs.count()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
 | `config` | `config.all`, `requestDefaults.all` | `requestDefaults` is a second endpoint over the same entries rather than a slice of the first: five of them (`negotiateCompression`, `loadNegotiateCompression`, `sendExpectContinue`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own and the engine resolves the answer, so the declared set is re-read rather than derived here - which is why `useUpdateConfigMutation` drops both keys. At the root, because design and load are separate cache entries and one write can move both (#1438) |

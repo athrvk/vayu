@@ -3609,15 +3609,20 @@ Three shapes, and each has a component rather than a recipe to copy:
 
 Two lanes, decided once here rather than per module (issue #1683/#1689):
 
-- **Collections and requests go to Trash, with Undo.** Deleting either is
-  recoverable for the retention window Settings shows - the undo toast handles
-  the immediate "I clicked the wrong row", and Trash's own restore handles
-  everything after that.
-- **Everything else confirms and deletes permanently**: environments, history
-  runs, load-test examples, inbox listeners and their captures, certificates.
-  The owner decided this deliberately (#1683) - a second Trash lane for every
-  other entity is not coming, so a module reaching for one should reach for
-  `DeleteConfirmDialog` instead.
+- **Collections, requests and environments go to Trash, with Undo.** Deleting
+  any of them is recoverable for the retention window Settings shows - the undo
+  toast (`hooks/useTrashUndo.ts`, one for every Trash-bound delete) handles the
+  immediate "I clicked the wrong row", and Trash's own restore handles
+  everything after that. Environments joined in #2970 (item 1 of #2431), and
+  their delete still opens `DeleteConfirmDialog` first, with copy that points at
+  the Trash rather than calling the delete final: the one Trash-bound delete
+  that asks.
+- **Everything else confirms and deletes permanently**: history runs,
+  load-test examples, inbox listeners and their captures, certificates. The
+  owner decided this deliberately (#1683) - a second Trash lane for every other
+  entity is not coming, so a module reaching for one should reach for
+  `DeleteConfirmDialog` instead; #2431 is where the owner names the entities
+  that do join it.
 - **A destructive action never runs from a single click without one of the
   two.** A control that removes data either lands in Trash (no confirm needed
   - it is reversible) or opens `DeleteConfirmDialog` (no Trash - it is not).

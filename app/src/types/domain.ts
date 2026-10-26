@@ -3944,6 +3944,11 @@ export interface McpStatus {
 	enabled: boolean;
 	/** Set while the server is enabled and its last start failed. */
 	error?: McpStartError;
+	/**
+	 * Absolute path of the copy of an unreadable `mcp-config.json` that the first
+	 * Settings change set aside. Absent when the file was readable.
+	 */
+	corruptCopy?: string;
 }
 
 /** Clients Vayu can register itself with via their own CLI (one-click connect). */
@@ -3972,6 +3977,7 @@ export type McpDataEntity =
 	/** One collection row and nothing under it: a create, an update, an unbind. */
 	| "collectionRow"
 	| "request"
+	/** Environments and the globals beside them, and the trash an environment delete adds to. */
 	| "environment"
 	| "run"
 	| "cookie"

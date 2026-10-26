@@ -52,6 +52,7 @@ vi.mock("@/queries", () => ({
 	useGlobalsQuery: () => ({ data: undefined, isLoading: false, error: null }),
 	useUpdateGlobalsMutation: () => ({ mutateAsync: vi.fn() }),
 	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
+	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
 	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 }));

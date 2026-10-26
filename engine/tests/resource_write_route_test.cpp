@@ -91,6 +91,8 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+delete_environment_response (vayu::db::Database& db, const std::string& id);
 // The same three cores with their `before_write` seam - invoked inside the lock
 // scope with the merged row staged and immediately before it is written, which
 // is the only way to drive a second writer into the window (#1440). A separate
@@ -124,6 +126,7 @@ using vayu::http::routes::apply_config_update;
 using vayu::http::routes::create_collection_response;
 using vayu::http::routes::create_environment_response;
 using vayu::http::routes::create_request_response;
+using vayu::http::routes::delete_environment_response;
 using vayu::http::routes::update_collection_response;
 using vayu::http::routes::update_environment_response;
 using vayu::http::routes::update_request_response;
@@ -1603,6 +1606,35 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateRejectsMismatchedBodyId) {
 TEST_F (ResourceWriteRouteTest, EnvironmentUpdateMissingIsNotFound) {
     auto [status, body] =
     update_environment_response (*db_, "env_does_not_exist", json{ { "name", "X" } });
+    EXPECT_EQ (status, 404);
+    EXPECT_EQ (body["error"]["message"], "Environment not found");
+}
+
+// A trashed environment is missing to the write routes (#2970): an update
+// that found it would write the whole row back and could resurrect it.
+TEST_F (ResourceWriteRouteTest, EnvironmentWritesOnATrashedIdAreNotFound) {
+    auto [created_status, created] =
+    create_environment_response (*db_, json{ { "name", "Env" } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+
+    auto [deleted_status, deleted] = delete_environment_response (*db_, id);
+    ASSERT_EQ (deleted_status, 200) << deleted.dump ();
+    EXPECT_TRUE (deleted["success"].get<bool> ());
+
+    auto [put_status, put_body] =
+    update_environment_response (*db_, id, json{ { "name", "Back" } });
+    EXPECT_EQ (put_status, 404);
+    EXPECT_EQ (put_body["error"]["message"], "Environment not found");
+    auto [delete_status, delete_body] = delete_environment_response (*db_, id);
+    EXPECT_EQ (delete_status, 404);
+    EXPECT_EQ (delete_body["error"]["message"], "Environment not found");
+    EXPECT_FALSE (db_->get_environment (id).has_value ())
+    << "the refused update wrote nothing back";
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentDeleteMissingIsNotFound) {
+    auto [status, body] = delete_environment_response (*db_, "env_does_not_exist");
     EXPECT_EQ (status, 404);
     EXPECT_EQ (body["error"]["message"], "Environment not found");
 }

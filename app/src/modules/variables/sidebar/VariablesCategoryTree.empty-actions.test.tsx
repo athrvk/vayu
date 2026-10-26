@@ -30,6 +30,7 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: [], isLoading: false }),
 	useEnvironmentsQuery: () => ({ data: [], isLoading: false }),
 	useCreateEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));

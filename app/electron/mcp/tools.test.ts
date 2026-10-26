@@ -1540,6 +1540,24 @@ describe("environments, globals and the cookie jar", () => {
 		expect(client.deleteEnvironment).not.toHaveBeenCalled();
 	});
 
+	test("delete_environment says the environment goes to the Trash, and how it comes back", async () => {
+		// The delete is soft since #2970: the preview and the description must
+		// not tell the agent it is final, and they name the tools that undo it.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"delete_environment",
+			{ environmentId: "env_1" },
+			ctxWith(client, WRITES)
+		);
+		expect(firstText(res)).toContain("It would go to Vayu's Trash");
+		expect(firstText(res)).toContain("restore_trash_entry");
+		expect(firstText(res)).not.toMatch(/cannot be undone|no undo/i);
+		const description = String(TOOLS.find((t) => t.name === "delete_environment")!.description);
+		expect(description).toContain("list_trash");
+		expect(description).toContain("restore_trash_entry");
+		expect(description).not.toMatch(/there is no undo/i);
+	});
+
 	test("delete_environment deletes once confirmed", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
@@ -1970,6 +1988,18 @@ describe("trash tools", () => {
 		collections: 2,
 		requests: 5,
 	};
+	// The engine's environment entry (#2970): a root that takes nothing with it,
+	// and the one kind that carries `variables`.
+	const ENVIRONMENT_TRASH_ITEM = {
+		id: "env_4",
+		kind: "environment",
+		name: "Staging",
+		deletedAt: 1_755_000_000_000,
+		parentId: null,
+		collections: 0,
+		requests: 0,
+		variables: 6,
+	};
 
 	test("list_trash answers one page of entries, each as the engine wrote it", async () => {
 		const client = fakeClient({ listTrashPage: vi.fn().mockResolvedValue(page([TRASH_ITEM])) });
@@ -2071,6 +2101,56 @@ describe("trash tools", () => {
 		expect(firstText(res)).toContain("2 sub-collection(s)");
 		expect(firstText(res)).toContain("5 saved request(s)");
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry names an environment and its variables, not a collection", async () => {
+		// Mutation check: map every non-request kind to "collection" again in
+		// `readTrashEntry` and this preview names a collection with no contents.
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [ENVIRONMENT_TRASH_ITEM], total: 1 }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "env_4" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain(
+			'This would permanently destroy the environment "Staging", with 6 variables in it.'
+		);
+		expect(firstText(res)).not.toContain("collection");
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry refuses a kind it does not know, rather than naming it as another", async () => {
+		const client = fakeClient({
+			listTrash: vi
+				.fn()
+				.mockResolvedValue({ items: [{ ...TRASH_ITEM, kind: "dataset" }], total: 1 }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "col_9", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"dataset"');
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("restore_trash_entry puts an environment back and answers the engine's entry", async () => {
+		const restored = { ...ENVIRONMENT_TRASH_ITEM, restored: true, reparentedToRoot: false };
+		const client = fakeClient({ restoreTrashEntry: vi.fn().mockResolvedValue(restored) });
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "env_4" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.restoreTrashEntry).toHaveBeenCalledWith("env_4", undefined);
+		expect(JSON.parse(firstText(res))).toMatchObject({ kind: "environment", variables: 6 });
+		// No re-parent caveat: an environment has no parent to lose.
+		expect(res.content.map((c) => c.text).join("\n")).not.toMatch(/top level/i);
 	});
 
 	test("purge_trash_entry purges once confirmed", async () => {

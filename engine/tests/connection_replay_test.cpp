@@ -25,6 +25,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <future>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -66,9 +67,17 @@ class ConnectionReplayTransferTest : public ::testing::Test {
         vayu::http::global_cleanup ();
     }
 
-    /// One send through the event loop, waited for before the next.
+    /// One send through the event loop, waited for before the next. The wait
+    /// is bounded so a send that never completes fails here with a message
+    /// rather than as a ctest Timeout; the fixture is left to the loop's
+    /// teardown, which cancels what is in flight.
     vayu::Result<vayu::Response> send (const std::string& url) {
-        return loop->submit_async (get (url)).future.get ();
+        auto pending = loop->submit_async (get (url));
+        if (pending.future.wait_for (vayu::tests::WAIT_DEADLINE) != std::future_status::ready) {
+            ADD_FAILURE () << "no completion for " << url;
+            return vayu::Error{ vayu::ErrorCode::Timeout, "send timed out" };
+        }
+        return pending.future.get ();
     }
 
     std::unique_ptr<vayu::http::EventLoop> loop;

@@ -430,6 +430,8 @@ export default function McpSettingsPanel() {
 			? ENDPOINT_NOT_RUNNING
 			: ENDPOINT_UNKNOWN;
 
+	const hasCorruptCopy = status?.corruptCopy !== undefined;
+
 	// Apply a change: main sanitizes + persists and returns the resolved config,
 	// which we adopt as the new source of truth.
 	const persist = useCallback(
@@ -438,6 +440,17 @@ export default function McpSettingsPanel() {
 			try {
 				const resolved = await window.electronAPI.updateMcpSafety(partial);
 				setConfig(resolved);
+				/*
+				 * The first write over an unreadable mcp-config.json is what sets its
+				 * copy aside, after the status on screen was read; without this the
+				 * notice waits for the next focus event.
+				 */
+				if (!hasCorruptCopy) {
+					void window.electronAPI
+						.getMcpStatus()
+						.then((s) => mounted.current && setStatus(s))
+						.catch(() => {});
+				}
 			} catch (err) {
 				showToast(
 					err instanceof Error
@@ -454,7 +467,7 @@ export default function McpSettingsPanel() {
 				if (current && mounted.current) setConfig(current);
 			}
 		},
-		[showToast]
+		[showToast, hasCorruptCopy]
 	);
 
 	// Turn the MCP server on/off; main persists the preference and starts/stops
@@ -596,6 +609,18 @@ export default function McpSettingsPanel() {
 				>
 					your saved allowlist, caps and tool switches are unchanged - editing is disabled
 					until they can be read.
+				</Callout>
+			)}
+
+			{/* Whole-config notice, so it sits above the cards rather than in one. */}
+			{status?.corruptCopy !== undefined && (
+				<Callout
+					className="enter-fade"
+					severity="warning"
+					title="Your MCP settings file was unreadable"
+				>
+					Vayu reset the settings to their defaults. The old file is kept as{" "}
+					<code className="font-mono break-all">{status.corruptCopy}</code>
 				</Callout>
 			)}
 

@@ -880,9 +880,10 @@ See [Database Schema](db-schema.md) for the full column list.
    kind to `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
-3. **Trash retention**: collections and requests deleted more than
-   `trashRetentionDays` ago are destroyed for good (issue #988) - the subtree,
-   its requests and their examples. Until then a delete is only a stamp, and
+3. **Trash retention**: collections, requests and environments deleted more
+   than `trashRetentionDays` ago are destroyed for good (issue #988,
+   environments #2970) - the subtree, its requests and their examples, or the
+   environment's one row. Until then a delete is only a stamp, and
    `POST /trash/:id/restore` puts it back.
 
 All three passes are best-effort: a failure is logged and never blocks startup.
@@ -1700,6 +1701,9 @@ the engine never sees, and a restore does not write either:
   position), `response-cache-clear.json` (the version that last cleared the
   response cache) and `mcp-config.json` (the MCP allowlist, caps and on/off
   switch).
+  A file that does not parse reads as empty, and the first write over it moves
+  it to `<name>.json.corrupt-<epoch-ms>` beside it (one copy per file, as the
+  engine does for `vayu.db`).
 
 What that costs depends on where the snapshot is restored. On the same machine
 the app state is untouched: it keeps whatever it held, and a tab may point at a

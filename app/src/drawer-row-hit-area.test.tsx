@@ -110,6 +110,7 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => idle,
 	useEnvironmentsQuery: () => ({ ...idle, data: [ENVIRONMENT] }),
 	useCreateEnvironmentMutation: () => noopMutation,
+	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteEnvironmentMutation: () => noopMutation,
 	useUpdateEnvironmentMutation: () => noopMutation,
 }));

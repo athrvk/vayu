@@ -1304,6 +1304,30 @@ TEST_F (PersistScriptVariablesTest, ACollectionDeletedDuringTheRunIsNotRecreated
     EXPECT_FALSE (db_->get_collection ("col_1").has_value ());
 }
 
+// A trashed environment is no scope for a send (#2970): `POST /execute` and
+// every run read it through `load_script_variable_scopes`, which finds it the
+// way it finds an id naming nothing.
+TEST_F (PersistScriptVariablesTest, ATrashedEnvironmentIsNoScopeForTheNextSend) {
+    ASSERT_FALSE (load ().environment.empty ());
+    db_->delete_environment ("env_1");
+
+    EXPECT_TRUE (load ().environment.empty ());
+}
+
+// And one trashed while the run was in flight is not written back: the persist
+// edits a fresh read, which finds nothing, so the trashed row keeps its blob.
+TEST_F (PersistScriptVariablesTest, AnEnvironmentTrashedDuringTheRunIsNotWritten) {
+    auto scopes = load ();
+    db_->delete_environment ("env_1");
+    scopes.environment["cursor"].value = "abc";
+
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_FALSE (db_->get_environment ("env_1").has_value ());
+    ASSERT_HAS_VALUE (db_->restore_deleted ("env_1"));
+    EXPECT_EQ (stored_environment_variables (), APP_BLOB);
+}
+
 // ---------------------------------------------------------------------------
 // load_script_variable_scopes - the collection chain a script reads (issue #234)
 //
