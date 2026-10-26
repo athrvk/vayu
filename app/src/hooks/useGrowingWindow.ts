@@ -50,6 +50,12 @@ export interface GrowingWindow {
 	sentinelRef: (node: HTMLElement | null) => void;
 	/** True while items remain unrendered - drives the "showing X of Y" line. */
 	hasMore: boolean;
+	/**
+	 * Grow by one step without waiting for the sentinel: for a caller whose
+	 * reader reaches the end by something other than scrolling (keyboard focus
+	 * on the last row can leave the sentinel just outside the scroller).
+	 */
+	showMore: () => void;
 }
 
 /** The default window size, and the amount each growth adds to it. */
@@ -132,5 +138,7 @@ export function useGrowingWindow(
 
 	useEffect(() => () => observerRef.current?.disconnect(), []);
 
-	return { visible, sentinelRef, hasMore: visible < total };
+	const showMore = useCallback(() => setVisible((n) => Math.min(n + step, total)), [step, total]);
+
+	return { visible, sentinelRef, hasMore: visible < total, showMore };
 }

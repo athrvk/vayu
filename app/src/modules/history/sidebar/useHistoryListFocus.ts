@@ -30,7 +30,16 @@ import { useCallback, useEffect, type RefObject } from "react";
 import { isTextEntryTarget } from "@/lib/keyboard";
 import { HISTORY_ROW_ACTIVATE as ROW, focusHistoryRow, historyRows } from "./history-row-focus";
 
-export function useHistoryListFocus(containerRef: RefObject<HTMLElement | null>) {
+/**
+ * @param onReachEnd Called when focus lands on the last row the list has
+ *   rendered. A windowed list (`HistoryList`) grows there, so the next ArrowDown
+ *   has a row to move to: the sentinel that grows it on scroll can sit just past
+ *   the scroller's edge when a keyboard moved the focus.
+ */
+export function useHistoryListFocus(
+	containerRef: RefObject<HTMLElement | null>,
+	onReachEnd?: () => void
+) {
 	const rows = useCallback(() => historyRows(containerRef.current), [containerRef]);
 
 	// Exactly one row must be tabbable. Seed the first on mount, and re-seed
@@ -87,11 +96,18 @@ export function useHistoryListFocus(containerRef: RefObject<HTMLElement | null>)
 	const onFocus = useCallback(
 		(e: React.FocusEvent<HTMLElement>) => {
 			const item = e.target.closest<HTMLElement>(ROW);
-			if (!item || item.tabIndex === 0) return;
+			if (!item) return;
+			// Before the tab-stop early return below: End and ArrowDown promote the
+			// destination to the stop themselves, so it arrives already at 0.
+			if (onReachEnd) {
+				const list = rows();
+				if (list[list.length - 1] === item) onReachEnd();
+			}
+			if (item.tabIndex === 0) return;
 			for (const other of rows()) other.tabIndex = -1;
 			item.tabIndex = 0;
 		},
-		[rows]
+		[rows, onReachEnd]
 	);
 
 	return { onKeyDown, onFocus };

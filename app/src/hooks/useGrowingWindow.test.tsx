@@ -133,6 +133,15 @@ describe("useGrowingWindow", () => {
 		expect(result.current.visible).toBe(GROWING_WINDOW_STEP);
 	});
 
+	it("grows by one step on showMore, never past the list", () => {
+		const { result } = renderHook(() => useGrowingWindow(GROWING_WINDOW_STEP + 5));
+
+		act(() => result.current.showMore());
+
+		expect(result.current.visible).toBe(GROWING_WINDOW_STEP + 5);
+		expect(result.current.hasMore).toBe(false);
+	});
+
 	it("has no more to show once the window covers the list", () => {
 		const { result } = renderHook(() => useGrowingWindow(10));
 		expect(result.current.hasMore).toBe(false);

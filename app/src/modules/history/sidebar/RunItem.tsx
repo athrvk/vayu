@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { memo } from "react";
 import type React from "react";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
@@ -93,7 +94,7 @@ interface RunItemProps {
 	collectionName?: string;
 }
 
-export default function RunItem({
+function RunItem({
 	run,
 	onSelect,
 	onDelete,
@@ -607,3 +608,11 @@ export default function RunItem({
 		</RowContextMenu>
 	);
 }
+
+/**
+ * Memoised because the list re-renders on every filter, search and store
+ * change while its rows (stable `run` objects, stable handlers) have nothing
+ * new to say. Every prop must stay referentially stable for this to hold:
+ * `HistoryList` wraps its handlers for that reason.
+ */
+export default memo(RunItem);

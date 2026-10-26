@@ -6,7 +6,7 @@
  */
 
 import { formatNumber } from "@/lib/format-number";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, Clock, Pin } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
 import { ApiError } from "@/services";
@@ -51,6 +51,7 @@ import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 
 /**
  * The origin Select carries one value for two store fields: a kind, or one
@@ -103,7 +104,12 @@ export default function HistoryList() {
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
 
-	const navigateToRunDetail = (runId: string) => openTab({ type: "run", entityId: runId });
+	// The row-handler props below are stable on purpose: `RunItem` is memoised, and
+	// one fresh function per render would make every row re-render anyway.
+	const navigateToRunDetail = useCallback(
+		(runId: string) => openTab({ type: "run", entityId: runId }),
+		[openTab]
+	);
 	const navigateToHistory = () => activateDrawerView("history");
 
 	// Debounce the search box into the server-side `q` param so a search covers
@@ -132,7 +138,8 @@ export default function HistoryList() {
 		filterStatus === "all" ? undefined : filterStatus
 	);
 	const deleteRunMutation = useDeleteRunMutation();
-	const setBaselineMutation = useSetRunBaselineMutation();
+	// `mutateAsync` is stable across renders; the mutation object is not.
+	const { mutateAsync: setBaseline } = useSetRunBaselineMutation();
 	const showToast = useToastStore((s) => s.showToast);
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -169,15 +176,43 @@ export default function HistoryList() {
 	const originNarrowing = filterOrigin !== "all" || filterClient !== null;
 	const isNarrowed =
 		searchQuery !== "" || filterType !== "all" || filterStatus !== "all" || originNarrowing;
+	/*
+	 * Only the first `visible` rows are mounted; the rest arrive as the end is
+	 * reached (`useGrowingWindow` records why this is a growing window and not a
+	 * virtual one: rows vary in height). Slicing before grouping is the same as
+	 * slicing after, because groups are runs of adjacent same-day rows.
+	 *
+	 * The window's identity is the question being asked, not the row count: the
+	 * 5s poll and "Load older runs" both change the length of the same list and
+	 * must not shut a window the reader has scrolled into.
+	 */
+	const windowKey = JSON.stringify([
+		debouncedSearch,
+		pinnedOnly,
+		filterOrigin,
+		filterClient,
+		filterType,
+		filterStatus,
+		sortBy,
+	]);
+	const {
+		visible,
+		sentinelRef,
+		hasMore: hasUnrenderedRuns,
+		showMore,
+	} = useGrowingWindow(runs.length, undefined, windowKey);
 	// Grouped after sorting/filtering, never before - a group is a label over
 	// whatever order `runs` is already in, not a second decision about it.
-	const runGroups = groupRunsByDay(runs);
+	const runGroups = groupRunsByDay(runs.slice(0, visible));
 
 	// Roving tabindex over the row activators inside this container - see
 	// useHistoryListFocus's own doc comment for why arrow keys move focus
 	// without opening the row they land on.
 	const listRef = useRef<HTMLDivElement>(null);
-	const { onKeyDown: onListKeyDown, onFocus: onListFocus } = useHistoryListFocus(listRef);
+	const { onKeyDown: onListKeyDown, onFocus: onListFocus } = useHistoryListFocus(
+		listRef,
+		hasUnrenderedRuns ? showMore : undefined
+	);
 
 	/*
 	 * A collection run's row carries the collection's id, not its name - the
@@ -235,38 +270,39 @@ export default function HistoryList() {
 		.filter(Boolean)
 		.join(" ");
 
-	const handleDeleteClick = (runId: string, event?: React.MouseEvent) => {
+	const handleDeleteClick = useCallback((runId: string, event?: React.MouseEvent) => {
 		// Absent when the row's menu is what asked: a menu selection is not a
 		// click on the card behind it, so there is nothing to stop.
 		event?.stopPropagation();
 		setDeleteConfirmRunId(runId);
-	};
+	}, []);
 
 	/**
 	 * Pin or unpin without a confirmation step: unlike a delete, both
 	 * directions are one click away from being undone, and the pin is visible
 	 * on the row either way.
 	 */
-	const handleToggleBaseline = async (
-		runId: string,
-		baseline: boolean,
-		event?: React.MouseEvent
-	) => {
-		event?.stopPropagation();
-		setPinningId(runId);
-		try {
-			await setBaselineMutation.mutateAsync({ runId, baseline });
-		} catch {
-			// Same reason the delete path toasts: a silent rejection leaves the
-			// row exactly as it was, which reads as the click not registering.
-			showToast(
-				baseline ? "Couldn't pin this run as the baseline." : "Couldn't unpin this run.",
-				"error"
-			);
-		} finally {
-			setPinningId(null);
-		}
-	};
+	const handleToggleBaseline = useCallback(
+		async (runId: string, baseline: boolean, event?: React.MouseEvent) => {
+			event?.stopPropagation();
+			setPinningId(runId);
+			try {
+				await setBaseline({ runId, baseline });
+			} catch {
+				// Same reason the delete path toasts: a silent rejection leaves the
+				// row exactly as it was, which reads as the click not registering.
+				showToast(
+					baseline
+						? "Couldn't pin this run as the baseline."
+						: "Couldn't unpin this run.",
+					"error"
+				);
+			} finally {
+				setPinningId(null);
+			}
+		},
+		[setBaseline, showToast]
+	);
 
 	const handleConfirmDelete = async () => {
 		if (!deleteConfirmRunId) return;
@@ -510,7 +546,11 @@ export default function HistoryList() {
 
 						{!isLoading &&
 							runGroups.map((group) => (
-								<div key={group.runs[0]?.id ?? group.label} className="space-y-1">
+								// Keyed by the day, not by its first run: a run landing at
+								// the head of "Today" would change the key and remount every
+								// row of the group, memoised or not. A day is one contiguous
+								// group in either sort, so the label is unique.
+								<div key={group.label} className="space-y-1">
 									{/*
 									 * The day-group header replaces the per-row relative
 									 * timestamp ("8h ago" repeated down a page of same-day
@@ -521,25 +561,47 @@ export default function HistoryList() {
 										{group.label}
 									</Eyebrow>
 									{group.runs.map((run) => (
-										<RunItem
+										// `skip-offscreen`: the browser skips layout and paint for
+										// mounted rows scrolled past, the pairing `useGrowingWindow`
+										// describes. 3.5rem is a row with a result line; the real
+										// height is remembered once seen.
+										<div
 											key={run.id}
-											run={run}
-											onSelect={navigateToRunDetail}
-											onDelete={handleDeleteClick}
-											onToggleBaseline={handleToggleBaseline}
-											onCompare={openRunComparison}
-											isDeleting={deletingId === run.id}
-											isTogglingBaseline={pinningId === run.id}
-											isSelected={selectedRunId === run.id}
-											collectionName={collectionName(run)}
-										/>
+											className="skip-offscreen [--skip-offscreen-size:3.5rem]"
+										>
+											<RunItem
+												run={run}
+												onSelect={navigateToRunDetail}
+												onDelete={handleDeleteClick}
+												onToggleBaseline={handleToggleBaseline}
+												onCompare={openRunComparison}
+												isDeleting={deletingId === run.id}
+												isTogglingBaseline={pinningId === run.id}
+												isSelected={selectedRunId === run.id}
+												collectionName={collectionName(run)}
+											/>
+										</div>
 									))}
 								</div>
 							))}
 
+						{/* The sentinel: reaching it mounts the next slice of what is
+						    already loaded. The count is stated rather than left to a
+						    scrollbar, as the console's and a scenario's steps are. */}
+						{!isLoading && hasUnrenderedRuns && (
+							<p
+								ref={sentinelRef}
+								className="px-1 py-2 text-xs text-muted-foreground"
+							>
+								Showing {formatNumber(visible)} of {formatNumber(runs.length)} runs
+								- scroll for more.
+							</p>
+						)}
+
 						{/* Older runs page in on demand - the poll only refreshes
-						    the first page. */}
-						{!isLoading && !showError && hasNextPage && (
+						    the first page. Not while loaded runs remain unmounted:
+						    the sentinel above is the end of the list until then. */}
+						{!isLoading && !showError && hasNextPage && !hasUnrenderedRuns && (
 							<Button
 								variant="ghost"
 								size="sm"
