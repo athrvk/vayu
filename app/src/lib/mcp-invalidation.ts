@@ -48,8 +48,8 @@ const INVALIDATORS: Record<
 	 * `trash` because a delete is what *adds* a row to it and a restore or purge
 	 * is what takes one away - `delete_collection` declares this family alone,
 	 * and `restore_trash_entry` and `purge_trash_entry` declare it beside
-	 * `request` and `environment` (issue #1438). The list is the only read of that family, so
-	 * without this an agent's delete never appears in an open Trash drawer and a
+	 * `request` and `environment` (issue #1438). The list is the only read of that
+	 * family, so without this an agent's delete never appears in an open Trash drawer and a
 	 * row it purged stays there until the drawer is closed and reopened; clicking
 	 * Restore on that phantom row 404s.
 	 *
@@ -111,8 +111,8 @@ const INVALIDATORS: Record<
 	 * `trash` for the same reason the `collection` family takes it:
 	 * `delete_request` declares this family alone and stamps a row the Trash
 	 * drawer lists, and `restore_trash_entry` / `purge_trash_entry` declare it
-	 * beside `collection` and `environment` (issue #1438). Unguarded, because the two trash tools
-	 * name no request and the event says which family changed, never how - so a
+	 * beside `collection` and `environment` (issue #1438). Unguarded, because the two
+	 * trash tools name no request and the event says which family changed, never how - so a
 	 * `create_request` pays a refetch of a short list that the drawer has to be
 	 * open to mount at all. That is this map's standing trade, taken here for the
 	 * same reason the `run` family takes it: a stale answer is a lie, a refetch

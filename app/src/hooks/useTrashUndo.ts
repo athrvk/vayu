@@ -74,8 +74,8 @@ export function useTrashUndo() {
 	 * Say where it went, and offer it straight back.
 	 *
 	 * No explicit duration: the toast takes the `info` default, scaled by the
-	 * user's own notification setting, exactly as the drag-and-drop undo beside
-	 * it does. A longer hardcoded window would override a preference the user
+	 * user's own notification setting, exactly as the tree's drag-and-drop undo
+	 * does. A longer hardcoded window would override a preference the user
 	 * set - including "never", which means "wait for me" - and it would be
 	 * buying something the feature already has: this toast is the fast path, and
 	 * the Trash view is the same undo with the retention window behind it, so a
