@@ -48,7 +48,12 @@ namespace {
 
 using nlohmann::json;
 
-enum class Resource { Collection, Request, Environment, Example };
+enum class Resource : std::uint8_t {
+    Collection,
+    Request,
+    Environment,
+    Example
+};
 
 struct PutRoute {
     const char* name;
@@ -109,9 +114,14 @@ class IfMatchServerTest : public ::testing::Test {
     const json& body                = json::object ()) const {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
-        auto response = method == "GET" ? client.Get (path, headers) :
-        method == "PUT" ? client.Put (path, headers, body.dump (), "application/json") :
-                          client.Post (path, headers, body.dump (), "application/json");
+        httplib::Result response;
+        if (method == "GET") {
+            response = client.Get (path, headers);
+        } else if (method == "PUT") {
+            response = client.Put (path, headers, body.dump (), "application/json");
+        } else {
+            response = client.Post (path, headers, body.dump (), "application/json");
+        }
         if (!response) {
             ADD_FAILURE () << "no response from " << method << " " << path;
             return {};
