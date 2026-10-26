@@ -240,7 +240,7 @@ TEST (LoggerRetentionTest, AStartRemovesTheLegacyGenerationOutright) {
 }
 
 // ---------------------------------------------------------------------------
-// Level: the file sink used to take DEBUG unconditionally.
+// Level: the file sink's floor, `info` unless `logLevel` says otherwise.
 // ---------------------------------------------------------------------------
 
 TEST (LoggerLevelTest, ParsesEveryNameTheEnumHasAndRefusesAnythingElse) {
@@ -250,7 +250,7 @@ TEST (LoggerLevelTest, ParsesEveryNameTheEnumHasAndRefusesAnythingElse) {
     EXPECT_EQ (vayu::utils::parse_log_level ("warning"), Logger::Level::WARNING);
     EXPECT_EQ (vayu::utils::parse_log_level ("error"), Logger::Level::ERROR);
 
-    // A refusal rather than a silent fall back to DEBUG: the daemon reports the
+    // A refusal rather than a silent fall back to a level: the daemon reports the
     // unusable value and keeps the default, which it can only do if told.
     EXPECT_FALSE (vayu::utils::parse_log_level ("trace").has_value ());
     EXPECT_FALSE (vayu::utils::parse_log_level ("").has_value ());
@@ -278,15 +278,45 @@ TEST (LoggerLevelTest, TheFileTakesOnlyWhatTheConfiguredLevelAllows) {
     EXPECT_NE (written.find ("an error line"), std::string::npos) << written;
 }
 
-// The default is what it always was, so an install that configures nothing logs
-// exactly what it logged before.
-TEST (LoggerLevelTest, TheDefaultLevelStillTakesDebug) {
+// The startup state, not the constant: `init` is all a `vayu-cli` run, an
+// unparsable `logLevel` and the lines the daemon writes before the database
+// opens ever do, so nothing here calls `set_file_level`. Mutation-check: set
+// `DEFAULT_LEVEL` back to "debug" and the debug line lands; hard-code
+// `Level::DEBUG` in `Logger::default_file_level` and so does it.
+TEST (LoggerLevelTest, AFreshFileTakesInfoAndAboveAndNotDebug) {
+    ScratchLogDir dir;
+    // Left at a level the default must undo: `init` is what restores it.
+    Logger::instance ().set_file_level (Logger::Level::ERROR);
+    Logger::instance ().init (dir.string ());
+    Logger::instance ().set_max_file_bytes (0);
+
+    vayu::utils::log_debug ("test", "a debug line");
+    vayu::utils::log_info ("test", "an info line");
+    Logger::instance ().flush ();
+
+    const std::string written = read_file (newest_log (dir.path ()));
+    EXPECT_EQ (written.find ("a debug line"), std::string::npos) << written;
+    EXPECT_NE (written.find ("an info line"), std::string::npos) << written;
+}
+
+// The seeded default and the logger's own are one value, and it is the one the
+// issue asks for: a 2xx request line and every database write are debug.
+TEST (LoggerLevelTest, TheDefaultIsInfoAndTheLoggerDerivesItFromTheConstant) {
+    EXPECT_STREQ (constants::logging::DEFAULT_LEVEL, "info");
+    EXPECT_EQ (Logger::default_file_level (), Logger::Level::INFO);
+    EXPECT_EQ (Logger::default_file_level (),
+    vayu::utils::parse_log_level (constants::logging::DEFAULT_LEVEL));
+}
+
+// Debug stays one `logLevel` entry away: the level the daemon applies for
+// "debug" takes the lines the default drops.
+TEST (LoggerLevelTest, LogLevelDebugTakesTheDebugLinesTheDefaultDrops) {
     ScratchLogDir dir;
     Logger::instance ().init (dir.string ());
     Logger::instance ().set_max_file_bytes (0);
-    auto default_level = vayu::utils::parse_log_level (constants::logging::DEFAULT_LEVEL);
-    ASSERT_HAS_VALUE (default_level) << "the seeded default names no level";
-    Logger::instance ().set_file_level (*default_level);
+    auto configured = vayu::utils::parse_log_level ("debug");
+    ASSERT_HAS_VALUE (configured);
+    Logger::instance ().set_file_level (*configured);
 
     vayu::utils::log_debug ("test", "a debug line");
     Logger::instance ().flush ();

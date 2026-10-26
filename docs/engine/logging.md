@@ -133,8 +133,12 @@ must not throw it.
 `<data-dir>/logs/engine_<stamp>.log` (the daemon) and
 `<data-dir>/logs/cli_<stamp>.log` (`vayu-cli`, its own default data directory
 when `--data-dir` names none). One file per process start; `logLevel`
-(Settings, Observability, restart-required) is the floor both write at,
-defaulting to `debug`. `maxLogFileBytes` rotates the open file once to `.1`
+(Settings, Observability, restart-required) is the daemon's floor, defaulting
+to `info`: a 2xx request line and every database write are `debug`, so a long
+session would otherwise fill the file with them. Set `logLevel` to `debug`
+for a bug report. The lines startup writes before the database opens, and an
+unparsable `logLevel`, take the same default; `vayu-cli` reads no config and
+always writes at it. `maxLogFileBytes` rotates the open file once to `.1`
 when it would cross the cap (0 = unlimited); the newest 10 per-prefix files
 survive a start, oldest deleted first along with their `.1`.
 

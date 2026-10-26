@@ -134,9 +134,10 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     seed (restart_required (keywords ({ "verbosity", "logging" }) (ConfigEntry{
     "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Log level",
     "The lowest severity written to Vayu's log files - the engine's and the "
-    "app's, side by side in the logs folder. Debug records everything, which "
-    "is what a bug report wants and what fills a disk fastest; Warning and "
-    "Error keep a long-running install quiet. Applies on the next start. A "
+    "app's, side by side in the logs folder. Info is the default. Debug adds "
+    "every successful request and database write, which is what a bug report "
+    "wants and what fills a disk fastest; Warning and Error keep a "
+    "long-running install quiet. Applies on the next start. A "
     "terminal you started the engine in yourself is separate and follows its "
     "-v flag.",
     "observability", vayu::core::constants::logging::DEFAULT_LEVEL,
