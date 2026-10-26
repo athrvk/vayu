@@ -3043,6 +3043,7 @@ export interface RunReport {
 		setupOverhead?: number;
 		/** Seconds from load end to teardown finished. Present on a stored load run; a collection run has none (#2822). */
 		cleanupOverhead?: number;
+		/** Absent where not recorded: `partial` or `summaryMissing` below, or a collection run (#2963). */
 		peakConcurrency?: number;
 		/** Mean requests on the wire over `testDuration`; absent from a run stored before it (#2821). */
 		avgInFlight?: number;
@@ -3054,6 +3055,7 @@ export interface RunReport {
 		 */
 		skippedRequests?: number;
 		stalledMs?: number;
+		/** Absent where not recorded: `partial` or `summaryMissing` below, or a collection run (#2963). */
 		avgQueueWaitMs?: number;
 		bytesSent?: number;
 		bytesReceived?: number;
@@ -3093,9 +3095,8 @@ export interface RunReport {
 		 * A failed load run reconciled after an engine crash (#2895). The counts,
 		 * `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last
 		 * persisted tick's totals, so they are a floor and not the final figures;
-		 * the report carries no `latency`, and `peakConcurrency` and
-		 * `avgQueueWaitMs` are 0, because none of them were recorded. Absent means
-		 * false.
+		 * the report carries no `latency`, `peakConcurrency` or `avgQueueWaitMs`:
+		 * absent, not recorded (#2963). Absent means false.
 		 */
 		partial?: boolean;
 		/**
@@ -3103,7 +3104,7 @@ export interface RunReport {
 		 * first tick, or a worker failure that never wrote one. The counts are
 		 * whatever the stored sampled results hold (0 where none were stored), not
 		 * whole-run totals, and none is a measurement; the report carries no
-		 * `latency`. Absent means false. Distinct from the report's top-level
+		 * `latency`, `peakConcurrency` or `avgQueueWaitMs`. Absent means false. Distinct from the report's top-level
 		 * `partial`, which means the run is still in flight.
 		 */
 		summaryMissing?: boolean;

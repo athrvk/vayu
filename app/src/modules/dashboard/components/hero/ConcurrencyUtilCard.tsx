@@ -26,7 +26,8 @@ export function ConcurrencyUtilCard({
 	configuredConcurrency,
 	meanInFlight,
 }: {
-	currentConcurrency: number;
+	/** Absent for a finished run whose peak was not recorded (#2963): "-". */
+	currentConcurrency?: number;
 	configuredConcurrency?: number;
 	meanInFlight?: number;
 }) {
@@ -38,7 +39,7 @@ export function ConcurrencyUtilCard({
 		? Math.min(meanInFlight, configuredConcurrency ?? meanInFlight)
 		: currentConcurrency;
 	const util =
-		configuredConcurrency && configuredConcurrency > 0
+		shown !== undefined && configuredConcurrency && configuredConcurrency > 0
 			? (shown / configuredConcurrency) * 100
 			: undefined;
 
@@ -48,7 +49,7 @@ export function ConcurrencyUtilCard({
 			tip={onTheWire ? TOOLTIPS.concurrencyUtil : TOOLTIPS.concurrencyUtilInstant}
 		>
 			<HeroValue
-				value={onTheWire ? formatOneDecimal(shown) : formatNumber(shown)}
+				value={orDash(shown, onTheWire ? formatOneDecimal : formatNumber)}
 				unit={
 					<>
 						of{" "}

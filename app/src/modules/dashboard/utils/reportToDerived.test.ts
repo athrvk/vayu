@@ -552,10 +552,39 @@ describe("reportToDerived", () => {
 				},
 			})
 		);
-		expect(d.peakConcurrency).toBe(0);
-		expect(d.avgQueueWaitMs).toBe(0);
+		// Not recorded stays absent rather than reading as a measured 0 (#2963).
+		expect(d.peakConcurrency).toBeUndefined();
+		expect(d.avgQueueWaitMs).toBeUndefined();
 		expect(d.droppedRequests).toBe(0);
 		expect(d.backpressure).toBe(0);
+	});
+
+	// Mutation checked: restoring `?? 0` on either read fails the first case.
+	describe("a run that recorded no peak or queue wait (#2963)", () => {
+		function unrecorded(flag: "partial" | "summaryMissing"): RunReport {
+			const report = baseReport({ summary: { ...baseReport().summary, [flag]: true } });
+			delete report.summary.peakConcurrency;
+			delete report.summary.avgQueueWaitMs;
+			return report;
+		}
+
+		it.each(["partial", "summaryMissing"] as const)(
+			"leaves both absent for a %s summary",
+			(flag) => {
+				const d = reportToDerived(unrecorded(flag));
+
+				expect(d.peakConcurrency).toBeUndefined();
+				expect(d.avgQueueWaitMs).toBeUndefined();
+				expect(d.totalRequests).toBe(600);
+			}
+		);
+
+		it("keeps both for a run that recorded them", () => {
+			const d = reportToDerived(baseReport());
+
+			expect(d.peakConcurrency).toBe(20);
+			expect(d.avgQueueWaitMs).toBe(1.0);
+		});
 	});
 	// Mutation checked: reading `report.latency.p99` unguarded throws here.
 	describe("a report without latency (#2938)", () => {

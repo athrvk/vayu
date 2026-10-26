@@ -104,7 +104,6 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 			? (actualRps / targetRps) * 100
 			: undefined);
 	const { receivedRate, receivedWindow } = receivedRateOf(s);
-	const peak = s.peakConcurrency ?? 0;
 	const duration = s.testDuration ?? s.totalDurationSeconds ?? 0;
 	const droppedRequests = s.droppedRequests ?? 0;
 	const skippedRequests = s.skippedRequests ?? 0;
@@ -131,15 +130,17 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 			settled: true,
 		}),
 		currentRps: actualRps ?? 0,
-		avgQueueWaitMs: s.avgQueueWaitMs ?? 0,
+		avgQueueWaitMs: s.avgQueueWaitMs,
 		totalRequests: s.totalRequests,
 		failedRequests: s.failedRequests,
 		...errorBreakdown(s.failedRequests, s.httpErrorRequests, s.noResponseRequests),
 		statusCodes: report.statusCodes ?? {},
 		requestsExpected: s.totalRequests,
 		requestsSent: s.totalRequests,
-		peakConcurrency: peak,
-		currentConcurrency: peak, // completed → HeroRow reads peak anyway
+		// Absent, never 0, for a run that recorded none (#2963).
+		peakConcurrency: s.peakConcurrency,
+		// Completed: HeroRow reads `peakConcurrency`, so an unrecorded peak shows "-".
+		currentConcurrency: s.peakConcurrency ?? 0,
 		avgInFlight: s.avgInFlight,
 		configuredConcurrency: cfg.concurrency,
 		backpressure: 0,

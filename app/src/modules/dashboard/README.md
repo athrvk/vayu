@@ -308,6 +308,12 @@ consumes it.
   buckets (#2547) feeds the bucket's max concurrency, so the figure is the
   overlay's over buckets. A run with no stored series prints no "lag" clause at
   all, never `lag -%`; the live card keeps its dash.
+- **A peak or queue wait the run did not record is absent, never `0`** (#2963).
+  A failed load run the engine could not fully record (`summary.partial`,
+  `summary.summaryMissing`) has no `peakConcurrency` or `avgQueueWaitMs`, and
+  `reportToDerived` passes both through as `undefined`. The Peak virtual users /
+  Peak in-flight requests stat and the finished hero concurrency cards print
+  "-", and the queue chip stays hidden.
 - **The Send / Throughput chip is judged on the windowed pair, held for a few
   seconds, and is grey until the run has settled** (#2802).
   `utils/dispatchLag.ts` decides, `ThroughputTwinCard` only draws what it is

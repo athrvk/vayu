@@ -29,7 +29,8 @@ export function CurrentConcurrencyCard({
 	rampDeviationPct,
 	isCompleted = false,
 }: {
-	currentConcurrency: number;
+	/** Absent for a finished run whose peak was not recorded (#2963): "-". */
+	currentConcurrency?: number;
 	targetConcurrency?: number;
 	rampUpDurationSeconds?: number;
 	rampDeviationPct?: number;
@@ -42,7 +43,7 @@ export function CurrentConcurrencyCard({
 			tip={TOOLTIPS.currentConcurrency}
 		>
 			<HeroValue
-				value={formatNumber(currentConcurrency)}
+				value={orDash(currentConcurrency, formatNumber)}
 				unit={isCompleted ? undefined : "active"}
 			/>
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
