@@ -121,8 +121,8 @@ class MockSpecServer {
                     return sink.write (chunk.data (), chunk.size ());
                 }
                 std::unique_lock lock (gate_mutex_);
-                gate_cv_.wait_for (lock, vayu::tests::WAIT_DEADLINE,
-                [this] { return gate_open_; });
+                gate_cv_.wait_for (
+                lock, vayu::tests::WAIT_DEADLINE, [this] { return gate_open_; });
                 body_finished_.store (true);
                 sink.done ();
                 return true;
