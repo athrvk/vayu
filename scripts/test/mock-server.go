@@ -7,6 +7,7 @@
 //   GET  /health     - Health check (instant response)
 //   GET  /fast       - Fast endpoint (~0ms latency)
 //   GET  /slow/:ms   - Configurable delay (e.g., /slow/100 for 100ms)
+//   GET  /blob/:n    - n-byte body (e.g., /blob/1048576 for 1 MiB)
 //   POST /echo       - Echo back request body
 //   GET  /stats      - Show request statistics
 
@@ -32,6 +33,12 @@ var (
 	startTime       time.Time
 	requestsPerPath = make(map[string]*int64)
 )
+
+// blobBytes returns n bytes, from one shared zero buffer so a large route
+// allocates nothing per request.
+var blobZeros = make([]byte, 64<<20)
+
+func blobBytes(n int) []byte { return blobZeros[:n] }
 
 func main() {
 	port := flag.Int("port", 8080, "Server port")
@@ -98,6 +105,29 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"ok":true,"delay_ms":%d}`, delayMs)
+
+		atomic.AddInt64(&totalLatencyNs, time.Since(start).Nanoseconds())
+	})
+
+	// Blob endpoint - a body of a chosen size: /blob/1048576 -> 1 MiB.
+	// Large-transfer cases (scripts/perf/ab_redirect_hook.py) need a response
+	// whose body streams across many libcurl progress calls.
+	mux.HandleFunc("/blob/", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		atomic.AddInt64(&totalRequests, 1)
+
+		size := 1024
+		parts := strings.Split(r.URL.Path, "/")
+		if len(parts) >= 3 {
+			if n, err := strconv.Atoi(parts[2]); err == nil && n >= 0 && n <= 64<<20 {
+				size = n
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(size))
+		w.WriteHeader(http.StatusOK)
+		w.Write(blobBytes(size))
 
 		atomic.AddInt64(&totalLatencyNs, time.Since(start).Nanoseconds())
 	})
