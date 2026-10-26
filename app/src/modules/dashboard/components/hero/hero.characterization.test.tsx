@@ -493,12 +493,13 @@ describe("HeroRow utilisation card per mode and run state (#2821)", () => {
 		expect(out).toContain("6of 10 active");
 	});
 
-	it("leaves capacity's card on the instant, whatever the mean says", () => {
+	it("gives capacity the search card, not a utilisation card (#2929)", () => {
 		const out = cardText({
 			...wave({ currentConcurrency: 6, avgInFlight: 4.2 }),
 			mode: "capacity",
 		});
-		expect(out).toContain("6of 10 active");
+		expect(out).not.toContain("utilisation");
+		expect(out).not.toContain("active");
 		expect(out).not.toContain("on the wire");
 	});
 

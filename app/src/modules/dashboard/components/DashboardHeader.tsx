@@ -90,8 +90,14 @@ function DashboardHeader({
 
 	// Config summary line
 	const configParts: string[] = [];
+	// A capacity search climbs toward the configured count and may stop well
+	// short of it, so the count is a ceiling, not the run's load (#2929).
 	if (configuration?.concurrency != null)
-		configParts.push(formatConcurrency(configuration.concurrency));
+		configParts.push(
+			configuration.mode === "capacity"
+				? `up to ${formatConcurrency(configuration.concurrency)}`
+				: formatConcurrency(configuration.concurrency)
+		);
 	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
 	// so every real run fell through and printed a raw `constant_rps` here.
 	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
