@@ -299,7 +299,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run - and held by the engine to each step's sent URL and OAuth 2.0 token endpoint (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
-| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
+| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch, with `If-Match` after that read; a `412` re-reads and merges once) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff` + `GET /requests/:id` (×N, reveal off, one per entry with a `headers`, `url` or `params` change) | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped; the current side of a `headers`, `url` or `params` change that could carry a credential withheld unless revealed) |
@@ -323,7 +323,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
 | `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId`; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
-| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
+| `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge, with `If-Match`; a `412` re-reads and merges once) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
@@ -904,7 +904,16 @@ Notes:
   authority.
 - **`update_environment`** fetches the environment and merges the supplied
   variables (`PUT /environments/:id` replaces the whole variables blob), so
-  partial updates preserve untouched variables and the name. Overwriting an
+  partial updates preserve untouched variables and the name. **The write is
+  conditioned on the version it read** (#2433): the `PUT` carries
+  `If-Match: W/"<updatedAt>"` from the row the list answered, so a change the
+  app or another client made in between is a `412` rather than a silent loss.
+  On a `412` the tool reads the row again, merges the same arguments onto it
+  and writes once more; a second `412` is answered as a `transient` error
+  saying nothing was written, and repeating the call merges into the latest
+  version. `update_collection` does the same whenever it reads (a variables or
+  script edit); a call naming only stated fields reads nothing and sends no
+  `If-Match`. Overwriting an
   existing variable changes its value only - its `secret`, `type`, `createdAt`
   and enabled/disabled state are preserved, so a rotated secret stays masked and
   a disabled variable stays disabled. The answer is the stored row, withheld as
@@ -947,8 +956,10 @@ Notes:
 - **`update_globals` has to read first.** Globals is the one resource with no
   create/update split - one row, one id - so `POST /globals` saves the blob
   whole and an absent `variables` means `{}`, not "keep". The tool reads
-  `GET /globals` and posts the merged result, which is the same read-merge-write
-  `update_environment` does for the same blob-replacement reason.
+  `GET /globals` and posts the merged result, the read-merge-write
+  `update_environment` does for the same blob-replacement reason, without its
+  version check: `POST /globals` takes no `If-Match` yet, so a concurrent edit
+  to the globals can still be lost (#2988).
 - **`clear_cookies` has three scopes, not two.** Omitting `environmentId`
   clears every jar, passing an id clears that environment's, and passing `null`
   clears the jar used when no environment is selected - the engine reads an
@@ -2118,7 +2129,7 @@ by the wrapper `server.ts` puts in front of its `tools/call` handler.
 | `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
 | `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
 | `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry; worded as below |
-| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, an engine answer the server could not use, a secret-masking lookup that failed (when its cause is no engine failure, else it is worded as that failure, below), a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
+| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, a merge another client's write beat twice (`update_environment`, `update_collection`: two `412`s, nothing written), an engine answer the server could not use, a secret-masking lookup that failed (when its cause is no engine failure, else it is worded as that failure, below), a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
 | `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
 
 **An id that names nothing** (#2778) is answered with the missing object and

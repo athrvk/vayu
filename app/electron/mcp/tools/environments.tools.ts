@@ -22,6 +22,7 @@ import {
 	engineErrorResult,
 	errorResult,
 	isRecord,
+	mergeAndWrite,
 	requireStr,
 	str,
 	textResult,
@@ -138,32 +139,30 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 					"input"
 				);
 			}
-			// Fetch the current env so we merge (the PUT replaces the whole blob)
-			// and keep the existing name (which the engine requires).
-			let existing: Record<string, unknown>;
-			try {
-				existing = ((await ctx.client.getEnvironment(environmentId, signal)) ??
-					{}) as Record<string, unknown>;
-			} catch (err) {
-				return engineErrorResult(err, ctx);
-			}
-			const merged = mergeVariables(existing.variables, patch, removals, ctx);
-			// PUT carries the id in the path, so the body is the patch only. The
-			// name is still sent because the engine treats it as having no
-			// default - omitting it would keep the stored name, but sending the
-			// caller's rename in the same call is the point of the `name` arg.
-			const payload: Record<string, unknown> = {
-				name: rename ?? (typeof existing.name === "string" ? existing.name : ""),
-				variables: merged.variables,
-			};
-			const result = await callEngine(
-				ctx,
-				() => ctx.client.updateEnvironment(environmentId, payload, signal),
-				echoShape(ctx)
-			);
+			// The PUT replaces the whole variables blob, so the stored one is read
+			// and merged into, under the version it was read at.
+			let absentRemovals: string[] = [];
+			const result = await mergeAndWrite(ctx, {
+				subject: `environment "${environmentId}"`,
+				read: () => ctx.client.getEnvironment(environmentId, signal),
+				merge: (existing) => {
+					const merged = mergeVariables(existing.variables, patch, removals, ctx);
+					absentRemovals = merged.absentRemovals;
+					// The id is the path, so the body is the patch only. `name` has
+					// no default engine-side, so the stored one rides along unless
+					// this call renames it.
+					return {
+						name: rename ?? (typeof existing.name === "string" ? existing.name : ""),
+						variables: merged.variables,
+					};
+				},
+				write: (payload, ifMatch) =>
+					ctx.client.updateEnvironment(environmentId, payload, signal, ifMatch),
+				shape: echoShape(ctx),
+			});
 			return result.isError
 				? result
-				: withCaveat(result, absentRemovalCaveat(merged.absentRemovals));
+				: withCaveat(result, absentRemovalCaveat(absentRemovals));
 		},
 	},
 	{
