@@ -1,0 +1,170 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_ca9c01",
+    "reference": "Vayu run \"Search API capacity\" (run_ca9c01) - load test, GET /search, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187830000,
+    "name": "Search API capacity",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": false,
+    "reason": "no_budgets"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/search?q=widget",
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "capacity",
+      "duration": "5m",
+      "concurrency": 128,
+      "startConcurrency": 1,
+      "sloMs": 200,
+      "stepDuration": "5s",
+      "timeout": "30s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 18022,
+      "successfulRequests": 18022,
+      "failedRequests": 0,
+      "httpErrorRequests": 0,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 0.0,
+      "totalDurationSeconds": 62.4,
+      "avgRps": 288.8,
+      "testDuration": 62.4,
+      "sendRate": 288.8,
+      "throughput": 288.8,
+      "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
+      "peakConcurrency": 51,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 600000,
+      "bytesReceived": 1197000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 39900
+    },
+    "latency": {
+      "min": 3.2,
+      "max": 310.0,
+      "avg": 71.5,
+      "median": 62.0,
+      "p50": 62.0,
+      "p75": 110.0,
+      "p90": 150.0,
+      "p95": 188.0,
+      "p99": 231.5,
+      "p999": 262.0
+    },
+    "statusCodes": {
+      "200": 18022
+    },
+    "errors": {
+      "total": 0,
+      "withDetails": 0,
+      "types": {}
+    },
+    "capacity": {
+      "sloMs": 200,
+      "maxErrorPct": 1,
+      "stopReason": "slo_exceeded",
+      "maxHealthyConcurrency": 41,
+      "maxHealthyRps": 402.6,
+      "p99AtMaxHealthyMs": 178.4,
+      "kneeConcurrency": 51,
+      "kneeP99Ms": 226.0,
+      "levels": [
+        {
+          "concurrency": 1,
+          "rps": 12.4,
+          "p99Ms": 38.0,
+          "errorPct": 0.0,
+          "samples": 62
+        },
+        {
+          "concurrency": 2,
+          "rps": 24.6,
+          "p99Ms": 41.2,
+          "errorPct": 0.0,
+          "samples": 123
+        },
+        {
+          "concurrency": 4,
+          "rps": 48.9,
+          "p99Ms": 46.0,
+          "errorPct": 0.0,
+          "samples": 244
+        },
+        {
+          "concurrency": 8,
+          "rps": 95.7,
+          "p99Ms": 58.3,
+          "errorPct": 0.0,
+          "samples": 478
+        },
+        {
+          "concurrency": 16,
+          "rps": 181.2,
+          "p99Ms": 81.5,
+          "errorPct": 0.0,
+          "samples": 906
+        },
+        {
+          "concurrency": 32,
+          "rps": 344.0,
+          "p99Ms": 133.0,
+          "errorPct": 0.0,
+          "samples": 1720
+        },
+        {
+          "concurrency": 41,
+          "rps": 402.6,
+          "p99Ms": 178.4,
+          "errorPct": 0.0,
+          "samples": 2013
+        },
+        {
+          "concurrency": 51,
+          "rps": 411.9,
+          "p99Ms": 226.0,
+          "errorPct": 0.3,
+          "samples": 2059
+        },
+        {
+          "concurrency": 51,
+          "rps": 408.3,
+          "p99Ms": 231.5,
+          "errorPct": 0.0,
+          "samples": 2041
+        }
+      ]
+    }
+  },
+  "comparison": null,
+  "notCarried": []
+}

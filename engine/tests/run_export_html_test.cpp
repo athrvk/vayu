@@ -32,7 +32,11 @@
  * the status chart the cumulative counts and the per-interval case reds; make
  * `counts_by_second` return false and the status-seconds golden and
  * the counted-seconds cases red; take a dark text token below 4.5:1 and the
- * contrast case reds.
+ * contrast case reds; drop the capacity, sequence or transactions push from
+ * `view_sections` and the section tests and the goldens red; write a step,
+ * transaction or stop-reason cell unescaped and the escaping case reds; drop
+ * the caption from `table_markup` and the caption case and the scenario goldens
+ * red.
  */
 
 #include <gtest/gtest.h>
@@ -77,12 +81,14 @@ using vayu::utils::escape_html;
 /// Every document the Markdown goldens use, so the page is exercised on stopped
 /// runs, collection runs, comparisons and hostile text as well as the goldens.
 constexpr auto ALL_CASES = std::to_array<std::string_view> ({ "healthy-passed",
-"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed", "no-budgets",
-"collection-load", "hostile-text", "status-seconds", "skipped-requests" });
+"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed",
+"no-budgets", "collection-load", "hostile-text", "status-seconds",
+"skipped-requests", "capacity-slo-exceeded", "scenario-sequence" });
 
 /// The cases whose rendered page is pinned byte for byte.
-constexpr auto GOLDEN_CASES = std::to_array<std::string_view> (
-{ "healthy-passed", "errors-and-budget-failed", "status-seconds", "skipped-requests" });
+constexpr auto GOLDEN_CASES =
+std::to_array<std::string_view> ({ "healthy-passed", "errors-and-budget-failed",
+"status-seconds", "skipped-requests", "capacity-slo-exceeded", "scenario-sequence" });
 
 constexpr std::size_t SIZE_LIMIT_BYTES = 300000;
 
@@ -304,13 +310,18 @@ R"(&lt;img src=x onerror=alert(1)&gt;')",
 });
 
 /// A document that writes every kind of free text: the run's name and comment,
-/// its URL and configuration strings, error keys, warnings, a custom budget and
-/// a comparison with a differing data file.
+/// its URL and configuration strings, error keys, warnings, a custom budget, a
+/// comparison with a differing data file, a capacity search's result and a
+/// scenario's steps and transactions.
 ordered_json full_document () {
     ordered_json document       = read_document ("errors-and-budget-failed");
     const ordered_json baseline = read_document ("vs-baseline-regressed");
     document["comparison"]      = baseline["comparison"];
-    document["run"]["comment"]  = "a comment";
+    document["report"]["capacity"] =
+    read_document ("capacity-slo-exceeded")["report"]["capacity"];
+    document["report"]["scenario"] =
+    read_document ("scenario-sequence")["report"]["scenario"];
+    document["run"]["comment"]                              = "a comment";
     document["config"]["configuration"]["mode"]             = "ramp_up";
     document["config"]["configuration"]["startConcurrency"] = 10;
     document["config"]["configuration"]["rampUpDuration"]   = "10s";
@@ -394,6 +405,18 @@ constexpr auto HOSTILE_FIELDS = std::to_array<HostileField> ({
 [] (ordered_json& d, const std::string& t) {
     d["report"]["thresholdValidation"]["checks"][4]["metric"] = t;
 } },
+{ "capacity stop reason",
+[] (ordered_json& d, const std::string& t) {
+    d["report"]["capacity"]["stopReason"] = t;
+} },
+{ "step name",
+[] (ordered_json& d, const std::string& t) {
+    d["report"]["scenario"]["steps"][0]["name"] = t;
+} },
+{ "transaction name",
+[] (ordered_json& d, const std::string& t) {
+    d["report"]["scenario"]["transactions"][0]["name"] = t;
+} },
 { "base reference",
 [] (ordered_json& d, const std::string& t) {
     d["comparison"]["baseReference"] = t;
@@ -429,6 +452,121 @@ TEST (RunExportHtmlTest, EveryKindOfFreeTextIsEscapedWhereverItIsWritten) {
             EXPECT_NE (html.find (escape_html (hostile)), std::string::npos) << where;
         }
     }
+}
+
+// --- the capacity and scenario sections (#2819) ----------------------------------------------
+
+/// The markup of the section with id @p id, or empty when the page has none.
+std::string section_html (const std::string& html, std::string_view id) {
+    const auto open = html.find ("<section id=\"" + std::string (id) + "\"");
+    if (open == std::string::npos) {
+        return {};
+    }
+    return html.substr (open, html.find ("</section>", open) - open);
+}
+
+constexpr auto SEARCH_AND_SEQUENCE_SECTIONS =
+std::to_array<std::string_view> ({ "capacity", "sequence", "transactions" });
+
+// Mutation check: drop the capacity push from `view_sections` and this fails,
+// as does the golden.
+TEST (RunExportHtmlTest, ACapacitySearchIsASectionOfItsSentencesAndItsLevels) {
+    const std::string html =
+    render_run_export_html (read_document ("capacity-slo-exceeded"));
+    const std::string capacity = section_html (html, "capacity");
+    ASSERT_FALSE (capacity.empty ());
+    EXPECT_NE (html.find ("<li><a href=\"#capacity\">Capacity</a></li>"), std::string::npos);
+    EXPECT_NE (
+    capacity.find ("<p><strong>Latency budget exceeded</strong> - Sustained 41 "
+                   "virtual users at 403 req/s, with a p99 of 178 ms against a "
+                   "200 ms budget.</p>\n"),
+    std::string::npos)
+    << capacity;
+    for (const char* line :
+    { "<p>The limit lies between 41 and 51 virtual users: it held 41 "
+      "and gave out at 51, where p99 reached 226 ms.</p>",
+    "<p>p99 stayed above the budget across two consecutive measurements of the "
+    "level "
+    "(each 5s long).</p>",
+    "<p>Budget: p99 &lt;= 200 ms; error limit: 1.0%; step length: 5s</p>" }) {
+        EXPECT_NE (capacity.find (line), std::string::npos) << line;
+    }
+    EXPECT_NE (capacity.find ("<table aria-labelledby=\"capacity-h\">"), std::string::npos);
+    // The word beside the colour, and a re-measured level once per measurement.
+    EXPECT_NE (capacity.find ("<td class=\"tone-bad\">226 (over budget)</td>"),
+    std::string::npos);
+    EXPECT_NE (capacity.find ("<th scope=\"row\">51 (re-measured)</th>"), std::string::npos);
+    EXPECT_EQ (html.find ("<section id=\"sequence\""), std::string::npos);
+}
+
+TEST (RunExportHtmlTest, AScenarioRunHasItsSequenceAndTransactionsAsTables) {
+    const std::string html =
+    render_run_export_html (read_document ("scenario-sequence"));
+    const std::string sequence = section_html (html, "sequence");
+    ASSERT_FALSE (sequence.empty ());
+    EXPECT_NE (sequence.find (
+               "<p>2,110 iterations started, 2,090 completed, 15 abandoned, "
+               "5 cut short</p>"),
+    std::string::npos)
+    << sequence;
+    EXPECT_NE (sequence.find ("<table aria-labelledby=\"sequence-h\">"), std::string::npos);
+    EXPECT_NE (sequence.find ("<th scope=\"row\">Log in</th>"), std::string::npos);
+    EXPECT_NE (
+    sequence.find ("<td class=\"tone-bad\">2,080 passed, 18 failed</td>"), std::string::npos);
+
+    const std::string transactions = section_html (html, "transactions");
+    ASSERT_FALSE (transactions.empty ());
+    EXPECT_NE (transactions.find ("<table aria-labelledby=\"transactions-h\">"),
+    std::string::npos);
+    EXPECT_NE (
+    transactions.find ("<th scope=\"row\">Checkout</th><td>2,090</td>"), std::string::npos);
+    EXPECT_EQ (html.find ("<section id=\"capacity\""), std::string::npos);
+    for (const char* link : { "<li><a href=\"#sequence\">Sequence</a></li>",
+         "<li><a href=\"#transactions\">Transactions</a></li>" }) {
+        EXPECT_NE (html.find (link), std::string::npos) << link;
+    }
+}
+
+// Mutation check: write the step cell as `words` rather than `user` in
+// `steps_table` (or the transaction cell likewise) and the name lands raw.
+TEST (RunExportHtmlTest, AStepNameIsTextInItsRowHeader) {
+    ordered_json document = read_document ("scenario-sequence");
+    document["report"]["scenario"]["steps"][0]["name"] = "a|b <script>";
+    const std::string html = render_run_export_html (document);
+    EXPECT_NE (html.find ("<th scope=\"row\">a|b &lt;script&gt;</th>"), std::string::npos);
+    EXPECT_EQ (markup_only (html).find ("<script"), std::string::npos);
+}
+
+TEST (RunExportHtmlTest, APlainLoadRunDrawsNeitherSearchNorSequenceNorCaption) {
+    for (const std::string_view name :
+    { "healthy-passed", "errors-and-budget-failed", "stopped-early", "no-budgets" }) {
+        const std::string html = render_run_export_html (read_document (name));
+        for (const std::string_view id : SEARCH_AND_SEQUENCE_SECTIONS) {
+            EXPECT_EQ (html.find ("<section id=\"" + std::string (id) + "\""),
+            std::string::npos)
+            << name << ": " << id;
+            EXPECT_EQ (html.find ("href=\"#" + std::string (id) + "\""), std::string::npos)
+            << name << ": " << id;
+        }
+        EXPECT_EQ (html.find ("<caption"), std::string::npos) << name;
+    }
+}
+
+// Mutation check: drop the caption from `table_markup` and this fails, as do
+// the scenario goldens.
+TEST (RunExportHtmlTest, ATableCaptionIsACaptionElementInsideItsTable) {
+    for (const std::string_view name : { "scenario-sequence", "collection-load" }) {
+        const std::string latency =
+        section_html (render_run_export_html (read_document (name)), "latency");
+        EXPECT_NE (
+        latency.find ("<table aria-labelledby=\"latency-h\">\n<caption>All "
+                      "steps pooled.</caption>\n<thead>"),
+        std::string::npos)
+        << name << ": " << latency;
+    }
+    const std::string capacity =
+    render_run_export_html (read_document ("capacity-slo-exceeded"));
+    EXPECT_EQ (capacity.find ("<caption"), std::string::npos);
 }
 
 // --- size and spikes ------------------------------------------------------------------------------------
@@ -828,7 +966,8 @@ TEST (RunExportHtmlTest, SectionsComeInTheMarkdownReportsOrderThenChartsThenFoot
     std::size_t from       = 0;
     for (const std::string_view marker : { "<h1>", "<section id=\"verdict\"",
          "<section id=\"run\"", "<section id=\"results\"", "<section id=\"latency\"",
-         "<section id=\"errors\"", "<section id=\"comparison\"",
+         "<section id=\"capacity\"", "<section id=\"sequence\"",
+         "<section id=\"transactions\"", "<section id=\"errors\"", "<section id=\"comparison\"",
          "<section id=\"warnings\"", "<section id=\"charts\"", "<footer>" }) {
         const auto at = html.find (marker, from);
         ASSERT_NE (at, std::string::npos) << marker << " after offset " << from;
@@ -1057,9 +1196,9 @@ TEST (RunExportHtmlTest, PassAndFailAreAlwaysAWordBesideTheColour) {
     // Every coloured cell says what the colour means.
     for (const std::string_view name : ALL_CASES) {
         const std::string html = render_run_export_html (read_document (name));
-        for (const auto& [tone, words] : std::map<std::string, std::vector<std::string>>{
-             { "tone-good", { "met", "improved" } },
-             { "tone-bad", { "missed", "regressed" } } }) {
+        for (const auto& [tone, words] :
+        std::map<std::string, std::vector<std::string>>{ { "tone-good", { "met", "improved" } },
+        { "tone-bad", { "missed", "regressed", "(over budget)", "(over limit)", "failed" } } }) {
             const std::string open = "<td class=\"" + tone + "\">";
             for (auto at = html.find (open); at != std::string::npos;
             at           = html.find (open, at + 1)) {

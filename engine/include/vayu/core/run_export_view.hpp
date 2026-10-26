@@ -102,6 +102,11 @@ using ReportRow = std::vector<ReportCell>;
 struct ReportTable {
     std::vector<std::string> headers;
     std::vector<ReportRow> rows;
+    /// One line of words saying what the figures are of (`All steps pooled.`);
+    /// empty for a table that needs none. Braced so the many `{ headers, rows }`
+    /// initialisers do not trip -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    ReportText caption{};
 };
 
 struct ReportVerdict {
@@ -122,9 +127,45 @@ struct ReportComparison {
     ReportText caveat;
 };
 
+/// What a capacity-discovery search found (`report.capacity`): the same
+/// sentences, in the same order, as the app's Capacity summary
+/// (`components/shared/CapacitySummary.tsx`, with the stop table in
+/// `capacityStop.ts`). Two lists hold the stop reasons' words - this view's
+/// `STOP_REASONS` in `run_export_view.cpp` and `capacityStop.ts` - and a change
+/// to one is a change to both.
+struct ReportCapacity {
+    /// Why the search stopped (`Latency budget exceeded`); an unknown reason
+    /// keeps its raw key, as the app does.
+    ReportText stop;
+    /// What the search found, worded by @ref stop (`Sustained 41 virtual users ...`).
+    ReportText headline;
+    /// Where the limit sits; empty when the search found no knee.
+    ReportText knee;
+    /// Why the search stopped in the report's own figures; empty for a reason
+    /// with no words.
+    ReportText detail;
+    /// The budget and step length the search ran under; empty when the
+    /// document records neither.
+    ReportText limits;
+    /// One row per level judged, a re-measured level once per measurement.
+    /// Errors and Samples are columns only when some level carries them.
+    ReportTable levels;
+};
+
+/// What a scenario run's sequence did (`report.scenario`), beyond the totals.
+struct ReportSequence {
+    /// `2,105 iterations started, 2,100 completed, 3 abandoned`; empty when the
+    /// document does not count iterations.
+    ReportText iterations;
+    /// One row per step in document order, folded past a fixed row count into
+    /// `and 35 more steps`; no rows when the document holds no per-step stats.
+    ReportTable steps;
+};
+
 /// The sections of a report, each already worded. A section the document has
-/// no data for is empty (`errors.rows`, `comparison`, `warnings`) so a renderer
-/// omits it; the rest read "-" for what the document lacks.
+/// no data for is empty (`errors.rows`, `capacity`, `sequence`, `comparison`,
+/// `warnings`) so a renderer omits it; the rest read "-" for what the document
+/// lacks.
 struct ReportView {
     ReportText title;
     ReportText reference;
@@ -136,6 +177,13 @@ struct ReportView {
     ReportTable run;
     ReportTable results;
     ReportTable latency;
+    /// Empty for a run that is not a capacity search.
+    std::optional<ReportCapacity> capacity;
+    /// Empty for a run that is not a scenario run.
+    std::optional<ReportSequence> sequence;
+    /// Named transactions of a scenario run, folded like @ref ReportSequence::steps;
+    /// no rows when the run declared none.
+    ReportTable transactions;
     ReportTable errors;
     std::optional<ReportComparison> comparison;
     std::vector<ReportText> warnings;
