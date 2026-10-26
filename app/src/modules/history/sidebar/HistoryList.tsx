@@ -51,6 +51,7 @@ import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 
 /**
  * The origin Select carries one value for two store fields: a kind, or one
@@ -175,15 +176,43 @@ export default function HistoryList() {
 	const originNarrowing = filterOrigin !== "all" || filterClient !== null;
 	const isNarrowed =
 		searchQuery !== "" || filterType !== "all" || filterStatus !== "all" || originNarrowing;
+	/*
+	 * Only the first `visible` rows are mounted; the rest arrive as the end is
+	 * reached (`useGrowingWindow` records why this is a growing window and not a
+	 * virtual one: rows vary in height). Slicing before grouping is the same as
+	 * slicing after, because groups are runs of adjacent same-day rows.
+	 *
+	 * The window's identity is the question being asked, not the row count: the
+	 * 5s poll and "Load older runs" both change the length of the same list and
+	 * must not shut a window the reader has scrolled into.
+	 */
+	const windowKey = JSON.stringify([
+		debouncedSearch,
+		pinnedOnly,
+		filterOrigin,
+		filterClient,
+		filterType,
+		filterStatus,
+		sortBy,
+	]);
+	const {
+		visible,
+		sentinelRef,
+		hasMore: hasUnrenderedRuns,
+		showMore,
+	} = useGrowingWindow(runs.length, undefined, windowKey);
 	// Grouped after sorting/filtering, never before - a group is a label over
 	// whatever order `runs` is already in, not a second decision about it.
-	const runGroups = groupRunsByDay(runs);
+	const runGroups = groupRunsByDay(runs.slice(0, visible));
 
 	// Roving tabindex over the row activators inside this container - see
 	// useHistoryListFocus's own doc comment for why arrow keys move focus
 	// without opening the row they land on.
 	const listRef = useRef<HTMLDivElement>(null);
-	const { onKeyDown: onListKeyDown, onFocus: onListFocus } = useHistoryListFocus(listRef);
+	const { onKeyDown: onListKeyDown, onFocus: onListFocus } = useHistoryListFocus(
+		listRef,
+		hasUnrenderedRuns ? showMore : undefined
+	);
 
 	/*
 	 * A collection run's row carries the collection's id, not its name - the
@@ -532,25 +561,47 @@ export default function HistoryList() {
 										{group.label}
 									</Eyebrow>
 									{group.runs.map((run) => (
-										<RunItem
+										// `skip-offscreen`: the browser skips layout and paint for
+										// mounted rows scrolled past, the pairing `useGrowingWindow`
+										// describes. 3.5rem is a row with a result line; the real
+										// height is remembered once seen.
+										<div
 											key={run.id}
-											run={run}
-											onSelect={navigateToRunDetail}
-											onDelete={handleDeleteClick}
-											onToggleBaseline={handleToggleBaseline}
-											onCompare={openRunComparison}
-											isDeleting={deletingId === run.id}
-											isTogglingBaseline={pinningId === run.id}
-											isSelected={selectedRunId === run.id}
-											collectionName={collectionName(run)}
-										/>
+											className="skip-offscreen [--skip-offscreen-size:3.5rem]"
+										>
+											<RunItem
+												run={run}
+												onSelect={navigateToRunDetail}
+												onDelete={handleDeleteClick}
+												onToggleBaseline={handleToggleBaseline}
+												onCompare={openRunComparison}
+												isDeleting={deletingId === run.id}
+												isTogglingBaseline={pinningId === run.id}
+												isSelected={selectedRunId === run.id}
+												collectionName={collectionName(run)}
+											/>
+										</div>
 									))}
 								</div>
 							))}
 
+						{/* The sentinel: reaching it mounts the next slice of what is
+						    already loaded. The count is stated rather than left to a
+						    scrollbar, as the console's and a scenario's steps are. */}
+						{!isLoading && hasUnrenderedRuns && (
+							<p
+								ref={sentinelRef}
+								className="px-1 py-2 text-xs text-muted-foreground"
+							>
+								Showing {formatNumber(visible)} of {formatNumber(runs.length)} runs
+								- scroll for more.
+							</p>
+						)}
+
 						{/* Older runs page in on demand - the poll only refreshes
-						    the first page. */}
-						{!isLoading && !showError && hasNextPage && (
+						    the first page. Not while loaded runs remain unmounted:
+						    the sentinel above is the end of the list until then. */}
+						{!isLoading && !showError && hasNextPage && !hasUnrenderedRuns && (
 							<Button
 								variant="ghost"
 								size="sm"
