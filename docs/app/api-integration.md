@@ -1157,6 +1157,12 @@ flag and is recorded as usual; see
 // (url/method/mode/duration/concurrency/comment), not the full configSnapshot.
 // `limit: 1` makes `pagination.total` a count of the runs the filters match,
 // which is how Settings counts runs without downloading them (#2979).
+// Older pages are read by cursor, not offset (#2978): pass the previous page's
+// `pagination.nextBefore` as `before` (the engine owns its `<startTime>:<id>`
+// spelling; null on the last page). `listRuns` sends its default `offset=0`
+// only when there is no cursor, because the engine refuses `before` beside a
+// non-zero offset (`before_with_offset`). `offset` stays for a caller that
+// jumps to a page number; the MCP server keeps using it.
 apiService.listRuns(params?: RunListParams): Promise<RunListResponse>
 apiService.getRun(id): Promise<Run>            // full configSnapshot
 apiService.getRunReport(id): Promise<RunReport>

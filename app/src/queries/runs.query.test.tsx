@@ -88,6 +88,7 @@ function page(rows: RunListResponse["data"], over: Partial<RunListResponse["pagi
 			offset: 0,
 			hasMore: false,
 			returned: rows.length,
+			nextBefore: null,
 			...over,
 		},
 	} satisfies RunListResponse;
@@ -338,58 +339,79 @@ describe("useLastCollectionRunQuery", () => {
 });
 
 describe("useRunsQuery", () => {
-	it("paginates: fetchNextPage advances the offset off the envelope", async () => {
-		listRuns.mockImplementation(({ offset }: { offset: number }) =>
-			offset === 0
-				? Promise.resolve(
-						page(
-							[
-								{
-									id: "a",
-									type: "load",
-									status: "completed",
-									startTime: 2,
-									endTime: 3,
-								},
-							],
-							{
-								total: 2,
-								hasMore: true,
-								offset: 0,
-							}
-						)
-					)
-				: Promise.resolve(
-						page(
-							[
-								{
-									id: "b",
-									type: "load",
-									status: "completed",
-									startTime: 1,
-									endTime: 2,
-								},
-							],
-							{
-								total: 2,
-								hasMore: false,
-								offset: 50,
-							}
-						)
-					)
+	it("paginates: fetchNextPage asks for the page after the engine's nextBefore, with no offset", async () => {
+		const cursor = "2:a";
+		listRuns.mockImplementation(({ before }: { before?: string }) =>
+			Promise.resolve(
+				before === undefined
+					? page([runRow("a")], { total: 2, hasMore: true, nextBefore: cursor })
+					: page([runRow("b")], { total: 2, hasMore: false, nextBefore: null })
+			)
 		);
 
 		const { result } = renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
 
 		await waitFor(() => expect(result.current.data?.pages.length).toBe(1));
 		expect(result.current.hasNextPage).toBe(true);
+		// The first page carries no cursor and, past the API layer's default, no offset.
+		expect(listRuns.mock.calls[0][0]).toMatchObject({ before: undefined });
+		expect(listRuns.mock.calls[0][0]).not.toHaveProperty("offset");
 
 		await result.current.fetchNextPage();
 		await waitFor(() => expect(result.current.data?.pages.length).toBe(2));
 		expect(result.current.hasNextPage).toBe(false);
-		// Second call requested offset = first offset + limit.
-		expect(listRuns).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 }));
+		// The second request carries the first response's cursor verbatim.
+		expect(listRuns).toHaveBeenCalledTimes(2);
+		const second = listRuns.mock.calls[1][0];
+		expect(second).toMatchObject({ before: cursor });
+		expect(second).not.toHaveProperty("offset");
 		expect(flattenRunPages(result.current.data).map((r) => r.id)).toEqual(["a", "b"]);
+	});
+
+	it("stops paging when the engine answers hasMore false and nextBefore null", async () => {
+		listRuns.mockResolvedValue(page([runRow("only")], { hasMore: false, nextBefore: null }));
+
+		const { result } = renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
+
+		await waitFor(() => expect(result.current.data?.pages.length).toBe(1));
+		expect(result.current.hasNextPage).toBe(false);
+		await result.current.fetchNextPage();
+		expect(listRuns).toHaveBeenCalledTimes(1);
+		expect(result.current.data?.pages.length).toBe(1);
+	});
+
+	it("refetching a paged list walks the cursors off the fresh pages, so a new head run shifts nothing", async () => {
+		// Page 1 holds a, b (cursor after b); page 2 holds c.
+		listRuns.mockImplementation(({ before }: { before?: string }) =>
+			Promise.resolve(
+				before === undefined
+					? page([runRow("a"), runRow("b")], { hasMore: true, nextBefore: "2:b" })
+					: page([runRow("c")], { hasMore: false, nextBefore: null })
+			)
+		);
+		const { result } = renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
+		await waitFor(() => expect(result.current.data?.pages.length).toBe(1));
+		await result.current.fetchNextPage();
+		await waitFor(() => expect(result.current.data?.pages.length).toBe(2));
+
+		// A run "z" starts: the head page now ends at "a", and its cursor moves with it.
+		listRuns.mockImplementation(({ before }: { before?: string }) =>
+			Promise.resolve(
+				before === undefined
+					? page([runRow("z"), runRow("a")], { hasMore: true, nextBefore: "3:a" })
+					: page([runRow("b"), runRow("c")], { hasMore: false, nextBefore: null })
+			)
+		);
+		await result.current.refetch();
+		await waitFor(() =>
+			expect(flattenRunPages(result.current.data).map((r) => r.id)).toEqual([
+				"z",
+				"a",
+				"b",
+				"c",
+			])
+		);
+		expect(listRuns).toHaveBeenLastCalledWith(expect.objectContaining({ before: "3:a" }));
 	});
 
 	it("passes a trimmed search as the q param, omitting a blank one", async () => {
@@ -503,7 +525,7 @@ describe("usePrefetchRuns", () => {
 			q: undefined,
 			baseline: undefined,
 			limit: 50,
-			offset: 0,
+			before: undefined,
 		});
 
 		// Paged shape, not a bare page: `prefetchQuery` would store the

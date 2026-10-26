@@ -2104,7 +2104,12 @@ click; refetching either removes it or proves it real.
 
 - **`useRunsQuery(q?, pinnedOnly?, origin?)`** - Run history as an **infinite
   query** over the paginated `GET /runs` `{data, pagination}` envelope, newest
-  first. `fetchNextPage` pages older runs in on demand. `q` is the
+  first. `fetchNextPage` pages older runs in on demand, by **keyset cursor**
+  (#2978): the first page carries no cursor, and each next page is asked for
+  `before=<the previous page's pagination.nextBefore>`, the engine's own value
+  rather than one derived from the rows, with no `offset`. A cursor page costs
+  the same at any depth and does not shift when a run starts between two pages;
+  `nextBefore: null` ends the paging. `q` is the
   optional server-side search; `origin` (`"app"` or `"mcp"`, `undefined` for
   all) is `GET /runs?origin=`.
   - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
@@ -2123,14 +2128,15 @@ click; refetching either removes it or proves it real.
     `useEntityItems` observe the key while they are visible and drive the
     cadence themselves.
   - **`runsListInfiniteOptions(q?, pinnedOnly?, origin?)`** - the key, fetcher
-    and page params, shared by the hook and the warm-up so the entry one writes
+    and page params (the cursor, `string | undefined`), shared by the hook and the warm-up so the entry one writes
     is the entry the other reads. `origin` joins the key only when set, so the
     unfiltered list stays the entry the warm-up and the other observers share. `prefetchInfiniteQuery`, not `prefetchQuery`: the
     readers are infinite queries and the cache entry has to be in `InfiniteData`
     shape.
   - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`
-    (dedupe by id guards the momentary double-row a head insertion can cause
-    across two refetched pages). **`runsTotal(data)`** - the server's total from
+    (a refetch walks the pages in order and reads each cursor off the page it
+    just fetched, so pages abut and a run cannot sit in two; dedupe by id is the
+    cheap guard that keeps a doubled row out regardless). **`runsTotal(data)`** - the server's total from
     the first page.
 - **`useRunsCountQuery()`** - How many runs are stored, for Settings' "N stored
   runs": one `limit=1` read of the list envelope, answering its
