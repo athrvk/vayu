@@ -489,7 +489,7 @@ size_t vu_index) {
 /// `run_step_before`'s answer: elapsed pipeline time on `includeScriptTime`'s
 /// terms, whether a controller kind (`control.if` / `control.once` /
 /// `control.throughput`, issue #1515) asked to skip this occurrence - the
-/// load path's own `pm.execution.skipRequest()` - and `control.switch`'s own
+/// load path's own skip, which an inline script cannot ask for - and `control.switch`'s own
 /// dispatch target, if it fired (issue #1569's `Kind::Next`, read the same
 /// way the sequential run's `decide_next_step` reads a pre-request script's).
 /// `assertion_failed` and `script_threw` are carried to the completion, which

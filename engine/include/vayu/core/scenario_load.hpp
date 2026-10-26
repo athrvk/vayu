@@ -632,8 +632,8 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * @brief Run the VU state machine to completion. Called by `execute_load_test`
  *        in place of a `LoadStrategy`, inside the same lifecycle.
  *
- * Every path leaves the run drainable: an errored step ends its VU's iteration
- * and the VU starts the next one rather than being stranded - a stranded VU
+ * Every path leaves the run drainable: a step that got no response ends its VU's
+ * iteration and the VU starts the next one rather than being stranded - a stranded VU
  * permanently shrinks effective concurrency, the same failure `handle_result`'s
  * error branch already guards against.
  *
