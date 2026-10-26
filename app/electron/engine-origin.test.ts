@@ -394,6 +394,16 @@ describe("main.ts", () => {
 		expect(webPreferences).toContain("contextIsolation: true");
 		expect(webPreferences).not.toMatch(/\bpartition\b|\bsession\b/);
 	});
+
+	it("states the sandbox and keeps Node integration off for the main window", () => {
+		// Mutation check: delete `sandbox: true` from main.ts and this fails.
+		const start = mainSource.indexOf("mainWindow = new BrowserWindow({");
+		const end = mainSource.indexOf("webPreferences: {", start);
+		const webPreferences = mainSource.slice(end, mainSource.indexOf("},", end));
+		expect(end).toBeGreaterThan(start);
+		expect(webPreferences).toContain("sandbox: true");
+		expect(webPreferences).toContain("nodeIntegration: false");
+	});
 });
 
 /*

@@ -387,13 +387,11 @@ const ScenarioPlan& plan) {
     const size_t executed = state.steps_executed.load (std::memory_order_relaxed);
     const size_t errored = state.steps_errored.load (std::memory_order_relaxed);
     const size_t skipped = state.steps_skipped.load (std::memory_order_relaxed);
-    // An HTTP error response is never `errored` (that is the iteration-abort
-    // count), so the two sets are disjoint and both come off `passed`.
-    size_t failed = 0;
-    for (size_t i = 0; i < state.steps.step_count (); ++i) {
-        failed += state.steps.http_errors (i);
-    }
-    const size_t not_passed = errored + failed;
+    const size_t failed  = state.steps_failed.load (std::memory_order_relaxed);
+    // The sequential runner's outcomes (#2824): disjoint, so `passed` is what
+    // is left. An HTTP error status with no failed assertion is `passed`; the
+    // step's `httpErrors` counts it.
+    const size_t not_passed = errored + failed + skipped;
     nlohmann::json summary = { // The keys `apply_run_summary` already reads for a
         // scenario run, so one report shape covers both executors.
         { "iterations", state.iterations_started.load (std::memory_order_relaxed) },
@@ -487,11 +485,39 @@ size_t vu_index) {
 /// load path's own `pm.execution.skipRequest()` - and `control.switch`'s own
 /// dispatch target, if it fired (issue #1569's `Kind::Next`, read the same
 /// way the sequential run's `decide_next_step` reads a pre-request script's).
+/// `assertion_failed` is carried to the completion, which alone knows whether
+/// a response arrived for the execution to count as `failed` (#2824).
 struct StepBeforeResult {
     int64_t elapsed_ms = 0;
     bool skip          = false;
     std::optional<std::string> next_target;
+    bool assertion_failed = false;
 };
+
+/// `run_step_after`'s answer, on `StepBeforeResult`'s terms.
+struct StepAfterResult {
+    int64_t elapsed_ms    = 0;
+    bool assertion_failed = false;
+};
+
+/**
+ * Adds @p tests to the run's inline assertion tally (issue #1497) and answers
+ * whether any of them failed - the per-execution bit the summary's `failed`
+ * is counted from (#2824), so several failures in one execution count once.
+ */
+bool tally_inline_tests (ScenarioLoadState& state,
+const std::vector<vayu::TestResult>& tests) {
+    bool any_failed = false;
+    for (const auto& test : tests) {
+        if (test.passed) {
+            state.inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            state.inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
+            any_failed = true;
+        }
+    }
+    return any_failed;
+}
 
 /**
  * Runs this step's `step.before` elements - the residual-token pass is the
@@ -591,16 +617,10 @@ const nlohmann::json* data_row) {
     // `pre_result.tests` is populated only when `script.pre` actually ran
     // above (a deferred one never invokes `run_pre_script`, so it stays
     // empty) - the inline half of issue #1497's assertion tally.
-    for (const auto& test : pre_result.tests) {
-        if (test.passed) {
-            state.inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
-        } else {
-            state.inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
-        }
-    }
+    const bool assertion_failed = tally_inline_tests (state, pre_result.tests);
 
     if (!start) {
-        return StepBeforeResult{ 0, skip, next_target };
+        return StepBeforeResult{ 0, skip, next_target, assertion_failed };
     }
     return StepBeforeResult{
         std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -608,6 +628,7 @@ const nlohmann::json* data_row) {
         .count (),
         skip,
         next_target,
+        assertion_failed,
     };
 }
 
@@ -621,9 +642,9 @@ const nlohmann::json* data_row) {
  *        only ever holds a `const Response&` off `Result::value()`, and
  *        copying a response to avoid it would pay for the body twice.
  * @return elapsed milliseconds, on the same terms @ref run_step_before returns
- *         them.
+ *         them, and whether an assertion failed.
  */
-int64_t run_step_after (const std::shared_ptr<RunContext>& context,
+StepAfterResult run_step_after (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
 VirtualUser& vu,
 const ScenarioStep& step,
@@ -632,7 +653,7 @@ vayu::Request& request,
 const vayu::Response& response,
 const nlohmann::json* data_row) {
     if (!step.elements || step.elements->empty ()) {
-        return 0;
+        return {};
     }
     const auto start = context->include_script_time ?
     std::optional (std::chrono::steady_clock::now ()) :
@@ -710,20 +731,17 @@ const nlohmann::json* data_row) {
     }
     // Every `assert.*` outcome and required `extract.*` miss lands here, beside
     // an inline `script.post`'s `pm.test` calls; a deferred one adds nothing.
-    for (const auto& test : post_result.tests) {
-        if (test.passed) {
-            state.inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
-        } else {
-            state.inline_tests_failed.fetch_add (1, std::memory_order_relaxed);
-        }
-    }
+    const bool assertion_failed = tally_inline_tests (state, post_result.tests);
 
     if (!start) {
-        return 0;
+        return StepAfterResult{ 0, assertion_failed };
     }
-    return std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now () - *start)
-    .count ();
+    return StepAfterResult{
+        std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::steady_clock::now () - *start)
+        .count (),
+        assertion_failed,
+    };
 }
 
 } // namespace
@@ -871,10 +889,12 @@ class ScenarioLoadDriver {
         // never consulted on the transport-error path, which ends the
         // iteration on `errored` alone regardless.
         std::optional<std::string> next_target_before = before_result.next_target;
+        const bool assertion_failed_before = before_result.assertion_failed;
         context_->event_loop->submit (request,
-        [context = context_, &db = db_, state = state_, &plan = execution_.plan, step_ptr,
-        vu, step_index, iteration, vu_index, row, data_row, pipeline_before_ms, sent_request,
-        next_target_before] (size_t, const vayu::Result<vayu::Response>& result) {
+        [context = context_, &db = db_, state = state_, &plan = execution_.plan,
+        step_ptr, vu, step_index, iteration, vu_index, row, data_row,
+        pipeline_before_ms, sent_request, next_target_before,
+        assertion_failed_before] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
                 finish_without_response (context, db, state, plan, vu, step_index,
                 result, ResultAnnotations{ row, step_index, iteration, vu_index });
@@ -882,19 +902,24 @@ class ScenarioLoadDriver {
             }
 
             const vayu::Response& response = result.value ();
-            int64_t pipeline_after_ms      = 0;
+            StepAfterResult after;
             if (sent_request) {
-                pipeline_after_ms = run_step_after (context, *state, *vu,
-                *step_ptr, step_index, *sent_request, response, data_row);
+                after = run_step_after (context, *state, *vu, *step_ptr,
+                step_index, *sent_request, response, data_row);
             }
 
             const bool errored = response.has_error ();
             // Decided once and handed to both populations, so the step's
             // histogram and the run's cannot disagree about it (#2792).
             const double script_ms = context->include_script_time ?
-            static_cast<double> (pipeline_before_ms + pipeline_after_ms) :
+            static_cast<double> (pipeline_before_ms + after.elapsed_ms) :
             0.0;
             record_step_response (*state, step_index, response, script_ms);
+            // An execution with no response is `errored` whatever its
+            // assertions said, as in the sequential runner's `classify_step`.
+            if (!errored && (assertion_failed_before || after.assertion_failed)) {
+                state->steps_failed.fetch_add (1, std::memory_order_relaxed);
+            }
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
             // that counted only successes would report the send as if it never

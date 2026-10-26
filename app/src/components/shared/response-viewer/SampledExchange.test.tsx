@@ -37,6 +37,28 @@ const base = {
 };
 
 describe("SampledExchange", () => {
+	it("draws no status badge and no time for an exchange that never reached the wire", () => {
+		// A skipped step (#2824): `0` would read as "ERR" and "0ms".
+		render(
+			<SampledExchange
+				{...base}
+				statusCode={undefined}
+				latencyMs={undefined}
+				state="skipped"
+			/>
+		);
+
+		expect(screen.queryByText("ERR")).toBeNull();
+		expect(screen.queryByText(/ms$/)).toBeNull();
+		expect(screen.queryByText("200")).toBeNull();
+	});
+
+	it("does not read an absent status as an error", () => {
+		render(<SampledExchange {...base} statusCode={undefined} latencyMs={undefined} />);
+
+		expect(screen.getByRole("button").querySelector("svg.text-destructive-text")).toBeNull();
+	});
+
 	it("exposes the summary as one button whose aria-expanded tracks the state", () => {
 		const { rerender } = render(<SampledExchange {...base} />);
 

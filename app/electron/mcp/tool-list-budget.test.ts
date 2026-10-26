@@ -90,6 +90,16 @@
  * `get_live_metrics`, each paid once per row and each within the margin alone,
  * together took the rows to 145,407 / 142,681 / 213,909 / 209,512 B, and the
  * four caps went to 145,700 / 143,000 / 214,200 / 209,800.
+ *
+ * #2938's sentence in `get_run_report` (`latency` is absent, not zero, on a
+ * crash-reconciled run) and its schema change landed beside #2937 on master,
+ * and each passed alone. Together the rows measure 145,176 / 142,450 / 213,678
+ * / 209,281 B (writes off: reveal off / on; writes on: reveal off / on), the
+ * first two over their caps and the last two within 22 B of theirs; the four
+ * caps went to 145,500 / 142,800 / 214,000 / 209,600 (one measurement plus a
+ * few hundred bytes). With #2823's, #2928's and #2938's sentences all in, the
+ * rows measure 145,407 / 142,681 / 213,909 / 209,512 B and the caps stay at
+ * 145,700 / 143,000 / 214,200 / 209,800.
  */
 
 import { describe, it, expect } from "vitest";

@@ -417,6 +417,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									<ScenarioStepsTab
 										steps={scenarioSteps}
 										virtualUsers={report.scenario?.virtualUsers}
+										iterations={report.scenario?.iterations}
 										iterationsCompleted={report.scenario?.iterationsCompleted}
 										iterationsAbandoned={report.scenario?.iterationsAbandoned}
 										replayCard={testValidationTitleOf(report)}

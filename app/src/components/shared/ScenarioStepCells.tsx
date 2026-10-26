@@ -119,18 +119,22 @@ export function ErrorsCell(props: { errors: number; httpErrors?: number; noRespo
  * The line above a step table: what the sequence has done so far. Each count is
  * drawn when its caller has one; abandoned only when non-zero, since a run that
  * lost nothing should not be made to display a zero next to a word like
- * "abandoned".
+ * "abandoned"; likewise cut short, the third way an iteration ends: neither
+ * finished nor lost to an errored step, but still running at the deadline or a
+ * Stop.
  */
 export function ScenarioFacts({
 	virtualUsers,
 	iterationsStarted,
 	iterationsCompleted,
 	iterationsAbandoned,
+	iterationsCutShort,
 }: {
 	virtualUsers?: number;
 	iterationsStarted?: number;
 	iterationsCompleted?: number;
 	iterationsAbandoned?: number;
+	iterationsCutShort?: number;
 }) {
 	return (
 		<div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm p-3 border rounded-md bg-background/50">
@@ -143,6 +147,9 @@ export function ScenarioFacts({
 			)}
 			{!!iterationsAbandoned && (
 				<Fact label="Iterations abandoned" value={iterationsAbandoned} warn />
+			)}
+			{!!iterationsCutShort && (
+				<Fact label="Iterations cut short" value={iterationsCutShort} />
 			)}
 		</div>
 	);

@@ -29,6 +29,7 @@ const mockSetStreaming = vi.fn();
 const mockSetError = vi.fn();
 const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
+const mockSetPlan = vi.fn();
 /** The fold the store keeps beside the rows; the notification body reads it. */
 const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0 };
 vi.mock("@/stores/scenario-run-store", () => ({
@@ -36,6 +37,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 		getState: () => ({
 			startRun: mockStartRun,
 			addSteps: mockAddSteps,
+			setPlan: mockSetPlan,
 			setStreaming: mockSetStreaming,
 			setError: mockSetError,
 			summary: { counts: stepCounts, iterationSteps: 0, dataBoundSteps: 0 },
@@ -254,6 +256,20 @@ describe("ScenarioRunService", () => {
 			// took the shared client from it (#1417).
 			expect.any(Function)
 		);
+	});
+
+	// The whole frame, not only its length: the run tab's header reads
+	// `iterations` and `stepsPerIteration` from the store while the run is live.
+	// Mutation check: drop the `setPlan` call in `handlePlan` and this fails.
+	it("hands the plan frame to the store for the run tab's header", () => {
+		scenarioRunService.startMonitoring("run_plan");
+		deliverPlan(6, 40);
+
+		expect(mockSetPlan).toHaveBeenCalledExactlyOnceWith({
+			stepsPerIteration: 6,
+			iterations: 40,
+			stepsExpected: 240,
+		});
 	});
 
 	it("refetches the report over the empty one the run tab cached at start", async () => {

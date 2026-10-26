@@ -44,6 +44,7 @@ import {
 	ExecutedCell,
 	ScenarioFacts,
 	StepLabelCell,
+	deferredResponsesOf,
 } from "@/components/shared";
 import { formatLatency, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -56,15 +57,80 @@ export interface ScenarioStepsTabProps {
 	steps: RunScenarioStepStat[];
 	/** Virtual users the run held, for the line above the table. */
 	virtualUsers?: number;
+	/** Iterations started; with the two below it gives the ones the end of the run cut off. */
+	iterations?: number;
 	iterationsCompleted?: number;
 	iterationsAbandoned?: number;
 	/** The sampled-replay card a deferred element row points at (`testValidationTitleOf`). */
 	replayCard?: string;
 }
 
+/**
+ * The Tests tally. With the step's replay population known (`deferred` on its
+ * script elements, #2824) the cell leads with the scope, "23 of 2,270", and
+ * keeps the assertion split in the title; the failed count stays in the cell,
+ * since a failure should not need a hover. A report stored before the engine
+ * counted `deferred` has no population, so it keeps the passed / failed form.
+ */
+function TestsCell({ step }: { step: RunScenarioStepStat }) {
+	const { tests } = step;
+	if (!tests) {
+		// A step that asserted nothing. A zero here would read as
+		// "nothing failed", which is a claim the run never made.
+		return (
+			<span className="text-muted-foreground" title="No assertions">
+				-
+			</span>
+		);
+	}
+	const population = deferredResponsesOf(step);
+	const split = `${formatNumber(tests.passed)} passed, ${formatNumber(
+		tests.failed
+	)} failed across ${formatNumber(tests.sampled)} sampled ${pluralize(tests.sampled, "response")}`;
+	if (population === 0) {
+		return (
+			<span title={split}>
+				{formatNumber(tests.passed)}
+				{tests.failed > 0 && (
+					<span className="text-status-error-text">
+						{" / "}
+						{formatNumber(tests.failed)}
+					</span>
+				)}
+			</span>
+		);
+	}
+	return (
+		<span title={`${split}, of ${formatNumber(population)} that carried a test script`}>
+			{formatNumber(tests.sampled)} of {formatNumber(population)}
+			{tests.failed > 0 && (
+				<span className="text-status-error-text">
+					{" / "}
+					{formatNumber(tests.failed)} failed
+				</span>
+			)}
+		</span>
+	);
+}
+
+/**
+ * Iterations the deadline or a Stop cut off: started, and neither completed nor
+ * abandoned by an errored step. Derived, so there is no engine key to go stale;
+ * clamped, so a report whose counts disagree reads as none rather than negative.
+ */
+function iterationsCutShortOf(
+	iterations: number | undefined,
+	completed: number | undefined,
+	abandoned: number | undefined
+): number {
+	if (iterations === undefined || completed === undefined) return 0;
+	return Math.max(0, iterations - completed - (abandoned ?? 0));
+}
+
 export default function ScenarioStepsTab({
 	steps,
 	virtualUsers,
+	iterations,
 	iterationsCompleted,
 	iterationsAbandoned,
 	replayCard,
@@ -75,6 +141,11 @@ export default function ScenarioStepsTab({
 	// every step, each row's `executed` equals it. A row below it is a step the
 	// sequence stopped short of.
 	const expectedPerStep = steps[0]?.executed ?? 0;
+	const iterationsCutShort = iterationsCutShortOf(
+		iterations,
+		iterationsCompleted,
+		iterationsAbandoned
+	);
 
 	return (
 		<div className="space-y-4">
@@ -82,6 +153,7 @@ export default function ScenarioStepsTab({
 				virtualUsers={virtualUsers}
 				iterationsCompleted={iterationsCompleted}
 				iterationsAbandoned={iterationsAbandoned}
+				iterationsCutShort={iterationsCutShort}
 			/>
 
 			{/* Wide content scrolls inside its own box rather than pushing the
@@ -121,34 +193,7 @@ export default function ScenarioStepsTab({
 										noResponse={step.noResponse}
 									/>
 									<TableCell className="text-right font-mono">
-										{step.tests ? (
-											<span
-												title={`${formatNumber(
-													step.tests.passed
-												)} passed, ${formatNumber(
-													step.tests.failed
-												)} failed across ${formatNumber(
-													step.tests.sampled
-												)} sampled ${pluralize(step.tests.sampled, "response")}`}
-											>
-												{formatNumber(step.tests.passed)}
-												{step.tests.failed > 0 && (
-													<span className="text-status-error-text">
-														{" / "}
-														{formatNumber(step.tests.failed)}
-													</span>
-												)}
-											</span>
-										) : (
-											// A step that asserted nothing. A zero here would read as
-											// "nothing failed", which is a claim the run never made.
-											<span
-												className="text-muted-foreground"
-												title="No assertions"
-											>
-												-
-											</span>
-										)}
+										<TestsCell step={step} />
 									</TableCell>
 									<TableCell className="text-right font-mono">
 										{formatLatency(step.latency.p50)}

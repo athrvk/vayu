@@ -1730,7 +1730,8 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     if (!extras.transactions.empty ()) {
         section["transactions"] = extras.transactions;
     }
-    // Beside `passed`, never folded into it: that count stays HTTP-only.
+    // Beside the step outcomes, never folded into them: those count step
+    // executions, this counts assertions.
     if (const auto& assertions = extras.scenario_assertions) {
         section["assertions"] = { { "passed", assertions->passed },
             { "failed", assertions->failed } };
