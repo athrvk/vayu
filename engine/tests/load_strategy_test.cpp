@@ -1133,7 +1133,10 @@ TEST_F (LoadStrategyTest, ConstantRpsDeliversRatesAbove1000) {
 
     const double owed = RPS * DUR_S;
     const size_t sent = context->requests_sent.load ();
-    EXPECT_GT (static_cast<double> (sent), owed * 0.9)
+    // The floor sits between the broken reading (~2000, a rate floored to a
+    // 1000-multiple) and the healthy one (~3000); 0.9 sat at 2700, which a
+    // three-vCPU macOS runner missed at 2430.
+    EXPECT_GT (static_cast<double> (sent), owed * 0.75)
     << "delivered " << sent << " of " << owed
     << "; a rate floored to a 1000-multiple would deliver ~2000";
     EXPECT_LT (static_cast<double> (sent), owed * 1.1)
