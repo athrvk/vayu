@@ -623,6 +623,9 @@ function createWindow() {
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
+			// Electron's default since 20, stated so SECURITY.md's claim does not
+			// move with a default; the preload is written for it (no Node modules).
+			sandbox: true,
 			preload: path.join(__dirname, "preload.js"),
 			// The engine's port, read once by the preload (#2118). Fixed before
 			// the first window exists; see `enginePortFixed`. The legacy-storage

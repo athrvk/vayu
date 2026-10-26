@@ -513,6 +513,20 @@ export const ROOT_READING_GUARDS = {
 		reader: "app/electron/release-attestation-scope.test.ts",
 		paths: [".github/workflows/release.yml"],
 	},
+	/*
+	 * SECURITY.md states facts that live in `app/` (the CSP's engine ports, the
+	 * update check), and it is Markdown, so no filter routes an edit to it. The
+	 * guards keep the document and the code from drifting apart (#2381); the
+	 * ports check is a second reader because `src/` cannot import `electron/`.
+	 */
+	securityPolicy: {
+		reader: "app/src/security-md.test.ts",
+		paths: ["SECURITY.md"],
+	},
+	securityPolicyPorts: {
+		reader: "app/electron/security-md-ports.test.ts",
+		paths: ["SECURITY.md"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 function union(guards: Record<string, ReadingGuard>): readonly string[] {

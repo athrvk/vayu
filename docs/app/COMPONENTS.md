@@ -3364,8 +3364,9 @@ beside a plain textarea.
 
    This is no longer a single layer: #822 landed the refusal underneath it, so
    `electron/window-navigation.ts` makes the main window refuse a navigation that
-   is not the app's own document and deny `window.open`. There is still no CSP.
-   Keep both - the window guard turns an escaped link into a dead one, and this
+   is not the app's own document and deny `window.open`; the app document also
+   carries a Content-Security-Policy (`electron/renderer-csp.ts`). Keep both
+   layers - the window guard turns an escaped link into a dead one, and this
    override is what makes it reach the user's browser instead.
 2. **`react-markdown` with the default `urlTransform`.** It builds React
    elements from an AST, so there is no `dangerouslySetInnerHTML` and no

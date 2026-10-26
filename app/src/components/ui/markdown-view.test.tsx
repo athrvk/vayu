@@ -21,10 +21,11 @@
  * "sanitise the href" - it is that no `href` reaches the DOM at all.
  *
  * The main window refuses an off-app navigation and denies `window.open` since
- * #822 (`electron/window-navigation.ts`, guarded by its own test); there is
- * still no CSP. That is the layer underneath these assertions, not a substitute
- * for them - a refused navigation is a dead link, while a button reaches the
- * user's browser.
+ * #822 (`electron/window-navigation.ts`, guarded by its own test), and the app
+ * document carries a Content-Security-Policy (`electron/renderer-csp.ts`).
+ * Those are the layers underneath these assertions, not a substitute for them -
+ * a refused navigation is a dead link, while a button reaches the user's
+ * browser.
  *
  * These assert that in the ways it could regress: a plain link, a bare URL that
  * `remark-gfm` autolinks behind your back, a `javascript:` URL, and raw HTML in
