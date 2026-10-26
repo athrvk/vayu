@@ -102,7 +102,7 @@ export function runsListInfiniteOptions(
 			...(type && { type }),
 			...(status && { status }),
 		}),
-		queryFn: ({ pageParam }: { pageParam: number }): Promise<RunListResponse> =>
+		queryFn: ({ pageParam }: { pageParam: string | undefined }): Promise<RunListResponse> =>
 			apiService.listRuns({
 				q: search,
 				baseline,
@@ -110,13 +110,14 @@ export function runsListInfiniteOptions(
 				type,
 				status,
 				limit: RUNS_PAGE_LIMIT,
-				offset: pageParam,
+				before: pageParam,
 			}),
-		initialPageParam: 0,
-		getNextPageParam: (lastPage: RunListResponse) =>
-			lastPage.pagination.hasMore
-				? lastPage.pagination.offset + lastPage.pagination.limit
-				: undefined,
+		// The cursor a page is read after: unset for the first page, then the
+		// engine's own `nextBefore` (null on the last page ends the paging).
+		// A cursor page costs the same at any depth and does not shift when a
+		// run starts between two pages (#2978).
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage: RunListResponse) => lastPage.pagination.nextBefore,
 	};
 }
 
@@ -169,10 +170,11 @@ export function usePrefetchRuns() {
 }
 
 /**
- * Flatten an infinite runs query's pages into a de-duplicated list. Dedup by id
- * matters because offset pagination + head insertions (a new run prepends to
- * page 1) can momentarily place one run in two refetched pages; keeping the
- * first occurrence avoids a doubled row.
+ * Flatten an infinite runs query's pages into a de-duplicated list. A refetch
+ * walks the pages in order and reads each cursor off the page it just fetched,
+ * so consecutive pages abut and a run cannot sit in two of them; dedup by id
+ * is the cheap guard that keeps a doubled row out of the list if one ever
+ * does, first occurrence winning.
  */
 export function flattenRunPages(data: InfiniteData<RunListResponse> | undefined): Run[] {
 	if (!data) return [];

@@ -206,6 +206,7 @@ function runPage(data: Run[], total = data.length): RunListResponse {
 			offset: 0,
 			hasMore: false,
 			returned: data.length,
+			nextBefore: null,
 		},
 	};
 }

@@ -523,6 +523,30 @@ TEST_F (DatabaseTest, TheFirstConnectionCarriesTheEnginesDurabilitySettings) {
     << "the schema was written under a rollback journal, before init() set WAL";
 }
 
+// #2433. Without a `journal_size_limit` the `-wal` keeps the size one large
+// transaction grew it to, because the autocheckpoint never truncates. The limit
+// is per-connection state, so it is read back from the connection: a literal
+// for the reason above, and before and after `init` like the settings above.
+TEST_F (DatabaseTest, TheConnectionReportsTheJournalSizeLimit) {
+    constexpr int64_t kSixtyFourMiB = 64LL * 1024 * 1024;
+
+    Database db (TEST_DB_PATH);
+    EXPECT_EQ (db.applied_journal_size_limit (), kSixtyFourMiB);
+
+    db.init ();
+    EXPECT_EQ (db.applied_journal_size_limit (), kSixtyFourMiB);
+}
+
+// #2433. A mapped region turns a read I/O error into a signal that kills the
+// engine, so the connection opens unmapped. A literal for the reason above.
+TEST_F (DatabaseTest, TheConnectionDoesNotMapTheDatabaseFile) {
+    Database db (TEST_DB_PATH);
+    EXPECT_EQ (db.applied_mmap_size (), 0);
+
+    db.init ();
+    EXPECT_EQ (db.applied_mmap_size (), 0);
+}
+
 // The other half of the same change: `init` must still hand the *configured*
 // level to the connection, so raising `dbSynchronous` is not quietly undone by
 // the default the constructor now applies. Reopened, because the entry is

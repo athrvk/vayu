@@ -155,6 +155,17 @@ struct RunFilter {
 };
 
 /**
+ * A keyset position in the GET /runs order (`start_time DESC, id DESC`): the
+ * last row of the page before. `id` breaks a `start_time` tie, which makes the
+ * order total, so a page that starts after this row neither repeats nor skips
+ * one (#2978).
+ */
+struct RunCursor {
+    int64_t start_time = 0;
+    std::string id;
+};
+
+/**
  * The narrow outcome of a design run's single exchange: what came back and how
  * long it took, and nothing else.
  *
@@ -801,11 +812,16 @@ class Database {
     void update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries = 3);
     void update_run_end_time (const std::string& id); // Update end_time without changing status
     std::vector<Run> get_all_runs ();
-    // Paginated, filtered run list ordered start_time DESC (newest first) - the
-    // only order the UI uses. count_runs returns the total matching @p filter
-    // (ignoring limit/offset) for the pagination envelope.
+    // Paginated, filtered run list ordered start_time DESC, id DESC (newest
+    // first, ties by id) - the only order the UI uses. count_runs returns the
+    // total matching @p filter (ignoring limit/offset/cursor) for the
+    // pagination envelope.
     std::vector<Run>
     get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset);
+    // The same order, starting after @p before: the index seeks to the cursor
+    // instead of stepping over every row an OFFSET would skip (#2978).
+    std::vector<Run>
+    get_runs_before (const RunFilter& filter, const RunCursor& before, int64_t limit);
     int64_t count_runs (const RunFilter& filter);
     void delete_run (const std::string& id);
 
@@ -1224,6 +1240,20 @@ class Database {
      * and the config seed had already run at SQLite's own default.
      */
     int applied_synchronous () const; // db_maintenance.cpp
+
+    /**
+     * @brief SQLite's `journal_size_limit` on this database's connection in
+     * bytes (-1 is no limit), read back from SQLite; nothing if it would not
+     * answer. Per-connection state like the settings above (#2433).
+     */
+    std::optional<int64_t> applied_journal_size_limit () const; // db_maintenance.cpp
+
+    /**
+     * @brief SQLite's `mmap_size` on this database's connection in bytes (0 is
+     * unmapped), read back from SQLite; nothing if it would not answer. SQLite
+     * clamps the request, so this is what is in force (#2433).
+     */
+    std::optional<int64_t> applied_mmap_size () const; // db_maintenance.cpp
 
     /**
      * @brief SQLite's busy timeout on this database's connection, in

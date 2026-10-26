@@ -172,6 +172,7 @@ export const API_ENDPOINTS = {
 	RUNS_LIST: (params: {
 		limit?: number;
 		offset?: number;
+		before?: string;
 		type?: string;
 		status?: string;
 		requestId?: string;
@@ -183,6 +184,7 @@ export const API_ENDPOINTS = {
 		const qs = new URLSearchParams();
 		if (params.limit !== undefined) qs.set("limit", String(params.limit));
 		if (params.offset !== undefined) qs.set("offset", String(params.offset));
+		if (params.before) qs.set("before", params.before);
 		if (params.type) qs.set("type", params.type);
 		if (params.status) qs.set("status", params.status);
 		if (params.requestId) qs.set("requestId", params.requestId);

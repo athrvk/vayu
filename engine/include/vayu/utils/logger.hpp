@@ -62,11 +62,15 @@ class Logger {
     void init (const std::string& log_dir, std::string_view source = "engine");
 
     // The file sink's own floor, separate from `verbosity_level_`, which is
-    // what `-v` buys the console. The file used to take everything at DEBUG
-    // unconditionally; `logLevel` is what moves that floor, and it is applied
-    // once the database is open - so the handful of lines startup writes before
-    // that always land.
+    // what `-v` buys the console. `logLevel` is what moves it off the default,
+    // and it is applied once the database is open - so the lines startup writes
+    // before that, every `vayu-cli` run (which reads no config) and a daemon
+    // whose `logLevel` is unparsable all log at `default_file_level ()`.
     void set_file_level (Level level);
+    /// The level `constants::logging::DEFAULT_LEVEL` names: what a freshly
+    /// `init`ed file takes until `set_file_level` says otherwise, so the
+    /// config entry's default and the logger's own cannot disagree.
+    static Level default_file_level ();
     // Size one log file may reach before it is rotated once to `<name>.1`;
     // 0 means unlimited. Config entry `maxLogFileBytes`.
     void set_max_file_bytes (int64_t bytes);
@@ -119,7 +123,7 @@ class Logger {
     std::string log_dir_;
     std::string log_file_path_;
     std::string source_     = "engine";
-    Level file_level_       = Level::DEBUG;
+    Level file_level_       = default_file_level ();
     int64_t max_file_bytes_ = 0; // 0 = unlimited
     // Bytes in the open file, seeded from its size because it is opened for
     // append: a restart inside the same clock second reopens the file the

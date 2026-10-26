@@ -80,6 +80,7 @@ function answerWith(list: Run[]) {
 			offset: 0,
 			hasMore: false,
 			returned: list.length,
+			nextBefore: null,
 		},
 	});
 }

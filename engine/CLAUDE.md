@@ -343,7 +343,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `docs/engine/log-record.schema.json`); the console renders the same record
   as text. `vayu::utils::Logger` keeps its console verbosity (`-v 0|1|2`:
   warnings and errors, info, debug) and its separate file level (`logLevel`,
-  default debug, with rotation under `maxLogFileBytes`); `Logger::init`'s
+  default info - `Logger::default_file_level` derives the logger's own from
+  `constants::logging::DEFAULT_LEVEL`, so the two cannot disagree - with
+  rotation under `maxLogFileBytes`); `Logger::init`'s
   `source` parameter (`"engine"` or `"cli"`) sets both the record's `src`
   field and the file name prefix (`engine_<stamp>.log`, `cli_<stamp>.log`),
   so the two binaries' files sort apart under one directory.

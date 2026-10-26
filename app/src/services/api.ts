@@ -933,7 +933,7 @@ export const apiService = {
 	async listRuns(params: RunListParams = {}): Promise<RunListResponse> {
 		const {
 			limit = RUNS_PAGE_LIMIT,
-			offset = 0,
+			before,
 			type,
 			status,
 			requestId,
@@ -942,10 +942,14 @@ export const apiService = {
 			baseline,
 			origin,
 		} = params;
+		// A cursor page has no offset to send; an explicit one still goes through
+		// so the engine's `before_with_offset` 400 stays loud.
+		const offset = params.offset ?? (before === undefined ? 0 : undefined);
 		return await httpClient.get<RunListResponse>(
 			API_ENDPOINTS.RUNS_LIST({
 				limit,
 				offset,
+				before,
 				type,
 				status,
 				requestId,

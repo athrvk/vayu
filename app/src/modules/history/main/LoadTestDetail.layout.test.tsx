@@ -95,12 +95,12 @@ function run(over: Partial<Run> = {}): Run {
 
 const emptyPage = {
 	data: [],
-	pagination: { total: 0, limit: 50, offset: 0, hasMore: false, returned: 0 },
+	pagination: { total: 0, limit: 50, offset: 0, hasMore: false, returned: 0, nextBefore: null },
 };
 
 const baselinePage = {
 	data: [run({ id: "run_baseline", baseline: true })],
-	pagination: { total: 1, limit: 1, offset: 0, hasMore: false, returned: 1 },
+	pagination: { total: 1, limit: 1, offset: 0, hasMore: false, returned: 1, nextBefore: null },
 };
 
 beforeEach(() => {

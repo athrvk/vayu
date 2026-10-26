@@ -265,13 +265,13 @@ reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t bef
  * Return the database's freed pages to the filesystem, if it holds enough of
  * them to be worth the rewrite (issue #990).
  *
- * On @p connection, the one the storage holds open (`open_forever`), never on
- * a second one: the checkpoint that shrinks the file has to truncate it, and
- * Windows refuses to truncate a file another connection still has mapped
- * (`mmap_size`), so from a second connection the rewrite committed and the
- * file stayed its old size. SQLite unmaps its own view before truncating, so
- * the holding connection is the one that can. The caller holds the DB mutex,
- * so nothing else is using that connection meanwhile.
+ * On @p connection, the one the storage holds open (`open_forever`). The
+ * checkpoint that shrinks the file has to truncate it, and Windows refuses to
+ * truncate a file any connection has mapped, so no connection maps it:
+ * `mmap_size` is 0 on this one and on the run-row reader (#2433). A mapping
+ * reintroduced on either leaves the rewrite committed and the file at its old
+ * size. The caller holds the DB mutex, so nothing else is using that
+ * connection meanwhile.
  */
 ReclaimOutcome reclaim_freed_pages (sqlite3* connection, const std::string& path) {
     ReclaimOutcome outcome;
@@ -2202,6 +2202,18 @@ int Database::applied_synchronous () const {
     // takes the mutex the rest of the storage access does.
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.pragma.synchronous ();
+}
+
+std::optional<int64_t> Database::applied_journal_size_limit () const {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    std::string error;
+    return read_pragma_int (impl_->connection, "PRAGMA journal_size_limit;", error);
+}
+
+std::optional<int64_t> Database::applied_mmap_size () const {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    std::string error;
+    return read_pragma_int (impl_->connection, "PRAGMA mmap_size;", error);
 }
 
 int Database::applied_busy_timeout_ms () const {

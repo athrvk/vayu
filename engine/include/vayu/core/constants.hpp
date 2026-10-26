@@ -75,9 +75,11 @@ constexpr int RETAINED_FILES = 10;
 /// Default value of the `maxLogFileBytes` config entry: the size one log file
 /// may reach before it is rotated once to `.log.1`. 0 means unlimited.
 constexpr int DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
-/// Default value of the `logLevel` config entry. `debug` preserves the
-/// behaviour the file sink had before it was filtered at all.
-constexpr const char* DEFAULT_LEVEL = "debug";
+/// Default value of the `logLevel` config entry, and the level
+/// `Logger::default_file_level` derives the logger's own from. `info`, not
+/// `debug`: every 2xx request line and every database write is a debug record,
+/// which fills a long session's file; `debug` is one `logLevel` entry away.
+constexpr const char* DEFAULT_LEVEL = "info";
 } // namespace logging
 
 /**
@@ -1312,10 +1314,24 @@ namespace database {
 constexpr int CACHE_SIZE_BYTES = 67108864;
 /// SQLite temp store mode (0=default, 1=file, 2=memory)
 constexpr int TEMP_STORE = 2;
-/// SQLite memory-mapped I/O size in bytes (256MB)
-constexpr size_t MMAP_SIZE_BYTES = 268435456;
+/// SQLite memory-mapped I/O size in bytes: 0, off (#2433). An I/O error inside
+/// a mapped region is a signal (SIGBUS on POSIX), not SQLITE_IOERR, so a failing
+/// disk or an externally truncated file would kill the engine with no log line
+/// and no 500. Mapping 256 MB cut SQLite's read time by 5-55%: 1-6 ms per
+/// 1,000 result rows, about 50 ms at the default 10,000 stored errors (Windows,
+/// OS cache warm; docs/engine/db-schema.md has the numbers) - not worth that.
+/// Windows also refuses to truncate a mapped file, which `reclaim_freed_pages`
+/// needs.
+constexpr size_t MMAP_SIZE_BYTES = 0;
 /// WAL autocheckpoint frequency in pages
 constexpr int WAL_AUTOCHECKPOINT = 1000;
+/// `journal_size_limit` in bytes (64 MiB): the size the `-wal` file is cut back
+/// to once a checkpoint has emptied it and the next write restarts the log.
+/// The autocheckpoint is passive and never shrinks the file, so one large
+/// transaction (a run prune, a big import) would otherwise leave its
+/// high-water mark on disk for the rest of the engine session; only a clean
+/// shutdown or the startup VACUUM gives it back (#2433).
+constexpr int64_t JOURNAL_SIZE_LIMIT_BYTES = 67108864;
 /// SQLite busy timeout in milliseconds (10 seconds)
 constexpr int BUSY_TIMEOUT_MS = 10000;
 /// SQLite synchronous mode (0=OFF, 1=NORMAL, 2=FULL), the default for

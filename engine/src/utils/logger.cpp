@@ -19,6 +19,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/log_redact.hpp"
 #include "vayu/utils/reentrant.hpp"
 
@@ -35,8 +36,9 @@ std::string Logger::file_prefix () const {
 
 void Logger::init (const std::string& log_dir, std::string_view source) {
     std::lock_guard<std::mutex> lock (mutex_);
-    log_dir_ = log_dir;
-    source_  = source == "cli" ? "cli" : "engine";
+    log_dir_    = log_dir;
+    source_     = source == "cli" ? "cli" : "engine";
+    file_level_ = default_file_level ();
     ensure_log_directory ();
 
     // Open log file with timestamp
@@ -66,6 +68,11 @@ void Logger::init (const std::string& log_dir, std::string_view source) {
     // engine mentions it, so an install that predates the split would carry
     // it forever otherwise.
     remove_legacy_log_files (log_dir_, vayu::core::constants::logging::LEGACY_FILE_PREFIX);
+}
+
+Logger::Level Logger::default_file_level () {
+    return invariant_value (parse_log_level (vayu::core::constants::logging::DEFAULT_LEVEL),
+    "constants::logging::DEFAULT_LEVEL names a level parse_log_level knows");
 }
 
 void Logger::set_file_level (Level level) {
@@ -197,7 +204,7 @@ void Logger::write (LogRecord&& record) {
     const int pid               = vayu::platform::get_process_id ();
 
     // The file takes everything at or above `logLevel`, which defaults to
-    // DEBUG - the level the file used to take unconditionally.
+    // `constants::logging::DEFAULT_LEVEL`.
     if (record.level >= file_level_) {
         write_to_file_locked (record, ts, thread_id, pid);
     }

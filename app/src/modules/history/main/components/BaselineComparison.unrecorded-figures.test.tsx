@@ -75,7 +75,14 @@ function renderStrip(baseline: RunReport) {
 	mocked.getRun.mockResolvedValue(run());
 	mocked.listRuns.mockResolvedValue({
 		data: [run({ id: "run_baseline", baseline: true })],
-		pagination: { total: 1, limit: 1, offset: 0, hasMore: false, returned: 1 },
+		pagination: {
+			total: 1,
+			limit: 1,
+			offset: 0,
+			hasMore: false,
+			returned: 1,
+			nextBefore: null,
+		},
 	});
 	mocked.getRunReport.mockResolvedValue(baseline);
 	render(

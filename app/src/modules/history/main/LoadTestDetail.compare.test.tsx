@@ -74,7 +74,7 @@ function run(over: Partial<Run> = {}): Run {
 
 const emptyPage = {
 	data: [],
-	pagination: { total: 0, limit: 50, offset: 0, hasMore: false, returned: 0 },
+	pagination: { total: 0, limit: 50, offset: 0, hasMore: false, returned: 0, nextBefore: null },
 };
 
 function renderDetail() {

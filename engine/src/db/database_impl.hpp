@@ -180,7 +180,8 @@ inline auto make_vayu_storage (const std::string& path) {
     // the retention trim and the clear), and a long-lived listener appends to
     // this table without bound between trims.
     make_index ("idx_inbox_requests_inbox_id", &InboxRequest::inbox_id),
-    // get_all_runs / get_runs_paginated sort the whole table on every GET /runs.
+    // get_all_runs / get_runs_paginated sort the whole table on every GET /runs;
+    // get_runs_before seeks it to a keyset cursor (#2978).
     make_index ("idx_runs_start_time", &Run::start_time),
     // GET /runs?requestId= (and useLastDesignRunQuery's single-run lookup)
     // filter on request_id; the design-run seed hits this per opened request.
@@ -775,6 +776,17 @@ struct Database::Impl {
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning ("db",
                 "Failed to set wal_autocheckpoint: " + std::string (err_msg));
+                sqlite3_free (err_msg);
+                err_msg = nullptr;
+            }
+            sql.str ("");
+
+            sql << "PRAGMA journal_size_limit = "
+                << vayu::core::constants::database::JOURNAL_SIZE_LIMIT_BYTES << ";";
+            rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning ("db",
+                "Failed to set journal_size_limit: " + std::string (err_msg));
                 sqlite3_free (err_msg);
             }
         };
