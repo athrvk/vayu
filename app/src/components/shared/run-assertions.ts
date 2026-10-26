@@ -7,7 +7,7 @@
 
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import type { RunReport } from "@/types";
+import type { RunReport, RunScenarioStepStat } from "@/types";
 
 export type ExactAssertions = NonNullable<NonNullable<RunReport["scenario"]>["assertions"]>;
 
@@ -45,4 +45,48 @@ export function testValidationTitleOf(
 	report: Pick<RunReport, "scenario"> | null | undefined
 ): string {
 	return exactAssertionsOf(report) ? SAMPLED_REPLAY_TITLE : TEST_VALIDATION_TITLE;
+}
+
+/**
+ * The responses a step's deferred post-request scripts were left to replay
+ * (`script.*` elements' `deferred`, summed). Zero for a step with none, and for
+ * a report stored before #2144, which tallied the replayed script as `skipped`.
+ */
+export function deferredResponsesOf(step: Pick<RunScenarioStepStat, "elements">): number {
+	let total = 0;
+	for (const element of step.elements ?? []) {
+		if (element.kind.startsWith("script.")) total += element.deferred ?? 0;
+	}
+	return total;
+}
+
+/** The population the sampled replay was drawn from, in a scenario load run. */
+export interface ReplayScope {
+	/** Responses that carried a deferred test script, across every step. */
+	responses: number;
+	/** Steps that carried one. */
+	steps: number;
+	/** The Assertions card (#2820) renders beside the replay, so a sentence can point at it. */
+	assertionsCounted: boolean;
+}
+
+/**
+ * What the sampled replay was a sample *of*, or `undefined` when the report is
+ * not a scenario load run or no step deferred a script (#2824). The request
+ * total is the wrong denominator there: most requests of a sequence carry no
+ * test script at all, so they are not "not kept".
+ */
+export function replayScopeOf(
+	report: Pick<RunReport, "scenario"> | null | undefined
+): ReplayScope | undefined {
+	const steps = report?.scenario?.steps ?? [];
+	let responses = 0;
+	let carrying = 0;
+	for (const step of steps) {
+		const deferred = deferredResponsesOf(step);
+		responses += deferred;
+		if (deferred > 0) carrying += 1;
+	}
+	if (responses === 0) return undefined;
+	return { responses, steps: carrying, assertionsCounted: !!exactAssertionsOf(report) };
 }

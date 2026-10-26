@@ -112,7 +112,13 @@ function outcomeCount(outcome: StepOutcome): string {
 beforeEach(() => {
 	reportQuery.data = undefined;
 	reportQuery.isLoading = false;
-	useScenarioRunStore.setState({ runId: null, steps: [], isStreaming: false, error: null });
+	useScenarioRunStore.setState({
+		runId: null,
+		steps: [],
+		plan: null,
+		isStreaming: false,
+		error: null,
+	});
 	stopRun.mockReset();
 	stopRun.mockResolvedValue({});
 	useToastStore.setState({ toasts: [] });
@@ -866,6 +872,171 @@ describe("the header tally", () => {
 		render(<ScenarioRunView run={RUN} />);
 
 		expect(screen.getByText("12,345 of 23,456 iterations - 34,567 steps")).toBeTruthy();
+	});
+});
+
+/** The `plan` frame a 6-step collection run over 40 iterations opens its stream with. */
+const PLAN = { stepsPerIteration: 6, iterations: 40, stepsExpected: 240 };
+
+function liveStep(iteration: number, stepIndex: number) {
+	return {
+		iteration,
+		stepIndex,
+		name: `Step ${stepIndex + 1}`,
+		outcome: "passed" as const,
+		statusCode: 200,
+		latencyMs: 5,
+	};
+}
+
+describe("the live run's place in its plan", () => {
+	it("reads Iteration 1 before the first step lands, and advances with the steps", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-1");
+			store.setPlan(PLAN);
+		});
+		// Mutation check: derive the iteration as `floor(stepsRun / stepsPerIteration)`
+		// without the +1 and this reads "Iteration 0".
+		expect(screen.getByText("Iteration 1 of 40 - 0 of 240 steps")).toBeTruthy();
+
+		act(() => {
+			useScenarioRunStore.getState().addSteps([0, 1, 2, 3, 4, 5].map((i) => liveStep(0, i)));
+		});
+		expect(screen.getByText("Iteration 1 of 40 - 6 of 240 steps")).toBeTruthy();
+
+		act(() => {
+			useScenarioRunStore.getState().addSteps([liveStep(1, 0)]);
+		});
+		expect(screen.getByText("Iteration 2 of 40 - 7 of 240 steps")).toBeTruthy();
+	});
+
+	// Mutation check: drop `plan` from the store (or the `setPlan` call in the
+	// service) and the line above never renders; this case is the other side of it.
+	it("says nothing beyond Running for a run whose plan frame never arrived", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-1");
+			store.addSteps([liveStep(0, 0)]);
+		});
+
+		expect(screen.getByText("Running")).toBeTruthy();
+		expect(screen.queryByText(/^Iteration \d/)).toBeNull();
+	});
+
+	it("does not draw another run's plan on this run's tab", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-2");
+			store.setPlan(PLAN);
+		});
+
+		expect(screen.queryByText(/^Iteration \d/)).toBeNull();
+	});
+
+	it("stops showing the plan once the run has ended", () => {
+		reportQuery.data = report({
+			scenario: {
+				iterations: 40,
+				iterationsCompleted: 40,
+				stepsExecuted: 240,
+				passed: 240,
+				failed: 0,
+				skipped: 0,
+				errored: 0,
+				stepsStored: 0,
+				stepsDropped: 0,
+			},
+		});
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-1");
+			store.setPlan(PLAN);
+			store.setStreaming(false);
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText(/^Iteration \d/)).toBeNull();
+	});
+});
+
+describe("the finished run's figures", () => {
+	const SCENARIO = {
+		iterations: 1,
+		iterationsCompleted: 1,
+		stepsExecuted: 83,
+		passed: 69,
+		failed: 14,
+		skipped: 0,
+		errored: 0,
+		stepsStored: 0,
+		stepsDropped: 0,
+	};
+
+	function summary(overrides: Partial<RunReport["summary"]>): RunReport["summary"] {
+		return { ...report({}).summary, ...overrides };
+	}
+
+	// Mutation check: stop reading `summary.errorRate` (or the duration) in
+	// `finishedRunFiguresText` and this reddens.
+	it("shows duration, requests sent and error rate beside the tally", () => {
+		reportQuery.data = report({
+			scenario: SCENARIO,
+			summary: summary({
+				totalDurationSeconds: 4.2,
+				totalRequests: 83,
+				failedRequests: 14,
+				errorRate: 16.867,
+			}),
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getByText("4.20s - 83 requests sent - 16.9% error rate")).toBeTruthy();
+		expect(screen.getByText("1 of 1 iteration - 83 steps")).toBeTruthy();
+	});
+
+	it("leaves the error rate out of a run in which no step sent", () => {
+		reportQuery.data = report({
+			scenario: { ...SCENARIO, stepsExecuted: 3, passed: 0, skipped: 3 },
+			summary: summary({ totalDurationSeconds: 0.4, totalRequests: 0 }),
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getByText("400ms - 0 requests sent")).toBeTruthy();
+	});
+
+	it("says the figures were not recorded rather than printing zeros", () => {
+		reportQuery.data = report({
+			scenario: SCENARIO,
+			summary: summary({ summaryMissing: true }),
+		});
+
+		render(<ScenarioRunView run={{ ...RUN, status: "failed" }} />);
+
+		expect(
+			screen.getByText("Duration, requests sent and error rate: not recorded")
+		).toBeTruthy();
+		expect(screen.queryByText(/requests sent -/)).toBeNull();
+	});
+
+	it("draws none of it while the run is live", () => {
+		reportQuery.data = report({
+			scenario: SCENARIO,
+			summary: summary({ totalDurationSeconds: 4.2, totalRequests: 83 }),
+		});
+
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		expect(screen.queryByText(/requests sent/)).toBeNull();
 	});
 });
 

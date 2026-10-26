@@ -8967,7 +8967,13 @@ that passed everything else. The run's rollup is
 
 Either kind of `errored` is the same outcome on the row, in the summary's
 `errored` count and on the `step` frame, with the error in `results.error`; the
-table's split is only about what the iteration does next. A transport failure
+table's split is only about what the iteration does next. An HTTP error status
+is not an outcome: a step that answered 4xx or 5xx with every assertion holding
+is `passed`, and the summary's `failedRequests` counts it. The four outcomes
+are disjoint and sum to `stepsExecuted`, a skipped step included, and a
+[scenario load run](#scenario-load-runs) reports them under the same
+arithmetic, with one difference: on a load run `errored` is an execution that
+got no response, so a thrown script is not counted there. A transport failure
 continues the iteration like a script error does, as Postman's and Newman's
 runners do by default; a later step that reads a response that never arrived
 errors on its own row. A step that errored while the iteration continues has its own flow control
@@ -9155,29 +9161,53 @@ knob.
 ```json
 "scenario": {
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
-  "stepsExecuted": 1422, "passed": 1386, "failed": 30, "errored": 6,
+  "stepsExecuted": 954, "passed": 906, "failed": 30, "errored": 6,
   "skipped": 12, "virtualUsers": 50,
-  "assertions": { "passed": 444, "failed": 30 },
+  "assertions": { "passed": 432, "failed": 30 },
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
       "unresolvedTokens": 0,
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "elements": [
-        { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0, "deferred": 0 }
+        { "id": "el_1", "kind": "extract.json", "passed": 474, "failed": 0, "skipped": 0, "deferred": 0 }
       ] },
     { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
-      "executed": 474, "errors": 30, "httpErrors": 30, "noResponse": 0,
+      "executed": 462, "errors": 30, "httpErrors": 30, "noResponse": 0,
       "unresolvedTokens": 0,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
       "elements": [
-        { "id": "el_2", "kind": "assert.status", "passed": 444, "failed": 30, "skipped": 0, "deferred": 0 }
+        { "id": "el_2", "kind": "control.if", "passed": 462, "failed": 0, "skipped": 12, "deferred": 0 },
+        { "id": "el_3", "kind": "assert.status", "passed": 432, "failed": 30, "skipped": 0, "deferred": 0 }
       ],
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
 ```
+
+This run ended by its iteration count: 6 of its 480 iterations lost their
+login to no response and were abandoned there, and the other 474 completed.
+`Get me` was reached 474 times; its `control.if` skipped 12 of them and 462
+ran, 30 of those answered a status its `assert.status` rejected. So
+`stepsExecuted` is 480 + 474 = 954, which is the 942 steps that ran plus the
+12 skipped, and the four outcomes are 906 + 30 + 6 + 12 = 954.
+
+**`iterations` is the iterations started**, not the iterations asked for, and
+three counts account for them: `iterationsCompleted` (the iteration reached its
+last step, or a script ended it with `setNextRequest(null)` or a forward jump),
+`iterationsAbandoned` (an errored step, or a jump to a target that names no
+step, ended it) and the iterations still running when the deadline or a Stop
+ended the run. The last has no key of its own; it is derivable:
+
+- `iterations = iterationsCompleted + iterationsAbandoned + cut at the end`,
+  so the iterations cut at the end are `iterations - iterationsCompleted -
+  iterationsAbandoned`
+
+That term is 0 for a run that ended by its iteration count, as the example
+above did (480 = 474 + 6 + 0), and positive for one a deadline or Stop ended
+mid-iteration: 1,150 started, 1,140 completed and none abandoned is 10 cut.
+The app's Steps tab shows it as "Iterations cut short" beside the other two.
 
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
@@ -9196,19 +9226,41 @@ failure, a refused header, a skip) adds a count and no duration. The step's
 histogram follows the same population as the run's, and `includeScriptTime`
 applies to a failed step as it does to an answered one (issue #2384), folding
 the same pipeline time into the run's latency as into the step's, so the run's
-`max` is never below a step's (#2792). At the
-top of the section, `errored` is the iteration-abort count (the sum of every
-step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
-`passed` is `stepsExecuted` less both. Failed assertions and script tests are
-not folded in; they are reported in `elements` and `tests`.
+`max` is never below a step's (#2792).
+
+At the top of the section, `passed`, `failed`, `skipped` and `errored` are the
+collection run's outcomes (Outcomes under [Scenario runs](#scenario-runs),
+#2824), counted per step execution and disjoint. `errored` is an execution that
+got no response, the iteration-abort count and the sum of every step's
+`noResponse`. `failed` is one whose response arrived and in which an inline
+assertion did not hold (an `assert.*` element, a required `extract.*` miss, an
+inline script's `pm.test`), counted once however many failed in it. `skipped`
+is one a controller or an inline `pm.execution.skipRequest()` stopped before
+the wire, and `passed` is the rest. An HTTP
+error status no assertion rejected is `passed`: the step's `httpErrors` and the
+report's `summary.failedRequests` count it. `stepsExecuted` is every step
+reached, a skipped one included, and a step's `executed` is the steps that ran,
+so two identities hold:
+
+- `passed + failed + errored + skipped = stepsExecuted`
+- the sum of `steps[].executed`, plus `skipped`, `= stepsExecuted`
+
+A deferred script's tests replay after the run against sampled responses, so
+they fail no step here; they are the step's `tests` and the report's
+`testValidation`. A run stored by engine 0.45.0 or earlier keeps the definition
+it was written under: `failed` was the sum of every step's `httpErrors`, and
+`passed` was `stepsExecuted` less `failed` and `errored`, its skipped steps
+included. Nothing rewrites a stored run.
 
 **`assertions`** (#2820) is the run's exact assertion population,
 `{ passed, failed }`: every `assert.*` outcome, every required `extract.*` miss
 and every inline script's `pm.test` call, counted on each completion. It is the
 figure a `maxAssertionFailureRatePct` check reports as `assertionsExact`. It
-sits beside `passed` and `summary.errorRate` rather than inside them, both of
-which stay HTTP-only, so a run whose every assertion failed against `200`s reads
-an `errorRate` of 0 and a non-zero `assertions.failed`. The deferred replay of an
+counts assertions where `failed` above counts step executions, so an execution
+that failed three assertions is one `failed` step and three
+`assertions.failed`. `summary.errorRate` stays HTTP-only: a run whose every
+assertion failed against `200`s reads an `errorRate` of 0, a non-zero
+`assertions.failed` and every asserting step `failed`. The deferred replay of an
 un-inlined script is the sampled population (the step's `tests`, the report's
 `testValidation`) and is never in it. **Absent**, never `{0, 0}`, for a run that
 made no such assertion, for a sequential collection run and for a run stored
@@ -11498,6 +11550,19 @@ run in which every step was skipped reports `totalRequests` `0` and an empty
 `statusCodes`. A summary stored before #2822 has no distribution: its
 `totalRequests` is the step count and the split comes from the kept rows.
 
+**`passed`, `failed`, `skipped` and `errored` mean the same in both run kinds**
+(#2824, the Outcomes table under [Scenario runs](#scenario-runs)): one per step
+execution, disjoint, with an HTTP error status that no assertion rejected
+counted as `passed` and in `summary.failedRequests`. `stepsExecuted` is every
+step reached, a skipped one included, so in both
+`passed + failed + errored + skipped = stepsExecuted`. A scenario load run's
+`steps[].executed` counts the steps that ran, so there the sum of
+`steps[].executed`, plus `skipped`, also equals `stepsExecuted`; a collection
+run has no `steps` array. A scenario load run stored by engine 0.45.0 or
+earlier keeps its old numbers: `failed` was the sum of every step's
+`httpErrors`, and `passed` was `stepsExecuted` less `failed` and `errored`,
+skipped steps included.
+
 `stepsNotRun` is how many plan positions errors cost the run - summed over
 every iteration an `errored` step ended, the positions after that step the
 iteration had not attempted (Outcomes under [Scenario runs](#scenario-runs)).
@@ -11511,8 +11576,9 @@ neither either.
 `assertions` (#2820) is the other way round: a scenario load run's alone,
 `{ passed, failed }` over the exact population (every `assert.*` outcome,
 required `extract.*` miss and inline `pm.test` call, never the sampled replay
-`testValidation` reports). `passed` and `failed` above stay HTTP-only beside it.
-It is **absent** for a run that made no such assertion, a collection run in
+`testValidation` reports). It counts assertions where `failed` above counts
+step executions, so an execution that failed three is one `failed` step and
+three `assertions.failed`. It is **absent** for a run that made no such assertion, a collection run in
 design mode and a run stored before it; [Scenario load runs](#scenario-load-runs)
 has the rest.
 

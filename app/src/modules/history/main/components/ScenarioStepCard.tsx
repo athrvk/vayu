@@ -149,6 +149,9 @@ function ScenarioStepCard({
 	// error that stopped the step. A live row has none until its stored row
 	// arrives, which is why the shell renders without one rather than blank.
 	const error = step.result?.error;
+	// A skipped step sent nothing: the stored row's status 0 and latency 0 are
+	// storage values, not a status and a time (#2824).
+	const sent = step.outcome !== "skipped";
 	const notRun = stepsNotRunText(step.stepsNotRun);
 
 	// "Iteration 2 · Row 3". The row is shown whenever the run had a data set,
@@ -233,9 +236,9 @@ function ScenarioStepCard({
 				) : undefined
 			}
 			state={OUTCOME_STATE[step.outcome]}
-			statusCode={step.statusCode}
+			statusCode={sent ? step.statusCode : undefined}
 			statusText={step.result?.statusText}
-			latencyMs={step.latencyMs}
+			latencyMs={sent ? step.latencyMs : undefined}
 			timestamp={context}
 			error={error}
 			details={

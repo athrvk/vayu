@@ -30,7 +30,8 @@ import { formatNumber, formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { Callout } from "./Callout";
 import { SampleRetentionNote } from "./SampleRetentionNote";
-import { TEST_VALIDATION_TITLE } from "./run-assertions";
+import { pluralize } from "@/modules/dashboard/utils/format";
+import { TEST_VALIDATION_TITLE, type ReplayScope } from "./run-assertions";
 import type { RunReport } from "@/types/domain";
 
 export interface TestValidationSummaryProps {
@@ -51,6 +52,14 @@ export interface TestValidationSummaryProps {
 	 * nothing about the denominator rather than guess one (never "of 0").
 	 */
 	totalRequests?: number;
+	/**
+	 * For a scenario load run, the responses that carried a deferred test script
+	 * (`replayScopeOf`, #2824). It is the denominator there, not
+	 * {@link totalRequests}: most requests of a sequence have no script to
+	 * replay, so "the rest were not kept" would be untrue of them. A caller
+	 * passes one or the other; this one wins if both arrive.
+	 */
+	replayScope?: ReplayScope;
 	/**
 	 * The card's title; `testValidationTitleOf` answers it (#2820), retitling the
 	 * card when `ExactAssertionsSummary` sits beside it.
@@ -74,12 +83,39 @@ function testedLine(samplesTested: number, totalRequests: number): string {
 	return `Tested ${formatNumber(samplesTested)} of ${formatNumber(totalRequests)} requests. The rest had no response or were not kept.`;
 }
 
+/** The same line for a scenario run, over the responses that had a script to replay. */
+function replayedLine(samplesTested: number, scope: ReplayScope): string {
+	const steps = `${formatNumber(scope.steps)} ${pluralize(scope.steps, "step")}`;
+	const population = `responses that carried a test script (${steps})`;
+	const head =
+		samplesTested >= scope.responses
+			? `Replayed all ${formatNumber(scope.responses)} ${population}.`
+			: `Replayed ${formatNumber(samplesTested)} of the ${formatNumber(scope.responses)} ${population}.`;
+	return scope.assertionsCounted
+		? `${head} Assertions that ran inline are counted under Assertions.`
+		: head;
+}
+
+/** The line under the four tallies, or `null` where there is no denominator to state. */
+function coverageLine(
+	samplesTested: number,
+	totalRequests: number | undefined,
+	replayScope: ReplayScope | undefined
+): string | null {
+	if (replayScope) return replayedLine(samplesTested, replayScope);
+	if (totalRequests !== undefined && totalRequests > 0) {
+		return testedLine(samplesTested, totalRequests);
+	}
+	return null;
+}
+
 export function TestValidationSummary({
 	testValidation,
 	sampling,
 	failures,
 	failuresTotal,
 	totalRequests,
+	replayScope,
 	title = TEST_VALIDATION_TITLE,
 	className,
 }: TestValidationSummaryProps) {
@@ -89,6 +125,9 @@ export function TestValidationSummary({
 	// a row of zeros - and with no failures to name there is nothing to show. A
 	// report old enough to omit the block reads the same as a run without tests.
 	if (!testValidation && !hasFailures) return null;
+
+	const coverage =
+		testValidation && coverageLine(testValidation.samplesTested, totalRequests, replayScope);
 
 	return (
 		<Card className={className}>
@@ -126,9 +165,9 @@ export function TestValidationSummary({
 								</p>
 							</div>
 						</div>
-						{totalRequests !== undefined && totalRequests > 0 && (
+						{coverage && (
 							<p className="mt-3 text-xs text-muted-foreground tabular-nums">
-								{testedLine(testValidation.samplesTested, totalRequests)}
+								{coverage}
 							</p>
 						)}
 						<SampleRetentionNote

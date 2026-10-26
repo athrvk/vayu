@@ -3462,17 +3462,34 @@ export interface RunReport {
 	 * `stepsDropped` means successes are missing, never a failure.
 	 */
 	scenario?: {
-		/** Iterations the run was asked for. */
+		/**
+		 * Iterations the run was asked for; on a load run, the ones it started.
+		 * `iterationsCompleted` and `iterationsAbandoned` do not add up to it when
+		 * the deadline or a Stop cut iterations off, and the difference is that term
+		 * (the Steps tab's "Iterations cut short").
+		 */
 		iterations: number;
 		/** Iterations that finished - fewer when the run was stopped or errored. */
 		iterationsCompleted: number;
 		/** Step executions the run performed, whether or not their rows survived. */
 		stepsExecuted: number;
+		/**
+		 * The four outcomes below are disjoint and sum to `stepsExecuted` on both
+		 * run kinds (#2824). A load run counts them per step execution under the
+		 * collection run's definition; engine 0.45.0 and earlier stored the old
+		 * load meaning (`failed` was the steps' `httpErrors`, and `passed` still
+		 * held the skipped steps).
+		 */
 		passed: number;
-		/** On a load run: step executions that answered 4xx/5xx (the steps' `httpErrors`). */
+		/**
+		 * Step executions whose response arrived and in which an assertion did not
+		 * hold. A 4xx or 5xx no assertion rejected is `passed`; the steps'
+		 * `httpErrors` and `summary.failedRequests` count it.
+		 */
 		failed: number;
+		/** Steps a controller or `pm.execution.skipRequest()` stopped before the wire. */
 		skipped: number;
-		/** On a load run: step executions that got no response (the steps' `noResponse`). */
+		/** Step executions that got no response, plus a collection run's thrown scripts (a load run counts only the steps' `noResponse`). */
 		errored: number;
 		/**
 		 * A scenario *load* run's exact assertion population (#2820): every

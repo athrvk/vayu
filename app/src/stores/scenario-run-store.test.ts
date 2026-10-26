@@ -43,6 +43,7 @@ beforeEach(() => {
 		steps: [],
 		summary: emptyStepSummary(),
 		appendEpoch: 0,
+		plan: null,
 		isStreaming: false,
 		error: null,
 	});
@@ -108,5 +109,31 @@ describe("appendEpoch", () => {
 		// the previous run's list getting longer.
 		expect(store().steps).toHaveLength(0);
 		expect(store().appendEpoch).toBeGreaterThan(before);
+	});
+});
+
+describe("plan", () => {
+	const PLAN = { stepsPerIteration: 6, iterations: 40, stepsExpected: 240 };
+
+	it("holds the frame the run opened with", () => {
+		store().startRun("run-1");
+		store().setPlan(PLAN);
+
+		expect(store().plan).toEqual(PLAN);
+	});
+
+	it("is cleared by the next run, so a run cannot be sized by the last one's frame", () => {
+		store().startRun("run-1");
+		store().setPlan(PLAN);
+
+		store().startRun("run-2");
+
+		expect(store().plan).toBeNull();
+	});
+
+	it("drops a frame that arrives with no run to belong to", () => {
+		store().setPlan(PLAN);
+
+		expect(store().plan).toBeNull();
 	});
 });

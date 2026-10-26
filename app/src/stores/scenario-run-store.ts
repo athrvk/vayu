@@ -30,7 +30,7 @@
  */
 
 import { create } from "zustand";
-import type { ScenarioStepEvent } from "@/types";
+import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
 import {
 	emptyStepSummary,
 	foldStepEvents,
@@ -68,6 +68,13 @@ interface ScenarioRunState {
 	 * prefix through.
 	 */
 	appendEpoch: number;
+	/**
+	 * The size the engine resolved for the run, from the `plan` frame that opens
+	 * its stream (#1398); null until one arrives, which for an older engine, or
+	 * a client attached past the frame's eviction from the tick ring, is for the
+	 * whole run. Read by `ScenarioRunView`'s live "Iteration k of N" line.
+	 */
+	plan: ScenarioRunPlanEvent | null;
 	/** True between `startRun` and the stream closing. */
 	isStreaming: boolean;
 	/** A transport failure on the stream; cleared by the next `startRun`. */
@@ -76,6 +83,7 @@ interface ScenarioRunState {
 	/** Begin a run: clears any previous run's steps, then starts streaming. */
 	startRun: (runId: string) => void;
 	addSteps: (steps: readonly ScenarioStepEvent[]) => void;
+	setPlan: (plan: ScenarioRunPlanEvent) => void;
 	setStreaming: (streaming: boolean) => void;
 	setError: (error: string | null) => void;
 }
@@ -85,6 +93,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	steps: [],
 	summary: emptyStepSummary(),
 	appendEpoch: 0,
+	plan: null,
 	isStreaming: false,
 	error: null,
 
@@ -97,6 +106,7 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 			steps: [],
 			summary: emptyStepSummary(),
 			appendEpoch: state.appendEpoch + 1,
+			plan: null,
 			isStreaming: true,
 			error: null,
 		})),
@@ -125,6 +135,10 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 						appendEpoch: appendedOnly ? state.appendEpoch : state.appendEpoch + 1,
 					};
 		}),
+
+	// Dropped with no run to belong to, for the same reason `addSteps` is: a
+	// frame that outlives the run it opened must not size the next one.
+	setPlan: (plan) => set((state) => (state.runId ? { plan } : state)),
 
 	setStreaming: (isStreaming) => set({ isStreaming }),
 	setError: (error) => set({ error }),
