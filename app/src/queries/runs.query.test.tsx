@@ -583,18 +583,6 @@ describe("flattenRunPages", () => {
 });
 
 /**
- * The delete-run patch walks *every* cache under the `runs.lists()` prefix and
- * treats each as `InfiniteData`. `useLastDesignRunQuery` caches a plain
- * `RunListResponse`, and `RequestBuilderProvider` mounts it for every open
- * request tab - so with one request tab open, deleting a run threw a TypeError
- * inside the mutation's own `onSuccess`: the engine had deleted the run, but the
- * row lingered, the count refresh and the report eviction never ran, and the
- * user saw "Couldn't delete run".
- *
- * Fixed at the root (its own key family) with a shape guard as the belt. The
- * three tests below pin the two halves separately, so reverting either is red.
- */
-/**
  * Settings' "N stored runs" is one `limit=1` read of the envelope's `total`
  * (#2979), not a download of the history.
  */
@@ -633,6 +621,18 @@ describe("useRunsCountQuery", () => {
 	});
 });
 
+/**
+ * The delete-run patch walks *every* cache under the `runs.lists()` prefix and
+ * treats each as `InfiniteData`. `useLastDesignRunQuery` caches a plain
+ * `RunListResponse`, and `RequestBuilderProvider` mounts it for every open
+ * request tab - so with one request tab open, deleting a run threw a TypeError
+ * inside the mutation's own `onSuccess`: the engine had deleted the run, but the
+ * row lingered, the count refresh and the report eviction never ran, and the
+ * user saw "Couldn't delete run".
+ *
+ * Fixed at the root (its own key family) with a shape guard as the belt. The
+ * three tests below pin the two halves separately, so reverting either is red.
+ */
 describe("useDeleteRunMutation with a foreign cache shape under the runs prefix", () => {
 	function seededClient() {
 		const client = makeClient();
