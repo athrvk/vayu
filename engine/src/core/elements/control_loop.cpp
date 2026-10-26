@@ -24,7 +24,7 @@
  * goes through - a loop-back is not a second flow-control mechanism.
  *
  * Runs under a scenario load run too (issue #1569): `scenario_load.cpp`'s
- * own `finish_step` reads this same `Next` decision off
+ * own `read_flow_control` (called from `finish_step`) reads this same `Next` decision off
  * `run_step_between`'s `ElementContext::pre_script_result` and resolves it
  * against the run's own `ScenarioLoadState::step_index` - the load path's
  * counterpart to `run_iteration`'s walk, guarded against a cycle that never

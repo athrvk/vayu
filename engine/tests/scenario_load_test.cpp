@@ -30,6 +30,7 @@
 #include <httplib.h>
 
 #include "basic_auth_pair.hpp"
+#include "log_capture.hpp"
 #include "mock_server.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -468,6 +469,57 @@ class ScenarioLoadTest : public ::testing::Test {
         << "the run never finished";
         manager.shutdown ();
         return vayu::http::routes::run_report_response (*db_, run_id).second;
+    }
+
+    /// One run of each kind over the same plan, for #2974's comparison.
+    struct BothRuns {
+        json load;       ///< The load run's report `scenario` section.
+        json sequential; ///< The collection run's.
+        /// What each run sent to each path, in the order asked for.
+        std::vector<size_t> load_hits;
+        std::vector<size_t> sequential_hits;
+        /// The collection run's stored step rows that carry an error.
+        std::vector<std::string> sequential_errors;
+    };
+
+    /// @p execution as a one-VU load run of @p iterations, then as a collection
+    /// run of as many, counting what each sent to @p paths on @p server.
+    BothRuns run_both (const ScenarioMockServer& server,
+    const vayu::core::ScenarioExecution& execution,
+    const std::vector<std::string>& paths,
+    size_t iterations) {
+        const auto hits_now = [&] () {
+            std::vector<size_t> counts;
+            counts.reserve (paths.size ());
+            for (const auto& path : paths) {
+                counts.push_back (server.hits_for (path).size ());
+            }
+            return counts;
+        };
+        BothRuns runs;
+        runs.load = run_to_report (
+        json{ { "mode", "iterations" }, { "iterations", iterations }, { "concurrency", 1 } }, execution)
+                    .at ("scenario");
+        runs.load_hits = hits_now ();
+        runs.sequential = run_sequentially_to_report (execution, iterations).at ("scenario");
+        runs.sequential_hits = hits_now ();
+        for (size_t i = 0; i < paths.size (); ++i) {
+            runs.sequential_hits[i] -= runs.load_hits[i];
+        }
+        for (const auto& row : db_->get_results ("run_sequential_report")) {
+            if (!row.error.empty ()) {
+                runs.sequential_errors.push_back (row.error);
+            }
+        }
+        return runs;
+    }
+
+    /// Override a seeded config value, keeping the rest of its row intact.
+    void set_config (const std::string& key, const std::string& value) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_HAS_VALUE (entry) << key << " is not a seeded config key";
+        entry->value = value;
+        db_->save_config_entry (*entry);
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -999,8 +1051,8 @@ TEST_F (ScenarioLoadTest, LoadStepOutcomesAreDisjointAndSumToStepsExecuted) {
 
 // An execution with no response is `errored` and nothing else (#2824), whatever
 // its assertions said, as the sequential runner's `classify_step` decides it.
-// Mutation check: drop the `!errored` guard where the completion counts
-// `steps_failed` and `failed` reads 2.
+// Mutation check: test `assertion_failed` before `no_response` in
+// `classify_execution` and `failed` reads 2.
 TEST_F (ScenarioLoadTest, AnExecutionWithNoResponseIsErroredAndNotAlsoFailed) {
     auto execution = plan_over ({ "http://127.0.0.1:1/unreachable" });
     execution.plan.steps[0].elements = vayu::tests::compiled_elements (
@@ -1048,10 +1100,9 @@ json one_inline_script (const char* kind, const std::string& script) {
 // #2947: an inline script that threw on a step that answered 200 is `errored`,
 // as the sequential runner's `classify_step` decides it, and the iteration
 // still goes on to step 1, so the target receives the load it did before.
-// Mutation checks: count no outcome for a thrown script in
-// `count_answered_outcome` and `errored` reads 0, `passed` 6; pass
-// `errored = true` to `finish_step` for a thrown script and `/s1` is never
-// reached, `iterations_abandoned` reads 3.
+// Mutation checks: drop `script_threw` from `classify_execution` and `errored`
+// reads 0, `passed` 6; abandon the iteration for a thrown script in
+// `finish_step` and `/s1` is never reached, `iterations_abandoned` reads 3.
 TEST_F (ScenarioLoadTest, AnInlineScriptPostThatThrewIsErroredWithoutAbandoningItsIteration) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
@@ -1124,8 +1175,8 @@ TEST_F (ScenarioLoadTest, AnInlineSkipRequestThrowsSoItsStepIsErroredAndStillSen
 // A script that failed an assertion and then threw is one `errored` execution,
 // not also a `failed` one: the throw outranks the assertion, as in
 // `classify_step`. The assertion still reaches the exact population. Mutation
-// check: test `assertion_failed` before `threw` in `count_answered_outcome`
-// and `failed` reads 2, `errored` 0.
+// check: test `assertion_failed` before `script_threw` in
+// `classify_execution` and `failed` reads 2, `errored` 0.
 TEST_F (ScenarioLoadTest, AThrowOutranksAFailedAssertionInTheSameExecution) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0") });
@@ -1150,9 +1201,9 @@ TEST_F (ScenarioLoadTest, AThrowOutranksAFailedAssertionInTheSameExecution) {
 // A step a controller skipped whose `script.pre` then threw is `errored`, not
 // `skipped` (`classify_step` checks the throw first). It still sends nothing
 // and ends no iteration, and it counts in its step's `executed`, which is what
-// keeps `sum(executed) + skipped == steps_executed`. Mutation checks: count it
-// `skipped` in `count_unsent_outcome` and `skipped` reads 2; drop its
-// `record_unsent` and the second identity is 2 short.
+// keeps `sum(executed) + skipped == steps_executed`. Mutation checks: test
+// `!sent` before `script_threw` in `classify_execution` and `skipped` reads 2;
+// drop `record_unsent` from `count_outcome` and the second identity is 2 short.
 TEST_F (ScenarioLoadTest, ASkippedStepWhosePreScriptThrewIsErroredNotSkipped) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
@@ -1177,9 +1228,9 @@ TEST_F (ScenarioLoadTest, ASkippedStepWhosePreScriptThrewIsErroredNotSkipped) {
     expect_load_outcome_identities (summary);
 }
 
-// A step that got no response is `errored` once, by `finish_step`, even when
-// its script threw too. Mutation check: drop the `!errored` guard before
-// `count_answered_outcome` and `errored` reads 4.
+// A step that got no response is `errored` once, by `count_outcome`, even
+// when its script threw too. Mutation check: count `steps_errored` for a
+// no-response execution in `finish_step` as well and `errored` reads 4.
 TEST_F (ScenarioLoadTest, ANoResponseStepWhoseScriptThrewIsErroredOnce) {
     auto execution = plan_over ({ "http://127.0.0.1:1/unreachable" });
     execution.plan.steps[0].elements = vayu::tests::compiled_elements (
@@ -1219,6 +1270,218 @@ TEST_F (ScenarioLoadTest, ALoadRunAndACollectionRunCountAThrownScriptTheSame) {
     }
     EXPECT_EQ (load.at ("errored"), ITERATIONS) << load.dump ();
     EXPECT_EQ (load.at ("iterationsAbandoned"), 0) << load.dump ();
+}
+
+// ============================================================================
+// Flow control is read the same on both run kinds (#2974)
+// ============================================================================
+
+namespace {
+
+/// A step's `control.switch` that routes every execution to @p target:
+/// `{{which}}` resolves to nothing here, so it stays its own literal and the
+/// case keyed on that literal always matches.
+json switch_to (const std::string& target) {
+    return json{ { "id", "el_switch" }, { "kind", "control.switch" }, { "enabled", true },
+        { "config", { { "variable", "which" }, { "cases", { { "{{which}}", target } } } } } };
+}
+
+/// The same outcome counts on both run kinds, the four outcomes summing to
+/// `stepsExecuted` on each, and the load run's steps' `executed` plus
+/// `skipped` summing to it too.
+void expect_same_outcomes (const json& load, const json& sequential) {
+    for (const char* key : { "stepsExecuted", "passed", "failed", "skipped", "errored" }) {
+        EXPECT_EQ (load.at (key), sequential.at (key))
+        << key << "\nload: " << load.dump () << "\ncollection: " << sequential.dump ();
+    }
+    for (const json* scenario : { &load, &sequential }) {
+        const auto count = [scenario] (const char* key) {
+            return scenario->at (key).get<size_t> ();
+        };
+        EXPECT_EQ (count ("passed") + count ("failed") + count ("errored") + count ("skipped"),
+        count ("stepsExecuted"))
+        << scenario->dump ();
+    }
+    size_t ran = 0;
+    for (const auto& step : load.at ("steps")) {
+        ran += step.at ("executed").get<size_t> ();
+    }
+    EXPECT_EQ (ran + load.at ("skipped").get<size_t> (),
+    load.at ("stepsExecuted").get<size_t> ())
+    << load.dump ();
+}
+
+} // namespace
+
+// A step whose inline script threw has its own jump dropped on a load run, as
+// on a collection run: the iteration walks on to step 1, and step 2 is reached
+// only by walking. Mutation check: read `next_target_from_before` in
+// `read_flow_control` whatever the outcome, and `/s1` gets 0 load hits
+// against the collection run's 3.
+TEST_F (ScenarioLoadTest, AThrownStepsSwitchIsDroppedOnBothRunKinds) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { one_inline_script ("script.pre", "throw new Error('x');"), switch_to ("step2") });
+
+    constexpr size_t ITERATIONS = 3;
+    const auto runs = run_both (server, execution, { "/s0", "/s1", "/s2" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load_hits, (std::vector<size_t>{ ITERATIONS, ITERATIONS, ITERATIONS }))
+    << "the thrown step's switch was honoured: " << runs.load.dump ();
+    EXPECT_EQ (runs.load_hits, runs.sequential_hits);
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("iterationsAbandoned"), 0) << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
+}
+
+// The same for an inline `setNextRequest` followed by a throw: a collection run
+// records the jump and drops it with the throw, and on a load run the call
+// itself throws. Either way the step is `errored` and the iteration walks on.
+TEST_F (ScenarioLoadTest, AThrownStepsSetNextRequestIsDroppedOnBothRunKinds) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements ({ one_inline_script (
+    "script.pre", "pm.execution.setNextRequest('step2');\nthrow new Error('x');") });
+
+    constexpr size_t ITERATIONS = 2;
+    const auto runs = run_both (server, execution, { "/s0", "/s1", "/s2" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load_hits, (std::vector<size_t>{ ITERATIONS, ITERATIONS, ITERATIONS }));
+    EXPECT_EQ (runs.load_hits, runs.sequential_hits);
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
+}
+
+// A thrown step whose switch names no step is `errored` once and abandons
+// nothing: its jump is dropped before anything tries to resolve it, so it can
+// never also be a jump the run could not honour.
+TEST_F (ScenarioLoadTest, AThrownStepsUnresolvableSwitchIsDroppedNotRefused) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { one_inline_script ("script.post", "throw new Error('x');"), switch_to ("nowhere") });
+
+    constexpr size_t ITERATIONS = 2;
+    const auto runs = run_both (server, execution, { "/s0", "/s1" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load_hits, (std::vector<size_t>{ ITERATIONS, ITERATIONS }));
+    EXPECT_EQ (runs.load_hits, runs.sequential_hits);
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("iterationsAbandoned"), 0) << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
+}
+
+// A jump past `maxStepsPerIteration` is the error of the step that set it, on
+// both run kinds, under the same text naming the steps that cycled. The
+// iteration still ends there, so step 1 is never reached, and on the load run
+// it is still abandoned. Each iteration runs step 0 five times: four jumps
+// honoured, the fifth refused. Mutation check: drop the `outcome =
+// StepOutcome::Errored` for an abandoned step in `finish_step` and the load
+// run's `errored` reads 0 against the collection run's 2.
+TEST_F (ScenarioLoadTest, AJumpPastTheStepCapErrorsItsStepOnBothRunKinds) {
+    set_config ("maxStepsPerIteration", "5");
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ switch_to ("step0") });
+
+    constexpr size_t ITERATIONS = 2;
+    const vayu::tests::LogCapture log;
+    const auto runs = run_both (server, execution, { "/s0", "/s1" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load_hits, (std::vector<size_t>{ 5 * ITERATIONS, 0 }));
+    EXPECT_EQ (runs.load_hits, runs.sequential_hits);
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("passed"), 4 * ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("iterationsAbandoned"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("steps").at (0).at ("errors"), 0)
+    << "a refused jump is not a request error: " << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
+
+    ASSERT_EQ (runs.sequential_errors.size (), ITERATIONS);
+    EXPECT_NE (runs.sequential_errors[0].find (
+               "step0 -> step0 -> step0 -> step0 -> step0"),
+    std::string::npos)
+    << runs.sequential_errors[0];
+    const auto lines = log.with_msg_prefix ("Scenario load run: iteration ");
+    ASSERT_EQ (lines.size (), ITERATIONS);
+    EXPECT_EQ (lines[0].at ("stepError"), runs.sequential_errors[0]) << lines[0].dump ();
+}
+
+// A target no step answers to is the same: `errored` on the step that set it,
+// the iteration abandoned, and the collection run's text in the log.
+TEST_F (ScenarioLoadTest, AnUnresolvableJumpErrorsItsStepOnBothRunKinds) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ switch_to ("nowhere") });
+
+    constexpr size_t ITERATIONS = 2;
+    const vayu::tests::LogCapture log;
+    const auto runs = run_both (server, execution, { "/s0", "/s1" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load_hits, (std::vector<size_t>{ ITERATIONS, 0 }));
+    EXPECT_EQ (runs.load_hits, runs.sequential_hits);
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("iterationsAbandoned"), ITERATIONS) << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
+
+    ASSERT_EQ (runs.sequential_errors.size (), ITERATIONS);
+    const auto lines = log.with_msg_prefix ("Scenario load run: iteration ");
+    ASSERT_EQ (lines.size (), ITERATIONS);
+    EXPECT_EQ (lines[0].at ("stepError"), runs.sequential_errors[0]) << lines[0].dump ();
+}
+
+// A refused jump on a step that also failed an assertion is one `errored`
+// execution, not also a `failed` one: the refusal is decided before the outcome
+// is counted. Mutation check: count the outcome in `finish_step` before
+// `decide_next_position` runs and `failed` reads 2 on the load run.
+TEST_F (ScenarioLoadTest, ARefusedJumpOutranksAFailedAssertionOnBothRunKinds) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { json{ { "id", "el_status" }, { "kind", "assert.status" },
+      { "enabled", true }, { "config", { { "in", json::array ({ 201 }) } } } },
+    switch_to ("nowhere") });
+
+    constexpr size_t ITERATIONS = 2;
+    const auto runs = run_both (server, execution, { "/s0", "/s1" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("failed"), 0) << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
+}
+
+// A skipped step whose `control.loop` repeat is refused is `errored`, not
+// `skipped`, and joins its step's `executed` though it sent nothing, which is
+// what keeps the steps' `executed` plus `skipped` equal to `stepsExecuted`.
+// Each iteration: skipped twice, then the third pass is refused. Mutation
+// check: drop `record_unsent` for an `errored` execution that was not sent in
+// `count_outcome` and the second identity is 2 short.
+TEST_F (ScenarioLoadTest, ASkippedStepsRefusedRepeatIsErroredOnBothRunKinds) {
+    set_config ("maxStepsPerIteration", "3");
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_if" }, { "kind", "control.if" }, { "enabled", true },
+      { "config", { { "condition", "{{never_set}} exists" } } } },
+    { { "id", "el_loop" }, { "kind", "control.loop" }, { "enabled", true },
+    { "config", { { "count", 10 } } } } });
+
+    constexpr size_t ITERATIONS = 2;
+    const auto runs = run_both (server, execution, { "/s0", "/s1" }, ITERATIONS);
+
+    EXPECT_EQ (runs.load_hits, (std::vector<size_t>{ 0, 0 }));
+    EXPECT_EQ (runs.load_hits, runs.sequential_hits);
+    EXPECT_EQ (runs.load.at ("skipped"), 2 * ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("errored"), ITERATIONS) << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("steps").at (0).at ("executed"), ITERATIONS)
+    << runs.load.dump ();
+    EXPECT_EQ (runs.load.at ("steps").at (0).at ("noResponse"), 0) << runs.load.dump ();
+    expect_same_outcomes (runs.load, runs.sequential);
 }
 
 // ============================================================================

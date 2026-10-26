@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -25,6 +26,7 @@
 #include "vayu/core/script_config.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -836,7 +838,7 @@ class ScenarioLoadDriver {
                 // breakdown is what attributes the failure to a step.
                 context_->requests_sent++;
                 finish_step (context_, state_, execution_.plan, vu, step_index,
-                /*errored=*/true, nullptr);
+                StepSignals{ .no_response = true }, nullptr);
                 handle_result (context_, db_,
                 vayu::Result<vayu::Response> (vayu::Error{
                 vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
@@ -866,9 +868,10 @@ class ScenarioLoadDriver {
             // exactly as a sent step would; there is simply no `Result` to
             // store and no coverage to record, matching a design send's own
             // skip (`execute_exchange`'s `outcome.sent = false` branch).
-            count_unsent_outcome (*state_, step_index, before_result.script_threw);
             finish_step (context_, state_, execution_.plan, vu, step_index,
-            /*errored=*/false, nullptr);
+            StepSignals{ .script_threw = before_result.script_threw,
+            .assertion_failed          = before_result.assertion_failed },
+            nullptr);
             return true;
         }
         const int64_t pipeline_before_ms = before_result.elapsed_ms;
@@ -899,9 +902,7 @@ class ScenarioLoadDriver {
         const ScenarioStep* step_ptr = &step;
         // `control.switch`'s own dispatch (issue #1569), decided above at
         // `step.before` and carried into the completion for `finish_step` to
-        // resolve once this step's own send (whatever it does) is done -
-        // never consulted on the transport-error path, which ends the
-        // iteration on `errored` alone regardless.
+        // resolve, or drop, once this step's outcome is known.
         std::optional<std::string> next_target_before = before_result.next_target;
         const bool assertion_failed_before = before_result.assertion_failed;
         const bool script_threw_before     = before_result.script_threw;
@@ -930,20 +931,17 @@ class ScenarioLoadDriver {
             static_cast<double> (pipeline_before_ms + after.elapsed_ms) :
             0.0;
             record_step_response (*state, step_index, response, script_ms);
-            // An execution with no response is `errored` once, by
-            // `finish_step`, whatever its scripts and assertions said.
-            if (!errored) {
-                count_answered_outcome (*state, script_threw_before || after.script_threw,
-                assertion_failed_before || after.assertion_failed);
-            }
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
             // that counted only successes would report the send as if it never
             // happened.
             state->coverage.record (step_index, response.status_code);
-            finish_step (context, state, plan, vu, step_index, errored,
-            session_after (errored, step_ptr->request, response, *vu),
-            errored ? std::nullopt : next_target_before);
+            finish_step (context, state, plan, vu, step_index,
+            StepSignals{ .no_response = errored,
+            .sent                     = true,
+            .script_threw = script_threw_before || after.script_threw,
+            .assertion_failed = assertion_failed_before || after.assertion_failed },
+            session_after (errored, step_ptr->request, response, *vu), next_target_before);
             handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration, vu_index, script_ms });
         });
@@ -1171,38 +1169,61 @@ class ScenarioLoadDriver {
         }
     }
 
+    /// What one execution of a step left behind, for `finish_step` to
+    /// classify and act on.
+    struct StepSignals {
+        /// No response arrived: a transport failure, or a request that could
+        /// not be built.
+        bool no_response = false;
+        /// The request went out; false for a step a controller skipped.
+        bool sent             = false;
+        bool script_threw     = false;
+        bool assertion_failed = false;
+    };
+
     /**
-     * The outcome of an execution whose response arrived, in the sequential
-     * runner's `classify_step` order: an inline script that threw is `errored`
-     * over any assertion that failed (#2947). Unlike `finish_step`'s
-     * no-response `errored` it does not end the iteration, so a broken script
-     * changes no load the target receives. `passed` is the summary's
-     * remainder, so it is not counted here.
+     * The execution's outcome before flow control is read, in the sequential
+     * runner's `classify_step` order: no response or a thrown inline script
+     * is `errored`, over a skip and over a failed assertion (#2824, #2947).
      */
-    static void count_answered_outcome (ScenarioLoadState& state, bool threw, bool assertion_failed) {
-        if (threw) {
-            state.steps_errored.fetch_add (1, std::memory_order_relaxed);
-            return;
+    static StepOutcome classify_execution (const StepSignals& signals) {
+        if (signals.no_response || signals.script_threw) {
+            return StepOutcome::Errored;
         }
-        if (assertion_failed) {
-            state.steps_failed.fetch_add (1, std::memory_order_relaxed);
+        if (!signals.sent) {
+            return StepOutcome::Skipped;
         }
+        return signals.assertion_failed ? StepOutcome::Failed : StepOutcome::Passed;
     }
 
     /**
-     * The outcome of a step `step.before` stopped before the wire: `skipped`,
-     * unless a pre-request script threw, which `classify_step` ranks above a
-     * skip and makes `errored` (#2947). That one is in its step's `executed`
-     * like every outcome but `skipped`, and not in its `noResponse`, which
-     * stays the count of executions that end their iteration.
+     * The execution's one outcome in the run's tallies, and in its step's
+     * `executed` when nothing else put it there: every outcome but `skipped`
+     * is in `executed`, and an answered one is already, by
+     * `record_step_response`. Only a no-response execution is in the step's
+     * `noResponse`. `passed` is the summary's remainder, so it is not counted.
      */
-    static void count_unsent_outcome (ScenarioLoadState& state, size_t step_index, bool threw) {
-        if (!threw) {
+    static void count_outcome (ScenarioLoadState& state,
+    size_t step_index,
+    StepOutcome outcome,
+    const StepSignals& signals) {
+        switch (outcome) {
+        case StepOutcome::Passed: return;
+        case StepOutcome::Failed:
+            state.steps_failed.fetch_add (1, std::memory_order_relaxed);
+            return;
+        case StepOutcome::Skipped:
             state.steps_skipped.fetch_add (1, std::memory_order_relaxed);
             return;
+        case StepOutcome::Errored:
+            state.steps_errored.fetch_add (1, std::memory_order_relaxed);
+            if (signals.no_response) {
+                state.steps.record_error (step_index);
+            } else if (!signals.sent) {
+                state.steps.record_unsent (step_index);
+            }
+            return;
         }
-        state.steps_errored.fetch_add (1, std::memory_order_relaxed);
-        state.steps.record_unsent (step_index);
     }
 
     /**
@@ -1247,7 +1268,8 @@ class ScenarioLoadDriver {
             vu->busy.store (false, std::memory_order_release);
         } else {
             state->coverage.record (step_index, 0);
-            finish_step (context, state, plan, vu, step_index, /*errored=*/true, nullptr);
+            finish_step (context, state, plan, vu, step_index,
+            StepSignals{ .no_response = true, .sent = true }, nullptr);
         }
         handle_result (context, db, result, annotations);
     }
@@ -1256,114 +1278,57 @@ class ScenarioLoadDriver {
      * One step's outcome applied to the run's tallies and the VU's state
      * machine, and - beside a Stop's cancellation in
      * `finish_without_response` - the only writer of `busy`'s `true -> false`
-     * edge. Shared by the completion callback and the data-binding failure, so
-     * a step that never reached the wire retires its VU exactly as a completed
-     * one does - a VU left busy permanently shrinks effective concurrency.
+     * edge. Shared by the completion callback, the controller skip and the
+     * data-binding failure, so a step that never reached the wire retires its
+     * VU exactly as a completed one does - a VU left busy permanently shrinks
+     * effective concurrency.
      *
-     * @p errored means the step got no response (a transport error, or a step
-     * never sent), and it ends the iteration as abandoned. A response with an
-     * HTTP error status is not `errored`: the completion counts it with
-     * `record_failed_status` and the iteration carries on. A step whose inline
-     * script threw is `errored` too, but its caller counts that
-     * (`count_answered_outcome`, `count_unsent_outcome`) and passes `false`
-     * here, because it does not end the iteration (#2947).
+     * A step that got no response ends its iteration as abandoned (#2947), and
+     * so does one that set a jump the run cannot honour (#2974); both are
+     * `errored`. One whose inline script threw is `errored` and the iteration
+     * walks on, so a script bug cannot shrink the load. A response with an
+     * HTTP error status is no outcome at all (`record_step_response` counts it
+     * in `httpErrors`).
      *
      * @p next_cookies is null for an outcome that carries none - an error, or a
      * step that was never sent. @p next_target_from_before is
      * `control.switch`'s own dispatch (issue #1569, `run_step_before`'s
-     * return), read only when this step did not error - the same "an
-     * instruction that cannot be honoured is this step's failure" priority
-     * `errored` already has over any control decision.
+     * return), which `read_flow_control` weighs.
      */
     static void finish_step (const std::shared_ptr<RunContext>& context,
     const std::shared_ptr<ScenarioLoadState>& state,
     const ScenarioPlan& plan,
     VirtualUser* vu,
     size_t step_index,
-    bool errored,
+    const StepSignals& signals,
     const std::vector<std::string>* next_cookies,
     std::optional<std::string> next_target_from_before = std::nullopt) {
-        const size_t step_count = plan.steps.size ();
         state->steps_executed.fetch_add (1, std::memory_order_relaxed);
         ++vu->steps_this_iteration;
+        remember_step (*vu, step_index);
 
-        std::optional<std::string> next_target;
-        if (errored) {
-            state->steps.record_error (step_index);
-            state->steps_errored.fetch_add (1, std::memory_order_relaxed);
-        } else {
-            // `control.loop`'s own decision (issue #1569) is chronologically
-            // last, so it overrides `control.switch`'s own step.before
-            // decision on the sequential run's own "last call wins" terms
-            // (`decide_next_step` reads its post-script over its pre).
-            next_target = run_step_between (
-            context, *state, plan.steps[step_index], step_index, *vu);
-            if (!next_target) {
-                next_target = std::move (next_target_from_before);
-            }
+        StepOutcome outcome = classify_execution (signals);
+        // A step that got no response reads no flow control (#2947).
+        NextStep next{ .end_iteration = true, .abandoned = true };
+        if (!signals.no_response) {
+            const auto next_target =
+            read_flow_control (context, *state, plan.steps[step_index],
+            step_index, *vu, outcome, std::move (next_target_from_before));
+            next = decide_next_position (context, *state, plan, *vu, step_index, next_target);
         }
-
-        // A `control.switch` / `control.loop` jump or repeat (issue #1569),
-        // resolved against the plan the same way a script's own
-        // `setNextRequest` is (`resolve_next_step`). A target this run
-        // cannot honour, or a cycle that never reaches
-        // `maxStepsPerIteration`, both end the iteration as abandoned - the
-        // sequential run's own rule for an instruction it cannot honour.
-        std::optional<size_t> jump_target;
-        bool jump_failed = false;
-        if (next_target && !errored) {
-            if (vu->steps_this_iteration >= state->max_steps_per_iteration) {
-                vayu::utils::log_warning ("run",
-                "Scenario load run: iteration exceeded maxStepsPerIteration - "
-                "a "
-                "control.switch/control.loop cycle never reached its end",
-                { { "runId", context->run_id },
-                { "maxStepsPerIteration", state->max_steps_per_iteration } });
-                jump_failed = true;
-            } else {
-                const auto resolution = resolve_next_step (state->step_index, *next_target);
-                switch (resolution.kind) {
-                case NextStepResolution::Kind::Step:
-                    jump_target = resolution.index;
-                    break;
-                case NextStepResolution::Kind::EndIteration:
-                    break; // Ends below, on the same terms a natural last step does.
-                case NextStepResolution::Kind::Unresolved:
-                    vayu::utils::log_warning ("run",
-                    "Scenario load run: " + resolution.error,
-                    { { "runId", context->run_id } });
-                    jump_failed = true;
-                    break;
-                }
-            }
+        // A jump the run cannot honour is the step's error, decided before
+        // the outcome is counted so the execution has one outcome, as a
+        // collection run's `decide_next_step` decides it before the row is
+        // classified (#2974).
+        if (next.abandoned) {
+            outcome = StepOutcome::Errored;
         }
+        count_outcome (*state, step_index, outcome, signals);
 
-        const bool ends_by_jump = next_target.has_value () && !jump_target && !jump_failed;
-        const bool abandon   = errored || jump_failed;
-        const bool last_step = step_index + 1 >= step_count;
-        const bool end_iteration = abandon || ends_by_jump || (!jump_target && last_step);
-
-        if (end_iteration) {
-            // An abandoned iteration ends here rather than stranding the VU,
-            // which would permanently shrink effective concurrency for the
-            // rest of the run; an ordinary last step or an explicit
-            // `Kind::EndIteration` both count as completed, not abandoned -
-            // neither is a failure.
-            if (abandon) {
-                state->iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
-            } else {
-                state->iterations_completed.fetch_add (1, std::memory_order_relaxed);
-            }
-            vu->step               = 0;
-            vu->iteration_boundary = true;
-            ++vu->iteration;
-            vu->steps_this_iteration = 0;
-            // Empty at the start of each iteration: a new iteration is a
-            // new user, not the same one logging in twice.
-            vu->cookies.clear ();
-            vu->scope_overlay.clear ();
+        if (next.end_iteration) {
+            end_iteration (*state, *vu, next.abandoned);
         } else {
-            vu->step = jump_target.value_or (step_index + 1);
+            vu->step = next.position;
             // Replace, never merge - the captured list is the whole jar the
             // handle held, so merging would resurrect a cookie the server
             // deleted by expiring it. This step's own send (a jump target
@@ -1389,6 +1354,134 @@ class ScenarioLoadDriver {
         // ready after the count moved would leave the controller computing
         // a deficit it cannot fill.
         vu->busy.store (false, std::memory_order_release);
+    }
+
+    /// Where a VU goes after a step: the sequential runner's
+    /// `decide_next_step` answer, on the load path.
+    struct NextStep {
+        size_t position    = 0;
+        bool end_iteration = false;
+        /// The iteration ends as abandoned: the step got no response, or set
+        /// a jump the run could not honour (#2974).
+        bool abandoned = false;
+    };
+
+    /// Appends @p step_index to @p vu's trail of recent steps, keeping the
+    /// newest `CYCLE_TRAIL_LENGTH`.
+    static void remember_step (VirtualUser& vu, size_t step_index) {
+        vu.recent_steps.push_back (step_index);
+        if (vu.recent_steps.size () > CYCLE_TRAIL_LENGTH) {
+            vu.recent_steps.erase (vu.recent_steps.begin ());
+        }
+    }
+
+    /**
+     * The jump this step asks for, if any: `control.loop`'s from
+     * `step.between`, which is chronologically last and so overrides
+     * `control.switch`'s from `step.before` on the sequential run's "last
+     * call wins" terms (`decide_next_step` reads its post-script over its
+     * pre).
+     *
+     * An `errored` step's own instruction is never read (#2526, #2974): it
+     * came from a step that did not finish, so the iteration walks to the
+     * next position, as on a collection run. That drops both `Next`
+     * channels, a matching `control.switch` and a `control.loop` repeat,
+     * and with them a `"null"` target's end of the iteration. A controller's
+     * skip has already happened, before the wire, and no other instruction
+     * reaches this path: an inline script's `pm.execution` call throws on a
+     * load run. `step.between` still runs, which a collection run skips after
+     * an errored step, so its waits hold: dropping them would let a script
+     * bug raise the rate the target receives. A `control.loop` there still
+     * counts the pass it is not allowed to repeat.
+     */
+    static std::optional<std::string> read_flow_control (
+    const std::shared_ptr<RunContext>& context,
+    ScenarioLoadState& state,
+    const ScenarioStep& step,
+    size_t step_index,
+    VirtualUser& vu,
+    StepOutcome outcome,
+    std::optional<std::string> next_target_from_before) {
+        auto next_target = run_step_between (context, state, step, step_index, vu);
+        if (outcome == StepOutcome::Errored) {
+            return std::nullopt;
+        }
+        return next_target ? std::move (next_target) : std::move (next_target_from_before);
+    }
+
+    /**
+     * Where the VU goes after a step that got a response or was skipped. A
+     * jump target resolves against the plan the way a script's own
+     * `setNextRequest` does (`resolve_next_step`). A target no step answers
+     * to, and a jump past `maxStepsPerIteration`, end the iteration as
+     * abandoned and make the step `errored`, with the collection run's
+     * error text in the log, since a load run stores no step rows.
+     */
+    static NextStep decide_next_position (const std::shared_ptr<RunContext>& context,
+    const ScenarioLoadState& state,
+    const ScenarioPlan& plan,
+    const VirtualUser& vu,
+    size_t step_index,
+    const std::optional<std::string>& next_target) {
+        if (!next_target) {
+            const bool last_step = step_index + 1 >= plan.steps.size ();
+            return { .position = step_index + 1, .end_iteration = last_step };
+        }
+        if (vu.steps_this_iteration >= state.max_steps_per_iteration) {
+            std::deque<std::string> recent_names;
+            for (const size_t position : vu.recent_steps) {
+                recent_names.push_back (plan.steps[position].name);
+            }
+            log_refused_jump (context, plan, vu, step_index,
+            describe_steps_cap_exceeded (state.max_steps_per_iteration, recent_names));
+            return { .end_iteration = true, .abandoned = true };
+        }
+        const auto resolution = resolve_next_step (state.step_index, *next_target);
+        switch (resolution.kind) {
+        case NextStepResolution::Kind::Step:
+            return { .position = resolution.index };
+        case NextStepResolution::Kind::EndIteration:
+            return { .end_iteration = true };
+        case NextStepResolution::Kind::Unresolved: break;
+        }
+        log_refused_jump (context, plan, vu, step_index, resolution.error);
+        return { .end_iteration = true, .abandoned = true };
+    }
+
+    static void log_refused_jump (const std::shared_ptr<RunContext>& context,
+    const ScenarioPlan& plan,
+    const VirtualUser& vu,
+    size_t step_index,
+    const std::string& error) {
+        vayu::utils::log_warning ("run",
+        "Scenario load run: iteration " + std::to_string (vu.iteration) +
+        " ended at step '" + plan.steps[step_index].name + "'",
+        { { "runId", context->run_id },
+        { "stepError", vayu::utils::bounded_log_text (error) } });
+    }
+
+    /**
+     * The VU's iteration over: counted, and the VU reset to start the next
+     * one at step 0. An abandoned iteration ends here rather than stranding
+     * the VU, which would permanently shrink effective concurrency for the
+     * rest of the run; an ordinary last step or an explicit end of the
+     * iteration counts as completed - neither is a failure.
+     */
+    static void end_iteration (ScenarioLoadState& state, VirtualUser& vu, bool abandoned) {
+        if (abandoned) {
+            state.iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            state.iterations_completed.fetch_add (1, std::memory_order_relaxed);
+        }
+        vu.step               = 0;
+        vu.iteration_boundary = true;
+        ++vu.iteration;
+        vu.steps_this_iteration = 0;
+        vu.recent_steps.clear ();
+        // Empty at the start of each iteration: a new iteration is a new
+        // user, not the same one logging in twice.
+        vu.cookies.clear ();
+        vu.scope_overlay.clear ();
     }
 
     const std::shared_ptr<RunContext>& context_;

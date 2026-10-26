@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -258,6 +259,22 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
  *                   executes exactly that many steps - can never trip it.
  */
 [[nodiscard]] size_t resolve_max_steps_per_iteration (int configured, size_t plan_steps);
+
+/// How many recently executed step names the cycle-bound message names. Enough
+/// to show a loop of a few steps repeating, short enough to stay readable in a
+/// `results.error` cell.
+inline constexpr size_t CYCLE_TRAIL_LENGTH = 8;
+
+/**
+ * @brief The error of a step whose jump would take its iteration past
+ *        `maxStepsPerIteration`, naming the steps it most recently ran
+ *        (at most `CYCLE_TRAIL_LENGTH`, oldest first, this step last).
+ *
+ * One sentence for both run kinds (#2974), so a collection run's row and a
+ * scenario load run's log line name a cycle the same way.
+ */
+[[nodiscard]] std::string describe_steps_cap_exceeded (size_t max_steps_per_iteration,
+const std::deque<std::string>& recent_steps);
 
 /**
  * @brief Wrap one step as a wire-ready SSE `step` event, tagged with

@@ -115,7 +115,7 @@ function TestsCell({ step }: { step: RunScenarioStepStat }) {
 
 /**
  * Iterations the deadline or a Stop cut off: started, and neither completed nor
- * abandoned by a step that got no response. Derived, so there is no engine key to go stale;
+ * abandoned by a step that got no response or set a jump the run could not honour. Derived, so there is no engine key to go stale;
  * clamped, so a report whose counts disagree reads as none rather than negative.
  */
 function iterationsCutShortOf(

@@ -38,11 +38,6 @@ namespace vayu::core {
 
 namespace {
 
-/// How many recently executed step names the cycle-bound message names. Enough
-/// to show a loop of a few steps repeating, short enough to stay readable in a
-/// `results.error` cell.
-constexpr size_t CYCLE_TRAIL_LENGTH = 8;
-
 int64_t runner_now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
@@ -330,6 +325,13 @@ size_t resolve_max_steps_per_iteration (int configured, size_t plan_steps) {
     }
     return std::max (constants::scenario::MIN_STEPS_PER_ITERATION,
     plan_steps * constants::scenario::STEPS_PER_ITERATION_MULTIPLIER);
+}
+
+std::string describe_steps_cap_exceeded (size_t max_steps_per_iteration,
+const std::deque<std::string>& recent_steps) {
+    return "Iteration exceeded maxStepsPerIteration (" +
+    std::to_string (max_steps_per_iteration) +
+    ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
 }
 
 const char* to_string (StepOutcome outcome) {
@@ -825,9 +827,8 @@ bool& end_iteration) {
     case vayu::ScriptControl::Kind::Next:
         if (steps_this_iteration >= max_steps_per_iteration) {
             record.outcome = StepOutcome::Errored;
-            record.error   = "Iteration exceeded maxStepsPerIteration (" +
-            std::to_string (max_steps_per_iteration) +
-            ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
+            record.error =
+            describe_steps_cap_exceeded (max_steps_per_iteration, recent_steps);
             end_iteration = true;
             break;
         }

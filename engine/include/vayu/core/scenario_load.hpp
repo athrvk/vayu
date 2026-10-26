@@ -262,6 +262,12 @@ struct VirtualUser {
     /// run's `maxStepsPerIteration`. Reset to 0 at the same iteration
     /// boundary `cookies` is.
     size_t steps_this_iteration = 0;
+    /// The plan positions this VU most recently executed in its current
+    /// iteration, oldest first and at most `CYCLE_TRAIL_LENGTH`: what the
+    /// `maxStepsPerIteration` error names (#2974). Positions rather than
+    /// names, so the per-step bookkeeping copies no string; cleared at the
+    /// same boundary as `steps_this_iteration`, keeping its capacity.
+    std::vector<size_t> recent_steps;
     /// Per-node "when did this node last start" state for this VU's own
     /// `timer.pacing` elements (issue #1498), keyed by element id - the
     /// load-path sibling of `RunContext::pacing_state`'s sequential-run
@@ -305,9 +311,10 @@ class StepHistograms {
     /// under status 0, as the run's own distribution does), or the step was
     /// never sent. Counts as executed, so it is not paired with `record`.
     void record_error (size_t step);
-    /// A step that sent nothing and still did not end its iteration: one a
-    /// controller skipped whose pre-request script threw (#2947), `errored`
-    /// rather than `skipped`. Counts as executed and nothing else.
+    /// A step that sent nothing and is still `errored` rather than `skipped`:
+    /// one a controller skipped whose pre-request script threw (#2947), or
+    /// whose jump the run could not honour (#2974). Counts as executed and
+    /// nothing else.
     void record_unsent (size_t step);
     /// The duration of a no-response step whose transfer ran (a timeout, a
     /// reset; #2384). Paired with `record_error`, which already counted the
@@ -468,7 +475,8 @@ struct ScenarioLoadState {
     TransactionHistograms transactions;
     /// Steps a `control.if` / `control.once` / `control.throughput` element
     /// skipped before they reached the wire (issue #1515), less those whose
-    /// inline `script.pre` threw, which are `errored` (#2947) - the load
+    /// inline `script.pre` threw or whose jump the run could not honour,
+    /// which are `errored` (#2947, #2974) - the load
     /// path's own `StepOutcome::Skipped`, read into the summary's
     /// `skipped` key in place of the constant `0` every scenario load run
     /// reported before this.
@@ -585,10 +593,11 @@ struct ScenarioLoadState {
     /// say why.
     std::atomic<size_t> iterations_abandoned{ 0 };
     std::atomic<size_t> steps_executed{ 0 };
-    /// The summary's `errored`: executions that got no response, which end
-    /// their iteration, and executions whose inline `script.pre` or
-    /// `script.post` threw (#2947), which do not. So it is not the sum of the
-    /// steps' `noResponse`; `iterations_abandoned` is the abort count.
+    /// The summary's `errored`: executions that got no response or set a
+    /// jump the run could not honour (#2974), which end their iteration, and
+    /// executions whose inline `script.pre` or `script.post` threw (#2947),
+    /// which do not. So it is not the sum of the steps' `noResponse`;
+    /// `iterations_abandoned` is the abort count.
     std::atomic<size_t> steps_errored{ 0 };
 };
 

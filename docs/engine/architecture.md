@@ -1385,12 +1385,15 @@ row exists - and the executor is the only thing that differs.
 - **A step that got no response ends its iteration**, and the VU starts the
   next one. A VU stranded on a failing step would permanently shrink effective
   concurrency for the rest of the run. This path does not read `stopOnError`:
-  the key is the sequential runner's, and here only a missing response ends an
+  the key is the sequential runner's, and here a missing response ends an
   iteration - a script error, inline or deferred, never has. An inline script
-  that threw still makes its step `errored`, as on a collection run (#2947), but
-  the completion counts that outcome beside `finish_step` rather than through
-  its abort edge, so the load the target receives is the same either way and
-  the summary's `errored` is no longer the sum of the steps' `noResponse`. A step that answered with an HTTP error
+  that threw still makes its step `errored`, as on a collection run (#2947),
+  without ending the iteration, so the summary's `errored` is not the sum of the
+  steps' `noResponse`. Flow control follows the collection run's rules (#2974):
+  `finish_step` drops the `control.switch` / `control.loop` jump of a step that
+  errored, so the iteration walks on, and a jump it cannot honour (an unresolved
+  target, the `maxStepsPerIteration` cap) ends the iteration as abandoned with
+  the step `errored`, its error text in the log. A step that answered with an HTTP error
   status is counted in that step's `errors` (as `httpErrors`, #2134) and the
   iteration carries on: a response arrived, so the next step has something to
   follow.

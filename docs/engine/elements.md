@@ -359,7 +359,8 @@ way a repeat or a dispatch needs. They now do: `ScenarioLoadState::step_index` (
 folder-start name through the same `resolve_next_step` the sequential run's `setNextRequest` uses, and
 `finish_step` applies the result to the VU's own `step`, guarded against a cycle that never closes by
 `VirtualUser::steps_this_iteration` and the same `maxStepsPerIteration` config entry the sequential run
-reads. Neither kind sets the registry's `jumps_or_repeats` flag any more, so `POST /runs`' own refusal
+reads. A step that errored has its jump dropped, and a jump the run cannot honour errors the step
+that set it, both as on the sequential run (#2974). Neither kind sets the registry's `jumps_or_repeats` flag any more, so `POST /runs`' own refusal
 (`vayu::core::find_load_incompatible_controller`, still there for a future kind that jumps in a way the
 load path cannot support yet) no longer applies to either.
 
