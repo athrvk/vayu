@@ -186,6 +186,21 @@ TEST (UrlPartsTest, AnUnsupportedSchemeStillSplits) {
     EXPECT_EQ (parts.query, "room=1");
 }
 
+// A downgrade is https to http and nothing else (#2949): the reverse protects
+// more, an unchanged scheme changes nothing, and a URL naming no scheme names
+// no transport. Mutation-check: drop the https test from is_scheme_downgrade
+// and http-to-http reads as a downgrade.
+TEST (UrlPartsTest, OnlyHttpsToHttpIsASchemeDowngrade) {
+    EXPECT_TRUE (is_scheme_downgrade ("https://a.test/x", "http://a.test/x"));
+    EXPECT_TRUE (is_scheme_downgrade ("HTTPS://a.test/x", "HtTp://b.test/y"));
+    EXPECT_FALSE (is_scheme_downgrade ("http://a.test/x", "https://a.test/x"));
+    EXPECT_FALSE (is_scheme_downgrade ("http://a.test/x", "http://b.test/x"));
+    EXPECT_FALSE (is_scheme_downgrade ("https://a.test/x", "https://b.test/x"));
+    EXPECT_FALSE (is_scheme_downgrade ("https://a.test/x", ""));
+    EXPECT_FALSE (is_scheme_downgrade ("", "http://a.test/x"));
+    EXPECT_FALSE (is_scheme_downgrade ("https://a.test/x", "ftp://a.test/x"));
+}
+
 // No scheme guessing: reporting `http` for a string that never said so would
 // put a protocol into a canonical string the request does not carry.
 TEST (UrlPartsTest, AUrlWithoutASchemeIsNotParsedRatherThanGuessedAt) {

@@ -20,6 +20,8 @@
 #endif
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/query_encoding.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/curl_options.hpp"
@@ -29,6 +31,7 @@
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/url_parts.hpp"
 
 #include <curl/curl.h>
 
@@ -282,7 +285,39 @@ struct HeaderSink {
     size_t max_hops = 0;
     /// Numeric status of the block being read, 0 before the first one.
     int block_status = 0;
+    /// The transfer whose `CURLINFO_EFFECTIVE_URL` names each block's request.
+    CURL* curl = nullptr;
+    /// The URL the block being read answered, unmasked; empty before the first
+    /// status line.
+    std::string block_url;
+    /// Query parameter names whose value a recorded hop URL must not carry.
+    std::vector<std::string> secret_params;
 };
+
+/// libcurl's current request URL, copied because the buffer is only valid until
+/// the next call into the handle; empty when libcurl reports none.
+std::string effective_url (CURL* curl) {
+    char* url = nullptr;
+    if (get_info<CURLINFO_EFFECTIVE_URL> (curl, &url) != CURLE_OK || url == nullptr) {
+        return {};
+    }
+    return url;
+}
+
+/// The names a request's auth-written query parameter can appear under in a
+/// URL: as typed, and as `append_query_param` percent-encodes it.
+std::vector<std::string> auth_param_names (const Request& request) {
+    if (request.auth_query_param.empty ()) {
+        return {};
+    }
+    std::vector<std::string> names{ request.auth_query_param };
+    auto encoded = vayu::core::encode_query_component (
+    request.auth_query_param, vayu::core::QueryPart::Key);
+    if (encoded != names.front ()) {
+        names.push_back (std::move (encoded));
+    }
+    return names;
+}
 
 /// The numeric code of "HTTP/<version> <code> [<reason phrase>]", or nullopt
 /// when the line carries none.
@@ -302,16 +337,24 @@ std::optional<int> status_line_code (std::string_view line) {
  * the 2xx a proxy `CONNECT` answers with reaches this callback too. Run on the
  * next status line, which is the first moment the previous block is known to
  * be complete, and before the header containers are cleared.
+ *
+ * @p next_url is libcurl's effective URL read at that same status line. By then
+ * libcurl has already followed the Location, so it is the URL of the block now
+ * starting, not of the one finished: the finished block's URL is the one the
+ * sink saved at the previous status line, and the pair gives the downgrade.
  */
-void record_finished_hop (HeaderSink& sink) {
+void record_finished_hop (HeaderSink& sink, const std::string& next_url) {
     Response& response = *sink.response;
     const int status   = sink.block_status;
     if (status < 300 || status >= 400 || response.redirect_hops.size () >= sink.max_hops) {
         return;
     }
+    int omitted = 0;
     response.redirect_hops.push_back ({ status,
     response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
-    std::move (response.header_lines) });
+    std::move (response.header_lines),
+    vayu::core::vayu_ext::redact_url_credentials (sink.block_url, sink.secret_params, omitted),
+    is_scheme_downgrade (sink.block_url, next_url) });
 }
 
 /**
@@ -355,7 +398,9 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 
     // Status line: "HTTP/<version> <code> [<reason phrase>]"
     if (line.starts_with ("HTTP/")) {
-        record_finished_hop (*sink);
+        const std::string url = effective_url (sink->curl);
+        record_finished_hop (*sink, url);
+        sink->block_url  = url;
         auto first_space = line.find (' ');
         if (first_space != std::string::npos) {
             auto second_space = line.find (' ', first_space + 1);
@@ -681,10 +726,14 @@ Result<Response> Client::send (const Request& request) {
     set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, &sink);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
-    HeaderSink header_sink{ &response,
-        request.follow_redirects ?
-        static_cast<size_t> (std::max (request.max_redirects, 0)) :
-        0 };
+    const size_t max_hops = request.follow_redirects ?
+    static_cast<size_t> (std::max (request.max_redirects, 0)) :
+    0;
+    HeaderSink header_sink;
+    header_sink.response      = &response;
+    header_sink.max_hops      = max_hops;
+    header_sink.curl          = curl;
+    header_sink.secret_params = auth_param_names (request);
     set_opt<CURLOPT_HEADERDATA> (curl, &header_sink);
 
     // Set timeout. The connect bound is set on every send because the handle

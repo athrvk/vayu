@@ -618,7 +618,9 @@ class CrlServer {
  * of them: a body only arrives at all if verification passed, so a 200 here is
  * the assertion and the payload is only there to make a partial read visible.
  * `/events` is the same assertion for the SSE driver, which reads a stream
- * rather than a body and so cannot be pointed at `/hello`.
+ * rather than a body and so cannot be pointed at `/hello`. `/bounce?to=<url>`
+ * answers `302` to that URL, which is how a test leaves TLS for a cleartext
+ * target (#2949).
  */
 class TlsServer {
     public:
@@ -694,6 +696,9 @@ class TlsServer {
         });
         svr_.Get ("/events", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("data: one\n\ndata: two\n\n", "text/event-stream");
+        });
+        svr_.Get ("/bounce", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_redirect (req.get_param_value ("to"), 302);
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });

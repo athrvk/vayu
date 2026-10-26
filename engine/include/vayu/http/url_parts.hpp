@@ -197,6 +197,15 @@ inline constexpr const char* SENDABLE_PROTOCOLS = "http,https";
 [[nodiscard]] std::string_view url_scheme (std::string_view url);
 
 /**
+ * @brief Whether a transfer that moved from @p from to @p to left `https` for
+ *        `http` (#2949), the schemes compared case-insensitively.
+ *
+ * Only that direction: `http` to `https` protects more than it did, and a
+ * scheme that is neither names no transport to downgrade.
+ */
+[[nodiscard]] bool is_scheme_downgrade (std::string_view from, std::string_view to);
+
+/**
  * @brief Why @p url cannot be sent, as a lowercase clause naming its scheme,
  *        when that scheme is anything but `http` or `https` (compared
  *        case-insensitively); `nullopt` for those two and for a URL that names

@@ -1636,7 +1636,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   [Secret values](#secret-values)); so do the response's `headerLines`, the
   `{name, value}` rows as received, where each `Set-Cookie` is a row of its own
   (issue #2460), and so does each hop's `headerLines` on `redirects`, the
-  `{status, statusText, headerLines}` of every 3xx the send followed (always
+  `{status, statusText, headerLines, url, schemeDowngrade}` of every 3xx the send followed (always
   present on the answer, `[]` when none; `headers` and `headerLines` hold the
   final response only, issue #2461). A hop's `Set-Cookie` is what the server
   sent, not what the cookie jar kept. `requestHeaderLines` (and a stored trace's

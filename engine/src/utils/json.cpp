@@ -1421,7 +1421,8 @@ Json serialize_redirects (const std::vector<RedirectHop>& hops) {
     Json out = Json::array ();
     for (const auto& hop : hops) {
         out.push_back ({ { "status", hop.status_code }, { "statusText", hop.status_text },
-        { "headerLines", serialize_header_lines (hop.header_lines) } });
+        { "headerLines", serialize_header_lines (hop.header_lines) },
+        { "url", hop.url }, { "schemeDowngrade", hop.scheme_downgrade } });
     }
     return out;
 }

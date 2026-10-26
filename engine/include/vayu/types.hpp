@@ -875,11 +875,23 @@ const std::map<int, size_t>& distribution) noexcept {
  * `Response::headers` holds the final hop only, so a `Set-Cookie` or
  * `Location` on an earlier hop is otherwise gone. `header_lines` is the same
  * received-lines shape `Response::header_lines` uses.
+ *
+ * `url` is the request URL this response answered, so a reader can see where a
+ * chain went; `scheme_downgrade` marks a Location that left `https` for `http`
+ * (#2949). libcurl withholds `Authorization` and a typed `Cookie` on a change of
+ * scheme, host name or port, but an API-key *header* is not withheld, so the
+ * downgrade is the one hop a credential can cross in clear text.
  */
 struct RedirectHop {
     int status_code = 0;
     std::string status_text;
     std::vector<HeaderLine> header_lines;
+    /// The URL of the request this response answered, with the auth query
+    /// parameter's value blanked (`Request::auth_query_param`) and libcurl's
+    /// own removal of userinfo. Empty when libcurl reported none.
+    std::string url;
+    /// This hop's request went over `https` and the next one over `http`.
+    bool scheme_downgrade = false;
 };
 
 /**

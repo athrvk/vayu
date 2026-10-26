@@ -24,6 +24,7 @@
 #include "mock_server.hpp"
 #include "optional_assert.hpp"
 #include "silent_listener.hpp"
+#include "tls_server.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -184,6 +185,15 @@ class MockHttpBin {
         // /chain - two hops, 301 then 302, before the 200 at /get.
         svr_.Get ("/chain", [] (const httplib::Request&, httplib::Response& res) {
             res.set_redirect ("/redirect/1", 301);
+        });
+
+        // /rel/start - a Location with no leading slash, which only resolves
+        // against the URL that was requested (#2949).
+        svr_.Get ("/rel/start", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_redirect ("end", 302);
+        });
+        svr_.Get ("/rel/end", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("done", "text/plain");
         });
 
         // A body that claims an encoding it is not in (gzip), and one in an
@@ -680,6 +690,90 @@ TEST_F (HttpClientTest, RedirectHopsAreRecordedInTheOrderTheyArrived) {
     ASSERT_EQ (result.value ().redirect_hops.size (), 2U);
     EXPECT_EQ (result.value ().redirect_hops[0].status_code, 301);
     EXPECT_EQ (result.value ().redirect_hops[1].status_code, 302);
+}
+
+// Each hop records the URL its own request went to (#2949). libcurl's effective
+// URL has already moved to the next hop when the finished block is recorded, so
+// reading it late would give every hop the URL of the one after it. The second
+// hop of /chain is reached through a Location, hop one through the request.
+// Mutation-check: record `next_url` instead of `block_url` and hop one names
+// /redirect/1.
+TEST_F (HttpClientTest, EachRedirectHopRecordsTheUrlItsOwnRequestWentTo) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/chain");
+    request.follow_redirects = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& hops = result.value ().redirect_hops;
+    ASSERT_EQ (hops.size (), 2U);
+    EXPECT_EQ (hops[0].url, mock_->url ("/chain"));
+    EXPECT_EQ (hops[1].url, mock_->url ("/redirect/1"));
+    EXPECT_FALSE (hops[0].scheme_downgrade);
+    EXPECT_FALSE (hops[1].scheme_downgrade);
+}
+
+// A Location that is not a full URL is recorded as the URL libcurl resolved it
+// to, because that is the request that was sent.
+TEST_F (HttpClientTest, ARelativeLocationIsRecordedAsTheUrlItResolvedTo) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/rel/start");
+    request.follow_redirects = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    ASSERT_EQ (result.value ().redirect_hops.size (), 1U);
+    EXPECT_EQ (result.value ().redirect_hops.front ().url, mock_->url ("/rel/start"));
+    EXPECT_EQ (result.value ().body, "done");
+}
+
+// A hop URL must not carry the API key the request's auth put in the query,
+// under the name as typed or as percent-encoded in the URL (#2949).
+// Mutation-check: pass an empty name list to redact_url_credentials and the
+// secret is in the recorded URL.
+TEST_F (HttpClientTest, AQueryParamApiKeyIsMaskedInTheRecordedHopUrl) {
+    for (const auto& [name, encoded] : { std::pair<std::string, std::string>{ "vk", "vk" },
+         std::pair<std::string, std::string>{ "my key", "my%20key" } }) {
+        Request request;
+        request.method = HttpMethod::GET;
+        request.url = mock_->url ("/chain") + "?" + encoded + "=s3cret&page=2";
+        request.auth_query_param = name;
+        request.follow_redirects = true;
+
+        auto result = client_->send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << name << ": " << result.error ().message;
+        const auto& hops = result.value ().redirect_hops;
+        ASSERT_EQ (hops.size (), 2U) << name;
+        EXPECT_EQ (hops[0].url, mock_->url ("/chain") + "?" + encoded + "=&page=2") << name;
+    }
+}
+
+// The one hop a header-placed credential can cross in clear text. The target is
+// the plain mock, reached from a TLS listener that does not verify.
+// Mutation-check: make is_scheme_downgrade answer false and the flag is lost.
+TEST_F (HttpClientTest, AHopFromHttpsToHttpIsFlaggedAsASchemeDowngrade) {
+    const vayu::tests::TestCertificateAuthority ca;
+    const vayu::tests::TlsServer tls (ca);
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = tls.url ("/bounce?to=" + mock_->url ("/chain"));
+    request.verify_ssl       = false;
+    request.follow_redirects = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& hops = result.value ().redirect_hops;
+    ASSERT_EQ (hops.size (), 3U);
+    EXPECT_TRUE (hops[0].scheme_downgrade);
+    EXPECT_TRUE (hops[0].url.starts_with ("https://127.0.0.1:"));
+    EXPECT_FALSE (hops[1].scheme_downgrade);
+    EXPECT_FALSE (hops[2].scheme_downgrade);
 }
 
 TEST_F (HttpClientTest, ARequestThatWasNotRedirectedHasNoHops) {

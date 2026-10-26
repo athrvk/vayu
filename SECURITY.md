@@ -284,10 +284,13 @@ a minute after launch and every 6 hours after, on every platform. Windows and
 the Linux AppImage then download it in the background; macOS and the Linux
 `.deb` only tell you. There is no setting to turn the check off.
 
-On a cross-host redirect the engine drops `Authorization` and `Cookie`, as curl
-does; every other header you set, including API-key headers, follows the
-redirect, and a configured client certificate stays attached. The API Key editor
-says so; turn off follow-redirects on a request whose key must stay on one host.
+On a redirect to a different scheme, host name or port the engine drops
+`Authorization` and `Cookie`, as curl does; every other header you set,
+including API-key headers, follows the redirect - over `http` too, after an
+`https` hop - and a configured client certificate stays attached. A design
+send's answer marks such a hop (`redirects[].schemeDowngrade`). The API Key
+editor says so; turn off follow-redirects on a request whose key must stay on
+one origin.
 The MCP host allowlist is checked against the URL you send, not against where it
 redirects.
 

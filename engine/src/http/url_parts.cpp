@@ -394,6 +394,11 @@ std::string_view url_scheme (std::string_view url) {
     return url.substr (0, length);
 }
 
+bool is_scheme_downgrade (std::string_view from, std::string_view to) {
+    return vayu::utils::ascii_lower_equal (url_scheme (from), "https") &&
+    vayu::utils::ascii_lower_equal (url_scheme (to), "http");
+}
+
 std::optional<std::string> unsendable_scheme (std::string_view url) {
     const std::string_view scheme = url_scheme (url);
     if (scheme.empty ()) {
