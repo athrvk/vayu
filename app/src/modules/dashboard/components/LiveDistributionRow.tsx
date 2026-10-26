@@ -27,8 +27,6 @@ import { LatencyStat } from "./stats/LatencyStat";
 import { PhasePercentiles } from "./charts/PhasePercentiles";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 import { HdrPercentileChart } from "./charts/uplot";
-import { useSloMs } from "../hooks/useSloMs";
-import type { Breakpoint } from "../utils/computeBreakpoint";
 import { pluralize } from "../utils/format";
 import { pooledTitle } from "../utils/pooledLatency";
 import { latestGateFrame, liveDistributions } from "../utils/liveDistributions";
@@ -42,15 +40,14 @@ function Placeholder({ title }: { title: string }) {
 
 export function LiveDistributionRow({
 	history,
-	breakpoint,
+	sloMs,
 	pooled = false,
 }: {
 	history: LoadTestMetrics[];
-	breakpoint: Breakpoint;
+	sloMs?: number;
 	/** A scenario load run: the distribution pools every step (#2823). */
 	pooled?: boolean;
 }) {
-	const sloMs = useSloMs(breakpoint);
 	const frame = useMemo(() => latestGateFrame(history), [history]);
 	const { latency, phases } = useMemo(() => liveDistributions(frame), [frame]);
 

@@ -21,6 +21,7 @@ const crossedAt19: Breakpoint = {
 	timeSeconds: 19,
 	p99Ms: 203,
 	sloMs: 200,
+	sloSource: "run",
 	atRunStart: false,
 };
 

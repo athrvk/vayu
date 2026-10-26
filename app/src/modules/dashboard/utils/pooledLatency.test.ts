@@ -11,7 +11,8 @@
  * Mutation-check: take the `<=` guard out of `slowestStepP99` and the tie case
  * fails; compare `<` the wrong way round and the slowest case fails; return
  * `true` for an empty `steps` array from `isPooledReport` and the design-mode
- * case fails.
+ * case fails; drop the `p99 === undefined` guard or the `report.latency`
+ * check and the unrecorded cases fail.
  */
 
 import { describe, it, expect } from "vitest";
@@ -50,6 +51,15 @@ describe("slowestStepP99", () => {
 		expect(slowestStepP99([step(0, "", 5)])).toEqual({ ms: 5, name: "req_0" });
 	});
 
+	it("passes over a step whose latency was not recorded", () => {
+		const unrecorded = {
+			...step(1, "B", 0),
+			latency: undefined,
+		} as unknown as RunScenarioStepStat;
+		expect(slowestStepP99([unrecorded, step(0, "A", 5)])).toEqual({ ms: 5, name: "A" });
+		expect(slowestStepP99([unrecorded])).toBeUndefined();
+	});
+
 	it("is undefined with no steps", () => {
 		expect(slowestStepP99([])).toBeUndefined();
 		expect(slowestStepP99(undefined)).toBeUndefined();
@@ -77,12 +87,18 @@ describe("pooledTitle", () => {
 
 describe("isPooledReport / pooledLatencyOf", () => {
 	const withScenario = (steps?: RunScenarioStepStat[]) =>
-		({ scenario: { steps } }) as unknown as RunReport;
+		({ scenario: { steps }, latency: { p99: 8 } }) as unknown as RunReport;
 
 	it("is true for a scenario load run's report, with the slowest step", () => {
 		const report = withScenario([step(0, "A", 3), step(1, "B", 8)]);
 		expect(isPooledReport(report)).toBe(true);
 		expect(pooledLatencyOf(report)).toEqual({ slowestStep: { ms: 8, name: "B" } });
+	});
+
+	it("names no slowest step for a report that recorded no latency (#2938)", () => {
+		const report = { ...withScenario([step(0, "A", 3)]), latency: undefined } as RunReport;
+		expect(isPooledReport(report)).toBe(true);
+		expect(pooledLatencyOf(report)).toEqual({});
 	});
 
 	it("is false for a single-request report and for a scenario section with no step breakdown", () => {

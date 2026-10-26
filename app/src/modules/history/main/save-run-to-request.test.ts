@@ -693,6 +693,40 @@ describe("buildChangeset", () => {
 	});
 });
 
+describe("a run's timeout is never written back (#2937)", () => {
+	// A request's own timeout is stored only when its owner states one. The run
+	// replays the number its send used, which can be an override that never
+	// lived on the request; writing it would pin that number on a request that
+	// states none, which is the opposite of what the field is for.
+	const RUN_TIMEOUT = 1500;
+	const timedRun = () =>
+		run({
+			configSnapshot: { ...run().configSnapshot, timeout: RUN_TIMEOUT },
+		} as Partial<Run>);
+
+	it("leaves it off the update, so the stored value is kept", () => {
+		const live = liveRequest();
+		const seed = seedFromRun(timedRun(), live);
+		expect(seed.request.timeout).toBe(RUN_TIMEOUT);
+
+		const patch = applyRunToRequest(seed, live);
+		expect(patch).not.toHaveProperty("timeout");
+	});
+
+	it("leaves it off a request created from the run", () => {
+		const seed = seedFromRun(timedRun(), liveRequest());
+		expect(createFieldsFromRun(seed)).not.toHaveProperty("timeout");
+	});
+
+	it("does not list it as a change in the confirmation", () => {
+		const live = liveRequest();
+		const fields = buildChangeset(seedFromRun(timedRun(), live), live).map((i) =>
+			i.field.toLowerCase()
+		);
+		expect(fields.some((field) => field.includes("timeout"))).toBe(false);
+	});
+});
+
 describe("applyRunToRequest, binary bodies", () => {
 	function binaryRun(file: unknown): Run {
 		const base = run();

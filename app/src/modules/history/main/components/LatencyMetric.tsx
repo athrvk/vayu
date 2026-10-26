@@ -14,11 +14,12 @@
  */
 
 import { cn } from "@/lib/utils";
-import { formatLatencyParts } from "@/lib/format-number";
+import { formatLatencyPartsOrDash } from "@/lib/format-number";
 
 interface LatencyMetricProps {
 	label: string;
-	value: number;
+	/** Absent for a run whose latency was not recorded: the tile reads "-". */
+	value: number | undefined;
 	/** The SLO in ms. Omit it and the tile stays neutral. */
 	sloMs?: number;
 	/** The tier the tile takes once `value` exceeds `sloMs`. */
@@ -38,8 +39,9 @@ const TIER_BG = {
 };
 
 export default function LatencyMetric({ label, value, sloMs, severity }: LatencyMetricProps) {
-	const tier = severity && sloMs !== undefined && value > sloMs ? severity : "neutral";
-	const { value: digits, unit } = formatLatencyParts(value);
+	const overSlo = value !== undefined && sloMs !== undefined && value > sloMs;
+	const tier = severity && overSlo ? severity : "neutral";
+	const { value: digits, unit } = formatLatencyPartsOrDash(value);
 
 	return (
 		<div className={cn("p-3 text-center", TIER_BG[tier])}>

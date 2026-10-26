@@ -70,6 +70,7 @@ enum class Loss : std::uint8_t {
     BodyFileDetails,
     HttpVersion,
     EventStream,
+    RequestTimeout,
     MockResponseMode,
     TruncatedExamples,
     ExampleContentTypes,
@@ -99,6 +100,7 @@ constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "body_file_details", "Content types and file names set on a binary body's file were left out - Postman reads the Content-Type header" },
 { "http_version", "HTTP version choices have no Postman equivalent" },
 { "event_stream", "Event-stream (SSE) settings have no Postman equivalent" },
+{ "request_timeout", "Request timeouts have no Postman equivalent" },
 { "mock_response_mode", "Mock response choices have no Postman equivalent" },
 { "truncated_examples", "Examples saved from a cut-off response were written partial" },
 { "example_content_types", "Example content types without a Content-Type header were left out" },
@@ -1934,6 +1936,9 @@ void note_request_losses (const PostmanExportRequest& request, Walk& walk) {
     }
     if (request.stream) {
         walk.lose (Loss::EventStream);
+    }
+    if (request.timeout_ms) {
+        walk.lose (Loss::RequestTimeout);
     }
     if (request.mock_response_mode != "first" && !request.mock_response_mode.empty ()) {
         walk.lose (Loss::MockResponseMode);

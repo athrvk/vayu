@@ -50,6 +50,7 @@ const crossed: Breakpoint = {
 	timeSeconds: 6,
 	p99Ms: 227,
 	sloMs: 200,
+	sloSource: "run",
 	atRunStart: false,
 };
 const notCrossed: Breakpoint = {
@@ -58,6 +59,7 @@ const notCrossed: Breakpoint = {
 	timeSeconds: null,
 	p99Ms: null,
 	sloMs: 200,
+	sloSource: "run",
 	atRunStart: false,
 };
 
@@ -212,6 +214,7 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 			timeSeconds: null,
 			p99Ms: null,
 			sloMs: 200,
+			sloSource: "run",
 			atRunStart: false,
 		},
 	};
@@ -564,6 +567,14 @@ describe("hero cards print counts, percents and spans through the shared formatt
 		expect(out).toContain("p99 crossed 227ms (the 2.00s SLO) at 45 virtual users");
 	});
 
+	it("calls a Settings-judged line the threshold in Settings, not an SLO (#2939)", () => {
+		const out = text(
+			<SaturationCard breakpoint={{ ...crossed, sloSource: "settings" }} failedRequests={0} />
+		);
+		expect(out).toContain("p99 crossed 227ms (the 200ms threshold in Settings) at 45");
+		expect(out).not.toContain("SLO");
+	});
+
 	it("keeps the unnamed line when the breakpoint carries no SLO", () => {
 		const out = text(
 			<SaturationCard breakpoint={{ ...crossed, sloMs: null }} failedRequests={0} />
@@ -689,12 +700,32 @@ describe("the Saturation card of a capacity run reads the search's stop reason (
 					timeSeconds: 12,
 					p99Ms: 310,
 					sloMs: 250,
+					sloSource: "run",
 					atRunStart: false,
 				},
 			})
 		);
 		expect(out).toContain("searching");
 		expect(out).toContain("p99 crossed 310ms (the 250ms SLO) at 22 virtual users");
+	});
+
+	it("words a live crossing judged by Settings as the Settings threshold (#2939)", () => {
+		const out = saturation(
+			row({
+				breakpoint: {
+					crossed: true,
+					concurrency: 22,
+					timeSeconds: 12,
+					p99Ms: 310,
+					sloMs: 200,
+					sloSource: "settings",
+					atRunStart: false,
+				},
+			})
+		);
+		expect(out).toContain(
+			"p99 crossed 310ms (the 200ms threshold in Settings) at 22 virtual users"
+		);
 	});
 
 	// S7: the first level already broke the budget, so the search has a knee at

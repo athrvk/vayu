@@ -981,6 +981,22 @@ TEST (RunExportHtmlTest, NoResponseRemainderIsOneRowWhenTypesStopAtTheCap) {
     EXPECT_EQ (html.find ("HTTP 0"), std::string::npos);
 }
 
+// #2938: a flagged run's document has no `latency` section, and every row of
+// the table reads `-` rather than a zero. Mutation check: read the figure
+// through a default of 0 in `latency_table` and this fails.
+TEST (RunExportHtmlTest, AReportWithoutLatencyPrintsADashInEveryRow) {
+    ordered_json document                    = read_document ("healthy-passed");
+    document["report"]["summary"]["partial"] = true;
+    document["report"].erase ("latency");
+    const std::string html = render_run_export_html (document);
+    for (const char* key : { "min", "p50", "p90", "p95", "p99", "p999", "max" }) {
+        EXPECT_NE (html.find (std::string ("<tr><th scope=\"row\">") + key + "</th><td>-</td>"),
+        std::string::npos)
+        << key;
+    }
+    EXPECT_EQ (html.find ("is 0"), std::string::npos);
+}
+
 // #2905: the notice sits in the verdict's band, one paragraph per flag.
 // Mutation check: drop the notices loop from `verdict_section` and this fails.
 TEST (RunExportHtmlTest, AReconciledRunSaysSoInTheVerdictBand) {
@@ -1007,13 +1023,11 @@ TEST (RunExportHtmlTest, AReconciledRunSaysSoInTheVerdictBand) {
     const std::string PARTIAL = "<p>" +
     escape_html (
     "Partial run: the engine stopped before this run finished, so the "
-    "totals are the last saved tick's and every latency figure is 0, not "
-    "a measurement.") +
+    "totals are the last saved tick's and latency was not recorded.") +
     "</p>\n";
     const std::string MISSING =
     "<p>No summary was recorded for this run, so the counts "
-    "are not whole-run totals and the latency figures are "
-    "not measurements.</p>\n";
+    "are not whole-run totals and latency was not recorded.</p>\n";
 
     const std::string partial_band = band_of (true, false);
     ASSERT_FALSE (partial_band.empty ());

@@ -766,6 +766,33 @@ TEST (JsonRequestListSerializer, OmitsTruncatedFieldsWhenEveryColumnFitsTheCap) 
     << "absent, not an empty array, when nothing was substituted";
 }
 
+// A request's own `timeout` (#2937) is always a key in both request
+// serializers, its number or `null`, and the two agree. Mutation check: drop
+// the `timeout` line from either serializer and its half fails.
+TEST (JsonRequestSerializers, BothEmitTheTimeoutAsANumberOrNull) {
+    vayu::db::Request r;
+    r.id            = "req_1";
+    r.collection_id = "col_1";
+    r.name          = "R";
+    r.url           = "https://example.test";
+    for (const std::optional<int> stored :
+    { std::optional<int> (2500), std::optional<int> () }) {
+        r.timeout_ms = stored;
+        const nlohmann::json expected =
+        stored ? nlohmann::json (*stored) : nlohmann::json (nullptr);
+
+        const auto object = vayu::json::serialize (r, vayu::http::FileAccessPolicy{});
+        ASSERT_TRUE (object.contains ("timeout")) << object.dump ();
+        EXPECT_EQ (object["timeout"], expected);
+
+        std::ostringstream out;
+        serialize_to_stream (r, out, vayu::http::FileAccessPolicy{});
+        const auto listed = nlohmann::json::parse (out.str ());
+        ASSERT_TRUE (listed.contains ("timeout")) << listed.dump ();
+        EXPECT_EQ (listed["timeout"], expected);
+    }
+}
+
 // ============================================================================
 // cap_trace_bodies - body caps + truncation metadata
 //

@@ -1047,6 +1047,42 @@ struct RunContext {
     std::atomic<uint64_t> level_epoch_{ 0 };
 
     /**
+     * Where a capacity search stands, for the live frame's `capacity` block
+     * (#2928). `CapacitySearch` writes it on the strategy thread when a level
+     * opens and when the search ends; the metrics thread reads it every tick.
+     *
+     * One struct under one lock rather than an atomic per field: separate
+     * relaxed loads could pair a new level with the previous one's start time
+     * or judged count in a single frame.
+     */
+    struct CapacityProgress {
+        /// The level being measured; 0 until the first level opens.
+        size_t level = 0;
+        /// When that level opened, on the steady clock in milliseconds. The
+        /// search's own elapsed time runs from `maintain_concurrency`'s start,
+        /// an origin the metrics thread does not have.
+        int64_t level_started_steady_ms = 0;
+        /// When the search ended, on the same clock; 0 while it runs. Holds
+        /// the frame's time in level still once nothing is being measured.
+        int64_t ended_steady_ms = 0;
+        size_t levels_judged    = 0;
+        /// A `capacity_stop` literal once the search has ended, else null.
+        const char* stop_reason = nullptr;
+    };
+    mutable std::mutex capacity_progress_mtx;
+    CapacityProgress capacity_progress_; // capacity_progress_mtx
+
+    void publish_capacity_progress (const CapacityProgress& progress) {
+        std::lock_guard<std::mutex> lock (capacity_progress_mtx);
+        capacity_progress_ = progress;
+    }
+
+    [[nodiscard]] CapacityProgress capacity_progress () const {
+        std::lock_guard<std::mutex> lock (capacity_progress_mtx);
+        return capacity_progress_;
+    }
+
+    /**
      * What a capacity run's search found, written by `CapacityLoadStrategy`
      * once its loop ends and read by `execute_load_test` when it builds the
      * summary - both on the worker thread, after the strategy's frame has

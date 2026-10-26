@@ -32,7 +32,7 @@ import { formatByteRateParts, formatNumber, formatPercent } from "@/lib/format-n
 import { CONCURRENCY_UNIT, isConcurrencySweepMode } from "@/constants/load-test-modes";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useDashboardStore } from "@/stores";
+import { runOwnSloMs, useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
 import { InfoChip } from "./shared";
@@ -71,8 +71,8 @@ import {
 import { ChartLegend } from "./charts/ChartLegend";
 import {
 	LATENCY_ENTRIES,
-	PERCENTILE_ENTRIES,
-	SCATTER_ENTRIES,
+	percentileLegend,
+	scatterLegend,
 	throughputLegend,
 } from "./charts/uplot/legend";
 import { hasSendRate } from "./charts/uplot/buildData";
@@ -168,6 +168,10 @@ function MetricsView({
 	// of an O(n) scan over the full historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
+	// The line drawn is the run's own, as in History (#2939): not `breakpoint.sloMs`,
+	// which is what a non-capacity run is judged against (the Settings SLO), and
+	// not the Settings SLO itself. A run that declared no p99 line draws none.
+	const sloMs = useDashboardStore((s) => runOwnSloMs(s.loadTestConfig));
 	const p99AtPeakMs = useDashboardStore((s) => s.p99AtPeakMs);
 	// When the windowed send and completion rates parted, folded per tick in the
 	// store like the aggregates above; the chip needs "for how long" and must not
@@ -376,11 +380,12 @@ function MetricsView({
 									)}
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
 								</h3>
-								<ChartLegend entries={SCATTER_ENTRIES} />
+								<ChartLegend entries={scatterLegend(sloMs !== undefined)} />
 							</div>
 							<ResponseTimeVsConcurrencyChart
 								history={historicalMetrics}
 								breakpoint={breakpoint}
+								sloMs={sloMs}
 								syncKey={CHART_SYNC.live}
 							/>
 						</Card>
@@ -393,13 +398,14 @@ function MetricsView({
 									{pooledTitle("Response time percentiles over time", isSequence)}
 									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
 								</h3>
-								<ChartLegend entries={PERCENTILE_ENTRIES} />
+								<ChartLegend entries={percentileLegend(sloMs !== undefined)} />
 							</div>
 							<LatencyPercentilesChart
 								history={chartWindow}
 								syncKey={CHART_SYNC.live}
 								mode={loadMode}
 								breakpoint={breakpoint}
+								sloMs={sloMs}
 								anomalies={anomalies}
 								sleeps={hostSleeps}
 							/>
@@ -489,11 +495,7 @@ function MetricsView({
 			)}
 
 			{/* Row 3 - run-so-far latency distribution + request timing */}
-			<LiveDistributionRow
-				history={historicalMetrics}
-				breakpoint={breakpoint}
-				pooled={isSequence}
-			/>
+			<LiveDistributionRow history={historicalMetrics} sloMs={sloMs} pooled={isSequence} />
 
 			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />

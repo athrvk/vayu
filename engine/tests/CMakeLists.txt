@@ -135,6 +135,7 @@ add_executable(vayu_tests
     run_shutdown_test.cpp
     run_retention_release_test.cpp
     run_config_validation_test.cpp
+    stored_request_timeout_test.cpp
     run_row_seed_test.cpp
     transient_execute_test.cpp
     send_with_row_test.cpp
@@ -478,6 +479,7 @@ set(vayu_scratch_database_suites
     SseLimitsTest
     SseServerShutdownTest
     StatsRouteTest
+    StoredRequestTimeoutTest
     StreamExecuteTest
     StreamedSampleRouteTest
     TransportPolicyDbTest

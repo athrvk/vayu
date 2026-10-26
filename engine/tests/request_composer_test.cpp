@@ -645,6 +645,36 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     EXPECT_EQ (payload["environmentId"], "env_1");
 }
 
+// A request's own `timeout` (#2937) is the one execution option composed only
+// when stated: absent, `/execute` and `/runs` resolve the `defaultTimeout`
+// setting at send time, which a composed copy would freeze. Mutation check:
+// emit `timeout` unconditionally (a `value_or` of the default) and the second
+// half fails; drop the emission and the first does.
+TEST_F (RequestComposerTest, ARequestsOwnTimeoutIsComposedOnlyWhenStated) {
+    seed_collection ("root", "");
+    auto timed       = make_request ("req_timed", "root");
+    timed.timeout_ms = 2500;
+    db_->save_request (timed);
+    db_->save_request (make_request ("req_plain", "root"));
+
+    auto [timed_status, timed_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_timed" } });
+    ASSERT_EQ (timed_status, 200) << timed_payload.dump ();
+    EXPECT_EQ (timed_payload.value ("timeout", 0), 2500) << timed_payload.dump ();
+
+    auto [plain_status, plain_payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_plain" } });
+    ASSERT_EQ (plain_status, 200) << plain_payload.dump ();
+    EXPECT_FALSE (plain_payload.contains ("timeout")) << plain_payload.dump ();
+
+    // An inline overlay states its own, `null` included, over the stored one.
+    auto [overlay_status, overlay_payload] = vayu::http::compose_request_core (*db_,
+    json{ { "requestId", "req_timed" }, { "request", { { "timeout", nullptr } } } });
+    ASSERT_EQ (overlay_status, 200) << overlay_payload.dump ();
+    ASSERT_TRUE (overlay_payload.contains ("timeout")) << overlay_payload.dump ();
+    EXPECT_TRUE (overlay_payload["timeout"].is_null ());
+}
+
 // The same chain with no pre-request script anywhere above the request: every
 // name resolves here, environment over leaf over root, and nothing is deferred.
 TEST_F (RequestComposerTest, ResolvesAnUnscriptedRequestThroughTheChainsPrecedence) {

@@ -216,6 +216,9 @@ describe("client error view", () => {
 
 	it("still shows the hint the icon introduces", () => {
 		const { container } = render(<ClientErrorView errorCode="TIMEOUT" />);
-		expect(container.textContent).toContain("Raise Default request timeout");
+		expect(container.textContent).toContain(
+			"Raise Request timeout in this request's Settings tab"
+		);
+		expect(container.textContent).toContain("Default request timeout in Settings");
 	});
 });

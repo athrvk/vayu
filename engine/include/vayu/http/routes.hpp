@@ -804,6 +804,31 @@ apply_int_field (const nlohmann::json& json, const char* key, int& out, int defa
 }
 
 /**
+ * Same rule for an integer field whose default is "none stated", stored as
+ * NULL: absent on create and `null` on either verb leave @p out empty. Unlike
+ * `apply_int_field`, a value @p field refuses (not a number, or out of its
+ * range) is a 400 naming the field, through the same `check_numeric_field`
+ * the execution routes hold their payloads to.
+ */
+[[nodiscard]] inline RouteResult apply_nullable_int_field (const nlohmann::json& json,
+const NumericRunField& field,
+std::optional<int>& out,
+bool is_create) {
+    if (!json.contains (field.key)) {
+        if (is_create) {
+            out = std::nullopt;
+        }
+        return {};
+    }
+    if (auto reason = check_numeric_field (json, field)) {
+        return route_error (400, *reason);
+    }
+    const auto& value = json[field.key];
+    out = value.is_null () ? std::nullopt : std::make_optional (value.get<int> ());
+    return {};
+}
+
+/**
  * The domain's wire values as quoted, comma-separated text, for the "Valid
  * values: ..." tail of a rejection. Built from `all_http_versions()` so the
  * message can never list a different set than the one actually accepted.

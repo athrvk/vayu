@@ -35,6 +35,8 @@ import type { KeyValueItem } from "@/types";
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
 	useRequestDefaultsQuery: () => ({ data: undefined }),
+	// The timeout field names the default timeout; this file is not about it.
+	useConfigQuery: () => ({ data: undefined }),
 }));
 
 /**

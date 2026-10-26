@@ -514,6 +514,7 @@ export default function RunCollectionDialog({
 						// mode and ramp the run was started with.
 						useDashboardStore.getState().startRun(runId, {
 							...loadFields,
+							latencyP99Ms: thresholds?.latencyP99Ms,
 							dataRowCount: dataFile?.parsed.rows.length,
 							dataFileName: dataFile?.fileName,
 							dataFileHash: dataFile?.hash,

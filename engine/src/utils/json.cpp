@@ -364,6 +364,14 @@ Json method_source_node (const std::optional<std::string>& stored) {
 }
 
 /**
+ * The `timeout` both request serializers emit (issue #2937): always a key, the
+ * stored milliseconds or `null` for "use the `defaultTimeout` setting".
+ */
+Json timeout_node (const std::optional<int>& stored) {
+    return stored.has_value () ? Json (*stored) : Json (nullptr);
+}
+
+/**
  * The `disabledSystemHeaders` array both request serializers emit (issue
  * #1765): the stored column, or `[]` for a value that will not parse as an
  * array of strings - the write route never stores one, so that is a
@@ -633,6 +641,7 @@ Json serialize (const vayu::db::Request& r, const vayu::http::FileAccessPolicy& 
     }
     json["followRedirects"] = r.follow_redirects;
     json["maxRedirects"]    = r.max_redirects;
+    json["timeout"]         = timeout_node (r.timeout_ms);
     json["httpVersion"]     = r.http_version;
     json["verifySSL"]       = r.verify_ssl;
     json["stream"]          = r.stream;
@@ -1743,6 +1752,7 @@ const vayu::http::FileAccessPolicy& files) {
     out << ",";
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
+    out << "\"timeout\":" << timeout_node (r.timeout_ms).dump () << ",";
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"verifySSL\":" << (r.verify_ssl ? "true" : "false") << ",";
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";

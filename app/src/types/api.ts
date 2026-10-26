@@ -194,6 +194,8 @@ export interface CreateRequestRequest {
 	elements?: ElementDef[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/** See {@link Request.timeout}. Absent or `null` stores none. */
+	timeout?: number | null;
 	httpVersion?: HttpVersion;
 	/** Verify the TLS certificate - see {@link Request.verifySSL}. */
 	verifySSL?: boolean;
@@ -238,6 +240,11 @@ export interface UpdateRequestRequest {
 	elements?: ElementDef[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * See {@link Request.timeout}. Absent keeps the stored value on a `PUT`;
+	 * `null` resets it to the `defaultTimeout` setting.
+	 */
+	timeout?: number | null;
 	httpVersion?: HttpVersion;
 	/** Verify the TLS certificate - see {@link Request.verifySSL}. */
 	verifySSL?: boolean;
@@ -440,6 +447,13 @@ export interface ExecuteRequestRequest {
 	 */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * Whole-transfer deadline in milliseconds. Present only when the composed
+	 * request states one (issue #2937): absent, the engine reads the
+	 * `defaultTimeout` setting at send time, which is why it is the one setting
+	 * here that is never sent at its default.
+	 */
+	timeout?: number;
 	/**
 	 * Protocol to negotiate. Sent on *every* execute, never elided when it
 	 * equals the default - exactly like the redirect policy above, and for the
@@ -683,6 +697,9 @@ export interface StartLoadTestRequest {
 	// test exercises the request under the policy the user configured for it.
 	followRedirects?: boolean;
 	maxRedirects?: number;
+
+	/** The composed request's own timeout - see {@link ExecuteRequestRequest.timeout}. */
+	timeout?: number;
 
 	/** Protocol to negotiate - same rationale as `followRedirects` above. */
 	httpVersion?: HttpVersion;
@@ -1743,6 +1760,8 @@ export interface ImportApplyRequestItem {
 	/** Omitted unless the imported file states them; the engine then applies its own defaults. */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/** Omitted unless the imported file states one - see {@link Request.timeout}. */
+	timeout?: number;
 	verifySSL?: boolean;
 	httpVersion?: HttpVersion;
 	stream?: boolean;

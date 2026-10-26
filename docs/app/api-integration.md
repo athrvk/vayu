@@ -706,6 +706,16 @@ turns that into an absent key and drops a value it does not recognize, and
 `updateRequest`'s field is `MethodSource | null`, so leaving GraphQL - or
 picking a method by hand - clears the marker the same way.
 
+A request carries **`timeout`** - its own timeout in milliseconds, `1`-`86400000`
+(issue #2937) - or `null` when it states none and sends with the `defaultTimeout`
+setting read at each send. The engine always serializes it, and
+`RequestTransformer` keeps `null` as `null` rather than filling in a default (a
+non-number reads as `null` too). On `updateRequest` the field is `number | null`:
+absent keeps the stored value and `null` resets it, so the builder's
+`buildUpdatePayload` writes a cleared field as an explicit `null`. The engine
+refuses a number outside the range with a 400 naming `timeout`, so the Settings
+tab clamps what is typed.
+
 #### Trash
 
 ```typescript
@@ -1276,6 +1286,13 @@ collection run's per-step progress.
   `LoadTestMetrics.scenario`: absent is "not a gate frame" or "not a scenario load", never a zeroed
   block. The live sequence panel reads it from the latest frame carrying it
   (`utils/liveScenario.ts`).
+- **Capacity state**: a capacity run's frames carry `capacity: {level, levelElapsedMs,
+  levelsJudged, stopReason?}` from tick 0 (issue #2928), and `mapSseMetrics()` passes it through
+  as `LoadTestMetrics.capacity` unchanged. Absent is "not a capacity run" (or an engine from
+  before #2928), never a zeroed level; `level` `0` is a search that has not opened its first level,
+  and `stopReason` appears only once the search has ended. A stored tick never carries it. No
+  renderer component reads it yet (the live card is #2929); until it lands the only reader is MCP
+  `get_live_metrics`
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
   for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
   on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row
@@ -1587,7 +1604,8 @@ list engine-side (`compose_elements`). The **engine** runs each element at its
 kind's phase - see `docs/engine/elements.md`.
 
 **Redirect policy, protocol and TLS verification are always sent, never
-elided.** `followRedirects`, `maxRedirects`, `httpVersion` and `verifySSL` all
+elided - and the request's timeout is the deliberate exception.**
+`followRedirects`, `maxRedirects`, `httpVersion` and `verifySSL` all
 come from the request's **Settings** tab and are included on every execute even
 when they equal the defaults. The engine defaults `follow_redirects` to `true`, so omitting a
 `false` would follow the 3xx the user asked to inspect - a bug the app shipped
@@ -1602,6 +1620,16 @@ only one, and it governs Send and load test alike. `httpVersion` is
 `"auto" | "http1.1" | "http2"`: `"auto"` lets ALPN negotiate, `"http1.1"`
 forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
 1.1 over plain `http://` (curl's `CURL_HTTP_VERSION_2TLS` semantics).
+
+**`timeout` is the one Settings field that is not always sent** (issue #2937).
+A request's own timeout is `number | null`, and `buildComposeBody` writes
+`timeout` onto the inline compose request only when it is a number. `null` means
+"use the `defaultTimeout` setting", and the engine can only read the live
+setting when the key is absent: sending today's value instead would pin it on
+the request, and `POST /execute` refuses a `null`. The composed payload carries
+the key on to `/execute` and `/runs`, so Send, a collection run and a load test
+wait as long as the Settings tab says. A History replay seeds it from the run's
+recorded body, and Save to request does not write it back.
 
 **Postman's protocol switches ride the same rule** (issue #1765).
 `disableCookies`, `disabledSystemHeaders` and `disableUrlEncoding` come from the
@@ -1977,6 +2005,7 @@ await apiService.startLoadTest({
   },
   followRedirects: true,
   maxRedirects: 10,
+  // timeout: 1500,  // only when the request states one; never sent as a copy of the setting
   httpVersion: "auto",
   verifySSL: true,
   mode: "constant_rps",
@@ -2033,8 +2062,10 @@ response at a time and cannot assert a p99 or an error rate, so a run whose
 every assertion passed can still have missed its budget. `undefined` is a run
 that declared none - not a run that passed nothing - so a report without the
 section renders exactly as it did before budgets existed. The dialog seeds its
-p99 field from the client `sloThresholdMs` setting, which until then only
-annotated a chart. A Capacity discovery run does not send that seed (issue
+p99 field from the client `sloThresholdMs` setting. The live dashboard draws a
+run's `thresholds.latencyP99Ms` as its SLO line (`LoadTestRunConfig.latencyP99Ms`,
+set by the request builder, the collection runner and `loadConfigFromSnapshot`),
+and a run with no p99 budget draws none: the setting is never the line. A Capacity discovery run does not send that seed (issue
 #2816): the engine judges `latencyP99Ms` on the run's pooled histogram, which
 holds every over-budget level the search climbed through on purpose, so
 `thresholds` omits it and a run with no other budget reads "No budgets set". A

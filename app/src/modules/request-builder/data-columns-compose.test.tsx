@@ -128,6 +128,7 @@ const REQUEST: RequestState = {
 	elements: [],
 	followRedirects: true,
 	maxRedirects: 10,
+	timeout: null,
 	httpVersion: "auto",
 	verifySSL: true,
 	disableCookies: false,
@@ -304,6 +305,20 @@ describe("a load run started with a data file", () => {
 			sloMs: 50,
 		});
 		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(50);
+	});
+
+	// The live charts draw the run's own p99 budget (#2939). Mutation check: drop
+	// `latencyP99Ms` from the `startRun` config in `index.tsx` and the first case fails.
+	it("hands the dashboard the run's p99 budget", async () => {
+		await startLoadRun({ ...LOAD_CONFIG, thresholds: { latencyP99Ms: 150 } });
+
+		expect(useDashboardStore.getState().loadTestConfig?.latencyP99Ms).toBe(150);
+	});
+
+	it("hands the dashboard no p99 line for a run with no budget on it", async () => {
+		await startLoadRun({ ...LOAD_CONFIG, thresholds: { maxErrorRatePct: 5 } });
+
+		expect(useDashboardStore.getState().loadTestConfig?.latencyP99Ms).toBeUndefined();
 	});
 
 	it("leaves the row count off a run with no file (#1940)", async () => {

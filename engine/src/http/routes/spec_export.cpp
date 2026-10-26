@@ -354,6 +354,7 @@ const std::vector<vayu::db::Collection>& chain) {
     entry.elements           = exported_elements (row.elements);
     entry.follow_redirects   = row.follow_redirects;
     entry.max_redirects      = row.max_redirects;
+    entry.timeout_ms         = row.timeout_ms;
     entry.http_version       = row.http_version;
     entry.verify_ssl         = row.verify_ssl;
     entry.stream             = row.stream;

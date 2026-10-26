@@ -526,8 +526,10 @@ export interface RequestDraft {
 	/**
 	 * The rest of the Settings tab, when the source states it - a Vayu export
 	 * does (`x-vayu-request.settings`), and absent means "engine default" for
-	 * the same reason as the two above.
+	 * the same reason as the two above. For `timeout` (ms, issue #2937) absent
+	 * means "use the `defaultTimeout` setting", which no other format states.
 	 */
+	timeout?: number;
 	verifySSL?: boolean;
 	httpVersion?: HttpVersion;
 	stream?: boolean;

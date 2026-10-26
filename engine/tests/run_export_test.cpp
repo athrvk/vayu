@@ -573,9 +573,10 @@ TEST_F (RunExportTest, MarkdownIsTextMarkdownNamedAfterTheRun) {
     EXPECT_NE (text.find ("| Error rate "), std::string::npos) << text;
 }
 
-// #2905: a run whose summary is partial, or missing, says so in all three
-// formats; a completed run says neither. Mutation check: drop "partial" and
-// "summaryMissing" from SUMMARY_KEYS and the JSON and the two text formats fail.
+// #2905, #2938: a run whose summary is partial, or missing, says so in all three
+// formats and carries no latency; a completed run says neither. Mutation check:
+// drop "partial" and "summaryMissing" from SUMMARY_KEYS and the JSON and the two
+// text formats fail; restore the old notice text and the notice assertions do.
 TEST_F (RunExportTest, AReconciledRunSaysSoInEveryFormat) {
     struct Case {
         std::string id;
@@ -597,11 +598,13 @@ TEST_F (RunExportTest, AReconciledRunSaysSoInEveryFormat) {
     for (const Case& c : cases) {
         seed_run (c.id, vayu::RunType::Load, c.status,
         json{ { "url", "https://x.test/a" }, { "method", "GET" } }, c.summary);
-        const json summary =
-        export_ok (json{ { "runId", c.id } }).second["report"]["summary"];
+        const json report = export_ok (json{ { "runId", c.id } }).second["report"];
+        const json& summary = report["summary"];
         for (const std::string key : { "partial", "summaryMissing" }) {
             EXPECT_EQ (summary.contains (key), key == c.flag) << c.id << " " << key;
         }
+        // #2938: a flagged run has no latency section, a whole one keeps it.
+        EXPECT_EQ (report.contains ("latency"), c.flag.empty ()) << c.id;
         for (const char* format : { "markdown", "html" }) {
             const auto [status, envelope] = export_run_report_response (
             *db_, json{ { "runId", c.id }, { "format", format } });
@@ -612,6 +615,17 @@ TEST_F (RunExportTest, AReconciledRunSaysSoInEveryFormat) {
             EXPECT_EQ (says_so, !c.notice.empty ()) << c.id << " " << format;
             EXPECT_EQ (text.find ("Partial run:") != std::string::npos, c.flag == "partial")
             << c.id << " " << format;
+            // #2938: the notice says the latency is absent, not that it is 0.
+            EXPECT_EQ (text.find ("latency was not recorded") != std::string::npos,
+            !c.flag.empty ())
+            << c.id << " " << format;
+            EXPECT_EQ (text.find ("is 0"), std::string::npos) << c.id << " " << format;
+            if (std::string_view (format) == "html") {
+                EXPECT_EQ (
+                text.find ("<tr><th scope=\"row\">p99</th><td>-</td>") != std::string::npos,
+                !c.flag.empty ())
+                << c.id;
+            }
         }
     }
 }

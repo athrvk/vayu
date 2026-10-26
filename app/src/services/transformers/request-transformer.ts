@@ -82,6 +82,17 @@ function clampMaxRedirects(raw: unknown): number {
 }
 
 /**
+ * A stored request's own timeout, or `null` for "use the `defaultTimeout`
+ * setting" (issue #2937). `null` stays `null`: filling in a default here would
+ * pin today's setting into the editor state and the next autosave would store
+ * it. A row from an engine that predates the column, or a non-number, reads as
+ * no timeout of its own.
+ */
+function toTimeout(raw: unknown): number | null {
+	return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+/**
  * Coerce a raw `httpVersion` into a value the app knows how to render. A row
  * saved before this column existed comes back without it, and a row written
  * by a newer engine version (or a corrupted one) can carry a protocol this
@@ -207,6 +218,7 @@ export class RequestTransformer {
 					? raw.followRedirects
 					: DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: clampMaxRedirects(raw.maxRedirects),
+			timeout: toTimeout(raw.timeout),
 			// HTTP protocol: a row stored before this column existed, or one
 			// carrying a value this build doesn't recognise, reads as the
 			// engine default rather than as an unselectable value.

@@ -68,12 +68,30 @@ export function formatLatencyParts(ms: number | undefined | null): LatencyParts 
 
 /**
  * A duration in milliseconds with its unit ("999ms", "1.23s"); a missing value
- * reads "0ms" (`fmtMs` draws "-" for it). The rule behind every chart tooltip
- * and any surface that has no slot of its own for a unit.
+ * reads "0ms" (`formatLatencyOrDash` draws "-" for it). The rule behind every
+ * chart tooltip and any surface that has no slot of its own for a unit.
  */
 export function formatLatency(ms: number | undefined | null): string {
 	const { value, unit } = formatLatencyParts(ms);
 	return `${value}${unit}`;
+}
+
+/**
+ * A latency that may never have been recorded: absent (or NaN) prints "-",
+ * where `formatLatency` prints "0ms". A real 0 is a measurement and still
+ * reads "0ms". Use this wherever the source is `RunReport["latency"]`, which
+ * is absent for a run whose latency was not recorded (#2938).
+ */
+export function formatLatencyOrDash(ms: number | undefined | null): string {
+	return isMissing(ms) ? "-" : formatLatency(ms);
+}
+
+/** `formatLatencyParts` for a figure that may be absent: "-" with no unit beside it. */
+export function formatLatencyPartsOrDash(ms: number | undefined | null): {
+	value: string;
+	unit: LatencyParts["unit"] | "";
+} {
+	return isMissing(ms) ? { value: "-", unit: "" } : formatLatencyParts(ms);
 }
 
 /** From here a duration in seconds reads as grouped whole seconds, not "1.25s". */

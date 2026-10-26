@@ -20,7 +20,7 @@
 import type { ReactNode } from "react";
 import { Activity, CheckCircle, TrendingUp, XCircle } from "lucide-react";
 import { exactAssertionsOf } from "@/components/shared";
-import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
+import { formatLatencyOrDash, formatNumber, formatPercent } from "@/lib/format-number";
 import { pooledCaption, pooledLatencyOf } from "@/modules/dashboard/utils/pooledLatency";
 import type { RunReport } from "@/types";
 import { NOT_RECORDED, unrecordedFiguresOf } from "./unrecorded-figures";
@@ -38,7 +38,7 @@ function Figure({ recorded, children }: { recorded: boolean; children: ReactNode
 
 export default function RunKeyMetrics({ report }: { report: RunReport }) {
 	const assertionsFailed = exactAssertionsOf(report)?.failed ?? 0;
-	const unrecorded = unrecordedFiguresOf(report.summary);
+	const unrecorded = unrecordedFiguresOf(report);
 	const pooled = pooledLatencyOf(report);
 	return (
 		<div
@@ -57,9 +57,7 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 					<span className="text-xs text-muted-foreground">P99 latency</span>
 				</div>
 				<p className="text-lg font-bold text-foreground">
-					<Figure recorded={!unrecorded.latency}>
-						{formatLatency(report.latency.p99)}
-					</Figure>
+					{formatLatencyOrDash(report.latency?.p99)}
 				</p>
 				{pooled && !unrecorded.latency && (
 					<p className="mt-0.5 text-label text-muted-foreground">

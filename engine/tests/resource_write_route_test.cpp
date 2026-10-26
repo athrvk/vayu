@@ -769,6 +769,129 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentKeepsNullResets) {
     EXPECT_EQ (reset["maxRedirects"], 10);
 }
 
+// A request's own `timeout` (#2937) under the one null-vs-absent rule, with no
+// value as its default: absent or `null` on create stores none, absent on
+// update keeps, `null` resets to none. Read back through both serializers,
+// which emit `timeout: null` rather than leaving the key out. Mutation check:
+// drop the `apply_nullable_int_field` call in `apply_request_fields` and the
+// stored value never appears.
+TEST_F (ResourceWriteRouteTest, RequestTimeoutFollowsTheNullVsAbsentRule) {
+    const std::string collection = make_collection ();
+    const json base{ { "collectionId", collection }, { "name", "R" },
+        { "method", "GET" }, { "url", "https://example.com" } };
+
+    auto [absent_status, absent] = create_request_response (*db_, base);
+    ASSERT_EQ (absent_status, 200) << absent.dump ();
+    ASSERT_TRUE (absent.contains ("timeout")) << absent.dump ();
+    EXPECT_TRUE (absent["timeout"].is_null ());
+
+    json with_null       = base;
+    with_null["timeout"] = nullptr;
+    auto [null_status, created_null] = create_request_response (*db_, with_null);
+    ASSERT_EQ (null_status, 200) << created_null.dump ();
+    EXPECT_TRUE (created_null["timeout"].is_null ());
+
+    json with_value              = base;
+    with_value["timeout"]        = 2500;
+    auto [value_status, created] = create_request_response (*db_, with_value);
+    ASSERT_EQ (value_status, 200) << created.dump ();
+    EXPECT_EQ (created["timeout"], 2500);
+    const std::string id = created["id"].get<std::string> ();
+    const auto stored    = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->timeout_ms, std::optional<int> (2500));
+
+    auto [keep_status, kept] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (keep_status, 200) << kept.dump ();
+    EXPECT_EQ (kept["timeout"], 2500)
+    << "an absent timeout keeps the stored one";
+
+    auto [set_status, set] =
+    update_request_response (*db_, id, json{ { "timeout", 4000 } });
+    ASSERT_EQ (set_status, 200) << set.dump ();
+    EXPECT_EQ (set["timeout"], 4000);
+    const json listed =
+    json::parse (vayu::http::routes::list_requests_body (*db_, collection));
+    bool found = false;
+    for (const auto& row : listed) {
+        if (row.value ("id", "") == id) {
+            found = true;
+            EXPECT_EQ (row["timeout"], 4000)
+            << "the list serializer dropped it";
+        } else {
+            ASSERT_TRUE (row.contains ("timeout")) << row.dump ();
+            EXPECT_TRUE (row["timeout"].is_null ());
+        }
+    }
+    EXPECT_TRUE (found) << listed.dump ();
+
+    auto [reset_status, reset] =
+    update_request_response (*db_, id, json{ { "timeout", nullptr } });
+    ASSERT_EQ (reset_status, 200) << reset.dump ();
+    EXPECT_TRUE (reset["timeout"].is_null ());
+    const auto cleared = db_->get_request (id);
+    ASSERT_HAS_VALUE (cleared);
+    EXPECT_FALSE (cleared->timeout_ms.has_value ())
+    << "null resets to the setting";
+}
+
+// The bound `POST /execute` holds a `timeout` to, on both verbs, before
+// anything is written. Mutation check: replace `check_numeric_field` in
+// `apply_nullable_int_field` with a plain `is_number ()` read and the
+// out-of-range cases store.
+TEST_F (ResourceWriteRouteTest, RequestTimeoutOutsideTheExecuteBoundIsRefused) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (update_request_response (*db_, id, json{ { "timeout", 3000 } }).first, 200);
+
+    for (const auto& bad : { json (0), json (-1), json (0.5), json (86400001),
+         json ("2500"), json (true), json::object () }) {
+        json create{ { "collectionId", collection }, { "name", "Bad" },
+            { "method", "GET" }, { "url", "https://example.com" }, { "timeout", bad } };
+        auto [create_status, create_body] = create_request_response (*db_, create);
+        EXPECT_EQ (create_status, 400) << bad.dump ();
+        EXPECT_NE (
+        create_body["error"]["message"].get<std::string> ().find ("'timeout'"),
+        std::string::npos)
+        << create_body.dump ();
+
+        auto [update_status, update_body] =
+        update_request_response (*db_, id, json{ { "timeout", bad } });
+        EXPECT_EQ (update_status, 400) << bad.dump ();
+        EXPECT_NE (
+        update_body["error"]["message"].get<std::string> ().find ("'timeout'"),
+        std::string::npos)
+        << update_body.dump ();
+    }
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->timeout_ms, std::optional<int> (3000))
+    << "a refused write changed the row";
+    EXPECT_EQ (db_->get_requests_in_collection (collection).size (), 1u)
+    << "a refused create stored a row";
+}
+
+// The app's Duplicate posts the stored row back as a create, minus its
+// identity. The copy keeps the timeout, and a row stating none copies as none.
+TEST_F (ResourceWriteRouteTest, ADuplicatedRequestKeepsItsTimeout) {
+    const std::string collection = make_collection ();
+    for (const json& timeout : { json (2500), json (nullptr) }) {
+        auto [status, original] = create_request_response (*db_,
+        json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+        { "url", "https://example.com" }, { "timeout", timeout } });
+        ASSERT_EQ (status, 200) << original.dump ();
+        json copy = original;
+        for (const char* key : { "id", "createdAt", "updatedAt" }) {
+            copy.erase (key);
+        }
+        auto [copy_status, duplicated] = create_request_response (*db_, copy);
+        ASSERT_EQ (copy_status, 200) << duplicated.dump ();
+        EXPECT_NE (duplicated["id"], original["id"]);
+        EXPECT_EQ (duplicated["timeout"], timeout) << duplicated.dump ();
+    }
+}
+
 // Issue #1514's cut-over: scripts are elements now, and the two legacy
 // fields are refused outright rather than accepted as a no-op or silently
 // ignored - a caller still sending them needs to be told, not left believing

@@ -343,11 +343,12 @@ TEST_F (RunExportSchemaTest, ARunStoredBeforeTheOverheadSplitValidates) {
     EXPECT_DOUBLE_EQ (document["report"]["summary"].value ("cleanupOverhead", -1.0), 0.1);
 }
 
-// #2905: the flags reach the document, and a run that carries one still has the
-// `latency` block the schema requires, all zeros. Mutation check: drop "partial"
-// or "summaryMissing" from SUMMARY_KEYS and the matching test fails; drop the
-// property from the schema and the validation does.
-TEST_F (RunExportSchemaTest, AReconciledRunCarriesItsPartialFlagAndAZeroLatency) {
+// #2905, #2938: the flags reach the document, and a run that carries one has no
+// `latency` section, which the schema no longer requires. Mutation check: drop
+// "partial" or "summaryMissing" from SUMMARY_KEYS and the matching test fails;
+// drop the property from the schema and the validation does; put "latency" back
+// in the report's `required` and both fail validation.
+TEST_F (RunExportSchemaTest, AReconciledRunCarriesItsPartialFlagAndNoLatency) {
     seed ("run_partial", vayu::RunStatus::Failed,
     json{ { "partial", true }, { "total_requests", 40 }, { "test_duration", 4.0 } },
     /*with_samples=*/false);
@@ -356,16 +357,16 @@ TEST_F (RunExportSchemaTest, AReconciledRunCarriesItsPartialFlagAndAZeroLatency)
     EXPECT_EQ (report["summary"].value ("partial", false), true);
     EXPECT_FALSE (report["summary"].contains ("summaryMissing"));
     EXPECT_EQ (report["summary"]["totalRequests"], 40);
-    EXPECT_DOUBLE_EQ (report["latency"].value ("p99", -1.0), 0.0);
+    EXPECT_FALSE (report.contains ("latency")) << report.dump ();
 }
 
-TEST_F (RunExportSchemaTest, AFailedRunWithNoSummaryCarriesItsMissingFlagAndAZeroLatency) {
+TEST_F (RunExportSchemaTest, AFailedRunWithNoSummaryCarriesItsMissingFlagAndNoLatency) {
     seed ("run_missing", vayu::RunStatus::Failed, json (), /*with_samples=*/false);
     const json document = expect_valid (json{ { "runId", "run_missing" } });
     const json& report  = document["report"];
     EXPECT_EQ (report["summary"].value ("summaryMissing", false), true);
     EXPECT_FALSE (report["summary"].contains ("partial"));
-    EXPECT_DOUBLE_EQ (report["latency"].value ("p99", -1.0), 0.0);
+    EXPECT_FALSE (report.contains ("latency")) << report.dump ();
 }
 
 TEST_F (RunExportSchemaTest, ACompletedRunCarriesNeitherFlag) {

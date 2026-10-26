@@ -2860,9 +2860,40 @@ const GateReadings& gate) {
     }
 }
 
+namespace {
+
+/**
+ * A capacity run's live `capacity` block (#2928). Level 0 means no level has
+ * opened yet, and its time in level is 0. Once the search has ended the time
+ * stops at the end and `stopReason` appears; it is absent while the search runs.
+ */
+nlohmann::json capacity_progress_json (const RunContext::CapacityProgress& progress,
+int64_t now_steady_ms) {
+    int64_t level_elapsed_ms = 0;
+    if (progress.level != 0) {
+        const int64_t until =
+        progress.ended_steady_ms != 0 ? progress.ended_steady_ms : now_steady_ms;
+        // The tick can read its clock just before the search opens a level.
+        level_elapsed_ms =
+        std::max<int64_t> (until - progress.level_started_steady_ms, 0);
+    }
+    nlohmann::json block = { { "level", progress.level },
+        { "levelElapsedMs", level_elapsed_ms },
+        { "levelsJudged", progress.levels_judged } };
+    if (progress.stop_reason != nullptr) {
+        block["stopReason"] = progress.stop_reason;
+    }
+    return block;
+}
+
+} // namespace
+
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr) {
-    auto& db         = *db_ptr;
-    auto last_update = std::chrono::steady_clock::now ();
+    auto& db = *db_ptr;
+    // Read once: the mode is fixed for the run, and the block is absent from
+    // every other run's frames rather than zeroed.
+    const bool capacity_run = runs_capacity_search (context->config);
+    auto last_update        = std::chrono::steady_clock::now ();
 
     // The frame's and the stored row's rates and window means.
     TrailingWindow rate_window (constants::server::LIVE_RATE_WINDOW_MS);
@@ -2963,6 +2994,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         stats["timestamp"]        = now_wall_ms;
         stats["requestsSent"]     = requests_sent;
         stats["requestsExpected"] = requests_expected;
+        if (capacity_run) {
+            stats["capacity"] =
+            capacity_progress_json (context->capacity_progress (), now_steady_ms);
+        }
 
         // Publish the same numbers to the strategies' feedback path, before
         // the SSE payload rather than after: a capacity search polls this every

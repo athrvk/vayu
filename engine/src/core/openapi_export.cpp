@@ -1835,6 +1835,9 @@ Json settings_object_of (const ExportRequest& entry) {
     if (entry.max_redirects != 10) {
         settings["maxRedirects"] = entry.max_redirects;
     }
+    if (entry.timeout_ms) {
+        settings["timeout"] = *entry.timeout_ms;
+    }
     if (entry.http_version != "auto") {
         settings["httpVersion"] = entry.http_version;
     }

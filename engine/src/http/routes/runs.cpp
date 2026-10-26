@@ -264,11 +264,13 @@ struct ReportExtras {
     // when empty (#2822).
     bool sequential_run = false;
     // False when the stored summary says nothing was timed (`latency.count`
-    // of 0 - a collection run in which no step sent), and for a live load run,
-    // whose percentiles cannot be read yet. The report then leaves `latency`
-    // out: its fields default to 0, which would read as steps that answered
-    // instantly. A summary with no `count` (every load run, and runs stored
-    // before collection runs wrote one) keeps the block.
+    // of 0 - a collection run in which no step sent), for a live load run,
+    // whose percentiles cannot be read yet, and for a run whose summary is
+    // `partial` or missing (#2938), whose rows were never flushed or are only
+    // a sample. The report then leaves `latency` out: its fields default to 0,
+    // which would read as steps that answered instantly. A summary with no
+    // `count` (every load run, and runs stored before collection runs wrote
+    // one) keeps the block.
     bool latency_measured = true;
     // Script-validation tallies; `has_tests` false leaves the report's
     // testValidation section out entirely.
@@ -2192,9 +2194,13 @@ vayu::core::RunManager* live_runs) {
     apply_run_summary (run->summary, report, extras);
     // A failed load run with no summary has no whole-run totals at all: the
     // engine died with no tick to rebuild them from (#2895), or the worker
-    // failed on a path that writes none. The zeros below are not a measurement.
+    // failed on a path that writes none. Its sampled rows are not the run's
+    // latency either, so the report carries none.
     extras.summary_missing = run->type == vayu::RunType::Load &&
     run->status == vayu::RunStatus::Failed && run->summary.empty ();
+    if (extras.summary_partial || extras.summary_missing) {
+        extras.latency_measured = false;
+    }
 
     const double target_rps =
     reconcile_report_rates (run->config_snapshot, duration_s, extras, report);

@@ -266,8 +266,9 @@ entries and paints each swatch through `ROLE_TOKEN`, the table the canvas
 resolves its strokes through; a band swatch uses the same `BAND_FILL_ALPHA` as
 the chart's band fill. The entries are declared once in `charts/uplot/legend.ts`
 (`THROUGHPUT_LEGEND`, `LATENCY_LEGEND`, `PERCENTILE_LEGEND`, `SCATTER_LEGEND`)
-and the lists each card renders sit beside them (`PERCENTILE_ENTRIES`,
-`SCATTER_ENTRIES`, `throughputLegend`); the chart modules build their series and
+and the lists each card renders sit beside them (`percentileLegend`,
+`scatterLegend`, `throughputLegend`; the first two list the SLO entry only
+where the chart draws that line, #2939); the chart modules build their series and
 markers from the declarations, and `MetricsView` and History's Performance tab
 render the same lists (#2697), so the key and the plot read one object. A hand-written `hsl(var(--x))` swatch is how thirteen legends came to
 disagree with their charts, nine of them in hue. `MetricsView.legend.test.tsx`
@@ -711,8 +712,8 @@ higher. `muted` had the same problem in reverse - it made "nothing came back"
 read as de-emphasised rather than as an outcome of its own.
 
 The history latency tiles are neutral and use `status-stopped` (P95) or
-`status-error` (P99, P999) only when the value exceeds the user's SLO
-(`LatencyMetric.tsx`, #2245); the percentile lines in the time-series chart take
+`status-error` (P99, P999) only when the value exceeds the run's own SLO
+(`LatencyMetric.tsx`, #2245; a run that declared none stays neutral, #2939); the percentile lines in the time-series chart take
 no status role at all, and the HDR distribution's p95 / p99 markers take
 `warning` / `destructive` only past the SLO (`hdrMarkers.ts`, #2263).
 

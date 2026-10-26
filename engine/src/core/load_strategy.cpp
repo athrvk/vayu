@@ -1439,6 +1439,18 @@ class RampUpLoadStrategy : public LoadStrategy {
 // Capacity Discovery Load Strategy
 // ============================================================================
 
+namespace {
+
+/// The steady clock in the milliseconds `collect_metrics` reads its ticks in,
+/// which `RunContext::CapacityProgress` is measured against.
+int64_t steady_clock_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
+}
+
+} // namespace
+
 CapacitySearch::CapacitySearch (CapacityConfig config, std::shared_ptr<RunContext> context)
 : config_ (config), context_ (std::move (context)) {
 }
@@ -1494,32 +1506,47 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
     return true;
 }
 
-CapacitySummary CapacitySearch::finish () const {
+CapacitySummary CapacitySearch::finish () {
     const char* reason = stop_reason_;
     if (reason == nullptr) {
         reason = context_->should_stop ? capacity_stop::STOPPED : capacity_stop::DEADLINE;
     }
+    publish_progress (reason, steady_clock_ms ());
     return summarize_capacity (config_, history_, reason);
 }
 
+void CapacitySearch::publish_progress (const char* stop_reason, int64_t ended_steady_ms) {
+    RunContext::CapacityProgress progress;
+    progress.level                   = current_;
+    progress.level_started_steady_ms = level_started_steady_ms_;
+    progress.ended_steady_ms         = ended_steady_ms;
+    progress.levels_judged           = history_.size ();
+    progress.stop_reason             = stop_reason;
+    context_->publish_capacity_progress (progress);
+}
+
 void CapacitySearch::open_level (size_t level, int64_t now_ms) {
-    current_          = level;
-    level_started_ms_ = now_ms;
-    ticks_seen_       = 0;
-    rps_windows_      = 0;
-    rps_sum_          = 0.0;
-    level_epoch_      = 0;
-    level_samples_    = 0;
-    level_p99_ms_     = 0.0;
-    level_completed_  = 0;
-    level_failed_     = 0;
-    level_error_pct_  = 0.0;
+    current_                 = level;
+    level_started_ms_        = now_ms;
+    level_started_steady_ms_ = steady_clock_ms ();
+    ticks_seen_              = 0;
+    rps_windows_             = 0;
+    rps_sum_                 = 0.0;
+    level_epoch_             = 0;
+    level_samples_           = 0;
+    level_p99_ms_            = 0.0;
+    level_completed_         = 0;
+    level_failed_            = 0;
+    level_error_pct_         = 0.0;
     // Adopt the newest published sequence so the first tick this level
     // counts is one produced after the target moved, not the one already
     // sitting there describing the previous level.
     if (auto tick = context_->latest_live_tick ()) {
         last_sequence_ = tick->sequence;
     }
+    // The judged count moves only just before a level opens or the search
+    // ends, so publishing here and in finish keeps the frame's count current.
+    publish_progress (nullptr, 0);
 }
 
 // The level histogram's reset is requested on the last settle tick rather
@@ -1649,6 +1676,12 @@ bool returns_at_send_deadline (const nlohmann::json& config) {
         return !config.contains ("iterations");
     }
     return *type != LoadTestType::Iterations;
+}
+
+bool runs_capacity_search (const nlohmann::json& config) noexcept {
+    const auto mode = config.find ("mode");
+    return mode != config.end () && mode->is_string () &&
+    parse_load_test_type (mode->get_ref<const std::string&> ()) == LoadTestType::Capacity;
 }
 
 } // namespace vayu::core

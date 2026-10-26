@@ -61,7 +61,6 @@ import {
 } from "@/constants/load-test-modes";
 import { pluralize } from "../../../utils/format";
 import { useClientSettingsStore } from "@/stores";
-import { useSloMs } from "../../../hooks/useSloMs";
 
 const COUNT_ONLY: readonly ScaleKey[] = ["y"];
 const CONCURRENCY_ONLY: readonly ScaleKey[] = ["y2"];
@@ -102,6 +101,16 @@ function breakpointHover(breakpoint: Breakpoint, mode?: string): string | undefi
 }
 
 /**
+ * The marker's words. Only a run's own line is an "SLO"; a Settings threshold
+ * the run never declared is named as the Settings one (#2939).
+ */
+function breakpointLabel({ sloMs, sloSource }: Breakpoint): string {
+	if (sloMs == null) return "p99 > SLO";
+	const line = formatLatency(sloMs);
+	return sloSource === "run" ? `p99 > SLO ${line}` : `p99 > ${line} (Settings)`;
+}
+
+/**
  * The vertical line where p99 first crossed the SLO, shared by the time-series
  * charts. A capacity elbow only means something where load rises under the
  * line (ramp_up, and a capacity search stepping up), so the other modes draw it
@@ -121,10 +130,7 @@ function breakpointMarker(
 			orient: "vertical",
 			value: breakpoint.timeSeconds,
 			role: "warning",
-			label:
-				breakpoint.sloMs != null
-					? `p99 > SLO ${formatLatency(breakpoint.sloMs)}`
-					: "p99 > SLO",
+			label: breakpointLabel(breakpoint),
 			hover: breakpointHover(breakpoint, mode),
 		},
 	];
@@ -138,23 +144,28 @@ export function LatencyPercentilesChart({
 	height,
 	mode,
 	breakpoint,
+	sloMs,
 	anomalies,
 	sleeps,
-}: BaseProps & { mode?: string }) {
+}: BaseProps & {
+	mode?: string;
+	/** The run's SLO line (ms); absent draws no horizontal line (#2939). */
+	sloMs?: number;
+}) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const sloMs = useSloMs(breakpoint);
-	const markers = useMemo<Marker[]>(
-		() => [
-			{
+	const markers = useMemo<Marker[]>(() => {
+		const m: Marker[] = [];
+		if (sloMs !== undefined) {
+			m.push({
 				orient: "horizontal",
 				value: sloMs,
 				role: PERCENTILE_LEGEND.slo.role,
 				label: `${PERCENTILE_LEGEND.slo.label} ${formatLatency(sloMs)}`,
-			},
-			...breakpointMarker(breakpoint, mode, true),
-		],
-		[sloMs, breakpoint, mode]
-	);
+			});
+		}
+		m.push(...breakpointMarker(breakpoint, mode, true));
+		return m;
+	}, [sloMs, breakpoint, mode]);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series } = useMemo(() => {
 		const d = buildPercentileChartData(history);

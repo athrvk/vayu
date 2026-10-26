@@ -29,13 +29,20 @@ function renderStat(breakpoint: Breakpoint) {
 
 describe("BreakpointStat", () => {
 	it("names the SLO an uncrossed run never reached, rather than a bare dash", () => {
-		const text = renderStat(notCrossed(200)).textContent;
+		const text = renderStat(notCrossed(200, "run")).textContent;
 		expect(text).toContain("not crossed");
 		expect(text).toContain("SLO 200ms");
 	});
 
 	it("reads the SLO off the breakpoint, so a later settings change cannot rewrite it", () => {
-		expect(renderStat(notCrossed(350)).textContent).toContain("SLO 350ms");
+		expect(renderStat(notCrossed(350, "run")).textContent).toContain("SLO 350ms");
+	});
+
+	it("names the Settings threshold, not an SLO, when the run declared none (#2939)", () => {
+		const text = renderStat(notCrossed(200, "settings")).textContent;
+		expect(text).toContain("not crossed");
+		expect(text).toContain("Settings 200ms");
+		expect(text).not.toContain("SLO");
 	});
 
 	// A stored capacity run reaches the stat through `reportToDerived`; the
@@ -61,6 +68,7 @@ describe("BreakpointStat", () => {
 			timeSeconds: 6,
 			p99Ms: 227,
 			sloMs: 200,
+			sloSource: "run",
 			atRunStart: false,
 		}).textContent;
 		expect(text).toContain("1,450");
@@ -69,13 +77,13 @@ describe("BreakpointStat", () => {
 	});
 
 	it("shows a dash, not a verdict, when no SLO was ever judged", () => {
-		const text = renderStat(notCrossed(null)).textContent;
+		const text = renderStat(notCrossed(null, "run")).textContent;
 		expect(text).toContain("-");
 		expect(text).not.toContain("not crossed");
 	});
 
 	it("falls back to a bare 'not crossed' when the SLO is 0", () => {
-		const text = renderStat(notCrossed(0)).textContent;
+		const text = renderStat(notCrossed(0, "run")).textContent;
 		expect(text).toContain("not crossed");
 		expect(text).not.toContain("SLO");
 	});

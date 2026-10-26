@@ -1339,6 +1339,20 @@ policy itself lives in
 `core/capacity_controller.hpp` as pure functions over a level history - no clock,
 no collector, no run context - so it is unit-tested without a server.
 
+The path also runs the other way, for display only (#2928). The search publishes
+where it stands through `RunContext::publish_capacity_progress()`: the level
+being measured, the steady-clock instant it opened, how many levels are judged
+and, once the search has ended, the stop reason. The metrics thread reads it on
+every tick into the live frame's `capacity` block, computing the time in level
+against its own tick clock; the search's own `elapsed_ms` runs from
+`maintain_concurrency`'s start, an origin the metrics thread does not have. The
+four are one struct under one mutex rather than an atomic each, so a frame
+cannot pair a new level with the previous one's start or judged count. It is
+written when a level opens and in `CapacitySearch::finish`, which resolves a
+user stop to `stopped` before the worker clears `is_running`, so the final frame
+names the reason the report does. Nothing in the search reads it back, so the
+invariant above still holds.
+
 ### Scenario load runs - the virtual-user state machine
 
 A `POST /runs` payload carrying **both** a `scenario` block and a load `mode` runs

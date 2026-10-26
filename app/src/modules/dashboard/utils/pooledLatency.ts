@@ -46,14 +46,19 @@ export function isPooledReport(report: Pick<RunReport, "scenario">): boolean {
 	return !!report.scenario?.steps?.length;
 }
 
-/** The step with the highest p99, or `undefined` for no steps. The first of equals wins. */
+/**
+ * The step with the highest p99, or `undefined` for no steps. The first of
+ * equals wins. A step is copied verbatim from the stored summary, so one with no
+ * `latency` (a summary that never recorded it) is passed over, not read as 0.
+ */
 export function slowestStepP99(
 	steps: readonly RunScenarioStepStat[] | undefined
 ): SlowestStep | undefined {
 	let slowest: SlowestStep | undefined;
 	for (const step of steps ?? []) {
-		if (slowest && step.latency.p99 <= slowest.ms) continue;
-		slowest = { ms: step.latency.p99, name: step.name || step.requestId };
+		const p99 = step.latency?.p99;
+		if (p99 === undefined || (slowest && p99 <= slowest.ms)) continue;
+		slowest = { ms: p99, name: step.name || step.requestId };
 	}
 	return slowest;
 }
@@ -64,8 +69,13 @@ export function pooledCaption(slowestStep: SlowestStep | undefined): string {
 	return `All steps pooled - slowest step: ${slowestStep.name}, p99 ${formatLatency(slowestStep.ms)}`;
 }
 
-/** The pooled-latency qualifier for a finished report; `undefined` for a single-request run. */
+/**
+ * The pooled-latency qualifier for a finished report; `undefined` for a
+ * single-request run. A report with no `latency` recorded none (#2938), so it
+ * names no slowest step either: the steps' figures are no measurement then.
+ */
 export function pooledLatencyOf(report: RunReport): PooledLatency | undefined {
 	if (!isPooledReport(report)) return undefined;
+	if (report.latency === undefined) return {};
 	return { slowestStep: slowestStepP99(report.scenario?.steps) };
 }

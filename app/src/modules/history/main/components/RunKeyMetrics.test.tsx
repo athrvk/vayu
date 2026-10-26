@@ -58,6 +58,14 @@ describe("RunKeyMetrics pooled caption", () => {
 		expect(screen.queryByText(/pooled/i)).toBeNull();
 	});
 
+	it("draws none, and a dash for the P99, when the run recorded no latency (#2938)", () => {
+		const report = { ...makeReport([step(0, "Log in", 12)]), latency: undefined } as RunReport;
+		render(<RunKeyMetrics report={report} />);
+
+		expect(screen.getByText("-")).toBeTruthy();
+		expect(screen.queryByText(/pooled/i)).toBeNull();
+	});
+
 	it("draws none for a scenario section with no step breakdown", () => {
 		render(<RunKeyMetrics report={makeReport([])} />);
 

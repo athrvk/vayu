@@ -95,6 +95,7 @@ describe("HeroRow", () => {
 				timeSeconds: null,
 				p99Ms: null,
 				sloMs: 200,
+				sloSource: "run",
 				atRunStart: false,
 			},
 			pooledLatency,

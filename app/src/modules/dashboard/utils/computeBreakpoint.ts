@@ -11,6 +11,19 @@ import { hasSecondPercentiles, secondPercentiles } from "./tickPercentiles";
 /** Default SLO threshold (ms) at which p99 is considered to have degraded. */
 export const DEFAULT_SLO_MS = 200;
 
+/** Whose threshold a breakpoint was judged against. */
+export type SloSource = "run" | "settings";
+
+/**
+ * Whose line `judgedMs` is. It is the run's when it equals the run's own p99
+ * line (`runOwnSloMs` live, `runSloMs(report)` stored); the Settings threshold
+ * is a client preference, so any other value is Settings'. A run with a p99
+ * budget that is judged against a different Settings number is still "settings".
+ */
+export function sloSourceOf(judgedMs: number | null, runOwnMs: number | undefined): SloSource {
+	return judgedMs !== null && judgedMs === runOwnMs ? "run" : "settings";
+}
+
 /**
  * The capacity breakpoint of a ramp_up or capacity run: the first per-tick
  * moment at which p99 latency crossed the SLO threshold, and the concurrency in
@@ -34,6 +47,12 @@ export interface Breakpoint {
 	 */
 	sloMs: number | null;
 	/**
+	 * Whose line `sloMs` is: the run's own (a capacity budget or a p99 budget) or
+	 * the client's Settings threshold. Only the first is an "SLO" the run declared;
+	 * a label for the second says "Settings", not "SLO" (#2939).
+	 */
+	sloSource: SloSource;
+	/**
 	 * The crossing tick is the first one that held a whole-second p99 reading, so
 	 * nothing was observed under the SLO before it: the run began over the line
 	 * and there was no crossing to mark. False when not crossed.
@@ -42,13 +61,14 @@ export interface Breakpoint {
 }
 
 /** A breakpoint the SLO has not been crossed for (yet), judged against `sloMs`. */
-export function notCrossed(sloMs: number | null): Breakpoint {
+export function notCrossed(sloMs: number | null, sloSource: SloSource): Breakpoint {
 	return {
 		crossed: false,
 		concurrency: null,
 		timeSeconds: null,
 		p99Ms: null,
 		sloMs,
+		sloSource,
 		atRunStart: false,
 	};
 }
@@ -63,6 +83,7 @@ export function notCrossed(sloMs: number | null): Breakpoint {
 export function breakpointAt(
 	m: LoadTestMetrics,
 	thresholdMs: number,
+	sloSource: SloSource,
 	firstReading: boolean
 ): Breakpoint | null {
 	const p99 = secondPercentiles(m)?.p99 ?? 0;
@@ -73,24 +94,29 @@ export function breakpointAt(
 		timeSeconds: m.elapsed_seconds,
 		p99Ms: p99,
 		sloMs: thresholdMs,
+		sloSource,
 		atRunStart: firstReading,
 	};
 }
 
 /**
  * Scan per-tick history for the first tick whose p99 exceeds `thresholdMs`.
- * History is assumed time-ordered (as it arrives over SSE). On a downsampled
+ * `runOwnMs` is the run's own p99 line, which decides the breakpoint's
+ * `sloSource` (the value judged does not change). History is assumed
+ * time-ordered (as it arrives over SSE). On a downsampled
  * series a point is a bucket, so `atRunStart` reads "the first bucket".
  */
 export function computeBreakpoint(
 	history: LoadTestMetrics[],
-	thresholdMs: number = DEFAULT_SLO_MS
+	thresholdMs: number = DEFAULT_SLO_MS,
+	runOwnMs?: number
 ): Breakpoint {
+	const sloSource = sloSourceOf(thresholdMs, runOwnMs);
 	let seenReading = false;
 	for (const m of history) {
-		const crossed = breakpointAt(m, thresholdMs, !seenReading);
+		const crossed = breakpointAt(m, thresholdMs, sloSource, !seenReading);
 		if (crossed) return crossed;
 		seenReading ||= hasSecondPercentiles(m);
 	}
-	return notCrossed(thresholdMs);
+	return notCrossed(thresholdMs, sloSource);
 }

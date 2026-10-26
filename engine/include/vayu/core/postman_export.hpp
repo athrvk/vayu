@@ -69,6 +69,9 @@ struct PostmanExportRequest {
     std::string http_version        = "auto";
     bool verify_ssl                 = true;
     bool stream                     = false;
+    /// The request's own timeout (issue #2937). A Postman item has no
+    /// timeout member, so a stated one is only counted in `notCarried`.
+    std::optional<int> timeout_ms;
     /// Postman's per-request protocol settings (issue #1765).
     bool disable_cookies = false;
     /// Lowercased header names, in stored order.

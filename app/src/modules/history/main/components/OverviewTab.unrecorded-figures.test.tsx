@@ -12,13 +12,16 @@
 /**
  * A failed load run the engine could not fully record (#2895) carries
  * `summary.summaryMissing` (the counts are not whole-run totals) or
- * `summary.partial` (the last saved tick's counts, latency all zeros). The
- * Overview says so, and draws "not recorded" where a 0 would pass for a
- * measurement.
+ * `summary.partial` (the last saved tick's counts), and its report omits
+ * `latency` (#2938). The Overview says so: "not recorded" where a count would
+ * pass for a measurement, "-" where the latency is absent.
+ *
+ * Mutation-check: revert the `reportToDerived` guard on `report.latency` and the
+ * flagged cases throw; revert `formatLatencyOrDash` and the P99 tile reads 0ms.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import OverviewTab from "./OverviewTab";
 import { withQueryClient } from "@/test/query-wrapper";
@@ -29,7 +32,12 @@ vi.mock("@/services/api", () => ({ apiService: {} }));
 
 type Flags = Pick<RunReport["summary"], "partial" | "summaryMissing">;
 
-function makeReport(flags: Flags, counts: { total: number; failed: number }): RunReport {
+/** A flagged run omits `latency`; pass one only for a run that recorded it. */
+function makeReport(
+	flags: Flags,
+	counts: { total: number; failed: number },
+	latency?: RunReport["latency"]
+): RunReport {
 	return {
 		metadata: {
 			runId: "run_1",
@@ -48,10 +56,15 @@ function makeReport(flags: Flags, counts: { total: number; failed: number }): Ru
 			avgRps: 0,
 			...flags,
 		},
-		latency: { min: 0, max: 0, avg: 0, p50: 0, p90: 0, p95: 0, p99: 0 },
+		latency,
 		statusCodes: {},
 		errors: { total: 0, withDetails: 0, types: {} },
 	};
+}
+
+/** The P99 latency tile, which sits beside its label. */
+function p99Tile(): HTMLElement {
+	return screen.getByText("P99 latency").parentElement!.parentElement!;
 }
 
 function renderTab(report: RunReport) {
@@ -73,8 +86,10 @@ describe("OverviewTab unrecorded figures", () => {
 
 		expect(await screen.findByText("Counts were not recorded")).toBeInTheDocument();
 		expect(screen.getByText(/The run ended before the totals were saved/)).toBeInTheDocument();
-		// P99, total requests and success rate: three tiles, no 0 and no 0.0%.
-		expect(screen.getAllByText("not recorded")).toHaveLength(3);
+		// Total requests and success rate say "not recorded"; the absent P99 is "-".
+		expect(screen.getAllByText("not recorded")).toHaveLength(2);
+		expect(within(p99Tile()).getByText("-")).toBeInTheDocument();
+		expect(screen.queryByText("0ms")).toBeNull();
 		expect(screen.queryByText("0.0%")).toBeNull();
 		// The cards under the tiles would each draw a measured-looking 0.
 		expect(screen.queryByText("Error rate")).toBeNull();
@@ -89,22 +104,23 @@ describe("OverviewTab unrecorded figures", () => {
 		expect(screen.getByText(/these are the last figures it recorded/)).toBeInTheDocument();
 		expect(screen.getByText("1,234")).toBeInTheDocument();
 		expect(screen.getByText("81.0%")).toBeInTheDocument();
-		// Only p99 is unrecorded.
-		expect(screen.getAllByText("not recorded")).toHaveLength(1);
+		// Only the latency is unrecorded: the counts above are the last tick's.
+		expect(screen.queryByText("not recorded")).toBeNull();
+		expect(within(p99Tile()).getByText("-")).toBeInTheDocument();
+		expect(screen.queryByText("0ms")).toBeNull();
 		expect(screen.queryByText("Error rate")).toBeNull();
 	});
 
 	it("shows neither notice nor placeholder for a run that recorded its summary", async () => {
-		const report = makeReport({}, { total: 1_234, failed: 234 });
-		report.latency.p99 = 87;
-		renderTab(report);
+		const latency = { min: 1, max: 90, avg: 20, p50: 18, p90: 40, p95: 60, p99: 87 };
+		renderTab(makeReport({}, { total: 1_234, failed: 234 }, latency));
 
 		// The glance under the tiles is drawn too; the tiles alone are not unique text.
 		expect(await screen.findByText("Error rate")).toBeInTheDocument();
 		expect(screen.queryByText("Counts were not recorded")).toBeNull();
 		expect(screen.queryByText("Counts are partial")).toBeNull();
 		expect(screen.queryByText("not recorded")).toBeNull();
-		expect(screen.getAllByText("87ms").length).toBeGreaterThan(0);
+		expect(within(p99Tile()).getByText("87ms")).toBeInTheDocument();
 		expect(screen.getAllByText("1,234").length).toBeGreaterThan(0);
 	});
 });

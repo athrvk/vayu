@@ -132,6 +132,48 @@ describe("mapSseMetrics", () => {
 		});
 	});
 
+	/* Mutation check: drop `capacity` from the mapper and the first three redden. */
+	describe("a capacity run's search state (issue #2928)", () => {
+		it("maps capacity as sent while the search runs, with no stopReason", () => {
+			const m = mapSseMetrics({
+				timestamp: 1,
+				capacity: { level: 16, levelElapsedMs: 3000, levelsJudged: 2 },
+			});
+			expect(m.capacity).toEqual({ level: 16, levelElapsedMs: 3000, levelsJudged: 2 });
+			expect(m.capacity).not.toHaveProperty("stopReason");
+		});
+
+		it("maps the stopReason the final frame carries", () => {
+			const m = mapSseMetrics({
+				timestamp: 1,
+				capacity: {
+					level: 64,
+					levelElapsedMs: 5000,
+					levelsJudged: 4,
+					stopReason: "stopped",
+				},
+			});
+			expect(m.capacity).toEqual({
+				level: 64,
+				levelElapsedMs: 5000,
+				levelsJudged: 4,
+				stopReason: "stopped",
+			});
+		});
+
+		it("keeps level 0 before the first level opens, not as absent", () => {
+			const m = mapSseMetrics({
+				timestamp: 1,
+				capacity: { level: 0, levelElapsedMs: 0, levelsJudged: 0 },
+			});
+			expect(m.capacity).toEqual({ level: 0, levelElapsedMs: 0, levelsJudged: 0 });
+		});
+
+		it("leaves a frame of any other run without the key", () => {
+			expect(mapSseMetrics({ timestamp: 1, totalRequests: 3 }).capacity).toBeUndefined();
+		});
+	});
+
 	describe("the gate frame's run-so-far distributions (issue #2782)", () => {
 		const latency = {
 			minMs: 1,
