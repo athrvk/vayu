@@ -490,6 +490,7 @@ class ScenarioLoadTest : public ::testing::Test {
     size_t iterations) {
         const auto hits_now = [&] () {
             std::vector<size_t> counts;
+            counts.reserve (paths.size ());
             for (const auto& path : paths) {
                 counts.push_back (server.hits_for (path).size ());
             }
