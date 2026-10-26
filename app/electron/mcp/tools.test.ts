@@ -16241,28 +16241,33 @@ describe("secret withholding", () => {
 		expect(revealed.body.requestHeaderLines).toEqual(lines);
 	});
 
-	test("run_request passes a followed redirect through and masks the hop's Set-Cookie (#2461)", async () => {
+	test("run_request passes a followed redirect through and masks the hop's Set-Cookie and url credential (#2461, #2949)", async () => {
 		const hop = {
 			status: 302,
 			statusText: "Found",
 			headerLines: [
 				{ name: "Set-Cookie", value: "session=hop-cookie-value; Path=/" },
-				{ name: "Location", value: "/home" },
+				{ name: "Location", value: "http://api.example.com/home" },
 			],
+			url: "https://api.example.com/login?api_key=hop-url-key-value",
+			schemeDowngrade: true,
 		};
 		const client = runClient({
 			executeRequest: vi.fn().mockResolvedValue({ ...EXECUTE_ANSWER, redirects: [hop] }),
 		});
 		const { text, body } = await sendRequest(client);
 		expect(text).not.toContain("hop-cookie-value");
+		expect(text).not.toContain("hop-url-key-value");
 		expect(body.redirects).toEqual([
 			{
 				status: 302,
 				statusText: "Found",
 				headerLines: [
 					{ name: "Set-Cookie", value: "<redacted>" },
-					{ name: "Location", value: "/home" },
+					{ name: "Location", value: "http://api.example.com/home" },
 				],
+				url: "https://api.example.com/login?api_key=<redacted>",
+				schemeDowngrade: true,
 			},
 		]);
 	});
