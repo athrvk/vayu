@@ -84,8 +84,9 @@ function nextStepFor(status: unknown, pollSeconds: number): string {
  * `terminal` comes from the status and `endTime` is null while the run is going:
  * the engine emits null for a run that has not finished (#2953), and this reads
  * the status first as well, so an engine that predates that still yields null
- * (its stored `endTime` is `startTime` until the run ends). `progress` exists only for a duration-bound
- * run whose duration parses; anywhere else it is null rather than an estimate.
+ * (its stored `endTime` is `startTime` until the run ends). `progress` exists
+ * only for a duration-bound run whose duration parses; anywhere else it is null
+ * rather than an estimate.
  */
 export function projectRunStatus(row: unknown, now: number = Date.now()): unknown {
 	if (!isRecord(row)) return row;
