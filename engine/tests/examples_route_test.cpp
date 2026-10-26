@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -32,6 +33,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/entity_tag.hpp"
 #include "wide_json.hpp"
 
 using nlohmann::json;
@@ -56,6 +58,13 @@ std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Databa
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json,
+const std::function<void ()>& before_write);
+// The same with the request's `If-Match` (#2433), judged in that scope.
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write);
 // Defined in import.cpp - the bulk path that also writes examples.
 std::pair<int, nlohmann::json>
@@ -995,6 +1004,37 @@ TEST_F (ExamplesRouteTest, AConcurrentExampleUpdateWaitsAndKeepsBothFieldsWritte
     EXPECT_EQ (stored->name, "Renamed");
     EXPECT_EQ (stored->status, 404)
     << "the status write merged against the row this write had already staged";
+}
+
+// If-Match (#2433). Mutation check: drop the `check_if_match` call in
+// `update_request_example_locked` and the stale write answers 200.
+TEST_F (ExamplesRouteTest, AnExamplePutNamingAStaleTagIs412AndWritesNothing) {
+    auto [created_status, row] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "Saved" } });
+    ASSERT_EQ (created_status, 200) << row.dump ();
+    const std::string id = row["id"].get<std::string> ();
+    const auto read_tag  = vayu::http::IfMatch::parse (
+    vayu::http::entity_tag (row["updatedAt"].get<int64_t> ()));
+    ASSERT_HAS_VALUE (read_tag);
+    auto [moved_status, moved] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "status", 404 } });
+    ASSERT_EQ (moved_status, 200) << moved.dump ();
+
+    auto [status, body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Stale" } }, *read_tag, nullptr);
+    EXPECT_EQ (status, 412) << body.dump ();
+    EXPECT_EQ (body["error"]["updatedAt"], moved["updatedAt"]);
+    const auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Saved");
+
+    const auto current_tag = vayu::http::IfMatch::parse (
+    vayu::http::entity_tag (moved["updatedAt"].get<int64_t> ()));
+    ASSERT_HAS_VALUE (current_tag);
+    auto [current_status, current] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Fresh" } }, *current_tag, nullptr);
+    EXPECT_EQ (current_status, 200) << current.dump ();
+    EXPECT_GT (current["updatedAt"].get<int64_t> (), moved["updatedAt"].get<int64_t> ());
 }
 
 } // namespace

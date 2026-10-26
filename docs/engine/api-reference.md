@@ -26,7 +26,9 @@ object carrying a machine-readable `code` and a human-readable `message`:
 (409), `bad_gateway` (502), `unavailable` (503), `insufficient_storage` (507),
 `internal_error` (any other 5xx). Routes
 with their own vocabulary pass it instead - `invalid_config` (`POST /config`),
-`invalid_run_config` (`POST /runs`), and the `oauth2_*` family.
+`invalid_run_config` (`POST /runs`), `precondition_failed` and
+`invalid_if_match` (a whole-record `PUT`'s `If-Match`), and the `oauth2_*`
+family.
 
 Any per-error detail sits **inside** the same object, so a client reads one
 place for the whole failure - `item` on `POST /import/apply`, the provider's
@@ -210,8 +212,53 @@ MCP agent, say - each merge onto what the other committed rather than onto the
 row as both of them found it. The alternative is not a conflict but a silent
 loss: the merge carries every field the body did not name, so the loser's fields
 come back written with the values the winner read a moment earlier, and neither
-request fails. There is no precondition header; a client that needs to *detect*
-that the row moved under it has nothing to read yet.
+request fails. A client that computes its body from an earlier read (a
+read-merge-write across two round trips) closes its own window with
+[`If-Match`](#conditional-updates-with-if-match).
+
+### Conditional updates with If-Match
+
+The four whole-record `PUT`s - [collections](#put-collectionsid),
+[requests](#put-requestsid), [environments](#put-environmentsid) and
+[examples](#put-requestsidexamplesexampleid) - take an optional `If-Match`
+header (issue [#2433](https://github.com/athrvk/vayu/issues/2433)). A row's
+version is its `updatedAt`, and its entity tag is the weak `W/"<updatedAt>"`.
+
+- Every `200` from those `PUT`s, and from [`GET /requests/:id`](#get-requestsid),
+  carries the row's `ETag`. The list reads (`GET /collections`,
+  `GET /environments`, `GET /requests/:id/examples`) carry no per-row header;
+  a client builds the tag from the row's `updatedAt`, which is the same value.
+- `If-Match: W/"<updatedAt>"` makes the write conditional: it lands only while
+  the stored row is at that version. The check runs inside the same lock
+  acquisition as the read and the merge, after the `404`, so the row it judges
+  is the row the write replaces.
+- A mismatch is `412` with code `precondition_failed`, and nothing is written.
+  The stored `updatedAt` rides inside the error, so the caller can re-read,
+  merge again and retry under the new tag:
+
+  ```json
+  {"error": {"code": "precondition_failed", "message": "The record changed after it was read; read it again and re-apply the change", "updatedAt": 1792359304908}}
+  ```
+
+- `If-Match: *` holds for any stored row (a missing one is still `404`). A
+  comma-separated list holds when any member names the version, and repeated
+  `If-Match` lines are read as one list. The comparison is weak: `W/` is ignored
+  on both sides, where RFC 9110 asks for the strong comparison, which no weak tag
+  passes. Every tag the engine issues is weak because a row's answer carries
+  members its `updatedAt` does not version (a request's derived file trust).
+- A value that is not `*` or entity tags (a bare `1792359304908`, an empty
+  value) is `400` `invalid_if_match`, before the row is looked up.
+- No `If-Match` is the unconditional write it always was. The app sends none:
+  its autosave patches only the fields that changed (#1436), so its writes
+  merge rather than collide.
+
+An update through these routes always moves `updatedAt` forward, even within one
+millisecond, so two of them never share a tag. Other writers of these rows (a
+reorder, a spec sync, a run persisting script variables) stamp the current time.
+Activating an environment clears `isActive` on the one it replaces without
+restamping that row, so an environment's tag does not cover `isActive`.
+`/globals` has no `PUT` and takes no `If-Match` yet
+([#2988](https://github.com/athrvk/vayu/issues/2988)).
 
 ### The engine owns every id
 
@@ -1521,9 +1568,13 @@ A `parentId` that changes the collection's parent and states no `order` appends
 the collection among its new siblings, rather than carrying a position from the
 list it just left. See [Ordering](#ordering).
 
-**Response:** The updated collection object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
 
-**Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
+**Response:** The updated collection object, with its `ETag`.
+
+**Errors:** `404` if the collection does not exist; `412` if `If-Match` no
+longer names the stored row; `400` on a `null` `name`, a malformed `If-Match` or
 on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1766,7 +1817,8 @@ every collection's request list and scanning them for the id.
 - `id` (required): The request ID to fetch
 
 **Response:** The request object, in the same shape as a full `GET /requests`
-list entry.
+list entry, with its `ETag` (`W/"<updatedAt>"`, see
+[Conditional updates](#conditional-updates-with-if-match)).
 ```json
 {
   "id": "req_1234567890",
@@ -2050,9 +2102,13 @@ stored block, whichever client wrote it, and a save that changed nothing keeps
 it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
 `POST /import/apply` apply the same rule.
 
-**Response:** The updated request object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
 
-**Errors:** `404` if the request does not exist; `400` on a `null`
+**Response:** The updated request object, with its `ETag`.
+
+**Errors:** `404` if the request does not exist; `412` if `If-Match` no longer
+names the stored row; `400` on a malformed `If-Match`, on a `null`
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
@@ -2415,7 +2471,13 @@ is a `400`). `postmanResponse` accepts only `null`, which clears it; any other
 value is a `400` - it records what a file said, and the export already
 regenerates each part of it an edit to `status` or `headers` makes stale.
 
-**Response:** the updated example object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
+
+**Response:** the updated example object, with its `ETag`.
+
+**Errors:** `404` as above; `412` if `If-Match` no longer names the stored row;
+`400` on a malformed `If-Match` or a rejected field.
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -4912,8 +4974,10 @@ Update an existing environment. **Update only** - a `404` when the id does not
 exist, never a silent create. Merge-patch body, same rule as collections.
 
 `variables` replaces the whole map, so a caller doing a partial edit reads the
-current map first and sends the merged result (this is what the MCP
-`update_environment` tool does). Sending `variables: null` resets it to `{}` -
+current map first and sends the merged result under the version it read,
+`If-Match: W/"<updatedAt>"` (this is what the MCP `update_environment` tool
+does; see [Conditional updates](#conditional-updates-with-if-match)). Sending
+`variables: null` resets it to `{}` -
 it no longer stores the literal string `null`, which is the bug this verb split
 fixed. `isActive` is honored here too; it used to be read only on create.
 
@@ -4936,9 +5000,13 @@ it survives a restart and is shared by every client on the same database. See
 }
 ```
 
-**Response:** The updated environment object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
 
-**Errors:** `404` if the environment does not exist; `400` on a `null` `name`;
+**Response:** The updated environment object, with its `ETag`.
+
+**Errors:** `404` if the environment does not exist; `412` if `If-Match` no
+longer names the stored row; `400` on a `null` `name` or a malformed `If-Match`;
 `413` naming the field, its size and the cap, when a serialized `variables` is
 over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -12281,6 +12349,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 401 | OAuth 2.0 provider rejected the token request |
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
+| 412 | A whole-record `PUT` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |

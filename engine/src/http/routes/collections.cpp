@@ -472,6 +472,7 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
 static std::pair<int, nlohmann::json> update_collection_locked (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
@@ -480,12 +481,15 @@ const std::function<void ()>& before_write) {
     if (!existing) {
         return { 404, error_body (404, "Collection not found") };
     }
+    if (auto held = check_if_match (if_match, existing->updated_at); !held) {
+        return as_response (held.error ());
+    }
 
     vayu::db::Collection c = *existing;
     if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/false); !outcome) {
         return as_response (outcome.error ());
     }
-    c.updated_at = now_ms ();
+    c.updated_at = next_updated_at (existing->updated_at);
 
     // The spec check runs only when the write states a binding: a collection
     // bound to a spec that has since been deleted out of band must stay
@@ -524,6 +528,8 @@ const std::function<void ()>& before_write) {
  * silently, on both sides. That window used to sit between `get_collection`
  * here and `create_collection` inside the lock.
  *
+ * @param if_match The request's `If-Match`, judged inside the same scope; a
+ *        row it no longer names is a 412 (#2433).
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
@@ -531,17 +537,26 @@ const std::function<void ()>& before_write) {
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
-    db.with_lock (
-    [&] { result = update_collection_locked (db, id, json, before_write); });
+    db.with_lock ([&] {
+        result = update_collection_locked (db, id, json, if_match, before_write);
+    });
     return result;
 }
 
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    return update_collection_response (db, id, json, std::nullopt, before_write);
+}
+
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
 const nlohmann::json& json) {
-    return update_collection_response (db, id, json, nullptr);
+    return update_collection_response (db, id, json, std::nullopt, nullptr);
 }
 
 /**
@@ -647,8 +662,10 @@ void register_collection_routes (RouteContext& ctx) {
      * value, null resets to the default). Update only - a missing id is a 404,
      * never a silent create (issue #95).
      * Path params: id - The collection ID to update.
-     * Returns: The updated collection object, 404 if it does not exist, 400,
-     * 409 when `parentId` names a collection in the trash, or 413 as on POST.
+     * Headers: If-Match (optional) - the row's `W/"<updatedAt>"` (#2433).
+     * Returns: The updated collection object with its ETag, 404 if it does
+     * not exist, 412 if If-Match no longer names it, 400, 409 when
+     * `parentId` names a collection in the trash, or 413 as on POST.
      */
     ctx.server.Put (R"(/collections/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -659,8 +676,13 @@ void register_collection_routes (RouteContext& ctx) {
                 refuse_request_body (res, "PUT /collections/:id", json.error ());
                 return;
             }
-            auto [status, body] =
-            update_collection_response (ctx.db, collection_id, *json);
+            const auto if_match = read_if_match (req);
+            if (!if_match) {
+                refuse_request_body (res, "PUT /collections/:id", if_match.error ());
+                return;
+            }
+            auto [status, body] = update_collection_response (
+            ctx.db, collection_id, *json, *if_match, nullptr);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /collections/:id failed",
                 { { "status", status }, { "id", collection_id },
@@ -670,6 +692,7 @@ void register_collection_routes (RouteContext& ctx) {
                 { { "id", collection_id }, { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
+            set_entity_tag (res, status, body);
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
