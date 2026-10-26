@@ -2769,6 +2769,12 @@ applying it live and writing it to disk. The same sanitizer runs over the
 persisted file on load and over the CLI's `VAYU_MCP_*` variables, so no path
 reaches the guards with a cap outside that range.
 
+A `mcp-config.json` that does not parse (or parses to something other than an
+object) loads as the locked-down defaults rather than failing the start. The
+first write over it renames it to `mcp-config.json.corrupt-<epoch-ms>` in the
+same folder, so the allowlist and caps in it can be copied back by hand. One
+copy is kept: corrupting the file again replaces the earlier copy (issue #2433).
+
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the

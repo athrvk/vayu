@@ -1700,6 +1700,9 @@ the engine never sees, and a restore does not write either:
   position), `response-cache-clear.json` (the version that last cleared the
   response cache) and `mcp-config.json` (the MCP allowlist, caps and on/off
   switch).
+  A file that does not parse reads as empty, and the first write over it moves
+  it to `<name>.json.corrupt-<epoch-ms>` beside it (one copy per file, as the
+  engine does for `vayu.db`).
 
 What that costs depends on where the snapshot is restored. On the same machine
 the app state is untouched: it keeps whatever it held, and a tab may point at a
