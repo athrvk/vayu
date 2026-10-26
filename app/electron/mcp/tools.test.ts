@@ -10900,6 +10900,27 @@ describe("run housekeeping tools", () => {
 			expect(rows[0].resultSummary).toEqual(resultSummary);
 		});
 
+		// #2954: the same pass-through guard for a collection row, whose summary
+		// is the step outcomes rather than the load figures.
+		test("a collection row's step counts reach the agent unshaped", async () => {
+			const resultSummary = {
+				passed: 5,
+				failed: 2,
+				skipped: 1,
+				errored: 3,
+				verdict: "failed",
+			};
+			const client = fakeClient({
+				listRuns: vi
+					.fn()
+					.mockResolvedValue(page([{ id: "run_1", type: "scenario", resultSummary }])),
+			});
+			const res = await dispatchTool("list_runs", {}, ctxWith(client));
+			const rows = (JSON.parse(firstText(res)) as { data: Array<Record<string, unknown>> })
+				.data;
+			expect(rows[0].resultSummary).toEqual(resultSummary);
+		});
+
 		test("the last page has a null next offset and no note", async () => {
 			const client = fakeClient({
 				listRuns: vi.fn().mockResolvedValue(page([{ id: "run_17" }], 17, 16)),

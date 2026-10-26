@@ -30,8 +30,9 @@ namespace vayu::http {
  *   re-parse it - one JSON parse per row, so 50 a tick at the default page size
  *   and up to 500 at the largest the route allows, all producing what the
  *   previous tick already produced.
- * - **A load run's `resultSummary`** (#2130), built from the stored run
- *   `summary`, the whole-run results that are far larger than the snapshot.
+ * - **A load or collection run's `resultSummary`** (#2130, #2954), built from
+ *   the stored run `summary`, the whole-run results that are far larger than
+ *   the snapshot.
  *
  * **Keyed by run id, and that is exact rather than merely likely.** A run's
  * `config_snapshot` is written once, by `Database::create_run`, from the two
@@ -87,7 +88,8 @@ class RunSummaryCache {
     }
 
     /**
-     * @brief A terminal load run's `resultSummary`, calling @p build only on a miss.
+     * @brief A terminal load or collection run's `resultSummary`, calling
+     *        @p build only on a miss.
      * @param run_id  A run whose status is Completed, Failed or Stopped; see
      *                the class comment for why nothing earlier may be cached.
      * @param build   Builds the outcome from the run's stored `summary`;
@@ -111,8 +113,8 @@ class RunSummaryCache {
         return summaries_.build_count ();
     }
 
-    /// The same seam for load-run outcomes, counted apart so a test of either
-    /// table is not thrown off by the other.
+    /// The same seam for load and collection run outcomes, counted apart so a
+    /// test of either table is not thrown off by the other.
     std::size_t outcome_build_count () const {
         return outcomes_.build_count ();
     }

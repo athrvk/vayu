@@ -205,6 +205,40 @@ describe("RunItem run types", () => {
 		expect(load.querySelector(".text-purple-500")).not.toBeNull();
 	});
 
+	// #2954: the engine's collection row carries its step counts, and the sidebar
+	// row neither prints them nor lets a failed verdict change its glyph - those
+	// stay a load run's (`rowOutcome` is gated on `type === "load"`).
+	// Mutation check: drop the `type === "load"` gate in `rowOutcome` and the
+	// markup differs.
+	it("renders a collection row the same with or without its step counts", () => {
+		const props = { onSelect: noop, onDelete: vi.fn(), isDeleting: false };
+		const scenario = { collectionId: "col_1", stepCount: 4, iterations: 2 };
+		const bare = render(<RunItem run={scenarioRun(scenario)} {...props} />);
+		const bareMarkup = bare.container.innerHTML;
+		bare.unmount();
+
+		const counted = render(
+			<RunItem
+				run={
+					{
+						...scenarioRun(scenario),
+						resultSummary: {
+							passed: 1,
+							failed: 1,
+							skipped: 0,
+							errored: 2,
+							verdict: "failed",
+						},
+					} as Run
+				}
+				{...props}
+			/>
+		);
+
+		expect(bareMarkup).not.toBe("");
+		expect(counted.container.innerHTML).toBe(bareMarkup);
+	});
+
 	/**
 	 * The badge slot beside Delete marks the run types whose identity line would
 	 * otherwise look the same - load and design, which both print a bare URL. A

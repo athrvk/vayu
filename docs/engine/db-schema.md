@@ -1406,8 +1406,8 @@ together and can never disagree. It exists apart from `summary` so
 off the row it already fetched for every page - no extra query, and no risk
 of the compact-summary cache (`RunSummaryCache`, keyed on the immutable
 `config_snapshot`) ever caching a completion-time fact. The same cache's
-second table holds a terminal load run's list-row `resultSummary` (#2130),
-built from `summary` and only once `status` is terminal: every writer stores
+second table holds a terminal load or collection run's list-row
+`resultSummary` (#2130, #2954), built from `summary` and only once `status` is terminal: every writer stores
 `summary` before the terminal status, so from then on the column is final.
 
 **`origin` / `origin_client`** (#1817, schema version 5) record who started
@@ -1628,8 +1628,10 @@ this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
 `assertionsPassed` / `assertionsFailed`, and for a capacity run the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
 `knee_concurrency` (#2930); `build_load_result_summary` in
-`http/routes/runs.cpp`) and held in the same cache, which is sound for the
-same reason: each `update_run_summary` writer stores the summary before the
+`http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`
+/ `failed` / `skipped` / `errored` and the same `thresholds` verdict
+(`build_scenario_result_summary`, #2954), held in the same cache, which is
+sound for the same reason: each `update_run_summary` writer stores the summary before the
 terminal status, and nothing rewrites it after. **A change that writes the
 summary after the terminal status, or rewrites it later, breaks that** too.
 

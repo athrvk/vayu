@@ -3286,7 +3286,8 @@ TEST_F (RunsRouteTest, StoppedLoadRowWithoutSummaryIsNotCachedBeforeTheWorkerWri
 }
 
 // A terminal load run's summary is final, so the poll parses it once - and
-// only a load row's: a design or scenario row never asks for an outcome.
+// only a load row's: a design row, or a collection row that stored no summary,
+// never asks for an outcome.
 TEST_F (RunsRouteTest, RepeatedPollsParseEachLoadSummaryOnce) {
     for (const char* id : { "run_l1", "run_l2", "run_l3" }) {
         seed ({ .id = id });
@@ -3309,9 +3310,12 @@ TEST_F (RunsRouteTest, RepeatedPollsParseEachLoadSummaryOnce) {
     EXPECT_EQ (second["data"], first["data"]);
 }
 
-// The design row keeps its own two numbers and a scenario row carries none,
-// even when either stored a summary a load row would read.
-TEST_F (RunsRouteTest, DesignAndScenarioRowsKeepTheirOwnResultSummary) {
+// The design row keeps its own two numbers even when it stored a summary a load
+// row would read, and a collection row reads only the `scenario` block of its
+// summary: a load-shaped summary without one yields no `resultSummary`.
+// Mutation check: make `build_terminal_result_summary` build the load shape for
+// a Scenario run and the second half fails (rps, p95Ms and errorRate appear).
+TEST_F (RunsRouteTest, DesignRowKeepsItsOwnResultSummaryAndCollectionRowReadsOnlyItsScenarioBlock) {
     const auto stored =
     vayu::core::build_run_summary_payload (summary_inputs ()).dump ();
     seed ({ .id = "run_design", .type = vayu::RunType::Design, .start_time = 1 });
@@ -3326,7 +3330,220 @@ TEST_F (RunsRouteTest, DesignAndScenarioRowsKeepTheirOwnResultSummary) {
     EXPECT_EQ (design["resultSummary"],
     (nlohmann::json{ { "statusCode", 201 }, { "latencyMs", 7.5 } }));
     EXPECT_FALSE (row_of (body, "run_scenario").contains ("resultSummary"));
+    // Asked about, found empty, and settled: the summary is final.
+    EXPECT_EQ (summaries_.outcome_build_count (), 1u);
+}
+
+/// A collection run's stored summary with the given step counts, built as the
+/// runner builds it. The steps that sent answered 200 (@p passed) or 500
+/// (@p failed); @p thresholds, when given, is judged off that tally, the way
+/// `sequential_summary` does.
+std::string counted_scenario_summary (size_t passed,
+size_t failed,
+size_t skipped,
+size_t errored,
+const json& thresholds = json ()) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.passed         = passed;
+    inputs.failed         = failed;
+    inputs.skipped        = skipped;
+    inputs.errored        = errored;
+    inputs.steps_executed = passed + failed + skipped + errored;
+    inputs.duration_s     = 2.0;
+    inputs.status_codes   = { { 200, passed } };
+    if (failed > 0) {
+        inputs.status_codes[500] = failed;
+    }
+    if (!thresholds.is_null ()) {
+        vayu::core::RunSummaryInputs judged;
+        judged.total_requests =
+        vayu::count_status_failures (inputs.status_codes).total;
+        judged.status_codes = inputs.status_codes;
+        inputs.thresholds =
+        vayu::core::evaluate_thresholds (json{ { "thresholds", thresholds } }, judged);
+    }
+    return vayu::core::build_scenario_summary_payload (inputs).dump ();
+}
+
+// A finished collection run says how its steps went on its own row (#2954): the
+// four disjoint outcomes, `errored` included because a run whose steps only
+// errored would otherwise read clean. A zero stored is a zero reported - the
+// run recorded it - and no budget declared means no `verdict`.
+// Mutation check: restore the Load-only gate (`carries_result_summary`) and
+// every row here loses its `resultSummary`; drop the `errored` copy in
+// `build_scenario_result_summary` and the second row fails.
+TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
+    seed ({ .id = "run_clean", .type = vayu::RunType::Scenario, .start_time = 1 });
+    db_->update_run_summary ("run_clean", counted_scenario_summary (4, 0, 0, 0));
+    seed ({ .id = "run_mixed", .type = vayu::RunType::Scenario, .start_time = 2 });
+    db_->update_run_summary ("run_mixed", counted_scenario_summary (5, 2, 1, 3));
+    seed ({ .id = "run_only_errored",
+    .type       = vayu::RunType::Scenario,
+    .status     = vayu::RunStatus::Failed,
+    .start_time = 3 });
+    db_->update_run_summary ("run_only_errored", counted_scenario_summary (0, 0, 0, 2));
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    EXPECT_EQ (row_of (body, "run_clean")["resultSummary"],
+    (json{ { "passed", 4 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 0 } }));
+    EXPECT_EQ (row_of (body, "run_mixed")["resultSummary"],
+    (json{ { "passed", 5 }, { "failed", 2 }, { "skipped", 1 }, { "errored", 3 } }));
+    EXPECT_EQ (row_of (body, "run_only_errored")["resultSummary"],
+    (json{ { "passed", 0 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 2 } }));
+}
+
+// The verdict is read exactly as a load row reads it: present only when the
+// summary recorded a judged budget, and as stored for a stopped run too.
+// Mutation check: drop `record_verdict` from `build_scenario_result_summary`
+// and the first two rows lose their verdict.
+TEST_F (RunsRouteTest, CollectionRowCarriesTheBudgetVerdictOnlyWhenOneWasJudged) {
+    seed ({ .id = "run_met", .type = vayu::RunType::Scenario, .start_time = 1 });
+    db_->update_run_summary ("run_met",
+    counted_scenario_summary (3, 0, 0, 0, json{ { "maxErrorRatePct", 1 } }));
+    seed ({ .id = "run_missed",
+    .type       = vayu::RunType::Scenario,
+    .status     = vayu::RunStatus::Failed,
+    .start_time = 2 });
+    db_->update_run_summary ("run_missed",
+    counted_scenario_summary (3, 2, 0, 0, json{ { "maxErrorRatePct", 1 } }));
+    seed ({ .id = "run_halted",
+    .type       = vayu::RunType::Scenario,
+    .status     = vayu::RunStatus::Stopped,
+    .start_time = 3 });
+    db_->update_run_summary ("run_halted",
+    counted_scenario_summary (3, 0, 0, 0, json{ { "maxErrorRatePct", 1 } }));
+    seed ({ .id = "run_unjudged_collection", .type = vayu::RunType::Scenario, .start_time = 4 });
+    db_->update_run_summary (
+    "run_unjudged_collection", counted_scenario_summary (3, 0, 0, 0));
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_EQ (row_of (body, "run_met")["resultSummary"]["verdict"], "passed");
+    EXPECT_EQ (row_of (body, "run_missed")["resultSummary"]["verdict"], "failed");
+    EXPECT_EQ (row_of (body, "run_halted")["resultSummary"]["verdict"], "passed");
+    EXPECT_FALSE (row_of (body, "run_unjudged_collection")["resultSummary"].contains ("verdict"));
+
+    // The report prints the same verdict the row does.
+    auto [report_status, report] =
+    vayu::http::routes::run_report_response (*db_, "run_missed");
+    ASSERT_EQ (report_status, 200);
+    EXPECT_EQ (row_of (body, "run_missed")["resultSummary"]["verdict"],
+    report["thresholdValidation"]["verdict"]);
+}
+
+// A key the summary does not record is absent, never zeroed (a summary stored by
+// an older engine), and a summary with no readable `scenario` object, an empty
+// one included, adds no `resultSummary` at all.
+// Mutation check: replace `copy_optional_number` in
+// `build_scenario_result_summary` with an unconditional write and the partial
+// row gains zeroed keys.
+TEST_F (RunsRouteTest, CollectionResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
+    seed ({ .id = "run_partial", .type = vayu::RunType::Scenario, .start_time = 1 });
+    db_->update_run_summary ("run_partial",
+    R"({"scenario":{"passed":2,"errored":"many","failed":null}})");
+    seed ({ .id = "run_empty_block", .type = vayu::RunType::Scenario, .start_time = 2 });
+    db_->update_run_summary ("run_empty_block", R"({"scenario":{}})");
+    seed ({ .id = "run_block_not_object", .type = vayu::RunType::Scenario, .start_time = 3 });
+    db_->update_run_summary ("run_block_not_object", R"({"scenario":[1,2]})");
+    seed ({ .id = "run_bad_summary", .type = vayu::RunType::Scenario, .start_time = 4 });
+    db_->update_run_summary ("run_bad_summary", "not valid json {{{");
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_EQ (row_of (body, "run_partial")["resultSummary"], (json{ { "passed", 2 } }));
+    for (const char* id : { "run_empty_block", "run_block_not_object", "run_bad_summary" }) {
+        EXPECT_FALSE (row_of (body, id).contains ("resultSummary")) << id;
+    }
+}
+
+// A running collection run has no final summary, so its row carries none and the
+// poll builds nothing until the status is terminal - the same cache rule a load
+// row follows.
+// Mutation check: drop the `is_terminal` half of `carries_result_summary` and
+// the running row's build count fails.
+TEST_F (RunsRouteTest, CollectionRowGetsNoResultSummaryUntilItsStatusIsTerminal) {
+    seed ({ .id = "run_collecting",
+    .type       = vayu::RunType::Scenario,
+    .status     = vayu::RunStatus::Running,
+    .start_time = 1 });
+    db_->update_run_summary ("run_collecting", counted_scenario_summary (1, 0, 0, 0));
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    EXPECT_FALSE (row_of (first, "run_collecting").contains ("resultSummary"));
     EXPECT_EQ (summaries_.outcome_build_count (), 0u);
+
+    db_->update_run_status_with_retry ("run_collecting", vayu::RunStatus::Completed);
+    auto [second_status, second] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (second_status, 200);
+    EXPECT_EQ (row_of (second, "run_collecting")["resultSummary"]["passed"], 1);
+    EXPECT_EQ (summaries_.outcome_build_count (), 1u);
+}
+
+// The stop-before-worker race, for a collection run: Stopped with no summary
+// must neither build nor cache, or the worker's own summary would never show.
+// Mutation check: drop the non-empty gate and the first poll's build count and
+// the last poll's key fail.
+TEST_F (RunsRouteTest, StoppedCollectionRowWithoutSummaryIsNotCachedBeforeTheWorkerWritesOne) {
+    seed ({ .id = "run_early_halt",
+    .type       = vayu::RunType::Scenario,
+    .status     = vayu::RunStatus::Stopped });
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    EXPECT_FALSE (row_of (first, "run_early_halt").contains ("resultSummary"));
+    EXPECT_EQ (summaries_.outcome_build_count (), 0u);
+
+    db_->update_run_summary ("run_early_halt", counted_scenario_summary (2, 1, 0, 0));
+    auto [second_status, second] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (second_status, 200);
+    EXPECT_EQ (row_of (second, "run_early_halt")["resultSummary"]["failed"], 1);
+    EXPECT_EQ (summaries_.outcome_build_count (), 1u);
+}
+
+// A terminal collection run's summary is final, so the poll parses it once.
+// Mutation check: bypass `outcome_for` for a Scenario run and the second poll's
+// build count grows.
+TEST_F (RunsRouteTest, RepeatedPollsParseEachCollectionSummaryOnce) {
+    for (const char* id : { "run_c1", "run_c2" }) {
+        seed ({ .id = id, .type = vayu::RunType::Scenario });
+        db_->update_run_summary (id, counted_scenario_summary (1, 1, 1, 1));
+    }
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    EXPECT_EQ (summaries_.outcome_build_count (), 2u);
+
+    auto [second_status, second] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (second_status, 200);
+    EXPECT_EQ (summaries_.outcome_build_count (), 2u);
+    EXPECT_EQ (second["data"], first["data"]);
+}
+
+// A scenario *load* run is a Load row: its summary carries a `scenario` block
+// too, but the row keeps the load shape and never takes the collection counts.
+// Mutation check: build the collection shape for every run type and this row
+// loses its `rps`.
+TEST_F (RunsRouteTest, ScenarioLoadRowKeepsTheLoadShapeNotTheCollectionCounts) {
+    auto stored        = nlohmann::json::parse (judged_summary (true));
+    stored["scenario"] = { { "iterations", 4 }, { "passed", 9 },
+        { "failed", 1 }, { "skipped", 0 }, { "errored", 0 } };
+    seed ({ .id = "run_scenario_load", .start_time = 1 });
+    db_->update_run_summary ("run_scenario_load", stored.dump ());
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    const auto outcome = row_of (body, "run_scenario_load")["resultSummary"];
+    EXPECT_TRUE (outcome.contains ("rps"));
+    for (const char* key : { "passed", "failed", "skipped", "errored" }) {
+        EXPECT_FALSE (outcome.contains (key)) << key;
+    }
 }
 
 // ---------------------------------------------------------------------------
