@@ -10573,8 +10573,10 @@ otherwise kill the stream for good.
 ### GET /runs
 
 List test runs (design mode, load tests and collection runs), newest first
-(`start_time DESC` - the only order the UI uses). Rows carry a compact
-`summary` rather than the full `configSnapshot`, so the polled history sidebar
+(`start_time DESC, id DESC` - the only order the UI uses; the `id` tiebreak
+makes the order total, so runs sharing a millisecond page in a fixed order and
+a page boundary inside such a tie neither repeats nor skips a row). Rows carry
+a compact `summary` rather than the full `configSnapshot`, so the polled history sidebar
 stays cheap as history grows.
 
 Each row's `summary` is derived from that run's `config_snapshot`, and the
@@ -10592,6 +10594,18 @@ seconds.
 **Query parameters** (every one optional; the answer is always the paginated envelope):
 - `limit` - page size (default 50, invalid/&le;0 falls back to 50, capped at 500).
 - `offset` - rows to skip (default 0, negative floored to 0).
+- `before` - a keyset cursor, `<startTime>:<id>`: the page starts after that
+  row (#2978). Pass the previous page's `pagination.nextBefore` unchanged; the
+  value is split on its first `:`, so an id holding one is read whole. Where
+  `offset` makes SQLite step over every row before the page, a cursor page
+  seeks `idx_runs_start_time` to the row and reads about `limit` rows however
+  deep it is, and it does not shift when a new run starts between two pages.
+  Every filter below still applies, and `total` still counts the whole filter,
+  not the rows after the cursor. A value that is not an integer, a `:` and a
+  non-empty id is a `400` with code `invalid_before`; `before` beside a
+  non-zero `offset` is a `400` with code `before_with_offset` (an `offset` of
+  `0` is the same as none). `offset` stays for a client that jumps to a page
+  number.
 - `type` - `design` | `load` | `scenario` (an unrecognised value is ignored, not an error).
 - `status` - a `RunStatus` string (`pending` | `running` | `completed` | `failed` | `stopped`; unrecognised ignored).
 - `requestId` - exact match on the run's linked request.
@@ -10835,9 +10849,22 @@ rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
       "resultSummary": { "statusCode": 200, "latencyMs": 34.2 }
     }
   ],
-  "pagination": { "total": 812, "limit": 50, "offset": 0, "hasMore": true, "returned": 50 }
+  "pagination": {
+    "total": 812,
+    "limit": 50,
+    "offset": 0,
+    "hasMore": true,
+    "returned": 50,
+    "nextBefore": "1234560001:run_1234560001"
+  }
 }
 ```
+
+`hasMore` is read off the rows: the engine fetches one row past `limit`, so it
+holds on a cursor page, which has no offset to add to `total`. `nextBefore` is
+the cursor naming this page's last row whenever `hasMore` is `true` (an offset
+page included, so a client can switch to cursors after its first page) and
+`null` on the last page. A cursor page echoes `offset: 0`.
 
 ### GET /runs/:runId
 

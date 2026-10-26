@@ -42,6 +42,13 @@ describe("API_ENDPOINTS canonical routes", () => {
 				limit: 1,
 			})
 		).toBe("/runs?limit=1&type=design&status=completed&requestId=req_1");
+		// The keyset cursor (#2978): the `<startTime>:<id>` text is escaped like any
+		// other value, and an unset or empty one leaves the question unasked.
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, before: "1234560001:run_1" })).toBe(
+			"/runs?limit=50&before=1234560001%3Arun_1"
+		);
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, before: undefined })).toBe("/runs?limit=50");
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, before: "" })).toBe("/runs?limit=50");
 		expect(API_ENDPOINTS.RUNS_LIST({ q: "users api" })).toBe("/runs?q=users+api");
 		// The context bar's "Last run" lookup - one collection, one row.
 		expect(API_ENDPOINTS.RUNS_LIST({ collectionId: "col_1", limit: 1 })).toBe(

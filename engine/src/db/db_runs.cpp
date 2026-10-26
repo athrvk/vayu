@@ -115,7 +115,7 @@ template <class Test> auto unless_unset (bool unset, Test test) {
     return c (case_<bool> ().when (unset, then (true)).else_ (std::move (test)).end ());
 }
 
-// Compose the sqlite_orm WHERE for a RunFilter, one `unless_unset` term per
+// Compose the sqlite_orm condition for a RunFilter, one `unless_unset` term per
 // optional filter, so the same compiled expression serves every filter
 // combination (no per-combination branching). `q` is a substring LIKE over
 // config_snapshot (see RunFilter's contract).
@@ -131,7 +131,7 @@ template <class Test> auto unless_unset (bool unset, Test test) {
 // A missing `$.scenario.collectionId` extracts as SQL NULL, and NULL equals no
 // id, so design and load runs (and a scenario run stored before the snapshot
 // carried the key) fall out of the result rather than erroring.
-auto run_filter_where (const RunFilter& filter) {
+auto run_filter_condition (const RunFilter& filter) {
     const bool no_type       = !filter.type.has_value ();
     const bool no_status     = !filter.status.has_value ();
     const bool no_req        = !filter.request_id.has_value ();
@@ -156,7 +156,7 @@ auto run_filter_where (const RunFilter& filter) {
     .else_ (std::string{ "{}" })
     .end ();
 
-    return where (unless_unset (no_type, c (&Run::type) == type_val) &&
+    return unless_unset (no_type, c (&Run::type) == type_val) &&
     unless_unset (no_status, c (&Run::status) == status_val) &&
     unless_unset (no_req, c (&Run::request_id) == req_val) &&
     unless_unset (no_q, like (&Run::config_snapshot, q_pat)) &&
@@ -164,7 +164,19 @@ auto run_filter_where (const RunFilter& filter) {
     unless_unset (no_origin, c (&Run::origin) == origin_val) &&
     unless_unset (no_collection,
     json_extract<std::string> (
-    snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val));
+    snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val);
+}
+
+auto run_filter_where (const RunFilter& filter) {
+    return where (run_filter_condition (filter));
+}
+
+// The list order. `id` makes it total: with `start_time` alone, rows sharing a
+// millisecond come back in whatever order the scan meets them, and a page
+// boundary inside such a tie repeats one row and skips another (#2978).
+auto newest_first () {
+    return multi_order_by (
+    order_by (&Run::start_time).desc (), order_by (&Run::id).desc ());
 }
 } // namespace
 
@@ -172,7 +184,22 @@ std::vector<Run>
 Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Run> (run_filter_where (filter),
-    order_by (&Run::start_time).desc (), sqlite_orm::limit (offset, limit));
+    newest_first (), sqlite_orm::limit (offset, limit));
+}
+
+// The row-value comparison is what lets idx_runs_start_time seek: SQLite
+// searches the index for `start_time <= ?` and reads the tie on the cursor's
+// own millisecond through `id`, so a deep page costs about `limit` rows rather
+// than every row before it. No composite (start_time, id) index: the planner
+// sorts only the rows that share one start_time, which the LIMIT bounds.
+std::vector<Run>
+Database::get_runs_before (const RunFilter& filter, const RunCursor& before, int64_t limit) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<Run> (
+    where (run_filter_condition (filter) &&
+    less_than (std::make_tuple (&Run::start_time, &Run::id),
+    std::make_tuple (before.start_time, before.id))),
+    newest_first (), sqlite_orm::limit (limit));
 }
 
 int64_t Database::count_runs (const RunFilter& filter) {
