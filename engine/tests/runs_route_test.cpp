@@ -597,6 +597,67 @@ TEST_F (RunsRouteTest, DesignRowWithNoStoredResultOmitsTheKey) {
     EXPECT_FALSE (body["data"][0].contains ("resultSummary"));
 }
 
+// #2953: `seed` stores end_time = start_time + 1 for every row, the shape a live
+// run has in the database (the engine seeds end_time at start, for a crash). A
+// list row reports it only once the run is terminal; before that it is null, so
+// a client cannot read a zero-length run off a running one.
+// Mutation check: have `serialize_run_end_time` return the raw end_time and the
+// pending and running rows fail.
+TEST_F (RunsRouteTest, ListRowEndTimeIsNullUntilTheRunIsTerminal) {
+    seed ({ .id = "run_pending", .status = vayu::RunStatus::Pending, .start_time = 100 });
+    seed ({ .id = "run_running", .status = vayu::RunStatus::Running, .start_time = 200 });
+    seed ({ .id = "run_done", .status = vayu::RunStatus::Completed, .start_time = 300 });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (body["data"].size (), 3u);
+    std::map<std::string, nlohmann::json> end_time_by_id;
+    for (const auto& row : body["data"]) {
+        end_time_by_id[row["id"].get<std::string> ()] = row.at ("endTime");
+    }
+    EXPECT_TRUE (end_time_by_id.at ("run_pending").is_null ());
+    EXPECT_TRUE (end_time_by_id.at ("run_running").is_null ());
+    EXPECT_EQ (end_time_by_id.at ("run_done"), 301);
+}
+
+// The baseline PUT answers with the same row shape, through the same helper.
+TEST_F (RunsRouteTest, BaselineRowEndTimeIsNullWhileTheRunIsRunning) {
+    seed ({ .id = "run_live", .status = vayu::RunStatus::Running, .start_time = 100 });
+    seed ({ .id = "run_done", .status = vayu::RunStatus::Completed, .start_time = 200 });
+
+    auto [live_status, live] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_live", R"({"baseline":true})");
+    ASSERT_EQ (live_status, 200);
+    EXPECT_TRUE (live["endTime"].is_null ());
+
+    auto [done_status, done] = vayu::http::routes::set_run_baseline_response (
+    *db_, "run_done", R"({"baseline":true})");
+    ASSERT_EQ (done_status, 200);
+    EXPECT_EQ (done["endTime"], 201);
+}
+
+// The report's metadata is a second reader of the same column (GET
+// /runs/:id/report), so it nulls a live run's endTime too.
+TEST_F (RunsRouteTest, ReportMetadataEndTimeIsNullUntilTheRunIsTerminal) {
+    vayu::db::Run run;
+    run.id              = "run_meta";
+    run.start_time      = 100;
+    run.end_time        = 100;
+    run.config_snapshot = R"({"url":"https://x.test/","method":"GET"})";
+
+    for (const auto status : { vayu::RunStatus::Pending, vayu::RunStatus::Running }) {
+        run.status = status;
+        SCOPED_TRACE (vayu::to_string (status));
+        const auto live = vayu::http::routes::build_report_metadata ("run_meta", run);
+        EXPECT_TRUE (live.at ("endTime").is_null ());
+        EXPECT_EQ (live.at ("startTime"), 100);
+    }
+
+    run.status   = vayu::RunStatus::Completed;
+    run.end_time = 4100;
+    const auto done = vayu::http::routes::build_report_metadata ("run_meta", run);
+    EXPECT_EQ (done.at ("endTime"), 4100);
+}
+
 // A scenario run's report `results` are the steps ScenarioRunView renders
 // one row per - not a sample. Past 100 steps used to be silently dropped,
 // which read as a run that executed fewer steps than it actually did.

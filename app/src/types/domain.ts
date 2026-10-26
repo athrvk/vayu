@@ -1869,7 +1869,8 @@ interface RunFields {
 	id: string;
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
-	endTime: number;
+	/** Unix ms once the run is terminal; `null` while it is pending or running. */
+	endTime: number | null;
 	/**
 	 * Present on list rows from the paginated `GET /runs`. The single-run
 	 * `GET /runs/:id` returns {@link configSnapshot} instead.
@@ -2880,7 +2881,8 @@ export interface RunReport {
 		runType: string;
 		status: string;
 		startTime: number;
-		endTime: number;
+		/** Unix ms once the run is terminal; `null` while it is pending or running. */
+		endTime: number | null;
 		requestUrl?: string;
 		requestMethod?: string;
 		configuration?: {

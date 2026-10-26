@@ -189,7 +189,7 @@ Json serialize (const vayu::db::Run& run) {
     json["type"]      = to_string (run.type);
     json["status"]    = to_string (run.status);
     json["startTime"] = run.start_time;
-    json["endTime"]   = run.end_time;
+    json["endTime"]   = serialize_run_end_time (run);
     // Try to parse configSnapshot as JSON if possible, otherwise string
     if (auto parsed = try_parse_body (run.config_snapshot)) {
         json["configSnapshot"] = *parsed;
@@ -207,6 +207,10 @@ Json serialize (const vayu::db::Run& run) {
     json["baseline"] = run.baseline;
     json["origin"]   = serialize_run_origin (run);
     return json;
+}
+
+Json serialize_run_end_time (const vayu::db::Run& run) {
+    return is_terminal (run.status) ? Json (run.end_time) : Json (nullptr);
 }
 
 Json serialize_run_origin (const vayu::db::Run& run) {

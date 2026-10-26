@@ -1099,7 +1099,7 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
     row["type"]      = vayu::to_string (run.type);
     row["status"]    = vayu::to_string (run.status);
     row["startTime"] = run.start_time;
-    row["endTime"]   = run.end_time;
+    row["endTime"]   = vayu::json::serialize_run_end_time (run);
     row["requestId"] = run.request_id.has_value () ? nlohmann::json (*run.request_id) :
                                                      nlohmann::json (nullptr);
     row["environmentId"] = run.environment_id.has_value () ?
@@ -1637,7 +1637,7 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
     metadata["runType"]   = vayu::to_string (run.type);
     metadata["status"]    = vayu::to_string (run.status);
     metadata["startTime"] = run.start_time;
-    metadata["endTime"]   = run.end_time;
+    metadata["endTime"]   = vayu::json::serialize_run_end_time (run);
 
     try {
         auto config = nlohmann::json::parse (run.config_snapshot);
