@@ -219,7 +219,7 @@ TEST_P (IfMatchRouteTest, APutNamingAStaleTagIs412AndWritesNothing) {
     ASSERT_EQ (moved.status, 200) << moved.body.dump ();
 
     const Answer answer = send ("PUT", path, { { "If-Match", tag } }, rename ("Stale"));
-    EXPECT_EQ (answer.status, 412) << answer.body.dump ();
+    ASSERT_EQ (answer.status, 412) << answer.body.dump ();
     EXPECT_EQ (answer.body["error"]["code"], "precondition_failed");
     EXPECT_EQ (answer.body["error"]["updatedAt"], moved.body["updatedAt"]);
     EXPECT_TRUE (answer.etag.empty ()) << "only a 200 carries the row's tag";
@@ -241,7 +241,7 @@ TEST_P (IfMatchRouteTest, AMalformedIfMatchIs400AndWritesNothing) {
 
     const Answer answer =
     send ("PUT", path, { { "If-Match", "1792359304908" } }, rename ("After"));
-    EXPECT_EQ (answer.status, 400) << answer.body.dump ();
+    ASSERT_EQ (answer.status, 400) << answer.body.dump ();
     EXPECT_EQ (answer.body["error"]["code"], "invalid_if_match");
     EXPECT_EQ (stored_name (GetParam ().resource, path), "Before");
 }
