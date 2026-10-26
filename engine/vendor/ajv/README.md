@@ -82,7 +82,11 @@ schema does. The evaluated module holds about 1,000 KB of the script's memory
 until the execution ends (the same harness reads chai at about 720 KB). A
 compile runs on the script's own stack budget, not the library's: the
 measured schema (four levels of nesting, `allErrors` on) needed between 48 and
-64 KB in a gcc `-O0` build, inside the 256 KB default.
+64 KB in a gcc `-O0` build, inside the 256 KB default. That is a gcc figure:
+MSVC at `/Od` under ASan needed more and overflowed 512 KB in the test suite,
+so its test engine is given more headroom
+(`docs/engine/building.md#what-the-matrix-found-and-where-it-stands`, #2684);
+production budgets are unchanged.
 
 To upgrade within 6.x, replace `ajv.min.js` and `LICENSE` from the new
 tarball, re-read the dependency versions its bundle carries and replace their
