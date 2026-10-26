@@ -2889,7 +2889,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // percentiles, puts them on its own frame and returns them, with the
     // trailing window the frame carries, for the stored row, so the frame and
     // the row of one tick cannot disagree. Only a gate frame carries the
-    // run-so-far distributions (#2782), so the 100 ms frames stay their size.
+    // run-so-far distributions (#2782) and a scenario load's sequence so far
+    // (#2823), so the 100 ms frames stay their size.
     // Every other tick returns nullopt and leaves the second open.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
                           int64_t now_wall_ms, int64_t now_steady_ms,
@@ -2931,6 +2932,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             put_interval_percentiles (stats, "second", gate->second);
             mc.put_gate_distributions (stats);
             stats["statusSeconds"] = status_seconds_json (gate->status_seconds);
+            if (const auto scenario = context->published_scenario_state ()) {
+                stats["scenario"] = build_scenario_live_progress (*scenario);
+            }
         }
 
         auto now_steady = std::chrono::steady_clock::now ();

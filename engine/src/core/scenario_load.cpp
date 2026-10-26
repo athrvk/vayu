@@ -396,7 +396,7 @@ const ScenarioPlan& plan) {
     const size_t not_passed = errored + failed;
     nlohmann::json summary = { // The keys `apply_run_summary` already reads for a
         // scenario run, so one report shape covers both executors.
-        { "iterations", state.iterations_started },
+        { "iterations", state.iterations_started.load (std::memory_order_relaxed) },
         { "iterations_completed", completed }, { "steps_executed", executed },
         { "passed", executed > not_passed ? executed - not_passed : 0 },
         { "failed", failed }, { "skipped", skipped }, { "errored", errored },
@@ -412,6 +412,29 @@ const ScenarioPlan& plan) {
         summary["transactions"] = std::move (transactions);
     }
     return summary;
+}
+
+std::vector<ScenarioStepLabel> scenario_step_labels (const ScenarioPlan& plan) {
+    std::vector<ScenarioStepLabel> labels;
+    labels.reserve (plan.steps.size ());
+    for (const auto& step : plan.steps) {
+        labels.push_back ({ step.index, step.name });
+    }
+    return labels;
+}
+
+nlohmann::json build_scenario_live_progress (const ScenarioLoadState& state) {
+    nlohmann::json steps = nlohmann::json::array ();
+    for (size_t i = 0; i < state.step_labels.size (); ++i) {
+        const auto& label = state.step_labels[i];
+        steps.push_back ({ { "index", label.index }, { "name", label.name },
+        { "executed", state.steps.completed (i) }, { "errors", state.steps.errors (i) } });
+    }
+    return { { "iterations", state.iterations_started.load (std::memory_order_relaxed) },
+        { "iterationsCompleted", state.iterations_completed.load (std::memory_order_relaxed) },
+        { "iterationsAbandoned", state.iterations_abandoned.load (std::memory_order_relaxed) },
+        { "stepsExecuted", state.steps_executed.load (std::memory_order_relaxed) },
+        { "steps", std::move (steps) } };
 }
 
 nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
@@ -947,12 +970,13 @@ class ScenarioLoadDriver {
                 continue;
             }
             if (vu.iteration_boundary) {
-                if (max_iterations_ > 0 && state_->iterations_started >= max_iterations_) {
+                if (max_iterations_ > 0 &&
+                state_->iterations_started.load (std::memory_order_relaxed) >= max_iterations_) {
                     vu.retired = true;
                     --live_vus_;
                     continue;
                 }
-                ++state_->iterations_started;
+                state_->iterations_started.fetch_add (1, std::memory_order_relaxed);
                 vu.iteration_boundary = false;
                 if (state_->data_row_count > 0) {
                     // One claim per iteration off the run-wide cursor, wrapping
@@ -1369,6 +1393,9 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
         user->rng = derive_vu_rng (context->rng_seed, user->index);
         state->vus.push_back (std::move (user));
     }
+    // After the setup writes above, so a gate frame never reads a state still
+    // being filled in.
+    context->publish_scenario_state (state);
 
     if (max_iterations > 0) {
         context->requests_expected = max_iterations * step_count;

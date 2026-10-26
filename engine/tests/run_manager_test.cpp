@@ -1524,6 +1524,8 @@ TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
 
         size_t gate_frames = 0;
         for (const auto& frame : frames) {
+            // A single-request run has no sequence to report, gate or not.
+            EXPECT_FALSE (frame.contains ("scenario")) << frame.dump ();
             if (!frame.contains ("secondSamples")) {
                 EXPECT_FALSE (frame.contains ("cumulativeLatency")) << frame.dump ();
                 EXPECT_FALSE (frame.contains ("cumulativePhases")) << frame.dump ();
@@ -1592,6 +1594,101 @@ TEST (LoadClock, GateFramesCarryTheRunSoFarDistributionsTheReportEndsOn) {
             report_latency.at (report_key).get<double> (), 1e-9)
             << live_key << " against latency." << report_key;
         }
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2823: a scenario load run's gate frames carry its sequence so far, and the
+// final frame, built after the drain, counts what the stored summary does. A
+// 100 ms frame carries no `scenario`; a single-request run's frames never do
+// (the test above). Two users over `/slow` then `/error` for 2 s: load outlasts
+// one gate cadence, so a gate lands while the state is published, and every
+// `/error` answer is a step error. Mutation checks: drop the `scenario` block
+// from `emit_live_tick`'s gate branch and the gate and final-frame assertions
+// fail; move it out of the gate branch and the 100 ms assertion fails; stop
+// `release_execution_resources` dropping the published state and the
+// retention assertion fails.
+TEST (LoadClock, GateFramesCarryTheScenarioSequenceTheSummaryEndsOn) {
+    const std::string db_path = "test_load_clock_scenario_sequence.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        auto execution            = std::make_shared<ScenarioExecution> ();
+        execution->request.source = "collection";
+        execution->request.collection_id = "col_live_sequence";
+        const auto urls = std::to_array ({ server.slow_url (), server.error_url () });
+        for (size_t i = 0; i < urls.size (); ++i) {
+            ScenarioStep step;
+            step.index              = i;
+            step.request_id         = "req_" + std::to_string (i);
+            step.name               = "step" + std::to_string (i);
+            step.request.method     = vayu::HttpMethod::GET;
+            step.request.url        = urls.at (i);
+            step.request.timeout_ms = 5000;
+            step.stored_url         = urls.at (i);
+            execution->plan.steps.push_back (std::move (step));
+        }
+        const nlohmann::json config{ { "mode", "constant_concurrency" },
+            { "concurrency", 2 }, { "duration", "2s" }, { "timeout", 5000 },
+            { "scenario",
+            { { "source", "collection" }, { "collectionId", "col_live_sequence" } } } };
+        const std::string run_id = "run_load_scenario_sequence";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db, execution));
+        const auto run = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (run);
+        ASSERT_EQ (run->status, vayu::RunStatus::Completed) << run->summary;
+        ASSERT_TRUE (vayu::tests::wait_until (
+        [&] () { return manager.get_run (run_id) == nullptr; }))
+        << "the run was never retained";
+
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+        EXPECT_EQ (context->published_scenario_state (), nullptr)
+        << "retention keeps the scenario state alive";
+        const auto frames = live_frames (*context);
+        ASSERT_FALSE (frames.empty ());
+
+        size_t sequence_frames = 0;
+        for (const auto& frame : frames) {
+            if (!frame.contains ("secondSamples")) {
+                EXPECT_FALSE (frame.contains ("scenario")) << frame.dump ();
+                continue;
+            }
+            sequence_frames += frame.contains ("scenario") ? 1 : 0;
+        }
+        EXPECT_GE (sequence_frames, 2u) << "no gate frame before the final one";
+
+        const auto& last = frames.back ();
+        ASSERT_TRUE (last.contains ("scenario")) << last.dump ();
+        const auto& live = last.at ("scenario");
+        const auto summary = nlohmann::json::parse (run->summary).at ("scenario");
+        EXPECT_EQ (live.at ("iterations"), summary.at ("iterations"));
+        EXPECT_EQ (live.at ("iterationsCompleted"), summary.at ("iterations_completed"));
+        EXPECT_EQ (live.at ("iterationsAbandoned"), summary.at ("iterations_abandoned"));
+        EXPECT_EQ (live.at ("stepsExecuted"), summary.at ("steps_executed"));
+        EXPECT_GT (live.at ("stepsExecuted").get<size_t> (), 0u) << live.dump ();
+
+        const auto& live_steps   = live.at ("steps");
+        const auto& stored_steps = summary.at ("steps");
+        ASSERT_EQ (live_steps.size (), urls.size ()) << live.dump ();
+        ASSERT_EQ (stored_steps.size (), urls.size ()) << summary.dump ();
+        for (size_t i = 0; i < urls.size (); ++i) {
+            for (const char* key : { "index", "name", "executed", "errors" }) {
+                EXPECT_EQ (live_steps.at (i).at (key), stored_steps.at (i).at (key))
+                << "step " << i << " " << key;
+            }
+        }
+        EXPECT_GT (live_steps.at (1).at ("errors").get<size_t> (), 0u) << live.dump ();
 
         manager.shutdown ();
     }
