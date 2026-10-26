@@ -1975,8 +1975,12 @@ describe("the timeout and think-time hint (issue #2229)", () => {
 	it("names where the request timeout and the pacing live", () => {
 		open();
 
-		const hint = screen.getByText(/times out after Default request timeout/);
-		expect(hint).toHaveTextContent("Settings › Network & connectivity");
+		const hint = screen.getByText(/times out after its own Request timeout/);
+		// Both timeouts: the request's own and the setting it falls back to (#2937).
+		expect(hint).toHaveTextContent("its own Request timeout (Settings tab)");
+		expect(hint).toHaveTextContent(
+			"Default request timeout (Settings › Network & connectivity)"
+		);
 		expect(hint).toHaveTextContent("Think time element");
 		expect(hint).toHaveTextContent("Elements tab");
 		expect(hint).toHaveTextContent("virtual users");
@@ -1985,7 +1989,7 @@ describe("the timeout and think-time hint (issue #2229)", () => {
 	it("sits under the target line, in the header", () => {
 		open({ url: "https://api.example.com/" });
 
-		const hint = screen.getByText(/times out after Default request timeout/);
+		const hint = screen.getByText(/times out after its own Request timeout/);
 		expect(hint.parentElement).toHaveAttribute("data-slot", "dialog-header");
 	});
 });

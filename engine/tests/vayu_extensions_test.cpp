@@ -182,6 +182,15 @@ TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     EXPECT_TRUE (ext::auth_of (Json::parse (R"({"mode":"inherit"})"), /*collection=*/false));
     EXPECT_FALSE (ext::settings_of (Json::parse (R"({"httpVersion":"http9"})")));
     EXPECT_FALSE (ext::settings_of (Json::parse (R"({"verifySSL":"no"})")));
+    // A `timeout` `POST /import/apply` would refuse is this piece's to drop
+    // (#2937), so the import is never refused over it.
+    for (const char* bad : { R"({"timeout":0})", R"({"timeout":86400001})",
+         R"({"timeout":"2500"})", R"({"timeout":null})" }) {
+        EXPECT_FALSE (ext::settings_of (Json::parse (bad))) << bad;
+    }
+    const auto timed = ext::settings_of (Json::parse (R"({"timeout":2500})"));
+    ASSERT_HAS_VALUE (timed);
+    EXPECT_EQ ((*timed)["timeout"], 2500);
     EXPECT_FALSE (ext::examples_of (Json::parse (R"([{"name":"x","status":42}])")));
     EXPECT_FALSE (ext::data_schema_of (Json::parse (R"({"columns":["a","a"]})")));
     EXPECT_FALSE (ext::folder_path_of (Json::parse (R"(["a",""])")));

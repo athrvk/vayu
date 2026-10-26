@@ -94,6 +94,10 @@ export function buildComposeBody(input: ComposeBodyInput): ComposeBody {
 			maxRedirects: request.maxRedirects,
 			httpVersion: request.httpVersion,
 			verifySSL: request.verifySSL,
+			// The one setting not always sent (issue #2937): unset, the key stays off
+			// the body so the engine reads the `defaultTimeout` setting at the send,
+			// where a copy of it here would pin today's value into the request.
+			...(request.timeout !== null ? { timeout: request.timeout } : {}),
 			// Postman's protocol switches (issue #1765), always sent for the same
 			// reason: the editor's value, not the saved row's.
 			...protocolSettings(request),

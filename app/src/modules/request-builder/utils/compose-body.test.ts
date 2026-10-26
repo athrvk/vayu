@@ -18,6 +18,8 @@ import type { RequestState } from "../types";
 import { buildComposeBody, type ComposeBodyInput } from "./compose-body";
 import { createDefaultRequestState } from "./request-state";
 
+const OWN_TIMEOUT = 1500;
+
 /** Every field off its default, so an always-sent one cannot pass by luck. */
 function editedRequest(): RequestState {
 	return {
@@ -48,6 +50,7 @@ function editedRequest(): RequestState {
 		elements: [{ id: "el_own", kind: "script.pre", enabled: true, config: { script: "1" } }],
 		followRedirects: false,
 		maxRedirects: 3,
+		timeout: OWN_TIMEOUT,
 		httpVersion: "http2",
 		verifySSL: false,
 		disableCookies: true,
@@ -127,6 +130,7 @@ describe("buildComposeBody", () => {
 				],
 				followRedirects: false,
 				maxRedirects: 3,
+				timeout: OWN_TIMEOUT,
 				httpVersion: "http2",
 				verifySSL: false,
 				disableCookies: true,
@@ -137,6 +141,20 @@ describe("buildComposeBody", () => {
 			collectionId: "col_leaf",
 			environmentId: "env_1",
 		});
+	});
+
+	it("leaves the timeout key off when the request states none, so the engine reads the setting (#2937)", () => {
+		// The one setting not always sent: a copy of today's `defaultTimeout`
+		// would pin it on the send, and a later change to the setting would not
+		// reach it.
+		const request = { ...editedRequest(), timeout: null };
+		const { body } = buildComposeBody(input({ request }));
+		expect(body.request).not.toHaveProperty("timeout");
+	});
+
+	it("sends the request's own timeout through", () => {
+		const { body } = buildComposeBody(input());
+		expect(body.request?.timeout).toBe(OWN_TIMEOUT);
 	});
 
 	it("sends params as [] when the request has no path rows", () => {

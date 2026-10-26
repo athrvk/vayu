@@ -2179,7 +2179,7 @@ describe("document CRUD parity", () => {
 	describe("saved-request auth and settings", () => {
 		const auth = { mode: "bearer", token: "{{apiToken}}" };
 
-		test("create_request stores auth and the four Settings fields", async () => {
+		test("create_request stores auth and the five Settings fields", async () => {
 			const client = fakeClient();
 			const res = await dispatchTool(
 				"create_request",
@@ -2190,6 +2190,7 @@ describe("document CRUD parity", () => {
 					auth,
 					followRedirects: false,
 					maxRedirects: 3,
+					timeout: 1500,
 					httpVersion: "http2",
 					stream: true,
 				},
@@ -2200,6 +2201,7 @@ describe("document CRUD parity", () => {
 				auth,
 				followRedirects: false,
 				maxRedirects: 3,
+				timeout: 1500,
 				httpVersion: "http2",
 				stream: true,
 			});
@@ -2219,6 +2221,7 @@ describe("document CRUD parity", () => {
 				"auth",
 				"followRedirects",
 				"maxRedirects",
+				"timeout",
 				"httpVersion",
 				"stream",
 			]) {
@@ -2344,6 +2347,7 @@ describe("document CRUD parity", () => {
 		test.each([
 			["followRedirects", false],
 			["maxRedirects", 3],
+			["timeout", 1500],
 			["httpVersion", "http2"],
 			["stream", true],
 			["verifySSL", false],
@@ -2355,6 +2359,27 @@ describe("document CRUD parity", () => {
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.updateRequest)[1]).toEqual({ [key]: value });
+		});
+
+		test("update_request sends an explicit null to reset the timeout, and refuses a value outside 1-86400000", async () => {
+			// `null` is the reset (issue #2937): the engine reads an absent key as
+			// "keep", so the argument has to reach the payload as `null`, not drop out.
+			const client = fakeClient();
+			await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", timeout: null },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.updateRequest)[1]).toEqual({ timeout: null });
+
+			const schema = schemaOf("update_request", "timeout");
+			for (const refused of [0, -5, 86_400_001, 1.5, "30s"]) {
+				expect(schema.safeParse(refused).success, String(refused)).toBe(false);
+			}
+			for (const accepted of [1, 86_400_000, null, undefined]) {
+				expect(schema.safeParse(accepted).success, String(accepted)).toBe(true);
+			}
+			expect(schemaOf("create_request", "timeout").safeParse(null).success).toBe(true);
 		});
 
 		test("run_request refuses a per-call downgrade before anything is sent", async () => {

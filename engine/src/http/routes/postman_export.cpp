@@ -80,6 +80,7 @@ read_request (vayu::db::Database& db, const vayu::db::Request& row) {
     request.http_version     = row.http_version;
     request.verify_ssl       = row.verify_ssl;
     request.stream           = row.stream;
+    request.timeout_ms       = row.timeout_ms;
     request.disable_cookies  = row.disable_cookies;
     request.disabled_system_headers =
     column (row.disabled_system_headers, ordered::array ());

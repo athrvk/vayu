@@ -348,9 +348,10 @@ export default function LoadTestConfigDialog({
 						)}
 					</DialogDescription>
 					<p className="text-label leading-relaxed text-muted-foreground">
-						A request times out after Default request timeout (Settings › Network &amp;
-						connectivity). To pace virtual users, add a Think time element on the
-						request&apos;s Elements tab.
+						A request times out after its own Request timeout (Settings tab) or, without
+						one, Default request timeout (Settings › Network &amp; connectivity). To
+						pace virtual users, add a Think time element on the request&apos;s Elements
+						tab.
 					</p>
 				</DialogHeader>
 

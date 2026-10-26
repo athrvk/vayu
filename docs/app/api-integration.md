@@ -706,6 +706,16 @@ turns that into an absent key and drops a value it does not recognize, and
 `updateRequest`'s field is `MethodSource | null`, so leaving GraphQL - or
 picking a method by hand - clears the marker the same way.
 
+A request carries **`timeout`** - its own timeout in milliseconds, `1`-`86400000`
+(issue #2937) - or `null` when it states none and sends with the `defaultTimeout`
+setting read at each send. The engine always serializes it, and
+`RequestTransformer` keeps `null` as `null` rather than filling in a default (a
+non-number reads as `null` too). On `updateRequest` the field is `number | null`:
+absent keeps the stored value and `null` resets it, so the builder's
+`buildUpdatePayload` writes a cleared field as an explicit `null`. The engine
+refuses a number outside the range with a 400 naming `timeout`, so the Settings
+tab clamps what is typed.
+
 #### Trash
 
 ```typescript
@@ -1589,7 +1599,8 @@ list engine-side (`compose_elements`). The **engine** runs each element at its
 kind's phase - see `docs/engine/elements.md`.
 
 **Redirect policy, protocol and TLS verification are always sent, never
-elided.** `followRedirects`, `maxRedirects`, `httpVersion` and `verifySSL` all
+elided - and the request's timeout is the deliberate exception.**
+`followRedirects`, `maxRedirects`, `httpVersion` and `verifySSL` all
 come from the request's **Settings** tab and are included on every execute even
 when they equal the defaults. The engine defaults `follow_redirects` to `true`, so omitting a
 `false` would follow the 3xx the user asked to inspect - a bug the app shipped
@@ -1604,6 +1615,16 @@ only one, and it governs Send and load test alike. `httpVersion` is
 `"auto" | "http1.1" | "http2"`: `"auto"` lets ALPN negotiate, `"http1.1"`
 forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
 1.1 over plain `http://` (curl's `CURL_HTTP_VERSION_2TLS` semantics).
+
+**`timeout` is the one Settings field that is not always sent** (issue #2937).
+A request's own timeout is `number | null`, and `buildComposeBody` writes
+`timeout` onto the inline compose request only when it is a number. `null` means
+"use the `defaultTimeout` setting", and the engine can only read the live
+setting when the key is absent: sending today's value instead would pin it on
+the request, and `POST /execute` refuses a `null`. The composed payload carries
+the key on to `/execute` and `/runs`, so Send, a collection run and a load test
+wait as long as the Settings tab says. A History replay seeds it from the run's
+recorded body, and Save to request does not write it back.
 
 **Postman's protocol switches ride the same rule** (issue #1765).
 `disableCookies`, `disabledSystemHeaders` and `disableUrlEncoding` come from the
@@ -1979,6 +2000,7 @@ await apiService.startLoadTest({
   },
   followRedirects: true,
   maxRedirects: 10,
+  // timeout: 1500,  // only when the request states one; never sent as a copy of the setting
   httpVersion: "auto",
   verifySSL: true,
   mode: "constant_rps",

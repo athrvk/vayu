@@ -166,6 +166,28 @@ TEST_F (PostmanExportRouteTest, TheRoundTripFixtureComesBackByteForByte) {
     EXPECT_EQ (body["notes"]["secretsOmitted"], 0);
 }
 
+// A Postman item has no timeout member (#2937), so the route reads the stored
+// one only to say it was left behind. Mutation check: drop the `timeout_ms`
+// copy in the route's `read_request` and `notCarried` is empty.
+TEST_F (PostmanExportRouteTest, ARequestsOwnTimeoutIsListedAsNotCarried) {
+    using vayu::http::routes::create_collection_response;
+    using vayu::http::routes::create_request_response;
+    auto [collection_status, collection] =
+    create_collection_response (*db_, json{ { "name", "Timed" } });
+    ASSERT_EQ (collection_status, 200) << collection.dump ();
+    const std::string id = collection["id"].get<std::string> ();
+    for (const json& timeout : { json (2500), json (nullptr) }) {
+        auto [status, created] = create_request_response (*db_,
+        json{ { "collectionId", id }, { "name", "R" }, { "method", "GET" },
+        { "url", "https://example.test" }, { "timeout", timeout } });
+        ASSERT_EQ (status, 200) << created.dump ();
+    }
+    const json body = export_ok (id);
+    ASSERT_EQ (body["notes"]["notCarried"].size (), 1u) << body.dump ();
+    EXPECT_EQ (body["notes"]["notCarried"][0]["code"], "request_timeout");
+    EXPECT_EQ (body["notes"]["notCarried"][0]["count"], 1);
+}
+
 /// The exported `protocolProfileBehavior` of the root item named @p name, as
 /// the text it was written as (member order is the point).
 std::string exported_protocol_behavior (const std::string& text, const std::string& name) {

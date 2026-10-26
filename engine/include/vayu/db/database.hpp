@@ -65,9 +65,10 @@ namespace vayu::db {
  *     apart again on its next create or reorder, and nothing would move them
  *     back;
  * 8 - `collections.spec_file` and `collections.data_file`, the files a
- *     collection's Spec and Data tabs are bound to (#2765).
+ *     collection's Spec and Data tabs are bound to (#2765);
+ * 9 - `requests.timeout_ms`, a request's own timeout (#2937).
  */
-inline constexpr int SCHEMA_VERSION = 8;
+inline constexpr int SCHEMA_VERSION = 9;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.

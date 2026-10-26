@@ -156,6 +156,29 @@ describe("seedFromRun", () => {
 		expect(request.maxRedirects).toBe(DEFAULT_MAX_REDIRECTS);
 	});
 
+	describe("the timeout the run's send named (#2937)", () => {
+		const RUN_TIMEOUT = 1500;
+		const withTimeout = (timeout: unknown) =>
+			run({
+				configSnapshot: { method: "GET", url: "https://x.test/", timeout },
+			} as Partial<Run>);
+
+		it("seeds it, so a replay waits as long as the run did", () => {
+			const { request } = seedFromRun(withTimeout(RUN_TIMEOUT), liveRequest);
+			expect(request.timeout).toBe(RUN_TIMEOUT);
+		});
+
+		it("seeds null when the snapshot carries none, never a default", () => {
+			// The engine records the body as sent, and the app sends a timeout only
+			// when the request states one: no key is a send on the setting.
+			expect(seedFromRun(run(), liveRequest).request).toHaveProperty("timeout", null);
+		});
+
+		it("reads a value that is not a number as none", () => {
+			expect(seedFromRun(withTimeout("30s"), liveRequest).request.timeout).toBeNull();
+		});
+	});
+
 	it("keeps the protocol switches the run used (#1765)", () => {
 		const recorded = run({
 			configSnapshot: {

@@ -26,6 +26,7 @@
  */
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -824,10 +825,40 @@ ExchangeInputs inputs);
 [[nodiscard]] size_t design_response_body_bound (vayu::db::Database& db);
 
 /**
+ * One numeric field of a payload: what it is called on the wire, and the
+ * closed interval it must fall in. Kept as data so a route's checks read as a
+ * table rather than hand-written branches that can drift apart.
+ */
+struct NumericRunField {
+    const char* key;
+    int64_t min;
+    int64_t max;
+    const char* why; // appended to the message, explains the bound
+};
+
+/**
+ * The `timeout` bound, in milliseconds. One definition for every writer of a
+ * timeout: `POST /execute` and `POST /runs` hold a payload to it, and a stored
+ * request's `timeout` (#2937) is held to it on `POST`/`PUT /requests`,
+ * `POST /import/apply` and an OpenAPI import's `x-vayu-request.settings`.
+ */
+inline constexpr NumericRunField REQUEST_TIMEOUT_FIELD{ "timeout", 1, 86400000,
+    "A transfer with no timeout never completes, so the run can never reach a "
+    "terminal status." };
+
+/**
+ * Why @p payload's @p field is unusable - present but not a JSON number, or
+ * outside its range - naming the field; nothing when it is usable. Absent and
+ * `null` are always usable: every such field has a default.
+ */
+[[nodiscard]] std::optional<std::string>
+check_numeric_field (const nlohmann::json& payload, const NumericRunField& field);
+
+/**
  * The timeout a request or run payload sends with: its own numeric `timeout`
  * when it carries one, otherwise `configured_default`. Absent and `null` both
  * mean "use the default". Reads, never validates: every route range-checks
- * `timeout` (`REQUEST_TIMEOUT_FIELD` in `routes/execution.cpp`) before this.
+ * `timeout` (`REQUEST_TIMEOUT_FIELD` above) before this.
  */
 [[nodiscard]] int resolve_request_timeout_ms (const nlohmann::json& payload,
 int configured_default);

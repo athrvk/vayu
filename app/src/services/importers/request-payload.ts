@@ -44,6 +44,7 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		// tests, and "absent" is the state the engine's field appliers read.
 		...(r.followRedirects !== undefined ? { followRedirects: r.followRedirects } : {}),
 		...(r.maxRedirects !== undefined ? { maxRedirects: r.maxRedirects } : {}),
+		...(r.timeout !== undefined ? { timeout: r.timeout } : {}),
 		...(r.verifySSL !== undefined ? { verifySSL: r.verifySSL } : {}),
 		...(r.httpVersion !== undefined ? { httpVersion: r.httpVersion } : {}),
 		...(r.stream !== undefined ? { stream: r.stream } : {}),

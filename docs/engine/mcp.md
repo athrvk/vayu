@@ -304,7 +304,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept; the returned row is withheld as `list_collections` answers it |
 | `preview_import`       | read     | `POST /import/parse`                         | - (stores nothing; import_document's own arguments; answers counts, names and `meta`, never the parsed tree) |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent (a `no_server_url` entry, an OpenAPI document with no `servers`, adds a sentence saying `{{baseUrl}}` is undefined and to set it with `update_collection` or `update_environment`; `preview_import` says the same); the caveat reads `meta.folderCount` and, when above 0, says the requests are filed under sub-collections and that `recursive: true` on `run_collection` or `run_collection_smoke` runs them all |
-| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
+| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `timeout` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it) |
@@ -402,10 +402,13 @@ Notes:
   own and the value reaches `CURLOPT_MAXREDIRS`, where a negative means
   *unlimited*.
   **The tool exposes no per-run `timeout`, and that is not an omission**:
-  `POST /runs` accepts one, but a run started here takes the `defaultTimeout`
-  setting (`resolve_request_timeout_ms`), which `update_engine_config` changes -
-  the run's OAuth 2.0 token fetches and every `pm.sendRequest` its scripts make
-  included (issues #2833, #2841). Four transfers keep bounds of their own: a
+  `POST /runs` accepts one, but a run started here takes the timeout of the
+  request itself. A run started by `requestId` sends with the stored request's
+  own `timeout` when it states one (issue #2937), because `POST /compose` writes
+  it into the payload the run is started from; otherwise, and for an ad-hoc
+  target, it takes the `defaultTimeout` setting (`resolve_request_timeout_ms`),
+  which `update_engine_config` changes - the run's OAuth 2.0 token fetches and
+  every `pm.sendRequest` its scripts make included (issues #2833, #2841). Four transfers keep bounds of their own: a
   stream ends on its idle timeout and its duration and event caps, never a
   whole-transfer deadline; the import fetch has its own 30 s and stall timeout;
   the connection test its 10 s; and the server-vitals monitor its scrape
@@ -764,8 +767,8 @@ Notes:
   any prompt is shown.
 - **A saved request an agent writes is the one the builder writes** (issues
   #759, #795). `create_request` / `update_request` carry the request's `auth`
-  block and the five **Settings** tab fields (`followRedirects`, `maxRedirects`,
-  `httpVersion`, `stream`, `verifySSL`) as well as its url, headers, body and
+  block and the six **Settings** tab fields (`followRedirects`, `maxRedirects`,
+  `timeout`, `httpVersion`, `stream`, `verifySSL`) as well as its url, headers, body and
   both scripts, so an agent that can send an authenticated request can now save
   one. The `auth` input is the *same schema* `run_request` takes rather than a
   copy of it - one definition, four descriptions - which is what lets an agent
@@ -781,7 +784,12 @@ Notes:
   the auth block and each setting follow the merge-patch rule the strings already
   did: named is written, absent is left alone, so an update that mentions only
   `maxRedirects` cannot hand a stored `followRedirects: false` back to the
-  engine's default. For `verifySSL` that rule is a *security* rule rather than a
+  engine's default. `timeout` (issue #2937; milliseconds, `1`-`86400000`, checked
+  at the schema as the engine checks it) has one more state than the others:
+  `null` on `update_request` resets it to "no timeout of its own", so the request
+  sends with the `defaultTimeout` setting again, where an absent key keeps the
+  stored value; `create_request` takes it absent or `null` for none. For
+  `verifySSL` that rule is a *security* rule rather than a
   convenience: a defaulted `true` on an unrelated update would silently re-enable
   a certificate check the user turned off. The one exclusion left is deliberate:
   **file body parts**, which name a path on the user's machine an agent cannot

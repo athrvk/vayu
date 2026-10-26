@@ -540,6 +540,12 @@ interface NumberSettingRowProps {
 	/** The committed value. Shown whenever the field is not mid-edit. */
 	value: string;
 	/**
+	 * What the field says while it is empty. For a setting that may be unset,
+	 * where empty is a real state ("use the default") rather than a draft the
+	 * row is waiting on.
+	 */
+	placeholder?: string;
+	/**
 	 * Fires per `commit`. Receives the raw string (always parseable as a
 	 * number); the owner still decides what to do with it - clamping included.
 	 */
@@ -595,6 +601,7 @@ export function NumberSettingRow({
 	labelHidden = false,
 	description,
 	value,
+	placeholder,
 	onCommit,
 	commit = "blur",
 	onDraftChange,
@@ -679,12 +686,22 @@ export function NumberSettingRow({
 			<div className="flex items-center gap-2">
 				{/* `min-w-0` so a compact input can shrink inside a narrow grid
 				    column instead of forcing the column wider than its track. */}
-				<div className={cn("relative", compact && "min-w-0 flex-1")}>
+				<div
+					className={cn(
+						"relative",
+						compact && "min-w-0 flex-1",
+						// A placeholder is a sentence the width must hold: the wrapper
+						// shrink-wraps the input's intrinsic ~70px otherwise and cuts
+						// "Use default (30,000 ms)" to "Use defau".
+						placeholder && !compact && "w-[16rem]"
+					)}
+				>
 					<Input
 						id={inputId}
 						type="number"
 						inputMode="numeric"
 						value={shown}
+						placeholder={placeholder}
 						min={min}
 						max={max}
 						step={integer ? 1 : "any"}
@@ -700,7 +717,7 @@ export function NumberSettingRow({
 						}}
 						size={compact ? "sm" : "default"}
 						className={cn(
-							!compact && "max-w-[12rem]",
+							!compact && (placeholder ? "max-w-[16rem]" : "max-w-[12rem]"),
 							// Literal classes, not a computed string: Tailwind's
 							// scanner cannot see one that is assembled at runtime.
 							unit && (unit.length > 4 ? "pr-20" : "pr-12"),

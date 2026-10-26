@@ -1844,6 +1844,7 @@ TEST (PostmanExport, VayuOnlySettingsAreNotes) {
     PostmanExportRequest entry = request ("r", "u");
     entry.http_version         = "http2";
     entry.stream               = true;
+    entry.timeout_ms           = 2500;
     entry.mock_response_mode   = "random";
     entry.has_spec_operation   = true;
     PostmanExportFolder root   = collection ();
@@ -1855,7 +1856,8 @@ TEST (PostmanExport, VayuOnlySettingsAreNotes) {
     root.requests.push_back (entry);
     const auto outcome = run (root);
     EXPECT_EQ (losses (outcome),
-    (json{ { "http_version", 1 }, { "event_stream", 1 }, { "mock_response_mode", 1 },
+    (json{ { "http_version", 1 }, { "event_stream", 1 },
+    { "request_timeout", 1 }, { "mock_response_mode", 1 },
     { "spec_operations", 1 }, { "data_contracts", 2 }, { "spec_bindings", 1 } }));
     json notes = vayu::core::postman_export_notes_json (outcome.notes);
     EXPECT_EQ (notes["requestsExported"], 1);

@@ -259,6 +259,10 @@ struct ExportRequest {
      * never declared `in: query`.
      */
     std::vector<ExportKeyValue> path_params;
+    /// `db::Request::timeout_ms` (issue #2937): the request's own timeout,
+    /// empty for "use the `defaultTimeout` setting". Appended last for the
+    /// positional-initialization reason `elements` gives.
+    std::optional<int> timeout_ms;
 };
 
 /**

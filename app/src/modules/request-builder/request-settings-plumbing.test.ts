@@ -40,6 +40,9 @@
  * the certificate the user turned verification off for, and the request fails
  * against the host the setting exists for.
  *
+ * `timeout` (issue #2937) joined them with the same load, save and compose hops
+ * and one difference, scanned for below: it is the only one not always sent.
+ *
  * All four fields have the same shape at every hop, deliberately. A revision
  * of this branch gave `httpVersion` a per-run picker in the load test dialog,
  * so the load-test hop read the confirmed `LoadTestConfig` instead of the
@@ -108,11 +111,18 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 	const SAVE_AND_CURL_HOPS: Record<string, number> = {
 		followRedirects: 2,
 		maxRedirects: 1,
+		timeout: 1,
 		httpVersion: 1,
 		verifySSL: 2,
 	};
 
-	for (const field of ["followRedirects", "maxRedirects", "httpVersion", "verifySSL"] as const) {
+	for (const field of [
+		"followRedirects",
+		"maxRedirects",
+		"timeout",
+		"httpVersion",
+		"verifySSL",
+	] as const) {
 		it(`loads ${field} from the saved request into the editor state`, () => {
 			expect(hops(source ?? "", "fetchedRequest", field)).toBe(1);
 		});
@@ -127,6 +137,23 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 			expect(hops(composeBody ?? "", "request", field)).toBe(1);
 		});
 	}
+
+	/**
+	 * `timeout` is the one field of the loop above that is not always sent
+	 * (issue #2937): `null` means "use the `defaultTimeout` setting", and the
+	 * engine reads the live setting only when the key is absent. Sending it
+	 * unconditionally would pin today's value, and a cleared field would reach
+	 * the engine as `timeout: null`, which POST /execute refuses.
+	 */
+	it("writes the timeout into the compose body only when the request states one", () => {
+		expect(composeBody).toMatch(
+			/\.\.\.\(request\.timeout !== null \? \{ timeout: request\.timeout \} : \{\}\)/
+		);
+	});
+
+	it("saves a cleared timeout as an explicit null, since an absent key keeps the stored one", () => {
+		expect(source).toContain("payload.timeout = request.timeout ?? null");
+	});
 
 	it("sends the load test through the shared compose body, from the request", () => {
 		const src = source ?? "";

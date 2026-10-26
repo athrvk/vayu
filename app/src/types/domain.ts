@@ -913,6 +913,15 @@ export interface Request {
 	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
 	maxRedirects: number;
 	/**
+	 * This request's own timeout in milliseconds (issue #2937), `1`-`86400000`,
+	 * or `null` when it states none and sends with the `defaultTimeout` setting
+	 * read at each send. Always present on a stored row. Unlike the fields
+	 * around it this one is never sent at its default: `null` stays off the
+	 * composed payload so the engine resolves the live setting, where a copy of
+	 * today's default would pin it.
+	 */
+	timeout: number | null;
+	/**
 	 * HTTP protocol to negotiate for this request. `"auto"` lets curl pick
 	 * (ALPN over TLS, HTTP/1.1 otherwise) - see {@link HTTP_VERSIONS}. This is
 	 * the *requested* protocol; the protocol actually negotiated for a given

@@ -244,9 +244,10 @@ export class EngineClient {
 	 * ({@link executeBudgetMs}), not a bare transfer. A payload with neither is
 	 * the timeout plus the grace, as it always was.
 	 *
-	 * MCP-composed payloads carry no `timeout` of their own (`payload_from_stored`
-	 * emits none), so the config read - not the payload - is what does the work;
-	 * the `max` covers an inline payload that does carry a larger one.
+	 * A payload composed from a stored request carries a `timeout` only when the
+	 * request states one (`payload_from_stored`, issue #2937), so for most sends
+	 * the config read - not the payload - is what does the work; the `max` covers
+	 * a payload whose own timeout is larger than the setting.
 	 */
 	private async proxiedTimeoutMs(payload: unknown, signal?: AbortSignal): Promise<number> {
 		let settings: BudgetSettings = { defaultTimeoutMs: 0, scriptTimeoutMs: 0 };

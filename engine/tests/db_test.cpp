@@ -3020,7 +3020,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 8);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 9);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
 
@@ -3775,7 +3775,7 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
 
     Database db (TEST_DB_PATH);
     db.init ();
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 8);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 9);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));
@@ -3831,6 +3831,52 @@ TEST_F (DatabaseTest, AVersionSevenDatabaseGainsTheCollectionFileBindingColumns)
     EXPECT_EQ (legacy->name, "Legacy");
     EXPECT_EQ (legacy->spec_file, "{}");
     EXPECT_EQ (legacy->data_file, "{}");
+}
+
+// Version 9 added `requests.timeout_ms` (#2937). A version-8 database has no
+// such column; `sync_schema ()` adds it, a stored request keeps its row and
+// reads back with no timeout of its own, and the migration only stamps.
+TEST_F (DatabaseTest, AVersionEightDatabaseGainsTheRequestTimeoutColumn) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_legacy";
+        col.name  = "Legacy";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_legacy";
+        r.collection_id = "col_legacy";
+        r.name          = "Legacy";
+        r.url           = "https://example.test";
+        r.timeout_ms    = 2500;
+        db.save_request (r);
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE requests DROP COLUMN timeout_ms",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "requests", "timeout_ms"))
+    << "test setup did not remove the column";
+    set_user_version (TEST_DB_PATH, 8);
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "timeout_ms"));
+    const auto legacy = db.get_request ("req_legacy");
+    ASSERT_HAS_VALUE (legacy)
+    << "a request stored before the column did not survive";
+    EXPECT_EQ (legacy->name, "Legacy");
+    EXPECT_FALSE (legacy->timeout_ms.has_value ());
 }
 
 // A database stamped by the next schema is refused before anything writes to

@@ -134,6 +134,7 @@ const DRAFT: RequestState = {
 	] as unknown as RequestState["elements"],
 	followRedirects: false,
 	maxRedirects: 3,
+	timeout: null,
 	httpVersion: "http2",
 	verifySSL: false,
 	disableCookies: false,
