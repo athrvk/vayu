@@ -892,7 +892,12 @@ logged as a warning: it means a client skipped composition.
   `verify_ssl`, #706). Both clients send them on every execute and load test
   rather than eliding defaults, because the engine defaults to following and
   verifying: an omitted `false` would follow the 3xx the user asked to see, or
-  verify the certificate they opted out for. Postman's
+  verify the certificate they opted out for. A request's own `timeout`
+  (`requests.timeout_ms`, nullable, #2937) is the deliberate exception:
+  `payload_from_stored` emits it only when stated, because its absent default
+  is the live `defaultTimeout` setting, resolved at send by
+  `resolve_request_timeout_ms`, and a scenario step's own value wins over the
+  run's. Postman's
   `disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` (#1765)
   follow the same rule on the same columns' pattern and parse onto
   `vayu::Request` in `read_request_options`: the jar is kept off the transfer

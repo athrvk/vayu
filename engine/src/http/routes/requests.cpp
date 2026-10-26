@@ -651,6 +651,14 @@ bool is_create) {
     // is not a policy we want a stray value to select.
     r.max_redirects = std::clamp (r.max_redirects, 0, 100);
 
+    // The request's own timeout (issue #2937), refused rather than clamped
+    // like `POST /execute`'s: `null` is "use the `defaultTimeout` setting".
+    if (auto outcome = apply_nullable_int_field (
+        json, REQUEST_TIMEOUT_FIELD, r.timeout_ms, is_create);
+    !outcome) {
+        return outcome;
+    }
+
     // Unlike the fields above, an unrecognized httpVersion is rejected rather
     // than coerced - see apply_http_version_field in routes.hpp. The seed is
     // read fresh here (not hoisted above the field applications) so it always
@@ -1011,7 +1019,8 @@ void register_request_routes (RouteContext& ctx) {
      * Body params: collectionId, name, method, url (all required), description,
      * params/headers (arrays of KeyValueEntry), body, bodyType, auth,
      * elements, order, followRedirects,
-     * maxRedirects, stream, specOperation ({operationId?, method, path} naming
+     * maxRedirects, timeout (ms, 1..86400000, null for the defaultTimeout
+     * setting), stream, specOperation ({operationId?, method, path} naming
      * the operation of the collection's bound spec this request is, or null for
      * none), httpVersion (absent/null seeds from the "defaultHttpVersion"
      * config entry; an unrecognized value is a 400, never silently coerced).

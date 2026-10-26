@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { computeBreakpoint, DEFAULT_SLO_MS } from "./computeBreakpoint";
+import { computeBreakpoint, DEFAULT_SLO_MS, notCrossed, sloSourceOf } from "./computeBreakpoint";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -186,5 +186,37 @@ describe("computeBreakpoint atRunStart", () => {
 	it("is clear on a series that never crossed", () => {
 		expect(computeBreakpoint([tick({ latency_p99_ms: 50 })], 200).atRunStart).toBe(false);
 		expect(computeBreakpoint([], 200).atRunStart).toBe(false);
+	});
+});
+
+describe("breakpoint sloSource (#2939)", () => {
+	const crossing = [tick({ elapsed_seconds: 1, latency_p99_ms: 260 })];
+	const quiet = [tick({ elapsed_seconds: 1, latency_p99_ms: 50 })];
+
+	it("is the Settings threshold when the run declared no line of its own", () => {
+		expect(computeBreakpoint(crossing, 200).sloSource).toBe("settings");
+		expect(computeBreakpoint(quiet, 200).sloSource).toBe("settings");
+	});
+
+	it("is the run's when the judged value is the run's own line", () => {
+		expect(computeBreakpoint(crossing, 250, 250).sloSource).toBe("run");
+		expect(computeBreakpoint(quiet, 250, 250).sloSource).toBe("run");
+	});
+
+	it("stays Settings when the run's own line differs from the judged one", () => {
+		// A ramp with a 350ms p99 budget is still judged against Settings' 200ms.
+		const bp = computeBreakpoint(crossing, 200, 350);
+		expect(bp).toMatchObject({ sloMs: 200, sloSource: "settings" });
+	});
+
+	it("is carried by notCrossed and an empty series", () => {
+		expect(notCrossed(50, "run").sloSource).toBe("run");
+		expect(computeBreakpoint([], 200, 200).sloSource).toBe("run");
+	});
+
+	it("sloSourceOf reads no source into a missing judgement or a missing run line", () => {
+		expect(sloSourceOf(null, undefined)).toBe("settings");
+		expect(sloSourceOf(200, undefined)).toBe("settings");
+		expect(sloSourceOf(200, 200)).toBe("run");
 	});
 });

@@ -36,6 +36,7 @@ let currentCtx: RequestBuilderContextValue;
 
 vi.mock("@/queries", () => ({
 	useRequestDefaultsQuery: () => ({ data: declared }),
+	useConfigQuery: () => ({ data: undefined }),
 }));
 vi.mock("../../../context", () => ({ useRequestBuilderContext: () => currentCtx }));
 

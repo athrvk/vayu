@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <utility>
 
 #include "vayu/core/path_template.hpp"
@@ -64,6 +65,28 @@ const std::string& value) {
 size_t design_response_body_bound (vayu::db::Database& db) {
     return static_cast<size_t> (db.get_config_int ("maxDesignResponseBodyBytes",
     static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
+}
+
+std::optional<std::string> check_numeric_field (const nlohmann::json& payload,
+const NumericRunField& field) {
+    if (!payload.contains (field.key) || payload[field.key].is_null ()) {
+        return std::nullopt;
+    }
+    const auto& value = payload[field.key];
+    if (!value.is_number ()) {
+        return std::string ("'") + field.key + "' must be a number (got " +
+        std::string (value.type_name ()) + ")";
+    }
+    // Read as a double first: an integer read of a fractional or huge value is
+    // itself undefined, and this is the guard that has to be total.
+    const double raw = value.get<double> ();
+    if (!std::isfinite (raw) || raw < static_cast<double> (field.min) ||
+    raw > static_cast<double> (field.max)) {
+        return std::string ("'") + field.key + "' must be between " +
+        std::to_string (field.min) + " and " + std::to_string (field.max) +
+        " (got " + value.dump () + "). " + field.why;
+    }
+    return std::nullopt;
 }
 
 int resolve_request_timeout_ms (const nlohmann::json& payload, int configured_default) {

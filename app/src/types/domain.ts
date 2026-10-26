@@ -913,6 +913,15 @@ export interface Request {
 	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
 	maxRedirects: number;
 	/**
+	 * This request's own timeout in milliseconds (issue #2937), `1`-`86400000`,
+	 * or `null` when it states none and sends with the `defaultTimeout` setting
+	 * read at each send. Always present on a stored row. Unlike the fields
+	 * around it this one is never sent at its default: `null` stays off the
+	 * composed payload so the engine resolves the live setting, where a copy of
+	 * today's default would pin it.
+	 */
+	timeout: number | null;
+	/**
 	 * HTTP protocol to negotiate for this request. `"auto"` lets curl pick
 	 * (ALPN over TLS, HTTP/1.1 otherwise) - see {@link HTTP_VERSIONS}. This is
 	 * the *requested* protocol; the protocol actually negotiated for a given
@@ -1214,6 +1223,13 @@ export interface RunConfigSnapshot {
 	 * as text, and is how every run recorded before the flag reads.
 	 */
 	dataFileCastNumbers?: boolean;
+	/**
+	 * The budgets the run declared, as sent (the engine stores the sanitized
+	 * request body). `loadConfigFromSnapshot` reads `latencyP99Ms` from it as the
+	 * line the live dashboard draws. A key can be absent, and a run recorded before
+	 * budgets existed has none.
+	 */
+	thresholds?: RunThresholds;
 	/**
 	 * Requested protocol the run executed with - `build_run_report_config` in
 	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
@@ -2123,8 +2139,9 @@ export interface LoadTestConfig {
 	/**
 	 * Capacity only: the p99 budget the search looks for the edge of, in ms.
 	 * Prefilled from the client-side `sloThresholdMs` setting, so the number
-	 * the dashboard already annotates its charts with becomes the number the
-	 * search is steered by rather than a second, unrelated one.
+	 * the search is steered by is the one the user already chose rather than a
+	 * second, unrelated one. The live and stored dashboards draw it as the run's
+	 * SLO line (`runOwnSloMs`, `runSloMs`).
 	 */
 	slo_ms?: number;
 	/** Capacity only: how long each concurrency level is held before it is judged. */
@@ -2498,6 +2515,22 @@ export interface StatusSecondEntry {
 	counts: [number, number, number, number, number];
 }
 
+/**
+ * Where a capacity search stands, on a live frame (issue #2928); keys keep the
+ * wire's camelCase. `level` is the concurrency being measured, `0` until the
+ * first level opens. `levelElapsedMs` is the time since that level opened (`0`
+ * while `level` is `0`, held at the moment the search ended once it has).
+ * `levelsJudged` counts judged levels, a re-measured level once per
+ * measurement. `stopReason` is the report's `capacity.stopReason` and appears
+ * only once the search has ended.
+ */
+export interface LiveCapacityState {
+	level: number;
+	levelElapsedMs: number;
+	levelsJudged: number;
+	stopReason?: string;
+}
+
 export interface LoadTestMetrics {
 	timestamp: number;
 	elapsed_seconds: number;
@@ -2620,6 +2653,14 @@ export interface LoadTestMetrics {
 	 * tells the status chart to diff `status_codes` instead.
 	 */
 	status_seconds?: StatusSecondEntry[];
+	/**
+	 * The capacity search's state, on every live frame of a capacity run (issue
+	 * #2928). Absent means not a capacity run, or an engine from before #2928; it
+	 * is never zeroed. A stored tick never carries it. The renderer card that
+	 * reads it is item 2 of #2818 (#2929); until it lands the only reader is MCP
+	 * `get_live_metrics`, which forwards frames raw.
+	 */
+	capacity?: LiveCapacityState;
 	/**
 	 * Custom trends, counters and rates recorded so far, riding the same tick
 	 * as the built-in phases above (issue #1500). Absent until the run has
@@ -2995,20 +3036,27 @@ export interface RunReport {
 		 * A failed load run reconciled after an engine crash (#2895). The counts,
 		 * `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last
 		 * persisted tick's totals, so they are a floor and not the final figures;
-		 * `latency` is all zeros, and `peakConcurrency` and `avgQueueWaitMs` are 0,
-		 * because none of them were recorded. Absent means false.
+		 * the report carries no `latency`, and `peakConcurrency` and
+		 * `avgQueueWaitMs` are 0, because none of them were recorded. Absent means
+		 * false.
 		 */
 		partial?: boolean;
 		/**
 		 * A Failed load run that has no summary at all (#2895): a crash before the
 		 * first tick, or a worker failure that never wrote one. The counts are
 		 * whatever the stored sampled results hold (0 where none were stored), not
-		 * whole-run totals, and none is a measurement. Absent means false. Distinct from the
-		 * report's top-level `partial`, which means the run is still in flight.
+		 * whole-run totals, and none is a measurement; the report carries no
+		 * `latency`. Absent means false. Distinct from the report's top-level
+		 * `partial`, which means the run is still in flight.
 		 */
 		summaryMissing?: boolean;
 	};
-	latency: {
+	/**
+	 * Absent for a run whose latency was never recorded: one with
+	 * `summary.partial` or `summary.summaryMissing`, or a collection run in which
+	 * no step sent. Absent is not zero; print it through `formatLatencyOrDash`.
+	 */
+	latency?: {
 		min: number;
 		max: number;
 		avg: number;

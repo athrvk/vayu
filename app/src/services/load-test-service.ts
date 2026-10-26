@@ -57,8 +57,8 @@ function runSummaryLine(report: RunReport): string | null {
 	const requests = report.summary?.totalRequests;
 	const p95 = report.latency?.p95;
 	const errorRate = report.summary?.errorRate;
-	// A failed run the engine could not fully record (#2895): its zeros are not
-	// measurements, and the line must not read as one.
+	// A failed run the engine could not fully record (#2895): its counts are not
+	// whole-run totals, and the line must not read as one.
 	if (report.summary?.summaryMissing) return "The run ended before its totals were saved.";
 	if (report.summary?.partial && typeof requests === "number" && typeof errorRate === "number") {
 		return `At least ${formatNumber(requests)} requests, ${formatPercent(errorRate)}% errors, latency not recorded`;

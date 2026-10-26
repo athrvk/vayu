@@ -69,6 +69,30 @@ describe("reportToDerived", () => {
 		});
 	});
 
+	// Mutation checked: dropping `runSloMs` from the return fails the first two cases.
+	describe("the run's own SLO line (#2939)", () => {
+		it("is a p99 budget's limit, not the breakpoint's threshold", () => {
+			const thresholdValidation = {
+				checks: [{ metric: "latencyP99Ms", limit: 350, actual: 400, passed: false }],
+				passed: 0,
+				failed: 1,
+				verdict: "failed" as const,
+			};
+			const d = reportToDerived(baseReport({ thresholdValidation }));
+			expect(d.runSloMs).toBe(350);
+			expect(d.breakpoint.sloMs).toBeNull();
+		});
+
+		it("is a capacity run's sloMs", () => {
+			const capacity = { sloMs: 50, stopReason: "plateau", levels: [] };
+			expect(reportToDerived(baseReport({ capacity })).runSloMs).toBe(50);
+		});
+
+		it("is absent for a report that declared neither", () => {
+			expect(reportToDerived(baseReport()).runSloMs).toBeUndefined();
+		});
+	});
+
 	// Mutation checked: dropping `capacity` from the return fails the first case.
 	describe("the search's result (#2816)", () => {
 		it("carries a capacity run's stop reason to the Saturation card", () => {
@@ -532,5 +556,32 @@ describe("reportToDerived", () => {
 		expect(d.avgQueueWaitMs).toBe(0);
 		expect(d.droppedRequests).toBe(0);
 		expect(d.backpressure).toBe(0);
+	});
+	// Mutation checked: reading `report.latency.p99` unguarded throws here.
+	describe("a report without latency (#2938)", () => {
+		function withoutLatency(): RunReport {
+			const report = baseReport({ summary: { ...baseReport().summary, partial: true } });
+			delete report.latency;
+			return report;
+		}
+
+		it("leaves the four latency figures absent instead of reading an absent block", () => {
+			const d = reportToDerived(withoutLatency());
+
+			expect(d.p99Latency).toBeUndefined();
+			expect(d.p95Latency).toBeUndefined();
+			expect(d.meanLatency).toBeUndefined();
+			expect(d.medianLatency).toBeUndefined();
+			expect(d.totalRequests).toBe(600);
+		});
+
+		it("keeps the recorded figures for a report that has latency", () => {
+			const d = reportToDerived(baseReport());
+
+			expect(d.p99Latency).toBe(108);
+			expect(d.p95Latency).toBe(103);
+			expect(d.meanLatency).toBe(101);
+			expect(d.medianLatency).toBe(101);
+		});
 	});
 });

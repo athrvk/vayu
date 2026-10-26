@@ -27,7 +27,9 @@ afterAll(restoreIntl);
 import {
 	formatByteRateParts,
 	formatLatency,
+	formatLatencyOrDash,
 	formatLatencyParts,
+	formatLatencyPartsOrDash,
 	formatMs,
 	formatOneDecimal,
 	formatPercent,
@@ -85,6 +87,26 @@ describe("formatMs and formatLatency: a measured sub-0.01 ms value is never 0", 
 
 	it("leaves a sub-0.01 rate to the plain digits rule", () => {
 		expect(formatRate(0.0004)).toBe("0");
+	});
+});
+
+describe("formatLatencyOrDash and formatLatencyPartsOrDash: an absent latency is not a 0", () => {
+	const cases: Array<[string, number | null | undefined, string, string, string]> = [
+		["null", null, "-", "-", ""],
+		["undefined", undefined, "-", "-", ""],
+		["NaN", NaN, "-", "-", ""],
+		["a measured zero", 0, "0ms", "0", "ms"],
+		["a measured value", 87, "87ms", "87", "ms"],
+		["seconds", 1234, "1.23s", "1.23", "s"],
+	];
+
+	it.each(cases)("%s", (_name, input, text, value, unit) => {
+		expect(formatLatencyOrDash(input)).toBe(text);
+		expect(formatLatencyPartsOrDash(input)).toEqual({ value, unit });
+	});
+
+	it("leaves formatLatency's own reading of an absent value alone", () => {
+		expect(formatLatency(undefined)).toBe("0ms");
 	});
 });
 

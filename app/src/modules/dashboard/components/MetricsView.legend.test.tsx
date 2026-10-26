@@ -26,6 +26,8 @@ import { useId } from "react";
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useClientSettingsStore, useDashboardStore } from "@/stores";
+import type { LoadTestRunConfig } from "@/stores/dashboard-store";
 import type { LoadTestMetrics } from "@/types";
 import type { DisplayMetrics, MetricsViewProps } from "../types";
 import MetricsView from "./MetricsView";
@@ -105,9 +107,19 @@ interface LegendEntryView {
 	chart: RecordedProps;
 }
 
-/** Every legend entry in the live view, paired with the props of the chart in its card. */
-function legendEntries(props: MetricsViewProps): LegendEntryView[] {
+/** The run's own p99 budget, which is what the live view draws as its SLO (#2939). */
+const WITH_SLO: LoadTestRunConfig = { latencyP99Ms: 200 };
+
+/**
+ * Every legend entry in the live view, paired with the props of the chart in
+ * its card, for a run started with `config`.
+ */
+function legendEntries(
+	props: MetricsViewProps,
+	config: LoadTestRunConfig = WITH_SLO
+): LegendEntryView[] {
 	charts.clear();
+	useDashboardStore.getState().startRun("r", config);
 	const { container } = render(
 		<TooltipProvider>
 			<MetricsView {...props} />
@@ -149,7 +161,7 @@ function isDrawnWithRole({ chart, label, role }: LegendEntryView, shape: "band" 
 describe("MetricsView legends match the roles their charts draw", () => {
 	let all: LegendEntryView[] = [];
 	beforeAll(() => {
-		all = RUNS.flatMap(legendEntries);
+		all = RUNS.flatMap((run) => legendEntries(run));
 	});
 
 	it("finds the legends it is meant to be guarding", () => {
@@ -238,13 +250,33 @@ describe("MetricsView percentile legend names the SLO line (#2698)", () => {
 	});
 });
 
+describe("MetricsView draws no SLO for a run that declared none (#2939)", () => {
+	// The Settings threshold is a client preference; a run with no p99 line must not
+	// borrow it, as its stored report does not.
+	beforeAll(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: 250 });
+	});
+
+	it.each(["ramp_up", "constant_rps"] as const)(
+		"lists no SLO and draws no line in mode %s",
+		(mode) => {
+			const entries = legendEntries({ ...base, mode, rampConfig: undefined }, {});
+			const p99Card = entries.filter((e) => e.chart.series.some((s) => s.label === "p99"));
+			expect(p99Card.map((e) => e.label)).not.toContain("SLO");
+			expect(p99Card.length).toBeGreaterThan(0);
+			const markers = p99Card[0].chart.markers?.map((m) => m.label) ?? [];
+			expect(markers.some((label) => label.startsWith("SLO"))).toBe(false);
+		}
+	);
+});
+
 describe("MetricsView draws the scatter for a capacity run (#2931)", () => {
 	const SCATTER_LABELS = ["p99", "SLO"];
 	const PERCENTILE_LABELS = ["p50", "p95", "p99", "SLO"];
 
 	/** The legend labels of every card whose chart draws a p99 series, one list per card. */
 	function p99Cards(props: MetricsViewProps): string[][] {
-		const entries = legendEntries(props).filter((e) =>
+		const entries = legendEntries(props, WITH_SLO).filter((e) =>
 			e.chart.series.some((s) => s.label === "p99")
 		);
 		return [...new Set(entries.map((e) => e.card))].map((card) =>
@@ -269,6 +301,7 @@ describe("MetricsView draws the scatter for a capacity run (#2931)", () => {
 	it("draws the SLO line and no knee marker on the live capacity scatter", () => {
 		// The knee is in the final report only; a live run has nothing to draw it from.
 		charts.clear();
+		useDashboardStore.getState().startRun("r", { mode: "capacity", sloMs: 50 });
 		render(
 			<TooltipProvider>
 				<MetricsView {...base} mode="capacity" rampConfig={undefined} />
@@ -280,7 +313,7 @@ describe("MetricsView draws the scatter for a capacity run (#2931)", () => {
 			)
 		) as RecordedProps;
 		const labels = scatter.markers?.map((m) => m.label) ?? [];
-		expect(labels.some((label) => label.startsWith("SLO "))).toBe(true);
+		expect(labels).toContain("SLO 50ms");
 		expect(labels.some((label) => label.startsWith("knee"))).toBe(false);
 	});
 });

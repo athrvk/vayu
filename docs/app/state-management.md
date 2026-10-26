@@ -1200,7 +1200,7 @@ Central home for renderer-only preferences that aren't part of the pre-paint app
   monoFont: MonoFontChoice       // a preset or "custom"
   monoFontCustom: string         // used when monoFont === "custom"
   chartBucketSeconds: number     // time-bucket width for the dashboard charts
-  sloThresholdMs: number         // p99 latency the breakpoint triggers at, for every mode but capacity (a capacity run uses its own sloMs)
+  sloThresholdMs: number         // p99 latency the breakpoint is judged against, for every mode but capacity (a capacity run uses its own sloMs); never the line the charts draw (that is the run's own, `runOwnSloMs`)
   liveRefreshMs: number          // how often live metrics commit into the store
   autoSave: AutoSavePrefs        // { enabled, delayMs }
   reducedMotion: boolean         // mirrored onto <html data-reduced-motion>
@@ -1282,10 +1282,10 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
   finalReport: RunReport | null
   error: string | null
   isStopping: boolean
-  loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run
+  loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run; `runOwnSloMs(loadTestConfig)` (capacity `sloMs`, else the `latencyP99Ms` budget, else undefined) is the SLO line the live charts draw
   requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
   peakConcurrency: number                      // Running max (monotonic)
-  breakpoint: Breakpoint                       // SLO crossing (latched on first breach); carries the sloMs it was judged against (a capacity run's own `loadTestConfig.sloMs`, read through `setRunConfig` too for a run started by an MCP agent; the Settings SLO in every other mode) and atRunStart (no reading under it came first)
+  breakpoint: Breakpoint                       // SLO crossing (latched on first breach); carries the sloMs it was judged against (a capacity run's own `loadTestConfig.sloMs`, read through `setRunConfig` too for a run started by an MCP agent; the Settings threshold in every other mode), its `sloSource` (`"run"` only where that number is the run's own p99 line, else `"settings"`, which the labels word as "Settings", not "SLO") and atRunStart (no reading under it came first)
 }
 ```
 

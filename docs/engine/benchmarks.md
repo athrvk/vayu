@@ -218,6 +218,63 @@ that. `phaseHistograms` (engine config) and `phase_histograms` (per run) turn it
 off for anyone whose target proves otherwise; off leaves the bank unallocated,
 so the completion path pays one null check.
 
+### The redirect-hop progress hook costs about 1.5% CPU per request (2026-10-26, engine 0.45.0)
+
+Counting every redirect hop's body (issue #2893) installs libcurl's xferinfo
+callback and sets `NOPROGRESS=0` on any request that follows redirects, which is
+the default, so every default load transfer pays for it. Issue #2940 asked what
+that costs. **Same hardware as the `phaseHistograms` entry above**: a 4-core Xeon
+2.1 GHz Linux container, release build, the mock server on the same cores, so
+read the ratios, not the absolute numbers.
+
+Same daemon, same target, same run config; the arm is the run's own
+`followRedirects`: `false` skips the install (hook off), `true` takes it (hook
+on). Hook off also turns `CURLOPT_FOLLOWLOCATION` off, a negligible confound. Each
+pair runs both arms with the first alternating per pair, a 4 s cooldown between
+runs, one discarded warm-up, 12 pairs. The null test is the same harness with
+hook on on both sides. CPU is the engine's `utime + stime` over the run.
+
+```bash
+python build.py --prod -e
+(cd scripts/test && go build -o mock-server mock-server.go)
+for case in rps20000 cc64 blob1mib; do   # 30 s for rps20000, 20 s for the others
+  python scripts/perf/ab_redirect_hook.py --engine engine/build-release/vayu-engine \
+      --mock scripts/test/mock-server --case $case --seconds 20 --pairs 12
+  python scripts/perf/ab_redirect_hook.py --engine engine/build-release/vayu-engine \
+      --mock scripts/test/mock-server --case $case --seconds 20 --pairs 12 --null
+done
+```
+
+`rps20000` is `constant_rps` at 20,000 req/s against `GET /fast`; `cc64` is
+`constant_concurrency` 64 against `/fast`; `blob1mib` is `constant_concurrency`
+64 against `GET /blob/1048576` (1 MiB, so the hook is called many times per
+body).
+
+| case | req/s on vs off | null req/s | CPU per request on vs off | null CPU |
+|---|---:|---:|---:|---:|
+| `rps20000` | 19,999 vs 19,999 (0.00%) | 0.00% | +1.35% | -1.12% |
+| `cc64` | 62,078 vs 63,041 (-1.53%) | +0.42% | +1.69% | -0.54% |
+| `blob1mib` | 3,763 vs 3,819 (-1.47%) | +0.92% | +1.19% | +0.46% |
+
+The open-loop case held 20,000 req/s in both arms (`rateControl.achievement`
+1.000, no skipped requests), so it shows the cost only as CPU. The closed-loop
+cases have a per-arm spread of 8-9% (`cc64`) and 18-23% (`blob1mib`), so the
+throughput differences are inside what the box resolves, as in the entries
+above; paired medians agree (+0.20% and -2.60%, wide ranges). CPU per request is
+the steadier statistic: it is higher with the hook in all three cases, by
+1.2-1.7%, against a null test that moves it by 0.5-1.1%. That is a real but
+small cost, and it is below the 2% line this page has used.
+
+**Verdict: accepted as is.** There is no throughput regression this host can
+resolve and the CPU cost is about 1.5% per request, under 2%, so none of the
+fixes in the issue pays for its code or its semantics (following redirects in
+the engine would move cookie, auth and method-rewrite behaviour into engine
+code). The throwaway build that forces `counts_redirect_bodies` false was not
+made: it would only separate the hook from the `FOLLOWLOCATION` confound, and
+both are inside the line either way. A quiet host would resolve the CPU figure
+tighter; rerun the commands above if a later change touches the install
+condition at `curl_utils.cpp` `setup_easy_handle`.
+
 ### The iteration identity: unresolvable against this host's noise (2026-08-27, engine 0.23.0)
 
 `{{$vu}}` / `{{$iteration}}` (issue #994) bind per submission on the load path,

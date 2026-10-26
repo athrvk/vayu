@@ -300,7 +300,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `8`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `9`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
    rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
@@ -449,6 +449,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
+| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting | none: `sync_schema ()` adds the nullable column, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -482,6 +483,14 @@ Version `8` is a bump of its own: `0.45.0` released `7`. **Merge gate:** the
 `git grep` against the last tag must show `7`; a column that joins `8` later
 must check the tag the same way. The release that carries `8` says so under
 Changed, naming #2765.
+
+Version `9` is a bump of its own even though no release stamps `8`: an engine
+built between #2765 and #2937 stamps `8` too, and its `sync_schema ()` would drop
+`timeout_ms`, and every request's timeout with it, from a workspace a newer build
+had opened; at `9` it refuses the workspace instead. **Merge gate:** the
+`git grep` against the last tag must show `7` or `8`; a column that joins `9`
+later must check the tag the same way. The release that carries `9` says so
+under Changed, naming #2937.
 
 ---
 
@@ -684,6 +693,7 @@ Stores individual HTTP request definitions.
 | `order`               | INTEGER | Position among the collection's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference.md#ordering)); default 0 |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
+| `timeout_ms`          | INTEGER | The request's own whole-transfer timeout in ms, `1`-`86400000`; NULL for the `defaultTimeout` setting (issue #2937) |
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
@@ -823,6 +833,18 @@ Rows written before the columns existed backfill to `1` / `10` / `'auto'` / `0`,
 i.e. the behaviour they already had (a row predating `http_version` could only
 ever have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
 clamped to `0..100` on write.
+
+**timeout_ms** - the request's own timeout (issue #2937, schema version `9`),
+serialized as `timeout` and edited in the same **Settings** tab. Unlike the four
+above it is nullable with no `DEFAULT`, on the `spec_operation` precedent, and
+`sync_schema()` adds it the same way: NULL means "use the `defaultTimeout`
+setting", which is what every row written before the column existed backfills
+to. A stored number would freeze the setting at the value it had on the day the
+row was saved, so the default is never written into the row. A value outside
+`1`-`86400000`, or not a number, is refused on write with the `400` `POST
+/execute` answers (`REQUEST_TIMEOUT_FIELD`), never clamped. `payload_from_stored`
+emits `timeout` only when the column holds one, so a by-id composition of a
+request that states none leaves the setting to `/execute` and `/runs`.
 
 **disable_cookies / disabled_system_headers / disable_url_encoding /
 postman_protocol_behavior** - Postman's per-request `protocolProfileBehavior`
@@ -1435,7 +1457,8 @@ holds for its last second only (`current_*`, `window_*`, the latency percentiles
 nothing it never measures (`latency`, `peak_concurrency`, `avg_in_flight`, `queue_wait_avg`,
 `error_types`, `sampling`, the sending window, `connection_replays`) is written, so the report
 reads each absent key as it reads an older engine's summary. The report flags the run with
-`summary.partial`. A summary the run already stored is never replaced, a run that wrote no tick
+`summary.partial` and leaves its `latency` block out (#2938), derived on read: a run already
+reconciled by an earlier version reads without latency with nothing rewritten. A summary the run already stored is never replaced, a run that wrote no tick
 keeps `""`, design and collection runs are given nothing, and `has_warnings` stays `0`.
 
 ```json

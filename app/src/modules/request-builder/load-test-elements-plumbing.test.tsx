@@ -129,6 +129,7 @@ const REQUEST: RequestState = {
 	elements: [PRE_SCRIPT],
 	followRedirects: true,
 	maxRedirects: 10,
+	timeout: null,
 	httpVersion: "auto",
 	verifySSL: true,
 	disableCookies: false,

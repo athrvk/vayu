@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatLatencyParts } from "@/lib/format-number";
+import { formatLatencyPartsOrDash } from "@/lib/format-number";
 import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
@@ -19,9 +19,9 @@ export function ThroughputCard({
 	meanLatency,
 }: {
 	throughput?: number;
-	meanLatency: number;
+	meanLatency?: number;
 }) {
-	const mean = formatLatencyParts(meanLatency);
+	const mean = formatLatencyPartsOrDash(meanLatency);
 	return (
 		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
 			<HeroValue value={fmtRate(throughput)} unit="req/s" />

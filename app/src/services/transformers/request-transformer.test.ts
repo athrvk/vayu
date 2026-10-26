@@ -94,6 +94,40 @@ describe("RequestTransformer redirect policy", () => {
 });
 
 /**
+ * A request's own timeout (issue #2937). `null` is a real value - "use the
+ * `defaultTimeout` setting" - so unlike every other setting here a missing or
+ * unreadable one must not be filled with a default: a number invented at this
+ * hop would reach the editor state and the next autosave would store it,
+ * pinning today's setting on a request that stated none.
+ */
+describe("RequestTransformer timeout", () => {
+	const STORED_TIMEOUT = 1500;
+
+	it("keeps a stored timeout", () => {
+		expect(RequestTransformer.toFrontend({ ...base, timeout: STORED_TIMEOUT }).timeout).toBe(
+			STORED_TIMEOUT
+		);
+	});
+
+	it("keeps null as null rather than filling in a default", () => {
+		expect(RequestTransformer.toFrontend({ ...base, timeout: null }).timeout).toBeNull();
+	});
+
+	it("reads a row from an engine that predates the column as no timeout of its own", () => {
+		expect(RequestTransformer.toFrontend({ ...base }).timeout).toBeNull();
+	});
+
+	it("reads a value that is not a number as no timeout of its own", () => {
+		for (const timeout of ["30s", true, {}, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				RequestTransformer.toFrontend({ ...base, timeout }).timeout,
+				String(timeout)
+			).toBeNull();
+		}
+	});
+});
+
+/**
  * `httpVersion` is a new column, same story as the redirect policy above: a
  * row written before this feature existed - or by a newer engine with a
  * protocol this app does not know about - must not surface as a value the

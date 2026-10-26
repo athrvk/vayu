@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A report flagged `summary.summaryMissing` has its counts and latency read as absent, and one flagged `summary.partial` its latency alone, each side judged on its own (#2904). A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
+  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A report flagged `summary.summaryMissing` has its counts and latency read as absent, and one flagged `summary.partial` its latency alone, each side judged on its own (#2904). The engine writes such a report with no `latency` object (#2938); the cases that still carry a block of zeros are documents exported before that, and read the same. A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
   "cases": [
     {
       "name": "a clean regression",
@@ -1728,6 +1728,58 @@
         "reliability": [
           {"metric":"summary.errorRate","base":2,"target":1,"delta":-1,"pctChange":-50,"direction":"lower-is-better"},
           {"metric":"summary.totalRequests","base":6000,"target":3000,"delta":-3000,"pctChange":-50,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a partial target whose report omits latency compares as not recorded, the way the engine now writes it",
+      "base": {"latency":{"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},"summary":{"avgRps":100,"throughput":100,"errorRate":2,"totalRequests":6000}},
+      "target": {"summary":{"partial":true,"avgRps":50,"throughput":80,"errorRate":1,"totalRequests":3000}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":50,"delta":-50,"pctChange":-50,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":100,"target":80,"delta":-20,"pctChange":-20,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":2,"target":1,"delta":-1,"pctChange":-50,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":3000,"delta":-3000,"pctChange":-50,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a summaryMissing target whose report omits latency compares as not recorded, the way the engine now writes it",
+      "base": {"latency":{"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},"summary":{"avgRps":100,"throughput":100,"errorRate":2,"totalRequests":6000}},
+      "target": {"summary":{"summaryMissing":true,"avgRps":4,"throughput":3,"errorRate":100,"totalRequests":12}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":100,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":2,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
         "compressionNegotiationDiffers": false,

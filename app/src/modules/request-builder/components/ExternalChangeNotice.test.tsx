@@ -95,3 +95,14 @@ describe("ExternalChangeNotice - Postman's protocol switches (#1765)", () => {
 		}
 	});
 });
+
+describe("ExternalChangeNotice - the request's own timeout (#2937)", () => {
+	it("files it under settings, a reset to the default included", () => {
+		const { takeExternalField } = renderWith({ timeout: null });
+
+		expect(screen.getByText(/changed elsewhere: settings/i)).toBeTruthy();
+
+		screen.getByRole("button", { name: /take theirs/i }).click();
+		expect(takeExternalField).toHaveBeenCalledWith("timeout");
+	});
+});

@@ -84,7 +84,7 @@ export default function OverviewTab({
 		if (destination) onOpenSample?.(destination);
 	};
 
-	const unrecorded = unrecordedFiguresOf(report.summary);
+	const unrecorded = unrecordedFiguresOf(report);
 	// Every card in these two rows reads at least one figure the engine did not
 	// record for a flagged run (latency, peak concurrency, queue wait, or the
 	// counts themselves), and each would draw it as a measured 0. The tiles above

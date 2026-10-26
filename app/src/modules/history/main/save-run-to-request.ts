@@ -543,6 +543,11 @@ type RunWritable = Pick<
  * serialise.
  */
 function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritable {
+	// `timeout` is deliberately not among them (issue #2937). It is the one
+	// stored setting whose absence is meaningful - "use the `defaultTimeout`
+	// setting" - and a run replays the number a send used, which can be an
+	// ad-hoc override from a script or an MCP client rather than the request's
+	// own. Writing it would pin that number onto a request that states none.
 	const request = seed.request;
 	const body = bodyFromSeed(request);
 

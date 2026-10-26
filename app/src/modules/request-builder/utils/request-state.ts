@@ -61,6 +61,7 @@ export const createDefaultRequestState = (
 		elements: [],
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
+		timeout: null,
 		httpVersion,
 		verifySSL: DEFAULT_VERIFY_SSL,
 		disableCookies: DEFAULT_DISABLE_COOKIES,
@@ -76,7 +77,8 @@ export const createDefaultRequestState = (
  * defaults rather than tracking "the user opened the tab", so a request that is
  * toggled off and back on stops badging again.
  *
- * Covers the redirect policy, the protocol, the event-stream flag *and*
+ * Covers the redirect policy, the timeout (any number badges; `null` is the
+ * default), the protocol, the event-stream flag *and*
  * Postman's protocol switches (issue #1765): a
  * request that only changes `httpVersion` (redirects left at their defaults)
  * must still badge, which is why this checks every field the tab owns rather
@@ -90,6 +92,7 @@ export function isRequestSettingsNonDefault(
 		RequestState,
 		| "followRedirects"
 		| "maxRedirects"
+		| "timeout"
 		| "httpVersion"
 		| "verifySSL"
 		| "stream"
@@ -101,6 +104,7 @@ export function isRequestSettingsNonDefault(
 	return (
 		state.followRedirects !== DEFAULT_FOLLOW_REDIRECTS ||
 		state.maxRedirects !== DEFAULT_MAX_REDIRECTS ||
+		state.timeout !== null ||
 		state.httpVersion !== DEFAULT_HTTP_VERSION ||
 		state.verifySSL !== DEFAULT_VERIFY_SSL ||
 		state.stream !== DEFAULT_STREAM ||

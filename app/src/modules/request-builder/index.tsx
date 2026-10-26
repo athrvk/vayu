@@ -143,6 +143,10 @@ function buildUpdatePayload(
 	if (changedFields.has("elements")) payload.elements = request.elements;
 	if (changedFields.has("followRedirects")) payload.followRedirects = request.followRedirects;
 	if (changedFields.has("maxRedirects")) payload.maxRedirects = request.maxRedirects;
+	// A cleared field is an explicit `null`: an absent key keeps the stored
+	// timeout, so "back to the default" has to be sent to reach the engine
+	// (issue #2937, the `methodSource` rule above).
+	if (changedFields.has("timeout")) payload.timeout = request.timeout ?? null;
 	if (changedFields.has("httpVersion")) payload.httpVersion = request.httpVersion;
 	if (changedFields.has("verifySSL")) payload.verifySSL = request.verifySSL;
 	if (changedFields.has("disableCookies")) payload.disableCookies = request.disableCookies;
@@ -411,6 +415,7 @@ export default function RequestBuilder() {
 			elements: fetchedRequest.elements,
 			followRedirects: fetchedRequest.followRedirects,
 			maxRedirects: fetchedRequest.maxRedirects,
+			timeout: fetchedRequest.timeout,
 			httpVersion: fetchedRequest.httpVersion,
 			verifySSL: fetchedRequest.verifySSL,
 			disableCookies: fetchedRequest.disableCookies,
@@ -827,6 +832,7 @@ export default function RequestBuilder() {
 						rampUpDuration: apiRequest.rampUpDuration,
 						startConcurrency: apiRequest.startConcurrency,
 						sloMs: apiRequest.sloMs,
+						latencyP99Ms: apiRequest.thresholds?.latencyP99Ms,
 						dataRowCount: config.data?.length,
 						dataFileName: config.dataFileName,
 						dataFileHash: config.dataFileHash,

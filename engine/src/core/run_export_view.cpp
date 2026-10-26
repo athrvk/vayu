@@ -531,22 +531,22 @@ ReportVerdict verdict_of (const ordered& document) {
 
 // --- notices -------------------------------------------------------------------------------------------------------------
 
-/// What the zeros in a crashed run's report are, said next to the verdict so a
-/// reader does not take them for a measurement (#2895, #2905).
+/// What a crashed run's report lacks, said next to the verdict so a reader
+/// does not take the figures it does carry for whole-run measurements (#2895,
+/// #2905, #2938).
 std::vector<ReportText> notices_of (const ordered& document) {
     const ordered& summary = at_path (document, { "report", "summary" });
     std::vector<ReportText> notices;
     if (member (summary, "partial") == true) {
         notices.emplace_back (
         "Partial run: the engine stopped before this run finished, "
-        "so the totals are the last saved tick's and every "
-        "latency figure is 0, not a measurement.");
+        "so the totals are the last saved tick's and latency was "
+        "not recorded.");
     }
     if (member (summary, "summaryMissing") == true) {
         notices.emplace_back (
         "No summary was recorded for this run, so the counts are "
-        "not whole-run totals and the latency figures are not "
-        "measurements.");
+        "not whole-run totals and latency was not recorded.");
     }
     return notices;
 }

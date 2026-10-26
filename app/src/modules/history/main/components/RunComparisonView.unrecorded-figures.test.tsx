@@ -11,8 +11,8 @@
 
 /**
  * A run flagged `summary.summaryMissing` (no counts, no latency) or
- * `summary.partial` (counts of the last saved tick, no latency) recorded zeros
- * where it measured nothing (#2895). The compare view judges each side on its
+ * `summary.partial` (counts of the last saved tick, no latency) measured
+ * nothing there (#2895), and its report omits `latency` (#2938). The compare view judges each side on its
  * own (#2904): the flagged run's cell reads "not recorded" and the change reads
  * "-", never a delta against the zero, whichever side of the table the flagged
  * run is on.
@@ -58,12 +58,13 @@ function recorded(n: number): RunReport {
 }
 
 /**
- * What the engine writes for a run it could not record: zeros, and the flag.
- * `partial` keeps the last tick's counts (600 requests, 3 rps) with a zero
- * latency block; `summaryMissing` keeps nothing.
+ * What the engine writes for a run it could not record: the flag, zero counts
+ * and no `latency`. `partial` keeps the last tick's counts (600 requests,
+ * 3 rps); `summaryMissing` keeps nothing.
  */
 function flagged(flag: Flag): RunReport {
 	const base = recorded(0);
+	delete base.latency;
 	const counts =
 		flag === "partial"
 			? { totalRequests: 600, successfulRequests: 600, errorRate: 0.5, avgRps: 30 }

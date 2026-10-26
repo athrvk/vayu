@@ -189,6 +189,33 @@ TEST_F (ImportApplyRouteTest, AppliesTheSameFieldDefaultsAsPerItemCreate) {
     EXPECT_EQ (stored_request->body_type, "json");
     EXPECT_TRUE (stored_request->follow_redirects);
     EXPECT_EQ (stored_request->max_redirects, 10);
+    EXPECT_FALSE (stored_request->timeout_ms.has_value ())
+    << "no timeout of its own";
+}
+
+// A bulk import holds a request's `timeout` to the bound `POST /requests` does
+// (#2937), through the same applier: an in-range one is stored and one outside
+// it refuses the whole tree, naming the field.
+TEST_F (ImportApplyRouteTest, ARequestsTimeoutIsStoredOrRefusedAsOnCreate) {
+    json timed              = request_item ("r1", "c1", "get");
+    timed["timeout"]        = 2500;
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+    { "requests", json::array ({ timed }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+    const auto stored = db_->get_request (response["idMap"]["r1"]);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->timeout_ms, std::optional<int> (2500));
+
+    json bad                   = request_item ("r1", "c2", "get");
+    bad["timeout"]             = 0;
+    auto [bad_status, refusal] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c2", "other") }) },
+    { "requests", json::array ({ bad }) } });
+    EXPECT_EQ (bad_status, 400) << refusal.dump ();
+    EXPECT_NE (refusal.dump ().find ("'timeout'"), std::string::npos) << refusal.dump ();
+    EXPECT_EQ (db_->get_collections ().size (), 1u)
+    << "the refused tree was partly written";
 }
 
 TEST_F (ImportApplyRouteTest, AppendsSiblingsInPayloadOrderWhenOrderIsOmitted) {

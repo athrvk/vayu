@@ -217,7 +217,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 			if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
 				payload.headers = toKeyValueEntries(args.headers);
 			}
-			// Auth and the five Settings fields ride the same rule as the strings
+			// Auth and the six Settings fields ride the same rule as the strings
 			// above: stated is written, absent is left alone. The block replaces
 			// the stored one wholesale because the engine stores it as one JSON
 			// column - there is no per-credential patch to offer.
@@ -266,7 +266,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
+					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
 					"input"
 				);
 			}

@@ -36,6 +36,7 @@ const FIELD_GROUPS: ReadonlyArray<{ label: string; fields: readonly MergeableReq
 		fields: [
 			"followRedirects",
 			"maxRedirects",
+			"timeout",
 			"httpVersion",
 			"verifySSL",
 			"disableCookies",

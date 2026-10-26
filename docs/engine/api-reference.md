@@ -258,7 +258,8 @@ The defaults are `{}` for `variables`, the resource's own default for `auth`
 (`{"mode":"none"}` for a collection, `{"mode":"inherit"}` for a request), `[]`
 for `params` / `headers`, `""` for `description` and the two script fields,
 `{"mode":"none"}` for a request `body`, `true` for `followRedirects`, `10` for
-`maxRedirects`, and `false` for `isActive`.
+`maxRedirects`, `null` for a request's `timeout` (the `defaultTimeout` setting,
+read at each send), and `false` for `isActive`.
 
 `order` is the one default that is computed rather than constant: it means
 "append after the current siblings", on both resources and on both verbs - see
@@ -1723,6 +1724,7 @@ field whole, however large.
     "elements": [],
     "followRedirects": true,
     "maxRedirects": 10,
+    "timeout": null,
     "httpVersion": "auto",
     "verifySSL": true,
     "stream": false,
@@ -1741,6 +1743,10 @@ the request's stored execution options. They are always present in the response:
 a request saved before these columns existed reads back as the engine defaults
 (`true` / `10` / `"auto"` / `true` / `false`), which is the behaviour it already
 had.
+`timeout` is the request's own timeout in milliseconds (issue #2937), always
+present on a stored-row response (`GET /requests`, `GET /requests/:id` and the
+`POST` / `PUT` answers): a number, or `null` when the request states none and sends with
+the `defaultTimeout` setting.
 `disableCookies` / `disabledSystemHeaders` / `disableUrlEncoding` are Postman's
 per-request protocol settings (issue #1765), always present too (`false` / `[]` /
 `false` for a request that states none); `postmanProtocolBehavior` is the
@@ -1815,6 +1821,8 @@ the null-vs-absent rule.
                                       // and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
+  "timeout": null,                   // Optional, this request's timeout in ms, 1..86400000.
+                                      // Absent/null: the "defaultTimeout" setting - see below
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
                                       // from the "defaultHttpVersion" config entry
   "verifySSL": true,                 // Optional, verify the TLS certificate. Default true
@@ -1859,6 +1867,20 @@ toggle persists here and a bulk import carries it. The engine never acts on the
 stored value by itself: `POST /execute` reads the flag off the payload it is
 given, and the by-id compose path deliberately does not add it, so an existing
 caller that composes by id keeps getting a buffered send.
+
+**`timeout` is the saved half of [`POST /execute`'s `timeout`](#post-execute)**
+(issue #2937): one slow endpoint can wait longer, or a fast one fail sooner,
+without changing the `defaultTimeout` setting for every request. It is held to
+the same `1`-`86400000` ms, and a number outside it or a value that is not a
+number is a `400` naming `'timeout'` here, on `PUT` and in `POST /import/apply`.
+Absent or `null` on create stores none, and the request sends with the setting
+in force at each send rather than a copy of it. [`POST /compose`](#post-compose)
+by `requestId` emits `timeout` only when the request states one, so a Send, a
+sequential collection run, a single-request load run built from the composed
+payload and a scenario load step all take it, and a request that states none
+still takes the setting. A Postman collection has no per-request timeout, so
+`POST /export/postman` lists one under `notCarried` (`request_timeout`); an
+OpenAPI export carries it in `x-vayu-request.settings`.
 
 **`specOperation` names which operation of the collection's
 [bound spec](#post-collections) this request is** (issue #637):
@@ -1987,14 +2009,16 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`verifySSL` / `stream` / `specOperation` / `methodSource` / `mockResponseMode` /
-`mockExampleId` / `disableCookies` / `disabledSystemHeaders` /
-`disableUrlEncoding` / `postmanProtocolBehavior` leaves the stored values
-untouched; sending `null` resets them to `true` / `10` / `true` / `false` / "no
-operation" / "no marker" / `"first"` / "no target" / `false` / `[]` / `false` /
-"none".
+`timeout` / `verifySSL` / `stream` / `specOperation` / `methodSource` /
+`mockResponseMode` / `mockExampleId` / `disableCookies` /
+`disabledSystemHeaders` / `disableUrlEncoding` / `postmanProtocolBehavior`
+leaves the stored values untouched; sending `null` resets them to `true` / `10`
+/ "the `defaultTimeout` setting" / `true` / `false` / "no operation" / "no
+marker" / `"first"` / "no target" / `false` / `[]` / `false` / "none".
 A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
+`timeout` is the exception among them: a value outside `1`-`86400000` or one
+that is not a number is a `400` naming `'timeout'`, and nothing is written.
 
 **`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
 as the fields above, but validates more strictly: absent keeps the stored
@@ -3189,8 +3213,8 @@ holds the request as the UI does: `name`, `method`, `url` (verbatim, `{{...}}`
 and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
-the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
-`verifySSL`, `stream`), every saved example with its headers and its `origin`
+the non-default `settings` (`followRedirects`, `maxRedirects`, `timeout`,
+`httpVersion`, `verifySSL`, `stream`), every saved example with its headers and its `origin`
 (`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
 and a document with none, as an older Vayu wrote, imports as `"import"`), and
 the mock mode with the index of a `fixed` target. At the root,
@@ -4295,6 +4319,7 @@ was before these rules.
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
 | `event_stream` | A request consumed as an event stream |
+| `request_timeout` | A request with a timeout of its own (Postman has only an app-wide one) |
 | `mock_response_mode` | A mock response mode other than `first` |
 | `truncated_examples` | An example saved from a cut-off response, written with the partial body |
 | `example_content_types` | An example content type no Content-Type header row states |
@@ -4562,10 +4587,11 @@ file and the screen it came from agree. It adds no rule of its own:
 (the `GET /runs/:runId/report` flags of the same name): `partial` for a run the
 engine died under and reconciled at the next start, whose counts are its last
 saved tick's, and `summaryMissing` for a failed load run that stored no summary,
-whose counts are not whole-run totals. In both, `report.latency` is still
-present (the schema requires it) but is not a measurement: all zeros for a
-crashed run, and for a failed run with no summary whatever its sampled results
-held.
+whose counts are not whole-run totals. In both, `report.latency` is absent
+(the schema no longer requires it, #2938): a crashed run flushed no rows to
+take a percentile from, and the sampled rows of a failed run with no summary
+are not the run's latency. The Markdown and HTML latency table then reads `-`
+in every row.
 The verdict is not changed by either; the Markdown and HTML reports word it
 (below).
 
@@ -4641,7 +4667,8 @@ The sections, in order:
    declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows,
    and for a run with `summary.partial` or `summary.summaryMissing` one
    sentence each follows that, saying the totals are the last saved tick's or
-   not whole-run totals, and that the latency figures are not measurements.
+   not whole-run totals, and that latency was not recorded (the latency table
+   then reads `-` in every row, #2938).
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
 4. `## Results`: requests, a `Skipped requests` row only when `summary.skippedRequests`
@@ -6239,7 +6266,10 @@ never re-resolved - see [POST /execute](#post-execute) and
   the request's own, each stamped with its origin, disabled and blank
   `script.*` entries dropped the same way - see [Elements](elements.md)),
   the stored execution options (`followRedirects` /
-  `maxRedirects` / `httpVersion` / `verifySSL`, always emitted) and its `requestName` (the
+  `maxRedirects` / `httpVersion` / `verifySSL`, always emitted; the request's own
+  `timeout`, emitted only when it states one, so a request that states none
+  sends with the `defaultTimeout` setting in force at the send, issue #2937) and
+  its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is
   only a fallback for a request without one. An unknown id is a definitive
@@ -6846,7 +6876,10 @@ sent twice and auth adds none.
 
 **`timeout` is the whole-transfer deadline in milliseconds** (issue #1917), held
 to `1`-`86400000` and defaulting to the `defaultTimeout` setting when absent or
-`null`. A number outside that range, or a value that is not a number, is a `400`
+`null`. A stored request's own `timeout` (issue #2937) reaches this field the
+same way: [`POST /compose`](#post-compose) by `requestId` writes it into the
+payload only when the request states one, so a composed send takes the inline
+overlay's `timeout`, else the stored request's, else the setting. A number outside that range, or a value that is not a number, is a `400`
 naming `'timeout'` before any run row exists and with nothing sent: libcurl
 reads `0` as "no timeout", and a negative value is a rejected option the
 transfer then runs without. `POST /runs` holds the same bound (see its
@@ -9343,7 +9376,7 @@ default, and whose message names the offending field and why the bound exists:
 | `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
 | `startConcurrency` | `1`-`10000` | The ramp is seeded with this many in-flight requests before the first duration check, and it is read as a `size_t`, so a negative start is ~1.8e19 of them. |
 | `maxInFlight` | `1`-`1000000` | It is a pending-request ceiling read as a `size_t`, so `-1` or `0` removes the backpressure the field exists to provide instead of tightening it, and an open-loop run against a slow target then accumulates in-flight requests for its whole duration. The ceiling is **not** the `concurrency` guard: that one bounds an eager per-worker connection pre-allocation, while this bounds a counter that pre-allocates nothing, and the engine's own default - `max(targetRps × 10, 1000)` - reaches 500,000 at the load dialog's 50k RPS maximum, so a lower bound would refuse ceilings the engine picks for itself. |
-| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). It also bounds the run's OAuth 2.0 token fetches (the pre-flight's, each step's at plan time, and every mid-run refresh) and is the default timeout of a `pm.sendRequest` from any script of the run: a sequential run's step, setup and teardown scripts, and a load run's inline step scripts, `script.setup` / `script.teardown` and deferred `tests` script (#2833, #2841). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. Absent or `null`, the run uses the `defaultTimeout` setting, as [`POST /execute`](#post-execute) does (#2798). In a scenario run, sequential or load, it is what a step whose stored request states no `timeout` of its own sends with; a step that states one sends with its own (#2937), and fetches and refreshes its OAuth 2.0 token under it too. It also bounds the run's other OAuth 2.0 token fetches (the pre-flight's, and each step's at plan time and every mid-run refresh) and is the default timeout of a `pm.sendRequest` from any script of the run: a sequential run's step, setup and teardown scripts, and a load run's inline step scripts, `script.setup` / `script.teardown` and deferred `tests` script (#2833, #2841). Latency percentiles and `max` saturate at one hour (`3600000` ms): a longer completion is counted there, not dropped (#2790). |
 | `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
 | `stepDuration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | `capacity` only, and read by the same parser `duration` is - so it is gated by the same rule rather than by a second copy of it. |
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
@@ -9372,7 +9405,10 @@ constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run and
 `capacity` run's `duration` defaults to its own 300 s search deadline instead.
 `timeout` is the exception: it defaults to the `defaultTimeout` setting (30 s
 unless changed in Settings), read when the run starts, for a single-request
-and a scenario run alike. None of them is written to the stored snapshot; only
+and a scenario run alike. A scenario step's own stored `timeout` (#2937) wins
+over both for that step's transfers. A `pm.sendRequest` keeps the run-level
+value, except from a sequential run's step scripts, which take their step's
+timeout as a Send's scripts take the Send's. None of them is written to the stored snapshot; only
 what the body carried is, so a replayed snapshot that carried no `timeout`
 takes the setting in force at its own start.
 
@@ -9769,7 +9805,9 @@ one the engine died under, whose summary is rebuilt from its last tick and
 flagged `summary.partial`) is reported from its stored rows alone, and there
 every stored row, a `0` included, is in the percentiles and the mean, which
 divides by the rows stored rather than by this population. A run that finished
-on its own reports from its summary, which this does not affect.
+on its own reports from its summary, which this does not affect. Those two
+reports write no `latency` block at all (#2938), so none of this reaches a
+reader for them.
 
 The sequential collection runner follows the same population, with two differences:
 its `latency` block is computed **exact nearest-rank** over every sent step's duration
@@ -10133,6 +10171,14 @@ window, which ends before the end-of-run drain, where a live frame divides by
 everything elapsed so far ([`GET /runs/:runId/report`](#get-runsrunidreport),
 issue #2392).
 
+A capacity run's frames carry one more key, the search's state (the
+`capacity` row of the field reference below), here three seconds into the
+search's third measurement:
+
+```
+data: {..., "capacity":{"level":16,"levelElapsedMs":3000,"levelsJudged":2}}
+```
+
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so
 `Last-Event-ID` resume works identically and a client that reconnects mid-run
@@ -10228,7 +10274,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases` and `statusSeconds` keys, which it adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys and a capacity run's `capacity`, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases` and `statusSeconds` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -10255,6 +10301,7 @@ no frame.
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
+| `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
@@ -10898,10 +10945,11 @@ tick's elapsed seconds), `avgRps` (completions over that time, not the tick's tr
 not measure for the whole run reads as an older engine's summary does: `avgInFlight`,
 `connectionReplays`, `sendingDurationSeconds` and `completedWhileSending` are absent,
 `peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
-`sampling` is absent, and `latency` is computed from the stored `results` rows, of which such a run
-has none, so every percentile is `0`. A failed load run with no summary at all, because it wrote no
+`sampling` is absent, and the report has **no `latency` block** (issue #2938): the percentiles come from
+the stored `results` rows, of which such a run has none, so omitting the block says "not recorded"
+where a block of zeros would read as steps that answered instantly. A failed load run with no summary at all, because it wrote no
 tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
-counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`). Both keys are absent, never `false`, on every other report. A client that shows a
+counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist. Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it
 as measured.
 
@@ -11579,8 +11627,8 @@ stored summary records it (the status-code distribution never held them).
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are
 its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load
-run with no summary at all, whose counts are not a measurement. Each is absent
-otherwise, never `false`; "A run the engine died under" above says what each
+run with no summary at all, whose counts are not a measurement. Neither report has
+a `latency` block (issue #2938). Each flag is absent otherwise, never `false`; "A run the engine died under" above says what each
 figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked

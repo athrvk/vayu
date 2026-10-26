@@ -199,6 +199,11 @@ export interface RequestState {
 	// Execution settings (Settings tab)
 	followRedirects: boolean;
 	maxRedirects: number;
+	/**
+	 * This request's own timeout in ms, or `null` for the `defaultTimeout`
+	 * setting. See `Request.timeout` (issue #2937).
+	 */
+	timeout: number | null;
 	/** Protocol to negotiate. See `Request.httpVersion` for the full rationale. */
 	httpVersion: HttpVersion;
 	/** Verify the TLS certificate. See `Request.verifySSL` for the rationale. */

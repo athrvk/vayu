@@ -75,8 +75,21 @@ export const SCATTER_LEGEND = {
 // The key each card renders. Live (`MetricsView`) and History read these same
 // lists, so a card cannot name a line its twin does not (#2697).
 export const LATENCY_ENTRIES: readonly LegendEntry[] = Object.values(LATENCY_LEGEND);
-export const PERCENTILE_ENTRIES: readonly LegendEntry[] = Object.values(PERCENTILE_LEGEND);
-export const SCATTER_ENTRIES: readonly LegendEntry[] = Object.values(SCATTER_LEGEND);
+
+/**
+ * The percentile card's key: the SLO entry only when the chart draws that line,
+ * which it does for a run that has an SLO to draw (#2939).
+ */
+export function percentileLegend(hasSlo: boolean): LegendEntry[] {
+	const { slo, ...series } = PERCENTILE_LEGEND;
+	return [...Object.values(series), ...(hasSlo ? [slo] : [])];
+}
+
+/** The scatter card's key: the p99 dots, and the SLO entry only when the chart draws that line. */
+export function scatterLegend(hasSlo: boolean): LegendEntry[] {
+	const { slo, ...series } = SCATTER_LEGEND;
+	return [...Object.values(series), ...(hasSlo ? [slo] : [])];
+}
 
 /**
  * The throughput card's key: the send-rate entry only when the chart draws that

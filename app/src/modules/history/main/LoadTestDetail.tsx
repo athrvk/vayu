@@ -43,6 +43,7 @@ import {
 } from "@/components/shared";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { runSloMs } from "@/modules/dashboard/utils/runSloMs";
 import { p99AtPeak } from "@/modules/dashboard/utils/p99AtPeak";
 import { buildRampOverlay } from "@/modules/dashboard/utils/metricsTransforms";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -189,7 +190,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				: undefined;
 		return {
 			...base,
-			breakpoint: computeBreakpoint(timeSeries, sloThresholdMs),
+			breakpoint: computeBreakpoint(timeSeries, sloThresholdMs, runSloMs(report)),
 			p99AtPeakMs: p99AtPeak(timeSeries),
 			rampDeviationPct,
 		};

@@ -5,11 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatLatency, formatPercent, formatRate } from "@/lib/format-number";
+import { formatLatencyOrDash, formatPercent, formatRate } from "@/lib/format-number";
 
 /** Shared value/axis formatters for the centralized charts. */
 
-export const fmtMs = (v: number | null | undefined): string => (v == null ? "-" : formatLatency(v));
+export const fmtMs = formatLatencyOrDash;
 
 /**
  * Decimals needed to write `step` exactly, up to 4. A tick sequence printed
