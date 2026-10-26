@@ -9,7 +9,9 @@
  * @file core/run_export_view.cpp
  * @brief The run-report document read into the sections every text renderer
  *        shares (#2131, #2135): a verdict, the run, the headline numbers,
- *        latency against budgets, errors, the comparison and the warnings.
+ *        latency against budgets, a capacity search's result, a scenario's
+ *        sequence and transactions, errors, the comparison and the warnings
+ *        (#2819).
  */
 
 #include "vayu/core/run_export_view.hpp"
@@ -50,6 +52,10 @@ constexpr std::string_view ABSENT = "-";
 /// the rest are folded into one line, so a run that saw 300 distinct codes
 /// writes the same few lines as one that saw three.
 constexpr std::size_t MAX_OPEN_SET_ROWS = 10;
+/// Rows a table fed by the plan (steps, transactions) shows before the rest are
+/// folded into one `and N more` line. Document order, never by count: the order
+/// is the sequence, and sorting it would hide which step comes first.
+constexpr std::size_t MAX_SEQUENCE_ROWS = 20;
 constexpr std::size_t MAX_WARNINGS      = 10;
 constexpr std::size_t MAX_WARNING_NAMES = 5;
 
@@ -553,21 +559,66 @@ std::vector<ReportText> notices_of (const ordered& document) {
 
 // --- run ------------------------------------------------------------------------------------------------
 
+const ordered& scenario_of (const ordered& document) {
+    return at_path (document, { "report", "scenario" });
+}
+
+/// The plan's step count from `scenario.steps`; nothing when the document
+/// holds no per-step stats (`stepsStored` counts stored executions, not steps).
+std::optional<std::size_t> steps_per_iteration (const ordered& document) {
+    const ordered& steps = member (scenario_of (document), "steps");
+    if (!steps.is_array () || steps.empty ()) {
+        return std::nullopt;
+    }
+    return steps.size ();
+}
+
+ReportText collection_run_text (const ordered& document) {
+    const auto steps = steps_per_iteration (document);
+    if (!steps) {
+        return "Collection run";
+    }
+    return words ("Collection run, " + format_run_count (static_cast<double> (*steps)) +
+    (*steps == 1 ? " step per iteration" : " steps per iteration"));
+}
+
 ReportText target_text (const ordered& document) {
     const std::string method = text_at (document, { "config", "method" });
     const std::string url    = text_at (document, { "config", "url" });
     if (!method.empty () || !url.empty ()) {
         return user (method + (method.empty () || url.empty () ? "" : " ") + url);
     }
-    return member (at_path (document, { "report" }), "scenario").is_object () ?
-    ReportText ("Collection run") :
-    absent ();
+    return scenario_of (document).is_object () ? collection_run_text (document) :
+                                                 absent ();
+}
+
+bool is_capacity_run (const ordered& document) {
+    return text_at (configuration_of (document), { "mode" }) == "capacity";
+}
+
+std::string virtual_users_noun (double count) {
+    return count == 1 ? "virtual user" : "virtual users";
+}
+
+/// A capacity run's `concurrency` is the ceiling it searches up to, and
+/// `startConcurrency` the first level it measures.
+ReportText capacity_virtual_users_text (const ordered& config) {
+    const auto ceiling = number_at (config, { "concurrency" });
+    if (!ceiling) {
+        return absent ();
+    }
+    const double first = number_at (config, { "startConcurrency" }).value_or (1);
+    return words ("Search from " + format_run_count (first) + " up to " +
+    format_run_count (*ceiling) + ' ' + virtual_users_noun (*ceiling));
 }
 
 /// The concurrency, and for a ramp its start level and ramp time too.
 ReportText virtual_users_text (const ordered& document) {
     const ordered& config = configuration_of (document);
-    const auto peak       = number_at (config, { "concurrency" });
+    if (is_capacity_run (document)) {
+        return capacity_virtual_users_text (config);
+    }
+    const auto peak = number_at (config, { "concurrency" });
     if (!peak) {
         return absent ();
     }
@@ -585,12 +636,40 @@ ReportText virtual_users_text (const ordered& document) {
     return text;
 }
 
+/// `Deadline 300 s, ran 142.5 s`: a capacity search ends when it finds its
+/// limit, so the configured duration is a ceiling and the run's own length is
+/// what it took.
+ReportText capacity_duration_text (const ordered& document) {
+    std::string out;
+    if (const auto deadline =
+        duration_seconds (member (configuration_of (document), "duration"))) {
+        out = "Deadline " + format_run_seconds (*deadline);
+    }
+    if (const auto ran = number_at (document, { "report", "summary", "testDuration" })) {
+        out += (out.empty () ? "Ran " : ", ran ") + format_run_seconds (*ran);
+    }
+    return out.empty () ? absent () : words (std::move (out));
+}
+
 ReportText duration_text (const ordered& document) {
+    if (is_capacity_run (document)) {
+        return capacity_duration_text (document);
+    }
     const ordered& duration = member (configuration_of (document), "duration");
     if (const auto seconds = duration_seconds (duration)) {
         return words (format_run_seconds (*seconds));
     }
     return duration.is_string () ? user (duration.get<std::string> ()) : absent ();
+}
+
+/// How long a capacity search holds each level: the string as it was sent
+/// (`5s`), or a number of seconds. Empty when the run left it at its default.
+ReportText step_length_text (const ordered& document) {
+    const ordered& step = member (configuration_of (document), "stepDuration");
+    if (step.is_number ()) {
+        return words (format_run_seconds (step.get<double> ()));
+    }
+    return step.is_string () ? user (step.get<std::string> ()) : ReportText ();
 }
 
 ReportText started_text (const ordered& document) {
@@ -622,6 +701,9 @@ Table run_table (const ordered& document) {
         field_row ("Target rate", words (format_run_figure (*rate) + " req/s")));
     }
     table.rows.push_back (field_row ("Duration", duration_text (document)));
+    if (const ReportText step = step_length_text (document); !step.empty ()) {
+        table.rows.push_back (field_row ("Step", step));
+    }
     table.rows.push_back (field_row ("Started", started_text (document)));
     table.rows.push_back (field_row ("Engine version",
     text_or_absent (user (text_at (document, { "engineVersion" })))));
@@ -738,6 +820,11 @@ constexpr auto LATENCY_ROWS = std::to_array<LatencyRow> ({
 Table latency_table (const ordered& document) {
     const ordered& latency = at_path (document, { "report", "latency" });
     Table table{ { "Measure", "Latency (ms)", "Budget" }, {} };
+    // A scenario run has one histogram for every step; the per-step ones are
+    // the Sequence table's.
+    if (scenario_of (document).is_object ()) {
+        table.caption = "All steps pooled.";
+    }
     for (const LatencyRow& row : LATENCY_ROWS) {
         table.rows.push_back (metric_row (row.key,
         figure_text (number_at (latency, { row.key }), format_run_figure),
@@ -965,6 +1052,501 @@ std::optional<ReportComparison> comparison_of (const ordered& document) {
     return out;
 }
 
+// --- capacity --------------------------------------------------------------------------------------------------------
+
+struct StopReason {
+    std::string_view key;
+    std::string_view label;
+    /// The detail of a stop whose wording does not depend on the report.
+    std::string_view fixed_detail;
+};
+
+/// The app's `STOP_REASONS` and `FIXED_DETAILS` (`components/shared/capacityStop.ts`):
+/// this list and that one word the same stops, so a change to either is a
+/// change to both. A reason not here keeps its raw key, as in the app.
+constexpr auto STOP_REASONS = std::to_array<StopReason> ({
+{ "slo_exceeded", "Latency budget exceeded", "" },
+{ "errors_exceeded", "Errors exceeded the limit", "" },
+{ "plateau", "Throughput plateaued", "" },
+{ "cap_reached", "Reached the virtual user ceiling", "The target held its budget all the way up. Raise the ceiling to find the limit." },
+{ "deadline", "Ran out of time", "The run's deadline passed before the search found a limit." },
+{ "stopped", "Stopped by hand", "The run was stopped before the search reached a conclusion." },
+});
+
+const StopReason* find_stop_reason (std::string_view key) {
+    const auto found = std::ranges::find (STOP_REASONS, key, &StopReason::key);
+    return found == STOP_REASONS.end () ? nullptr : &*found;
+}
+
+/// A search that ran out of ceiling, time or patience: its best level is a
+/// floor, not a limit (the app's `OPEN_ENDED_STOPS`).
+bool is_open_ended_stop (std::string_view stop) {
+    return stop == "cap_reached" || stop == "deadline" || stop == "stopped";
+}
+
+/// The stops with no field naming the level that was open when they hit.
+bool is_interrupted_stop (std::string_view stop) {
+    return stop == "deadline" || stop == "stopped";
+}
+
+/// A figure of @p capacity spelled by @p spell with @p unit, or `-`.
+std::string capacity_figure (const ordered& capacity,
+std::string_view key,
+std::string (*spell) (double),
+std::string_view unit = {}) {
+    const auto value = number_at (capacity, { key });
+    return value ? with_unit (spell (*value), unit) : std::string (ABSENT);
+}
+
+std::string capacity_ms (const ordered& capacity, std::string_view key) {
+    return capacity_figure (capacity, key, format_run_figure, " ms");
+}
+
+std::string users_text (double count) {
+    return format_run_count (count) + ' ' + virtual_users_noun (count);
+}
+
+/// `41 virtual users`, or `-` for a level the search did not report.
+std::string users_figure (const ordered& capacity, std::string_view key) {
+    const auto count = number_at (capacity, { key });
+    return count ? users_text (*count) : std::string (ABSENT);
+}
+
+/// `14 req/s, p99 41 ms` for the level whose three figures are named by the
+/// keys.
+std::string level_reading (const ordered& capacity, std::string_view rps_key, std::string_view p99_key) {
+    return capacity_figure (capacity, rps_key, format_run_figure, " req/s") +
+    ", p99 " + capacity_ms (capacity, p99_key);
+}
+
+bool has_levels (const ordered& capacity) {
+    const ordered& levels = member (capacity, "levels");
+    return levels.is_array () && !levels.empty ();
+}
+
+/// Where throughput stopped growing; a plateau stored before `saturation*`
+/// existed names no level.
+std::string plateau_headline (const ordered& capacity) {
+    if (!number_at (capacity, { "saturationConcurrency" }) ||
+    !number_at (capacity, { "saturationRps" }) ||
+    !number_at (capacity, { "saturationP99Ms" })) {
+        return "Throughput stopped growing. More only queued.";
+    }
+    return "Throughput stopped growing at " +
+    users_figure (capacity, "saturationConcurrency") + " (" +
+    level_reading (capacity, "saturationRps", "saturationP99Ms") + "). More only queued.";
+}
+
+/// No level held: the first one the search tried was already over.
+std::string no_level_headline (const ordered& capacity, std::string_view stop) {
+    if (stop == "errors_exceeded") {
+        return "No level stayed under the error limit - the target was already "
+               "over "
+               "it at the fewest virtual users the search tried.";
+    }
+    return "No level met the " + capacity_ms (capacity, "sloMs") +
+    " budget - the target was already over it at the fewest virtual users the "
+    "search tried.";
+}
+
+/// A floor: the target held this much and the search stopped for a reason of
+/// its own.
+std::string open_ended_headline (const ordered& capacity, std::string_view stop) {
+    return "At least " + users_figure (capacity, "maxHealthyConcurrency") +
+    " held the budget (" + level_reading (capacity, "maxHealthyRps", "p99AtMaxHealthyMs") +
+    "). The search did not find a limit." +
+    (is_interrupted_stop (stop) ? " The next level was still being measured." : "");
+}
+
+std::string sustained_headline (const ordered& capacity) {
+    return "Sustained " + users_figure (capacity, "maxHealthyConcurrency") + " at " +
+    capacity_figure (capacity, "maxHealthyRps", format_run_figure, " req/s") +
+    ", with a p99 of " + capacity_ms (capacity, "p99AtMaxHealthyMs") +
+    " against a " + capacity_ms (capacity, "sloMs") + " budget.";
+}
+
+/// What the search found, chosen the way the app's `headlineKind` chooses it:
+/// the same `maxHealthy*` figures are a measured capacity when the target gave
+/// out, a floor when the search ran out of ceiling or time, and an overshoot
+/// when throughput plateaued.
+std::string capacity_headline (const ordered& capacity, std::string_view stop) {
+    if (!has_levels (capacity)) {
+        return "The search ended before it finished measuring a single level, "
+               "so it "
+               "has nothing to report about this target. Give the run longer "
+               "than "
+               "one step, or shorten the step.";
+    }
+    if (stop == "plateau") {
+        return plateau_headline (capacity);
+    }
+    if (!number_at (capacity, { "maxHealthyConcurrency" })) {
+        return no_level_headline (capacity, stop);
+    }
+    return is_open_ended_stop (stop) ? open_ended_headline (capacity, stop) :
+                                       sustained_headline (capacity);
+}
+
+/// What was measured at the knee: the error share when errors ended the search,
+/// the p99 otherwise, each only when the document holds it.
+std::string knee_evidence (const ordered& capacity, std::string_view stop) {
+    if (const auto errors = number_at (capacity, { "kneeErrorPct" });
+    stop == "errors_exceeded" && errors) {
+        return ", where " + format_run_percent (*errors) + "% of requests failed";
+    }
+    if (const auto p99 = number_at (capacity, { "kneeP99Ms" })) {
+        return ", where p99 reached " + format_run_figure (*p99) + " ms";
+    }
+    return {};
+}
+
+/// Where the limit sits. With a held level beside it the knee is half of a
+/// bracket; without one the first level tried already gave out.
+std::string knee_sentence (const ordered& capacity, std::string_view stop, double knee) {
+    const std::string evidence = knee_evidence (capacity, stop) + '.';
+    const auto held = number_at (capacity, { "maxHealthyConcurrency" });
+    if (!held) {
+        return "It gave out at " + users_text (knee) + evidence;
+    }
+    return "The limit lies between " + format_run_count (*held) + " and " +
+    users_text (knee) + ": it held " + format_run_count (*held) +
+    " and gave out at " + format_run_count (knee) + evidence;
+}
+
+/// A breach is a verdict only once the search has measured the level twice; each
+/// measurement is one step of the level, so the step length is the one duration
+/// the sentence can name.
+ReportText consecutive_measurements (const ReportText& step_length) {
+    ReportText out = "two consecutive measurements of the level";
+    if (!step_length.empty ()) {
+        out += " (each " + step_length + " long)";
+    }
+    return out;
+}
+
+ReportText errors_detail (const ordered& capacity, const ReportText& step_length) {
+    const auto limit = number_at (capacity, { "maxErrorPct" });
+    ReportText lead  = limit ?
+     words ("More than " + format_run_figure (*limit) + "% of requests failed across ") :
+     ReportText ("More requests failed than the limit allows across ");
+    return lead + consecutive_measurements (step_length) + ".";
+}
+
+/// Quotes the p99 rise only when the document proves one: the saturation
+/// level's p99 against the last level tried.
+std::string plateau_detail (const ordered& capacity) {
+    const std::string lead =
+    "More virtual users stopped buying more throughput";
+    const auto saturated  = number_at (capacity, { "saturationP99Ms" });
+    const ordered& levels = member (capacity, "levels");
+    const auto last =
+    has_levels (capacity) ? number_at (levels.back (), { "p99Ms" }) : std::nullopt;
+    if (!saturated || !last || *last <= *saturated) {
+        return lead + ".";
+    }
+    return lead + "; p99 stayed inside the budget but rose from " +
+    format_run_figure (*saturated) + " ms to " + format_run_figure (*last) + " ms.";
+}
+
+/// The line under the headline: why the search stopped, in the document's own
+/// figures. Empty for a reason with no words.
+ReportText capacity_detail (const ordered& capacity,
+std::string_view stop,
+const ReportText& step_length) {
+    if (stop == "slo_exceeded") {
+        return "p99 stayed above the budget across " +
+        consecutive_measurements (step_length) + ".";
+    }
+    if (stop == "errors_exceeded") {
+        return errors_detail (capacity, step_length);
+    }
+    if (stop == "plateau") {
+        return words (plateau_detail (capacity));
+    }
+    const StopReason* reason = find_stop_reason (stop);
+    return reason == nullptr ? ReportText () : words (std::string (reason->fixed_detail));
+}
+
+/// `Budget: p99 <= 200 ms; error limit: 1.0%; step length: 5s`, naming only
+/// what the document records.
+ReportText capacity_limits (const ordered& capacity, const ReportText& step_length) {
+    std::vector<ReportText> parts;
+    if (number_at (capacity, { "sloMs" })) {
+        parts.push_back (words ("Budget: p99 <= " + capacity_ms (capacity, "sloMs")));
+    }
+    if (number_at (capacity, { "maxErrorPct" })) {
+        parts.push_back (words ("error limit: " +
+        capacity_figure (capacity, "maxErrorPct", format_run_percent, "%")));
+    }
+    if (!step_length.empty ()) {
+        parts.push_back ("step length: " + step_length);
+    }
+    ReportText out;
+    for (const ReportText& part : parts) {
+        out += out.empty () ? part : "; " + part;
+    }
+    return out;
+}
+
+/// Which optional columns the levels table has: a run stored before errors were
+/// judged has no `errorPct` on any level, and its column would be empty cells.
+struct LevelColumns {
+    bool errors  = false;
+    bool samples = false;
+};
+
+LevelColumns level_columns (const ordered& levels) {
+    const auto carries = [&levels] (std::string_view key) {
+        return std::ranges::any_of (levels,
+        [key] (const ordered& level) { return member (level, key).is_number (); });
+    };
+    return { carries ("errorPct"), carries ("samples") };
+}
+
+/// The concurrency, marked when an earlier level measured it already: the
+/// search re-measures a level after one bad measurement, and that repeat is the
+/// audit trail, not a duplicate.
+ReportCell level_concurrency_cell (const ordered& level, std::vector<double>& seen) {
+    const auto concurrency = number_at (level, { "concurrency" });
+    if (!concurrency) {
+        return cell (absent ());
+    }
+    const bool repeated = std::ranges::find (seen, *concurrency) != seen.end ();
+    seen.push_back (*concurrency);
+    return plain_cell (
+    format_run_count (*concurrency) + (repeated ? " (re-measured)" : ""));
+}
+
+/// A figure with the words that flag it when @p over holds; colour never
+/// carries it alone.
+ReportCell flagged_cell (const std::optional<double>& value,
+std::string (*spell) (double),
+bool over,
+std::string_view flag) {
+    if (!value) {
+        return cell (absent ());
+    }
+    return cell (words (spell (*value) + (over ? " (" + std::string (flag) + ")" : "")),
+    over ? Tone::bad : Tone::neutral);
+}
+
+Row level_row (const ordered& level,
+const ordered& capacity,
+const LevelColumns& columns,
+std::vector<double>& seen) {
+    const auto p99         = number_at (level, { "p99Ms" });
+    const auto slo         = number_at (capacity, { "sloMs" });
+    const auto error_pct   = number_at (level, { "errorPct" });
+    const auto error_limit = number_at (capacity, { "maxErrorPct" });
+    Row row                = { level_concurrency_cell (level, seen),
+                       cell (figure_text (number_at (level, { "rps" }), format_run_figure)),
+                       flagged_cell (p99, format_run_figure, p99 && slo && *p99 > *slo, "over budget") };
+    if (columns.errors) {
+        row.push_back (flagged_cell (error_pct, format_run_percent,
+        error_pct && error_limit && *error_pct > *error_limit, "over limit"));
+    }
+    if (columns.samples) {
+        row.push_back (
+        cell (figure_text (number_at (level, { "samples" }), format_run_count)));
+    }
+    return row;
+}
+
+Table capacity_levels (const ordered& capacity) {
+    const ordered& levels = member (capacity, "levels");
+    Table table{ { "Virtual users", "Throughput (req/s)", "p99 (ms)" }, {} };
+    if (!levels.is_array ()) {
+        return table;
+    }
+    const LevelColumns columns = level_columns (levels);
+    if (columns.errors) {
+        table.headers.emplace_back ("Errors (%)");
+    }
+    if (columns.samples) {
+        table.headers.emplace_back ("Samples");
+    }
+    std::vector<double> seen;
+    for (const ordered& level : levels) {
+        table.rows.push_back (level_row (level, capacity, columns, seen));
+    }
+    return table;
+}
+
+/// Empty when the document holds no capacity section.
+std::optional<ReportCapacity> capacity_of (const ordered& document) {
+    const ordered& capacity = at_path (document, { "report", "capacity" });
+    if (!capacity.is_object ()) {
+        return std::nullopt;
+    }
+    const std::string stop       = text_at (capacity, { "stopReason" });
+    const ReportText step_length = step_length_text (document);
+    const StopReason* reason     = find_stop_reason (stop);
+    ReportCapacity out;
+    out.stop     = reason == nullptr ? text_or_absent (user (stop)) :
+                                       words (std::string (reason->label));
+    out.headline = words (capacity_headline (capacity, stop));
+    if (const auto knee = number_at (capacity, { "kneeConcurrency" })) {
+        out.knee = words (knee_sentence (capacity, stop, *knee));
+    }
+    out.detail = capacity_detail (capacity, stop, step_length);
+    out.limits = capacity_limits (capacity, step_length);
+    out.levels = capacity_levels (capacity);
+    return out;
+}
+
+// --- sequence ---------------------------------------------------------------------------------------------------------
+
+/// `2,105 iterations started, 2,100 completed, 3 abandoned, 2 cut short`. The
+/// cut-short count is derived as the app derives it: started and neither
+/// completed nor abandoned by an errored step, clamped at none.
+ReportText iterations_text (const ordered& scenario) {
+    const auto started = number_at (scenario, { "iterations" });
+    if (!started) {
+        return {};
+    }
+    const auto completed = number_at (scenario, { "iterationsCompleted" });
+    const double abandoned =
+    number_at (scenario, { "iterationsAbandoned" }).value_or (0);
+    std::string out = format_run_count (*started) +
+    (*started == 1 ? " iteration" : " iterations") + " started";
+    if (completed) {
+        out += ", " + format_run_count (*completed) + " completed";
+    }
+    if (abandoned > 0) {
+        out += ", " + format_run_count (abandoned) + " abandoned";
+    }
+    if (const double cut_short = *started - completed.value_or (*started) - abandoned;
+    completed && cut_short > 0) {
+        out += ", " + format_run_count (cut_short) + " cut short";
+    }
+    return words (std::move (out));
+}
+
+/// The inline assertion outcomes of one step: `assert.*` elements and the
+/// `script.*` ones whose `pm.test` calls ran inline. A script the engine only
+/// replays afterwards is `deferred` and carries no pass or fail count here.
+struct AssertionTally {
+    bool counted    = false;
+    double passed   = 0;
+    double failed   = 0;
+    double deferred = 0;
+};
+
+AssertionTally assertions_of (const ordered& step) {
+    AssertionTally tally;
+    const ordered& elements = member (step, "elements");
+    if (!elements.is_array ()) {
+        return tally;
+    }
+    for (const ordered& element : elements) {
+        const std::string kind = text_at (element, { "kind" });
+        if (!kind.starts_with ("assert.") && !kind.starts_with ("script.")) {
+            continue;
+        }
+        tally.counted = true;
+        tally.passed += number_at (element, { "passed" }).value_or (0);
+        tally.failed += number_at (element, { "failed" }).value_or (0);
+        tally.deferred += number_at (element, { "deferred" }).value_or (0);
+    }
+    return tally;
+}
+
+ReportCell assertions_cell (const AssertionTally& tally) {
+    if (!tally.counted) {
+        return cell (absent ());
+    }
+    if (tally.passed + tally.failed == 0 && tally.deferred > 0) {
+        return plain_cell ("deferred to a post-run replay");
+    }
+    return cell (words (format_run_count (tally.passed) + " passed, " +
+                 format_run_count (tally.failed) + " failed"),
+    tally.failed > 0 ? Tone::bad : Tone::neutral);
+}
+
+ReportCell percentile_cell (const ordered& source, std::string_view key) {
+    return cell (figure_text (number_at (source, { "latency", key }), format_run_figure));
+}
+
+ReportCell count_cell (const ordered& source, std::string_view key) {
+    return cell (figure_text (number_at (source, { key }), format_run_count));
+}
+
+/// The step's name, or its position when the document names none.
+ReportText step_label (const ordered& step, std::size_t position) {
+    if (std::string name = text_at (step, { "name" }); !name.empty ()) {
+        return user (std::move (name));
+    }
+    const double index =
+    number_at (step, { "index" }).value_or (static_cast<double> (position));
+    return words ("Step " + format_run_count (index + 1));
+}
+
+Row step_row (const ordered& step, std::size_t position) {
+    return { cell (step_label (step, position)), count_cell (step, "executed"),
+        count_cell (step, "errors"), assertions_cell (assertions_of (step)),
+        percentile_cell (step, "p50"), percentile_cell (step, "p95"),
+        percentile_cell (step, "p99") };
+}
+
+Row transaction_row (const ordered& transaction, std::size_t /*position*/) {
+    return { cell (user (text_at (transaction, { "name" }))),
+        count_cell (transaction, "count"), count_cell (transaction, "errors"),
+        percentile_cell (transaction, "p50"), percentile_cell (transaction, "p95"),
+        percentile_cell (transaction, "p99") };
+}
+
+/// @p table filled from @p items in document order, cut to
+/// @ref MAX_SEQUENCE_ROWS with the rest named in one `and N more <noun>s` row;
+/// @p noun is the singular.
+Table folded_table (Table table,
+const ordered& items,
+Row (*row_of) (const ordered&, std::size_t),
+std::string_view noun) {
+    if (!items.is_array ()) {
+        return table;
+    }
+    for (std::size_t at = 0; at < items.size () && at < MAX_SEQUENCE_ROWS; ++at) {
+        table.rows.push_back (row_of (items[at], at));
+    }
+    if (items.size () > MAX_SEQUENCE_ROWS) {
+        const std::size_t hidden = items.size () - MAX_SEQUENCE_ROWS;
+        Row fold (table.headers.size ());
+        fold.front () =
+        plain_cell ("and " + format_run_count (static_cast<double> (hidden)) +
+        " more " + std::string (noun) + (hidden == 1 ? "" : "s"));
+        table.rows.push_back (std::move (fold));
+    }
+    return table;
+}
+
+Table steps_table (const ordered& scenario) {
+    return folded_table (
+    { { "Step", "Executed", "Errors", "Assertions", "p50 (ms)", "p95 (ms)", "p99 (ms)" }, {} },
+    member (scenario, "steps"), step_row, "step");
+}
+
+Table transactions_table (const ordered& scenario) {
+    return folded_table (
+    { { "Transaction", "Count", "Errors", "p50 (ms)", "p95 (ms)", "p99 (ms)" }, {} },
+    member (scenario, "transactions"), transaction_row, "transaction");
+}
+
+/// Empty when the run is not a scenario run, or the document says nothing about
+/// its iterations or steps.
+std::optional<ReportSequence> sequence_of (const ordered& document) {
+    const ordered& scenario = scenario_of (document);
+    if (!scenario.is_object ()) {
+        return std::nullopt;
+    }
+    ReportSequence out;
+    out.iterations = iterations_text (scenario);
+    out.steps      = steps_table (scenario);
+    if (out.iterations.empty () && out.steps.rows.empty ()) {
+        return std::nullopt;
+    }
+    return out;
+}
+
 // --- warnings -------------------------------------------------------------------------------------------------------------
 
 ReportText warning_names (const ordered& names) {
@@ -1025,17 +1607,20 @@ ReportView build_run_report_view (const ordered& document) {
     const std::string reference = text_at (document, { "run", "reference" });
     const std::string title     = reference_title (reference);
     ReportView view;
-    view.title      = title.empty () ? ReportText ("Load test") : user (title);
-    view.reference  = user (reference);
-    view.verdict    = verdict_of (document);
-    view.notices    = notices_of (document);
-    view.run        = run_table (document);
-    view.results    = results_table (document);
-    view.latency    = latency_table (document);
-    view.errors     = errors_table (document);
-    view.comparison = comparison_of (document);
-    view.warnings   = warning_lines (document);
-    view.footer     = footer_of (document);
+    view.title     = title.empty () ? ReportText ("Load test") : user (title);
+    view.reference = user (reference);
+    view.verdict   = verdict_of (document);
+    view.notices   = notices_of (document);
+    view.run       = run_table (document);
+    view.results   = results_table (document);
+    view.latency   = latency_table (document);
+    view.capacity  = capacity_of (document);
+    view.sequence  = sequence_of (document);
+    view.transactions = transactions_table (scenario_of (document));
+    view.errors       = errors_table (document);
+    view.comparison   = comparison_of (document);
+    view.warnings     = warning_lines (document);
+    view.footer       = footer_of (document);
     return view;
 }
 

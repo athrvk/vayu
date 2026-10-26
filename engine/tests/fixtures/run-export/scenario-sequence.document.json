@@ -1,0 +1,214 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_5e0a42",
+    "reference": "Vayu run \"Checkout flow\" (run_5e0a42) - load test, collection \"Checkout flow\", 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187830000,
+    "name": "Checkout flow",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": false,
+    "reason": "no_budgets"
+  },
+  "config": {
+    "method": null,
+    "url": null,
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "60s",
+      "concurrency": 20,
+      "timeout": "30s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 6293,
+      "successfulRequests": 6281,
+      "failedRequests": 12,
+      "httpErrorRequests": 7,
+      "noResponseRequests": 5,
+      "cancelledRequests": 0,
+      "errorRate": 0.2,
+      "totalDurationSeconds": 30.0,
+      "avgRps": 104.88,
+      "testDuration": 30.0,
+      "sendRate": 104.88,
+      "throughput": 104.88,
+      "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
+      "peakConcurrency": 20,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 600000,
+      "bytesReceived": 1197000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 39900
+    },
+    "latency": {
+      "min": 11.0,
+      "max": 1450.0,
+      "avg": 96.0,
+      "median": 42.0,
+      "p50": 42.0,
+      "p75": 90.0,
+      "p90": 190.0,
+      "p95": 250.0,
+      "p99": 420.0,
+      "p999": 1100.0
+    },
+    "statusCodes": {
+      "200": 6281,
+      "500": 7
+    },
+    "errors": {
+      "total": 12,
+      "withDetails": 12,
+      "types": {
+        "timeout": 5
+      },
+      "byStatusCode": {
+        "500": 7
+      }
+    },
+    "scenario": {
+      "iterations": 2110,
+      "iterationsCompleted": 2090,
+      "stepsExecuted": 6293,
+      "passed": 6270,
+      "failed": 23,
+      "skipped": 0,
+      "errored": 0,
+      "virtualUsers": 20,
+      "iterationsAbandoned": 15,
+      "assertions": {
+        "passed": 4185,
+        "failed": 18
+      },
+      "steps": [
+        {
+          "index": 0,
+          "name": "Log in",
+          "requestId": "req_login",
+          "method": "POST",
+          "executed": 2105,
+          "errors": 0,
+          "httpErrors": 0,
+          "noResponse": 0,
+          "latency": {
+            "min": 18.0,
+            "p50": 42.0,
+            "p95": 88.0,
+            "p99": 131.0,
+            "max": 290.0
+          },
+          "elements": [
+            {
+              "id": "el_status",
+              "kind": "assert.status",
+              "passed": 2105,
+              "failed": 0,
+              "skipped": 0
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "name": "Add to cart",
+          "requestId": "req_cart",
+          "method": "POST",
+          "executed": 2098,
+          "errors": 9,
+          "httpErrors": 7,
+          "noResponse": 2,
+          "latency": {
+            "min": 11.0,
+            "p50": 35.0,
+            "p95": 97.0,
+            "p99": 210.0,
+            "max": 640.0
+          },
+          "elements": [
+            {
+              "id": "el_body",
+              "kind": "assert.body_contains",
+              "passed": 2080,
+              "failed": 18,
+              "skipped": 0
+            },
+            {
+              "id": "el_post",
+              "kind": "script.post",
+              "passed": 0,
+              "failed": 0,
+              "skipped": 0,
+              "deferred": 2098
+            },
+            {
+              "id": "el_think",
+              "kind": "timer.think",
+              "passed": 2098,
+              "failed": 0,
+              "skipped": 0
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "name": "Pay | confirm <now>",
+          "requestId": "req_pay",
+          "method": "POST",
+          "executed": 2090,
+          "errors": 3,
+          "httpErrors": 0,
+          "noResponse": 3,
+          "latency": {
+            "min": 40.0,
+            "p50": 120.0,
+            "p95": 310.0,
+            "p99": 480.0,
+            "max": 1450.0
+          }
+        }
+      ],
+      "transactions": [
+        {
+          "name": "Checkout",
+          "count": 2090,
+          "errors": 12,
+          "latency": {
+            "min": 88.0,
+            "p50": 210.0,
+            "p90": 380.0,
+            "p95": 450.0,
+            "p99": 702.0,
+            "max": 1900.0
+          }
+        }
+      ]
+    }
+  },
+  "comparison": null,
+  "notCarried": []
+}

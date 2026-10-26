@@ -27,6 +27,8 @@
 
 ## Latency
 
+*All steps pooled.*
+
 | Measure | Latency (ms) | Budget          |
 | ------- | ------------ | --------------- |
 | min     | 8            | -               |
@@ -36,6 +38,10 @@
 | p99     | 910          | -               |
 | p999    | 1,320        | -               |
 | max     | 1,450        | -               |
+
+## Sequence
+
+2,105 iterations started, 2,105 completed
 
 ## Errors
 

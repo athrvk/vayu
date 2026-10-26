@@ -8,8 +8,9 @@
 /**
  * @file core/run_export_markdown.cpp
  * @brief The run-report document as Markdown (#2131): a verdict, the run, the
- *        headline numbers, latency against budgets, errors, the comparison
- *        and the warnings, in that order. What each section says is
+ *        headline numbers, latency against budgets, a capacity search's
+ *        result, a scenario's sequence and transactions, errors, the
+ *        comparison and the warnings, in that order. What each section says is
  *        `run_export_view.cpp`; this file is Markdown's syntax and escaping.
  */
 
@@ -282,7 +283,54 @@ std::string results_block (const ReportView& view) {
 }
 
 std::string latency_block (const ReportView& view) {
-    return "## Latency\n\n" + render_table (view.latency);
+    const ReportText& caption = view.latency.caption;
+    return "## Latency\n\n" +
+    (caption.empty () ? std::string () : "*" + markdown_text (caption) + "*\n\n") +
+    render_table (view.latency);
+}
+
+/// Empty when the run was not a capacity search.
+std::string capacity_block (const ReportView& view) {
+    if (!view.capacity) {
+        return {};
+    }
+    const ReportCapacity& capacity = *view.capacity;
+    std::string out = "## Capacity\n\n**" + markdown_text (capacity.stop) +
+    "** - " + markdown_text (capacity.headline) + '\n';
+    for (const ReportText* line : { &capacity.knee, &capacity.detail, &capacity.limits }) {
+        if (!line->empty ()) {
+            out += '\n' + markdown_text (*line) + '\n';
+        }
+    }
+    if (!capacity.levels.rows.empty ()) {
+        out += '\n' + render_table (capacity.levels);
+    }
+    return out;
+}
+
+/// Empty when the run was not a scenario run, or the document says nothing
+/// about its iterations or steps.
+std::string sequence_block (const ReportView& view) {
+    if (!view.sequence) {
+        return {};
+    }
+    const ReportSequence& sequence = *view.sequence;
+    std::string out                = "## Sequence\n\n";
+    if (!sequence.iterations.empty ()) {
+        out += markdown_text (sequence.iterations) + '\n';
+    }
+    if (!sequence.steps.rows.empty ()) {
+        out +=
+        (sequence.iterations.empty () ? "" : "\n") + render_table (sequence.steps);
+    }
+    return out;
+}
+
+/// Empty when the run declared no transaction.
+std::string transactions_block (const ReportView& view) {
+    return view.transactions.rows.empty () ?
+    std::string () :
+    "## Transactions\n\n" + render_table (view.transactions);
 }
 
 /// Empty when the run recorded no error.
@@ -332,7 +380,8 @@ std::string render_run_export_markdown (const nlohmann::ordered_json& document) 
     const ReportView view = build_run_report_view (document);
     std::string out;
     for (const auto section : { title_block, verdict_block, run_block, results_block,
-         latency_block, errors_block, comparison_block, warnings_block, footer_block }) {
+         latency_block, capacity_block, sequence_block, transactions_block,
+         errors_block, comparison_block, warnings_block, footer_block }) {
         if (const std::string block = section (view); !block.empty ()) {
             add_block (out, block);
         }

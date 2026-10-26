@@ -4654,7 +4654,9 @@ nothing the document does not. No raw HTML and no images. Its size does not
 grow with the run: the time series is never read, and a table fed by an open
 set (status codes, error types, warnings) shows ten rows and folds the rest
 into one `Other (<n> codes)` row, so a 2-hour run that saw 300 status codes is
-still under 6 KB.
+still under 6 KB. The two tables a scenario's plan feeds (steps and
+transactions) show twenty rows in document order, the order of the plan and
+never sorted by count, and fold the rest into one `and <n> more steps` row.
 
 The sections, in order:
 
@@ -4669,8 +4671,15 @@ The sections, in order:
    sentence each follows that, saying the totals are the last saved tick's or
    not whole-run totals, and that latency was not recorded (the latency table
    then reads `-` in every row, #2938).
-3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
-   users, duration, start (ISO-8601 UTC), engine version and the comment.
+3. `## Run`: target (`<METHOD> <url>`, or `Collection run, 3 steps per
+   iteration` - the step count is `report.scenario.steps`, left off when the
+   document holds no per-step stats), mode, virtual users, duration, start
+   (ISO-8601 UTC), engine version and the comment. A `capacity` run reads its
+   configuration as a search: `Search from 1 up to 128 virtual users` (the
+   first level and the ceiling), `Deadline 300 s, ran 62.4 s` (the configured
+   deadline, then `summary.testDuration`, because the search ends when it finds
+   its limit) and a `Step` row with `configuration.stepDuration` as it was sent
+   (`5s`, or a number of seconds).
 4. `## Results`: requests, a `Skipped requests` row only when `summary.skippedRequests`
    is above 0 (`625 requests skipped: the load generator stalled for 2.5 s`, from
    `skippedRequests` and `stalledMs`, issue #2911; absent or `0` prints no row),
@@ -4681,8 +4690,46 @@ The sections, in order:
    response, bytes in and out, and the throughput and error-rate budgets that
    judged them. The error rate is the report's, never derived from the counts.
 5. `## Latency`: min, p50, p90, p95, p99, p999 and max, with the budget that
-   judged each (`<= 30 ms - missed`).
-6. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
+   judged each (`<= 30 ms - missed`). A scenario run's table opens with the
+   line `*All steps pooled.*`: it is one histogram over every step, and the
+   per-step figures are the Sequence table's.
+6. `## Capacity`, only for a run whose document has `report.capacity`: the
+   stop reason in bold and what the search found (`**Latency budget exceeded**
+   - Sustained 41 virtual users at 403 req/s, with a p99 of 178 ms against a
+   200 ms budget.`), then where the limit sits (`The limit lies between 41 and
+   51 virtual users: it held 41 and gave out at 51, where p99 reached 226
+   ms.`), why it stopped in the document's own figures (`p99 stayed above the
+   budget across two consecutive measurements of the level (each 5s long).`),
+   the budget, error limit and step length the search ran under, and a table
+   of the levels it judged: virtual users, throughput, p99, plus `Errors (%)`
+   and `Samples` only when some level carries them (a run stored before the
+   engine reported them has neither). A level the search measured twice reads
+   `51 (re-measured)`, and a p99 or error share past its limit says `(over
+   budget)` or `(over limit)` in words. The sentences are the app's Capacity
+   summary's (`components/shared/CapacitySummary.tsx`, with the stop reasons'
+   labels and detail lines in `components/shared/capacityStop.ts`): the
+   stop-reason table in `run_export_view.cpp` and `capacityStop.ts` word the
+   same stops, so a change to one is a change to both. A reason neither table
+   knows (a newer engine's) prints under its raw key with no detail line. What
+   the search found depends on why it stopped: a measured capacity when the
+   target gave out (`slo_exceeded`, `errors_exceeded`), `At least N virtual
+   users held the budget` when it ran out of ceiling, time or patience
+   (`cap_reached`, `deadline`, `stopped`), the saturation level when throughput
+   plateaued, and `The search ended before it finished measuring a single
+   level` when `levels` is empty. A latency here is spelled `178 ms` as the
+   rest of this report spells it, not `178ms` as the app does.
+7. `## Sequence`, only for a scenario run whose document counts iterations or
+   lists steps: one line (`2,110 iterations started, 2,090 completed, 15
+   abandoned, 5 cut short` - abandoned and cut short only when above zero, cut
+   short being started less completed less abandoned, as the app derives it),
+   then a table with a row per step in plan order: executed, errors,
+   `Assertions` (`2,080 passed, 18 failed`, summed from the step's `assert.*`
+   and `script.*` element tallies; `deferred to a post-run replay` for a script
+   the engine only replays afterwards; `-` for a step that asserts nothing) and
+   its p50, p95 and p99. Step names are free text and escaped as every name is.
+8. `## Transactions`, only when the run declared any: name, count, errors and
+   p50, p95 and p99 per `report.scenario.transactions[]` entry.
+9. `## Errors`, only when there were any: by status code (`HTTP 503`), then by
    transport error type. A request that got no response is listed once, under
    its error type: status code 0 counts the same requests, so no row reads
    `HTTP 0` (issue #2400). A `No response` row (the app's words) appears only
@@ -4691,13 +4738,13 @@ The sections, in order:
    the remainder (code 0 minus the types' sum), so the requests no type names
    are not lost and none is listed twice. With no error types at all it holds
    the whole of code 0. The HTML report reads the same table.
-7. `## Compared with <base reference>`, only when the document has a
+10. `## Compared with <base reference>`, only when the document has a
    `comparison`: each metric's base, this run, change and a word from the
    delta's own `direction` (`improved`, `regressed`, `unchanged`, or `not
    compared` for a figure one run lacks), then one line per
    `comparison.differences[]` entry.
-8. `## Warnings` from `report.warnings`, and the footer `Generated by Vayu
-   <version>. No request or response data is included.`
+11. `## Warnings` from `report.warnings`, and the footer `Generated by Vayu
+    <version>. No request or response data is included.`
 
 Every table is padded to its widest cell so it reads as a table before it is
 rendered. All free text (the title, URL, comment, error types, warning text)
@@ -4728,8 +4775,10 @@ It holds the Markdown report's sections in the same order (title and reference
 line, verdict, run, results, latency with its budgets, errors, comparison,
 warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
 description list for the run - from the same reading of the document, so the two
-cannot word a verdict differently; the partial and missing-summary sentences
-sit in the verdict's band, one paragraph each. Above the title sits a one-line brand
+cannot word a verdict differently, except that it does not yet draw the
+Markdown report's Capacity, Sequence and Transactions sections (#2819); the
+partial and missing-summary sentences sit in the verdict's band, one paragraph
+each. Above the title sits a one-line brand
 (the Vayu mark at 28 px, then the wordmark `Vayu run report`, muted; the mark has
 an empty `alt` because the wordmark names the product). The mark is
 `shared/icon_png/vayu_icon_64x64.png`, embedded as a base64 `data:` URI
