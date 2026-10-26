@@ -9159,6 +9159,22 @@ ran, 30 of those answered a status its `assert.status` rejected. So
 `stepsExecuted` is 480 + 474 = 954, which is the 942 steps that ran plus the
 12 skipped, and the four outcomes are 906 + 30 + 6 + 12 = 954.
 
+**`iterations` is the iterations started**, not the iterations asked for, and
+three counts account for them: `iterationsCompleted` (the iteration reached its
+last step, or a script ended it with `setNextRequest(null)` or a forward jump),
+`iterationsAbandoned` (an errored step, or a jump to a target that names no
+step, ended it) and the iterations still running when the deadline or a Stop
+ended the run. The last has no key of its own; it is derivable:
+
+- `iterations = iterationsCompleted + iterationsAbandoned + cut at the end`,
+  so the iterations cut at the end are `iterations - iterationsCompleted -
+  iterationsAbandoned`
+
+That term is 0 for a run that ended by its iteration count, as the example
+above did (480 = 474 + 6 + 0), and positive for one a deadline or Stop ended
+mid-iteration: 1,150 started, 1,140 completed and none abandoned is 10 cut.
+The app's Steps tab shows it as "Iterations cut short" beside the other two.
+
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
 
