@@ -233,6 +233,135 @@ describe("the per-step test tallies", () => {
 });
 
 /**
+ * The Tests cell states its scope (#2824): the sampled responses against the
+ * responses that carried the step's script, with the assertion split in the
+ * title. Mutation-check: render the old passed / failed form unconditionally
+ * and the scope cases fail; drop the `population === 0` branch and the
+ * pre-`deferred` case fails.
+ */
+describe("the Tests cell scope", () => {
+	const script = (deferred?: number) => [
+		{ id: "el_1", kind: "script.post", passed: 0, failed: 0, skipped: 0, deferred },
+	];
+	const replayed = (over: Partial<RunScenarioStepStat>): RunScenarioStepStat => ({
+		...STEPS[1],
+		executed: 2_270,
+		elements: script(2_270),
+		tests: { sampled: 23, passed: 23, failed: 0 },
+		...over,
+	});
+
+	it("says how many of the step's script-carrying responses were replayed", () => {
+		render(<ScenarioStepsTab steps={[replayed({})]} virtualUsers={8} />);
+
+		const cell = within(rowFor("List orders")).getByText("23 of 2,270");
+		expect(cell).toHaveAttribute(
+			"title",
+			"23 passed, 0 failed across 23 sampled responses, of 2,270 that carried a test script"
+		);
+	});
+
+	it("keeps a failed count in the cell, tinted, rather than only in the title", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[replayed({ tests: { sampled: 20, passed: 17, failed: 3 } })]}
+				virtualUsers={8}
+			/>
+		);
+
+		const row = within(rowFor("List orders"));
+		expect(row.getByText(/20 of 2,270/)).toBeTruthy();
+		expect(row.getByText(/3 failed/, { selector: "span.text-status-error-text" })).toBeTruthy();
+	});
+
+	it("keeps the passed / failed cell for a report stored before `deferred`", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[
+					replayed({
+						elements: script(undefined),
+						tests: { sampled: 8, passed: 5, failed: 3 },
+					}),
+				]}
+				virtualUsers={8}
+			/>
+		);
+
+		const row = within(rowFor("List orders"));
+		expect(row.getByTitle("5 passed, 3 failed across 8 sampled responses")).toBeTruthy();
+		expect(row.queryByText(/ of /)).toBeNull();
+	});
+});
+
+/**
+ * The third way an iteration ends (#2824). Mutation-check: drop the
+ * subtraction of `abandoned`, or the `Math.max` clamp, and the matching case
+ * fails; show the line unconditionally and the "adds up" case fails.
+ */
+describe("Iterations cut short", () => {
+	it("appears for iterations that neither completed nor were abandoned", () => {
+		render(
+			<ScenarioStepsTab
+				steps={STEPS}
+				iterations={1_150}
+				iterationsCompleted={1_140}
+				iterationsAbandoned={0}
+			/>
+		);
+
+		const label = screen.getByText("Iterations cut short:");
+		expect(label.parentElement).toHaveTextContent("Iterations cut short:10");
+	});
+
+	it("takes the abandoned iterations out of the count", () => {
+		render(
+			<ScenarioStepsTab
+				steps={STEPS}
+				iterations={1_150}
+				iterationsCompleted={1_100}
+				iterationsAbandoned={40}
+			/>
+		);
+
+		expect(screen.getByText("Iterations cut short:").parentElement).toHaveTextContent(
+			"Iterations cut short:10"
+		);
+	});
+
+	it("is absent when the three counts add up", () => {
+		render(
+			<ScenarioStepsTab
+				steps={STEPS}
+				iterations={480}
+				iterationsCompleted={474}
+				iterationsAbandoned={6}
+			/>
+		);
+
+		expect(screen.queryByText(/cut short/)).toBeNull();
+	});
+
+	it("reads a disagreeing report as none rather than a negative count", () => {
+		render(
+			<ScenarioStepsTab
+				steps={STEPS}
+				iterations={10}
+				iterationsCompleted={10}
+				iterationsAbandoned={5}
+			/>
+		);
+
+		expect(screen.queryByText(/cut short/)).toBeNull();
+	});
+
+	it("is absent when the report has no started count to derive it from", () => {
+		render(<ScenarioStepsTab steps={STEPS} iterationsCompleted={1_140} />);
+
+		expect(screen.queryByText(/cut short/)).toBeNull();
+	});
+});
+
+/**
  * Non-script elements - extractors, assertions, timers - tallied per step
  * across every virtual user and iteration (`scenario.steps[i].elements`,
  * issue #1495). Written by the engine since #1495 but never rendered until

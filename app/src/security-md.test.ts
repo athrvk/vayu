@@ -12,10 +12,11 @@
  */
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
-const doc = readFileSync(resolve(__dirname, "../../SECURITY.md"), "utf8");
+const [SECURITY_PATH] = ROOT_READING_GUARDS.securityPolicy.paths;
+const doc = readFileSync(fromRepoRoot(SECURITY_PATH), "utf8");
 
 const SECTIONS = [
 	"What Vayu defends and what it does not",
@@ -32,5 +33,27 @@ describe("SECURITY.md structure", () => {
 
 	it.each(SECTIONS)("has a '%s' section", (title) => {
 		expect(doc).toMatch(new RegExp(`^## ${title.replace(/[()]/g, "\\$&")}$`, "m"));
+	});
+});
+
+/** A section's body: from its heading to the next `## ` one, whitespace folded. */
+function section(title: string): string {
+	const start = doc.indexOf(`\n## ${title}\n`);
+	expect(start, `no '${title}' section`).toBeGreaterThan(-1);
+	const next = doc.indexOf("\n## ", start + 1);
+	return doc.slice(start, next === -1 ? undefined : next).replace(/\s+/g, " ");
+}
+
+describe("SECURITY.md covers the update check", () => {
+	it("says under Network behaviour that the app checks for updates and cannot be told not to", () => {
+		const network = section("Network behaviour");
+		expect(network).toMatch(/update check/i);
+		expect(network).toMatch(/no setting to turn the check off/);
+	});
+
+	it("says under Releases what the updater verifies", () => {
+		const releases = section("Releases");
+		expect(releases).toMatch(/in-app updater/i);
+		expect(releases).toMatch(/installer's attestation, not the feed's/);
 	});
 });

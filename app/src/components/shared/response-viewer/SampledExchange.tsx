@@ -98,9 +98,15 @@ export interface SampledExchangeProps {
 	 * it only when the caller genuinely knows something the exchange does not.
 	 */
 	state?: ExchangeState;
-	statusCode: number;
+	/**
+	 * Absent for an exchange that never reached the wire (a skipped step): the
+	 * row then draws no badge, where `0` would draw "ERR" for a request that
+	 * was never sent.
+	 */
+	statusCode?: number;
 	statusText?: string;
-	latencyMs: number;
+	/** Absent with {@link statusCode}: no request, no time. */
+	latencyMs?: number;
 	/** Formatted by the caller - see the note on live vs stored in the header. */
 	timestamp: ReactNode;
 	error?: string;
@@ -148,8 +154,8 @@ export function SampledExchange({
 	// a 500 or a 429 does not wear the success tick. A connection failure
 	// (status 0) has no code to show, so the icon is the only thing that says
 	// "this one did not come back".
-	const derived: ExchangeState =
-		error || isErrorStatus(statusCode) ? "error" : isSlow ? "slow" : "success";
+	const badStatus = statusCode !== undefined && isErrorStatus(statusCode);
+	const derived: ExchangeState = error || badStatus ? "error" : isSlow ? "slow" : "success";
 	const resolved = state ?? derived;
 	const isError = resolved === "error";
 	const StatusIcon = STATE_ICON[resolved];
@@ -188,20 +194,24 @@ export function SampledExchange({
 
 						{title}
 
-						<StatusCodeBadge
-							status={statusCode}
-							statusText={statusText}
-							className="shrink-0"
-						/>
+						{statusCode !== undefined && (
+							<StatusCodeBadge
+								status={statusCode}
+								statusText={statusText}
+								className="shrink-0"
+							/>
+						)}
 
-						<span
-							className={cn(
-								"text-sm font-mono shrink-0",
-								isSlow && "text-status-stopped-text"
-							)}
-						>
-							{formatLatency(latencyMs)}
-						</span>
+						{latencyMs !== undefined && (
+							<span
+								className={cn(
+									"text-sm font-mono shrink-0",
+									isSlow && "text-status-stopped-text"
+								)}
+							>
+								{formatLatency(latencyMs)}
+							</span>
+						)}
 
 						<span className="text-xs text-muted-foreground sm:ml-auto">
 							{timestamp}

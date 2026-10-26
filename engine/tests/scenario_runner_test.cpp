@@ -122,6 +122,13 @@ class ScenarioMockServer {
             std::this_thread::sleep_for (std::chrono::milliseconds (120));
             res.set_content ("{}", "application/json");
         });
+        // A response that arrived with an error status, which no assertion
+        // has to judge for the step's outcome to be decided.
+        svr.Get ("/fail500", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.status = 500;
+            res.set_content (R"({"error":"boom"})", "application/json");
+        });
         // A body that satisfies the pet schema the schema-verdict tests declare,
         // and one that does not - the `id` is a string where the contract says
         // integer, which is the ordinary shape of a contract drift.
@@ -1820,6 +1827,45 @@ TEST_F (ScenarioRunnerTest, ASkippedStepIsInNeitherTheRequestCountNorTheDistribu
     EXPECT_EQ (summary["scenario"]["skipped"].get<size_t> (), 2u);
     EXPECT_EQ (summary["total_requests"].get<size_t> (), 2u);
     EXPECT_EQ (summary["status_codes"], (json{ { "200", 2 } })) << summary.dump ();
+}
+
+// The step outcomes are disjoint and sum to `steps_executed`, a skipped step
+// included (#2824, the definition a load run's summary shares). Two failed
+// assertions in one step are one `failed` step, and a 500 nothing asserts on is
+// `passed` while the summary still counts it among the requests that failed.
+// A regression guard: the sequential runner already counted this way.
+TEST_F (ScenarioRunnerTest, StepOutcomesAreDisjointAndSumToStepsExecuted) {
+    seed_collection ("col_1");
+    seed_request ("req_skip", 0, "/ok", R"(pm.execution.skipRequest();)");
+    const auto status_404 = [] (const std::string& id) {
+        return json{ { "id", id }, { "kind", "assert.status" }, { "enabled", true },
+            { "config", { { "in", json::array ({ 404 }) } } } };
+    };
+    seed_request_with_elements ("req_assert", 1, "/ok",
+    json::array ({ status_404 ("el_a"), status_404 ("el_b") }));
+    seed_request ("req_500", 2, "/fail500");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary   = summary_of (run_id);
+    const auto& scenario = summary.at ("scenario");
+    const auto count     = [&scenario] (const char* key) {
+        return scenario.at (key).get<size_t> ();
+    };
+    EXPECT_EQ (count ("steps_executed"), 6u) << scenario.dump ();
+    EXPECT_EQ (count ("skipped"), 2u) << scenario.dump ();
+    EXPECT_EQ (count ("failed"), 2u) << scenario.dump ();
+    EXPECT_EQ (count ("errored"), 0u) << scenario.dump ();
+    EXPECT_EQ (count ("passed"), 2u) << scenario.dump ();
+    EXPECT_EQ (count ("passed") + count ("failed") + count ("errored") + count ("skipped"),
+    count ("steps_executed"));
+    // Every step that was not skipped sent, so the steps that ran and the
+    // skipped ones are the whole of `steps_executed`.
+    EXPECT_EQ (summary.at ("total_requests").get<size_t> () + count ("skipped"),
+    count ("steps_executed"));
+    EXPECT_EQ (summary.at ("status_codes"), (json{ { "200", 2 }, { "500", 2 } }))
+    << summary.dump ();
 }
 
 // The other side of the same line: a request that went out and got no answer

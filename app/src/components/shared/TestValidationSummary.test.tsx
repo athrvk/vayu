@@ -241,4 +241,72 @@ describe("TestValidationSummary", () => {
 			expect(screen.queryByText(/drawn uniformly from the whole run/)).toBeNull();
 		});
 	});
+
+	describe("the replayed-of-scope line for a scenario run (#2824)", () => {
+		const SCOPE = { responses: 2_270, steps: 1, assertionsCounted: true };
+
+		it("names the responses that carried a script, not the run's requests", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, samplesTested: 23 }}
+					sampling={undefined}
+					replayScope={SCOPE}
+				/>
+			);
+
+			expect(
+				screen.getByText(
+					"Replayed 23 of the 2,270 responses that carried a test script (1 step). Assertions that ran inline are counted under Assertions."
+				)
+			).toBeTruthy();
+			expect(screen.queryByText(/requests/)).toBeNull();
+		});
+
+		it("takes the scope over a request total passed beside it", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, samplesTested: 23 }}
+					sampling={undefined}
+					totalRequests={11_350}
+					replayScope={SCOPE}
+				/>
+			);
+
+			expect(screen.getByText(/Replayed 23 of the 2,270 responses/)).toBeTruthy();
+			expect(screen.queryByText(/11,350/)).toBeNull();
+		});
+
+		it("pluralises the steps and says all when every response was replayed", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, samplesTested: 40 }}
+					sampling={undefined}
+					replayScope={{ responses: 40, steps: 2, assertionsCounted: true }}
+				/>
+			);
+
+			expect(
+				screen.getByText(
+					/Replayed all 40 responses that carried a test script \(2 steps\)\./
+				)
+			).toBeTruthy();
+		});
+
+		it("points at Assertions only when that card renders", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, samplesTested: 23 }}
+					sampling={undefined}
+					replayScope={{ ...SCOPE, assertionsCounted: false }}
+				/>
+			);
+
+			expect(
+				screen.getByText(
+					"Replayed 23 of the 2,270 responses that carried a test script (1 step)."
+				)
+			).toBeTruthy();
+			expect(screen.queryByText(/counted under Assertions/)).toBeNull();
+		});
+	});
 });

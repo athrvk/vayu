@@ -1044,10 +1044,11 @@ rows, so that array is the only per-step record such a run keeps.
 
 It also carries `scenario.assertions` (`{passed, failed}`, #2820) when the run
 made at least one exact assertion: every `assert.*` outcome, required `extract.*`
-miss and inline `pm.test` call, counted on every completion. It is a separate
-population from `passed` / `failed` and the report's error rate, which stay
-HTTP-only, so a run of `200`s that failed every assertion reads a 0% error rate
-and a non-zero `assertions.failed`. **Absent**, never `{0, 0}`, for a run with no
+miss and inline `pm.test` call, counted on every completion. It counts
+assertions, where `scenario.failed` counts step executions in which one failed
+(#2824, once however many), and the report's error rate stays HTTP-only, so a
+run of `200`s that failed every assertion reads a 0% error rate and a non-zero
+`assertions.failed`. **Absent**, never `{0, 0}`, for a run with no
 such assertion, a collection run and a report stored before the field. Three
 renderer readers go through `exactAssertionsOf` (`components/shared/run-assertions.ts`):
 the verdict (`reportOutcome`), `RunKeyMetrics`' fourth tile and the Overview's
@@ -1064,7 +1065,12 @@ A step also carries `tests` (`{sampled, passed, failed}`) when its own
 post-request script was replayed against that step's sampled responses - the
 deferred per-step validation. The key is **absent** for a step that asserted
 nothing or whose script drew no sample, which is not the same claim as zero
-failures, so the table shows a dash there rather than a `0`.
+failures, so the table shows a dash there rather than a `0`. The Tests cell reads
+`tests.sampled` against the step's `deferred` count ("23 of 2,270"), with the
+passed / failed split in its title; a step with no `deferred` (a report stored
+before the engine wrote it) keeps the plain passed / failed cell. The line above
+the table adds "Iterations cut short" when `iterations - iterationsCompleted -
+iterationsAbandoned` is above zero, the iterations a deadline or Stop ended.
 
 A **design run's** list row carries one thing the detail route says at greater
 length: `resultSummary` (`{statusCode, latencyMs}`), the outcome of its single
@@ -1945,9 +1951,12 @@ before the engine kept exact per-type counts or a design-mode run; on any other
 run the types are exact past the error store's cap and the note stays silent.
 The Test validation card (titled **Sampled replay** when a scenario load report
 also carries `scenario.assertions`, which gets its own Assertions card counted on
-every response, #2820) also states the arithmetic from `summary.totalRequests`
+every response, #2820) also states its denominator: for a single-request run `summary.totalRequests`
 ("Tested N of M requests"), worded so it holds for requests that never got a
-response as well as for displaced ones; `samplesTested` counts responses and
+response as well as for displaced ones, and for a scenario load run the responses
+that carried a deferred test script, the sum of `deferred` over its `script.*`
+elements ("Replayed N of the M responses that carried a test script (1 step)", #2824),
+because most requests of a sequence have no script to replay; `samplesTested` counts responses and
 `testsPassed` / `testsFailed` count assertions, and the card's labels say so
 (issue #2144). A report's `elements[]` row may carry `deferred` (absent from older
 reports): a post-request script left to the post-run replay, rendered as "replayed
