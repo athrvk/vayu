@@ -10704,7 +10704,25 @@ report's rules for the same keys. A capacity search that stopped on its
 latency budget reads `"capacity": { "stopReason": "slo_exceeded",
 "maxHealthyConcurrency": 48, "kneeConcurrency": 64 }`. A `pending` or `running` load row, and
 a terminal one with no stored summary (the engine stopped before writing it),
-carries no `resultSummary` at all. A collection run's row never carries one.
+carries no `resultSummary` at all.
+
+A **collection run's** row (`type: "scenario"`) carries one once it is terminal
+too (#2954), read from the `scenario` block of the stored summary under the
+same rule: nothing for a `pending` or `running` row, nothing for a terminal row
+whose summary is not stored yet. The four counts are the step
+[outcomes](#scenario-runs), which are disjoint:
+
+| Key | Meaning |
+|-----|---------|
+| `passed`, `failed`, `skipped`, `errored` | How many steps ended each way, the report's `scenario.passed` / `failed` / `skipped` / `errored`. `errored` is a step whose script threw or whose exchange did not complete, kept apart from `failed` so a run whose steps only errored does not read clean |
+| `verdict` | As on a load row: the run's verdict against its declared `thresholds`, absent when it declared none, and as stored even for a `stopped` run |
+
+Each key is omitted when the stored summary does not record it, never zeroed,
+and a stored summary with no `scenario` object (a run stored before collection
+runs wrote one) adds no `resultSummary`. A clean four-step run reads
+`"resultSummary": { "passed": 4, "failed": 0, "skipped": 0, "errored": 0 }`:
+the zeros are recorded counts. The load figures (`rps`, `p95Ms`, `errorRate`)
+are not on this row; the report has them.
 
 `verdict` is the verdict as stored, even for a `stopped` run, whose partial
 data the app shows as "Not judged" rather than passed or failed. `errorRate`

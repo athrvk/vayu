@@ -1021,6 +1021,14 @@ ReportExtras& extras) {
     apply_summary_sections (summary, extras);
 }
 
+// The budget verdict the stored summary recorded, or no key when no budget
+// judged the run - as stored, so a stopped run keeps the verdict it was given.
+void record_verdict (const nlohmann::json& summary, nlohmann::json& outcome) {
+    if (const auto thresholds = read_threshold_outcome (summary)) {
+        outcome["verdict"] = thresholds->verdict ();
+    }
+}
+
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
  * error rate, budget verdict and, for a scenario load run, its exact assertion
@@ -1058,9 +1066,7 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
             outcome["errorRate"] = failures.error_rate ();
         }
     }
-    if (const auto thresholds = read_threshold_outcome (summary)) {
-        outcome["verdict"] = thresholds->verdict ();
-    }
+    record_verdict (summary, outcome);
     if (const auto assertions = read_scenario_assertions (summary)) {
         outcome["assertionsPassed"] = assertions->passed;
         outcome["assertionsFailed"] = assertions->failed;
@@ -1073,17 +1079,54 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
     return outcome;
 }
 
+/**
+ * A terminal collection (sequential scenario) run's `resultSummary` (#2954):
+ * how many steps passed, failed, were skipped and errored, and the budget
+ * verdict, read from the stored `summary.scenario` block. The four counts are
+ * disjoint (api-reference, "Outcomes"), and `errored` is kept beside `failed`
+ * because a run whose steps only errored would otherwise read clean.
+ *
+ * Each key is omitted when the summary does not record it, never zeroed. A
+ * summary with no `scenario` object answers an empty object, which the caller
+ * leaves off the row. Runs under `RunSummaryCache`'s lock, so it parses and
+ * nothing more.
+ */
+nlohmann::json build_scenario_result_summary (const std::string& summary_json) {
+    nlohmann::json outcome = nlohmann::json::object ();
+    const auto summary =
+    nlohmann::json::parse (summary_json, nullptr, /*allow_exceptions=*/false);
+    if (!summary.is_object () || !summary.contains ("scenario") ||
+    !summary["scenario"].is_object ()) {
+        return outcome;
+    }
+
+    const auto& scenario = summary["scenario"];
+    copy_optional_number (scenario, "passed", outcome, "passed");
+    copy_optional_number (scenario, "failed", outcome, "failed");
+    copy_optional_number (scenario, "skipped", outcome, "skipped");
+    copy_optional_number (scenario, "errored", outcome, "errored");
+    record_verdict (summary, outcome);
+    return outcome;
+}
+
 // Whether a row of this run may carry a `resultSummary` built from its stored
-// summary: a load run at a terminal status with a summary stored. A Pending or
-// Running row's summary is not final yet (see RunSummaryCache), so it is neither
-// read nor cached. Terminal status does not guarantee the summary exists: the
-// inactive branch of POST /runs/:id/stop writes Stopped with none before the
-// worker registers, and the worker writes its summary afterwards. An empty
-// summary is therefore not final either, and caching its empty outcome would
-// hide the real one for good.
-bool carries_load_result_summary (const vayu::db::Run& run) {
-    return run.type == vayu::RunType::Load && !run.summary.empty () &&
-    vayu::is_terminal (run.status);
+// summary: a load or collection run at a terminal status with a summary stored.
+// A Pending or Running row's summary is not final yet (see RunSummaryCache), so
+// it is neither read nor cached. Terminal status does not guarantee the summary
+// exists: the inactive branch of POST /runs/:id/stop writes Stopped with none
+// before the worker registers, and the worker writes its summary afterwards. An
+// empty summary is therefore not final either, and caching its empty outcome
+// would hide the real one for good.
+bool carries_result_summary (const vayu::db::Run& run) {
+    const bool summarised =
+    run.type == vayu::RunType::Load || run.type == vayu::RunType::Scenario;
+    return summarised && !run.summary.empty () && vayu::is_terminal (run.status);
+}
+
+nlohmann::json build_terminal_result_summary (const vayu::db::Run& run) {
+    return run.type == vayu::RunType::Scenario ?
+    build_scenario_result_summary (run.summary) :
+    build_load_result_summary (run.summary);
 }
 
 // Serialize one run into a list row: identity + status + the compact summary,
@@ -1123,9 +1166,10 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
  * `summary` (see build_run_summary for its keys) instead of the full
  * `config_snapshot`, wrapped in the
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
- * design run's row also carries `resultSummary` (statusCode + latencyMs), and a
+ * design run's row also carries `resultSummary` (statusCode + latencyMs), a
  * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, the
- * assertion counts, capacity, each only when recorded; #2130) - what a reader
+ * assertion counts, capacity, each only when recorded; #2130) and a terminal
+ * collection run's carries its step counts and verdict (#2954) - what a reader
  * would otherwise fetch a report per row to learn. A row whose run finished
  * with warnings carries `summary.hasWarnings: true` (#1527), read fresh off
  * this page's own `Run` rows rather than through `summaries` - see the comment
@@ -1153,9 +1197,9 @@ vayu::http::RunSummaryCache& summaries) {
 
     // A design run is one exchange, so its outcome fits on its row and the page
     // pays one extra query for all of them (get_design_result_outcomes). A load
-    // run's results are many and unbounded, so they are never read here; its
-    // row's `resultSummary` comes from the whole-run summary already on the
-    // `Run` row instead. A scenario row carries none.
+    // run's results are many and unbounded, so they are never read here; a load
+    // or collection row's `resultSummary` comes from the whole-run summary
+    // already on the `Run` row instead.
     std::vector<std::string> design_run_ids;
     for (const auto& run : runs) {
         if (run.type == vayu::RunType::Design) {
@@ -1183,9 +1227,9 @@ vayu::http::RunSummaryCache& summaries) {
             row["resultSummary"]["statusCode"] = found->second.status_code;
             row["resultSummary"]["latencyMs"]  = found->second.latency_ms;
         }
-        if (carries_load_result_summary (run)) {
+        if (carries_result_summary (run)) {
             auto outcome = summaries.outcome_for (
-            run.id, [&run] { return build_load_result_summary (run.summary); });
+            run.id, [&run] { return build_terminal_result_summary (run); });
             if (!outcome.empty ()) {
                 row["resultSummary"] = std::move (outcome);
             }
@@ -2545,7 +2589,8 @@ void register_run_routes (RouteContext& ctx) {
      * with it. A design run's row also carries `resultSummary`
      * (statusCode + latencyMs), a terminal load run's carries
      * `resultSummary` (rps + p95Ms + errorRate + verdict, each only when
-     * recorded); see get_runs_response.
+     * recorded) and a terminal collection run's carries passed/failed/
+     * skipped/errored + verdict; see get_runs_response.
      *
      * Query params:
      * - limit: page size, default 50, capped at 500

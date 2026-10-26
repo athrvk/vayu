@@ -919,10 +919,10 @@ class Database {
      *
      * The paginated GET /runs list attaches each design run's outcome to its
      * row (`resultSummary`), the way GET /runs/:id attaches the whole exchange;
-     * a load row's `resultSummary` comes from the run's stored `summary`
-     * instead, never from its results (#2130). Three properties make the
-     * design read affordable, and all three are why this is not
-     * `get_results` in a loop:
+     * a load or collection row's `resultSummary` comes from the run's stored
+     * `summary` instead, never from its results (#2130, #2954). Three
+     * properties make the design read affordable, and all three are why this
+     * is not `get_results` in a loop:
      *
      * - Two columns, so `trace_data` is never read.
      * - One statement for the whole page, so a page of 50 is one query.
