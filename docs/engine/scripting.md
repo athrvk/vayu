@@ -497,6 +497,8 @@ pm.response.cookies           // Set-Cookie, parsed - see below
                               // (the stored session is pm.cookies)
 pm.response.errorCode         // string | undefined - TIMEOUT, DNS_ERROR, ...
 pm.response.errorMessage      // string | undefined - the same failure in words
+pm.response.redirects         // The 3xx hops followed to get here (Vayu only) -
+                              // see pm.response.redirects below
 ```
 
 `errorCode` and `errorMessage` are present **only when the send failed before a
@@ -651,6 +653,52 @@ ring is fixed-size and a script may make hundreds of assertions. Both count
 first place: a failing `pm.test` ends a step whichever script made it, and the
 list used to hold the test script's alone, so a step could be `failed` and
 named in its error line by an assertion its own Tests list did not contain.
+
+### `pm.response.redirects` - the hops a send followed
+
+Vayu-specific: Postman scripts have no view of the redirects a request went
+through, so nothing here is portable to or from Postman. `pm.response` is the
+**last** response of a followed chain - its headers, cookies and body are the
+final hop's alone - and `redirects` is the rest of the chain, in the order the
+engine followed it:
+
+```javascript
+pm.test('no hop left https for http', function () {
+    const downgraded = (pm.response.redirects || []).filter(function (hop) {
+        return hop.schemeDowngrade;
+    });
+    pm.expect(downgraded).to.be.empty;
+});
+
+pm.test('the login redirect set the session', function () {
+    const first = pm.response.redirects[0];
+    pm.expect(first.code).to.equal(302);
+    pm.expect(first.headers.get('Set-Cookie')).to.include('session=');
+});
+```
+
+Each entry is `{ code, status, url, schemeDowngrade, headers }`:
+
+| Field | |
+|-------|--|
+| `code` | The hop's status, a number (`301`, `302`, ...). Named as `pm.response.code` is. |
+| `status` | The hop's reason phrase, as `pm.response.status` is - the wire phrase, or the registered text for the code on HTTP/2 and later. |
+| `url` | The URL of the request **this hop answered**, so `redirects[0].url` is the URL that was requested and the next entry's is where the first one's `Location` pointed (resolved, when it was relative). The value of the request's auth query parameter is blanked, as it is in the stored trace. |
+| `schemeDowngrade` | `true` when this hop's request went over `https` and the next one over `http`. libcurl withholds `Authorization` and a typed `Cookie` when the scheme, host or port changes, but an API-key *header* is sent on, so this is the one hop a credential can cross in clear text. |
+| `headers` | The hop's own received headers, shaped as `pm.response.headers` is: lower-cased keys, case-insensitive `get()` / `has()` and the other read methods, a repeated name folded with `", "`. A hop's `Set-Cookie` lines therefore join into one string, as they do on `pm.response.headers`. |
+
+**Empty means none, absent means not recorded.** A send that was not redirected,
+or that ran with *Follow redirects* off, reads `[]` - the engine looked and saw no
+hop. The property is **missing** where the engine follows redirects without
+keeping the chain: a load run's deferred `tests` script and a streamed
+request's script. `typeof pm.response.redirects === 'undefined'` is the guard
+there, so an assertion that the length is `0` cannot pass over a chain nobody
+recorded. A chain that ends in `too_many_redirects` still lists the hops it
+made, at most the request's `maxRedirects`.
+
+The same facts are on the run's stored trace as `response.redirects[]`, with
+`status`/`statusText` and `headerLines` in place of the script's
+`code`/`status`/`headers`.
 
 ### Reading response headers
 
@@ -3825,6 +3873,10 @@ The **language** is current; what is missing is the **host environment**:
   also reports `iteration` - the index the sampled submission claimed before it
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
+- `pm.response.redirects` is **absent** here, inline or deferred: a load run
+  follows redirects without recording the chain, so there is no list to read and
+  an empty one would claim there was nothing to find (see
+  [`pm.response.redirects`](#pmresponseredirects---the-hops-a-send-followed))
 - `POST /runs` no longer takes a `tests` field: it is refused with a `400`
   naming `requestElements`, like every legacy script field. The collection chain's
   test scripts arrive as `script.post` elements in `requestElements`, ahead of

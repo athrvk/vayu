@@ -28,6 +28,7 @@ supported is listed [below](#not-yet-supported).
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
+| Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
@@ -1203,6 +1204,32 @@ All three are **absent** on an ordinary response rather than empty, so
 stream that produced nothing" - the same absent-not-empty rule
 `pm.iterationData` follows. Full reference in
 [scripting.md](../engine/scripting.md#pmresponseevents---a-streamed-runs-events).
+
+### Redirect hops (`pm.response.redirects`)
+
+**Vayu-specific; Postman has no equivalent.** Postman's sandbox exposes the final
+response only, so a script that is lifted into or out of Postman should not
+depend on this property. Each entry is a followed 3xx response, oldest first:
+`code` (number) and `status` (reason phrase) named as on `pm.response`, `url`
+(the request that hop answered, an auth query parameter's value blanked),
+`schemeDowngrade` (`true` for an `https` request redirected to `http`, the one
+hop a header-placed API key crosses in clear text) and `headers`, shaped as
+`pm.response.headers` is.
+
+```javascript
+pm.test('no redirect left https for http', function () {
+    const leaked = (pm.response.redirects || []).filter(function (hop) {
+        return hop.schemeDowngrade;
+    });
+    pm.expect(leaked).to.be.empty;
+});
+```
+
+An empty array means the send was not redirected (or ran with *Follow redirects*
+off). The property is **absent** - `typeof` is `'undefined'` - on a load run's
+scripts and a streamed request's, where redirects are followed but not recorded,
+so `redirects.length === 0` cannot pass over a chain nobody saw. Full reference in
+[scripting.md](../engine/scripting.md#pmresponseredirects---the-hops-a-send-followed).
 
 ### Response cookies (`pm.response.cookies`)
 

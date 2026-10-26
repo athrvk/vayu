@@ -6034,7 +6034,8 @@ sent to; the app says this beside the API Key fields.
 A design send makes the downgrade visible: each entry of the answer's
 `redirects` records the `url` its request went to and `schemeDowngrade`, true
 when that request was `https` and the next one `http` (see
-[`redirects`](#post-execute)). A load run and a stream record no hops.
+[`redirects`](#post-execute)) and `pm.response.redirects` shows them to a
+post-request script. A load run and a stream record no hops.
 (`engine/tests/redirect_credentials_test.cpp`)
 
 ### OAuth 2.0 token cache
@@ -7674,7 +7675,11 @@ one, the 3xx being the answer), and holds at most `maxRedirects` entries, so a
 loop that ends in `TOO_MANY_REDIRECTS` reports the hops it made. The stored
 `trace_data.response` carries it too, written only when non-empty; a load-run
 sample records none. It reports what the server sent: see the cross-origin
-paragraph above for why a hop's cookie is not necessarily one the jar kept.
+paragraph above for why a hop's cookie is not necessarily one the jar kept. A post-request script reads
+the same hops as
+[`pm.response.redirects`](scripting.md#pmresponseredirects---the-hops-a-send-followed)
+(`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where
+the chain is not recorded.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
