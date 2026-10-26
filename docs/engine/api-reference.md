@@ -10706,6 +10706,11 @@ latency budget reads `"capacity": { "stopReason": "slo_exceeded",
 a terminal one with no stored summary (the engine stopped before writing it),
 carries no `resultSummary` at all.
 
+`verdict` is the verdict as stored, even for a `stopped` run, whose partial
+data the app shows as "Not judged" rather than passed or failed. `errorRate`
+uses the same failure definition as the report's `summary.errorRate`, over the
+stored status-code distribution, and is omitted when no distribution is stored.
+
 A **collection run's** row (`type: "scenario"`) carries one once it is terminal
 too (#2954), read from the `scenario` block of the stored summary under the
 same rule: nothing for a `pending` or `running` row, nothing for a terminal row
@@ -10723,11 +10728,6 @@ runs wrote one) adds no `resultSummary`. A clean four-step run reads
 `"resultSummary": { "passed": 4, "failed": 0, "skipped": 0, "errored": 0 }`:
 the zeros are recorded counts. The load figures (`rps`, `p95Ms`, `errorRate`)
 are not on this row; the report has them.
-
-`verdict` is the verdict as stored, even for a `stopped` run, whose partial
-data the app shows as "Not judged" rather than passed or failed. `errorRate`
-uses the same failure definition as the report's `summary.errorRate`, over the
-stored status-code distribution, and is omitted when no distribution is stored.
 
 `endTime` is `null` while a row's `status` is `pending` or `running` and the
 stored value once it is `completed`, `failed` or `stopped` (#2953). The database
