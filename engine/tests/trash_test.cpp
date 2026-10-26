@@ -192,7 +192,7 @@ class TrashTest : public ::testing::Test {
             return {};
         }
         for (const auto& example : listed) {
-            if (example.value ("id", std::string{}) == id) {
+            if (example.at ("id").get<std::string> () == id) {
                 return example.dump ();
             }
         }
