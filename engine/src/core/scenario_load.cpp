@@ -184,6 +184,13 @@ void StepHistograms::record_error (size_t step) {
     no_response_[step].fetch_add (1, std::memory_order_relaxed);
 }
 
+void StepHistograms::record_unsent (size_t step) {
+    if (step >= histograms_.size ()) {
+        return;
+    }
+    completed_[step].fetch_add (1, std::memory_order_relaxed);
+}
+
 void StepHistograms::record_failed_transfer (size_t step, double latency_ms) {
     if (step >= histograms_.size ()) {
         return;
@@ -485,19 +492,22 @@ size_t vu_index) {
 /// load path's own `pm.execution.skipRequest()` - and `control.switch`'s own
 /// dispatch target, if it fired (issue #1569's `Kind::Next`, read the same
 /// way the sequential run's `decide_next_step` reads a pre-request script's).
-/// `assertion_failed` is carried to the completion, which alone knows whether
-/// a response arrived for the execution to count as `failed` (#2824).
+/// `assertion_failed` and `script_threw` are carried to the completion, which
+/// alone knows whether a response arrived for the execution to count as
+/// `failed` or `errored` (#2824, #2947).
 struct StepBeforeResult {
     int64_t elapsed_ms = 0;
     bool skip          = false;
     std::optional<std::string> next_target;
     bool assertion_failed = false;
+    bool script_threw     = false;
 };
 
 /// `run_step_after`'s answer, on `StepBeforeResult`'s terms.
 struct StepAfterResult {
     int64_t elapsed_ms    = 0;
     bool assertion_failed = false;
+    bool script_threw     = false;
 };
 
 /**
@@ -618,9 +628,10 @@ const nlohmann::json* data_row) {
     // above (a deferred one never invokes `run_pre_script`, so it stays
     // empty) - the inline half of issue #1497's assertion tally.
     const bool assertion_failed = tally_inline_tests (state, pre_result.tests);
+    const bool threw            = script_threw (pre_result);
 
     if (!start) {
-        return StepBeforeResult{ 0, skip, next_target, assertion_failed };
+        return StepBeforeResult{ 0, skip, next_target, assertion_failed, threw };
     }
     return StepBeforeResult{
         std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -629,6 +640,7 @@ const nlohmann::json* data_row) {
         skip,
         next_target,
         assertion_failed,
+        threw,
     };
 }
 
@@ -642,7 +654,7 @@ const nlohmann::json* data_row) {
  *        only ever holds a `const Response&` off `Result::value()`, and
  *        copying a response to avoid it would pay for the body twice.
  * @return elapsed milliseconds, on the same terms @ref run_step_before returns
- *         them, and whether an assertion failed.
+ *         them, whether an assertion failed and whether a script threw.
  */
 StepAfterResult run_step_after (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
@@ -732,15 +744,17 @@ const nlohmann::json* data_row) {
     // Every `assert.*` outcome and required `extract.*` miss lands here, beside
     // an inline `script.post`'s `pm.test` calls; a deferred one adds nothing.
     const bool assertion_failed = tally_inline_tests (state, post_result.tests);
+    const bool threw            = script_threw (post_result);
 
     if (!start) {
-        return StepAfterResult{ 0, assertion_failed };
+        return StepAfterResult{ 0, assertion_failed, threw };
     }
     return StepAfterResult{
         std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::steady_clock::now () - *start)
         .count (),
         assertion_failed,
+        threw,
     };
 }
 
@@ -852,7 +866,7 @@ class ScenarioLoadDriver {
             // exactly as a sent step would; there is simply no `Result` to
             // store and no coverage to record, matching a design send's own
             // skip (`execute_exchange`'s `outcome.sent = false` branch).
-            state_->steps_skipped.fetch_add (1, std::memory_order_relaxed);
+            count_unsent_outcome (*state_, step_index, before_result.script_threw);
             finish_step (context_, state_, execution_.plan, vu, step_index,
             /*errored=*/false, nullptr);
             return true;
@@ -890,11 +904,12 @@ class ScenarioLoadDriver {
         // iteration on `errored` alone regardless.
         std::optional<std::string> next_target_before = before_result.next_target;
         const bool assertion_failed_before = before_result.assertion_failed;
+        const bool script_threw_before     = before_result.script_threw;
         context_->event_loop->submit (request,
         [context = context_, &db = db_, state = state_, &plan = execution_.plan,
         step_ptr, vu, step_index, iteration, vu_index, row, data_row,
-        pipeline_before_ms, sent_request, next_target_before,
-        assertion_failed_before] (size_t, const vayu::Result<vayu::Response>& result) {
+        pipeline_before_ms, sent_request, next_target_before, assertion_failed_before,
+        script_threw_before] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
                 finish_without_response (context, db, state, plan, vu, step_index,
                 result, ResultAnnotations{ row, step_index, iteration, vu_index });
@@ -915,10 +930,11 @@ class ScenarioLoadDriver {
             static_cast<double> (pipeline_before_ms + after.elapsed_ms) :
             0.0;
             record_step_response (*state, step_index, response, script_ms);
-            // An execution with no response is `errored` whatever its
-            // assertions said, as in the sequential runner's `classify_step`.
-            if (!errored && (assertion_failed_before || after.assertion_failed)) {
-                state->steps_failed.fetch_add (1, std::memory_order_relaxed);
+            // An execution with no response is `errored` once, by
+            // `finish_step`, whatever its scripts and assertions said.
+            if (!errored) {
+                count_answered_outcome (*state, script_threw_before || after.script_threw,
+                assertion_failed_before || after.assertion_failed);
             }
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
@@ -1156,6 +1172,40 @@ class ScenarioLoadDriver {
     }
 
     /**
+     * The outcome of an execution whose response arrived, in the sequential
+     * runner's `classify_step` order: an inline script that threw is `errored`
+     * over any assertion that failed (#2947). Unlike `finish_step`'s
+     * no-response `errored` it does not end the iteration, so a broken script
+     * changes no load the target receives. `passed` is the summary's
+     * remainder, so it is not counted here.
+     */
+    static void count_answered_outcome (ScenarioLoadState& state, bool threw, bool assertion_failed) {
+        if (threw) {
+            state.steps_errored.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
+        if (assertion_failed) {
+            state.steps_failed.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    /**
+     * The outcome of a step `step.before` stopped before the wire: `skipped`,
+     * unless a pre-request script threw, which `classify_step` ranks above a
+     * skip and makes `errored` (#2947). That one is in its step's `executed`
+     * like every outcome but `skipped`, and not in its `noResponse`, which
+     * stays the count of executions that end their iteration.
+     */
+    static void count_unsent_outcome (ScenarioLoadState& state, size_t step_index, bool threw) {
+        if (!threw) {
+            state.steps_skipped.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
+        state.steps_errored.fetch_add (1, std::memory_order_relaxed);
+        state.steps.record_unsent (step_index);
+    }
+
+    /**
      * The session @ref finish_step leaves the VU with after a step: none after
      * an error, the step's own capture after an ordinary send, and - for a
      * step with `disableCookies` (issue #1765), whose transfer tracked
@@ -1213,7 +1263,10 @@ class ScenarioLoadDriver {
      * @p errored means the step got no response (a transport error, or a step
      * never sent), and it ends the iteration as abandoned. A response with an
      * HTTP error status is not `errored`: the completion counts it with
-     * `record_failed_status` and the iteration carries on.
+     * `record_failed_status` and the iteration carries on. A step whose inline
+     * script threw is `errored` too, but its caller counts that
+     * (`count_answered_outcome`, `count_unsent_outcome`) and passes `false`
+     * here, because it does not end the iteration (#2947).
      *
      * @p next_cookies is null for an outcome that carries none - an error, or a
      * step that was never sent. @p next_target_from_before is

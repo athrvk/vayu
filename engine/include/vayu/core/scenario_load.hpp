@@ -305,6 +305,10 @@ class StepHistograms {
     /// under status 0, as the run's own distribution does), or the step was
     /// never sent. Counts as executed, so it is not paired with `record`.
     void record_error (size_t step);
+    /// A step that sent nothing and still did not end its iteration: one a
+    /// controller skipped whose pre-request script threw (#2947), `errored`
+    /// rather than `skipped`. Counts as executed and nothing else.
+    void record_unsent (size_t step);
     /// The duration of a no-response step whose transfer ran (a timeout, a
     /// reset; #2384). Paired with `record_error`, which already counted the
     /// step; touches only the histogram, so the step's percentiles cover the
@@ -463,7 +467,8 @@ struct ScenarioLoadState {
     /// recording into it takes no lock.
     TransactionHistograms transactions;
     /// Steps a `control.if` / `control.once` / `control.throughput` element
-    /// skipped before they reached the wire (issue #1515) - the load
+    /// skipped before they reached the wire (issue #1515), less those whose
+    /// inline `script.pre` threw, which are `errored` (#2947) - the load
     /// path's own `StepOutcome::Skipped`, read into the summary's
     /// `skipped` key in place of the constant `0` every scenario load run
     /// reported before this.
@@ -573,12 +578,17 @@ struct ScenarioLoadState {
      */
     size_t data_cursor = 0;
     std::atomic<size_t> iterations_completed{ 0 };
-    /// Iterations an errored step ended before the plan's last step. Counted
-    /// rather than folded into `completed`, since a run that abandoned most of
-    /// its iterations has a per-step breakdown that thins towards the end and
-    /// nothing else would say why.
+    /// Iterations a step that got no response, or a jump this run could not
+    /// honour, ended before the plan's last step. Counted rather than folded
+    /// into `completed`, since a run that abandoned most of its iterations has
+    /// a per-step breakdown that thins towards the end and nothing else would
+    /// say why.
     std::atomic<size_t> iterations_abandoned{ 0 };
     std::atomic<size_t> steps_executed{ 0 };
+    /// The summary's `errored`: executions that got no response, which end
+    /// their iteration, and executions whose inline `script.pre` or
+    /// `script.post` threw (#2947), which do not. So it is not the sum of the
+    /// steps' `noResponse`; `iterations_abandoned` is the abort count.
     std::atomic<size_t> steps_errored{ 0 };
 };
 
