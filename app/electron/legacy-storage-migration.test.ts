@@ -26,7 +26,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { transformWithOxc } from "vite";
-import { LEGACY_FILE_BINDING_KEYS, STORAGE_KEYS } from "../src/constants/storage-keys";
+import { STORAGE_KEYS } from "../src/constants/storage-keys";
 import type { IpcSenderLike } from "./ipc-sender.js";
 import {
 	LEGACY_STORAGE_ARG,
@@ -52,7 +52,7 @@ const mainSource = readFileSync(path.join(here, "main.ts"), "utf8");
 /** What a `file:` build left behind, with one key that is not the app's. */
 const OLD_ORIGIN = {
 	"vayu-theme-source": "dark",
-	"vayu.spec-files": '{"state":{"c1":{"path":"/home/ada/spec.yaml"}},"version":1}',
+	"vayu.tabs": '{"state":{"tabs":[]},"version":1}',
 	"vayu:lastLoadTestConfig": '{"vus":10}',
 	"other-app": "not ours",
 };
@@ -98,7 +98,7 @@ describe("vayuEntries", () => {
 			})
 		).toEqual({
 			"vayu-theme-source": "dark",
-			"vayu.spec-files": OLD_ORIGIN["vayu.spec-files"],
+			"vayu.tabs": OLD_ORIGIN["vayu.tabs"],
 			"vayu:lastLoadTestConfig": '{"vus":10}',
 		});
 	});
@@ -107,10 +107,8 @@ describe("vayuEntries", () => {
 		expect(() => vayuEntries(answer)).toThrow(/file: origin answered/);
 	});
 
-	it("passes every key the renderer persists, and the legacy ones it still imports", () => {
-		// The file bindings an older build kept (#2765) still have to reach the
-		// app origin, or the one-time import there finds nothing to move.
-		const keys = [...Object.values(STORAGE_KEYS), ...Object.values(LEGACY_FILE_BINDING_KEYS)];
+	it("passes every key the renderer persists", () => {
+		const keys = Object.values(STORAGE_KEYS);
 		expect(keys.length).toBeGreaterThan(15);
 		expect(keys.filter((key) => !isVayuStorageKey(key))).toEqual([]);
 	});
@@ -240,7 +238,7 @@ describe("createLegacyStorageMigration", () => {
 		expect(migration.hasPending()).toBe(true);
 		expect(migration.take()).toEqual({
 			"vayu-theme-source": "dark",
-			"vayu.spec-files": OLD_ORIGIN["vayu.spec-files"],
+			"vayu.tabs": OLD_ORIGIN["vayu.tabs"],
 			"vayu:lastLoadTestConfig": '{"vus":10}',
 		});
 		// Taking is not the hand-off: the window has not written anything yet.
@@ -486,12 +484,12 @@ describe("the preload's half", () => {
 			storage,
 			sendSync: () => ({
 				"vayu-theme-source": "dark",
-				"vayu.spec-files": OLD_ORIGIN["vayu.spec-files"],
+				"vayu.tabs": OLD_ORIGIN["vayu.tabs"],
 			}),
 		});
 
 		expect(ipc.sendSync.mock.calls).toEqual([[LEGACY_STORAGE_TAKE_CHANNEL]]);
-		expect(setItem.mock.calls).toEqual([["vayu.spec-files", OLD_ORIGIN["vayu.spec-files"]]]);
+		expect(setItem.mock.calls).toEqual([["vayu.tabs", OLD_ORIGIN["vayu.tabs"]]]);
 		expect(items.get("vayu-theme-source")).toBe("light");
 		expect(ipc.send.mock.calls).toEqual([
 			[LEGACY_STORAGE_TAKEN_CHANNEL, { written: 1, kept: 1, failed: 0 }],
@@ -499,11 +497,11 @@ describe("the preload's half", () => {
 	});
 
 	it("counts a refused write and carries on", async () => {
-		const { storage, items } = fakeStorage({}, new Set(["vayu.spec-files"]));
+		const { storage, items } = fakeStorage({}, new Set(["vayu.tabs"]));
 		const ipc = await runPreload({
 			argv: [LEGACY_STORAGE_ARG],
 			storage,
-			sendSync: () => ({ "vayu.spec-files": "{}", "vayu-theme-source": "dark" }),
+			sendSync: () => ({ "vayu.tabs": "{}", "vayu-theme-source": "dark" }),
 		});
 
 		expect(items.get("vayu-theme-source")).toBe("dark");
@@ -551,7 +549,7 @@ describe("main and the preload together", () => {
 		expect(record.data.done).toBe(true);
 		expect(Object.fromEntries(items)).toEqual({
 			"vayu-theme-source": "light",
-			"vayu.spec-files": OLD_ORIGIN["vayu.spec-files"],
+			"vayu.tabs": OLD_ORIGIN["vayu.tabs"],
 			"vayu:lastLoadTestConfig": '{"vus":10}',
 		});
 		expect(migration.hasPending()).toBe(false);
