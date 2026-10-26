@@ -28,6 +28,7 @@ import { PhasePercentiles } from "./charts/PhasePercentiles";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 import { HdrPercentileChart } from "./charts/uplot";
 import { pluralize } from "../utils/format";
+import { pooledTitle } from "../utils/pooledLatency";
 import { latestGateFrame, liveDistributions } from "../utils/liveDistributions";
 
 /** The HDR chart's own height; the placeholder holds the same space. */
@@ -40,9 +41,12 @@ function Placeholder({ title }: { title: string }) {
 export function LiveDistributionRow({
 	history,
 	sloMs,
+	pooled = false,
 }: {
 	history: LoadTestMetrics[];
 	sloMs?: number;
+	/** A scenario load run: the distribution pools every step (#2823). */
+	pooled?: boolean;
 }) {
 	const frame = useMemo(() => latestGateFrame(history), [history]);
 	const { latency, phases } = useMemo(() => liveDistributions(frame), [frame]);
@@ -53,7 +57,7 @@ export function LiveDistributionRow({
 			<Card pad="sm" className="min-w-0">
 				<div className="flex items-baseline justify-between mb-3">
 					<h3 className="text-xs font-semibold text-foreground">
-						Latency distribution
+						{pooledTitle("Latency distribution", pooled)}
 						<InfoChip tip={TOOLTIPS.latencyDistribution} />
 						<span className="ml-2 text-label font-normal text-muted-foreground">
 							HDR percentile plot

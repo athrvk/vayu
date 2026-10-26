@@ -6,6 +6,7 @@
  */
 
 import { formatLatencyPartsOrDash } from "@/lib/format-number";
+import { pooledCaption, type PooledLatency } from "../../utils/pooledLatency";
 import { Eyebrow } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell } from "./HeroCardShell";
@@ -17,25 +18,39 @@ import { HeroCardShell } from "./HeroCardShell";
  * the run so far - the live tick's cumulative percentiles, or the final
  * report's once the run completes - so the mean and median beside the tail
  * describe the same population (issue #2385), not the last 100 ms.
+ *
+ * `pooledLatency` is set for a scenario load run: the figures pool every step,
+ * so the card says so and names the slowest step where the producer knows it
+ * (#2823).
  */
 export function LatencyPercentilesCard({
 	p95,
 	p99,
 	meanLatency,
 	medianLatency,
+	pooledLatency,
 }: {
 	p95?: number;
 	p99?: number;
 	meanLatency?: number;
 	medianLatency?: number;
+	pooledLatency?: PooledLatency;
 }) {
 	return (
-		<HeroCardShell label="Latency" tip={TOOLTIPS.latencyPercentiles}>
+		<HeroCardShell
+			label="Latency"
+			tip={pooledLatency ? TOOLTIPS.latencyPercentilesPooled : TOOLTIPS.latencyPercentiles}
+		>
 			<div className="grid grid-cols-2 gap-4 items-end mt-1">
 				<PercentileValue label="p95" ms={p95} />
 				<PercentileValue label="p99" ms={p99} />
 			</div>
 			<TailSubLine p99={p99} meanLatency={meanLatency} medianLatency={medianLatency} />
+			{pooledLatency && (
+				<p className="text-label text-muted-foreground">
+					{pooledCaption(pooledLatency.slowestStep)}
+				</p>
+			)}
 		</HeroCardShell>
 	);
 }

@@ -1286,7 +1286,12 @@ collection run's per-step progress.
   frame alone, so the dashboard reads the latest frame carrying the key from its buffer, never the
   newest tick. Each phase carries `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`; the live view
   turns them into the report's `timingBreakdown` shape for the waterfall and the percentile table,
-  and shows the latency distribution's `count` as "N completions so far"
+  and shows the latency distribution's `count` as "N completions so far". A scenario load run's
+  gate frame also carries `scenario` (`{iterations, iterationsCompleted, iterationsAbandoned,
+  stepsExecuted, steps: [{index, name, executed, errors}]}`, issue #2823), mapped as sent onto
+  `LoadTestMetrics.scenario`: absent is "not a gate frame" or "not a scenario load", never a zeroed
+  block. The live sequence panel reads it from the latest frame carrying it
+  (`utils/liveScenario.ts`).
 - **Capacity state**: a capacity run's frames carry `capacity: {level, levelElapsedMs,
   levelsJudged, stopReason?}` from tick 0 (issue #2928), and `mapSseMetrics()` passes it through
   as `LoadTestMetrics.capacity` unchanged. Absent is "not a capacity run" (or an engine from

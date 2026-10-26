@@ -414,6 +414,15 @@ const StepHistograms& steps,
 const StepElementTallies& elements,
 ScriptsOverrideMode scripts_mode);
 
+/// A plan step's identity as the live gate frame names it (#2823).
+struct ScenarioStepLabel {
+    size_t index = 0;
+    std::string name;
+};
+
+/// Every step's label, in plan order.
+[[nodiscard]] std::vector<ScenarioStepLabel> scenario_step_labels (const ScenarioPlan& plan);
+
 /**
  * @brief Everything a scenario load run accumulates, shared with its callbacks.
  *
@@ -430,10 +439,10 @@ struct ScenarioLoadState {
     CoverageTally coverage,
     vayu::http::routes::ScriptVariableScopes base_scopes,
     vayu::runtime::ScriptConfig script_config)
-    : steps (plan.steps.size ()), element_spans (compute_element_spans (plan)),
-      transactions (plan), element_tallies (plan),
-      step_index (build_step_index (plan)), shared_throughput (plan),
-      shared_pacing (shared_pacing_element_ids (plan)),
+    : steps (plan.steps.size ()), step_labels (scenario_step_labels (plan)),
+      element_spans (compute_element_spans (plan)), transactions (plan),
+      element_tallies (plan), step_index (build_step_index (plan)),
+      shared_throughput (plan), shared_pacing (shared_pacing_element_ids (plan)),
       shared_throughput_budgets (shared_throughput_element_ids (plan)),
       base_scopes (std::move (base_scopes)),
       base_vars (vayu::http::routes::flatten_variable_scopes (this->base_scopes)),
@@ -442,6 +451,9 @@ struct ScenarioLoadState {
     }
 
     StepHistograms steps;
+    /// Copied off the plan and never written again, so the live gate frame
+    /// can name the steps without the plan, which retention releases.
+    const std::vector<ScenarioStepLabel> step_labels;
     /// The plan-wide first/last position of every scope-spanning element
     /// (issue #1515's `control.transaction` and, since #1569, `control.loop`
     /// too), computed once here.
@@ -542,8 +554,10 @@ struct ScenarioLoadState {
     CoverageTally coverage;
     std::vector<std::unique_ptr<VirtualUser>> vus;
     size_t virtual_users = 0;
-    /// Producer-thread only: how many iterations were ever begun.
-    size_t iterations_started = 0;
+    /// How many iterations were ever begun. The producer thread is the only
+    /// writer; atomic because the metrics thread reads it for the live gate
+    /// frame (#2823), so relaxed on both sides.
+    std::atomic<size_t> iterations_started{ 0 };
     /// Rows this run was given; 0 for a run sent without `data`.
     size_t data_row_count = 0;
     /**
@@ -553,9 +567,9 @@ struct ScenarioLoadState {
      * Shared rather than per-VU because that is the semantics that makes
      * distinct-credentials-per-user work - two VUs must not both get row 0 -
      * and it is k6's `iterationInTest` / JMeter's "All threads" parity. Plain,
-     * not atomic, for the same reason `iterations_started` beside it is: the
-     * strategy thread is the sole producer and `take_ready_vu` is the only
-     * claimer, so the claim costs an increment rather than a locked one.
+     * not atomic: the strategy thread is the sole producer, `take_ready_vu` is
+     * the only claimer and nothing else reads it, so the claim costs an
+     * increment rather than a locked one.
      */
     size_t data_cursor = 0;
     std::atomic<size_t> iterations_completed{ 0 };
@@ -580,6 +594,19 @@ struct ScenarioLoadState {
  */
 [[nodiscard]] nlohmann::json
 build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan& plan);
+
+/**
+ * @brief The `scenario` object a live gate frame carries for a scenario load
+ *        run (#2823): `{iterations, iterationsCompleted, iterationsAbandoned,
+ *        stepsExecuted, steps: [{index, name, executed, errors}]}`.
+ *
+ * Built while the workers still write, so it reads only relaxed atomics and the
+ * immutable `step_labels`, never a step's histogram (`percentiles`,
+ * `latency_samples`), whose plain hdr reads would race the workers. The counts
+ * are the same counters `build_scenario_load_summary` reads, so a frame built
+ * after the drain says what the summary does.
+ */
+[[nodiscard]] nlohmann::json build_scenario_live_progress (const ScenarioLoadState& state);
 
 /**
  * @brief The `coverage` object a scenario load run stores in `runs.summary`,

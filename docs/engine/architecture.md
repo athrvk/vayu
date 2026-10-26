@@ -500,6 +500,15 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   per-second counts, and `run_export_html.cpp` draws its status chart from them as responses
   per second, falling back to differencing the cumulative `status_codes` only for a run whose
   rows carry none (#2888)
+- **A scenario load's sequence on the gate frame** (issue #2823): `execute_scenario_load`
+  publishes its `ScenarioLoadState` to the `RunContext` once it is built
+  (`publish_scenario_state`, a leaf mutex held for the pointer swap alone, the `event_loop`
+  pattern), and the gate frame copies the pointer under that lock and builds its `scenario`
+  block (`build_scenario_live_progress`) from the state's relaxed atomics and its step labels,
+  which are copied off the plan at construction because retention releases the plan. It never
+  reads a step's histogram: those are plain hdr reads racing the workers' atomic records, so
+  per-step latency stays a report figure. Retention drops the published pointer with the event
+  loop; the metrics thread has been joined by then
 - **Batch DB writes**: Per-request results written after test completion; the metrics thread
   persists one wide `metric_ticks` row per second during the run (the complete tick object,
   built once at write time), and the whole-run `runs.summary` is written once at completion.

@@ -2471,6 +2471,31 @@ export interface SanityResult extends HttpResponse {
 	validation?: ResponseValidation;
 }
 
+/**
+ * A scenario load run's sequence so far, as a gate frame carries it (issue
+ * #2823): the counters the stored summary's `scenario` block reads, without any
+ * latency (a step's percentiles are in the finished report alone). Read while
+ * the workers still write, so the figures may differ by the completions that
+ * landed between the reads.
+ */
+export interface LiveScenarioProgress {
+	/** Iterations started. */
+	iterations: number;
+	iterationsCompleted: number;
+	iterationsAbandoned: number;
+	stepsExecuted: number;
+	/** One entry per plan step, in plan order. */
+	steps: LiveScenarioStep[];
+}
+
+/** One plan step's counters on a gate frame; `errors` is the run's one definition (#2124). */
+export interface LiveScenarioStep {
+	index: number;
+	name: string;
+	executed: number;
+	errors: number;
+}
+
 /** A gate frame's run-so-far latency distribution, as the engine sends it (ms). */
 export interface LiveLatencyDistribution {
 	minMs: number;
@@ -2618,6 +2643,13 @@ export interface LoadTestMetrics {
 	 */
 	cumulative_latency?: LiveLatencyDistribution | null;
 	cumulative_phases?: LivePhaseDistributions | null;
+	/**
+	 * The sequence of a scenario load run, on a gate frame only (issue #2823):
+	 * absent from every other frame and from every run that is not a scenario
+	 * load, so a reader takes it from the latest frame that carries it
+	 * (`utils/liveScenario.ts`), never from the newest tick.
+	 */
+	scenario?: LiveScenarioProgress;
 	/** Mean latency over the whole run so far, not the tick's window. */
 	avg_latency_ms: number;
 	bytes_sent: number;

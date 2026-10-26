@@ -14,6 +14,7 @@ import { notCrossed, sloSourceOf } from "./computeBreakpoint";
 import { runSloMs } from "./runSloMs";
 import { dispatchStatus } from "./dispatchLag";
 import { shouldShowDropped } from "./metricsTransforms";
+import { pooledLatencyOf } from "./pooledLatency";
 import { liveRateFidelity } from "./rateFidelity";
 
 /**
@@ -146,6 +147,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		meanLatency: lat?.avg,
 		medianLatency: lat?.median ?? lat?.p50,
 		p95Latency: lat?.p95,
+		pooledLatency: pooledLatencyOf(report),
 		testDuration: duration,
 		elapsedSeconds: duration,
 		setupOverhead: s.setupOverhead,

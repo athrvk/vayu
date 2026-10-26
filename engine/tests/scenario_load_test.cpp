@@ -542,7 +542,7 @@ TEST_F (ScenarioLoadTest, AnIterationsRunStopsStartingIterationsWithoutStranding
         { "concurrency", 3 } };
     auto state        = run (config, execution);
 
-    EXPECT_EQ (state->iterations_started, 4u);
+    EXPECT_EQ (state->iterations_started.load (), 4u);
     EXPECT_EQ (state->iterations_completed.load (), 4u);
     EXPECT_EQ (state->steps_executed.load (), 12u)
     << "4 iterations x 3 steps; a VU stopped mid-sequence would send fewer";

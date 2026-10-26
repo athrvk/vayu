@@ -318,8 +318,9 @@ struct RunContext {
     /// Let go of everything the run needed only while it was sending: the
     /// event loop - with its per-worker curl handle pools, its multi handles
     /// and the TCP/TLS connections those hold open against the target, and the
-    /// 512KB submission queues - the bound CSV rows, the scenario plan, and the
-    /// response bodies the deferred passes have already read (issue #1155).
+    /// 512KB submission queues - the bound CSV rows, the scenario plan and its
+    /// published load state, and the response bodies the deferred passes have
+    /// already read (issue #1155).
     /// What retention exists for is untouched: the tick topic, `closed`, the
     /// summary counters and the collector behind them (issue #1154) - including
     /// `response_samples_dropped`, so the report still says what was thinned
@@ -339,6 +340,13 @@ struct RunContext {
         {
             std::lock_guard<std::mutex> lock (event_loop_mtx);
             loop = std::move (event_loop);
+        }
+        // Moved out like the loop, so its virtual users and histograms free
+        // outside the lock.
+        std::shared_ptr<const ScenarioLoadState> scenario_state;
+        {
+            std::lock_guard<std::mutex> lock (scenario_state_mtx);
+            scenario_state = std::move (live_scenario_state);
         }
         load_data.reset ();
         scenario.reset ();
@@ -685,6 +693,25 @@ struct RunContext {
      * choice of executor differs, and that is the one place this is read.
      */
     std::shared_ptr<const ScenarioExecution> scenario;
+
+    /// A scenario load run's state, for the metrics thread's gate frame
+    /// (#2823): the `event_loop_mtx` pattern, with a leaf lock held for the
+    /// pointer copy alone. The reader reads the state's atomics unlocked.
+    mutable std::mutex scenario_state_mtx;
+    std::shared_ptr<const ScenarioLoadState> live_scenario_state;
+
+    /// Called once by `execute_scenario_load`, once the state is built.
+    void publish_scenario_state (std::shared_ptr<const ScenarioLoadState> state) {
+        std::lock_guard<std::mutex> lock (scenario_state_mtx);
+        live_scenario_state = std::move (state);
+    }
+
+    /// The published state, or null for a run that is not a scenario load,
+    /// before `execute_scenario_load` has built it, and after retention.
+    [[nodiscard]] std::shared_ptr<const ScenarioLoadState> published_scenario_state () const {
+        std::lock_guard<std::mutex> lock (scenario_state_mtx);
+        return live_scenario_state;
+    }
 
     /**
      * The rows a *single-request* load run binds, or null for a run sent

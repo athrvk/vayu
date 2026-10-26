@@ -119,6 +119,17 @@ describe("a scenario load run", () => {
 		expect(screen.queryByText(/unknown url/i)).toBeNull();
 	});
 
+	// The run's headline latency is one histogram over every step (#2823).
+	// Mutation check: drop the `isPooledReport` guard in `pooledLatencyOf` and the
+	// single-request case below fails; drop the caption and this one fails.
+	it("says the P99 pools every step and names the slowest one", () => {
+		renderReport(<LoadTestDetail report={report(SCENARIO)} runId="run_1" />);
+
+		expect(
+			screen.getAllByText("All steps pooled - slowest step: List orders, p99 90ms").length
+		).toBeGreaterThan(0);
+	});
+
 	it("offers a Steps tab, and it is the breakdown that gets rendered there", () => {
 		renderReport(<LoadTestDetail report={report(SCENARIO)} runId="run_1" />);
 
@@ -167,6 +178,7 @@ describe("a single-request load run", () => {
 
 		expect(screen.getByText("https://api.test/ping")).toBeTruthy();
 		expect(screen.queryByText("SEQUENCE")).toBeNull();
+		expect(screen.queryByText(/pooled/i)).toBeNull();
 		// An empty tab is worse than no tab: it invites a click that answers
 		// nothing.
 		expect(screen.queryByRole("tab", { name: /steps/i })).toBeNull();

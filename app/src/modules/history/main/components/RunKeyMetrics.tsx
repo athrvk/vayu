@@ -13,12 +13,15 @@
  * HTTP one; a scenario run with failed assertions (#2820) gains a fourth tile
  * for them, because a run whose every assertion failed against `200`s reads
  * 100.0% here and the tile is the only place that says otherwise at a glance.
+ * A scenario load run's P99 pools every step, and the tile says which step set
+ * it (#2823).
  */
 
 import type { ReactNode } from "react";
 import { Activity, CheckCircle, TrendingUp, XCircle } from "lucide-react";
 import { exactAssertionsOf } from "@/components/shared";
 import { formatLatencyOrDash, formatNumber, formatPercent } from "@/lib/format-number";
+import { pooledCaption, pooledLatencyOf } from "@/modules/dashboard/utils/pooledLatency";
 import type { RunReport } from "@/types";
 import { NOT_RECORDED, unrecordedFiguresOf } from "./unrecorded-figures";
 
@@ -36,6 +39,7 @@ function Figure({ recorded, children }: { recorded: boolean; children: ReactNode
 export default function RunKeyMetrics({ report }: { report: RunReport }) {
 	const assertionsFailed = exactAssertionsOf(report)?.failed ?? 0;
 	const unrecorded = unrecordedFiguresOf(report);
+	const pooled = pooledLatencyOf(report);
 	return (
 		<div
 			className={
@@ -55,6 +59,11 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 				<p className="text-lg font-bold text-foreground">
 					{formatLatencyOrDash(report.latency?.p99)}
 				</p>
+				{pooled && !unrecorded.latency && (
+					<p className="mt-0.5 text-label text-muted-foreground">
+						{pooledCaption(pooled.slowestStep)}
+					</p>
+				)}
 			</div>
 			<div className="bg-muted/50 p-3">
 				<div className="flex items-center gap-2 mb-1">

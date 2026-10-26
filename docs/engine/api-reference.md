@@ -10274,7 +10274,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys and a capacity run's `capacity`, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases` and `statusSeconds` keys, which it adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys and a capacity run's `capacity`, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases`, `statusSeconds` and `scenario` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -10305,6 +10305,7 @@ no frame.
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
 | `statusSeconds` | **Gate frames only** (issue #2866), the final frame included: the seconds since load start that closed since the previous gate, `[{second, span, counts}]` with `span` `1` and `counts` `[2xx, 3xx, 4xx, 5xx, error]`, each response counted in the second it completed in. A gate frame's entries are its [stored row](#get-runsrunidmetrics)'s `status_seconds`, drained once for both, so live and History hold the same seconds; the final frame's are the seconds closed since the last gate, which only it carries. `[]` when no second closed. Absent from every other frame |
+| `scenario` | **Gate frames only** (issue #2823), the final frame included, and only on a scenario load run: the sequence so far, `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, one `steps` entry per plan step in plan order. The same counters as the stored summary's `scenario` block (`iterations`, `iterations_completed`, `iterations_abandoned`, `steps_executed`, and each step's `executed` and `errors`), read while the workers still write, so a mid-run reading's figures can differ from each other by the completions that landed between the reads; the final frame is read after the drain and equals the summary. No latency: a step's percentiles are in the [report](#get-runsrunidreport) alone. Absent from every other frame and from every frame of any other run
 
 **Read order within one tick.** The metrics thread snapshots the status-code
 distribution first, then `get_current_stats()` reads the completed count
