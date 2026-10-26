@@ -9017,7 +9017,7 @@ that passed everything else. The run's rollup is
 | `passed` | The request completed and every assertion held. | Continues. |
 | `failed` | A `pm.test` assertion did not hold, at the collection, a folder or the request. | Continues - the request itself completed. |
 | `errored`, step | The step did not run clean: the pre-request or test script threw, at any level (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
-| `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
+| `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` (or `control.switch` / `control.loop`) target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
 
 Either kind of `errored` is the same outcome on the row, in the summary's
@@ -9027,12 +9027,15 @@ is not an outcome: a step that answered 4xx or 5xx with every assertion holding
 is `passed`, and the summary's `failedRequests` counts it. The four outcomes
 are disjoint and sum to `stepsExecuted`, a skipped step included, and a
 [scenario load run](#scenario-load-runs) reports them under the same
-arithmetic and the same outcome for a no-response step and a thrown inline
-script (#2947); a step's flow control (`control.switch`, a jump the run cannot
-honour) is read differently on the two (#2974).
-What differs there is the effect on the iteration: only a step that got no
-response ends it, so a load run's `errored` is not the sum of its steps'
-`noResponse`, and `iterationsAbandoned` is its iteration-abort count. A transport failure
+arithmetic and reads a step's flow control the same way: a no-response step
+and a thrown inline script are `errored` (#2947), a step that errored has its
+own jump (`control.switch`, `control.loop`) dropped, and a jump the run cannot
+honour is the `errored` of the step that set it (#2974). A load run stores no
+step rows, so that error's text, the same sentence, is the `stepError` of a
+`run` warning in the [engine log](logging.md). What differs there is a step that
+got no response: on a load run it ends its iteration, so a load run's
+`errored` is not the sum of its steps' `noResponse`, and `iterationsAbandoned`
+is its iteration-abort count. On a collection run a transport failure
 continues the iteration like a script error does, as Postman's and Newman's
 runners do by default; a later step that reads a response that never arrived
 errors on its own row. A step that errored while the iteration continues has its own flow control
@@ -9210,9 +9213,11 @@ knob.
   for a run sent without `data`.
 - **A step that got no response ends its iteration** (a transport error, or a
   step never sent) and its virtual user starts the next one. It is never
-  stranded. A step that answered with an HTTP error status (4xx/5xx) counts in
-  its `errors` but does **not** end the iteration: a response arrived, and the
-  next step runs.
+  stranded. So does a `control.switch` or `control.loop` jump the run cannot
+  honour (a target no step answers to, or one past `maxStepsPerIteration`), as
+  on a collection run, with the step that set it `errored` (#2974). A step that
+  answered with an HTTP error status (4xx/5xx) counts in its `errors` but does
+  **not** end the iteration: a response arrived, and the next step runs.
 - **No per-step `results` rows are stored** - one row per step per iteration per
   virtual user is what a load run exists not to keep. The report's
   `scenario.steps` breakdown is the per-step record instead:
@@ -9255,8 +9260,8 @@ ran, 30 of those answered a status its `assert.status` rejected. So
 **`iterations` is the iterations started**, not the iterations asked for, and
 three counts account for them: `iterationsCompleted` (the iteration reached its
 last step, or a script ended it with `setNextRequest(null)` or a forward jump),
-`iterationsAbandoned` (a step that got no response, or a jump to a target that
-names no step, ended it) and the iterations still running when the deadline or a Stop
+`iterationsAbandoned` (a step that got no response, or a jump the run could
+not honour, ended it) and the iterations still running when the deadline or a Stop
 ended the run. The last has no key of its own; it is derivable:
 
 - `iterations = iterationsCompleted + iterationsAbandoned + cut at the end`,
@@ -9277,7 +9282,9 @@ counts. **`httpErrors`** is the responses that arrived with a 4xx or 5xx;
 the step's latency includes them, and the iteration carries on to the next
 step. **`noResponse`** is the executions that got nothing back (a transport
 error, booked under status 0 like the run's own distribution, or a
-data-binding failure that sent nothing); only these end the iteration. A
+data-binding failure that sent nothing); these end the iteration, as a jump
+the run could not honour does, and a refused jump is in neither count: it is
+an outcome (below), not a request error. A
 `noResponse` execution whose transfer ran (a timeout, a reset, a DNS or TLS
 failure) is also in the step's latency, so a step that times out reports its
 timeout in `p99` and `max`; one that never reached the wire (a data-binding
@@ -9290,12 +9297,15 @@ the same pipeline time into the run's latency as into the step's, so the run's
 At the top of the section, `passed`, `failed`, `skipped` and `errored` are the
 collection run's outcomes (Outcomes under [Scenario runs](#scenario-runs),
 #2824), counted per step execution and disjoint. `errored` is an execution that
-got no response, or one whose inline `script.pre` or `script.post` threw (a
+got no response, one whose inline `script.pre` or `script.post` threw (a
 thrown error, a script timeout, a refused `pm.request` write-back, an inline
-`pm.execution` call; #2947). A throw outranks a failed assertion and a skip, as
-on a collection run. Only the no-response kind ends its iteration, so the
-target receives the same load whether a script threw or not, and `errored` is
-not the sum of every step's `noResponse`: the iteration-abort count is
+`pm.execution` call; #2947), or one that set a jump the run could not honour
+(#2974). A throw outranks a failed assertion and a skip, and a refused jump
+outranks every other outcome, as on a collection run. The no-response kind and
+the refused jump end their iteration; a throw does not, and only drops the
+step's own jump, so a script bug changes the load the target receives only
+where the step that threw also asked to jump. `errored` is therefore not the
+sum of every step's `noResponse`: the iteration-abort count is
 `iterationsAbandoned`. `failed` is one whose response arrived and in which an
 inline assertion did not hold (an `assert.*` element, a required `extract.*`
 miss, an inline script's `pm.test`), counted once however many failed in it.
@@ -9304,8 +9314,9 @@ miss, an inline script's `pm.test`), counted once however many failed in it.
 error status no assertion rejected is `passed`: the step's `httpErrors` and the
 report's `summary.failedRequests` count it. `stepsExecuted` is every step
 reached, a skipped one included, and a step's `executed` is every execution of
-it that was not `skipped` (a skipped one whose `script.pre` threw is in it, as
-`errored`, and adds nothing to `noResponse` or the latency), so two identities
+it that was not `skipped` (a skipped one whose `script.pre` threw, or whose
+`control.loop` repeat was refused, is in it as `errored`, and adds nothing to
+`noResponse` or the latency), so two identities
 hold:
 
 - `passed + failed + errored + skipped = stepsExecuted`

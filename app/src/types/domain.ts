@@ -3549,10 +3549,10 @@ export interface RunReport {
 		/** Steps a controller or `pm.execution.skipRequest()` stopped before the wire. */
 		skipped: number;
 		/**
-		 * Step executions that got no response or whose script threw, on both run
-		 * kinds (#2947). On a load run only the no-response kind ends its
-		 * iteration, so there it is not the sum of the steps' `noResponse`:
-		 * `iterationsAbandoned` is the abort count.
+		 * Step executions that got no response, whose script threw (#2947) or that
+		 * set a jump the run could not honour (#2974), on both run kinds. On a load
+		 * run a thrown script does not end its iteration, so there it is not the
+		 * sum of the steps' `noResponse`: `iterationsAbandoned` is the abort count.
 		 */
 		errored: number;
 		/**
