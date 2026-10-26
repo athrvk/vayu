@@ -19,12 +19,16 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/metrics_helper.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <expected>
 #include <map>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -1155,15 +1159,62 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
     return row;
 }
 
+// `<startTime>:<id>`, split on the first ':' because the time is an integer
+// and an id may hold one. A cursor names a row, so an empty id is malformed.
+std::optional<vayu::db::RunCursor> parse_run_cursor (std::string_view text) {
+    const auto colon = text.find (':');
+    if (colon == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto start_time = vayu::utils::parse_number<int64_t> (text.substr (0, colon));
+    const auto id = text.substr (colon + 1);
+    if (!start_time || id.empty ()) {
+        return std::nullopt;
+    }
+    return vayu::db::RunCursor{ .start_time = *start_time, .id = std::string (id) };
+}
+
+std::string run_cursor_text (const vayu::db::Run& run) {
+    return std::to_string (run.start_time) + ":" + run.id;
+}
+
+// One row past @p limit, so the caller reads `hasMore` off the rows: a cursor
+// page has no offset to add to `total`, and `total` is counted under its own
+// lock acquisition, so a run started in between would skew the sum anyway.
+std::expected<std::vector<vayu::db::Run>, RouteError> fetch_runs_page (vayu::db::Database& db,
+const vayu::db::RunFilter& filter,
+int64_t limit,
+int64_t offset,
+const std::optional<std::string>& before) {
+    if (!before) {
+        return db.get_runs_paginated (filter, limit + 1, offset);
+    }
+    if (offset != 0) {
+        return route_error (400, "'before' and a non-zero 'offset' cannot be combined: a cursor page starts after the row it names",
+        "before_with_offset");
+    }
+    const auto cursor = parse_run_cursor (*before);
+    if (!cursor) {
+        return route_error (400, "'before' must be '<startTime>:<id>', as pagination.nextBefore spells it",
+        "invalid_before");
+    }
+    return db.get_runs_before (filter, *cursor, limit + 1);
+}
+
 } // namespace
 
 /**
  * Testable core of the paginated GET /runs list, returning {http_status,
- * json_body}. Always 200 - a list of zero rows is a valid list, not a 404.
+ * json_body}. A list of zero rows is a valid list, not a 404; the one refusal
+ * is a `before` that is malformed (`invalid_before`) or sent beside a non-zero
+ * offset (`before_with_offset`), both 400.
  *
  * `limit`/`offset` arrive already parsed and clamped by the caller (limit
  * default 50, capped at 500; offset floored at 0); `filter` holds the already
- * validated type/status/requestId/q constraints. Rows carry the compact
+ * validated type/status/requestId/q constraints. `before` is the raw query
+ * value, a keyset cursor (#2978): the page starts after the row it names, and
+ * `pagination.nextBefore` names this page's last row whenever `hasMore`.
+ * Rows carry the compact
  * `summary` (see build_run_summary for its keys) instead of the full
  * `config_snapshot`, wrapped in the
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
@@ -1192,9 +1243,18 @@ std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
 const vayu::db::RunFilter& filter,
 int64_t limit,
 int64_t offset,
-vayu::http::RunSummaryCache& summaries) {
+vayu::http::RunSummaryCache& summaries,
+const std::optional<std::string>& before) {
+    auto page = fetch_runs_page (db, filter, limit, offset, before);
+    if (!page) {
+        return as_response (page.error ());
+    }
+    auto& runs          = *page;
+    const bool has_more = std::cmp_greater (runs.size (), limit);
+    if (has_more) {
+        runs.pop_back ();
+    }
     const int64_t total = db.count_runs (filter);
-    auto runs           = db.get_runs_paginated (filter, limit, offset);
 
     // A design run is one exchange, so its outcome fits on its row and the page
     // pays one extra query for all of them (get_design_result_outcomes). A load
@@ -1239,13 +1299,15 @@ vayu::http::RunSummaryCache& summaries) {
     }
 
     nlohmann::json response;
-    response["data"]                 = std::move (data);
-    response["pagination"]["total"]  = total;
-    response["pagination"]["limit"]  = limit;
-    response["pagination"]["offset"] = offset;
-    response["pagination"]["hasMore"] =
-    (offset + static_cast<int64_t> (runs.size ())) < total;
-    response["pagination"]["returned"] = runs.size ();
+    response["data"]                     = std::move (data);
+    response["pagination"]["total"]      = total;
+    response["pagination"]["limit"]      = limit;
+    response["pagination"]["offset"]     = offset;
+    response["pagination"]["hasMore"]    = has_more;
+    response["pagination"]["returned"]   = runs.size ();
+    response["pagination"]["nextBefore"] = has_more && !runs.empty () ?
+    nlohmann::json (run_cursor_text (runs.back ())) :
+    nlohmann::json (nullptr);
     return { 200, response };
 }
 
@@ -2360,9 +2422,14 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
         offset = std::max<int64_t> (offset, 0);
     }
 
+    std::optional<std::string> before;
+    if (req.has_param ("before")) {
+        before = req.get_param_value ("before");
+    }
+
     try {
         auto [status, body] = get_runs_response (ctx.db,
-        run_filter_from_query (req), limit, offset, ctx.run_summary_cache);
+        run_filter_from_query (req), limit, offset, ctx.run_summary_cache, before);
         res.status          = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
@@ -2584,12 +2651,13 @@ httplib::Response& res) {
 
 void register_run_routes (RouteContext& ctx) {
     /**
-     * GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=
+     * GET /runs?limit=&offset=&before=&type=&status=&requestId=&collectionId=&q=
      * Lists test runs (both "design" single requests and "load" tests), newest
-     * first. Rows carry a compact `summary` (url/method/mode/duration/
-     * concurrency/iterations/targetRps/startConcurrency/rampUpDuration/comment/
-     * httpVersion/followRedirects/maxRedirects/requestName/dataFileName/
-     * dataFileHash/dataFileCastNumbers, plus acceptEncoding and scenario when
+     * first (start_time DESC, ties by id DESC). Rows carry a compact `summary`
+     * (url/method/mode/duration/concurrency/iterations/targetRps/
+     * startConcurrency/rampUpDuration/comment/httpVersion/followRedirects/
+     * maxRedirects/requestName/dataFileName/dataFileHash/dataFileCastNumbers,
+     * plus acceptEncoding and scenario when
      * recorded) instead of the full config_snapshot, wrapped in the
      * `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
@@ -2602,6 +2670,11 @@ void register_run_routes (RouteContext& ctx) {
      * Query params:
      * - limit: page size, default 50, capped at 500
      * - offset: rows to skip, floored at 0
+     * - before: keyset cursor "<startTime>:<id>", the previous page's
+     *   pagination.nextBefore; the page starts after that row and costs about
+     *   `limit` rows however deep it is. Malformed -> 400 invalid_before;
+     *   beside a non-zero offset -> 400 before_with_offset. Filters still apply
+     *   and `total` still counts the whole filter.
      * - type: "design" | "load" (invalid -> ignored)
      * - status: RunStatus string (invalid -> ignored)
      * - requestId: exact match

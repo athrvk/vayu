@@ -21,6 +21,7 @@
 #include <chrono>
 #include <future>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -49,12 +50,15 @@
 using nlohmann::json;
 
 namespace vayu::http::routes {
-// Defined in runs.cpp; returns {http_status, json_body}.
+// Defined in runs.cpp; returns {http_status, json_body}. The default is this
+// declaration's alone: the route always passes `before`, and most cases here
+// page by offset.
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
 const vayu::db::RunFilter& filter,
 int64_t limit,
 int64_t offset,
-vayu::http::RunSummaryCache& summaries);
+vayu::http::RunSummaryCache& summaries,
+const std::optional<std::string>& before = std::nullopt);
 
 // Defined in runs.cpp; builds the GET /runs/:id/report `configuration`
 // object from an already-parsed config_snapshot, extracted so it is testable
@@ -119,6 +123,14 @@ class RunsRouteTest : public ::testing::Test {
         run.start_time      = s.start_time;
         run.end_time        = s.start_time + 1;
         db_->create_run (run);
+    }
+
+    /// `run_0` .. `run_<count - 1>` at start_time 0 .. count - 1, so the list
+    /// reads `run_<count - 1>` down to `run_0`.
+    void seed_numbered (int count) {
+        for (int i = 0; i < count; ++i) {
+            seed ({ .id = "run_" + std::to_string (i), .start_time = i });
+        }
     }
 
     /// One stored exchange for @p run_id. `trace_data` is deliberately large:
@@ -1295,25 +1307,27 @@ auto snapshot_predicate_counters_entry () {
     return reinterpret_cast<void (*) ()> (&install_snapshot_predicate_counters);
 }
 
-// Installs the counters on every connection opened while this lives. A test
-// cannot reach the storage's own connection, so it reopens the database
-// inside one. Cancelled on scope exit because a direct run of the binary
-// (no ctest) keeps one process for every test after this one.
-class SnapshotPredicateCounters {
+// Installs an auto-extension entry point on every connection opened while
+// this lives. A test cannot reach the storage's own connection, so it reopens
+// the database inside one. Cancelled on scope exit because a direct run of the
+// binary (no ctest) keeps one process for every test after this one.
+class ScopedAutoExtension {
     public:
-    SnapshotPredicateCounters ()
-    : registered (sqlite3_auto_extension (snapshot_predicate_counters_entry ())) {
-        snapshot_predicate_calls () = {};
+    explicit ScopedAutoExtension (void (*entry) ())
+    : registered (sqlite3_auto_extension (entry)), entry_ (entry) {
     }
-    ~SnapshotPredicateCounters () {
-        sqlite3_cancel_auto_extension (snapshot_predicate_counters_entry ());
+    ~ScopedAutoExtension () {
+        sqlite3_cancel_auto_extension (entry_);
     }
-    SnapshotPredicateCounters (const SnapshotPredicateCounters&) = delete;
-    SnapshotPredicateCounters& operator= (const SnapshotPredicateCounters&) = delete;
-    SnapshotPredicateCounters (SnapshotPredicateCounters&&)            = delete;
-    SnapshotPredicateCounters& operator= (SnapshotPredicateCounters&&) = delete;
+    ScopedAutoExtension (const ScopedAutoExtension&)            = delete;
+    ScopedAutoExtension& operator= (const ScopedAutoExtension&) = delete;
+    ScopedAutoExtension (ScopedAutoExtension&&)                 = delete;
+    ScopedAutoExtension& operator= (ScopedAutoExtension&&)      = delete;
 
     const int registered;
+
+    private:
+    void (*entry_) ();
 };
 
 // The 5 s History poll lists and counts with no `q` and no collection, so
@@ -1330,7 +1344,7 @@ TEST_F (RunsRouteTest, AnUnfilteredListNeverEvaluatesTheSnapshotPredicates) {
     }
 
     db_.reset ();
-    const SnapshotPredicateCounters counters;
+    const ScopedAutoExtension counters (snapshot_predicate_counters_entry ());
     ASSERT_EQ (counters.registered, SQLITE_OK);
     // No `init ()`: its retention pass would prune the set to maxRunsRetained.
     db_ = std::make_unique<vayu::db::Database> (DB_PATH);
@@ -1406,6 +1420,223 @@ TEST_F (RunsRouteTest, TextAndCollectionFiltersComposeOverOneSet) {
     vayu::db::RunFilter empty_text;
     empty_text.q = "";
     EXPECT_EQ (ids_of (empty_text).size (), 5u); // an empty `q` is no filter
+}
+
+// ==================== Keyset cursor (#2978) ====================
+
+// How many rows a statement's WHERE examined, read through `like`: with `q`
+// set, the run filter calls it once per row it looks at. This stand-in answers
+// "match", so every row passes and the count is the rows the read stepped over
+// plus the rows it returned.
+int& like_calls () {
+    static int calls = 0;
+    return calls;
+}
+
+void count_matching_like (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++like_calls ();
+    sqlite3_result_int (context, 1);
+}
+
+int install_like_counter (sqlite3* db, char** /*error*/, const sqlite3_api_routines* /*api*/) {
+    return sqlite3_create_function (
+    db, "like", 2, SQLITE_UTF8, nullptr, &count_matching_like, nullptr, nullptr);
+}
+
+auto like_counter_entry () {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return reinterpret_cast<void (*) ()> (&install_like_counter);
+}
+
+constexpr int DEEP_RUNS       = 2000;
+constexpr int64_t DEEP_LIMIT  = 50;
+constexpr int64_t LAST_OFFSET = DEEP_RUNS - DEEP_LIMIT; // page 40 of 40
+constexpr const char* PAGE_40 = "50:run_50"; // the row just before page 40
+
+std::vector<std::string> ids_of_page (const json& body) {
+    std::vector<std::string> ids;
+    for (const auto& row : body["data"]) {
+        ids.push_back (row["id"].get<std::string> ());
+    }
+    return ids;
+}
+
+TEST_F (RunsRouteTest, KeysetPageFortyMatchesTheOffsetPage) {
+    seed_numbered (DEEP_RUNS);
+
+    std::optional<std::string> before;
+    json page;
+    for (int number = 1; number <= DEEP_RUNS / DEEP_LIMIT; ++number) {
+        auto [status, body] = vayu::http::routes::get_runs_response (
+        *db_, {}, DEEP_LIMIT, 0, summaries_, before);
+        ASSERT_EQ (status, 200) << "page " << number;
+        page             = std::move (body);
+        const auto& next = page["pagination"]["nextBefore"];
+        before = next.is_string () ? std::optional (next.get<std::string> ()) : std::nullopt;
+    }
+
+    auto [status, by_offset] = vayu::http::routes::get_runs_response (
+    *db_, {}, DEEP_LIMIT, LAST_OFFSET, summaries_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (page["data"].size (), static_cast<size_t> (DEEP_LIMIT));
+    EXPECT_EQ (page["data"], by_offset["data"]);
+    EXPECT_EQ (page["data"].front ()["id"], "run_49");
+    EXPECT_EQ (page["data"].back ()["id"], "run_0");
+
+    const auto& pagination = page["pagination"];
+    EXPECT_EQ (pagination["total"], DEEP_RUNS); // the whole filter, not the remainder
+    EXPECT_EQ (pagination["offset"], 0);
+    EXPECT_EQ (pagination["returned"], DEEP_LIMIT);
+    EXPECT_EQ (pagination["hasMore"], false);
+    EXPECT_TRUE (pagination["nextBefore"].is_null ());
+    EXPECT_EQ (by_offset["pagination"]["hasMore"], false);
+}
+
+// What the cursor is for: a deep page reads about `limit` rows, where OFFSET
+// steps over every row before the page. Healthy: the cursor page examines 51
+// rows (limit, and the one more `hasMore` reads); an OFFSET read of the same
+// page examines all 2,000. The bound, 2 x limit, sits between the two. Counted
+// through the route core, so a core that turned the cursor back into an
+// offset fails here even though its rows would be right.
+TEST_F (RunsRouteTest, ADeepKeysetPageReadsAboutLimitRows) {
+    seed_numbered (DEEP_RUNS);
+    db_.reset ();
+    const ScopedAutoExtension counter (like_counter_entry ());
+    ASSERT_EQ (counter.registered, SQLITE_OK);
+    // No `init ()`: its retention pass would prune the set to maxRunsRetained.
+    db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+
+    vayu::db::RunFilter every_row;
+    every_row.q = "any";
+    auto& calls = like_calls ();
+    calls       = 0;
+    // The core counts the whole filter on every call; that scan is subtracted.
+    EXPECT_EQ (db_->count_runs (every_row), DEEP_RUNS);
+    const int counting = calls;
+    ASSERT_EQ (counting, DEEP_RUNS)
+    << "the counter is not on the storage's connection";
+
+    calls                           = 0;
+    auto [offset_status, by_offset] = vayu::http::routes::get_runs_response (
+    *db_, every_row, DEEP_LIMIT, LAST_OFFSET, summaries_);
+    ASSERT_EQ (offset_status, 200);
+    const int offset_rows = calls - counting;
+
+    calls                           = 0;
+    auto [cursor_status, by_cursor] = vayu::http::routes::get_runs_response (
+    *db_, every_row, DEEP_LIMIT, 0, summaries_, std::string (PAGE_40));
+    ASSERT_EQ (cursor_status, 200);
+    const int cursor_rows = calls - counting;
+
+    ASSERT_EQ (by_cursor["data"].size (), static_cast<size_t> (DEEP_LIMIT));
+    EXPECT_EQ (ids_of_page (by_cursor), ids_of_page (by_offset));
+    EXPECT_GE (offset_rows, DEEP_RUNS);
+    EXPECT_LE (cursor_rows, 2 * DEEP_LIMIT);
+}
+
+// Rows sharing a start_time page in id order, by offset and by cursor alike,
+// one row a page so every boundary falls inside the tie. Inserted out of id
+// order, so an order that fell back to the scan's would show. `tie:z` holds a
+// ':' and is the last of the tie, so the cursor naming it splits on the first.
+TEST_F (RunsRouteTest, TiedStartTimesPageWithoutASkipOrARepeat) {
+    seed ({ .id = "run_old", .start_time = 100 });
+    for (const char* id : { "tie_a", "tie_d", "tie:z", "tie_b", "tie_c" }) {
+        seed ({ .id = id, .start_time = 200 });
+    }
+    seed ({ .id = "run_new", .start_time = 300 });
+    const std::vector<std::string> expected = { "run_new", "tie_d", "tie_c",
+        "tie_b", "tie_a", "tie:z", "run_old" };
+
+    std::vector<std::string> by_offset;
+    for (int64_t offset = 0; std::cmp_less (offset, expected.size ()); ++offset) {
+        auto [status, body] =
+        vayu::http::routes::get_runs_response (*db_, {}, 1, offset, summaries_);
+        ASSERT_EQ (status, 200);
+        const auto ids = ids_of_page (body);
+        by_offset.insert (by_offset.end (), ids.begin (), ids.end ());
+    }
+    EXPECT_EQ (by_offset, expected);
+
+    std::vector<std::string> by_cursor;
+    std::vector<std::string> cursors;
+    std::optional<std::string> before;
+    // Bounded, so a cursor that never advances fails instead of hanging.
+    for (size_t page = 0; page <= expected.size (); ++page) {
+        auto [status, body] =
+        vayu::http::routes::get_runs_response (*db_, {}, 1, 0, summaries_, before);
+        ASSERT_EQ (status, 200);
+        const auto ids = ids_of_page (body);
+        by_cursor.insert (by_cursor.end (), ids.begin (), ids.end ());
+        const auto& next = body["pagination"]["nextBefore"];
+        if (!next.is_string ()) {
+            break;
+        }
+        before = next.get<std::string> ();
+        cursors.push_back (*before);
+    }
+    EXPECT_EQ (by_cursor, expected);
+    ASSERT_EQ (cursors.size (), expected.size () - 1);
+    EXPECT_EQ (cursors.back (), "200:tie:z");
+}
+
+TEST_F (RunsRouteTest, AMalformedCursorIsRefused) {
+    seed ({ .id = "run_a", .start_time = 100 });
+    for (const char* malformed : { "", "100", "run_a", ":run_a", "100:", "x100:run_a",
+         "+100:run_a", " 100:run_a", "1.5:run_a", "99999999999999999999:run_a" }) {
+        auto [status, body] = vayu::http::routes::get_runs_response (
+        *db_, {}, 50, 0, summaries_, std::string (malformed));
+        EXPECT_EQ (status, 400) << "'" << malformed << "'";
+        EXPECT_EQ (body["error"]["code"], "invalid_before") << "'" << malformed << "'";
+    }
+}
+
+// A cursor page starts after a row; an offset on top of it would skip rows
+// relative to a position the client cannot see, so the pair is refused rather
+// than one of them silently ignored. An offset of 0 is the absent one.
+TEST_F (RunsRouteTest, ACursorBesideANonZeroOffsetIsRefused) {
+    seed ({ .id = "run_a", .start_time = 100 });
+    seed ({ .id = "run_b", .start_time = 200 });
+
+    auto [refused, body] = vayu::http::routes::get_runs_response (
+    *db_, {}, 50, 1, summaries_, std::string ("200:run_b"));
+    EXPECT_EQ (refused, 400);
+    EXPECT_EQ (body["error"]["code"], "before_with_offset");
+
+    auto [status, page] = vayu::http::routes::get_runs_response (
+    *db_, {}, 50, 0, summaries_, std::string ("200:run_b"));
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (ids_of_page (page), std::vector<std::string>{ "run_a" });
+}
+
+// The cursor is one more term on the filter's WHERE, never a replacement for
+// it: each page keeps the filter, and `total` counts the whole filter on every
+// page rather than what is left after the cursor.
+TEST_F (RunsRouteTest, ACursorComposesWithTheFilters) {
+    for (int i = 1; i <= 6; ++i) {
+        const bool load = i % 2 == 1;
+        seed ({ .id = (load ? "load_" : "design_") + std::to_string (i),
+        .type       = load ? vayu::RunType::Load : vayu::RunType::Design,
+        .start_time = i });
+    }
+    vayu::db::RunFilter loads;
+    loads.type = vayu::RunType::Load;
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, loads, 2, 0, summaries_);
+    ASSERT_EQ (first_status, 200);
+    EXPECT_EQ (ids_of_page (first), (std::vector<std::string>{ "load_5", "load_3" }));
+    EXPECT_EQ (first["pagination"]["total"], 3);
+    EXPECT_EQ (first["pagination"]["hasMore"], true);
+    ASSERT_EQ (first["pagination"]["nextBefore"], "3:load_3");
+
+    auto [second_status, second] = vayu::http::routes::get_runs_response (*db_,
+    loads, 2, 0, summaries_, first["pagination"]["nextBefore"].get<std::string> ());
+    ASSERT_EQ (second_status, 200);
+    EXPECT_EQ (ids_of_page (second), std::vector<std::string>{ "load_1" });
+    EXPECT_EQ (second["pagination"]["total"], 3);
+    EXPECT_EQ (second["pagination"]["returned"], 1);
+    EXPECT_EQ (second["pagination"]["hasMore"], false);
+    EXPECT_TRUE (second["pagination"]["nextBefore"].is_null ());
 }
 
 // GET /runs/:id/report's `configuration` object: same nine-key extension as
