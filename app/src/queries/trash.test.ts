@@ -114,6 +114,30 @@ describe("useRestoreTrashMutation", () => {
 		expect(invalidatedKeys()).toContain(queryKeys.trash.all.join("/"));
 	});
 
+	it("invalidates exactly the trash, the tree, the environments and every composition", async () => {
+		// The whole list, so a key added or dropped here is a decision a test
+		// names. `environments.all` covers the list and the details the
+		// Variables view reads, and `compose.all` the compositions a restored
+		// environment's variables feed (#2970). Mutation check: drop the
+		// environments line from the restore's `onSuccess` and this fails.
+		const { result } = renderHook(() => useRestoreTrashMutation(), { wrapper });
+
+		await result.current.mutateAsync("e1");
+
+		expect([...invalidatedKeys()].sort()).toEqual(
+			[
+				queryKeys.trash.all,
+				queryKeys.collections.all,
+				queryKeys.prefetch.allRequests(),
+				queryKeys.requests.all,
+				queryKeys.environments.all,
+				queryKeys.compose.all,
+			]
+				.map((k) => k.join("/"))
+				.sort()
+		);
+	});
+
 	it("refetches the list when the restore fails, so a phantom row cannot survive", async () => {
 		// The row this acted on is one the list said existed, so the likeliest
 		// failure is that it no longer does - an agent purged or restored it since
@@ -124,11 +148,9 @@ describe("useRestoreTrashMutation", () => {
 
 		await expect(result.current.mutateAsync("gone")).rejects.toThrow("Request not found");
 
-		expect(invalidatedKeys()).toContain(queryKeys.trash.all.join("/"));
 		// Only the list: nothing crossed back into the live caches, because nothing
 		// was restored.
-		expect(invalidatedKeys()).not.toContain(queryKeys.collections.all.join("/"));
-		expect(invalidatedKeys()).not.toContain(queryKeys.requests.all.join("/"));
+		expect(invalidatedKeys()).toEqual([queryKeys.trash.all.join("/")]);
 	});
 });
 
@@ -147,8 +169,9 @@ describe("usePurgeTrashMutation", () => {
 
 		await result.current.mutateAsync("c1");
 
-		expect(invalidatedKeys()).not.toContain(queryKeys.collections.all.join("/"));
-		expect(invalidatedKeys()).not.toContain(queryKeys.requests.all.join("/"));
+		// The trash list and nothing else - an environment purge included: the
+		// Variables view stopped listing it when it was deleted.
+		expect(invalidatedKeys()).toEqual([queryKeys.trash.all.join("/")]);
 	});
 
 	/*

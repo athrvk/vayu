@@ -312,6 +312,13 @@ engine's environment list does not contain. That guard keys on the query's
 empty list too, and clearing on that would discard a good selection whenever
 the app started before the engine did.
 
+A delete is soft since #2970 - the environment goes to the Trash - and the id
+stays cleared through a restore. The engine clears `is_active` in the same
+write that stamps the row and a restore clears only the stamp, so a restored
+environment comes back inactive; neither `useRestoreTrashMutation` nor the
+delete's Undo toast writes `activeEnvironmentId`. Making it active again is
+the user's choice, through the switcher or **Set active**.
+
 `activeCollectionId` was **removed** in v2. It had a reader (the resolver's
 fallback scope) and no writer, so it was permanently null on a fresh install
 and, on an older one, rehydrated a collection the user had long left and
@@ -2026,19 +2033,23 @@ rewrite, each written as the kind it is.
 
 #### Trash
 
-The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`
-and `useDeleteRequestMutation` stamp a row rather than removing it, and these
-are how the app sees what got stamped (`queries/trash.ts`).
+The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`,
+`useDeleteRequestMutation` and `useDeleteEnvironmentMutation` (#2970) stamp a
+row rather than removing it, and these are how the app sees what got stamped
+(`queries/trash.ts`).
 
 - **`useTrashQuery()`** - Every deleted root, newest first (`GET /trash`). No
-  `staleTime`: the list changes only through the two mutations below, the two
-  delete mutations above, and the startup retention purge, so the default is
+  `staleTime`: the list changes only through the two mutations below, the three
+  delete mutations, and the startup retention purge, so the default is
   already the cheapest correct answer.
 - **`useRestoreTrashMutation()`** - Put one deleted root back
   (`POST /trash/:id/restore`). Invalidates `trash.all`, `collections.all` and
   every request list through `invalidateAllRequestLists` - the same coarse
   invalidation `useDeleteCollectionMutation` does, and for the same reason (see
-  the cascade delete note below).
+  the cascade delete note below) - plus `environments.all` and every
+  composition (`invalidateCompositions`), whatever kind came back: a restored
+  environment reappears in the Variables tree and its variables can resolve
+  again. It leaves `activeEnvironmentId` alone (see the session store above).
 - **`usePurgeTrashMutation()`** - Destroy one deleted root for good
   (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
   already stopped serving these rows when they were stamped, so purging them
@@ -2083,7 +2094,10 @@ click; refetching either removes it or proves it real.
 - **`useSetActiveEnvironmentMutation()`** - The only writer of the active
   environment; PUTs `isActive` and mirrors it into `session-store`, rolling the
   store back if the engine refuses
-- **`useDeleteEnvironmentMutation()`**
+- **`useDeleteEnvironmentMutation()`** - A soft delete into the Trash (#2970).
+  Patches the environment out of the list cache, removes its detail cache,
+  clears `activeEnvironmentId` when it was the active one, and invalidates
+  `trash.all` so an open Trash view lists it
 - **`useUpdateGlobalsMutation()`**
 
 #### Runs & History

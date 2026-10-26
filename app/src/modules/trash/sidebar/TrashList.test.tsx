@@ -52,6 +52,16 @@ function collectionEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 	};
 }
 
+function environmentEntry(over: Partial<TrashEntry> = {}): TrashEntry {
+	return collectionEntry({
+		id: "e1",
+		kind: "environment",
+		name: "Staging",
+		variables: 3,
+		...over,
+	});
+}
+
 vi.mock("@/queries", () => ({
 	useTrashQuery: () => ({
 		data: { items: state.items, total: state.items.length },
@@ -146,14 +156,44 @@ describe("the list", () => {
 	it("writes the kind out, rather than leaving it to a decorative icon", () => {
 		// The glyph is aria-hidden, so without this a screen reader gets a name
 		// and a date and no way to tell a deleted folder from a deleted request.
+		// All three kinds, so a ternary that falls through to one of them fails
+		// on the kind it mislabels (#2970).
 		state.items = [
 			collectionEntry(),
 			collectionEntry({ id: "r1", kind: "request", name: "Charge" }),
+			environmentEntry(),
 		];
 		renderTrash();
 
 		expect(screen.getByText(/^Collection · Deleted/)).toBeInTheDocument();
 		expect(screen.getByText(/^Request · Deleted/)).toBeInTheDocument();
+		expect(screen.getByText(/^Environment · Deleted/)).toBeInTheDocument();
+	});
+
+	it("draws an environment with the glyph the Variables view gives one", () => {
+		state.items = [environmentEntry()];
+		renderTrash();
+
+		expect(rowFor("e1")?.querySelector("svg.lucide-cloud")).not.toBeNull();
+		expect(rowFor("e1")?.querySelector("svg.lucide-file-json")).toBeNull();
+	});
+
+	it("counts an environment's variables, the one thing it takes with it", () => {
+		state.items = [environmentEntry({ variables: 12 })];
+		renderTrash();
+
+		expect(screen.getByText(/with 12 variables$/)).toBeInTheDocument();
+	});
+
+	it("does not pluralise a single variable, and says nothing for none", () => {
+		state.items = [
+			environmentEntry({ variables: 1 }),
+			environmentEntry({ id: "e2", name: "Empty", variables: 0 }),
+		];
+		renderTrash();
+
+		expect(screen.getByText(/with 1 variable$/)).toBeInTheDocument();
+		expect(rowFor("e2")?.textContent).not.toMatch(/with/);
 	});
 
 	it("says what the delete took with it, so a restore's size is visible", () => {
@@ -193,6 +233,10 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(screen.getByText("Trash is empty")).toBeInTheDocument();
+		// Every kind a delete sends here, environments included (#2970).
+		expect(
+			screen.getByText(/^Deleted collections, requests and environments wait here/)
+		).toBeInTheDocument();
 	});
 
 	it("shows a failure as a failure, not as an empty trash", () => {
@@ -207,6 +251,21 @@ describe("the list", () => {
 });
 
 describe("restore", () => {
+	it("restores an environment by its own id, with nothing to explain", async () => {
+		state.items = [environmentEntry()];
+		restore.mockResolvedValue({
+			...environmentEntry(),
+			restored: true,
+			reparentedToRoot: false,
+		});
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Restore Staging" }));
+
+		await waitFor(() => expect(restore).toHaveBeenCalledWith("e1"));
+		expect(showToast).not.toHaveBeenCalled();
+	});
+
 	it("restores the row it was pressed on", async () => {
 		state.items = [collectionEntry()];
 		renderTrash();

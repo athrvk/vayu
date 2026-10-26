@@ -70,6 +70,7 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ ...idle, data: [COLLECTION] }),
 	useEnvironmentsQuery: () => ({ ...idle, data: environments }),
 	useCreateEnvironmentMutation: () => ({ mutateAsync: createEnvironment, isPending: false }),
+	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteEnvironmentMutation: () => ({ mutateAsync: deleteEnvironment, isPending: false }),
 	useUpdateEnvironmentMutation: () => ({ mutateAsync: updateEnvironment, isPending: false }),
 }));
@@ -328,14 +329,14 @@ describe("the actions that had no keyboard path", () => {
 
 		press(row(tree, "Production"), "Delete");
 		expect(screen.getByText(/Delete "Production"\?/)).toBeInTheDocument();
-		expect(screen.getByText(/Its 0 variables are removed/)).toBeInTheDocument();
+		expect(screen.getByText(/Its 0 variables go with it/)).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 		// The key a Mac keyboard actually has. Both are live on every platform,
 		// so neither is asserted against a stubbed `isMac`.
 		press(row(tree, "Staging"), "Backspace");
 		expect(screen.getByText(/Delete "Staging"\?/)).toBeInTheDocument();
-		expect(screen.getByText(/Its 0 variables are removed/)).toBeInTheDocument();
+		expect(screen.getByText(/Its 0 variables go with it/)).toBeInTheDocument();
 	});
 });
 

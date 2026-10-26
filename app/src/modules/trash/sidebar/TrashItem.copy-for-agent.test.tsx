@@ -79,6 +79,21 @@ describe("Copy for agent on a trash entry", () => {
 		expect(writeText).toHaveBeenCalledWith('Vayu trash entry "Billing" (col_1) - collection');
 	});
 
+	it("names an environment entry by its kind", async () => {
+		fireEvent.click(
+			renderItem({
+				...ENTRY,
+				id: "env_1",
+				kind: "environment",
+				name: "Staging",
+				variables: 4,
+			})
+		);
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(writeText).toHaveBeenCalledWith('Vayu trash entry "Staging" (env_1) - environment');
+	});
+
 	it("swaps the glyph to a check and raises no toast", async () => {
 		const button = renderItem();
 		expect(liveGlyph(button)).toContain("lucide-copy");

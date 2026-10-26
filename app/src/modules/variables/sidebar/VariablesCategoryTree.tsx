@@ -79,6 +79,7 @@ import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
 import { useCopy } from "@/hooks/useCopy";
+import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { environmentReference } from "@/lib/agent-reference";
 import { downloadTextFile } from "@/lib/download-text-file";
 import {
@@ -180,6 +181,7 @@ export default function VariablesCategoryTree() {
 	const failSave = useSaveStore((s) => s.failSave);
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
+	const offerUndo = useTrashUndo();
 
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
@@ -383,9 +385,11 @@ export default function VariablesCategoryTree() {
 	const handleConfirmDelete = async () => {
 		if (!deleteConfirmEnvId) return;
 		const envIdToDelete = deleteConfirmEnvId;
+		const deletedName = envToDelete?.name ?? envIdToDelete;
 		setDeletingEnvId(envIdToDelete);
 		try {
 			await deleteEnvironmentMutation.mutateAsync(envIdToDelete);
+			offerUndo(envIdToDelete, deletedName, "environment");
 			if (
 				selectedCategory?.type === "environment" &&
 				(selectedCategory as { type: "environment"; environmentId: string })
@@ -916,7 +920,7 @@ export default function VariablesCategoryTree() {
 				description={
 					envToDelete
 						? environmentDeleteDescription(envToDelete)
-						: "This can't be undone."
+						: "You can restore it from Trash."
 				}
 				onConfirm={handleConfirmDelete}
 				onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
