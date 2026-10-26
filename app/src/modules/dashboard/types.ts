@@ -16,6 +16,7 @@ import type { RunOutcome } from "@/components/shared/run-outcome";
 import type { LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
+import type { PooledLatency } from "./utils/pooledLatency";
 import type { DispatchStatus } from "./utils/dispatchLag";
 
 // ============================================================================
@@ -179,6 +180,11 @@ export interface DashboardDerived {
 	meanLatency: number;
 	medianLatency: number;
 	p95Latency: number;
+	/**
+	 * Set for a scenario load run, whose latency figures above pool every step
+	 * (#2823); absent for a single-request run, which pools nothing.
+	 */
+	pooledLatency?: PooledLatency;
 	// Timing
 	testDuration?: number;
 	elapsedSeconds: number;

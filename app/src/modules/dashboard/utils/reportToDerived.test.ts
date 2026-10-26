@@ -534,3 +534,30 @@ describe("reportToDerived", () => {
 		expect(d.backpressure).toBe(0);
 	});
 });
+
+describe("reportToDerived pooled latency (#2823)", () => {
+	const step = (index: number, name: string, p99: number) => ({
+		index,
+		name,
+		requestId: `req_${index}`,
+		method: "GET",
+		executed: 10,
+		errors: 0,
+		latency: { min: 1, p50: 2, p95: 3, p99, max: p99 },
+	});
+
+	it("names the slowest step for a scenario load run", () => {
+		const d = reportToDerived(
+			baseReport({
+				scenario: {
+					steps: [step(0, "Log in", 12), step(1, "List", 90)],
+				} as RunReport["scenario"],
+			})
+		);
+		expect(d.pooledLatency).toEqual({ slowestStep: { ms: 90, name: "List" } });
+	});
+
+	it("leaves a single-request report unqualified", () => {
+		expect(reportToDerived(baseReport()).pooledLatency).toBeUndefined();
+	});
+});

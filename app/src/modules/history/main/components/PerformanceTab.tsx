@@ -32,6 +32,7 @@ import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePer
 import { StreamMetrics } from "@/modules/dashboard/components/charts/StreamMetrics";
 import { LatencyStat } from "@/modules/dashboard/components/stats/LatencyStat";
 import { TOOLTIPS } from "@/modules/dashboard/components/tooltips";
+import { isPooledReport, pooledTitle } from "@/modules/dashboard/utils/pooledLatency";
 import LatencyMetric from "./LatencyMetric";
 import { NOT_RECORDED, unrecordedFiguresOf } from "./unrecorded-figures";
 import MonitorSummary from "./MonitorSummary";
@@ -82,6 +83,8 @@ export default function PerformanceTab({
 	// A failed run the engine could not fully record has an all-zero latency
 	// block (#2895); drawing it would pass those zeros off as measurements.
 	const latencyUnrecorded = unrecordedFiguresOf(report.summary).latency;
+	// A scenario load run's percentile cards and charts pool every step (#2823).
+	const pooled = isPooledReport(report);
 	// The figure the Rate fidelity card shows (a stopped run is judged by pace,
 	// #2805); the stored value covers a caller that hands over no derived figure.
 	const achievement = derived.rateAchievementPct ?? report.rateControl?.achievement ?? 0;
@@ -114,7 +117,9 @@ export default function PerformanceTab({
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
 							<div className="flex items-baseline justify-between">
-								<CardTitle>Response time vs {CONCURRENCY_UNIT}</CardTitle>
+								<CardTitle>
+									{pooledTitle(`Response time vs ${CONCURRENCY_UNIT}`, pooled)}
+								</CardTitle>
 								<ChartLegend entries={SCATTER_ENTRIES} />
 							</div>
 						</CardHeader>
@@ -131,7 +136,9 @@ export default function PerformanceTab({
 					<Card className="enter-fade">
 						<CardHeader className="pb-2">
 							<div className="flex items-baseline justify-between">
-								<CardTitle>Response time percentiles over time</CardTitle>
+								<CardTitle>
+									{pooledTitle("Response time percentiles over time", pooled)}
+								</CardTitle>
 								<ChartLegend entries={PERCENTILE_ENTRIES} />
 							</div>
 						</CardHeader>
@@ -167,7 +174,7 @@ export default function PerformanceTab({
 			{/* Latency Statistics */}
 			<Card>
 				<CardHeader>
-					<CardTitle>Latency distribution</CardTitle>
+					<CardTitle>{pooledTitle("Latency distribution", pooled)}</CardTitle>
 				</CardHeader>
 				<CardContent>
 					{latencyUnrecorded ? (

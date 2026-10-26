@@ -56,6 +56,7 @@ function LatencyCard({ d }: { d: DashboardDerived }) {
 			p99={d.p99Latency}
 			meanLatency={d.meanLatency}
 			medianLatency={d.medianLatency}
+			pooledLatency={d.pooledLatency}
 		/>
 	);
 }

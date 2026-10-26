@@ -99,6 +99,13 @@ consumes it.
   `iterations`) show three stats: their p99 is in the hero row's
   `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
   the stats row as p99 at peak.
+- **A scenario load run's latency figures pool every step** (#2823). The run
+  has one histogram over all its requests, so a sequence's p99 is the tail of
+  the whole mix and the slowest step sets it. `DashboardDerived.pooledLatency`
+  (from `reportToDerived`, off `report.scenario.steps`) makes the latency card
+  say so and name that step (`utils/pooledLatency.ts`: `slowestStepP99`,
+  `pooledCaption`, `pooledTitle`); History's P99 tile and Performance-tab
+  titles read the same helpers. A single-request run leaves it unset.
 - **p99 at peak is read at the run's peak load, not at the breakpoint**
   (#2802). It is the worst whole-second p99 (`secondPercentiles`, the reading
   `computeBreakpoint` uses) among the ticks whose `current_concurrency` equals
