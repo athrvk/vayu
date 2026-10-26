@@ -642,7 +642,7 @@ TEST (RunExportMarkdownTest, ALevelTheSearchRepeatedIsMarkedAndOverBudgetIsSaidI
     EXPECT_NE (second.find ("232 (over budget)"), std::string::npos) << second;
     EXPECT_EQ (first.find ("re-measured"), std::string::npos) << first;
     // The held level is neither flagged nor marked.
-    EXPECT_EQ (line_starting (text, "| 41 ").find ("("), std::string::npos) << text;
+    EXPECT_EQ (line_starting (text, "| 41 ").find ('('), std::string::npos) << text;
     // The error share that went over the limit is flagged too.
     ordered_json document = read_document ("capacity-slo-exceeded");
     document["report"]["capacity"]["levels"][7]["errorPct"] = 2.5;
