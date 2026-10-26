@@ -324,7 +324,7 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 	const ECHOES = [
 		["create_collection", { name: "Checkout" }],
 		["update_collection", { collectionId: "col_data", name: "Checkout" }],
-		["move_item", { type: "collection", id: "col_data", parentId: null }],
+		["move_item", { type: "collection", itemId: "col_data", parentId: null }],
 	] as const;
 	const echoClient = () => ({
 		createCollection: vi.fn().mockResolvedValue(STORED),

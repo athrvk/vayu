@@ -1992,7 +1992,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"restore_trash_entry",
-			{ id: "col_9" },
+			{ entryId: "col_9" },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
@@ -2023,7 +2023,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"restore_trash_entry",
-			{ id: "req_5" },
+			{ entryId: "req_5" },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBe(true);
@@ -2033,9 +2033,65 @@ describe("trash tools", () => {
 
 	test("restore_trash_entry refuses while writes are disabled, without calling the engine", async () => {
 		const client = fakeClient();
-		const res = await dispatchTool("restore_trash_entry", { id: "col_9" }, ctxWith(client));
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "col_9" },
+			ctxWith(client)
+		);
 		expect(res.isError).toBe(true);
 		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("restore_trash_entry answers the deprecated `id` and says to send `entryId`", async () => {
+		const client = fakeClient({
+			restoreTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, restored: true }),
+		});
+		const ctx = ctxWith(client, { allowWrites: true });
+		const legacy = await dispatchTool("restore_trash_entry", { id: "col_9" }, ctx);
+		expect(legacy.isError).toBeFalsy();
+		expect(client.restoreTrashEntry).toHaveBeenCalledWith("col_9", undefined);
+		expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
+			/Deprecated.*"entryId".*#2962/s
+		);
+		// The named parameter carries no note.
+		const named = await dispatchTool("restore_trash_entry", { entryId: "col_9" }, ctx);
+		expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
+	});
+
+	test("restore_trash_entry and purge_trash_entry name `entryId` when the id is missing", async () => {
+		const client = fakeClient();
+		const ctx = ctxWith(client, { allowWrites: true });
+		for (const tool of ["restore_trash_entry", "purge_trash_entry"]) {
+			const res = await dispatchTool(tool, {}, ctx);
+			expect(res.isError, tool).toBe(true);
+			expect(firstText(res), tool).toBe('"entryId" is required.');
+		}
+		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry answers the deprecated `id` and says to send `entryId`", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
+			purgeTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, purged: true }),
+		});
+		const ctx = ctxWith(client, { allowWrites: true });
+		const legacy = await dispatchTool(
+			"purge_trash_entry",
+			{ id: "col_9", confirmed: true },
+			ctx
+		);
+		expect(legacy.isError).toBeFalsy();
+		expect(client.purgeTrashEntry).toHaveBeenCalledWith("col_9", undefined);
+		expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
+			/Deprecated.*"entryId".*#2962/s
+		);
+		const named = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "col_9", confirmed: true },
+			ctx
+		);
+		expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
 	});
 
 	test("purge_trash_entry previews the entry's name and counts, and purges nothing", async () => {
@@ -2044,7 +2100,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_9" },
+			{ entryId: "col_9" },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
@@ -2062,7 +2118,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_9", confirmed: true },
+			{ entryId: "col_9", confirmed: true },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
@@ -2075,7 +2131,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_missing", confirmed: true },
+			{ entryId: "col_missing", confirmed: true },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBe(true);
@@ -2087,7 +2143,7 @@ describe("trash tools", () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_9", confirmed: true },
+			{ entryId: "col_9", confirmed: true },
 			ctxWith(client)
 		);
 		expect(res.isError).toBe(true);
@@ -2899,7 +2955,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2" },
+				{ type: "request", itemId: "req_1", collectionId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBeFalsy();
@@ -2908,13 +2964,48 @@ describe("document CRUD parity", () => {
 			});
 		});
 
+		test("move_item answers the deprecated `id` and says to send `itemId`", async () => {
+			const client = moveClient();
+			const ctx = ctxWith(client, { allowWrites: true });
+			const legacy = await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_2" },
+				ctx
+			);
+			expect(legacy.isError).toBeFalsy();
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [{ type: "request", id: "req_1", order: 2, collectionId: "col_2" }],
+			});
+			expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
+				/Deprecated.*"itemId".*#2962/s
+			);
+			const named = await dispatchTool(
+				"move_item",
+				{ type: "request", itemId: "req_1", collectionId: "col_2" },
+				ctx
+			);
+			expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
+		});
+
+		test("move_item names `itemId` when the id is missing", async () => {
+			const client = moveClient();
+			const res = await dispatchTool(
+				"move_item",
+				{ type: "request", collectionId: "col_2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe('"itemId" is required.');
+			expect(client.reorder).not.toHaveBeenCalled();
+		});
+
 		test("a request lands after the folders and requests of an interleaved parent", async () => {
 			// `col_1`: v1 at 0, r_mid at 1, v2 at 2 - already dense, so only the
 			// moved row is written.
 			const client = moveClient({ col_1: [at("r_mid", 1)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_1" },
+				{ type: "request", itemId: "req_1", collectionId: "col_1" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -2929,7 +3020,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_2: [at("r_tail", 2)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1a", parentId: "col_2" },
+				{ type: "collection", itemId: "col_1a", parentId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -2942,7 +3033,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_1: [at("r_mid", 1)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_1", position: "first" },
+				{ type: "request", itemId: "req_1", collectionId: "col_1", position: "first" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -2959,7 +3050,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_1: [at("r_mid", 2)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_2a", parentId: "col_1", position: "first" },
+				{ type: "collection", itemId: "col_2a", parentId: "col_1", position: "first" },
 				ctxWith(client, { allowWrites: true })
 			);
 			// v1 0 -> 1. v2 already sits at 2, its slot after the insert, so it is
@@ -2980,7 +3071,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_1: [at("req_1", 1), at("r2", 3)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_1" },
+				{ type: "request", itemId: "req_1", collectionId: "col_1" },
 				ctxWith(client, { allowWrites: true })
 			);
 			const batch = callArgs(client.reorder)[0] as { moves: Array<Record<string, unknown>> };
@@ -3001,7 +3092,7 @@ describe("document CRUD parity", () => {
 			});
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2" },
+				{ type: "request", itemId: "req_1", collectionId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			// The tie at 0 ranks Admin first and the requests by createdAt (r2, r1),
@@ -3020,7 +3111,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1a", parentId: null },
+				{ type: "collection", itemId: "col_1a", parentId: null },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -3035,7 +3126,7 @@ describe("document CRUD parity", () => {
 			const ctx = ctxWith(client, { allowWrites: true });
 			const intoSelf = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1", parentId: "col_1" },
+				{ type: "collection", itemId: "col_1", parentId: "col_1" },
 				ctx
 			);
 			expect(intoSelf.isError).toBe(true);
@@ -3043,7 +3134,7 @@ describe("document CRUD parity", () => {
 
 			const intoChild = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1", parentId: "col_1a" },
+				{ type: "collection", itemId: "col_1", parentId: "col_1a" },
 				ctx
 			);
 			expect(intoChild.isError).toBe(true);
@@ -3057,7 +3148,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1a" },
+				{ type: "collection", itemId: "col_1a" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBe(true);
@@ -3069,7 +3160,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_gone", parentId: null },
+				{ type: "collection", itemId: "col_gone", parentId: null },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBe(true);
@@ -3096,7 +3187,7 @@ describe("document CRUD parity", () => {
 				{ requestId: "req_1", exampleId: "exa_1", confirmed: true },
 				"deleteRequestExample",
 			],
-			["move_item", { type: "request", id: "req_1", collectionId: "col_2" }, "reorder"],
+			["move_item", { type: "request", itemId: "req_1", collectionId: "col_2" }, "reorder"],
 		];
 		for (const [tool, args, method] of calls) {
 			const res = await dispatchTool(tool, args, ctxWith(client, { allowWrites: false }));
@@ -10071,6 +10162,8 @@ describe("an unknown id names the object and its list tool", () => {
 		create_collection: "the engine does not check that parentId exists",
 		create_request: "an unknown collectionId is a 400 that names it, not a 404",
 		move_item: "reads the collection list first and words an unknown id itself (move.tools.ts)",
+		restore_trash_entry: "trashRefusalMessage words the 404 itself (trash.ts)",
+		purge_trash_entry: "readTrashEntry words an id the trash does not hold (trash.ts)",
 		clear_cookies:
 			"environmentId names a jar, which need not exist; clearing an empty one is 0",
 	};
@@ -15692,14 +15785,14 @@ describe("secret withholding", () => {
 			// The engine answers a restore with the trash entry alone; the
 			// projection is what keeps a row it ever added from being echoed.
 			tool: "restore_trash_entry",
-			args: { id: "c1" },
+			args: { entryId: "c1" },
 			method: "restoreTrashEntry",
 			answer: { id: "c1", kind: "collection", restored: true, auth: ECHO_COLLECTION.auth },
 			secrets: ["echo-collection-token"],
 		},
 		{
 			tool: "move_item",
-			args: { type: "request", id: "req_1", collectionId: "c1" },
+			args: { type: "request", itemId: "req_1", collectionId: "c1" },
 			method: "reorder",
 			answer: { collections: [ECHO_COLLECTION], requests: [ECHO_REQUEST] },
 			secrets: [

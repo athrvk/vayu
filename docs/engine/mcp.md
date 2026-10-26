@@ -308,13 +308,13 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it) |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); a restored row is withheld as the read of it is |
-| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm     |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId` (the bare `id` is a deprecated alias, #2962); a restored row is withheld as the read of it is |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm; names the entry with `entryId` (the bare `id` is a deprecated alias, #2962) |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
-| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
+| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId` (the bare `id` is a deprecated alias, #2962); `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
@@ -769,7 +769,11 @@ Notes:
   gated exactly like `delete_collection`: it reads the entry off `GET /trash`
   first, so the confirmation prompt names what a mistyped id would otherwise
   destroy sight unseen, and an entry the trash does not hold is a refusal before
-  any prompt is shown.
+  any prompt is shown. Both name the entry with `entryId`, not a bare `id`
+  (#2446: an `id` beside `requestId` / `runId` / `environmentId` reads as "the
+  id of something else"). The old `id` is still accepted so a client that
+  cached the schema keeps working; a call that uses it succeeds and its result
+  carries a deprecation note. #2962 removes the alias.
 - **A saved request an agent writes is the one the builder writes** (issues
   #759, #795). `create_request` / `update_request` carry the request's `auth`
   block and the six **Settings** tab fields (`followRedirects`, `maxRedirects`,
@@ -871,7 +875,8 @@ Notes:
   still cannot do is refuse the pair together - the first move is committed by
   the time the second is rejected - or renumber the destination's siblings in the
   same write. What the
-  tool offers is the row menu's "Move to…": a destination, and `first` or
+  tool offers is the row menu's "Move to…" (the moved row is `itemId`; the bare
+  `id` is a deprecated alias, #2962, answered with a note): a destination, and `first` or
   `last` among its new siblings. Positions in between stay a UI gesture on
   purpose - naming one means reproducing the app's ordering arithmetic
   (`modules/collections/reorder-math.ts`) from outside it, and getting it wrong

@@ -105,6 +105,11 @@
  * sentence and an `outputSchema`, paid once), took the rows to 145,857 /
  * 143,131 / 214,359 / 209,962 B, and the four caps went to 146,200 / 143,500 /
  * 214,700 / 210,300.
+ *
+ * #2446's renamed `entryId` / `itemId` arguments and their deprecated `id`
+ * aliases (three write tools) took the writes-on rows to 214,955 / 210,558 B;
+ * those two caps went to 215,300 / 210,900 and the writes-off rows are
+ * untouched.
  */
 
 import { describe, it, expect } from "vitest";
@@ -126,8 +131,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 146_200 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 143_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 214_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 210_300 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 215_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 210_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
