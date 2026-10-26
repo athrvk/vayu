@@ -414,7 +414,7 @@ tracking issue.
 - **#2684** - `windows-asan` failed seven ajv and tv4 tests with
   `RangeError: Maximum call stack size exceeded`, QuickJS's soft stack check
   against the script's budget. Same family as #959: frame size, not the
-  library. `library_call_config ()` (`tests/library_call_config.hpp`, #2861 for
+  library. `library_call_config ()` (`tests/library_call_config.hpp`, #2652 for
   lodash and moment) had already raised the budget to 512 KB, and an ajv
   `compile()` and tv4 still overflowed it at `/Od` under ASan; the `-O0` GCC
   measurement in `engine/vendor/ajv/README.md` (48 to 64 KB) does not carry to
