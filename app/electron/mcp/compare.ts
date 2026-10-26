@@ -444,10 +444,11 @@ const COMPARABILITY_RULES: ((base: Report, target: Report) => ComparabilityWarni
  * A figure of the report's `latency` or `summary` block, or `null` where the
  * engine did not record it (#2904): `summary.summaryMissing` (a failed run
  * with no summary) leaves the counts and the latency block unreliable, and
- * `summary.partial` (reconciled after a crash) leaves the latency block all
- * zeros. A 0 read through here would be a measurement no run made, and a delta
- * against it a regression no run showed. Read per side, so one unrecorded run
- * nulls only its own column. Mirrors `unrecordedFiguresOf`
+ * `summary.partial` (reconciled after a crash) leaves the latency block out
+ * (#2938); the flag is still checked, for an export that predates the omission
+ * and carries zeros. A 0 read through here would be a measurement no run made,
+ * and a delta against it a regression no run showed. Read per side, so one
+ * unrecorded run nulls only its own column. Mirrors `unrecordedFiguresOf`
  * (`modules/history/main/components/unrecorded-figures.ts`).
  */
 function recordedNum(report: Report, section: "latency" | "summary", key: string): number | null {

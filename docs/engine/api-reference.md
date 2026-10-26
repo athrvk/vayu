@@ -4587,10 +4587,11 @@ file and the screen it came from agree. It adds no rule of its own:
 (the `GET /runs/:runId/report` flags of the same name): `partial` for a run the
 engine died under and reconciled at the next start, whose counts are its last
 saved tick's, and `summaryMissing` for a failed load run that stored no summary,
-whose counts are not whole-run totals. In both, `report.latency` is still
-present (the schema requires it) but is not a measurement: all zeros for a
-crashed run, and for a failed run with no summary whatever its sampled results
-held.
+whose counts are not whole-run totals. In both, `report.latency` is absent
+(the schema no longer requires it, #2938): a crashed run flushed no rows to
+take a percentile from, and the sampled rows of a failed run with no summary
+are not the run's latency. The Markdown and HTML latency table then reads `-`
+in every row.
 The verdict is not changed by either; the Markdown and HTML reports word it
 (below).
 
@@ -4666,7 +4667,8 @@ The sections, in order:
    declared`; for a stopped run a line `Stopped early at 3 s of 20 s` follows,
    and for a run with `summary.partial` or `summary.summaryMissing` one
    sentence each follows that, saying the totals are the last saved tick's or
-   not whole-run totals, and that the latency figures are not measurements.
+   not whole-run totals, and that latency was not recorded (the latency table
+   then reads `-` in every row, #2938).
 3. `## Run`: target (`<METHOD> <url>`, or `Collection run`), mode, virtual
    users, duration, start (ISO-8601 UTC), engine version and the comment.
 4. `## Results`: requests, a `Skipped requests` row only when `summary.skippedRequests`
@@ -9751,7 +9753,9 @@ one the engine died under, whose summary is rebuilt from its last tick and
 flagged `summary.partial`) is reported from its stored rows alone, and there
 every stored row, a `0` included, is in the percentiles and the mean, which
 divides by the rows stored rather than by this population. A run that finished
-on its own reports from its summary, which this does not affect.
+on its own reports from its summary, which this does not affect. Those two
+reports write no `latency` block at all (#2938), so none of this reaches a
+reader for them.
 
 The sequential collection runner follows the same population, with two differences:
 its `latency` block is computed **exact nearest-rank** over every sent step's duration
@@ -10889,10 +10893,11 @@ tick's elapsed seconds), `avgRps` (completions over that time, not the tick's tr
 not measure for the whole run reads as an older engine's summary does: `avgInFlight`,
 `connectionReplays`, `sendingDurationSeconds` and `completedWhileSending` are absent,
 `peakConcurrency`, `avgQueueWaitMs`, `setupOverhead` and `httpVersionDowngraded` are `0`,
-`sampling` is absent, and `latency` is computed from the stored `results` rows, of which such a run
-has none, so every percentile is `0`. A failed load run with no summary at all, because it wrote no
+`sampling` is absent, and the report has **no `latency` block** (issue #2938): the percentiles come from
+the stored `results` rows, of which such a run has none, so omitting the block says "not recorded"
+where a block of zeros would read as steps that answered instantly. A failed load run with no summary at all, because it wrote no
 tick or failed on a path that writes none, carries **`summary.summaryMissing: true`**, and its
-counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`). Both keys are absent, never `false`, on every other report. A client that shows a
+counts are not whole-run totals (those of whatever sampled `results` rows were stored, often `0`) and whose report has no `latency` block either, even where sampled rows exist. Both keys are absent, never `false`, on every other report. A client that shows a
 figure from a report carrying either one says the figure was not recorded rather than showing it
 as measured.
 
@@ -11556,8 +11561,8 @@ stored summary records it (the status-code distribution never held them).
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are
 its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load
-run with no summary at all, whose counts are not a measurement. Each is absent
-otherwise, never `false`; "A run the engine died under" above says what each
+run with no summary at all, whose counts are not a measurement. Neither report has
+a `latency` block (issue #2938). Each flag is absent otherwise, never `false`; "A run the engine died under" above says what each
 figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked

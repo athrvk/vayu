@@ -87,7 +87,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 
 	if (!comparison || !baselineRun || !target) return null;
 
-	const unrecorded = unrecordedFiguresOf(report.summary);
+	const unrecorded = unrecordedFiguresOf(report);
 	// All three headline figures are unmeasured, so there is nothing to compare.
 	if (unrecorded.counts) return null;
 

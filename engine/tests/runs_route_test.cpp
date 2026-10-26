@@ -2706,7 +2706,9 @@ int64_t wall_clock_ms () {
 // The whole path: a load run left running with three ticks, the engine
 // restarted over the same file, and the report of the reconciled run. Mutation
 // check: drop the `run.summary` write in `reconcile_orphaned_runs` and the
-// report answers totalRequests 0 with no `partial`.
+// report answers totalRequests 0 with no `partial`; delete the
+// `latency_measured = false` line for a flagged run and the report writes a
+// block of zeros, so the `latency` assertion fails.
 TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPartial) {
     // Recent: the restart's init() prunes by the real retention defaults.
     seed ({ .id = "run_crashed", .status = vayu::RunStatus::Running, .start_time = wall_clock_ms () });
@@ -2734,6 +2736,8 @@ TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPa
     EXPECT_FALSE (summary.contains ("avgInFlight"));
     EXPECT_FALSE (summary.contains ("connectionReplays"));
     EXPECT_FALSE (summary.contains ("sendingDurationSeconds"));
+    // No row was flushed, so there is no latency to report: absent, not zero.
+    EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
 
     // The history row reads the same summary: a rate, an error share, and no
     // tail latency or verdict nothing measured.
@@ -2751,7 +2755,9 @@ TEST_F (RunsRouteTest, ReportOfARunTheEngineDiedUnderCarriesItsLastTickFlaggedPa
 // A failed load run with no summary at all says so instead of passing its
 // zeros off as a run that sent nothing. Only a load run: a design run never
 // has a load summary to miss. Mutation check: drop the `summary_missing`
-// assignment in `run_report_response` and the first assertion fails.
+// assignment in `run_report_response` and the first assertion fails; delete
+// the `latency_measured = false` line beside it and the `latency` assertions
+// fail.
 TEST_F (RunsRouteTest, ReportOfAFailedLoadRunWithNoSummarySaysItIsMissing) {
     seed ({ .id = "run_no_summary", .status = vayu::RunStatus::Failed, .start_time = 1000 });
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_summary");
@@ -2759,6 +2765,7 @@ TEST_F (RunsRouteTest, ReportOfAFailedLoadRunWithNoSummarySaysItIsMissing) {
     EXPECT_EQ (body["summary"].value ("summaryMissing", false), true)
     << body["summary"].dump ();
     EXPECT_FALSE (body["summary"].contains ("partial"));
+    EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
 
     seed ({ .id = "run_design_failed",
     .type       = vayu::RunType::Design,
@@ -2768,6 +2775,22 @@ TEST_F (RunsRouteTest, ReportOfAFailedLoadRunWithNoSummarySaysItIsMissing) {
     vayu::http::routes::run_report_response (*db_, "run_design_failed");
     ASSERT_EQ (design_status, 200);
     EXPECT_FALSE (design["summary"].contains ("summaryMissing"));
+}
+
+// A failed worker can leave sampled rows behind with no summary. Their latency
+// is a sample's, not the run's, so the report still carries none.
+TEST_F (RunsRouteTest, SummaryMissingReportOmitsLatencyDespiteSampledRows) {
+    seed ({ .id = "run_sampled_no_summary", .status = vayu::RunStatus::Failed, .start_time = 1000 });
+    seed_result ("run_sampled_no_summary", 200, 7.0);
+    seed_result ("run_sampled_no_summary", 200, 9.0);
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_sampled_no_summary");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["summary"].value ("summaryMissing", false), true)
+    << body["summary"].dump ();
+    EXPECT_EQ (body["resultsStored"].get<size_t> (), 2u);
+    EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
 }
 
 // A run that stored its own summary carries neither flag, whether it completed

@@ -37,7 +37,9 @@ const mocked = vi.mocked(apiService);
 
 type Flag = "summaryMissing" | "partial";
 
+/** A flagged run omits `latency` (#2938), as the engine does; `p99` is read only without a flag. */
 function report(over: { p99: number; avgRps: number; errorRate: number; flag?: Flag }): RunReport {
+	const latency = { min: 1, max: 90, avg: 10, p50: 8, p90: 20, p95: 30, p99: over.p99 };
 	return {
 		metadata: { runId: "r", runType: "load", status: "completed", startTime: 0, endTime: 1000 },
 		summary: {
@@ -49,7 +51,7 @@ function report(over: { p99: number; avgRps: number; errorRate: number; flag?: F
 			avgRps: over.avgRps,
 			...(over.flag ? { [over.flag]: true } : {}),
 		},
-		latency: { min: 1, max: 90, avg: 10, p50: 8, p90: 20, p95: 30, p99: over.p99 },
+		...(over.flag ? {} : { latency }),
 		statusCodes: { "200": 1000 },
 		errors: { total: 0, withDetails: 0, types: {} },
 	} as RunReport;

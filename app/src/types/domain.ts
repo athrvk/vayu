@@ -3036,20 +3036,27 @@ export interface RunReport {
 		 * A failed load run reconciled after an engine crash (#2895). The counts,
 		 * `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last
 		 * persisted tick's totals, so they are a floor and not the final figures;
-		 * `latency` is all zeros, and `peakConcurrency` and `avgQueueWaitMs` are 0,
-		 * because none of them were recorded. Absent means false.
+		 * the report carries no `latency`, and `peakConcurrency` and
+		 * `avgQueueWaitMs` are 0, because none of them were recorded. Absent means
+		 * false.
 		 */
 		partial?: boolean;
 		/**
 		 * A Failed load run that has no summary at all (#2895): a crash before the
 		 * first tick, or a worker failure that never wrote one. The counts are
 		 * whatever the stored sampled results hold (0 where none were stored), not
-		 * whole-run totals, and none is a measurement. Absent means false. Distinct from the
-		 * report's top-level `partial`, which means the run is still in flight.
+		 * whole-run totals, and none is a measurement; the report carries no
+		 * `latency`. Absent means false. Distinct from the report's top-level
+		 * `partial`, which means the run is still in flight.
 		 */
 		summaryMissing?: boolean;
 	};
-	latency: {
+	/**
+	 * Absent for a run whose latency was never recorded: one with
+	 * `summary.partial` or `summary.summaryMissing`, or a collection run in which
+	 * no step sent. Absent is not zero; print it through `formatLatencyOrDash`.
+	 */
+	latency?: {
 		min: number;
 		max: number;
 		avg: number;

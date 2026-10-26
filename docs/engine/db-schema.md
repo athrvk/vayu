@@ -1457,7 +1457,8 @@ holds for its last second only (`current_*`, `window_*`, the latency percentiles
 nothing it never measures (`latency`, `peak_concurrency`, `avg_in_flight`, `queue_wait_avg`,
 `error_types`, `sampling`, the sending window, `connection_replays`) is written, so the report
 reads each absent key as it reads an older engine's summary. The report flags the run with
-`summary.partial`. A summary the run already stored is never replaced, a run that wrote no tick
+`summary.partial` and leaves its `latency` block out (#2938), derived on read: a run already
+reconciled by an earlier version reads without latency with nothing rewritten. A summary the run already stored is never replaced, a run that wrote no tick
 keeps `""`, design and collection runs are given nothing, and `has_warnings` stays `0`.
 
 ```json

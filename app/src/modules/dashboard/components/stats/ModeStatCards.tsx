@@ -15,7 +15,7 @@
 
 import {
 	formatLatency,
-	formatLatencyParts,
+	formatLatencyPartsOrDash,
 	formatNumber,
 	formatSeconds,
 } from "@/lib/format-number";
@@ -74,7 +74,7 @@ export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 
 /** Mean iter time - average wall-clock per iteration (tracks p50 closely). */
 export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
-	const { value, unit } = formatLatencyParts(d.meanLatency);
+	const { value, unit } = formatLatencyPartsOrDash(d.meanLatency);
 	return (
 		<StatCard
 			label="Mean iter time"
@@ -121,6 +121,6 @@ export function BreakpointStat({ d }: { d: DashboardDerived }) {
  */
 export function P99AtPeakStat({ d }: { d: DashboardDerived }) {
 	const p99 = d.p99AtPeakMs ?? d.p99Latency;
-	const { value, unit } = formatLatencyParts(p99);
+	const { value, unit } = formatLatencyPartsOrDash(p99);
 	return <StatCard label="p99 at peak" value={value} unit={unit} infoTip={TOOLTIPS.p99AtPeak} />;
 }

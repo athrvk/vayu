@@ -405,18 +405,34 @@ TEST (RunExportMarkdownTest, AStoppedRunSaysHowFarItGot) {
 
 constexpr std::string_view PARTIAL_NOTICE =
 "Partial run: the engine stopped before this run finished, so the totals are "
-"the "
-"last saved tick's and every latency figure is 0, not a measurement.";
+"the last saved tick's and latency was not recorded.";
 constexpr std::string_view SUMMARY_MISSING_NOTICE =
 "No summary was recorded for this run, so the counts are not whole-run totals "
-"and "
-"the latency figures are not measurements.";
+"and latency was not recorded.";
 
 /// The verdict line of a rendered report, `**Passed** - ...` up to its newline.
 std::string verdict_line_of (const std::string& text) {
     const auto at = text.find ("**");
     return at == std::string::npos ? std::string () :
                                      text.substr (at, text.find ('\n', at) - at);
+}
+
+// #2938: a flagged run's document has no `latency` section, and every row of
+// the table reads `-` rather than a zero. Mutation check: read the figure
+// through a default of 0 in `latency_table` and this fails.
+TEST (RunExportMarkdownTest, AReportWithoutLatencyPrintsADashInEveryRow) {
+    ordered_json document                    = read_document ("healthy-passed");
+    document["report"]["summary"]["partial"] = true;
+    document["report"].erase ("latency");
+    const std::string text = render_run_export_markdown (document);
+    for (const char* row :
+    { "min    ", "p50    ", "p90    ", "p95    ", "p99    ", "p999   ", "max    " }) {
+        EXPECT_NE (text.find (std::string ("| ") + row + " | -            | "),
+        std::string::npos)
+        << row << "\n"
+        << text;
+    }
+    EXPECT_EQ (text.find ("is 0"), std::string::npos) << text;
 }
 
 // #2905: a reconciled or summaryless run says its figures are not a

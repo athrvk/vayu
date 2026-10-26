@@ -136,7 +136,11 @@ scattered strings land the same way.
   unit in a slot of its own renders both halves from it, never a literal "ms"
   beside `formatMs`: 1234 ms reads `1.23 s` on every tile. `formatLatency` is
   the same pair joined for a surface with no slot of its own (`999ms`, then
-  `1.23s` once it rounds to 1000 ms). `formatSeconds` is the same rule for a
+  `1.23s` once it rounds to 1000 ms). A latency a report may lack (a run whose
+  latency was not recorded carries none, #2938) goes through
+  `formatLatencyOrDash` or `formatLatencyPartsOrDash`, which print `-`;
+  `formatLatency(undefined)` is `0ms`, which would pass an absent figure off as a
+  measurement. `formatSeconds` is the same rule for a
   span measured in seconds (an ETA, a ramp, a test's duration, an anomaly's
   length): under a minute it is `formatLatency` (0.4 reads `400ms`, 4.2 reads
   `4.20s`), from a minute up grouped whole seconds (`75s`, `3,600s`), so a clock

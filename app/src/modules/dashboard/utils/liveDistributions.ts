@@ -43,7 +43,7 @@ export interface LiveDistributions {
 	 * `null` until a completion has been recorded. `count` is the completions
 	 * behind the distribution, which the report shape has no field for.
 	 */
-	latency: (Pick<RunReport, "latency"> & { count: number }) | null;
+	latency: (Required<Pick<RunReport, "latency">> & { count: number }) | null;
 	phases: LivePhaseTiming;
 }
 
