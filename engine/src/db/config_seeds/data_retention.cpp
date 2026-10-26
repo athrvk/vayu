@@ -139,11 +139,11 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (unit ("days") (keywords ({ "recycle bin", "recover", "cleanup" }) (ConfigEntry{ "trashRetentionDays",
     std::to_string (vayu::core::constants::database::TRASH_RETENTION_DAYS), "integer", "Trash retention",
-    "Deleted collections and requests are kept in the Trash this long before "
-    "they are destroyed for good; the sweep runs when Vayu starts. Until then "
-    "they can be restored exactly as they were. A higher value - or 0 to keep "
-    "them forever - leaves more to undo at the cost of a larger database file "
-    "on disk.",
+    "Deleted collections, requests and environments are kept in the Trash "
+    "this long before they are destroyed for good; the sweep runs when Vayu "
+    "starts. Until then they can be restored exactly as they were. A higher "
+    "value - or 0 to keep them forever - leaves more to undo at the cost of a "
+    "larger database file on disk.",
     "data_retention", std::to_string (vayu::core::constants::database::TRASH_RETENTION_DAYS),
     "0", "3650", std::nullopt, now })));
 

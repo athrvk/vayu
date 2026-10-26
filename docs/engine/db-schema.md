@@ -449,7 +449,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
-| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting | none: `sync_schema ()` adds the nullable column, the migration only stamps |
+| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash | none: `sync_schema ()` adds the nullable columns, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -491,6 +491,14 @@ had opened; at `9` it refuses the workspace instead. **Merge gate:** the
 `git grep` against the last tag must show `7` or `8`; a column that joins `9`
 later must check the tag the same way. The release that carries `9` says so
 under Changed, naming #2937.
+
+The #2970 `environments.deleted_at` column joined version `9` the same way the
+#1817 columns joined `5`: `0.45.0`, the last release, stamps `7`, so no released
+build has stamped `9`, and `sync_schema ()` adds the nullable column on every
+start whatever the stamp. **Merge gate:** the `git grep` against the last tag
+must still show `7` or `8`; if a release shipped `9` without this column, it
+needs its own bump to `10` and a row of its own here. The release that carries
+`9` names #2970 beside #2937 under Changed.
 
 ---
 
@@ -1204,6 +1212,7 @@ Stores named variable sets.
 | `is_active`  | INTEGER | Boolean; 0 or 1. At most one row is 1 - see below |
 | `created_at` | INTEGER | Unix ms                               |
 | `updated_at` | INTEGER | Unix ms                               |
+| `deleted_at` | INTEGER | Nullable, Unix ms. NULL while live; the delete's instant once it is in the trash (#2970) |
 
 **`is_active` marks the environment clients resolve against by default, and at
 most one row carries it.** The invariant is enforced in the DB layer, not the
@@ -1215,6 +1224,15 @@ intermediate zero. Three paths reach this table (`POST /environments`, `PUT
 /environments/:id`, and `POST /import/apply`); putting the rule in the handlers
 would mean repeating it in each, which is how this column previously ended up
 honoured on create but not on update.
+
+**A trashed row is never active.** `DELETE /environments/:id` stamps
+`deleted_at` and clears `is_active` in one write, and a restore clears the stamp
+alone, so the row comes back inactive. Every read (`get_environments`,
+`get_environment`) filters `deleted_at IS NULL`, and so does
+`deactivate_other_environments_locked`: the rule above is about live rows, and a
+stamped one already holds `0`. An environment owns no rows, so unlike
+[`collections`](#collections) its stamp is no cohort key; it is always its own
+trash root, and a purge (`DELETE /trash/:id`, or retention) removes the row.
 
 Writing `isActive: true` **is** the switch - there is no separate endpoint and
 no companion request to clear the old one. Clearing entirely is spelled as

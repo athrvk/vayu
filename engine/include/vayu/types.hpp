@@ -1984,6 +1984,11 @@ struct Environment {
     bool is_active     = false;
     int64_t created_at = 0;
     int64_t updated_at = 0;
+    // When this environment was deleted, in Unix ms - NULL while it is live
+    // (#2970). The `Collection::deleted_at` rule without the cohort: an
+    // environment owns no rows, so its stamp is only the trash's clock. A
+    // stamped row is never active - the delete clears `is_active` with it.
+    std::optional<int64_t> deleted_at;
 };
 
 struct Run {

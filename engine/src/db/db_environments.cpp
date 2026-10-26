@@ -42,10 +42,12 @@ namespace vayu::db {
 // repeated in each - the shape of bug this table already had, when `is_active`
 // was honoured on create but not update. A caller that stores an active
 // environment gets the previous one deactivated in the same transaction, so no
-// reader can observe two actives, and none can observe zero either.
+// reader can observe two actives, and none can observe zero either. A trashed
+// row is outside the rule (#2970): its delete already cleared the flag.
 void Database::deactivate_other_environments_locked (const std::string& keep_id) {
     impl_->storage.update_all (set (c (&Environment::is_active) = false),
-    where (c (&Environment::is_active) == true and c (&Environment::id) != keep_id));
+    where (c (&Environment::is_active) == true &&
+    c (&Environment::id) != keep_id && is_null (&Environment::deleted_at)));
 }
 
 void Database::save_environment (const Environment& e) {
@@ -61,22 +63,58 @@ void Database::save_environment (const Environment& e) {
     });
 }
 
+// Deleted rows are excluded here rather than at each caller (#2970), the
+// `get_collections` reasoning: composition, script scopes and the export all
+// read through these two.
 std::vector<Environment> Database::get_environments () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Environment> ();
+    return impl_->storage.get_all<Environment> (where (is_null (&Environment::deleted_at)));
 }
 
 std::optional<Environment> Database::get_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto envs = impl_->storage.get_all<Environment> (where (c (&Environment::id) == id));
+    auto envs = impl_->storage.get_all<Environment> (
+    where (c (&Environment::id) == id && is_null (&Environment::deleted_at)));
     if (envs.empty ())
         return std::nullopt;
     return envs.front ();
 }
 
+// Soft delete (#2970): the row is stamped, not removed, and leaves the active
+// slot in the same write - a trashed environment is never the one a client
+// restores on launch. A restore does not take the slot back.
 void Database::delete_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting environment", { { "id", id } });
+    vayu::utils::log_debug ("db", "Deleting environment (soft)", { { "id", id } });
+    const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                          .count ();
+    impl_->storage.transaction ([&] {
+        for (auto& environment : impl_->storage.get_all<Environment> (where (
+             c (&Environment::id) == id && is_null (&Environment::deleted_at)))) {
+            environment.deleted_at = stamp;
+            environment.is_active  = false;
+            impl_->storage.update (environment);
+        }
+        return true; // Commit
+    });
+}
+
+TrashOutcome Database::restore_environment_locked (const TrashEntry& entry) {
+    impl_->storage.transaction ([&] {
+        for (auto& environment : impl_->storage.get_all<Environment> (where (
+             c (&Environment::id) == entry.id && is_not_null (&Environment::deleted_at)))) {
+            environment.deleted_at.reset ();
+            impl_->storage.update (environment);
+        }
+        return true; // Commit
+    });
+    vayu::utils::log_info (
+    "db", "Restored environment from trash", { { "id", entry.id } });
+    return TrashOutcome{ entry, false };
+}
+
+void Database::purge_environment_locked (const std::string& id) {
     impl_->storage.remove_all<Environment> (where (c (&Environment::id) == id));
 }
 

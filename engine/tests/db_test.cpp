@@ -791,6 +791,27 @@ TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
     EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_imported" });
 }
 
+// A trashed environment gives up the active slot in the delete itself (#2970),
+// so neither path that activates another can leave two set, and none is
+// active in between.
+TEST_F (DatabaseTest, ATrashedEnvironmentGivesUpTheActiveSlot) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    db.save_environment (make_environment ("env_dev", true));
+
+    db.delete_environment ("env_dev");
+    EXPECT_TRUE (active_environment_ids (db).empty ());
+
+    db.save_environment (make_environment ("env_prod", true));
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_prod" });
+    db.import_apply ({}, {}, { make_environment ("env_imported", true) });
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_imported" });
+
+    ASSERT_HAS_VALUE (db.restore_deleted ("env_dev"));
+    EXPECT_EQ (active_environment_ids (db), std::vector<std::string>{ "env_imported" })
+    << "a restore does not take the slot back";
+}
+
 // ==================== Index Tests ====================
 
 // Every index declared in make_vayu_storage(), each backing a hot query path:
