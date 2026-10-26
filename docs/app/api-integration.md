@@ -1056,7 +1056,8 @@ Assertions card.
 
 A step's `errors` is the run's one error definition (a response outside 2xx/3xx,
 or no response) and equals `httpErrors + noResponse`. Only a `noResponse`
-execution ends its iteration; an HTTP error status does not. `httpErrors` and
+execution, or a jump the run could not honour (#2974), ends its iteration; an HTTP
+error status does not. `httpErrors` and
 `noResponse` are optional in the renderer's type because a report stored before
 the engine split the tally lacks them; the Steps table shows the split in the
 Errors cell's tooltip when both are present and the bare count otherwise.
