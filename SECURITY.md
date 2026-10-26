@@ -62,7 +62,7 @@ carry `Access-Control-Allow-Credentials`, so "never with your cookies" holds onl
 for the default, and the listener still answers every request: the list decides
 who may read the reply, not who may send. A mock binds to loopback only. An
 inbox can bind past loopback only through an explicit `bind` plus
-`confirmNonLoopback` from the app or the API, never from an MCP agent, and once
+`confirmNonLoopback` from the engine API, never from an MCP agent, and once
 it does, anyone on that network can post to it. Since a mock replays saved
 examples verbatim, do not save examples from production responses into a
 collection you mock.
