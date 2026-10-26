@@ -15,14 +15,22 @@ import { type EngineClient, EngineRequestError } from "../engine-client.js";
 import { engineSentence } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
+const TRASH_KINDS = ["collection", "request", "environment"] as const;
+
 /** One `GET /trash` row, as `purge_trash_entry` needs it to name what it destroys. */
 export interface TrashRow {
-	kind: "collection" | "request";
+	kind: (typeof TRASH_KINDS)[number];
 	name: string;
-	/** Sub-collections this row's delete took with it. Always 0 for a request. */
+	/** Sub-collections this row's delete took with it. Always 0 for a request or an environment. */
 	collections: number;
-	/** Requests this row's delete took with it. Always 0 for a request. */
+	/** Requests this row's delete took with it. Always 0 for a request or an environment. */
 	requests: number;
+	/** The environment's variable count; the engine sends it on environment rows only. */
+	variables: number;
+}
+
+function isTrashKind(kind: unknown): kind is TrashRow["kind"] {
+	return TRASH_KINDS.some((known) => known === kind);
 }
 
 /**
@@ -31,7 +39,8 @@ export interface TrashRow {
  *
  * Thrown rather than defaulted, on {@link readCascadeScope}'s reasoning: an
  * entry nobody could read must not become a purge prompt carrying a name and
- * counts nobody verified.
+ * counts nobody verified. A kind this build does not know is refused the same
+ * way, rather than described as one it does (#2970).
  */
 export async function readTrashEntry(
 	client: EngineClient,
@@ -43,25 +52,40 @@ export async function readTrashEntry(
 	const row = items.find((item) => isRecord(item) && item.id === id) as
 		Record<string, unknown> | undefined;
 	if (!row) throw new ToolArgError(`Nothing in the trash with id "${id}".`, "not_found");
+	if (!isTrashKind(row.kind)) {
+		throw new ToolArgError(
+			`Trash entry "${id}" is of a kind this version of Vayu does not know (${JSON.stringify(row.kind)}), so nothing was done to it.`,
+			"policy"
+		);
+	}
 	return {
-		kind: row.kind === "request" ? "request" : "collection",
+		kind: row.kind,
 		name: typeof row.name === "string" && row.name !== "" ? row.name : id,
 		collections: typeof row.collections === "number" ? row.collections : 0,
 		requests: typeof row.requests === "number" ? row.requests : 0,
+		variables: typeof row.variables === "number" ? row.variables : 0,
 	};
 }
 
 /** One phrase naming what purging this entry destroys. */
 export function describeTrashEntry(entry: TrashRow): string {
-	const subject =
-		entry.kind === "collection"
-			? `the collection "${entry.name}"`
-			: `the saved request "${entry.name}"`;
-	if (entry.collections === 0 && entry.requests === 0) return subject;
-	return (
-		`${subject}, with ${entry.collections} sub-collection(s) and ` +
-		`${entry.requests} saved request(s) inside it`
-	);
+	switch (entry.kind) {
+		case "environment":
+			return (
+				`the environment "${entry.name}", with ` +
+				`${entry.variables} variable${entry.variables === 1 ? "" : "s"} in it`
+			);
+		case "request":
+			return `the saved request "${entry.name}"`;
+		case "collection": {
+			const subject = `the collection "${entry.name}"`;
+			if (entry.collections === 0 && entry.requests === 0) return subject;
+			return (
+				`${subject}, with ${entry.collections} sub-collection(s) and ` +
+				`${entry.requests} saved request(s) inside it`
+			);
+		}
+	}
 }
 
 /**

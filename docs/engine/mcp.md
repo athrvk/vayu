@@ -314,9 +314,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `timeout` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
-| `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it) |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is |
-| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm; names the entry with `entryId` |
+| `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it; collections, requests and environments) |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - an environment's variable count); names the entry with `entryId` |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
@@ -325,7 +325,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
-| `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
+| `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count); a soft delete - the environment goes to the Trash, inactive |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
 | `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused, the rule every send follows; secret values withheld unless revealed) |
 | `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
@@ -764,20 +764,24 @@ Notes:
   subtree - or an id no collection has - is a refusal, never a prompt carrying
   a number nobody verified. `delete_request` reads the row the same way, so the
   prompt names the request and its URL rather than an opaque id.
-- **The Trash tools (issue #1071) close the loop those two deletes open.**
-  `list_trash` answers a page of `GET /trash` (#2443), each entry unchanged -
-  roots only, with `collections` / `requests` counting what each entry's delete
-  took, exactly as the route documents. `restore_trash_entry` is the one write tool here that is **not**
+- **The Trash tools (issue #1071) close the loop those two deletes open**, and
+  the one `delete_environment` opens since #2970. `list_trash` answers a page of
+  `GET /trash` (#2443), each entry unchanged - roots only, with `collections` /
+  `requests` counting what each entry's delete took and an environment entry
+  carrying `variables`, exactly as the route documents. `restore_trash_entry` is the one write tool here that is **not**
   destructive - it puts a row back rather than removing one - so it carries the
   write toggle alone, with no confirmation step; it surfaces the engine's own
   404/409 text verbatim instead of writing a second sentence that could
   disagree with it, and reports `reparentedToRoot` in its result text when a
   restored collection came back at the top level because its parent is gone or
-  itself in the trash. `purge_trash_entry` is the Trash's own hard delete and is
-  gated exactly like `delete_collection`: it reads the entry off `GET /trash`
-  first, so the confirmation prompt names what a mistyped id would otherwise
-  destroy sight unseen, and an entry the trash does not hold is a refusal before
-  any prompt is shown. Both name the entry with `entryId`, not a bare `id`
+  itself in the trash; a restored environment comes back inactive, and
+  `activate_environment` is what makes it the active one again.
+  `purge_trash_entry` is the Trash's own hard delete and is gated exactly like
+  `delete_collection`: it reads the entry off `GET /trash` first, so the
+  confirmation prompt names what a mistyped id would otherwise destroy sight
+  unseen (a collection's sub-collections and requests, an environment's
+  variable count), and an entry the trash does not hold - or one of a kind this
+  build does not know - is a refusal before any prompt is shown. Both name the entry with `entryId`, not a bare `id`
   (#2446: an `id` beside `requestId` / `runId` / `environmentId` reads as "the
   id of something else"). A call that sends only `id` is refused with
   `"entryId" is required.` (the alias was retired in #2962).
@@ -2903,7 +2907,10 @@ refetches the collections and their compositions and no request list. Every
 other collection write (`delete_collection`, `move_item`, `import_document`,
 `bind_spec`, `sync_spec`, the two trash tools) declares `collection`, which
 refetches every request list, because what it changes reaches past the
-collection it names.
+collection it names. The two trash tools also declare `environment` (issue
+#2970): its renderer invalidator takes the trash list beside the environments,
+the globals and every composition, so a `delete_environment` reaches an open
+Trash drawer and a restored environment reappears in the Variables view.
 
 **One field on the event is not a hint at all.** `startedRun` rides the `run`
 event of the two tools that *create* a run - `start_load_run` and
