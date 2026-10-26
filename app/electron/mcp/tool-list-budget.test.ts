@@ -100,6 +100,11 @@
  * few hundred bytes). With #2823's, #2928's and #2938's sentences all in, the
  * rows measure 145,407 / 142,681 / 213,909 / 209,512 B and the caps stay at
  * 145,700 / 143,000 / 214,200 / 209,800.
+ *
+ * #2955's `get_live_metrics` answer, now `{ticks, completed}` (one description
+ * sentence and an `outputSchema`, paid once), took the rows to 145,857 /
+ * 143,131 / 214,359 / 209,962 B, and the four caps went to 146,200 / 143,500 /
+ * 214,700 / 210,300.
  */
 
 import { describe, it, expect } from "vitest";
@@ -119,10 +124,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 145_700 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 143_000 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 214_200 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 209_800 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 146_200 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 143_500 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 214_700 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 210_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

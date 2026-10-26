@@ -166,6 +166,13 @@ export const runStatusSchema = z.looseObject({
 	nextStep: optStr,
 });
 
+/** `get_live_metrics`: the ticks, whether the run had ended, and (only then) the empty-window caveat. */
+export const liveMetricsSchema = z.looseObject({
+	ticks: anyList,
+	completed: optBool,
+	note: optStr,
+});
+
 export const engineConfigSchema = z.looseObject({
 	entries: rowsOf(z.looseObject({ key: optStr })),
 });

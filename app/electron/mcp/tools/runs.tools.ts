@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { EngineRequestError } from "../engine-client.js";
+import { EngineRequestError, type LiveMetricsSnapshot } from "../engine-client.js";
 import { compareReports } from "../compare.js";
 import { RUN_ERROR_DEFINITION_POINTER } from "../error-definition.js";
 import { defaultMcpExportFormat, MCP_EXPORT_FORMAT_IDS } from "../run-export-formats.js";
@@ -21,6 +21,7 @@ import type { McpTool } from "./contract.js";
 import {
 	callEngine,
 	callEngineForRunOutput,
+	callEngineStructured,
 	callEngineForRunText,
 	confirmDestructive,
 	confirmedInput,
@@ -38,7 +39,7 @@ import {
 } from "./kit.js";
 import { ID_KINDS, unknownIdText } from "./failure.js";
 import { describeRun, resolveBaseline, runTypeRefusal } from "./run-housekeeping.js";
-import { runComparisonSchema } from "./output-schemas.js";
+import { liveMetricsSchema, runComparisonSchema } from "./output-schemas.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 /** The Export menu's HTML report: a file for a person, which an agent can neither save nor use. */
@@ -80,6 +81,19 @@ function exportedDocument(answer: unknown): string {
  */
 const LIVE_EXPIRED_TEXT =
 	"The live buffer for this run expired (kept 60 s after it ends); the run still exists - read get_run_report(runId).";
+
+/**
+ * The final tick of a finished run covers an empty window (the run stopped
+ * issuing requests), so its percentiles read 0; the stored report has the
+ * run's real ones. Said only when the run ended: a live run's last window is
+ * not empty by construction.
+ */
+const COMPLETED_NOTE =
+	"The run had ended. The final tick's latency window may be empty, so its percentiles can read 0; take the run's percentiles from get_run_report.";
+
+function liveMetricsAnswer({ ticks, completed }: LiveMetricsSnapshot) {
+	return completed ? { ticks, completed, note: COMPLETED_NOTE } : { ticks, completed };
+}
 
 export const RUN_TOOLS: McpTool[] = [
 	{
@@ -214,7 +228,7 @@ export const RUN_TOOLS: McpTool[] = [
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		notFoundByCode: { live_expired: LIVE_EXPIRED_TEXT },
 		description:
-			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. The live buffer is kept 60 s after a run ends (by default); after that the call is refused as expired, and get_run_report holds the run's numbers. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. A tick that closes a second (about one a second) also carries statusSeconds, [{second, span, counts: [2xx, 3xx, 4xx, 5xx, error]}]: the responses that completed in each second it closed, second counted from load start, and [] when it closed none; the other ticks carry no statusSeconds. For a scenario load run the ticks that carry statusSeconds also carry scenario, {iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}: the sequence so far, without latency. A capacity run's ticks also carry capacity, {level, levelElapsedMs, levelsJudged, stopReason?}: the concurrency being measured and where the search stands, with stopReason once it has ended. " +
+			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. The live buffer is kept 60 s after a run ends (by default); after that the call is refused as expired, and get_run_report holds the run's numbers. A tick's latencyP50Ms / latencyP95Ms / latencyP99Ms cover its window (about 100 ms) and are null when its latencySamples is 0: nothing completed in it, which is a stall, not a 0 ms answer. A tick that closes a second (about one a second) also carries statusSeconds, [{second, span, counts: [2xx, 3xx, 4xx, 5xx, error]}]: the responses that completed in each second it closed, second counted from load start, and [] when it closed none; the other ticks carry no statusSeconds. For a scenario load run the ticks that carry statusSeconds also carry scenario, {iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}: the sequence so far, without latency. A capacity run's ticks also carry capacity, {level, levelElapsedMs, levelsJudged, stopReason?}: the concurrency being measured and where the search stands, with stopReason once it has ended. The answer is {ticks, completed}: completed is false when the time budget ended the read with the run still going; true once it ended, with a note that the last tick's latency window may be empty (percentiles: get_run_report). " +
 			RUN_ERROR_DEFINITION_POINTER,
 		annotations: {
 			title: "Get live metrics",
@@ -222,6 +236,7 @@ export const RUN_TOOLS: McpTool[] = [
 			idempotentHint: false,
 			openWorldHint: false,
 		},
+		outputSchema: liveMetricsSchema,
 		inputSchema: {
 			runId: z.string().describe("Run ID to sample."),
 			limit: z
@@ -237,8 +252,10 @@ export const RUN_TOOLS: McpTool[] = [
 			// before dispatch, but the handler is the layer that knows a
 			// non-positive limit reaches `slice(-limit)` and inverts the bound.
 			const limit = optionalPositiveInt(args, "limit", 10);
-			return callEngine(ctx, () =>
-				ctx.client.getLiveMetricsSnapshot(runId, limit, undefined, signal)
+			return callEngineStructured(
+				ctx,
+				() => ctx.client.getLiveMetricsSnapshot(runId, limit, undefined, signal),
+				(snapshot) => liveMetricsAnswer(snapshot as LiveMetricsSnapshot)
 			);
 		},
 	},
