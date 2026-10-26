@@ -40,6 +40,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -430,6 +431,38 @@ class ScenarioLoadTest : public ::testing::Test {
         vayu::core::RunManager manager;
         EXPECT_TRUE (manager.start_run (run_id, config, *db_,
         std::make_shared<const vayu::core::ScenarioExecution> (execution)));
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&] () { return manager.get_run (run_id) == nullptr; }))
+        << "the run never finished";
+        manager.shutdown ();
+        return vayu::http::routes::run_report_response (*db_, run_id).second;
+    }
+
+    /// Run @p execution @p iterations times through the sequential runner, as
+    /// `POST /runs` starts a collection run, and answer its report: the
+    /// other run kind `run_to_report`'s figures are held to.
+    json run_sequentially_to_report (vayu::core::ScenarioExecution execution, size_t iterations) {
+        execution.request.iterations = iterations;
+        const json config            = { { "scenario",
+                   { { "source", "collection" }, { "collectionId", "col_test" },
+                   { "iterations", iterations } } } };
+        const std::string run_id     = "run_sequential_report";
+        vayu::db::Run run;
+        run.id              = run_id;
+        run.type            = vayu::RunType::Scenario;
+        run.status          = vayu::RunStatus::Pending;
+        run.config_snapshot = config.dump ();
+        run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                         .count ();
+        run.end_time = run.start_time;
+        db_->create_run (run);
+
+        vayu::http::CookieJar jar;
+        vayu::core::RunManager manager;
+        EXPECT_TRUE (manager.start_scenario_run (run_id, config,
+        std::make_shared<const vayu::core::ScenarioExecution> (std::move (execution)),
+        *db_, jar));
         EXPECT_TRUE (vayu::tests::wait_until (
         [&] () { return manager.get_run (run_id) == nullptr; }))
         << "the run never finished";
@@ -985,6 +1018,207 @@ TEST_F (ScenarioLoadTest, AnExecutionWithNoResponseIsErroredAndNotAlsoFailed) {
     EXPECT_EQ (summary["failed"], 0) << summary.dump ();
     EXPECT_EQ (summary["passed"], 0) << summary.dump ();
     EXPECT_EQ (summary["steps_executed"], 2) << summary.dump ();
+}
+
+namespace {
+
+/// Both identities a load summary's outcomes answer to (#2824): the four
+/// outcomes sum to `steps_executed`, and so do the steps' `executed` plus
+/// `skipped`.
+void expect_load_outcome_identities (const json& summary) {
+    const auto count = [&summary] (const char* key) {
+        return summary.at (key).get<size_t> ();
+    };
+    EXPECT_EQ (count ("passed") + count ("failed") + count ("errored") + count ("skipped"),
+    count ("steps_executed"))
+    << summary.dump ();
+    size_t ran = 0;
+    for (const auto& step : summary.at ("steps")) {
+        ran += step.at ("executed").get<size_t> ();
+    }
+    EXPECT_EQ (ran + count ("skipped"), count ("steps_executed")) << summary.dump ();
+}
+
+json one_inline_script (const char* kind, const std::string& script) {
+    return vayu::tests::script_element_json ("el_script", kind, script, /*inline_script=*/true);
+}
+
+} // namespace
+
+// #2947: an inline script that threw on a step that answered 200 is `errored`,
+// as the sequential runner's `classify_step` decides it, and the iteration
+// still goes on to step 1, so the target receives the load it did before.
+// Mutation checks: count no outcome for a thrown script in
+// `count_answered_outcome` and `errored` reads 0, `passed` 6; pass
+// `errored = true` to `finish_step` for a thrown script and `/s1` is never
+// reached, `iterations_abandoned` reads 3.
+TEST_F (ScenarioLoadTest, AnInlineScriptPostThatThrewIsErroredWithoutAbandoningItsIteration) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { one_inline_script ("script.post", "throw new Error('x');") });
+
+    constexpr size_t ITERATIONS = 3;
+    auto state                  = run (json{ { "mode", "iterations" },
+                                       { "iterations", ITERATIONS }, { "concurrency", 1 } },
+                     execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    EXPECT_EQ (server.hits_for ("/s1").size (), ITERATIONS)
+    << "a thrown script ended its iteration";
+    EXPECT_EQ (summary["errored"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (summary["passed"], ITERATIONS)
+    << "only step 1 passed: " << summary.dump ();
+    EXPECT_EQ (summary["failed"], 0) << summary.dump ();
+    EXPECT_EQ (summary["iterations_abandoned"], 0) << summary.dump ();
+    EXPECT_EQ (summary["iterations_completed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (summary["steps"][0]["noResponse"], 0)
+    << "a thrown script is not a step that got no response";
+    expect_load_outcome_identities (summary);
+}
+
+// The same for `script.pre`: the request it ran before still goes out, as it
+// did before #2947, and the step is `errored` rather than `passed`.
+TEST_F (ScenarioLoadTest, AnInlineScriptPreThatThrewIsErroredAndItsRequestStillSent) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { one_inline_script ("script.pre", "throw new Error('x');") });
+
+    constexpr size_t ITERATIONS = 3;
+    auto state                  = run (json{ { "mode", "iterations" },
+                                       { "iterations", ITERATIONS }, { "concurrency", 1 } },
+                     execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), ITERATIONS);
+    EXPECT_EQ (server.hits_for ("/s1").size (), ITERATIONS);
+    EXPECT_EQ (summary["errored"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (summary["passed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (summary["iterations_abandoned"], 0) << summary.dump ();
+    expect_load_outcome_identities (summary);
+}
+
+// An inline script's `pm.execution` call throws on a load run (no sequence to
+// redirect from inside a script), so `skipRequest()` there errors its step and
+// skips nothing: the request still goes out.
+TEST_F (ScenarioLoadTest, AnInlineSkipRequestThrowsSoItsStepIsErroredAndStillSent) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { one_inline_script ("script.pre", "pm.execution.skipRequest();") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    EXPECT_EQ (server.hits_for ("/s0").size (), 2u);
+    EXPECT_EQ (summary["errored"], 2) << summary.dump ();
+    EXPECT_EQ (summary["skipped"], 0) << summary.dump ();
+    expect_load_outcome_identities (summary);
+}
+
+// A script that failed an assertion and then threw is one `errored` execution,
+// not also a `failed` one: the throw outranks the assertion, as in
+// `classify_step`. The assertion still reaches the exact population. Mutation
+// check: test `assertion_failed` before `threw` in `count_answered_outcome`
+// and `failed` reads 2, `errored` 0.
+TEST_F (ScenarioLoadTest, AThrowOutranksAFailedAssertionInTheSameExecution) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.post",
+    "pm.test('fails', function () { pm.expect(1).to.equal(2); });\n"
+    "throw new Error('x');") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    ASSERT_EQ (state->inline_tests_failed.load (), 2u)
+    << "the assertion never ran, so this proves nothing";
+    EXPECT_EQ (summary["errored"], 2) << summary.dump ();
+    EXPECT_EQ (summary["failed"], 0) << summary.dump ();
+    EXPECT_EQ (summary["passed"], 0) << summary.dump ();
+    expect_load_outcome_identities (summary);
+}
+
+// A step a controller skipped whose `script.pre` then threw is `errored`, not
+// `skipped` (`classify_step` checks the throw first). It still sends nothing
+// and ends no iteration, and it counts in its step's `executed`, which is what
+// keeps `sum(executed) + skipped == steps_executed`. Mutation checks: count it
+// `skipped` in `count_unsent_outcome` and `skipped` reads 2; drop its
+// `record_unsent` and the second identity is 2 short.
+TEST_F (ScenarioLoadTest, ASkippedStepWhosePreScriptThrewIsErroredNotSkipped) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_if" }, { "kind", "control.if" }, { "enabled", true },
+      { "config", { { "condition", "{{never_set}} exists" } } } },
+    one_inline_script ("script.pre", "throw new Error('x');") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    EXPECT_TRUE (server.hits_for ("/s0").empty ())
+    << "the skipped step was sent";
+    EXPECT_EQ (server.hits_for ("/s1").size (), 2u);
+    EXPECT_EQ (summary["errored"], 2) << summary.dump ();
+    EXPECT_EQ (summary["skipped"], 0) << summary.dump ();
+    EXPECT_EQ (summary["iterations_abandoned"], 0) << summary.dump ();
+    EXPECT_EQ (summary["steps"][0]["executed"], 2) << summary.dump ();
+    EXPECT_EQ (summary["steps"][0]["noResponse"], 0) << summary.dump ();
+    expect_load_outcome_identities (summary);
+}
+
+// A step that got no response is `errored` once, by `finish_step`, even when
+// its script threw too. Mutation check: drop the `!errored` guard before
+// `count_answered_outcome` and `errored` reads 4.
+TEST_F (ScenarioLoadTest, ANoResponseStepWhoseScriptThrewIsErroredOnce) {
+    auto execution = plan_over ({ "http://127.0.0.1:1/unreachable" });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { one_inline_script ("script.pre", "throw new Error('x');") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } }, execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    EXPECT_EQ (summary["errored"], 2) << summary.dump ();
+    EXPECT_EQ (summary["iterations_abandoned"], 2) << summary.dump ();
+    EXPECT_EQ (summary["steps_executed"], 2) << summary.dump ();
+    expect_load_outcome_identities (summary);
+}
+
+// #2947's acceptance: the same stored collection, one request whose test
+// script throws on a 200, reports the same outcomes run as a load run and as
+// a collection run. Mutation check: as the first #2947 case above; the load
+// report's `errored` reads 0 against the collection run's 3.
+TEST_F (ScenarioLoadTest, ALoadRunAndACollectionRunCountAThrownScriptTheSame) {
+    ScenarioMockServer server;
+    const auto execution =
+    resolve_one_step (server.url ("/s0"), json{ { "mode", "none" } },
+    json::array ({ one_inline_script ("script.post", "throw new Error('x');") }));
+
+    constexpr size_t ITERATIONS = 3;
+    const auto load             = run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } }, execution)
+                      .at ("scenario");
+    const auto sequential =
+    run_sequentially_to_report (execution, ITERATIONS).at ("scenario");
+
+    for (const char* key : { "stepsExecuted", "passed", "failed", "skipped", "errored" }) {
+        EXPECT_EQ (load.at (key), sequential.at (key))
+        << key << "\nload: " << load.dump () << "\ncollection: " << sequential.dump ();
+    }
+    EXPECT_EQ (load.at ("errored"), ITERATIONS) << load.dump ();
+    EXPECT_EQ (load.at ("iterationsAbandoned"), 0) << load.dump ();
 }
 
 // ============================================================================

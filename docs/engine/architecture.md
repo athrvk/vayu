@@ -1386,7 +1386,11 @@ row exists - and the executor is the only thing that differs.
   next one. A VU stranded on a failing step would permanently shrink effective
   concurrency for the rest of the run. This path does not read `stopOnError`:
   the key is the sequential runner's, and here only a missing response ends an
-  iteration - a script error, inline or deferred, never has. A step that answered with an HTTP error
+  iteration - a script error, inline or deferred, never has. An inline script
+  that threw still makes its step `errored`, as on a collection run (#2947), but
+  the completion counts that outcome beside `finish_step` rather than through
+  its abort edge, so the load the target receives is the same either way and
+  the summary's `errored` is no longer the sum of the steps' `noResponse`. A step that answered with an HTTP error
   status is counted in that step's `errors` (as `httpErrors`, #2134) and the
   iteration carries on: a response arrived, so the next step has something to
   follow.

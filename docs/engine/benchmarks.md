@@ -265,6 +265,22 @@ the steadier statistic: it is higher with the hook in all three cases, by
 1.2-1.7%, against a null test that moves it by 0.5-1.1%. That is a real but
 small cost, and it is below the 2% line this page has used.
 
+The table above is ratios only. A re-run of the same three commands (hook on
+versus off, 12 pairs, no null arm) on a 4-core Xeon 2.8 GHz Linux container, a
+different host from the 2.1 GHz one above, records the absolute medians the
+ratios came from:
+
+| case | req/s on vs off | CPU s per 1,000 requests on vs off | MB/s on vs off |
+|---|---:|---:|---:|
+| `rps20000` | 19,998.7 vs 19,998.7 | 0.088 vs 0.088 (-0.28%) | - |
+| `cc64` | 31,170 vs 31,759 (-1.85%) | 0.075 vs 0.074 (+1.40%) | - |
+| `blob1mib` | 1,371 vs 1,396 (-1.76%) | 2.141 vs 2.101 (+1.93%) | 1,438 vs 1,464 (-1.76%) |
+
+`blob1mib` also reads 2.042 vs 2.003 CPU ms per MB. The open-loop case again held
+20,000 req/s in both arms (achievement 1.000, no skipped requests). The closed-loop
+per-arm spread was 12-15% (`cc64`) and 18-23% (`blob1mib`); the CPU deltas
+(+1.4% and +1.9%) agree in sign and size with the first run (+1.7% and +1.2%).
+
 **Verdict: accepted as is.** There is no throughput regression this host can
 resolve and the CPU cost is about 1.5% per request, under 2%, so none of the
 fixes in the issue pays for its code or its semantics (following redirects in

@@ -9063,8 +9063,12 @@ is not an outcome: a step that answered 4xx or 5xx with every assertion holding
 is `passed`, and the summary's `failedRequests` counts it. The four outcomes
 are disjoint and sum to `stepsExecuted`, a skipped step included, and a
 [scenario load run](#scenario-load-runs) reports them under the same
-arithmetic, with one difference: on a load run `errored` is an execution that
-got no response, so a thrown script is not counted there. A transport failure
+arithmetic and the same outcome for a no-response step and a thrown inline
+script (#2947); a step's flow control (`control.switch`, a jump the run cannot
+honour) is read differently on the two (#2974).
+What differs there is the effect on the iteration: only a step that got no
+response ends it, so a load run's `errored` is not the sum of its steps'
+`noResponse`, and `iterationsAbandoned` is its iteration-abort count. A transport failure
 continues the iteration like a script error does, as Postman's and Newman's
 runners do by default; a later step that reads a response that never arrived
 errors on its own row. A step that errored while the iteration continues has its own flow control
@@ -9287,8 +9291,8 @@ ran, 30 of those answered a status its `assert.status` rejected. So
 **`iterations` is the iterations started**, not the iterations asked for, and
 three counts account for them: `iterationsCompleted` (the iteration reached its
 last step, or a script ended it with `setNextRequest(null)` or a forward jump),
-`iterationsAbandoned` (an errored step, or a jump to a target that names no
-step, ended it) and the iterations still running when the deadline or a Stop
+`iterationsAbandoned` (a step that got no response, or a jump to a target that
+names no step, ended it) and the iterations still running when the deadline or a Stop
 ended the run. The last has no key of its own; it is derivable:
 
 - `iterations = iterationsCompleted + iterationsAbandoned + cut at the end`,
@@ -9322,22 +9326,29 @@ the same pipeline time into the run's latency as into the step's, so the run's
 At the top of the section, `passed`, `failed`, `skipped` and `errored` are the
 collection run's outcomes (Outcomes under [Scenario runs](#scenario-runs),
 #2824), counted per step execution and disjoint. `errored` is an execution that
-got no response, the iteration-abort count and the sum of every step's
-`noResponse`. `failed` is one whose response arrived and in which an inline
-assertion did not hold (an `assert.*` element, a required `extract.*` miss, an
-inline script's `pm.test`), counted once however many failed in it. `skipped`
-is one a controller or an inline `pm.execution.skipRequest()` stopped before
-the wire, and `passed` is the rest. An HTTP
+got no response, or one whose inline `script.pre` or `script.post` threw (a
+thrown error, a script timeout, a refused `pm.request` write-back, an inline
+`pm.execution` call; #2947). A throw outranks a failed assertion and a skip, as
+on a collection run. Only the no-response kind ends its iteration, so the
+target receives the same load whether a script threw or not, and `errored` is
+not the sum of every step's `noResponse`: the iteration-abort count is
+`iterationsAbandoned`. `failed` is one whose response arrived and in which an
+inline assertion did not hold (an `assert.*` element, a required `extract.*`
+miss, an inline script's `pm.test`), counted once however many failed in it.
+`skipped` is one a controller (`control.if`, `control.once`,
+`control.throughput`) stopped before the wire, and `passed` is the rest. An HTTP
 error status no assertion rejected is `passed`: the step's `httpErrors` and the
 report's `summary.failedRequests` count it. `stepsExecuted` is every step
-reached, a skipped one included, and a step's `executed` is the steps that ran,
-so two identities hold:
+reached, a skipped one included, and a step's `executed` is every execution of
+it that was not `skipped` (a skipped one whose `script.pre` threw is in it, as
+`errored`, and adds nothing to `noResponse` or the latency), so two identities
+hold:
 
 - `passed + failed + errored + skipped = stepsExecuted`
 - the sum of `steps[].executed`, plus `skipped`, `= stepsExecuted`
 
 A deferred script's tests replay after the run against sampled responses, so
-they fail no step here; they are the step's `tests` and the report's
+they fail and error no step here; they are the step's `tests` and the report's
 `testValidation`. A run stored by engine 0.45.0 or earlier keeps the definition
 it was written under: `failed` was the sum of every step's `httpErrors`, and
 `passed` was `stepsExecuted` less `failed` and `errored`, its skipped steps
@@ -11675,7 +11686,7 @@ execution, disjoint, with an HTTP error status that no assertion rejected
 counted as `passed` and in `summary.failedRequests`. `stepsExecuted` is every
 step reached, a skipped one included, so in both
 `passed + failed + errored + skipped = stepsExecuted`. A scenario load run's
-`steps[].executed` counts the steps that ran, so there the sum of
+`steps[].executed` counts every execution that was not `skipped`, so there the sum of
 `steps[].executed`, plus `skipped`, also equals `stepsExecuted`; a collection
 run has no `steps` array. A scenario load run stored by engine 0.45.0 or
 earlier keeps its old numbers: `failed` was the sum of every step's
