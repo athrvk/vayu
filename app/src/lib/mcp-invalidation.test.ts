@@ -344,7 +344,7 @@ describe("invalidateForMcpEvent", () => {
 	test("a run invalidates both list families", () => {
 		const { keys } = keysFor({ entity: "run" });
 		expect(keys).toContainEqual(queryKeys.runs.lists());
-		expect(keys).toContainEqual(queryKeys.runs.allRuns());
+		expect(keys).toContainEqual(queryKeys.runs.count());
 	});
 
 	test("a run invalidates the compare picker's per-request lists", () => {

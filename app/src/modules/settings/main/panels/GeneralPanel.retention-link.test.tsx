@@ -25,7 +25,7 @@ import { useSettingsStore } from "@/modules/settings/settings-store";
 import GeneralPanel from "./GeneralPanel";
 
 vi.mock("@/queries/runs", () => ({
-	useAllRunsQuery: () => ({ data: [{ id: "r1", status: "completed" }] }),
+	useRunsCountQuery: () => ({ data: 1 }),
 	useInvalidateRuns: () => vi.fn(),
 }));
 

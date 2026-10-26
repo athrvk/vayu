@@ -957,26 +957,6 @@ export const apiService = {
 		);
 	},
 
-	/**
-	 * Fetch every run matching @p params by paging to exhaustion. For callers
-	 * that genuinely need the whole set (clearing all history, counting) rather
-	 * than a polled page. Rows still carry the compact `summary`, so this stays
-	 * cheap even over a large history.
-	 */
-	async listAllRuns(params: Omit<RunListParams, "limit" | "offset"> = {}): Promise<Run[]> {
-		const limit = 500; // Engine's max page size.
-		const all: Run[] = [];
-		let offset = 0;
-		// Bounded by pagination.hasMore; the engine caps limit at 500.
-		for (;;) {
-			const page = await this.listRuns({ ...params, limit, offset });
-			all.push(...page.data);
-			if (!page.pagination.hasMore) break;
-			offset += page.pagination.limit;
-		}
-		return all;
-	},
-
 	async getRun(id: string): Promise<Run> {
 		// Backend returns run object directly
 		return await httpClient.get<Run>(API_ENDPOINTS.RUN_BY_ID(id));

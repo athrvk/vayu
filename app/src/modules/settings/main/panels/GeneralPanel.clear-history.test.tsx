@@ -26,6 +26,10 @@
  * retention keeps: a pinned baseline and a run still in flight. So the dialog
  * counts only what will go, names what is kept, and the tabs that close are the
  * ids the engine reports, not every run the list happened to hold.
+ *
+ * What is kept is read when the button is pressed, from `limit=1` counts
+ * (#2979): `listRuns` below answers the way the engine's filters do, over the
+ * `runs` fixture, and returns no more than a page's worth of rows.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -58,8 +62,30 @@ const plain: Row[] = [
 ];
 let runs: Row[] = plain;
 
+/** `GET /runs` over the fixture: the filters the panel uses, and `total` ahead of the rows. */
+const listRuns = vi.fn(
+	(params: { limit?: number; baseline?: boolean; status?: string }): Promise<unknown> => {
+		const matching = runs.filter(
+			(r) =>
+				(params.baseline === undefined || Boolean(r.baseline) === params.baseline) &&
+				(params.status === undefined || r.status === params.status)
+		);
+		const data = matching.slice(0, params.limit);
+		return Promise.resolve({
+			data,
+			pagination: {
+				total: matching.length,
+				limit: params.limit,
+				offset: 0,
+				hasMore: matching.length > data.length,
+				returned: data.length,
+			},
+		});
+	}
+);
+
 vi.mock("@/queries/runs", () => ({
-	useAllRunsQuery: () => ({ data: runs }),
+	useRunsCountQuery: () => ({ data: runs.length }),
 	useInvalidateRuns: () => invalidateRuns,
 }));
 
@@ -67,6 +93,7 @@ vi.mock("@/services", () => ({
 	apiService: {
 		clearRuns: () => clearRuns(),
 		deleteRun: (id: string) => deleteRun(id),
+		listRuns: (params: Parameters<typeof listRuns>[0]) => listRuns(params),
 	},
 }));
 
@@ -93,6 +120,7 @@ beforeEach(() => {
 	runs = plain;
 	clearRuns.mockClear();
 	deleteRun.mockClear();
+	listRuns.mockClear();
 	invalidateRuns.mockClear();
 	useToastStore.setState({ toasts: [] });
 	confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -197,8 +225,40 @@ describe("GeneralPanel - clear run history", () => {
 		expect(dialog).not.toHaveTextContent(/\ball\b/i);
 	});
 
-	it("disables the button, with the reason, when only pinned runs are stored", async () => {
-		runs = [{ id: "r1", status: "completed", baseline: true }];
+	it("says why nothing is cleared, and opens no dialog, when only kept runs are stored", async () => {
+		runs = [
+			{ id: "r1", status: "completed", baseline: true },
+			{ id: "r2", status: "running" },
+		];
+		render(<GeneralPanel />);
+
+		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
+
+		await waitFor(() =>
+			expect(toastMessages()).toEqual([
+				"Only pinned baselines and runs in progress are stored",
+			])
+		);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(clearRuns).not.toHaveBeenCalled();
+		// The stored count on screen is re-read, in case it was what went stale.
+		expect(invalidateRuns).toHaveBeenCalled();
+	});
+
+	it("keeps a pinned run that is also running out of the in-flight count", async () => {
+		runs = [
+			{ id: "r1", status: "completed" },
+			{ id: "r2", status: "running", baseline: true },
+		];
+		render(<GeneralPanel />);
+
+		expect(await openDialog()).toHaveTextContent(
+			"One stored run and its metrics are removed permanently. One pinned baseline is kept. This can't be undone."
+		);
+	});
+
+	it("disables the button, with the reason, when nothing is stored", async () => {
+		runs = [];
 		render(<GeneralPanel />);
 
 		const button = screen.getByRole("button", { name: /clear run history/i });
@@ -209,11 +269,25 @@ describe("GeneralPanel - clear run history", () => {
 		hint!.focus();
 		fireEvent.focus(hint!);
 		await waitFor(() =>
-			expect(
-				screen.getAllByText("Only pinned baselines and runs in progress are stored").length
-			).toBeGreaterThan(0)
+			expect(screen.getAllByText("No stored runs to clear").length).toBeGreaterThan(0)
 		);
+		expect(listRuns).not.toHaveBeenCalled();
 		expect(clearRuns).not.toHaveBeenCalled();
+	});
+
+	it("shows the failure and opens no dialog when the plan cannot be read", async () => {
+		listRuns.mockRejectedValueOnce(new Error("engine unreachable"));
+		render(<GeneralPanel />);
+
+		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
+
+		await waitFor(() =>
+			expect(toastMessages()).toEqual(["Couldn't read the run history - engine unreachable"])
+		);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(clearRuns).not.toHaveBeenCalled();
+		// Not stuck: the button is live again.
+		expect(screen.getByRole("button", { name: /clear run history/i })).toBeEnabled();
 	});
 
 	it("deletes nothing when the dialog is cancelled", async () => {

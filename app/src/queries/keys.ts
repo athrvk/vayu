@@ -118,7 +118,10 @@ export const queryKeys = {
 		// `lists()` as `InfiniteData`.
 		searches: () => [...queryKeys.runs.all, "search"] as const,
 		search: (q: string) => [...queryKeys.runs.searches(), q] as const,
-		allRuns: () => [...queryKeys.runs.all, "allRuns"] as const,
+		// How many runs are stored (#2979), a bare number off a `limit=1` read.
+		// Its own family for the sixth time and the same reason as the five above:
+		// the delete-run patch walks everything under `lists()` as `InfiniteData`.
+		count: () => [...queryKeys.runs.all, "count"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,
 		report: (id: string) => [...queryKeys.runs.all, "report", id] as const,
