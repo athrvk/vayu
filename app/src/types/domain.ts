@@ -2498,6 +2498,22 @@ export interface StatusSecondEntry {
 	counts: [number, number, number, number, number];
 }
 
+/**
+ * Where a capacity search stands, on a live frame (issue #2928); keys keep the
+ * wire's camelCase. `level` is the concurrency being measured, `0` until the
+ * first level opens. `levelElapsedMs` is the time since that level opened (`0`
+ * while `level` is `0`, held at the moment the search ended once it has).
+ * `levelsJudged` counts judged levels, a re-measured level once per
+ * measurement. `stopReason` is the report's `capacity.stopReason` and appears
+ * only once the search has ended.
+ */
+export interface LiveCapacityState {
+	level: number;
+	levelElapsedMs: number;
+	levelsJudged: number;
+	stopReason?: string;
+}
+
 export interface LoadTestMetrics {
 	timestamp: number;
 	elapsed_seconds: number;
@@ -2620,6 +2636,14 @@ export interface LoadTestMetrics {
 	 * tells the status chart to diff `status_codes` instead.
 	 */
 	status_seconds?: StatusSecondEntry[];
+	/**
+	 * The capacity search's state, on every live frame of a capacity run (issue
+	 * #2928). Absent means not a capacity run, or an engine from before #2928; it
+	 * is never zeroed. A stored tick never carries it. The renderer card that
+	 * reads it is item 2 of #2818 (#2929); until it lands the only reader is MCP
+	 * `get_live_metrics`, which forwards frames raw.
+	 */
+	capacity?: LiveCapacityState;
 	/**
 	 * Custom trends, counters and rates recorded so far, riding the same tick
 	 * as the built-in phases above (issue #1500). Absent until the run has

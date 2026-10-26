@@ -2287,6 +2287,192 @@ TEST_F (LoadStrategyTest, LiveTicksPublishTheLevelEpochTheStrategyRequested) {
     metrics.join ();
 }
 
+namespace {
+
+/// `collect_metrics` on its own thread for the life of the object: the live
+/// producer a load run starts, with the test thread as the strategy thread.
+/// Stopped in the destructor too, so a failed `ASSERT` cannot leave the
+/// thread joinable.
+class LiveProducer {
+    public:
+    LiveProducer (std::shared_ptr<vayu::core::RunContext> context, vayu::db::Database& db)
+    : context_ (std::move (context)) {
+        context_->is_running = true;
+        thread_              = std::thread ([context = context_, &db] () {
+            vayu::core::collect_metrics (context, &db);
+        });
+    }
+    ~LiveProducer () {
+        try {
+            stop ();
+        } catch (const std::exception& e) {
+            ADD_FAILURE () << "the live producer did not stop: " << e.what ();
+        }
+    }
+    LiveProducer (const LiveProducer&)            = delete;
+    LiveProducer& operator= (const LiveProducer&) = delete;
+    LiveProducer (LiveProducer&&)                 = delete;
+    LiveProducer& operator= (LiveProducer&&)      = delete;
+
+    /// End the loop and wait for its final frame.
+    void stop () {
+        context_->is_running = false;
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+    }
+
+    private:
+    std::shared_ptr<vayu::core::RunContext> context_;
+    std::thread thread_;
+};
+
+/// Every live frame @p context holds, each one's `data:` line parsed.
+std::vector<nlohmann::json> live_frames (const vayu::core::RunContext& context) {
+    constexpr std::string_view data_field = "data: ";
+    std::vector<nlohmann::json> frames;
+    for (const std::string_view payload : context.ticks_since (0).payloads) {
+        const auto data_at = payload.find (data_field);
+        if (data_at == std::string_view::npos) {
+            ADD_FAILURE () << "not an SSE data frame: " << payload;
+            continue;
+        }
+        const auto json_at = data_at + data_field.size ();
+        frames.push_back (nlohmann::json::parse (
+        payload.substr (json_at, payload.find ('\n', json_at) - json_at)));
+    }
+    return frames;
+}
+
+/// The newest live frame's `capacity` block, or an empty object when it has
+/// none, so a caller reads its default instead of throwing.
+nlohmann::json newest_capacity_block (const vayu::core::RunContext& context) {
+    const auto frames = live_frames (context);
+    if (frames.empty ()) {
+        return nlohmann::json::object ();
+    }
+    return frames.back ().contains ("capacity") ?
+    frames.back ().at ("capacity") :
+    nlohmann::json::object ();
+}
+
+/// A `capacity` block's numeric member, 0 when it has not got one. Read with
+/// `at` and `get`: GCC 13 at -O3 rejects `json::value` on a number here under
+/// -Werror=null-dereference.
+size_t block_count (const nlohmann::json& block, const char* key) {
+    return block.contains (key) ? block.at (key).get<size_t> () : 0;
+}
+
+} // namespace
+
+// #2928: a capacity run's frames say where the search stands, from tick 0
+// (before any level opens) to a user's stop, against the real producer.
+// Mutation-check: drop the `publish_progress` call in open_level and the wait
+// for a judged level times out; drop the one in finish and the final frame
+// names no stop reason.
+TEST_F (LoadStrategyTest, LiveFramesCarryTheCapacitySearchState) {
+    vayu::db::Database db (TEST_DB_PATH);
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run-capacity-frame", nlohmann::json{ { "mode", "capacity" } });
+    vayu::core::CapacitySearch search (search_config (), context);
+    LiveProducer producer (context, db);
+
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return !newest_capacity_block (*context).empty (); }))
+    << "tick 0 carried no capacity block";
+    EXPECT_EQ (live_frames (*context).front ().at ("capacity"),
+    (nlohmann::json{ { "level", 0 }, { "levelElapsedMs", 0 }, { "levelsJudged", 0 } }))
+    << "tick 0 is emitted before the first level opens";
+
+    ASSERT_TRUE (search.advance (0));
+    const size_t first_level = search.level ();
+    auto& collector          = *context->metrics_collector;
+    // Each poll answers one more request and advances the search past its
+    // step, so the level is judged on the first counted tick that saw one.
+    ASSERT_TRUE (vayu::tests::wait_until ([&] () {
+        collector.record_success (200, 20.0, 0.0);
+        (void)search.advance (SEARCH_STEP_MS);
+        return block_count (newest_capacity_block (*context), "levelsJudged") == 1;
+    }))
+    << "no frame counted the judged level: "
+    << newest_capacity_block (*context).dump ();
+
+    const auto live = newest_capacity_block (*context);
+    EXPECT_NE (search.level (), first_level)
+    << "the judged level was not replaced";
+    EXPECT_EQ (live.at ("level").get<size_t> (), search.level ())
+    << "the frame paired the judged count with another level";
+    EXPECT_TRUE (live.at ("levelElapsedMs").is_number_integer ()) << live.dump ();
+    EXPECT_FALSE (live.contains ("stopReason"))
+    << "a live search has no stop reason: " << live.dump ();
+
+    context->should_stop = true;
+    const auto summary   = search.finish ();
+    producer.stop ();
+
+    EXPECT_EQ (summary.stop_reason, vayu::core::capacity_stop::STOPPED);
+    const auto last = newest_capacity_block (*context);
+    EXPECT_EQ (last.at ("stopReason").get<std::string> (), summary.stop_reason)
+    << "the final frame and the report disagree on why the search stopped: "
+    << last.dump ();
+    EXPECT_EQ (block_count (last, "levelsJudged"), 1U);
+}
+
+// A search that ends itself publishes its own reason, here the deadline.
+// Mutation-check: drop the `publish_progress` call in finish and the final
+// frame names no reason.
+TEST_F (LoadStrategyTest, TheFinalFrameCarriesTheSearchsOwnStopReason) {
+    vayu::db::Database db (TEST_DB_PATH);
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run-capacity-deadline-frame", nlohmann::json{ { "mode", "capacity" } });
+    const auto config = search_config ();
+    vayu::core::CapacitySearch search (config, context);
+    LiveProducer producer (context, db);
+
+    ASSERT_TRUE (search.advance (0));
+    EXPECT_FALSE (search.advance (config.deadline_ms));
+    const auto summary = search.finish ();
+    producer.stop ();
+
+    EXPECT_EQ (summary.stop_reason, vayu::core::capacity_stop::DEADLINE);
+    const auto last = newest_capacity_block (*context);
+    EXPECT_EQ (last.at ("stopReason").get<std::string> (), vayu::core::capacity_stop::DEADLINE)
+    << last.dump ();
+    EXPECT_EQ (block_count (last, "level"), SEARCH_START_CONCURRENCY);
+}
+
+// Every other run's frames carry no `capacity` key at all, rather than a
+// zeroed one a reader would take for a search at level 0.
+// Mutation-check: emit the block whatever the mode and this fails.
+TEST_F (LoadStrategyTest, OnlyACapacityRunsFramesCarryTheCapacityBlock) {
+    vayu::db::Database db (TEST_DB_PATH);
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run-not-capacity-frame", nlohmann::json{ { "mode", "constant_concurrency" } });
+    LiveProducer producer (context, db);
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&] () { return context->ticks_since (0).payloads.size () >= 3; }))
+    << "the producer never emitted three frames";
+    producer.stop ();
+
+    const auto frames = live_frames (*context);
+    ASSERT_GE (frames.size (), 3u);
+    for (const auto& frame : frames) {
+        EXPECT_FALSE (frame.contains ("capacity")) << frame.dump ();
+    }
+}
+
+TEST (RunsCapacitySearch, IsTrueOnlyForTheCapacityMode) {
+    using vayu::core::runs_capacity_search;
+    EXPECT_TRUE (runs_capacity_search ({ { "mode", "capacity" } }));
+    for (const char* mode :
+    { "constant_rps", "constant_concurrency", "ramp_up", "iterations", "legacy" }) {
+        EXPECT_FALSE (runs_capacity_search ({ { "mode", mode } })) << mode;
+    }
+    EXPECT_FALSE (runs_capacity_search (nlohmann::json::object ()));
+    EXPECT_FALSE (runs_capacity_search ({ { "mode", 5 } }))
+    << "a mode that is not a string is not a capacity run, and does not throw";
+}
+
 // ============================================================================
 // Per-phase histograms on the completion path (issue #476)
 // ============================================================================
