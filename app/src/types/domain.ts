@@ -2311,7 +2311,8 @@ export interface HeaderLine {
  *
  * `url` and `schemeDowngrade` are issue #2949, and absent on a hop from an
  * engine or a stored trace from before it. `url` is the request the hop
- * answered as libcurl resolved it (a relative `Location` already joined), with
+ * answered: the requested URL for the first hop, the previous hop's `Location`
+ * resolved against it for each later one, with
  * the values of credential query parameters blanked by the engine; `""` when
  * libcurl reported none. `schemeDowngrade` is true when that request went over
  * `https` and the next over `http`.

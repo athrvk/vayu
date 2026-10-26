@@ -187,9 +187,14 @@ class MockHttpBin {
             res.set_redirect ("/redirect/1", 301);
         });
 
-        // /rel/start - a Location with no leading slash, which only resolves
-        // against the URL that was requested (#2949).
+        // /rel/start -> /rel/mid -> /rel/end by Locations with no leading
+        // slash, which only resolve against the URL they answered (#2949). The
+        // second hop's URL is the first Location resolved, so it is the one
+        // that proves resolution.
         svr_.Get ("/rel/start", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_redirect ("mid", 302);
+        });
+        svr_.Get ("/rel/mid", [] (const httplib::Request&, httplib::Response& res) {
             res.set_redirect ("end", 302);
         });
         svr_.Get ("/rel/end", [] (const httplib::Request&, httplib::Response& res) {
@@ -716,7 +721,9 @@ TEST_F (HttpClientTest, EachRedirectHopRecordsTheUrlItsOwnRequestWentTo) {
 }
 
 // A Location that is not a full URL is recorded as the URL libcurl resolved it
-// to, because that is the request that was sent.
+// to, because that is the request that was sent: the second hop's URL exists
+// only as the first hop's relative Location. Mutation-check: record the raw
+// Location text for the second hop and it reads "mid".
 TEST_F (HttpClientTest, ARelativeLocationIsRecordedAsTheUrlItResolvedTo) {
     Request request;
     request.method           = HttpMethod::GET;
@@ -726,8 +733,10 @@ TEST_F (HttpClientTest, ARelativeLocationIsRecordedAsTheUrlItResolvedTo) {
     auto result = client_->send (request);
 
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
-    ASSERT_EQ (result.value ().redirect_hops.size (), 1U);
-    EXPECT_EQ (result.value ().redirect_hops.front ().url, mock_->url ("/rel/start"));
+    const auto& hops = result.value ().redirect_hops;
+    ASSERT_EQ (hops.size (), 2U);
+    EXPECT_EQ (hops[0].url, mock_->url ("/rel/start"));
+    EXPECT_EQ (hops[1].url, mock_->url ("/rel/mid"));
     EXPECT_EQ (result.value ().body, "done");
 }
 

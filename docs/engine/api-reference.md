@@ -7660,9 +7660,9 @@ send followed** (issue #2461), in the order they arrived, each as
 shaped as above. `headers`
 and `headerLines` hold the final hop only, so a `Set-Cookie` or `Location` on an
 earlier hop - the `302` that answers a login and sets the session cookie - is
-readable nowhere else. `url` is the URL of the request that hop answered, as
-libcurl resolved it (a relative `Location` is already joined to its base, userinfo
-is removed), with the value of the request's auth-written query parameter, and
+readable nowhere else. `url` is the URL of the request that hop answered: the URL the
+send went to for the first hop, the previous hop's `Location` resolved against it
+for each later one (userinfo is removed), with the value of the request's auth-written query parameter, and
 of any query parameter named like a credential, blanked; `""` when libcurl
 reported none. `schemeDowngrade` is true when that
 request went over `https` and the next one over `http`: the one hop on which an

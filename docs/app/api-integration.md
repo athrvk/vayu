@@ -1858,7 +1858,8 @@ stores the folded map.
 
 `redirects` is the redirect responses the send followed (issue #2461): one
 `{ status, statusText, headerLines, url?, schemeDowngrade? }` per 3xx, in arrival
-order. `url` is the request that hop answered, as libcurl resolved it, with the
+order. `url` is the request that hop answered (the requested URL for the first hop, the
+previous hop's `Location` resolved against it after that), with the
 values of credential query parameters blanked engine-side; `schemeDowngrade` is
 true when that request went over `https` and the next over `http` (issue #2949).
 Both are absent on a hop from an engine or a stored trace from before the
