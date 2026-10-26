@@ -227,6 +227,15 @@ consumes it.
   level the search gave out at, in the destructive role beside the amber
   breakpoint line): the engine reports the knee in the final report alone, so
   the live scatter has the SLO line and the breakpoint, nothing more.
+- **A capacity run's first hero card names the search, not utilisation**
+  (#2929). `CapacitySearchCard` replaces `ConcurrencyUtilCard` for `capacity`:
+  its "N of 100 active" read progress toward the ceiling as load held. Live it
+  shows the level being measured, the time into it and the levels judged, from
+  the frame's `capacity` block (#2928; `DisplayMetrics.capacity` ->
+  `DashboardDerived.liveCapacity` in `MetricsView`); once the report is here it
+  reads `DashboardDerived.capacity` ("41 virtual users held", "gave out at 51 of
+  up to 100"). The header prints a capacity run's configured count as "up to N
+  virtual users" (`DashboardHeader`): it is the ceiling.
 - **A capacity run's Saturation card reads the search's stop reason, and never
   says "healthy"** (#2816). `ramp_up` keeps `SaturationCard` ("healthy" /
   "degrading" off the ticks); `capacity` mounts `CapacitySaturationCard`, because
@@ -287,7 +296,7 @@ consumes it.
   to `currentConcurrency` live and `peakConcurrency` once finished, and the chart
   to `current_concurrency` per tick, so such a run reads as it always did. The
   chart keeps the last tick of a bucket like the other windowed series (a mean
-  is not a maximum). `capacity`, `ramp_up` and `constant_rps` stay on the instant in the card and the chart. The window credits a request to the second it completes in, so a target slower than the window reads high for a tick and low after; the card clamps to the configured users. The "Peak
+  is not a maximum). `ramp_up` and `constant_rps` stay on the instant in the chart, and `capacity` has no utilisation card (above). The window credits a request to the second it completes in, so a target slower than the window reads high for a tick and low after; the card clamps to the configured users. The "Peak
   virtual users" stat and `p99AtPeak` stay on the peak.
 - **A finished `ramp_up` run's concurrency card is titled for the peak** (#2870).
   Instantaneous concurrency is 0 once a run ends, so `HeroRow` already hands

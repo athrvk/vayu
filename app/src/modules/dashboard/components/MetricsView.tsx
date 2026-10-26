@@ -269,6 +269,7 @@ function MetricsView({
 			startConcurrency: rampConfig?.startConcurrency,
 			targetConcurrency: rampConfig?.targetConcurrency,
 			breakpoint,
+			liveCapacity: metrics.capacity,
 			p99AtPeakMs,
 		};
 	}, [

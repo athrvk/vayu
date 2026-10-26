@@ -19,6 +19,7 @@ import { ErrorRateCard } from "./ErrorRateCard";
 import { DroppedRequestsCard } from "./DroppedRequestsCard";
 import { AchievedThroughputCard } from "./AchievedThroughputCard";
 import { ConcurrencyUtilCard } from "./ConcurrencyUtilCard";
+import { CapacitySearchCard } from "./CapacitySearchCard";
 import { ProgressCard } from "./ProgressCard";
 import { ThroughputCard } from "./ThroughputCard";
 import { CurrentConcurrencyCard } from "./CurrentConcurrencyCard";
@@ -98,15 +99,18 @@ function renderModeCards(d: DashboardDerived) {
 		// Capacity discovery climbs toward the ceiling the user set, so the
 		// question its hero answers is "how far up is it, and has the target
 		// given out yet" - the same pair `ramp_up` asks, read against the cap
-		// rather than against a planned curve. `CurrentConcurrencyCard` is
+		// rather than against a planned curve. `ConcurrencyUtilCard` is not
+		// reused either: its "N of 100 active" reads progress toward the ceiling
+		// as load held (#2929). `CurrentConcurrencyCard` is
 		// deliberately not reused here: its subtitle states a ramp duration and
 		// a ramp lag, and a search has neither.
 		case "capacity":
 			return (
 				<>
-					<ConcurrencyUtilCard
-						currentConcurrency={activeConcurrency}
-						configuredConcurrency={d.configuredConcurrency}
+					<CapacitySearchCard
+						live={d.liveCapacity}
+						capacity={d.capacity}
+						ceiling={d.configuredConcurrency}
 					/>
 					<CapacitySaturationCard
 						capacity={d.capacity}
