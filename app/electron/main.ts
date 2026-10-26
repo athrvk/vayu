@@ -58,6 +58,7 @@ import {
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { installQuitOnSignal } from "./quit-signals.js";
+import { installQuitOnSessionEnd } from "./session-end.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createLoginItem, registerLoginItemIpc } from "./login-item.js";
 import { registerForRestart, wasRestartedAfterReboot } from "./restart-registration.js";
@@ -767,6 +768,14 @@ function createWindow() {
 
 	mainWindow.on("closed", () => {
 		mainWindow = null;
+	});
+
+	// Windows logoff and shutdown never reach `before-quit`; see session-end.ts.
+	// Nobody can answer a dialog at logoff, so neither one is asked (#1363, #1908).
+	installQuitOnSessionEnd(mainWindow, () => {
+		serviceStopGuard.markQuitUnattended();
+		flushFailureGate.markQuitUnattended();
+		app.quit();
 	});
 }
 
