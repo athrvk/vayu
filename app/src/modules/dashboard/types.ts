@@ -13,7 +13,7 @@
 
 import type { CapacityResult } from "@/components/shared/capacityStop";
 import type { RunOutcome } from "@/components/shared/run-outcome";
-import type { LoadTestMetrics } from "@/types";
+import type { LiveCapacityState, LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
 import type { DispatchStatus } from "./utils/dispatchLag";
@@ -214,6 +214,11 @@ export interface DashboardDerived {
 	 */
 	capacity?: CapacityResult;
 	/**
+	 * Where a capacity search stands, off the latest live frame (#2928). Absent
+	 * for a stored run, an engine from before the block and every other mode.
+	 */
+	liveCapacity?: LiveCapacityState;
+	/**
 	 * Worst whole-second p99 (ms) among the ticks at the run's peak load; absent
 	 * where no per-tick series reached the peak, and the stat falls back to
 	 * `p99Latency`.
@@ -260,4 +265,6 @@ export interface DisplayMetrics {
 	// Run progress - feeds the iterations-mode ETA stat (live only).
 	requests_sent?: number;
 	requests_expected?: number;
+	// A capacity run's search state (#2928); live only.
+	capacity?: LiveCapacityState;
 }
