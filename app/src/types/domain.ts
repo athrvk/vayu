@@ -1906,9 +1906,10 @@ interface RunFields {
  * A run as the engine lists it. `type` decides what `resultSummary` holds, so
  * narrow on it before reading the summary: a design row's is its one exchange
  * ({@link RunResultSummary}), a terminal load row's is the run's headline
- * numbers ({@link LoadResultSummary}), and a collection run's row has none.
- * `GET /runs/:id` carries neither: it attaches a design run's whole `result`, and
- * the report serves a load run's numbers.
+ * numbers ({@link LoadResultSummary}), and a terminal collection row's is its
+ * step counts ({@link CollectionResultSummary}).
+ * `GET /runs/:id` carries none of them: it attaches a design run's whole
+ * `result`, and the report serves a load or collection run's numbers.
  */
 export type Run =
 	| (RunFields & { type: "load"; resultSummary?: LoadResultSummary })
@@ -1917,8 +1918,9 @@ export type Run =
 	// list), not the load-test report: a scenario run's `results[]` are step
 	// executions, so the load report's percentiles would describe a sequence as if
 	// it were one request repeated. The sidebar row is still the non-load shape,
-	// which `RunItem.run-types.test.tsx` pins.
-	| (RunFields & { type: "scenario"; resultSummary?: undefined });
+	// which `RunItem.run-types.test.tsx` pins: the row carries the counts (#2954)
+	// for a reader of the wire, and no badge or glyph reads them.
+	| (RunFields & { type: "scenario"; resultSummary?: CollectionResultSummary });
 
 /**
  * The outcome of a design run's single exchange, carried by its **list row**
@@ -1980,6 +1982,27 @@ export interface LoadResultSummary {
 	 * level already failed. `stopReason` is the key `STOP_REASONS` words.
 	 */
 	capacity?: LoadResultCapacity;
+}
+
+/**
+ * A **terminal collection run's** list row, read engine-side from the stored
+ * `summary.scenario` block (#2954). The four counts are disjoint outcomes of the
+ * run's steps, and `errored` sits beside `failed` because a run whose steps only
+ * errored would otherwise read clean. Every key is absent when the run did not
+ * record it, never zeroed; a row still pending or running has no
+ * `resultSummary` at all, and `verdict` is present only when the run declared
+ * budgets.
+ *
+ * No renderer reader: the history row's badge and glyph stay gated on a load
+ * run, and the MCP `list_runs` row, which passes the summary through, is the
+ * consumer.
+ */
+export interface CollectionResultSummary {
+	passed?: number;
+	failed?: number;
+	skipped?: number;
+	errored?: number;
+	verdict?: "passed" | "failed";
 }
 
 /** The levels a capacity search settled on - see {@link LoadResultSummary.capacity}. */

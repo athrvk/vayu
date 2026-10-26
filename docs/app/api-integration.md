@@ -1077,7 +1077,10 @@ length: `resultSummary` (`{statusCode, latencyMs}`), the outcome of its single
 exchange. `GET /runs/:id` attaches the whole `result` instead, trace and bodies
 included, which is why the list carries the two numbers rather than that - and
 why the context bar's Recent sends section is one list call and no report fetch.
-A collection run's row carries no `resultSummary`. A load run's results are
+A terminal collection run's row carries `{passed, failed, skipped, errored,
+verdict}` from its stored summary (#2954), each key only when recorded; the
+renderer does not read it - no badge or glyph on the row changes - and the MCP
+`list_runs` rows are its consumer. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and
