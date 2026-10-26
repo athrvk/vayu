@@ -1052,7 +1052,7 @@ governs what a run measures rather than what it keeps:
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
-| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests and environments deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
+| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests, environments and saved examples deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
@@ -2142,12 +2142,16 @@ the full kind table.
 
 ## Trash
 
-What deleting a collection, a request or an environment now does, and how to
-undo it (issue #988; environments #2970). `DELETE /collections/:id`,
-`DELETE /requests/:id` and `DELETE /environments/:id` stamp rows instead of
-removing them; every other read surface filters stamped rows out, so the tree
-and the environment list the app sees are unchanged, and these three endpoints
-are the whole of what the stamp buys.
+What deleting a collection, a request, an environment or a saved example now
+does, and how to undo it (issue #988; environments #2970; examples #2971).
+`DELETE /collections/:id`, `DELETE /requests/:id`, `DELETE /environments/:id`
+and, for an example a person saved (`origin: "user"`),
+`DELETE /requests/:id/examples/:exampleId` stamp rows instead of removing them;
+every other read surface filters stamped rows out, so the tree, the environment
+list and a request's examples look the same as after a hard delete, and these
+three endpoints are the whole of what the stamp buys. An imported example is
+not trashed: its delete leaves the tombstone a spec sync reads (see
+[DELETE /requests/:id/examples/:exampleId](#delete-requestsidexamplesexampleid)).
 
 Two rules decide what a restore of a collection or request puts back:
 
@@ -2168,6 +2172,16 @@ same write, so the active slot is free for another environment, and a restore
 brings it back inactive: making it active again is a `PUT` with
 `isActive: true`, the client's choice rather than the trash's.
 
+An example hangs under its request, one level below where a request hangs under
+its collection, and follows the request's rule. Its delete stamps its one row.
+It is a root only while its request is live: under a trashed request it is part
+of what that request's entry stands for, and restoring the request leaves the
+example's own earlier delete in the trash as a root again. Restoring an example
+whose request is in the trash or gone is a `409` naming the request to restore
+first, and so is restoring one into a request that already holds the maximum of
+100 examples. A stamped example whose request row is gone entirely is listed
+nowhere.
+
 Rows sit in the trash until they are purged: explicitly through
 `DELETE /trash/:id`, or by the startup sweep once they are older than
 `trashRetentionDays` (default 30; `0` keeps them forever).
@@ -2176,7 +2190,8 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count. Every deleted environment is a root.
+`collections` and `requests` count. Every deleted environment is a root; a
+deleted example is one while its request is live.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2207,25 +2222,36 @@ a user asked to delete, never what their cascade took with them; that is what
       "collections": 0,
       "requests": 0,
       "variables": 6
+    },
+    {
+      "id": "exa_1234567890",
+      "kind": "example",
+      "name": "200 - created",
+      "deletedAt": 1787745400000,
+      "parentId": "req_1234567890",
+      "collections": 0,
+      "requests": 0
     }
   ],
-  "total": 2
+  "total": 3
 }
 ```
 
-`kind` is `"collection"`, `"request"` or `"environment"`. `parentId` is a
-collection's parent (`null` at the tree root), a request's owning collection, or
-`null` for an environment. `collections` and `requests` are `0` for a request
-and an environment. `variables` is carried by an environment entry only - the
+`kind` is `"collection"`, `"request"`, `"environment"` or `"example"`.
+`parentId` is a collection's parent (`null` at the tree root), a request's
+owning collection, an example's owning **request**, or `null` for an
+environment. `collections` and `requests` are `0` for a request, an environment
+and an example. `variables` is carried by an environment entry only - the
 number of variables its stored map holds - and is absent, not `0`, on the other
-two kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
+three kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
 
 ### POST /trash/:id/restore
 
-Put a deleted collection, request or environment back, with everything the
-same delete took. Takes no body. An environment comes back exactly as it was
-deleted except that it is inactive (see [Trash](#trash)), and its answer
-carries `variables` like its list entry.
+Put a deleted collection, request, environment or example back, with
+everything the same delete took. Takes no body. An environment comes back
+exactly as it was deleted except that it is inactive (see [Trash](#trash)), and
+its answer carries `variables` like its list entry. An example comes back
+exactly as it was deleted, `order` included.
 
 **Response:** the entry that was restored, plus what happened to it:
 ```json
@@ -2248,12 +2274,15 @@ carries `variables` like its list entry.
 |--------|------|
 | `404` | Nothing in the trash carries that id - a live row, or one already purged |
 | `409` | A request whose collection is itself deleted or gone; restore the collection first |
+| `409` | An example whose request is itself deleted or gone; restore the request first |
+| `409` | An example whose request already holds the maximum of 100 examples; delete one first |
 
 ### DELETE /trash/:id
 
-Destroy a deleted collection, request or environment for good, with its whole
-subtree - requests, and the examples they own; an environment is its one row. This is the hard cascade soft delete
-replaced, asked for deliberately; there is no undo for it.
+Destroy a deleted collection, request, environment or example for good, with
+its whole subtree - requests, and the examples they own, trashed ones included;
+an environment or an example is its one row. This is the hard cascade soft
+delete replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
 left inside the subtree goes too, because a request under a removed collection
@@ -2286,7 +2315,9 @@ otherwise come back shuffled by the id tiebreak.
 
 **Caps.** A `body` over **1 MiB** is a `400` rather than a truncation - an
 example served as if it were whole when it is not is worse than a refused write
-- and a request holds at most **100** examples.
+- and a request holds at most **100** examples. Only live ones count: a
+tombstoned or trashed example does not, which is why restoring one into a full
+request is refused (see [Trash](#trash)).
 
 **`origin` says who wrote the row** (issue #588): `"import"` for everything an
 importer or a spec sync produced, `"user"` for one a person saved from a live
@@ -2453,8 +2484,17 @@ example is gone from every read (the list, a mock server, an export, and a `GET`
 or `PUT` on its id, all `404`), and a later sync leaves that response status
 alone rather than writing the document's example for it back. Re-importing the
 document is a fresh import and does bring it back, which is the only way it
-returns. An `origin: "user"` example is removed outright - nothing re-creates
-one, so there is no intent to keep.
+returns.
+
+**Deleting an example a person saved moves it to the [trash](#trash)** (#2971).
+An `origin: "user"` example is stamped `deleted_at` rather than removed:
+nothing re-creates one, so the row is the only copy of the response. It is gone
+from the same reads a tombstone is, a second `DELETE` is a `404`, it no longer
+counts against the 100-example cap, and [`GET /trash`](#get-trash) lists it
+(kind `example`, `parentId` its request) while its request is live.
+[`POST /trash/:id/restore`](#post-trashidrestore) brings it back as it was;
+[`DELETE /trash/:id`](#delete-trashid), or the startup sweep after
+`trashRetentionDays`, destroys it.
 
 The response is the same either way, because from the caller's side so is the
 outcome:

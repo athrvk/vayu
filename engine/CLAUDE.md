@@ -480,7 +480,7 @@ Key endpoints:
 | GET | `/health` | Health check |
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
-| GET | `/trash` | What deleting a collection, request or environment left recoverable (#988, environments #2970): roots only, each with what its cascade took (an environment entry alone carries `variables`, its count); `POST /trash/:id/restore` puts one back (an environment inactive), `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
+| GET | `/trash` | What deleting a collection, request, environment or user-saved example left recoverable (#988, environments #2970, examples #2971): roots only, each with what its cascade took (an environment entry alone carries `variables`, its count; an example's `parentId` is its request, and it is a root only while that request is live); `POST /trash/:id/restore` puts one back (an environment inactive; an example `409`s under a trashed or missing request or a full one), `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan) into the tree `/import/apply` persists (#877); reads only |
 | POST | `/import` | The same parse, flattened and applied in one call; what MCP `import_document` wraps. The app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM through the engine's one reader; what the app's `$ref` bundler needs |
@@ -662,8 +662,10 @@ logged as a warning: it means a client skipped composition.
   request's imported rows on any applied change; every read filters tombstones
   out (`get_request_examples`, `get_request_example`) and
   `get_suppressed_request_examples` is the single read that sees them, matching
-  on response **status**, which survives a reworded description. An example
-  imported from Postman keeps the saved response it came from in
+  on response **status**, which survives a reworded description. **Deleting a
+  user's example moves it to the Trash** (`deleted_at`, #2971) instead: the
+  same reads filter the stamp, and the trash lists, restores and purges it.
+  An example imported from Postman keeps the saved response it came from in
   **`postman_response`** (schema version 2): the entry as JSON text in source
   member order, `name`/`body` as `null` placeholders. An import writes it, and
   so does an app save that sends `savedFrom` (the request as written at Send,

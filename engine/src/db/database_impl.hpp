@@ -338,7 +338,10 @@ inline auto make_vayu_storage (const std::string& path) {
     // bumped with it.
     make_column ("postman_response", &RequestExample::postman_response),
     make_column ("created_at", &RequestExample::created_at),
-    make_column ("updated_at", &RequestExample::updated_at)),
+    make_column ("updated_at", &RequestExample::updated_at),
+    // Soft delete of a user's example (#2971), the `environments.deleted_at`
+    // shape: NULL is live.
+    make_column ("deleted_at", &RequestExample::deleted_at)),
 
     // Spec documents: OpenAPI documents, stored once and bound to collections
     // (issue #637). A new table, so sync_schema() creates it outright and there

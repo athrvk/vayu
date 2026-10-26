@@ -303,6 +303,15 @@ std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
             vayu::utils::invariant_value (environment.deleted_at, STAMPED),
             std::nullopt, 0, 0, variables };
     }
+
+    auto examples = impl_->storage.get_all<RequestExample> (where (
+    c (&RequestExample::id) == id && is_not_null (&RequestExample::deleted_at)));
+    if (!examples.empty ()) {
+        const auto& example = examples.front ();
+        return TrashEntry{ example.id, "example", example.name,
+            vayu::utils::invariant_value (example.deleted_at, STAMPED),
+            example.request_id, 0, 0, std::nullopt };
+    }
     return std::nullopt;
 }
 
@@ -347,6 +356,16 @@ std::vector<TrashEntry> Database::get_trash () {
     for (const auto& environment_id : impl_->storage.select (
          &Environment::id, where (is_not_null (&Environment::deleted_at)))) {
         push_root (entries, environment_id);
+    }
+    // An example under a trashed request is part of that request's entry, and
+    // one whose request row is gone has nothing to come back under (#2971).
+    for (const auto& [example_id, request_id] :
+    impl_->storage.select (columns (&RequestExample::id, &RequestExample::request_id),
+    where (is_not_null (&RequestExample::deleted_at)))) {
+        if (request_is_absent_locked (request_id)) {
+            continue;
+        }
+        push_root (entries, example_id);
     }
 
     // Newest first - what a trash view shows at the top - with `id` as the
@@ -458,6 +477,9 @@ const std::string& id) {
     if (entry->kind == "environment") {
         return restore_environment_locked (*entry);
     }
+    if (entry->kind == "example") {
+        return restore_example_locked (*entry);
+    }
     throw std::logic_error (
     "Trash entry '" + id + "' has unknown kind '" + entry->kind + "'");
 }
@@ -473,6 +495,10 @@ void Database::purge_trash_entry_locked (const TrashEntry& entry) {
     }
     if (entry.kind == "environment") {
         purge_environment_locked (entry.id);
+        return;
+    }
+    if (entry.kind == "example") {
+        purge_example_locked (entry.id);
         return;
     }
     throw std::logic_error (

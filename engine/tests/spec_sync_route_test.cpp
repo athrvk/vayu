@@ -740,6 +740,52 @@ TEST_F (SpecSyncRouteTest, ARewordedDescriptionDoesNotBringADeletedExampleBack) 
     EXPECT_TRUE (db_->get_request_examples (request).empty ());
 }
 
+// A user's trashed example is gone to the refresh's plan (#2971): the
+// document's block starts where it would on a request holding no example, and
+// the refresh neither deletes the trashed row nor brings it back - it stays
+// restorable. Mutation check: drop the trash filter from
+// `get_request_examples` and the trashed row is listed and the block starts
+// past it.
+TEST_F (SpecSyncRouteTest, ARefreshPlansAroundATrashedUserExampleAndLeavesItInTheTrash) {
+    const std::string request =
+    create_request (root_, json{ { "specOperation", list_pets () } });
+    const std::string trashed =
+    seed_example (request, vayu::core::constants::request_example::ORIGIN_USER, 0);
+    ASSERT_EQ (routes::delete_request_example_response (*db_, request, trashed).first, 200);
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+    json::array ({ json{ { "id", request }, { "examples", true } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    auto rows = db_->get_request_examples (request);
+    ASSERT_EQ (rows.size (), 2u)
+    << "the document's 200 and 404, and no trashed row";
+    EXPECT_EQ (rows[0].order, 0);
+    EXPECT_EQ (rows[1].order, 1);
+
+    ASSERT_HAS_VALUE (db_->restore_deleted (trashed));
+    EXPECT_EQ (db_->get_request_examples (request).size (), 3u);
+}
+
+// A sync's delete stays hard (#1046) and takes the request's trashed examples
+// with it, so nothing is left behind that a restore could find.
+TEST_F (SpecSyncRouteTest, ASyncDeleteRemovesTheRequestsTrashedExamples) {
+    const std::string gone = create_request (root_, json{ { "name", "list owners" } });
+    const std::string trashed =
+    seed_example (gone, vayu::core::constants::request_example::ORIGIN_USER, 0);
+    ASSERT_EQ (routes::delete_request_example_response (*db_, gone, trashed).first, 200);
+
+    auto [status, response] = routes::spec_sync_response (
+    *db_, body (json{ { "delete", json::array ({ gone }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const auto restored = db_->restore_deleted (trashed);
+    ASSERT_FALSE (restored.has_value ());
+    EXPECT_EQ (restored.error ().reason, vayu::db::RestoreRefusal::NotFound)
+    << "the row is gone, not stranded under a missing request";
+}
+
 // ---------------------------------------------------------------------------
 // The payload's own shape
 // ---------------------------------------------------------------------------

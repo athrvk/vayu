@@ -67,8 +67,9 @@ namespace vayu::db {
  * 8 - `collections.spec_file` and `collections.data_file`, the files a
  *     collection's Spec and Data tabs are bound to (#2765);
  * 9 - `requests.timeout_ms`, a request's own timeout (#2937);
- *     `environments.deleted_at`, the environment trash (#2970, folded into
- *     the same unreleased version).
+ *     `environments.deleted_at`, the environment trash (#2970), and
+ *     `request_examples.deleted_at`, the example trash (#2971), both folded
+ *     into the same unreleased version.
  */
 inline constexpr int SCHEMA_VERSION = 9;
 
@@ -177,23 +178,25 @@ struct DesignResultOutcome {
  */
 struct TrashEntry {
     std::string id;
-    /// "collection", "request" or "environment" - the three tables the trash
-    /// spans, so a client knows which shape it is looking at without a second
-    /// read. Every dispatch on it names all three and throws on anything else.
+    /// "collection", "request", "environment" or "example" - the four tables
+    /// the trash spans, so a client knows which shape it is looking at without
+    /// a second read. Every dispatch on it names all four and throws on
+    /// anything else.
     std::string kind;
     std::string name;
     /// When the delete ran, in Unix ms. Also the cohort key - see
     /// `Collection::deleted_at`.
     int64_t deleted_at = 0;
-    /// The collection this row hung under: a collection's parent (absent at the
-    /// tree root), a request's owning collection (always present). Absent for
-    /// an environment, which hangs under nothing.
+    /// The row this one hung under: a collection's parent (absent at the tree
+    /// root), a request's owning collection (always present), an example's
+    /// owning *request* (always present, #2971). Absent for an environment,
+    /// which hangs under nothing.
     std::optional<std::string> parent_id;
     /// Descendants *this delete* took with it - the cohort, and therefore
     /// exactly what a restore puts back. A purge may take more (a row an
     /// earlier delete left inside the same subtree), which is the one place
-    /// these counts are a floor rather than the whole. Both 0 for a request
-    /// and an environment.
+    /// these counts are a floor rather than the whole. Both 0 for a request,
+    /// an environment and an example.
     int64_t collections = 0;
     int64_t requests    = 0;
     /// How many variables an environment holds, as `parse_variables` reads its
@@ -220,9 +223,11 @@ struct RunHistoryCleared {
 };
 
 /// Why a restore did not happen. `NotFound` is a 404 - nothing in the trash
-/// carries that id; `OwnerGone` is a 409 - a request whose collection is itself
-/// deleted or missing, which has no root to come back to.
-enum class RestoreRefusal : std::uint8_t { NotFound, OwnerGone };
+/// carries that id; `OwnerGone` is a 409 - a request whose collection, or an
+/// example whose request, is itself deleted or missing, which has no root to
+/// come back to; `OverLimit` is a 409 - an example whose request already holds
+/// `request_example::MAX_PER_REQUEST` live examples (#2971).
+enum class RestoreRefusal : std::uint8_t { NotFound, OwnerGone, OverLimit };
 
 /// A refused restore, as the route reports it (issue #988).
 struct RestoreFailure {
@@ -442,7 +447,10 @@ class Database {
 
     /// Every deleted root, newest first. A root is a stamped row whose owner is
     /// *not* stamped: the thing the user deleted, never what its cascade took.
-    /// A deleted environment has no owner, so it is always a root (#2970).
+    /// A deleted environment has no owner, so it is always a root (#2970). A
+    /// deleted example is a root only while its request is live (#2971): under
+    /// a trashed request it is part of that request's entry, and with no
+    /// request row at all it is listed nowhere, having nothing to come back to.
     std::vector<TrashEntry> get_trash ();
 
     /**
@@ -460,6 +468,10 @@ class Database {
      * An environment comes back unconditionally and inactive (#2970): it has
      * no owner to check, and its delete cleared `is_active`, which a restore
      * does not set again - activating it is the client's choice to make.
+     *
+     * An example comes back only under a live request and only while that
+     * request has room under `MAX_PER_REQUEST` (#2971); either refusal is a
+     * 409 and leaves the row in the trash.
      */
     std::expected<TrashOutcome, RestoreFailure> restore_deleted (const std::string& id);
 
@@ -494,17 +506,26 @@ class Database {
     // an example only means anything next to the request it answers.
 
     void save_request_example (const RequestExample& e);
-    /// A suppressed row reads as absent - see the definition (issue #722).
+    /// A suppressed or trashed row reads as absent - see the definition
+    /// (issues #722, #2971).
     std::optional<RequestExample> get_request_example (const std::string& id);
     /// Oldest first (created_at, then id) - the order a mock server resolves
     /// "the first example" in, so it is a contract rather than a detail.
-    /// Excludes tombstones, so a deleted imported example is gone to every
-    /// reader (issue #722).
+    /// Excludes tombstones and trashed rows, so a deleted example of either
+    /// origin is gone to every reader (issues #722, #2971).
     std::vector<RequestExample> get_request_examples (const std::string& request_id);
     /// The tombstones only - deleted imported examples, which exist so a spec
     /// sync does not write back what the user removed (issue #722).
     std::vector<RequestExample> get_suppressed_request_examples (const std::string& request_id);
+    /// Live examples only - what counts against `MAX_PER_REQUEST`.
     int64_t count_request_examples (const std::string& request_id);
+    /// Whether any row carries @p id, tombstoned or trashed included - the
+    /// collision check a create runs before its `replace`, which would
+    /// otherwise overwrite a row every read hides (#2971).
+    bool request_example_id_taken (const std::string& id);
+    /// Stamps a live example as deleted (#2971); the row stays for `GET /trash`
+    /// until a restore or a purge. The route sends only a user's own example
+    /// here - an imported one is tombstoned by `suppress_request_example`.
     void delete_request_example (const std::string& id);
     /// Keeps an imported example's row as a tombstone instead of removing it
     /// (issue #722). `now` is the caller's clock, as every other write here.
@@ -1292,9 +1313,9 @@ class Database {
     SubtreeRows rows = SubtreeRows::All); // db_collections.cpp
 
     /**
-     * @brief Destroy a collection subtree, a single request or a single
-     *        environment outright - examples, requests, then collections,
-     *        deepest first.
+     * @brief Destroy a collection subtree, a single request, a single
+     *        environment or a single example outright - examples, requests,
+     *        then collections, deepest first.
      *
      * The hard cascade soft delete replaced (issue #988), kept as the one
      * definition purge and retention both reach for. A collection purge takes
@@ -1306,6 +1327,7 @@ class Database {
     void purge_collection_locked (const std::string& id);  // db_collections.cpp
     void purge_request_locked (const std::string& id);     // db_requests.cpp
     void purge_environment_locked (const std::string& id); // db_environments.cpp
+    void purge_example_locked (const std::string& id);     // db_requests.cpp
 
     /**
      * @brief Destroy the trash entry @p entry names, by its kind - the one
@@ -1340,10 +1362,20 @@ class Database {
     bool owner_is_absent_locked (const std::optional<std::string>& owner_id); // database.cpp
 
     /**
-     * @brief The three shapes of `restore_deleted`, split by what a row can
+     * @brief Whether the request @p request_id names is missing or itself
+     *        deleted - `owner_is_absent_locked` for an example, whose owner is
+     *        a request and never the tree root (#2971). Both the listing and
+     *        the restore ask it, so they agree on what an example can come
+     *        back under. The caller must already hold the DB mutex.
+     */
+    bool request_is_absent_locked (const std::string& request_id); // db_requests.cpp
+
+    /**
+     * @brief The four shapes of `restore_deleted`, split by what a row can
      *        come back to: a request needs a live collection and refuses
-     *        without one, a collection re-parents to the tree root instead, and
-     *        an environment needs nothing.
+     *        without one, a collection re-parents to the tree root instead, an
+     *        environment needs nothing, and an example needs a live request
+     *        with room for it.
      *
      * Named steps rather than one function with every shape inside it (#1033's
      * rule, and what `readability-function-cognitive-complexity` reports).
@@ -1357,6 +1389,11 @@ class Database {
     /// Clears the stamp and nothing else: no owner, no cohort, no re-parent,
     /// and `is_active` stays false (#2970).
     TrashOutcome restore_environment_locked (const TrashEntry& entry); // db_environments.cpp
+    /// Refuses under a request that is not live (`OwnerGone`) or already holds
+    /// `MAX_PER_REQUEST` live examples (`OverLimit`); otherwise clears the
+    /// stamp and nothing else (#2971).
+    std::expected<TrashOutcome, RestoreFailure> restore_example_locked (
+    const TrashEntry& entry); // db_requests.cpp
 
     /**
      * @brief Clear `is_active` on every environment except @p keep_id.

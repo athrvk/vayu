@@ -880,10 +880,10 @@ See [Database Schema](db-schema.md) for the full column list.
    kind to `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
-3. **Trash retention**: collections, requests and environments deleted more
-   than `trashRetentionDays` ago are destroyed for good (issue #988,
-   environments #2970) - the subtree, its requests and their examples, or the
-   environment's one row. Until then a delete is only a stamp, and
+3. **Trash retention**: collections, requests, environments and saved
+   examples deleted more than `trashRetentionDays` ago are destroyed for good
+   (issue #988, environments #2970, examples #2971) - the subtree, its requests
+   and their examples, or the environment's or example's one row. Until then a delete is only a stamp, and
    `POST /trash/:id/restore` puts it back.
 
 All three passes are best-effort: a failure is logged and never blocks startup.

@@ -312,6 +312,23 @@ reason about a row nobody can see, and a restore brings it back inactive rather
 than taking the slot from whatever was activated since. A purge, explicit or by
 retention, removes the row.
 
+**A saved example a person made goes there too** (#2971), one level below a
+request. `DELETE /requests/:id/examples/:exampleId` on an `origin: "user"`
+example stamps `request_examples.deleted_at` on its one row, and every example
+read (the list, a mock server, both exports, the spec sync's refresh and the
+per-request cap) filters it out. An imported example keeps the tombstone it has
+had since #722 instead: a spec sync reads those to leave a removed response
+alone, and a trash entry would let a restore bring back what the document's
+next sync is told to skip. An example hangs under its request the way a request
+hangs under its collection, and takes the request's rule rather than the
+collection's: it is a trash root only while its request is live (under a
+trashed request it is part of what that request's entry stands for), and a
+restore is a `409` while the request is in the trash or gone, since an example
+has no root of its own to come back to. A restore is also refused when the
+request already holds its 100 live examples: the delete freed a slot a later
+save may have taken. Purging a request or collection removes its examples
+whatever their stamp, so a trashed example never outlives its request.
+
 ### 6. Response Viewer
 
 The Response Viewer shows the **RESOLVED** request in the "Raw Request" tab:
