@@ -269,7 +269,8 @@ export const mockServerListSchema = dataListSchema(z.looseObject({ mockId: optSt
 export const mockRoutesSchema = dataListSchema(
 	z.looseObject({ requestId: optStr, method: optStr, path: optStr, hasExample: optBool })
 );
-export const mockActivitySchema = dataListSchema();
+/** `get_mock_activity`: one page of the engine's activity ring, paged here (the route has no `offset`). */
+export const mockActivitySchema = pagedEnvelopeSchema();
 export const inboxListSchema = dataListSchema(z.looseObject({ inboxId: optStr }));
 
 /**

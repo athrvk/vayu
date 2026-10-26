@@ -256,6 +256,15 @@ rejected result as a broken tool and hides the body.
 `output-schema.conformance.test.ts` fails a read tool that is on neither side
 of that line, and an exception that stops being true.
 
+**Argument names are uniform** (#2446), held by
+`schema-naming.conformance.test.ts` over every tool's top-level inputs: an id
+is named for what it identifies (`requestId`, `runId`, `entryId`, `itemId`),
+never a bare `id`, and a `limit` comes with an `offset`. The exceptions are
+listed in the test with their reasons: the deprecated `id` aliases on
+`restore_trash_entry`, `purge_trash_entry` and `move_item` (#2962 retires them),
+and `get_live_metrics`, which answers the tail of a ring buffer and so has
+nothing to page from.
+
 The four categories partition tools by what they can do - and thus which gate
 applies: **read** (inspection; returns workspace data, with secrets withheld unless the
 user enables reveal - see [Secret values](#secret-values), which also covers
@@ -284,7 +293,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
-| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1; the answer is `{ticks, completed}` (#2955): `completed` is the stream's own `complete` event, `true` once the run ended and `false` when the time budget ended the read with the run still going, and only when `true` a `note` says the final tick's latency window may be empty (its percentiles can read 0) and the run's percentiles come from `get_run_report`; a tick that closes a second carries `statusSeconds` (#2866, as the engine sends it: the responses that completed in each second it closed, `[]` for none), the others do not; a capacity run's ticks carry `capacity` (#2928, as the engine sends it: `{level, levelElapsedMs, levelsJudged, stopReason?}`, `stopReason` once the search has ended), other runs' do not. The ticks that carry `statusSeconds` also carry `cumulativeLatency` / `cumulativePhases` (the run-so-far distributions) and, for a scenario load run, `scenario` (#2823: `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, no latency; the final tick included). The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
+| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number from 1 to 3000 (refused above, not clamped: 3000 is the stock live buffer, `liveReplayWindowMs` 300,000 ms at the 100 ms tick cadence), and there is no `offset` - it answers the tail of the buffer, so a page position has nothing to count from; the answer is `{ticks, completed}` (#2955): `completed` is the stream's own `complete` event, `true` once the run ended and `false` when the time budget ended the read with the run still going, and only when `true` a `note` says the final tick's latency window may be empty (its percentiles can read 0) and the run's percentiles come from `get_run_report`; a tick that closes a second carries `statusSeconds` (#2866, as the engine sends it: the responses that completed in each second it closed, `[]` for none), the others do not; a capacity run's ticks carry `capacity` (#2928, as the engine sends it: `{level, levelElapsedMs, levelsJudged, stopReason?}`, `stopReason` once the search has ended), other runs' do not. The ticks that carry `statusSeconds` also carry `cumulativeLatency` / `cumulativePhases` (the run-so-far distributions) and, for a scenario load run, `scenario` (#2823: `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, no latency; the final tick included). The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, a capacity search's result, a scenario's sequence and transactions, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path and held by the engine to the URL it sends after any pre-request script (`targetPolicy`); omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
@@ -308,13 +317,13 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it) |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); a restored row is withheld as the read of it is |
-| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm     |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId` (the bare `id` is a deprecated alias, #2962); a restored row is withheld as the read of it is |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm; names the entry with `entryId` (the bare `id` is a deprecated alias, #2962) |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
-| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
+| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId` (the bare `id` is a deprecated alias, #2962); `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
@@ -339,7 +348,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `start_mock_server`    | execute  | `POST /mock/start`                           | - (loopback-only listener, so no allowlist entry applies); the `latencyMs` ceiling and the `allowedOrigins` rules are the engine's |
 | `list_mock_servers`    | read     | `GET /mock`                                  | - (running mocks only - a stopped one has no record) |
 | `get_mock_routes`      | read     | `GET /mock/:id/routes`                       | - (a start-time snapshot, constant under a running mock, except each row's `hits` count) |
-| `get_mock_activity`    | read     | `GET /mock/:id/activity?limit=`              | - (newest first, 50 rows by default, 200 max; discarded when the mock stops, and re-fetched to see new entries rather than pushed; secret values read `<redacted>` unless revealed) |
+| `get_mock_activity`    | read     | `GET /mock/:id/activity?limit=200`           | - (the `{data, pagination}` envelope with `pagination.nextOffset` / `note` as `list_runs`, newest first, 50 rows by default, 200 max; the route has no `offset`, so the tool reads the engine's whole 200-entry ring and slices it - exact, not a truncation, and a mock logging between two pages shifts `offset` by what arrived; discarded when the mock stops, and re-fetched to see new entries rather than pushed; secret values read `<redacted>` unless revealed) |
 | `stop_mock_server`     | execute  | `POST /mock/:id/stop`                        | - (unknown id is a `404`, surfaced as a tool error) |
 | `start_webhook_inbox`  | execute  | `POST /inbox/start`                          | - (loopback-only listener; `bind` / `confirmNonLoopback` are never sent; the `allowedOrigins` rules are the engine's) |
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
@@ -769,7 +778,11 @@ Notes:
   gated exactly like `delete_collection`: it reads the entry off `GET /trash`
   first, so the confirmation prompt names what a mistyped id would otherwise
   destroy sight unseen, and an entry the trash does not hold is a refusal before
-  any prompt is shown.
+  any prompt is shown. Both name the entry with `entryId`, not a bare `id`
+  (#2446: an `id` beside `requestId` / `runId` / `environmentId` reads as "the
+  id of something else"). The old `id` is still accepted so a client that
+  cached the schema keeps working; a call that uses it succeeds and its result
+  carries a deprecation note. #2962 removes the alias.
 - **A saved request an agent writes is the one the builder writes** (issues
   #759, #795). `create_request` / `update_request` carry the request's `auth`
   block and the six **Settings** tab fields (`followRedirects`, `maxRedirects`,
@@ -871,7 +884,8 @@ Notes:
   still cannot do is refuse the pair together - the first move is committed by
   the time the second is rejected - or renumber the destination's siblings in the
   same write. What the
-  tool offers is the row menu's "Move to…": a destination, and `first` or
+  tool offers is the row menu's "Move to…" (the moved row is `itemId`; the bare
+  `id` is a deprecated alias, #2962, answered with a note): a destination, and `first` or
   `last` among its new siblings. Positions in between stay a UI gesture on
   purpose - naming one means reproducing the app's ordering arithmetic
   (`modules/collections/reorder-math.ts`) from outside it, and getting it wrong
@@ -1137,7 +1151,9 @@ Notes:
   watching a client under test calls it again to see what has arrived since
   the last read rather than trusting a cached copy - unlike the route table,
   which is worth fetching only once. It is capped at 200 rows per call (50 by
-  default) and, like the route table, is discarded outright on
+  default), pages with `offset` in the `{data, pagination}` envelope the other
+  paged reads answer (the engine route takes `limit` alone and keeps 200
+  entries, so the tool reads that whole ring and slices it) and, like the route table, is discarded outright on
   `stop_mock_server` rather than kept the way an inbox keeps its captures.
   **`allowedOrigins`** (issue #2367) is which browser pages may read the mock's
   answers, the half of reach that "loopback-only" does not decide: a page open

@@ -1992,7 +1992,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"restore_trash_entry",
-			{ id: "col_9" },
+			{ entryId: "col_9" },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
@@ -2023,7 +2023,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"restore_trash_entry",
-			{ id: "req_5" },
+			{ entryId: "req_5" },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBe(true);
@@ -2033,9 +2033,65 @@ describe("trash tools", () => {
 
 	test("restore_trash_entry refuses while writes are disabled, without calling the engine", async () => {
 		const client = fakeClient();
-		const res = await dispatchTool("restore_trash_entry", { id: "col_9" }, ctxWith(client));
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "col_9" },
+			ctxWith(client)
+		);
 		expect(res.isError).toBe(true);
 		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("restore_trash_entry answers the deprecated `id` and says to send `entryId`", async () => {
+		const client = fakeClient({
+			restoreTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, restored: true }),
+		});
+		const ctx = ctxWith(client, { allowWrites: true });
+		const legacy = await dispatchTool("restore_trash_entry", { id: "col_9" }, ctx);
+		expect(legacy.isError).toBeFalsy();
+		expect(client.restoreTrashEntry).toHaveBeenCalledWith("col_9", undefined);
+		expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
+			/Deprecated.*"entryId".*#2962/s
+		);
+		// The named parameter carries no note.
+		const named = await dispatchTool("restore_trash_entry", { entryId: "col_9" }, ctx);
+		expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
+	});
+
+	test("restore_trash_entry and purge_trash_entry name `entryId` when the id is missing", async () => {
+		const client = fakeClient();
+		const ctx = ctxWith(client, { allowWrites: true });
+		for (const tool of ["restore_trash_entry", "purge_trash_entry"]) {
+			const res = await dispatchTool(tool, {}, ctx);
+			expect(res.isError, tool).toBe(true);
+			expect(firstText(res), tool).toBe('"entryId" is required.');
+		}
+		expect(client.restoreTrashEntry).not.toHaveBeenCalled();
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry answers the deprecated `id` and says to send `entryId`", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
+			purgeTrashEntry: vi.fn().mockResolvedValue({ ...TRASH_ITEM, purged: true }),
+		});
+		const ctx = ctxWith(client, { allowWrites: true });
+		const legacy = await dispatchTool(
+			"purge_trash_entry",
+			{ id: "col_9", confirmed: true },
+			ctx
+		);
+		expect(legacy.isError).toBeFalsy();
+		expect(client.purgeTrashEntry).toHaveBeenCalledWith("col_9", undefined);
+		expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
+			/Deprecated.*"entryId".*#2962/s
+		);
+		const named = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "col_9", confirmed: true },
+			ctx
+		);
+		expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
 	});
 
 	test("purge_trash_entry previews the entry's name and counts, and purges nothing", async () => {
@@ -2044,7 +2100,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_9" },
+			{ entryId: "col_9" },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
@@ -2062,7 +2118,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_9", confirmed: true },
+			{ entryId: "col_9", confirmed: true },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
@@ -2075,7 +2131,7 @@ describe("trash tools", () => {
 		});
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_missing", confirmed: true },
+			{ entryId: "col_missing", confirmed: true },
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBe(true);
@@ -2087,7 +2143,7 @@ describe("trash tools", () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"purge_trash_entry",
-			{ id: "col_9", confirmed: true },
+			{ entryId: "col_9", confirmed: true },
 			ctxWith(client)
 		);
 		expect(res.isError).toBe(true);
@@ -2899,7 +2955,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2" },
+				{ type: "request", itemId: "req_1", collectionId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBeFalsy();
@@ -2908,13 +2964,48 @@ describe("document CRUD parity", () => {
 			});
 		});
 
+		test("move_item answers the deprecated `id` and says to send `itemId`", async () => {
+			const client = moveClient();
+			const ctx = ctxWith(client, { allowWrites: true });
+			const legacy = await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_2" },
+				ctx
+			);
+			expect(legacy.isError).toBeFalsy();
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [{ type: "request", id: "req_1", order: 2, collectionId: "col_2" }],
+			});
+			expect(legacy.content.map((c) => c.text).join("\n")).toMatch(
+				/Deprecated.*"itemId".*#2962/s
+			);
+			const named = await dispatchTool(
+				"move_item",
+				{ type: "request", itemId: "req_1", collectionId: "col_2" },
+				ctx
+			);
+			expect(named.content.map((c) => c.text).join("\n")).not.toMatch(/Deprecated/);
+		});
+
+		test("move_item names `itemId` when the id is missing", async () => {
+			const client = moveClient();
+			const res = await dispatchTool(
+				"move_item",
+				{ type: "request", collectionId: "col_2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe('"itemId" is required.');
+			expect(client.reorder).not.toHaveBeenCalled();
+		});
+
 		test("a request lands after the folders and requests of an interleaved parent", async () => {
 			// `col_1`: v1 at 0, r_mid at 1, v2 at 2 - already dense, so only the
 			// moved row is written.
 			const client = moveClient({ col_1: [at("r_mid", 1)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_1" },
+				{ type: "request", itemId: "req_1", collectionId: "col_1" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -2929,7 +3020,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_2: [at("r_tail", 2)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1a", parentId: "col_2" },
+				{ type: "collection", itemId: "col_1a", parentId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -2942,7 +3033,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_1: [at("r_mid", 1)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_1", position: "first" },
+				{ type: "request", itemId: "req_1", collectionId: "col_1", position: "first" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -2959,7 +3050,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_1: [at("r_mid", 2)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_2a", parentId: "col_1", position: "first" },
+				{ type: "collection", itemId: "col_2a", parentId: "col_1", position: "first" },
 				ctxWith(client, { allowWrites: true })
 			);
 			// v1 0 -> 1. v2 already sits at 2, its slot after the insert, so it is
@@ -2980,7 +3071,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient({ col_1: [at("req_1", 1), at("r2", 3)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_1" },
+				{ type: "request", itemId: "req_1", collectionId: "col_1" },
 				ctxWith(client, { allowWrites: true })
 			);
 			const batch = callArgs(client.reorder)[0] as { moves: Array<Record<string, unknown>> };
@@ -3001,7 +3092,7 @@ describe("document CRUD parity", () => {
 			});
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2" },
+				{ type: "request", itemId: "req_1", collectionId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			// The tie at 0 ranks Admin first and the requests by createdAt (r2, r1),
@@ -3020,7 +3111,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1a", parentId: null },
+				{ type: "collection", itemId: "col_1a", parentId: null },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
@@ -3035,7 +3126,7 @@ describe("document CRUD parity", () => {
 			const ctx = ctxWith(client, { allowWrites: true });
 			const intoSelf = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1", parentId: "col_1" },
+				{ type: "collection", itemId: "col_1", parentId: "col_1" },
 				ctx
 			);
 			expect(intoSelf.isError).toBe(true);
@@ -3043,7 +3134,7 @@ describe("document CRUD parity", () => {
 
 			const intoChild = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1", parentId: "col_1a" },
+				{ type: "collection", itemId: "col_1", parentId: "col_1a" },
 				ctx
 			);
 			expect(intoChild.isError).toBe(true);
@@ -3057,7 +3148,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_1a" },
+				{ type: "collection", itemId: "col_1a" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBe(true);
@@ -3069,7 +3160,7 @@ describe("document CRUD parity", () => {
 			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
-				{ type: "collection", id: "col_gone", parentId: null },
+				{ type: "collection", itemId: "col_gone", parentId: null },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBe(true);
@@ -3096,7 +3187,7 @@ describe("document CRUD parity", () => {
 				{ requestId: "req_1", exampleId: "exa_1", confirmed: true },
 				"deleteRequestExample",
 			],
-			["move_item", { type: "request", id: "req_1", collectionId: "col_2" }, "reorder"],
+			["move_item", { type: "request", itemId: "req_1", collectionId: "col_2" }, "reorder"],
 		];
 		for (const [tool, args, method] of calls) {
 			const res = await dispatchTool(tool, args, ctxWith(client, { allowWrites: false }));
@@ -5508,6 +5599,25 @@ describe("start_load_run scenario runs", () => {
 	});
 });
 
+/**
+ * Descriptions that once said something the tools no longer do (#2446): a
+ * format the engine reads that the description left out, and a sentence that
+ * denied a call the tool answers.
+ */
+describe("description claims that must stay true", () => {
+	const describe_ = (name: string) => descriptionOf(TOOLS.find((t) => t.name === name));
+
+	test("import_document names every format the engine reads, JMeter included", () => {
+		expect(describe_("import_document")).toMatch(/a JMeter test plan/);
+	});
+
+	test("list_requests does not claim a sub-collection's requests need no separate call", () => {
+		const text = describe_("list_requests");
+		expect(text).not.toMatch(/no separate call/i);
+		expect(text).toMatch(/calling this again with the sub-collection id/);
+	});
+});
+
 describe("get_live_metrics limit", () => {
 	function metricsClient() {
 		return fakeClient({
@@ -5586,6 +5696,34 @@ describe("get_live_metrics limit", () => {
 		).not.toThrow();
 	});
 
+	test("rejects a limit above the live buffer without calling the engine", async () => {
+		const client = metricsClient();
+		const res = await dispatchTool(
+			"get_live_metrics",
+			{ runId: "run_1", limit: 3001 },
+			ctxWith(client)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/"limit" must be 3000 or less/);
+		expect(client.getLiveMetricsSnapshot).not.toHaveBeenCalled();
+	});
+
+	test("accepts a limit of exactly the live buffer", async () => {
+		const client = metricsClient();
+		const res = await dispatchTool(
+			"get_live_metrics",
+			{ runId: "run_1", limit: 3000 },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.getLiveMetricsSnapshot).toHaveBeenCalledWith(
+			"run_1",
+			3000,
+			undefined,
+			undefined
+		);
+	});
+
 	test("the input schema rejects a non-positive limit too", () => {
 		const shape = TOOLS.find((t) => t.name === "get_live_metrics")!.inputSchema as Record<
 			string,
@@ -5595,6 +5733,8 @@ describe("get_live_metrics limit", () => {
 		expect(shape.limit.safeParse(-3).success).toBe(false);
 		expect(shape.limit.safeParse(2.5).success).toBe(false);
 		expect(shape.limit.safeParse(10).success).toBe(true);
+		expect(shape.limit.safeParse(3000).success).toBe(true);
+		expect(shape.limit.safeParse(3001).success).toBe(false);
 		expect(shape.limit.safeParse(undefined).success).toBe(true);
 	});
 });
@@ -10071,6 +10211,8 @@ describe("an unknown id names the object and its list tool", () => {
 		create_collection: "the engine does not check that parentId exists",
 		create_request: "an unknown collectionId is a 400 that names it, not a 404",
 		move_item: "reads the collection list first and words an unknown id itself (move.tools.ts)",
+		restore_trash_entry: "trashRefusalMessage words the 404 itself (trash.ts)",
+		purge_trash_entry: "readTrashEntry words an id the trash does not hold (trash.ts)",
 		clear_cookies:
 			"environmentId names a jar, which need not exist; clearing an empty one is 0",
 	};
@@ -10630,23 +10772,108 @@ describe("mock server tools", () => {
 		expect(client.getMockServerRoutes).not.toHaveBeenCalled();
 	});
 
-	test("activity defaults its limit to 50 and forwards an explicit one", async () => {
-		const client = fakeClient();
-		const defaulted = await dispatchTool(
-			"get_mock_activity",
-			{ mockId: "mock_1" },
-			ctxWith(client)
-		);
-		expect(defaulted.isError).toBeFalsy();
-		expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 50, undefined);
+	/**
+	 * The engine route pages by `limit` alone and keeps 200 entries, so the tool
+	 * always reads the whole ring and slices it: `offset` and the envelope are
+	 * this layer's.
+	 */
+	describe("get_mock_activity paging", () => {
+		/** 120 entries, newest first: `p119` ... `p0`. */
+		const ring = Array.from({ length: 120 }, (_, i) => ({
+			at_ms: 120 - i,
+			method: "GET",
+			path: `/p${119 - i}`,
+			status: 200,
+		}));
+		const ringClient = () =>
+			fakeClient({ getMockServerActivity: vi.fn().mockResolvedValue({ data: ring }) });
+		const pageOf = async (args: Record<string, unknown>, client = ringClient()) => {
+			const res = await dispatchTool(
+				"get_mock_activity",
+				{ mockId: "mock_1", ...args },
+				ctxWith(client)
+			);
+			expect(res.isError).toBeFalsy();
+			return JSON.parse(firstText(res)) as {
+				data: { path: string }[];
+				pagination: Record<string, unknown>;
+			};
+		};
 
-		const limited = await dispatchTool(
-			"get_mock_activity",
-			{ mockId: "mock_1", limit: 10 },
-			ctxWith(client)
-		);
-		expect(limited.isError).toBeFalsy();
-		expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 10, undefined);
+		test("reads the whole 200-entry ring whatever the limit, and defaults to 50 entries", async () => {
+			const client = ringClient();
+			const page = await pageOf({}, client);
+			expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 200, undefined);
+			expect(page.data).toHaveLength(50);
+			expect(page.data[0].path).toBe("/p119");
+			expect(page.pagination).toMatchObject({
+				total: 120,
+				limit: 50,
+				offset: 0,
+				returned: 50,
+				hasMore: true,
+				nextOffset: 50,
+			});
+			expect(page.pagination.note).toMatch(/offset: 50/);
+
+			const limited = ringClient();
+			await pageOf({ limit: 10 }, limited);
+			expect(limited.getMockServerActivity).toHaveBeenCalledWith("mock_1", 200, undefined);
+		});
+
+		test("offset skips from the newest entry and the last page says it is the last", async () => {
+			const second = await pageOf({ limit: 50, offset: 50 });
+			expect(second.data.map((e) => e.path)).toEqual(ring.slice(50, 100).map((e) => e.path));
+			expect(second.pagination).toMatchObject({ offset: 50, returned: 50, hasMore: true });
+
+			const last = await pageOf({ limit: 50, offset: 100 });
+			expect(last.data).toHaveLength(20);
+			expect(last.pagination).toMatchObject({
+				total: 120,
+				offset: 100,
+				returned: 20,
+				hasMore: false,
+				nextOffset: null,
+			});
+			expect(last.pagination.note).toBeUndefined();
+
+			const past = await pageOf({ offset: 500 });
+			expect(past.data).toEqual([]);
+			expect(past.pagination).toMatchObject({ total: 120, returned: 0, hasMore: false });
+		});
+
+		test("an empty ring is an empty page, not a missing envelope", async () => {
+			const page = await pageOf({}, fakeClient());
+			expect(page.data).toEqual([]);
+			expect(page.pagination).toMatchObject({ total: 0, returned: 0, hasMore: false });
+		});
+
+		test.each([
+			[{ limit: 201 }, /"limit" must be 200 or less/],
+			[{ limit: 0 }, /"limit" must be a whole number greater than 0/],
+			[{ offset: -1 }, /"offset" must be a whole number of 0 or more/],
+			[{ offset: 1.5 }, /"offset" must be a whole number of 0 or more/],
+		])("refuses %j without calling the engine", async (args, message) => {
+			const client = ringClient();
+			const res = await dispatchTool(
+				"get_mock_activity",
+				{ mockId: "mock_1", ...args },
+				ctxWith(client)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(message);
+			expect(client.getMockServerActivity).not.toHaveBeenCalled();
+		});
+
+		test("the page validates against the declared output schema", async () => {
+			const res = await dispatchTool(
+				"get_mock_activity",
+				{ mockId: "mock_1", limit: 5 },
+				ctxWith(ringClient())
+			);
+			const tool = TOOLS.find((t) => t.name === "get_mock_activity")!;
+			expect(() => tool.outputSchema!.parse(res.structuredContent)).not.toThrow();
+		});
 	});
 
 	test("activity surfaces an unknown mock id as a tool error", async () => {
@@ -15692,14 +15919,14 @@ describe("secret withholding", () => {
 			// The engine answers a restore with the trash entry alone; the
 			// projection is what keeps a row it ever added from being echoed.
 			tool: "restore_trash_entry",
-			args: { id: "c1" },
+			args: { entryId: "c1" },
 			method: "restoreTrashEntry",
 			answer: { id: "c1", kind: "collection", restored: true, auth: ECHO_COLLECTION.auth },
 			secrets: ["echo-collection-token"],
 		},
 		{
 			tool: "move_item",
-			args: { type: "request", id: "req_1", collectionId: "c1" },
+			args: { type: "request", itemId: "req_1", collectionId: "c1" },
 			method: "reorder",
 			answer: { collections: [ECHO_COLLECTION], requests: [ECHO_REQUEST] },
 			secrets: [
@@ -16293,7 +16520,7 @@ describe("secret withholding", () => {
 			activity.data[3],
 		]);
 		const revealed = await read("get_mock_activity", client, REVEAL, { mockId: "mock_1" });
-		expect(revealed.body).toEqual(activity);
+		expect(revealed.body).toMatchObject(activity);
 	});
 
 	test("a failed secret lookup fails the read closed, naming the lookup and returning nothing", async () => {

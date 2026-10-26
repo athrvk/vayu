@@ -17,12 +17,14 @@ import {
 	callEngine,
 	confirmDestructive,
 	confirmedInput,
+	deprecatedIdCaveat,
+	deprecatedIdInput,
 	echoShape,
 	engineErrorResult,
 	errorResult,
 	isRecord,
 	jsonResult,
-	requireStr,
+	requireRenamedId,
 	ToolArgError,
 	withCaveat,
 	writesDisabled,
@@ -67,7 +69,7 @@ export const TRASH_TOOLS: McpTool[] = [
 		description:
 			"Put a deleted collection or saved request back from Vayu's Trash, with everything its delete took along - a restored collection's whole subtree returns too, scoped to that one delete's cohort (see list_trash). " +
 			GUARDED_WRITE_SENTENCE +
-			". This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. An id the trash does not hold - a live row, or one already purged - is a 404.",
+			". This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. An `entryId` the trash does not hold - a live row, or one already purged - is a 404.",
 		annotations: {
 			title: "Restore from Trash",
 			readOnlyHint: false,
@@ -76,12 +78,16 @@ export const TRASH_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			id: z.string().describe("Trash entry ID to restore (from list_trash)."),
+			entryId: z
+				.string()
+				.optional()
+				.describe("Trash entry ID to restore (from list_trash). Required."),
+			id: deprecatedIdInput("entryId"),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const id = requireStr(args, "id");
+			const { id, viaLegacyId } = requireRenamedId(args, "entryId");
 			let restored: Record<string, unknown>;
 			try {
 				const value = await ctx.client.restoreTrashEntry(id, signal);
@@ -99,14 +105,15 @@ export const TRASH_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			const result = jsonResult(echoShape(ctx)(restored));
+			const noted = deprecatedIdCaveat(result, "entryId", viaLegacyId);
 			// A moved folder is worth telling the caller about - it is not where it
 			// used to be, even though the restore itself succeeded.
 			return restored.reparentedToRoot === true
 				? withCaveat(
-						result,
+						noted,
 						"\n\nRestored at the top level: its original parent is gone or itself in the trash, so it came back as a tree root rather than where it was."
 					)
-				: result;
+				: noted;
 		},
 	},
 	{
@@ -116,7 +123,7 @@ export const TRASH_TOOLS: McpTool[] = [
 		description:
 			"Permanently destroy one entry in Vayu's Trash, with its whole subtree - requests, and the examples they own. THERE IS NO UNDO: this is the Trash's own hard delete, on top of the soft delete delete_collection / delete_request already did, and once it runs the row is gone the way a delete used to be before Trash existed. " +
 			GUARDED_WRITE_SENTENCE +
-			", and confirmation: if the client supports elicitation the user is prompted with the entry's name and what it holds; otherwise call once for a preview, then again with `confirmed: true`. An id the trash does not hold is a 404, which also stops a mistyped id from destroying anything live.",
+			", and confirmation: if the client supports elicitation the user is prompted with the entry's name and what it holds; otherwise call once for a preview, then again with `confirmed: true`. An `entryId` the trash does not hold is a 404, which also stops a mistyped id from destroying anything live.",
 		annotations: {
 			title: "Purge from Trash",
 			readOnlyHint: false,
@@ -125,13 +132,17 @@ export const TRASH_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {
-			id: z.string().describe("Trash entry ID to destroy for good (from list_trash)."),
+			entryId: z
+				.string()
+				.optional()
+				.describe("Trash entry ID to destroy for good (from list_trash). Required."),
+			id: deprecatedIdInput("entryId"),
 			confirmed: confirmedInput("actually purge this trash entry for good"),
 		},
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const id = requireStr(args, "id");
+			const { id, viaLegacyId } = requireRenamedId(args, "entryId");
 			// Read what the purge destroys before asking, the same reasoning
 			// delete_collection reads its cascade first: an unreadable entry is a
 			// refusal, never a prompt carrying a name and counts nobody verified.
@@ -154,7 +165,11 @@ export const TRASH_TOOLS: McpTool[] = [
 					"This is a preview. To purge it, call purge_trash_entry again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(ctx, () => ctx.client.purgeTrashEntry(id, signal));
+			return deprecatedIdCaveat(
+				await callEngine(ctx, () => ctx.client.purgeTrashEntry(id, signal)),
+				"entryId",
+				viaLegacyId
+			);
 		},
 	},
 ];

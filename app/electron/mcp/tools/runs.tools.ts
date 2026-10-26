@@ -95,6 +95,14 @@ function liveMetricsAnswer({ ticks, completed }: LiveMetricsSnapshot) {
 	return completed ? { ticks, completed, note: COMPLETED_NOTE } : { ticks, completed };
 }
 
+/**
+ * The most ticks a run's live buffer holds at stock settings: the engine's
+ * `liveReplayWindowMs` (300,000 ms, `DEFAULT_LIVE_REPLAY_WINDOW_MS`) at its
+ * 100 ms tick cadence (`STATS_INTERVAL_MS`) is 3,000 ticks. A larger `limit`
+ * promises ticks the buffer cannot hold, so it is refused rather than clamped.
+ */
+const MAX_LIVE_METRICS_TICKS = 3000;
+
 export const RUN_TOOLS: McpTool[] = [
 	{
 		name: "stop_run",
@@ -243,8 +251,11 @@ export const RUN_TOOLS: McpTool[] = [
 				.number()
 				.int()
 				.positive()
+				.max(MAX_LIVE_METRICS_TICKS)
 				.optional()
-				.describe("How many recent ticks to return (default 10). Must be 1 or more."),
+				.describe(
+					`How many recent ticks to return (default 10, max ${MAX_LIVE_METRICS_TICKS}). Must be 1 or more.`
+				),
 		},
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
@@ -252,6 +263,11 @@ export const RUN_TOOLS: McpTool[] = [
 			// before dispatch, but the handler is the layer that knows a
 			// non-positive limit reaches `slice(-limit)` and inverts the bound.
 			const limit = optionalPositiveInt(args, "limit", 10);
+			if (limit > MAX_LIVE_METRICS_TICKS) {
+				throw new ToolArgError(
+					`"limit" must be ${MAX_LIVE_METRICS_TICKS} or less - the live buffer holds no more ticks than that.`
+				);
+			}
 			return callEngineStructured(
 				ctx,
 				() => ctx.client.getLiveMetricsSnapshot(runId, limit, undefined, signal),
