@@ -774,6 +774,17 @@ struct Database::Impl {
                 vayu::utils::log_warning ("db",
                 "Failed to set wal_autocheckpoint: " + std::string (err_msg));
                 sqlite3_free (err_msg);
+                err_msg = nullptr;
+            }
+            sql.str ("");
+
+            sql << "PRAGMA journal_size_limit = "
+                << vayu::core::constants::database::JOURNAL_SIZE_LIMIT_BYTES << ";";
+            rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning ("db",
+                "Failed to set journal_size_limit: " + std::string (err_msg));
+                sqlite3_free (err_msg);
             }
         };
 

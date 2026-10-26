@@ -225,9 +225,9 @@ Three things worth knowing about where it sits:
 - **Last in `init()`**, after the run prune and the trash purge, so it sees the pages every sweep
   freed rather than only the first one's.
 - **On the storage's own held connection** (`open_forever`), under the DB mutex, never on a
-  second one: the truncating checkpoint below has to run on the connection that holds the file
-  mapping, because Windows refuses to truncate a file another connection still has mapped
-  (`mmap_size`) - from a second connection the rewrite committed and the file stayed its old size.
+  second one. The truncating checkpoint below needs the file unmapped, because Windows refuses to
+  truncate a file any connection has mapped (`mmap_size`) - with a mapping the rewrite committed
+  and the file stayed its old size. No connection maps it ([Connection settings](#connection-settings)).
   (`POST /workspace/backup`'s `VACUUM INTO` runs on its own separate connection, since it writes
   a different file, and so does the [run-row reader](#runs), which maps nothing and opens only
   after `init`.) Nothing contends for it: `init` runs before the HTTP listener starts, and the
@@ -499,6 +499,29 @@ start whatever the stamp. **Merge gate:** the `git grep` against the last tag
 must still show `7` or `8`; if a release shipped `9` without this column, it
 needs its own bump to `10` and a row of its own here. The release that carries
 `9` names #2970 beside #2937 under Changed.
+
+---
+
+## Connection settings
+
+PRAGMAs are per-connection state, so the engine applies them when the storage opens its one
+long-lived connection (`Database::Impl` in `engine/src/db/database_impl.hpp`; the values are in
+`vayu::core::constants::database`). The `config_entries` rows named below are re-applied by
+`init` once they can be read.
+
+| PRAGMA | Value | Why |
+|--------|-------|-----|
+| `journal_mode` | `WAL` | Readers (the run-row reader, a report poll) do not wait on a writer |
+| `synchronous` | `dbSynchronous`, default `1` (NORMAL) | See [`dbSynchronous`](#config_entries) |
+| `busy_timeout` | `dbBusyTimeout`, default 10 s | How long a statement waits on another connection's lock |
+| `cache_size` | `dbCacheSize`, default 64 MB | |
+| `temp_store` | `2` (memory) | |
+| `mmap_size` | `0` (off) | An I/O error inside a mapped region is a signal (SIGBUS on POSIX), not `SQLITE_IOERR`, so a failing disk or a truncated file would kill the engine with no log line. Mapping 256 MB cut SQLite's read time by 5-55%, which is 1-6 ms per 1,000 result rows (about 50 ms at the default 10,000 stored errors), and Windows cannot truncate a mapped file, so the engine stays unmapped (#2433). Measured on Windows with a release SQLite and a warm OS cache, over a file of 2 KB result rows and 8 KB bodies, cache 64 MB, medians of 7 interleaved runs, mapped against unmapped, first pass then second pass in one connection. 185 MB file (fits the map): scan of 15,000 `results` rows 118 against 202 ms, then 67 against 146 ms; 7,500 random body reads 273 against 339 ms, then 252 against 341 ms. 560 MB file (the map covers part): scan of 50,000 rows 485 against 532 ms, then 336 against 544 ms; 7,500 body reads 326 against 344 ms, then 335 against 375 ms. Only Windows was measured |
+| `wal_autocheckpoint` | `1000` pages | Passive: it copies frames back but never shrinks the `-wal` file |
+| `journal_size_limit` | `64 MiB` | Once a checkpoint has emptied the log and the next write restarts it, the `-wal` file is cut back to this size. Without it one large transaction (a run prune, a big import) leaves a `-wal` of its own size beside the database for the rest of the session; only a clean shutdown (which checkpoints and deletes the `-wal`) or the startup `VACUUM` gives it back (#2433) |
+
+The run-row reader (see [`runs`](#runs)) opens `query_only` with `mmap_size = 0` and sets none of the
+write-side settings.
 
 ---
 
