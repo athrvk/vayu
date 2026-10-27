@@ -1720,13 +1720,6 @@ picked spec file and data file (`collections.spec_file` / `data_file`, issue
 files as before; a file that is not at its path on this machine reads as
 unresolved until it is picked again.
 
-Before #2765 the two file bindings were `localStorage` keys
-(`vayu.spec-files`, `vayu.data-files`). The first launch of a release that
-stores them on the row moves each binding onto the collection it named, if the
-engine still lists that collection and it holds no binding yet, and removes the
-key once every move has landed. A binding of a collection that was deleted or
-in the trash at that launch is not moved.
-
 ### Logging
 
 `vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`
