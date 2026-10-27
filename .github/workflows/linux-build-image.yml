@@ -1,0 +1,84 @@
+name: Linux build image
+
+# Builds the container the Linux release is built in (#2634) and publishes it
+# to GHCR. It is the only workflow that contacts Launchpad, and only when the
+# Dockerfile changes, so a Launchpad outage fails this job and nothing else.
+#
+# release.yml, pr-tests.yml and cache-warm.yml name the image by digest. After
+# a publish, copy the digest from the job summary into those three files.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/linux-build/**'
+      - '.github/workflows/linux-build-image.yml'
+  pull_request:
+    paths:
+      - '.github/linux-build/**'
+      - '.github/workflows/linux-build-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-build-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/athrvk/vayu-linux-build
+
+jobs:
+  build:
+    name: Build the Linux build image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Pull requests build without pushing, so a broken Dockerfile shows up on
+    # the pull request. Only master and a manual run publish.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: docker build --pull --tag "$IMAGE:build" .github/linux-build
+
+      # The Linux jobs run as root in the container and pick GCC 13 through
+      # CC/CXX, so the image must carry the compiler and the 22.04 glibc.
+      - name: Check the toolchain
+        run: |
+          docker run --rm "$IMAGE:build" bash -euc '
+            . /etc/os-release
+            [ "$VERSION_ID" = 22.04 ]
+            g++-13 --version | head -1
+            ldd --version | head -1
+            git --version
+            zstd --version'
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        run: |
+          tag="$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
+          docker tag "$IMAGE:build" "$IMAGE:$tag"
+          docker push "$IMAGE:$tag"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$tag")"
+          {
+            echo "### Published image"
+            echo
+            echo '```'
+            echo "$digest"
+            echo '```'
+            echo
+            echo "Pin this in release.yml, pr-tests.yml and cache-warm.yml."
+          } >> "$GITHUB_STEP_SUMMARY"
