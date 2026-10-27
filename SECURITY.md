@@ -90,6 +90,13 @@ those or for files under a folder you allowed. The engine does not take the
 renderer's word for file access either: a binary body or a form file part is
 sent only if the file is under a folder you allowed or is one you picked.
 
+These layers keep a compromised window away from Node and the operating system.
+They do not keep it away from your data: the engine trusts the window, so script
+that runs inside it can read every collection, environment and stored secret and
+send any request you could. That is why the policy allows no inline script
+beyond the one hashed above, so markup that gets injected into the window cannot
+run script.
+
 ## Data at rest
 
 Secrets, including variables you mark secret, are stored in plaintext in the
