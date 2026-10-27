@@ -52,8 +52,10 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -68,6 +70,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/entity_tag.hpp"
 #include "vayu/types.hpp"
 #include "wide_json.hpp"
 
@@ -109,6 +112,22 @@ const std::function<void ()>& before_write);
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::function<void ()>& before_write);
+// The same three with the request's `If-Match` (#2433), judged in that scope.
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
+const std::function<void ()>& before_write);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
+const std::function<void ()>& before_write);
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write);
 // Defined in requests.cpp - the list serializer, which is separate code from
 // the single-request one and has been the half a new field missed before.
@@ -1891,6 +1910,214 @@ TEST_F (ResourceWriteRouteTest, AConcurrentEnvironmentUpdateWaitsAndKeepsBothFie
     EXPECT_EQ (json::parse (stored->variables)["host"], "api.example.com")
     << "the variables write merged against the row this write had already "
        "staged";
+}
+
+// ---------------------------------------------------------------------------
+// If-Match on a whole-record PUT (issue #2433)
+// ---------------------------------------------------------------------------
+
+vayu::http::IfMatch if_match_of (const std::string& field) {
+    auto parsed = vayu::http::IfMatch::parse (field);
+    EXPECT_TRUE (parsed.has_value ()) << field;
+    return parsed.value_or (vayu::http::IfMatch::parse ("*").value ());
+}
+
+std::string tag_of (const json& row) {
+    return vayu::http::entity_tag (row["updatedAt"].get<int64_t> ());
+}
+
+json make_environment_row (vayu::db::Database& db) {
+    auto [status, body] = create_environment_response (
+    db, json{ { "name", "Staging" }, { "variables", json{ { "host", "a" } } } });
+    EXPECT_EQ (status, 200) << body.dump ();
+    return body;
+}
+
+TEST_F (ResourceWriteRouteTest, AnEnvironmentPutNamingTheStoredTagLandsWithANewOne) {
+    const json row       = make_environment_row (*db_);
+    const std::string id = row["id"].get<std::string> ();
+
+    auto [status, body] = update_environment_response (*db_, id,
+    json{ { "name", "Production" } }, if_match_of (tag_of (row)), nullptr);
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_GT (body["updatedAt"].get<int64_t> (), row["updatedAt"].get<int64_t> ())
+    << "the answer must carry a tag the stale one no longer matches";
+    const auto stored = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Production");
+}
+
+// Mutation check: drop the `check_if_match` call in
+// `update_environment_locked` and this answers 200 with the stale merge stored.
+TEST_F (ResourceWriteRouteTest, AnEnvironmentPutNamingAStaleTagIs412AndWritesNothing) {
+    const json row             = make_environment_row (*db_);
+    const std::string id       = row["id"].get<std::string> ();
+    auto [moved_status, moved] = update_environment_response (
+    *db_, id, json{ { "variables", json{ { "host", "b" } } } });
+    ASSERT_EQ (moved_status, 200);
+
+    auto [status, body] = update_environment_response (*db_, id,
+    json{ { "name", "Production" }, { "variables", json{ { "host", "a" } } } },
+    if_match_of (tag_of (row)), nullptr);
+    EXPECT_EQ (status, 412) << body.dump ();
+    EXPECT_EQ (body["error"]["code"], "precondition_failed");
+    EXPECT_EQ (body["error"]["updatedAt"], moved["updatedAt"])
+    << "the refusal names the version a re-read will find";
+    const auto stored = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Staging");
+    EXPECT_EQ (json::parse (stored->variables)["host"], "b");
+    EXPECT_EQ (stored->updated_at, moved["updatedAt"].get<int64_t> ());
+}
+
+TEST_F (ResourceWriteRouteTest, AnEnvironmentPutWithoutIfMatchIsUnconditional) {
+    const json row       = make_environment_row (*db_);
+    const std::string id = row["id"].get<std::string> ();
+    ASSERT_EQ (
+    update_environment_response (*db_, id, json{ { "description", "x" } }).first, 200);
+
+    auto [status, body] =
+    update_environment_response (*db_, id, json{ { "name", "Production" } });
+    EXPECT_EQ (status, 200) << body.dump ();
+}
+
+TEST_F (ResourceWriteRouteTest, AnEnvironmentPutWithStarOrAListHoldingTheTagLands) {
+    const json row       = make_environment_row (*db_);
+    const std::string id = row["id"].get<std::string> ();
+
+    auto [star_status, starred] = update_environment_response (
+    *db_, id, json{ { "description", "one" } }, if_match_of ("*"), nullptr);
+    ASSERT_EQ (star_status, 200) << starred.dump ();
+
+    const std::string list     = "W/\"1\", " + tag_of (starred) + ", \"2\"";
+    auto [list_status, listed] = update_environment_response (
+    *db_, id, json{ { "description", "two" } }, if_match_of (list), nullptr);
+    ASSERT_EQ (list_status, 200) << listed.dump ();
+
+    auto [miss_status, missed] = update_environment_response (*db_, id,
+    json{ { "description", "three" } }, if_match_of ("W/\"1\", \"2\""), nullptr);
+    EXPECT_EQ (miss_status, 412) << missed.dump ();
+}
+
+TEST_F (ResourceWriteRouteTest, AnEnvironmentPutOnAMissingIdIs404WhateverItsIfMatch) {
+    auto [status, body] = update_environment_response (*db_, "env_missing",
+    json{ { "name", "X" } }, if_match_of ("W/\"1\""), nullptr);
+    EXPECT_EQ (status, 404) << body.dump ();
+}
+
+// A row stamped ahead of this clock (a skewed write, an import from a faster
+// machine) still gets a later tag. Mutation check: stamp `now_ms ()` in
+// `update_environment_locked` and the answer's `updatedAt` goes backwards.
+TEST_F (ResourceWriteRouteTest, AnEnvironmentUpdateAlwaysMovesItsTagForward) {
+    const json row       = make_environment_row (*db_);
+    const std::string id = row["id"].get<std::string> ();
+    auto stored          = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored);
+    stored->updated_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+                         std::chrono::system_clock::now ().time_since_epoch ())
+                         .count () +
+    3'600'000;
+    db_->save_environment (*stored);
+
+    auto [status, body] =
+    update_environment_response (*db_, id, json{ { "description", "x" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["updatedAt"].get<int64_t> (), stored->updated_at + 1);
+}
+
+// Two clients read one version and both write conditioned on it. The second
+// is started inside the first's lock scope, so it judges its tag against the
+// row the first committed. Mutation check: drop the `with_lock` in
+// `update_environment_response` and the second write lands too.
+TEST_F (ResourceWriteRouteTest, TwoEnvironmentWritesFromOneReadLandOnlyOnce) {
+    const json row       = make_environment_row (*db_);
+    const std::string id = row["id"].get<std::string> ();
+    const auto tag       = if_match_of (tag_of (row));
+
+    int other_status = 0;
+    json other_body;
+    CompetingWriter other ([&] {
+        auto result  = update_environment_response (*db_, id,
+         json{ { "variables", json{ { "host", "other" } } } }, tag, nullptr);
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = update_environment_response (*db_, id,
+    json{ { "variables", json{ { "host", "first" } } } }, tag, other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+    EXPECT_EQ (other_status, 412) << other_body.dump ();
+    const auto stored = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->variables)["host"], "first");
+}
+
+TEST_F (ResourceWriteRouteTest, ACollectionPutNamingTheStoredTagLandsWithANewOne) {
+    auto [created_status, row] =
+    create_collection_response (*db_, json{ { "name", "Billing" } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id = row["id"].get<std::string> ();
+
+    auto [status, body] = update_collection_response (*db_, id,
+    json{ { "name", "Invoices" } }, if_match_of (tag_of (row)), nullptr);
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_GT (body["updatedAt"].get<int64_t> (), row["updatedAt"].get<int64_t> ());
+    const auto stored = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Invoices");
+}
+
+// Mutation check: drop the `check_if_match` call in `update_collection_locked`.
+TEST_F (ResourceWriteRouteTest, ACollectionPutNamingAStaleTagIs412AndWritesNothing) {
+    auto [created_status, row] = create_collection_response (*db_,
+    json{ { "name", "Billing" }, { "variables", json{ { "host", "a" } } } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id       = row["id"].get<std::string> ();
+    auto [moved_status, moved] = update_collection_response (
+    *db_, id, json{ { "variables", json{ { "host", "b" } } } });
+    ASSERT_EQ (moved_status, 200);
+
+    auto [status, body] = update_collection_response (*db_, id,
+    json{ { "name", "Invoices" }, { "variables", json{ { "host", "a" } } } },
+    if_match_of (tag_of (row)), nullptr);
+    EXPECT_EQ (status, 412) << body.dump ();
+    EXPECT_EQ (body["error"]["updatedAt"], moved["updatedAt"]);
+    const auto stored = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Billing");
+    EXPECT_EQ (json::parse (stored->variables)["host"], "b");
+}
+
+TEST_F (ResourceWriteRouteTest, ACollectionPutWithoutIfMatchIsUnconditional) {
+    const std::string id = make_collection ("Billing");
+    ASSERT_EQ (
+    update_collection_response (*db_, id, json{ { "description", "x" } }).first, 200);
+
+    auto [status, body] =
+    update_collection_response (*db_, id, json{ { "name", "Invoices" } });
+    EXPECT_EQ (status, 200) << body.dump ();
+}
+
+// Mutation check: drop the `check_if_match` call in `update_request_locked`.
+TEST_F (ResourceWriteRouteTest, ARequestPutNamingAStaleTagIs412AndWritesNothing) {
+    const std::string id = make_request (make_collection ());
+    auto [read_status, row] =
+    update_request_response (*db_, id, json{ { "name", "R1" } });
+    ASSERT_EQ (read_status, 200);
+    ASSERT_EQ (update_request_response (*db_, id, json{ { "name", "R2" } }).first, 200);
+
+    auto [status, body] = update_request_response (*db_, id,
+    json{ { "url", "https://stale.example" } }, if_match_of (tag_of (row)), nullptr);
+    EXPECT_EQ (status, 412) << body.dump ();
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->url, "https://example.com");
+
+    auto [current_status, current] =
+    update_request_response (*db_, id, json{ { "url", "https://fresh.example" } },
+    if_match_of (vayu::http::entity_tag (stored->updated_at)), nullptr);
+    EXPECT_EQ (current_status, 200) << current.dump ();
 }
 
 } // namespace

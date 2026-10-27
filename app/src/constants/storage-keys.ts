@@ -60,15 +60,3 @@ export const STORAGE_KEYS = {
 	 */
 	INBOX_NOTIFY_STORE: "vayu.inbox-notify",
 } as const;
-
-/**
- * Keys an older Vayu wrote and this one only reads, once: each collection's
- * spec-file and data-file binding, from before the binding rode the engine row
- * (#2765). `useLegacyFileBindingImport` moves what they hold onto the rows and
- * removes each key once it has; nothing writes them any more. Retired with the
- * import (#2809), beside the `file:` origin hand-off (#2763).
- */
-export const LEGACY_FILE_BINDING_KEYS = {
-	SPEC_FILES: "vayu.spec-files",
-	DATA_FILES: "vayu.data-files",
-} as const;

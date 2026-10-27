@@ -225,9 +225,9 @@ Three things worth knowing about where it sits:
 - **Last in `init()`**, after the run prune and the trash purge, so it sees the pages every sweep
   freed rather than only the first one's.
 - **On the storage's own held connection** (`open_forever`), under the DB mutex, never on a
-  second one: the truncating checkpoint below has to run on the connection that holds the file
-  mapping, because Windows refuses to truncate a file another connection still has mapped
-  (`mmap_size`) - from a second connection the rewrite committed and the file stayed its old size.
+  second one. The truncating checkpoint below needs the file unmapped, because Windows refuses to
+  truncate a file any connection has mapped (`mmap_size`) - with a mapping the rewrite committed
+  and the file stayed its old size. No connection maps it ([Connection settings](#connection-settings)).
   (`POST /workspace/backup`'s `VACUUM INTO` runs on its own separate connection, since it writes
   a different file, and so does the [run-row reader](#runs), which maps nothing and opens only
   after `init`.) Nothing contends for it: `init` runs before the HTTP listener starts, and the
@@ -449,7 +449,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
-| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash | none: `sync_schema ()` adds the nullable columns, the migration only stamps |
+| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash | none: `sync_schema ()` adds the nullable columns, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -499,6 +499,35 @@ start whatever the stamp. **Merge gate:** the `git grep` against the last tag
 must still show `7` or `8`; if a release shipped `9` without this column, it
 needs its own bump to `10` and a row of its own here. The release that carries
 `9` names #2970 beside #2937 under Changed.
+
+The #2971 `request_examples.deleted_at` column joined version `9` by the same
+argument and under the same gate: the last release still stamps `7`, and
+`sync_schema ()` adds the nullable column on every start whatever the stamp. If
+a release shipped `9` without it, it needs its own bump and its own row here.
+The release that carries `9` names #2971 beside #2970 and #2937 under Changed.
+
+---
+
+## Connection settings
+
+PRAGMAs are per-connection state, so the engine applies them when the storage opens its one
+long-lived connection (`Database::Impl` in `engine/src/db/database_impl.hpp`; the values are in
+`vayu::core::constants::database`). The `config_entries` rows named below are re-applied by
+`init` once they can be read.
+
+| PRAGMA | Value | Why |
+|--------|-------|-----|
+| `journal_mode` | `WAL` | Readers (the run-row reader, a report poll) do not wait on a writer |
+| `synchronous` | `dbSynchronous`, default `1` (NORMAL) | See [`dbSynchronous`](#config_entries) |
+| `busy_timeout` | `dbBusyTimeout`, default 10 s | How long a statement waits on another connection's lock |
+| `cache_size` | `dbCacheSize`, default 64 MB | |
+| `temp_store` | `2` (memory) | |
+| `mmap_size` | `0` (off) | An I/O error inside a mapped region is a signal (SIGBUS on POSIX), not `SQLITE_IOERR`, so a failing disk or a truncated file would kill the engine with no log line. Mapping 256 MB cut SQLite's read time by 5-55%, which is 1-6 ms per 1,000 result rows (about 50 ms at the default 10,000 stored errors), and Windows cannot truncate a mapped file, so the engine stays unmapped (#2433). Measured on Windows with a release SQLite and a warm OS cache, over a file of 2 KB result rows and 8 KB bodies, cache 64 MB, medians of 7 interleaved runs, mapped against unmapped, first pass then second pass in one connection. 185 MB file (fits the map): scan of 15,000 `results` rows 118 against 202 ms, then 67 against 146 ms; 7,500 random body reads 273 against 339 ms, then 252 against 341 ms. 560 MB file (the map covers part): scan of 50,000 rows 485 against 532 ms, then 336 against 544 ms; 7,500 body reads 326 against 344 ms, then 335 against 375 ms. Only Windows was measured |
+| `wal_autocheckpoint` | `1000` pages | Passive: it copies frames back but never shrinks the `-wal` file |
+| `journal_size_limit` | `64 MiB` | Once a checkpoint has emptied the log and the next write restarts it, the `-wal` file is cut back to this size. Without it one large transaction (a run prune, a big import) leaves a `-wal` of its own size beside the database for the rest of the session; only a clean shutdown (which checkpoints and deletes the `-wal`) or the startup `VACUUM` gives it back (#2433) |
+
+The run-row reader (see [`runs`](#runs)) opens `query_only` with `mmap_size = 0` and sets none of the
+write-side settings.
 
 ---
 
@@ -961,6 +990,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `postman_response` | TEXT | The Postman saved response this example has - from an import or from a save in the app - as JSON text; NULL when it has none (schema version 2) |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
+| `deleted_at`   | INTEGER | Nullable, Unix ms. NULL while live; the delete's instant once a `user` example is in the trash (#2971) |
 
 **headers** is the same `KeyValueEntry[]` shape a request's headers use, not the
 JSON object [`result_bodies`](#result_bodies) and [`inbox_requests`](#inbox_requests)
@@ -1016,8 +1046,24 @@ tombstone. `get_request_example`, `get_request_examples` and
 `count_request_examples` all filter suppressed rows out - so the list route, a
 mock server and an export behave exactly as though the delete had removed it -
 and `get_suppressed_request_examples` is the one read that sees them, for the
-one caller that must. A `user` row is still deleted outright: nothing re-creates
-a saved response, so there is no intent to keep.
+one caller that must. A `user` row is never tombstoned: nothing re-creates a
+saved response, so there is no intent for a sync to keep, and its delete goes
+to the trash instead (`deleted_at`, below).
+
+**deleted_at** (#2971) is the trash stamp of a `user` example, on the
+[`environments.deleted_at`](#environments) shape: one row, no cohort, NULL
+while live. `DELETE /requests/:id/examples/:exampleId` stamps it on a `user`
+row and tombstones an `import` row, so a row is never both suppressed and
+stamped. Every read filters it exactly as it filters `suppressed`
+(`get_request_example`, `get_request_examples`, `count_request_examples`, and
+`get_suppressed_request_examples` too), so a trashed example is gone to the
+list route, a mock server, both exports and the spec sync's refresh, and does
+not count against the cap. The trash lists it as a root while its request is
+live (`parentId` is the request); a restore clears the stamp alone and is
+refused while the request is trashed or gone, or already holds
+`MAX_PER_REQUEST` live examples. The create path's id-collision check reads
+`request_example_id_taken`, which sees every row, so a fresh id can never
+overwrite a hidden one.
 
 **spec_example_key** (issue #1457) records which entry of a 3.x response's
 named `examples` map the import took this example's payload from - the *first*
@@ -1059,12 +1105,16 @@ builds it from a `savedFrom` instead (left NULL, with a warning, when the
 result would be over that cap), and `PUT` accepts only `null`, which clears it. The list route does not return
 it.
 
-**Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
-them in the same transaction, and the `delete_collection` cascade removes each
-descendant request's examples before the requests themselves. Every read here is
-by `request_id` or by example id, so a row left behind would be unreachable
-rather than merely stale. A tombstone is a row like any other and goes with the
-same cascades.
+**Cascade.** Examples are owned by their request. `DELETE /requests/:id` and
+the `delete_collection` cascade stamp the requests and leave their examples
+untouched (issue #988): every route reaching an example checks its request
+first, so they are unreachable while it is in the trash and come back with it.
+The purge of a request or a collection (`purge_request_locked`,
+`purge_collection_locked`) removes each request's examples before the request,
+by `request_id` and whatever their stamp, and so does the spec sync's hard
+delete. Every read here is by `request_id` or by example id, so a row left
+behind would be unreachable rather than merely stale. A tombstone and a trashed
+example are rows like any other and go with the same purges.
 
 **Caps.** A body over `request_example::MAX_BODY_BYTES` (1 MiB) is a `400`, never
 a truncation - a half-body served as if whole is worse than a refused write - and

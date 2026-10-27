@@ -29,6 +29,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 
 import { useRestoreTrashMutation, usePurgeTrashMutation, useTrashQuery } from "./trash";
+import { useRequestExamplesQuery } from "./request-examples";
 import { queryKeys } from "./keys";
 import { apiService } from "@/services/api";
 import { useDataFileStore } from "@/stores/data-file-store";
@@ -40,6 +41,7 @@ vi.mock("@/services/api", () => ({
 		restoreTrashEntry: vi.fn(),
 		purgeTrashEntry: vi.fn(),
 		updateCollection: vi.fn(),
+		listRequestExamples: vi.fn(),
 	},
 }));
 
@@ -136,6 +138,31 @@ describe("useRestoreTrashMutation", () => {
 				.map((k) => k.join("/"))
 				.sort()
 		);
+	});
+
+	it("refetches an open examples list, so a restored example reappears in its request", async () => {
+		// The Examples panel's list is keyed under `requests.detail(<id>)`, which
+		// `requests.all` covers by prefix (#2971). Mutation check: invalidate
+		// anything narrower than `requests.all` in the restore and this fails.
+		vi.mocked(apiService.listRequestExamples).mockResolvedValue([]);
+		const examples = renderHook(() => useRequestExamplesQuery("req_1"), { wrapper });
+		await waitFor(() => expect(examples.result.current.isSuccess).toBe(true));
+		expect(apiService.listRequestExamples).toHaveBeenCalledTimes(1);
+
+		vi.mocked(apiService.restoreTrashEntry).mockResolvedValue({
+			id: "exa_1",
+			kind: "example",
+			name: "Happy path",
+			deletedAt: 1,
+			collections: 0,
+			requests: 0,
+			restored: true,
+			reparentedToRoot: false,
+		});
+		const { result } = renderHook(() => useRestoreTrashMutation(), { wrapper });
+		await result.current.mutateAsync("exa_1");
+
+		await waitFor(() => expect(apiService.listRequestExamples).toHaveBeenCalledTimes(2));
 	});
 
 	it("refetches the list when the restore fails, so a phantom row cannot survive", async () => {

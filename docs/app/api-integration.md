@@ -294,14 +294,21 @@ its own change. The three consumers are in `queries/request-examples.ts`
 (`useRequestExamplesQuery`, `useCreateRequestExampleMutation`,
 `useDeleteRequestExampleMutation`); both writes settle by invalidating the one
 list key rather than splicing a row in, since the engine decides the id, the
-`order` an append lands on and the stored shape of the row.
+`order` an append lands on and the stored shape of the row. The delete also
+invalidates `trash.all` (#2971): the engine moves a saved example to the Trash
+and keeps an imported one as a spec-sync tombstone, and the mutation cannot
+tell which, so an open Trash view refetches either way. A saved example's
+delete raises the shared `Moved "<name>" to the Trash` toast with an Undo
+(`hooks/useTrashUndo.ts`); an imported one raises none, since there is nothing
+in the Trash to restore.
 
 A saved example is written with **`origin: "user"`**, and an imported one keeps
 the engine's `"import"` default. Its first reader is the OpenAPI spec sync
 (#627), which may replace the examples a document produced and must never touch
 one a person saved - and since #722 the panel reads it too: `RequestExample`
 claims the field, an imported row carries an **Imported** chip, and the delete
-dialog says what can still bring that kind of row back. The asymmetry the field
+dialog says what can still bring that kind of row back (the Trash for a saved
+one, a re-import for an imported one). The asymmetry the field
 encodes is a fact about the list, so leaving it invisible made which rows the
 next sync would replace unpredictable. The rest of the
 payload is the importers' own mapping, `contentType` included (the response's
@@ -724,8 +731,9 @@ apiService.restoreTrashEntry(id): Promise<RestoreTrashResponse> // POST   /trash
 apiService.purgeTrashEntry(id): Promise<PurgeTrashResponse>     // DELETE /trash/:id
 ```
 
-What `deleteCollection`, `deleteRequest` and `deleteEnvironment` (#2970) now do
-is a soft delete (issue #988): the engine stamps the row instead of removing
+What `deleteCollection`, `deleteRequest`, `deleteEnvironment` (#2970) and
+`deleteRequestExample` for a saved example (#2971) now do is a soft delete
+(issue #988): the engine stamps the row instead of removing
 it, and these three read that stamp back. No transformer on any of the three -
 a trash entry is the engine's own summary of a deleted row (a name, a stamp and
 its counts), not a stored record the app reshapes, so the wire shape is the
@@ -734,9 +742,11 @@ only shape.
 `listTrash` returns **roots only** - the row a user actually asked to delete,
 never a descendant the same cascade took with it. A deleted collection's whole
 subtree is represented by that one root entry, with `collections` / `requests`
-counting what that delete took along. `kind` is `"collection"`, `"request"` or
-`"environment"`; an environment entry is always a root, counts `0` for both,
-and alone carries `variables`, how many variables it holds.
+counting what that delete took along. `kind` is `"collection"`, `"request"`,
+`"environment"` or `"example"`; an environment entry is always a root, counts
+`0` for both, and alone carries `variables`, how many variables it holds. An
+example entry counts `0` for both too; the engine's `parentId` on it is the
+owning request, which `TrashEntry` does not claim because no reader needs it.
 
 `restoreTrashEntry` puts one deleted root back, with everything the same
 delete took, and answers with the entry plus `restored: true` and
@@ -745,10 +755,14 @@ the trash, so the engine clears its parent and returns it as a tree root
 instead. It rejects with a `404` for an id the trash does not hold (a live row,
 or one already purged) and a `409` for a request whose collection is itself
 deleted or gone - a request has no root to land on the way a collection does,
-so the engine's message names the collection to restore first; surface
-`ApiError.message` rather than inventing wording for it. A restored environment
+so the engine's message names the collection to restore first - and the same
+`409` for an example whose request is deleted or gone, or already holds the
+most examples a request may (100); surface `ApiError.message` rather than
+inventing wording for it. Both the Trash view's Restore and the toast's Undo do. A restored environment
 comes back with every variable but inactive: the delete cleared its active flag
-and the restore does not set it again.
+and the restore does not set it again. A restored example reappears in its
+request's Examples list because the restore invalidates `requests.all`, under
+which the examples key sits.
 
 `purgeTrashEntry` is the hard purge the soft delete deferred - it destroys the
 row for good, with its whole subtree, and there is no undo. It answers with the

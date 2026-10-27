@@ -148,6 +148,8 @@ add_executable(vayu_tests
     config_snapshot_test.cpp
     run_origin_test.cpp
     request_body_depth_test.cpp
+    if_match_route_test.cpp
+    entity_tag_test.cpp
     request_body_parse_scan_test.cpp
     user_error_wording_scan_test.cpp
     execute_auth_provenance_test.cpp
@@ -351,6 +353,14 @@ if(NOT MSVC)
     target_precompile_headers(vayu_tests PRIVATE <nlohmann/json.hpp>)
 endif()
 
+# The tests run scripts on the main thread, whose 1 MiB default reserve is
+# below what QuickJS's soft stack check needs once /Od and ASan frames apply
+# (the ajv and tv4 tests overflowed it, #2684). 8 MiB is what quickjs-ng links
+# its own executables with. It is address space reserved, committed lazily.
+if(MSVC)
+    target_link_options(vayu_tests PRIVATE /STACK:8388608)
+endif()
+
 # The test binary needs the manifest for two reasons: any test that opens a
 # TLS connection would otherwise run without ALPN, and `WindowsOsVersionShim`
 # in http_version_support_test.cpp asserts on *this* process's view of the OS
@@ -417,6 +427,8 @@ set(vayu_scratch_database_suites
     ExamplesRouteTest
     GlobalsRouteTest
     HealthRouteTest
+    IfMatchRouteTest
+    IfMatchServerTest
     ImportApplyRouteTest
     ImportParseRoute
     InboxListenerTest

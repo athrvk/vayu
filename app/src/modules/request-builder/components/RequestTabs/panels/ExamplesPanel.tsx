@@ -26,10 +26,10 @@
  * (#722). A spec sync rewrites a request's imported examples whenever it
  * applies any change to it and never touches a saved one, so which rows the
  * next sync owns is a fact about the list - and until the chip it was one the
- * list did not show. Deleting either kind is durable now: the engine records a
- * deleted imported example rather than only removing it, so this dialog's
- * promise is true for both, and only the wording of what could still bring one
- * back differs.
+ * list did not show. Deleting either kind is durable: the engine records a
+ * deleted imported example as a tombstone, and moves a saved one to the Trash
+ * (#2971), which is why only a saved delete raises the Undo toast and why the
+ * dialog's wording of what could bring the row back differs.
  */
 
 import { useMemo, useState } from "react";
@@ -46,6 +46,7 @@ import {
 	Badge,
 	Button,
 	DeleteConfirmDialog,
+	exampleDeleteDescription,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -61,6 +62,7 @@ import {
 	useRequestQuery,
 	useUpdateRequestMutation,
 } from "@/queries";
+import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { exampleReference } from "@/lib/agent-reference";
 import { collectionNamePath } from "@/modules/collections/tree-utils";
 import { useImportModalStore } from "@/stores";
@@ -307,6 +309,7 @@ export default function ExamplesPanel() {
 	const [pendingDelete, setPendingDelete] = useState<RequestExample | null>(null);
 	const deleteExample = useDeleteRequestExampleMutation();
 	const openImport = useImportModalStore((s) => s.open);
+	const offerUndo = useTrashUndo();
 
 	// The saved row, not the builder's draft: an unsaved rename would put a name
 	// in the line that the engine and the agent's tools do not know yet.
@@ -318,9 +321,17 @@ export default function ExamplesPanel() {
 
 	const confirmDelete = () => {
 		if (!request.id || !pendingDelete) return;
+		const { id, name, origin } = pendingDelete;
 		deleteExample.mutate(
-			{ requestId: request.id, exampleId: pendingDelete.id },
-			{ onSuccess: () => setPendingDelete(null) }
+			{ requestId: request.id, exampleId: id },
+			{
+				onSuccess: () => {
+					setPendingDelete(null);
+					// An imported example is a spec-sync tombstone, not a Trash
+					// entry: there is nothing to restore it from.
+					if (origin !== "import") offerUndo(id, name, "example");
+				},
+			}
 		);
 	};
 
@@ -393,9 +404,10 @@ export default function ExamplesPanel() {
 			 * example of a matched route, so removing one can change what the next
 			 * restart serves.
 			 *
-			 * The second sentence differs by origin because what happens next
-			 * does (issue #722). A saved example is simply gone. An imported one
-			 * is gone too - the engine keeps the delete as a tombstone, so no
+			 * The last sentence differs by origin because what happens next does
+			 * (issues #722, #2971). A saved example goes to the Trash and the
+			 * toast after the delete offers it straight back. An imported one is
+			 * not trashed - the engine keeps the delete as a tombstone, so no
 			 * later sync writes it back - but re-importing the document is a
 			 * fresh import and does bring it back, which is the one way it can
 			 * return and so the one thing worth saying here.
@@ -405,15 +417,7 @@ export default function ExamplesPanel() {
 				onOpenChange={(open) => !open && setPendingDelete(null)}
 				title={`Delete "${pendingDelete?.name ?? "example"}"?`}
 				confirmLabel="Delete example"
-				description={
-					<>
-						The example is removed from this request. A mock server for this collection
-						stops answering with it once it is restarted.{" "}
-						{pendingDelete?.origin === "import"
-							? "Syncing this collection with its spec won't bring it back; re-importing the document will."
-							: "This can't be undone."}
-					</>
-				}
+				description={exampleDeleteDescription(pendingDelete?.origin ?? "user")}
 				// The engine's refusal, in the dialog that asked for the delete. Without
 				// it a failed delete looks like nothing happened: the row is still there
 				// and the dialog is still open.

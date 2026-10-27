@@ -123,6 +123,11 @@ describe("one line per kind", () => {
 		expect(trashReference({ id: "req_9", kind: "request", name: "Old" })).toBe(
 			'Vayu trash entry "Old" (req_9) - request'
 		);
+		// The id is the example's own: restore_trash_entry takes it, and the
+		// owning request is not needed to put it back (#2971).
+		expect(trashReference({ id: "exa_9", kind: "example", name: "Old" })).toBe(
+			'Vayu trash entry "Old" (exa_9) - example'
+		);
 	});
 
 	it("variable: its name and the scope it lives in, never a value", () => {

@@ -15,10 +15,10 @@ import type { TrashEntry } from "@/types";
  * Raise the toast a soft delete offers: "Moved "<name>" to the Trash" with an
  * Undo that restores the row.
  *
- * Lives here rather than beside one of its callers because two modules delete
- * into the Trash - the collection tree (`useTreeCrud`) and the Variables view's
- * environment deletes (#2970) - and a second, hand-rolled toast would not
- * receive this one's fixes. `restoreClientState` is whatever the caller threw
+ * Lives here rather than beside one of its callers because three surfaces delete
+ * into the Trash - the collection tree (`useTreeCrud`), the Variables view's
+ * environment deletes (#2970) and the Examples panel (#2971) - and a second,
+ * hand-rolled toast would not receive this one's fixes. `restoreClientState` is whatever the caller threw
  * away on the client and wants back once the engine has restored the row; it
  * runs only after a restore that landed.
  */

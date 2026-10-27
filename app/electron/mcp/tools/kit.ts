@@ -25,7 +25,7 @@ import {
 	inputResponse,
 	type InputRequiredResult,
 } from "@modelcontextprotocol/server";
-import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
+import { EngineRequestError, EngineTimeoutError, entityTagOf } from "../engine-client.js";
 import { presentCollection } from "../collection-shape.js";
 import { engineDownRemedy, settingRemedy } from "../remedy.js";
 import { targetPolicyRefusalOfErrorBody, type GuardResult } from "../safety.js";
@@ -285,6 +285,61 @@ async function callEngineAs(
 	} catch (err) {
 		return engineErrorResult(err, ctx);
 	}
+}
+
+/**
+ * One read-merge-write of a stored row, conditioned on the version the merge
+ * was computed from (#2433).
+ */
+export interface MergedWrite {
+	/** The row as named in the conflict sentence: `environment "env_1"`. */
+	subject: string;
+	/** The row as stored now; null or a non-object when nothing matches. */
+	read: () => Promise<unknown>;
+	/** The body to write, computed from the row just read. */
+	merge: (row: Record<string, unknown>) => Record<string, unknown>;
+	/** The PUT, sent with `If-Match` when the row read carried a version. */
+	write: (payload: Record<string, unknown>, ifMatch: string | undefined) => Promise<unknown>;
+	shape?: (value: unknown) => unknown;
+}
+
+const PRECONDITION_FAILED = Symbol("precondition failed");
+
+/**
+ * Runs @p op. A 412 means another client wrote the row between the read and
+ * the write; the row is read and merged once more, and a second 412 is
+ * answered as a conflict with nothing written.
+ */
+export async function mergeAndWrite(ctx: ToolContext, op: MergedWrite): Promise<ToolResult> {
+	const first = await attemptMergedWrite(ctx, op);
+	if (first !== PRECONDITION_FAILED) return first;
+	const second = await attemptMergedWrite(ctx, op);
+	if (second !== PRECONDITION_FAILED) return second;
+	return errorResult(
+		`Nothing was written: ${op.subject} was changed by another client twice while this call was merging into it. Repeat the call to merge into the latest version.`,
+		"transient"
+	);
+}
+
+async function attemptMergedWrite(
+	ctx: ToolContext,
+	op: MergedWrite
+): Promise<ToolResult | typeof PRECONDITION_FAILED> {
+	let row: unknown;
+	try {
+		row = await op.read();
+	} catch (err) {
+		return engineErrorResult(err, ctx);
+	}
+	const payload = op.merge(isRecord(row) ? row : {});
+	let answer: unknown;
+	try {
+		answer = await op.write(payload, entityTagOf(row));
+	} catch (err) {
+		if (err instanceof EngineRequestError && err.status === 412) return PRECONDITION_FAILED;
+		return engineErrorResult(err, ctx);
+	}
+	return callEngine(ctx, () => Promise.resolve(answer), op.shape);
 }
 
 /**

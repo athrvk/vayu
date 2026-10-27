@@ -26,7 +26,9 @@ object carrying a machine-readable `code` and a human-readable `message`:
 (409), `bad_gateway` (502), `unavailable` (503), `insufficient_storage` (507),
 `internal_error` (any other 5xx). Routes
 with their own vocabulary pass it instead - `invalid_config` (`POST /config`),
-`invalid_run_config` (`POST /runs`), and the `oauth2_*` family.
+`invalid_run_config` (`POST /runs`), `precondition_failed` and
+`invalid_if_match` (a whole-record `PUT`'s `If-Match`), and the `oauth2_*`
+family.
 
 Any per-error detail sits **inside** the same object, so a client reads one
 place for the whole failure - `item` on `POST /import/apply`, the provider's
@@ -210,8 +212,53 @@ MCP agent, say - each merge onto what the other committed rather than onto the
 row as both of them found it. The alternative is not a conflict but a silent
 loss: the merge carries every field the body did not name, so the loser's fields
 come back written with the values the winner read a moment earlier, and neither
-request fails. There is no precondition header; a client that needs to *detect*
-that the row moved under it has nothing to read yet.
+request fails. A client that computes its body from an earlier read (a
+read-merge-write across two round trips) closes its own window with
+[`If-Match`](#conditional-updates-with-if-match).
+
+### Conditional updates with If-Match
+
+The four whole-record `PUT`s - [collections](#put-collectionsid),
+[requests](#put-requestsid), [environments](#put-environmentsid) and
+[examples](#put-requestsidexamplesexampleid) - take an optional `If-Match`
+header (issue [#2433](https://github.com/athrvk/vayu/issues/2433)). A row's
+version is its `updatedAt`, and its entity tag is the weak `W/"<updatedAt>"`.
+
+- Every `200` from those `PUT`s, and from [`GET /requests/:id`](#get-requestsid),
+  carries the row's `ETag`. The list reads (`GET /collections`,
+  `GET /environments`, `GET /requests/:id/examples`) carry no per-row header;
+  a client builds the tag from the row's `updatedAt`, which is the same value.
+- `If-Match: W/"<updatedAt>"` makes the write conditional: it lands only while
+  the stored row is at that version. The check runs inside the same lock
+  acquisition as the read and the merge, after the `404`, so the row it judges
+  is the row the write replaces.
+- A mismatch is `412` with code `precondition_failed`, and nothing is written.
+  The stored `updatedAt` rides inside the error, so the caller can re-read,
+  merge again and retry under the new tag:
+
+  ```json
+  {"error": {"code": "precondition_failed", "message": "The record changed after it was read; read it again and re-apply the change", "updatedAt": 1792359304908}}
+  ```
+
+- `If-Match: *` holds for any stored row (a missing one is still `404`). A
+  comma-separated list holds when any member names the version, and repeated
+  `If-Match` lines are read as one list. The comparison is weak: `W/` is ignored
+  on both sides, where RFC 9110 asks for the strong comparison, which no weak tag
+  passes. Every tag the engine issues is weak because a row's answer carries
+  members its `updatedAt` does not version (a request's derived file trust).
+- A value that is not `*` or entity tags (a bare `1792359304908`, an empty
+  value) is `400` `invalid_if_match`, before the row is looked up.
+- No `If-Match` is the unconditional write it always was. The app sends none:
+  its autosave patches only the fields that changed (#1436), so its writes
+  merge rather than collide.
+
+An update through these routes always moves `updatedAt` forward, even within one
+millisecond, so two of them never share a tag. Other writers of these rows (a
+reorder, a spec sync, a run persisting script variables) stamp the current time.
+Activating an environment clears `isActive` on the one it replaces without
+restamping that row, so an environment's tag does not cover `isActive`.
+`/globals` has no `PUT` and takes no `If-Match` yet
+([#2988](https://github.com/athrvk/vayu/issues/2988)).
 
 ### The engine owns every id
 
@@ -1052,7 +1099,7 @@ governs what a run measures rather than what it keeps:
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
-| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests and environments deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
+| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests, environments and saved examples deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
@@ -1521,9 +1568,13 @@ A `parentId` that changes the collection's parent and states no `order` appends
 the collection among its new siblings, rather than carrying a position from the
 list it just left. See [Ordering](#ordering).
 
-**Response:** The updated collection object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
 
-**Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
+**Response:** The updated collection object, with its `ETag`.
+
+**Errors:** `404` if the collection does not exist; `412` if `If-Match` no
+longer names the stored row; `400` on a `null` `name`, a malformed `If-Match` or
 on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1766,7 +1817,8 @@ every collection's request list and scanning them for the id.
 - `id` (required): The request ID to fetch
 
 **Response:** The request object, in the same shape as a full `GET /requests`
-list entry.
+list entry, with its `ETag` (`W/"<updatedAt>"`, see
+[Conditional updates](#conditional-updates-with-if-match)).
 ```json
 {
   "id": "req_1234567890",
@@ -2050,9 +2102,13 @@ stored block, whichever client wrote it, and a save that changed nothing keeps
 it. `POST /requests`, `POST /collections`, `PUT /collections/:id` and
 `POST /import/apply` apply the same rule.
 
-**Response:** The updated request object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
 
-**Errors:** `404` if the request does not exist; `400` on a `null`
+**Response:** The updated request object, with its `ETag`.
+
+**Errors:** `404` if the request does not exist; `412` if `If-Match` no longer
+names the stored row; `400` on a malformed `If-Match`, on a `null`
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
@@ -2142,12 +2198,16 @@ the full kind table.
 
 ## Trash
 
-What deleting a collection, a request or an environment now does, and how to
-undo it (issue #988; environments #2970). `DELETE /collections/:id`,
-`DELETE /requests/:id` and `DELETE /environments/:id` stamp rows instead of
-removing them; every other read surface filters stamped rows out, so the tree
-and the environment list the app sees are unchanged, and these three endpoints
-are the whole of what the stamp buys.
+What deleting a collection, a request, an environment or a saved example now
+does, and how to undo it (issue #988; environments #2970; examples #2971).
+`DELETE /collections/:id`, `DELETE /requests/:id`, `DELETE /environments/:id`
+and, for an example a person saved (`origin: "user"`),
+`DELETE /requests/:id/examples/:exampleId` stamp rows instead of removing them;
+every other read surface filters stamped rows out, so the tree, the environment
+list and a request's examples look the same as after a hard delete, and these
+three endpoints are the whole of what the stamp buys. An imported example is
+not trashed: its delete leaves the tombstone a spec sync reads (see
+[DELETE /requests/:id/examples/:exampleId](#delete-requestsidexamplesexampleid)).
 
 Two rules decide what a restore of a collection or request puts back:
 
@@ -2168,6 +2228,16 @@ same write, so the active slot is free for another environment, and a restore
 brings it back inactive: making it active again is a `PUT` with
 `isActive: true`, the client's choice rather than the trash's.
 
+An example hangs under its request, one level below where a request hangs under
+its collection, and follows the request's rule. Its delete stamps its one row.
+It is a root only while its request is live: under a trashed request it is part
+of what that request's entry stands for, and restoring the request leaves the
+example's own earlier delete in the trash as a root again. Restoring an example
+whose request is in the trash or gone is a `409` naming the request to restore
+first, and so is restoring one into a request that already holds the maximum of
+100 examples. A stamped example whose request row is gone entirely is listed
+nowhere.
+
 Rows sit in the trash until they are purged: explicitly through
 `DELETE /trash/:id`, or by the startup sweep once they are older than
 `trashRetentionDays` (default 30; `0` keeps them forever).
@@ -2176,7 +2246,8 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count. Every deleted environment is a root.
+`collections` and `requests` count. Every deleted environment is a root; a
+deleted example is one while its request is live.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2207,25 +2278,36 @@ a user asked to delete, never what their cascade took with them; that is what
       "collections": 0,
       "requests": 0,
       "variables": 6
+    },
+    {
+      "id": "exa_1234567890",
+      "kind": "example",
+      "name": "200 - created",
+      "deletedAt": 1787745400000,
+      "parentId": "req_1234567890",
+      "collections": 0,
+      "requests": 0
     }
   ],
-  "total": 2
+  "total": 3
 }
 ```
 
-`kind` is `"collection"`, `"request"` or `"environment"`. `parentId` is a
-collection's parent (`null` at the tree root), a request's owning collection, or
-`null` for an environment. `collections` and `requests` are `0` for a request
-and an environment. `variables` is carried by an environment entry only - the
+`kind` is `"collection"`, `"request"`, `"environment"` or `"example"`.
+`parentId` is a collection's parent (`null` at the tree root), a request's
+owning collection, an example's owning **request**, or `null` for an
+environment. `collections` and `requests` are `0` for a request, an environment
+and an example. `variables` is carried by an environment entry only - the
 number of variables its stored map holds - and is absent, not `0`, on the other
-two kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
+three kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
 
 ### POST /trash/:id/restore
 
-Put a deleted collection, request or environment back, with everything the
-same delete took. Takes no body. An environment comes back exactly as it was
-deleted except that it is inactive (see [Trash](#trash)), and its answer
-carries `variables` like its list entry.
+Put a deleted collection, request, environment or example back, with
+everything the same delete took. Takes no body. An environment comes back
+exactly as it was deleted except that it is inactive (see [Trash](#trash)), and
+its answer carries `variables` like its list entry. An example comes back
+exactly as it was deleted, `order` included.
 
 **Response:** the entry that was restored, plus what happened to it:
 ```json
@@ -2248,12 +2330,15 @@ carries `variables` like its list entry.
 |--------|------|
 | `404` | Nothing in the trash carries that id - a live row, or one already purged |
 | `409` | A request whose collection is itself deleted or gone; restore the collection first |
+| `409` | An example whose request is itself deleted or gone; restore the request first |
+| `409` | An example whose request already holds the maximum of 100 examples; delete one first |
 
 ### DELETE /trash/:id
 
-Destroy a deleted collection, request or environment for good, with its whole
-subtree - requests, and the examples they own; an environment is its one row. This is the hard cascade soft delete
-replaced, asked for deliberately; there is no undo for it.
+Destroy a deleted collection, request, environment or example for good, with
+its whole subtree - requests, and the examples they own, trashed ones included;
+an environment or an example is its one row. This is the hard cascade soft
+delete replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
 left inside the subtree goes too, because a request under a removed collection
@@ -2286,7 +2371,9 @@ otherwise come back shuffled by the id tiebreak.
 
 **Caps.** A `body` over **1 MiB** is a `400` rather than a truncation - an
 example served as if it were whole when it is not is worse than a refused write
-- and a request holds at most **100** examples.
+- and a request holds at most **100** examples. Only live ones count: a
+tombstoned or trashed example does not, which is why restoring one into a full
+request is refused (see [Trash](#trash)).
 
 **`origin` says who wrote the row** (issue #588): `"import"` for everything an
 importer or a spec sync produced, `"user"` for one a person saved from a live
@@ -2438,7 +2525,13 @@ is a `400`). `postmanResponse` accepts only `null`, which clears it; any other
 value is a `400` - it records what a file said, and the export already
 regenerates each part of it an edit to `status` or `headers` makes stale.
 
-**Response:** the updated example object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
+
+**Response:** the updated example object, with its `ETag`.
+
+**Errors:** `404` as above; `412` if `If-Match` no longer names the stored row;
+`400` on a malformed `If-Match` or a rejected field.
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -2453,8 +2546,17 @@ example is gone from every read (the list, a mock server, an export, and a `GET`
 or `PUT` on its id, all `404`), and a later sync leaves that response status
 alone rather than writing the document's example for it back. Re-importing the
 document is a fresh import and does bring it back, which is the only way it
-returns. An `origin: "user"` example is removed outright - nothing re-creates
-one, so there is no intent to keep.
+returns.
+
+**Deleting an example a person saved moves it to the [trash](#trash)** (#2971).
+An `origin: "user"` example is stamped `deleted_at` rather than removed:
+nothing re-creates one, so the row is the only copy of the response. It is gone
+from the same reads a tombstone is, a second `DELETE` is a `404`, it no longer
+counts against the 100-example cap, and [`GET /trash`](#get-trash) lists it
+(kind `example`, `parentId` its request) while its request is live.
+[`POST /trash/:id/restore`](#post-trashidrestore) brings it back as it was;
+[`DELETE /trash/:id`](#delete-trashid), or the startup sweep after
+`trashRetentionDays`, destroys it.
 
 The response is the same either way, because from the caller's side so is the
 outcome:
@@ -4935,8 +5037,10 @@ Update an existing environment. **Update only** - a `404` when the id does not
 exist, never a silent create. Merge-patch body, same rule as collections.
 
 `variables` replaces the whole map, so a caller doing a partial edit reads the
-current map first and sends the merged result (this is what the MCP
-`update_environment` tool does). Sending `variables: null` resets it to `{}` -
+current map first and sends the merged result under the version it read,
+`If-Match: W/"<updatedAt>"` (this is what the MCP `update_environment` tool
+does; see [Conditional updates](#conditional-updates-with-if-match)). Sending
+`variables: null` resets it to `{}` -
 it no longer stores the literal string `null`, which is the bug this verb split
 fixed. `isActive` is honored here too; it used to be read only on create.
 
@@ -4959,9 +5063,13 @@ it survives a restart and is shared by every client on the same database. See
 }
 ```
 
-**Response:** The updated environment object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
 
-**Errors:** `404` if the environment does not exist; `400` on a `null` `name`;
+**Response:** The updated environment object, with its `ETag`.
+
+**Errors:** `404` if the environment does not exist; `412` if `If-Match` no
+longer names the stored row; `400` on a `null` `name` or a malformed `If-Match`;
 `413` naming the field, its size and the cap, when a serialized `variables` is
 over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -12379,6 +12487,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 401 | OAuth 2.0 provider rejected the token request |
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
+| 412 | A whole-record `PUT` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |

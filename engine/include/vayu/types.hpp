@@ -1903,6 +1903,12 @@ struct RequestExample {
     std::optional<std::string> postman_response;
     int64_t created_at = 0;
     int64_t updated_at = 0;
+    // When this example was deleted, in Unix ms - NULL while it is live
+    // (#2971). Only a user's own example is ever stamped: deleting an imported
+    // one tombstones it (`suppressed`) instead, so the two never meet on one
+    // row. The `Environment::deleted_at` rule: one row, no cohort, and every
+    // read filters it out. Not serialized - the trash is the one reader.
+    std::optional<int64_t> deleted_at;
 };
 
 /**

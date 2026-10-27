@@ -339,7 +339,10 @@ inline auto make_vayu_storage (const std::string& path) {
     // bumped with it.
     make_column ("postman_response", &RequestExample::postman_response),
     make_column ("created_at", &RequestExample::created_at),
-    make_column ("updated_at", &RequestExample::updated_at)),
+    make_column ("updated_at", &RequestExample::updated_at),
+    // Soft delete of a user's example (#2971), the `environments.deleted_at`
+    // shape: NULL is live.
+    make_column ("deleted_at", &RequestExample::deleted_at)),
 
     // Spec documents: OpenAPI documents, stored once and bound to collections
     // (issue #637). A new table, so sync_schema() creates it outright and there
@@ -773,6 +776,17 @@ struct Database::Impl {
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning ("db",
                 "Failed to set wal_autocheckpoint: " + std::string (err_msg));
+                sqlite3_free (err_msg);
+                err_msg = nullptr;
+            }
+            sql.str ("");
+
+            sql << "PRAGMA journal_size_limit = "
+                << vayu::core::constants::database::JOURNAL_SIZE_LIMIT_BYTES << ";";
+            rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning ("db",
+                "Failed to set journal_size_limit: " + std::string (err_msg));
                 sqlite3_free (err_msg);
             }
         };

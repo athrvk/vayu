@@ -3462,8 +3462,12 @@ method), and the first `compile` and a call 10 ms and 35 ms more, most of it
 compiling the draft-07 meta-schema the schema is checked against. The evaluated
 module holds about 1,000 KB of the script's 64 MB limit until the execution
 ends. A compile runs on the script's own stack: the measured schema (four
-levels of nesting, `allErrors` on) needed between 48 and 64 KB in a `-O0`
-build, inside the 256 KB default. Nothing is shared between executions.
+levels of nesting, `allErrors` on) needed between 48 and 64 KB in a gcc `-O0`
+build, inside the 256 KB default. MSVC at `/Od` under ASan needed more and
+overflowed 512 KB in the test suite, which therefore gives its test engine more
+stack (#2684 in [what the sanitizer matrix
+found](building.md#what-the-matrix-found-and-where-it-stands)); the default is
+unchanged. Nothing is shared between executions.
 
 The Postman import's script scan does not name `require('ajv')`.
 

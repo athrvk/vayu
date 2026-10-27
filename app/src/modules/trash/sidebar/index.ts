@@ -8,7 +8,7 @@
 /**
  * Trash Sidebar Components
  *
- * The drawer view for deleted collections, requests and environments.
+ * The drawer view for deleted collections, requests, environments and examples.
  */
 
 export { default as TrashList } from "./TrashList";

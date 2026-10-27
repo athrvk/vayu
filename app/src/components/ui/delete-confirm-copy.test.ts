@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { environmentDeleteDescription } from "./delete-confirm-copy";
+import { environmentDeleteDescription, exampleDeleteDescription } from "./delete-confirm-copy";
 
 const withVariables = (count: number) => ({
 	variables: Object.fromEntries(Array.from({ length: count }, (_, i) => [`v${i}`, {}])),
@@ -39,6 +39,36 @@ describe("environmentDeleteDescription", () => {
 	it("still says what a request using them will send", () => {
 		expect(environmentDeleteDescription(withVariables(1))).toContain(
 			"Requests that use them will send the literal `{{variableName}}` text."
+		);
+	});
+});
+
+/**
+ * A saved example's delete is soft since #2971, an imported one's is not: the
+ * engine keeps it as a spec-sync tombstone. Mutation check: put "This can't be
+ * undone." back for a saved example, or the Trash sentence onto an imported
+ * one, and the matching case fails.
+ */
+describe("exampleDeleteDescription", () => {
+	it("points a saved example at the Trash instead of calling the delete final", () => {
+		const description = exampleDeleteDescription("user");
+
+		expect(description).toContain("You can restore it from Trash.");
+		expect(description).not.toMatch(/can't be undone|cannot be undone/);
+		expect(description).not.toContain("re-importing");
+	});
+
+	it("keeps the spec-sync wording for an imported example and does not promise a restore", () => {
+		const description = exampleDeleteDescription("import");
+
+		expect(description).toContain("Syncing this collection with its spec won't bring it back");
+		expect(description).toContain("re-importing the document will.");
+		expect(description).not.toContain("Trash");
+	});
+
+	it.each(["user", "import"] as const)("tells a %s example what a mock server does", (origin) => {
+		expect(exampleDeleteDescription(origin)).toContain(
+			"A mock server for this collection stops answering with it once it is restarted."
 		);
 	});
 });

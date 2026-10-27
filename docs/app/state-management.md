@@ -495,22 +495,6 @@ read IPC *as a path*; a malformed `hash` drops only the hash, and a
 non-boolean `castNumbers` reads as off. An engine that predates the column, or
 answers `{}`, reads as unbound.
 
-**Bindings from an older Vayu.** Before #2765 both stores were zustand
-`persist` stores, under the `localStorage` keys that are now
-`LEGACY_FILE_BINDING_KEYS` (`vayu.spec-files`, `vayu.data-files`).
-`useLegacyFileBindingImport` (mounted in `App.tsx`) reads them once, after the
-first collections list arrives (`importLegacyFileBindings`,
-`queries/legacy-file-bindings.ts`): each entry goes through the row's
-normalizer and is written, binding-only, to the collection it named - but only
-to one the engine still lists and that holds no binding of that kind, so a
-binding already on the row is never overwritten. An entry for a collection
-the list does not name - one deleted, or sitting in the trash, before the
-upgrade - is dropped, so restoring such a collection later brings it back
-unbound. A key is removed once every write it asked for has landed; a launch
-that cannot reach the engine keeps it and the next one finishes the move. A
-key that is not a payload the old store could have written is logged and
-dropped.
-
 #### `spec-file-store.ts` - Where Each Collection's Spec File Lives
 
 Each collection's picked spec file, by collection id, for the specs that were
@@ -2034,12 +2018,13 @@ rewrite, each written as the kind it is.
 #### Trash
 
 The read side of the same soft delete (issue #989): `useDeleteCollectionMutation`,
-`useDeleteRequestMutation` and `useDeleteEnvironmentMutation` (#2970) stamp a
-row rather than removing it, and these are how the app sees what got stamped
+`useDeleteRequestMutation`, `useDeleteEnvironmentMutation` (#2970) and
+`useDeleteRequestExampleMutation` (#2971, for a saved example) stamp a row
+rather than removing it, and these are how the app sees what got stamped
 (`queries/trash.ts`).
 
 - **`useTrashQuery()`** - Every deleted root, newest first (`GET /trash`). No
-  `staleTime`: the list changes only through the two mutations below, the three
+  `staleTime`: the list changes only through the two mutations below, the four
   delete mutations, and the startup retention purge, so the default is
   already the cheapest correct answer.
 - **`useRestoreTrashMutation()`** - Put one deleted root back
@@ -2049,7 +2034,9 @@ row rather than removing it, and these are how the app sees what got stamped
   the cascade delete note below) - plus `environments.all` and every
   composition (`invalidateCompositions`), whatever kind came back: a restored
   environment reappears in the Variables tree and its variables can resolve
-  again. It leaves `activeEnvironmentId` alone (see the session store above).
+  again. A restored example reappears in its request's Examples panel through
+  the same `requests.all` invalidation: `requests.examples(id)` sits under it.
+  It leaves `activeEnvironmentId` alone (see the session store above).
 - **`usePurgeTrashMutation()`** - Destroy one deleted root for good
   (`DELETE /trash/:id`). Invalidates only `trash.all`: every other cache
   already stopped serving these rows when they were stamped, so purging them
@@ -2390,7 +2377,8 @@ The `lists()` / `details()` levels exist to be invalidated as prefixes; what a
 query is keyed on is `list()` / `detail(id)`. `requests.examples(id)` sits
 *under* `detail(id)` rather than beside it, because examples are owned by the
 request: invalidating one request's subtree drops its examples with it, which is
-what a request delete needs. `runs.lastDesign`,
+what a request delete needs, and what a restored example needs, since
+`requests.all` reaches it by prefix (#2971). `runs.lastDesign`,
 `runs.recentDesign`, `runs.lastCollectionRun`, `runs.baseline` and
 `runs.requestRun` sit under
 `runs.all` but deliberately **not** under `runs.lists()` - see below.
@@ -2510,7 +2498,7 @@ to keys through `lib/mcp-invalidation.ts`:
 |--------|-------------|--------------|
 | `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | Declared by the writes that can reach any collection's requests: `delete_collection`, `move_item`, `import_document`, `bind_spec`, `sync_spec`, `restore_trash_entry` and `purge_trash_entry` (the two trash tools declare `request` and `environment` too). A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. The event's `collectionId` is not read: each tool names a different collection by it (the one deleted, a move's destination, a spec's binder), and none changes that collection's list alone. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` ahead of `requests.all` (`invalidateAllRequestLists`), so the mounted lists join one `GET /requests` rather than each fetching (#1438) |
 | `collectionRow` | `collections.all`, `compose.all` | Declared by `create_collection`, `update_collection` and `unbind_spec`, which write one collection row and nothing beneath it: a new collection holds no requests, an update cannot reach a trashed row, and an unbind leaves the requests' operation stamps in place. So no request list, trash row or warm-cache pass is read - an agent renaming 50 collections refetches the collections 50 times and the workspace's request lists not at all. The two reads are the ones `useUpdateCollectionMutation` refreshes (#2546) |
-| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
+| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open, and it is also the prefix the request's examples list sits under, so `delete_request_example` reaches an open Examples panel through it. `trash.all` because `delete_request` and `delete_request_example` (a saved example goes to the Trash since #2971) declare this family alone and stamp a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it is one workspace-wide `GET /requests?fields=summary`, too costly to repeat per row, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `trash.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader. `trash.all` because `delete_environment` declares this family alone and, since #2970, stamps a row the drawer lists; `restore_trash_entry` and `purge_trash_entry` declare it beside `collection` and `request`, so a restored environment reappears in the Variables tree. An `update_environment` pays a refetch of the trash list while the drawer is open - the trade the `request` family takes |
 | `run` | `runs.lists()`, `runs.count()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |

@@ -85,7 +85,7 @@ Some modules have components displayed in both the sidebar and main content area
 #### `trash/`
 
 - **Location:** Sidebar only - the `trash` drawer view (issue #989, over the engine's soft delete in #988)
-- **Components:** `sidebar/TrashList.tsx` - deleted collections, requests and environments,
+- **Components:** `sidebar/TrashList.tsx` - deleted collections, requests, environments and saved examples,
   newest first, each with restore and purge-for-good actions; `sidebar/TrashItem.tsx` - one row
 - **Also exports** `retentionCopy()` and `retentionDaysFrom()` (`retention.ts`), which turn the
   engine's `trashRetentionDays` config entry into the sentence the view puts under its title

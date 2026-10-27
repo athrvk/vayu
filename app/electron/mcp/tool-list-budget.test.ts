@@ -116,6 +116,13 @@
  * schema was a bare `{data}` list) and the `limit` ceiling on
  * `get_live_metrics` took all four rows up by about 800 B: 146,936 / 144,210 /
  * 215,751 / 211,354 B. The caps went to 147,200 / 144,500 / 216,100 / 211,700.
+ *
+ * #2971's Trash wording (a saved example is a fourth kind `list_trash` lists
+ * and `restore_trash_entry` / `purge_trash_entry` act on, and
+ * `delete_request_example` says where it goes) took the writes-on rows to
+ * 216,547 / 212,150 B. Those two caps went to 216,800 / 212,400; `list_trash`
+ * is the one read tool it touched and stays within the writes-off margin, so
+ * those caps are untouched.
  */
 
 import { describe, it, expect } from "vitest";
@@ -137,8 +144,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_200 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 144_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 216_100 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 211_700 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 216_800 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 212_400 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
