@@ -298,7 +298,10 @@ export interface MergedWrite {
 	read: () => Promise<unknown>;
 	/** The body to write, computed from the row just read. */
 	merge: (row: Record<string, unknown>) => Record<string, unknown>;
-	/** The PUT, sent with `If-Match` when the row read carried a version. */
+	/**
+	 * The write (a merge-patch `PUT`, or the whole-blob `POST /globals`), sent
+	 * with `If-Match` when the row read carried a version.
+	 */
 	write: (payload: Record<string, unknown>, ifMatch: string | undefined) => Promise<unknown>;
 	shape?: (value: unknown) => unknown;
 }
