@@ -20,3 +20,6 @@
 
 # style(engine): bulk-format engine/{src,include,tests} at clang-format 19 (#886)
 1132ece2e334ec26c15a001a627e4d6839c4498d
+
+# style(engine): reformat engine/{src,include,tests} at clang-format 22 (#2784)
+ac82031bfc23abb30c237d4c53c3d5d0d1a4a632
