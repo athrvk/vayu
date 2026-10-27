@@ -147,6 +147,8 @@ add_executable(vayu_tests
     config_snapshot_test.cpp
     run_origin_test.cpp
     request_body_depth_test.cpp
+    if_match_route_test.cpp
+    entity_tag_test.cpp
     request_body_parse_scan_test.cpp
     user_error_wording_scan_test.cpp
     execute_auth_provenance_test.cpp
@@ -424,6 +426,8 @@ set(vayu_scratch_database_suites
     ExamplesRouteTest
     GlobalsRouteTest
     HealthRouteTest
+    IfMatchRouteTest
+    IfMatchServerTest
     ImportApplyRouteTest
     ImportParseRoute
     InboxListenerTest

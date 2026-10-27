@@ -36,6 +36,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/entity_tag.hpp"
 #include "vayu/http/grant_secret.hpp"
 #include "vayu/http/request_builder.hpp"
 // The `POST /execute` core - `ScriptVariableScopes`, the exchange itself - now
@@ -324,6 +325,64 @@ const RouteError& refusal) {
     res.set_content (
     refusal.body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
     "application/json");
+}
+
+/**
+ * The request's `If-Match`, every field line joined as one list (RFC 9110
+ * 5.3), or the 400 `invalid_if_match` for one that is not `*` or entity tags.
+ * Absent is nothing: a PUT without it writes unconditionally (#2433).
+ */
+[[nodiscard]] inline std::expected<std::optional<vayu::http::IfMatch>, RouteError>
+read_if_match (const httplib::Request& req) {
+    const size_t lines = req.get_header_value_count ("If-Match");
+    if (lines == 0) {
+        return std::nullopt;
+    }
+    std::string field;
+    for (size_t i = 0; i < lines; ++i) {
+        field += (i == 0 ? "" : ",") + req.get_header_value ("If-Match", "", i);
+    }
+    auto parsed = vayu::http::IfMatch::parse (field);
+    if (!parsed) {
+        return route_error (400, parsed.error (), "invalid_if_match");
+    }
+    return std::optional<vayu::http::IfMatch> (std::move (*parsed));
+}
+
+/**
+ * The 412 for a write whose `If-Match` no longer names the stored row, with
+ * the row's `updatedAt` inside the error. Runs under the lock the merge holds
+ * and after the 404, so the row it judges is the row the write replaces.
+ */
+inline RouteResult check_if_match (const std::optional<vayu::http::IfMatch>& if_match,
+int64_t stored_updated_at) {
+    if (!if_match || if_match->holds_for (stored_updated_at)) {
+        return {};
+    }
+    auto refusal = route_error (
+    412, "The record changed after it was read; read it again and re-apply the change",
+    "precondition_failed");
+    refusal.error ().body["error"]["updatedAt"] = stored_updated_at;
+    return refusal;
+}
+
+/**
+ * The `updatedAt` an update stamps: past the one it replaces even within one
+ * millisecond, or two writes would share an entity tag.
+ */
+inline int64_t next_updated_at (int64_t previous) {
+    return std::max (now_ms (), previous + 1);
+}
+
+/** The `ETag` of a 200 answer that carries the row's `updatedAt`. */
+inline void set_entity_tag (httplib::Response& res, int status, const nlohmann::json& body) {
+    if (status != 200 || !body.is_object ()) {
+        return;
+    }
+    const auto updated_at = body.find ("updatedAt");
+    if (updated_at != body.end () && updated_at->is_number_integer ()) {
+        res.set_header ("ETag", vayu::http::entity_tag (updated_at->get<int64_t> ()));
+    }
 }
 
 /**

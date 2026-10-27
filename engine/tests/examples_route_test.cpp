@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -32,6 +33,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/entity_tag.hpp"
 #include "wide_json.hpp"
 
 using nlohmann::json;
@@ -56,6 +58,13 @@ std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Databa
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json,
+const std::function<void ()>& before_write);
+// The same with the request's `If-Match` (#2433), judged in that scope.
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write);
 // Defined in import.cpp - the bulk path that also writes examples.
 std::pair<int, nlohmann::json>
@@ -785,7 +794,10 @@ TEST_F (ExamplesRouteTest, UpdateRejectsMismatchedBodyId) {
 // Delete and the cascades
 // ---------------------------------------------------------------------------
 
-TEST_F (ExamplesRouteTest, DeleteRemovesAUserSavedRowOutright) {
+// A user's own example goes to the trash (#2971), not to the tombstones a spec
+// sync reads (#722): nothing re-creates a saved response, so the trash is the
+// only way back. `trash_test.cpp` holds the restore and purge.
+TEST_F (ExamplesRouteTest, DeleteMovesAUserSavedRowToTheTrash) {
     const std::string id =
     create_example ("req_1", json{ { "name", "x" }, { "origin", "user" } });
 
@@ -793,13 +805,35 @@ TEST_F (ExamplesRouteTest, DeleteRemovesAUserSavedRowOutright) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["id"], id);
     EXPECT_FALSE (db_->get_request_example (id).has_value ());
-    // Nothing can re-create a saved response, so there is no intent to record
-    // and no tombstone to leave behind (issue #722).
     EXPECT_TRUE (db_->get_suppressed_request_examples ("req_1").empty ());
+    const auto trash = db_->get_trash ();
+    ASSERT_EQ (trash.size (), 1u);
+    EXPECT_EQ (trash[0].id, id);
+    EXPECT_EQ (trash[0].kind, "example");
 
     // A second delete is a 404 rather than a silent success.
     auto [again, _] = routes::delete_request_example_response (*db_, "req_1", id);
     EXPECT_EQ (again, 404);
+}
+
+// The create route's collision check reads this, because its `replace` would
+// overwrite whatever row holds the id - and a trashed or tombstoned row is one
+// `get_request_example` hides (#2971). Mutation check: filter hidden rows out
+// of `request_example_id_taken` and both stay-taken assertions red.
+TEST_F (ExamplesRouteTest, AHiddenExampleKeepsItsIdTaken) {
+    const std::string trashed =
+    create_example ("req_1", json{ { "name", "mine" }, { "origin", "user" } });
+    const std::string tombstoned =
+    create_example ("req_1", json{ { "name", "imported" } });
+    ASSERT_EQ (routes::delete_request_example_response (*db_, "req_1", trashed).first, 200);
+    ASSERT_EQ (
+    routes::delete_request_example_response (*db_, "req_1", tombstoned).first, 200);
+
+    EXPECT_FALSE (db_->get_request_example (trashed).has_value ());
+    EXPECT_TRUE (db_->request_example_id_taken (trashed));
+    EXPECT_FALSE (db_->get_request_example (tombstoned).has_value ());
+    EXPECT_TRUE (db_->request_example_id_taken (tombstoned));
+    EXPECT_FALSE (db_->request_example_id_taken ("exa_never_written"));
 }
 
 // Issue #722. The row stays as a tombstone so a later spec sync knows not to
@@ -995,6 +1029,37 @@ TEST_F (ExamplesRouteTest, AConcurrentExampleUpdateWaitsAndKeepsBothFieldsWritte
     EXPECT_EQ (stored->name, "Renamed");
     EXPECT_EQ (stored->status, 404)
     << "the status write merged against the row this write had already staged";
+}
+
+// If-Match (#2433). Mutation check: drop the `check_if_match` call in
+// `update_request_example_locked` and the stale write answers 200.
+TEST_F (ExamplesRouteTest, AnExamplePutNamingAStaleTagIs412AndWritesNothing) {
+    auto [created_status, row] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "Saved" } });
+    ASSERT_EQ (created_status, 200) << row.dump ();
+    const std::string id = row["id"].get<std::string> ();
+    const auto read_tag  = vayu::http::IfMatch::parse (
+    vayu::http::entity_tag (row["updatedAt"].get<int64_t> ()));
+    ASSERT_HAS_VALUE (read_tag);
+    auto [moved_status, moved] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "status", 404 } });
+    ASSERT_EQ (moved_status, 200) << moved.dump ();
+
+    auto [status, body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Stale" } }, *read_tag, nullptr);
+    EXPECT_EQ (status, 412) << body.dump ();
+    EXPECT_EQ (body["error"]["updatedAt"], moved["updatedAt"]);
+    const auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Saved");
+
+    const auto current_tag = vayu::http::IfMatch::parse (
+    vayu::http::entity_tag (moved["updatedAt"].get<int64_t> ()));
+    ASSERT_HAS_VALUE (current_tag);
+    auto [current_status, current] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Fresh" } }, *current_tag, nullptr);
+    EXPECT_EQ (current_status, 200) << current.dump ();
+    EXPECT_GT (current["updatedAt"].get<int64_t> (), moved["updatedAt"].get<int64_t> ());
 }
 
 } // namespace

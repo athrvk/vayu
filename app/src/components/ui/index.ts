@@ -54,7 +54,11 @@ export type { DialogCancelButtonProps } from "./dialog-cancel-button";
 
 export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
-export { deleteConfirmCopy, environmentDeleteDescription } from "./delete-confirm-copy";
+export {
+	deleteConfirmCopy,
+	environmentDeleteDescription,
+	exampleDeleteDescription,
+} from "./delete-confirm-copy";
 export type { DeleteScope } from "./delete-confirm-copy";
 
 export {

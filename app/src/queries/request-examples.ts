@@ -69,10 +69,13 @@ export function useCreateRequestExampleMutation() {
  * Remove one saved example.
  *
  * An example you can create and never remove is the #553 shape at a smaller
- * scale, which is why this landed with the create rather than after it. It is
- * not scoped to app-saved rows: the engine's route is not, an imported example
- * is as much the user's to prune as a saved one, and telling the two apart
- * here would mean reading an `origin` no surface displays.
+ * scale, which is why this landed with the create rather than after it. The
+ * route is not scoped to app-saved rows: an imported example is as much the
+ * user's to prune as a saved one. What the engine does with the row differs by
+ * origin (#2971) - a saved example goes to the Trash, an imported one becomes a
+ * spec-sync tombstone - and the mutation cannot tell which, so it invalidates
+ * `trash.all` either way; for a tombstone that costs one refetch of a list
+ * that comes back unchanged.
  */
 export function useDeleteRequestExampleMutation() {
 	const queryClient = useQueryClient();
@@ -83,6 +86,7 @@ export function useDeleteRequestExampleMutation() {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.requests.examples(requestId),
 			});
+			void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		},
 	});
 }

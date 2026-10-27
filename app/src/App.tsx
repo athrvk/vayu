@@ -33,7 +33,6 @@ import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useWindowFileDrop } from "./hooks/useWindowFileDrop";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useFileBindingMirror } from "./hooks/useFileBindingMirror";
-import { useLegacyFileBindingImport } from "./hooks/useLegacyFileBindingImport";
 import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
 import { useAppFocusMirror } from "./hooks/useAppFocusMirror";
 import { useRunWatchers } from "./hooks/useRunWatchers";
@@ -123,9 +122,6 @@ function App() {
 	// Each collection's spec-file and data-file binding rides its engine row
 	// (#2765); the stores that index them by id follow the collections list.
 	useFileBindingMirror();
-	// Once, after the first list: the bindings an older Vayu kept in
-	// localStorage move onto those rows.
-	useLegacyFileBindingImport();
 
 	// The other direction on the same seam: MCP names a collection's data file
 	// from the main process's copy of that store (#1742).

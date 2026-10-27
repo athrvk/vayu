@@ -512,7 +512,9 @@ const nlohmann::json& json) {
     }
 
     const std::string id = vayu::utils::generate_id ("exa_");
-    if (db.get_request_example (id).has_value ()) {
+    // Every row, hidden ones included: `get_request_example` misses a
+    // tombstone or a trashed row, and the `replace` below would overwrite it.
+    if (db.request_example_id_taken (id)) {
         const std::string conflict = "Example '" + id +
         "' already exists; use PUT /requests/:id/examples/:exampleId to update";
         return { 409, error_body (409, conflict) };
@@ -550,6 +552,7 @@ static std::pair<int, nlohmann::json> update_request_example_locked (vayu::db::D
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, example_id); !outcome) {
         return as_response (outcome.error ());
@@ -561,11 +564,15 @@ const std::function<void ()>& before_write) {
     if (auto outcome = load_owned_example (db, request_id, example_id, x); !outcome) {
         return as_response (outcome.error ());
     }
+    if (auto held = check_if_match (if_match, x.updated_at); !held) {
+        return as_response (held.error ());
+    }
 
+    const int64_t stored_updated_at = x.updated_at;
     if (auto outcome = apply_request_example_fields (x, json, /*is_create=*/false); !outcome) {
         return as_response (outcome.error ());
     }
-    x.updated_at = now_ms ();
+    x.updated_at = next_updated_at (stored_updated_at);
 
     if (before_write) {
         before_write ();
@@ -584,6 +591,8 @@ const std::function<void ()>& before_write) {
  * released the lock before the write would answer for a row a concurrent
  * `delete_request` cascade could take in between.
  *
+ * @param if_match The request's `If-Match`, judged inside the same scope; a
+ *        row it no longer names is a 412 (#2433).
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
@@ -592,10 +601,12 @@ std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Databa
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
     db.with_lock ([&] {
-        result = update_request_example_locked (db, request_id, example_id, json, before_write);
+        result = update_request_example_locked (
+        db, request_id, example_id, json, if_match, before_write);
     });
     return result;
 }
@@ -603,26 +614,25 @@ const std::function<void ()>& before_write) {
 std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    return update_request_example_response (
+    db, request_id, example_id, json, std::nullopt, before_write);
+}
+
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
 const nlohmann::json& json) {
-    return update_request_example_response (db, request_id, example_id, json, nullptr);
+    return update_request_example_response (
+    db, request_id, example_id, json, std::nullopt, nullptr);
 }
 
 /**
- * Testable core of DELETE /requests/:id/examples/:exampleId.
- *
- * **An imported example is tombstoned rather than removed** (issue #722). A
- * spec sync replaces every `origin="import"` row of a request it applies any
- * change to, so a removed row came back on the next rename-only sync and the
- * delete this route performs was not a decision that lasted. Keeping the row
- * as a tombstone (`suppressed`) is what records the decision - the sync reads
- * them and leaves that status alone.
- *
- * A user's own example is still removed outright: nothing re-creates one, so
- * there is no intent to remember and a hidden row would be a leak with no
- * reader. Either way the answer is the same, because from the caller's side it
- * is: the example is gone from every read.
+ * The check-and-write of DELETE /requests/:id/examples/:exampleId, run under the
+ * caller's lock.
  */
-std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
+static std::pair<int, nlohmann::json> delete_request_example_locked (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id) {
     if (auto outcome = reject_missing_request (db, request_id); !outcome) {
@@ -640,6 +650,32 @@ const std::string& example_id) {
     }
     return { 200,
         nlohmann::json{ { "message", "Example deleted successfully" }, { "id", example_id } } };
+}
+
+/**
+ * Testable core of DELETE /requests/:id/examples/:exampleId.
+ *
+ * **An imported example is tombstoned rather than trashed** (issue #722). A
+ * spec sync replaces every `origin="import"` row of a request it applies any
+ * change to, so a removed row came back on the next rename-only sync and the
+ * delete this route performs was not a decision that lasted. Keeping the row
+ * as a tombstone (`suppressed`) is what records the decision - the sync reads
+ * them and leaves that status alone.
+ *
+ * **A user's own example goes to the trash** (#2971): nothing re-creates one,
+ * so the delete is the only copy of the decision and the row is the only copy
+ * of the response; `POST /trash/:id/restore` brings it back. Either way the
+ * answer is the same, because from the caller's side it is: the example is
+ * gone from every read. The check and the write are one lock scope, so the
+ * origin read is the origin acted on.
+ */
+std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = delete_request_example_locked (db, request_id, example_id); });
+    return result;
 }
 
 void register_request_example_routes (RouteContext& ctx) {
@@ -721,7 +757,9 @@ void register_request_example_routes (RouteContext& ctx) {
      * Updates one saved example (merge-patch: absent keeps, null resets).
      * Update only - a missing example is a 404, never a silent create, and so is
      * one stored under a different request.
-     * Returns: the updated example, 404, or 400.
+     * Headers: If-Match (optional) - the row's `W/"<updatedAt>"` (#2433).
+     * Returns: the updated example with its ETag, 404, 412 if If-Match no
+     * longer names it, or 400.
      */
     ctx.server.Put (R"(/requests/([^/]+)/examples/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -733,15 +771,22 @@ void register_request_example_routes (RouteContext& ctx) {
             res, "PUT /requests/:id/examples/:exampleId", json.error ());
             return;
         }
+        const auto if_match = read_if_match (req);
+        if (!if_match) {
+            refuse_request_body (
+            res, "PUT /requests/:id/examples/:exampleId", if_match.error ());
+            return;
+        }
         try {
-            auto [status, body] =
-            update_request_example_response (ctx.db, request_id, example_id, *json);
+            auto [status, body] = update_request_example_response (
+            ctx.db, request_id, example_id, *json, *if_match, nullptr);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /requests/:id/examples/:exampleId failed",
                 { { "status", status }, { "id", example_id },
                 { "error", error_message_of (body) } });
             }
             res.status = status;
+            set_entity_tag (res, status, body);
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
@@ -752,7 +797,9 @@ void register_request_example_routes (RouteContext& ctx) {
 
     /**
      * DELETE /requests/:id/examples/:exampleId
-     * Deletes one saved example. Returns a message and the id, or 404.
+     * Deletes one saved example: a user's own goes to the trash (#2971), an
+     * imported one becomes a tombstone (#722). Returns a message and the id,
+     * or 404.
      */
     ctx.server.Delete (R"(/requests/([^/]+)/examples/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

@@ -880,10 +880,10 @@ See [Database Schema](db-schema.md) for the full column list.
    kind to `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
-3. **Trash retention**: collections, requests and environments deleted more
-   than `trashRetentionDays` ago are destroyed for good (issue #988,
-   environments #2970) - the subtree, its requests and their examples, or the
-   environment's one row. Until then a delete is only a stamp, and
+3. **Trash retention**: collections, requests, environments and saved
+   examples deleted more than `trashRetentionDays` ago are destroyed for good
+   (issue #988, environments #2970, examples #2971) - the subtree, its requests
+   and their examples, or the environment's or example's one row. Until then a delete is only a stamp, and
    `POST /trash/:id/restore` puts it back.
 
 All three passes are best-effort: a failure is logged and never blocks startup.
@@ -1719,13 +1719,6 @@ picked spec file and data file (`collections.spec_file` / `data_file`, issue
 #2765) are in the database and survive, so the Spec and Data tabs name the same
 files as before; a file that is not at its path on this machine reads as
 unresolved until it is picked again.
-
-Before #2765 the two file bindings were `localStorage` keys
-(`vayu.spec-files`, `vayu.data-files`). The first launch of a release that
-stores them on the row moves each binding onto the collection it named, if the
-engine still lists that collection and it holds no binding yet, and removes the
-key once every move has landed. A binding of a collection that was deleted or
-in the trash at that launch is not moved.
 
 ### Logging
 

@@ -6,6 +6,7 @@
  */
 
 import {
+	Bookmark,
 	Check,
 	Cloud,
 	Copy,
@@ -37,12 +38,14 @@ interface TrashItemProps {
  * How each kind reads on a row. A `Record` over the union, not a ternary: a kind
  * the engine adds fails to compile here until it has a glyph and a word, rather
  * than rendering as whichever kind the ternary's last branch named. The
- * environment's glyph is the one the Variables view draws for an environment.
+ * environment's glyph is the one the Variables view draws for an environment,
+ * and the example's is the bookmark family "Save as example" uses.
  */
 const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string }> = {
 	collection: { icon: Folder, label: "Collection" },
 	request: { icon: FileJson, label: "Request" },
 	environment: { icon: Cloud, label: "Environment" },
+	example: { icon: Bookmark, label: "Example" },
 };
 
 /**

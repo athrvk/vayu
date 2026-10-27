@@ -13,7 +13,7 @@
 import { z } from "zod";
 import { precedenceNote } from "../variable-origins.js";
 import { withheldPointer } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngine,
 	collectionEchoShape,
@@ -22,6 +22,7 @@ import {
 	elementsArg,
 	engineErrorResult,
 	errorResult,
+	mergeAndWrite,
 	requireStr,
 	str,
 	ToolArgError,
@@ -190,44 +191,40 @@ export const COLLECTION_TOOLS: McpTool[] = [
 					"input"
 				);
 			}
-			let absentRemovals: string[] = [];
-			// One read serves both merges. `PUT /collections/:id` replaces the
-			// whole variables blob and the whole `elements` list rather than
-			// patching inside either, so "change one of them" is a
-			// read-merge-write here - without the read, an agent setting one
-			// variable would drop every other one the collection holds, and
-			// setting one script would drop every other element on it. An
-			// explicit `elements` argument needs no read: it already states
-			// the whole list.
-			if (patch !== undefined || removals.length > 0 || scriptEdits.length > 0) {
-				let existing: Record<string, unknown>;
-				try {
-					existing = ((await ctx.client.getCollection(collectionId, signal)) ??
-						{}) as Record<string, unknown>;
-				} catch (err) {
-					return engineErrorResult(err, ctx);
-				}
-				if (patch !== undefined || removals.length > 0) {
-					const merged = mergeVariables(existing.variables, patch, removals, ctx);
-					payload.variables = merged.variables;
-					absentRemovals = merged.absentRemovals;
-				}
-				if (scriptEdits.length > 0) {
-					let elements = existing.elements;
-					for (const [which, script] of scriptEdits) {
-						elements = upsertScriptElement(elements, which, script);
-					}
-					payload.elements = elements;
-				}
-			}
 			if (elementsGiven !== undefined) {
 				payload.elements = elementsGiven;
 			}
-			const result = await callEngine(
-				ctx,
-				() => ctx.client.updateCollection(collectionId, payload, signal),
-				collectionEchoShape(ctx)
-			);
+			const write = (body: Record<string, unknown>, ifMatch?: string) =>
+				ctx.client.updateCollection(collectionId, body, signal, ifMatch);
+			// `PUT /collections/:id` replaces the whole variables blob and the
+			// whole `elements` list rather than patching inside either, so
+			// "change one of them" is a read-merge-write, under the version the
+			// read found. An explicit `elements` argument already states the
+			// whole list and needs no read.
+			if (patch === undefined && removals.length === 0 && scriptEdits.length === 0) {
+				return callEngine(ctx, () => write(payload), collectionEchoShape(ctx));
+			}
+			let absentRemovals: string[] = [];
+			const result = await mergeAndWrite(ctx, {
+				subject: `collection "${collectionId}"`,
+				read: () => ctx.client.getCollection(collectionId, signal),
+				merge: (existing) => {
+					const merged = mergeCollectionEdits(
+						existing,
+						payload,
+						{
+							patch,
+							removals,
+							scriptEdits,
+						},
+						ctx
+					);
+					absentRemovals = merged.absentRemovals;
+					return merged.body;
+				},
+				write,
+				shape: collectionEchoShape(ctx),
+			});
 			return result.isError
 				? result
 				: withCaveat(result, absentRemovalCaveat(absentRemovals));
@@ -292,3 +289,37 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		},
 	},
 ];
+
+/** The edits of an `update_collection` call that have to read the stored row. */
+interface CollectionReadEdits {
+	patch: Record<string, unknown> | undefined;
+	removals: readonly string[];
+	scriptEdits: readonly (readonly ["pre" | "post", string])[];
+}
+
+/**
+ * @p stated with @p edits folded into the variables and elements @p existing
+ * holds, and the removals that named nothing there.
+ */
+function mergeCollectionEdits(
+	existing: Record<string, unknown>,
+	stated: Record<string, unknown>,
+	{ patch, removals, scriptEdits }: CollectionReadEdits,
+	ctx: ToolContext
+): { body: Record<string, unknown>; absentRemovals: string[] } {
+	const body = { ...stated };
+	let absentRemovals: string[] = [];
+	if (patch !== undefined || removals.length > 0) {
+		const merged = mergeVariables(existing.variables, patch, removals, ctx);
+		body.variables = merged.variables;
+		absentRemovals = merged.absentRemovals;
+	}
+	if (scriptEdits.length > 0) {
+		let elements = existing.elements;
+		for (const [which, script] of scriptEdits) {
+			elements = upsertScriptElement(elements, which, script);
+		}
+		body.elements = elements;
+	}
+	return { body, absentRemovals };
+}

@@ -2001,6 +2001,18 @@ describe("trash tools", () => {
 		variables: 6,
 	};
 
+	// A user-saved example (#2971): a root that takes nothing with it, whose
+	// `parentId` is the owning request.
+	const EXAMPLE_TRASH_ITEM = {
+		id: "exa_5",
+		kind: "example",
+		name: "Happy path",
+		deletedAt: 1_755_000_000_000,
+		parentId: "req_2",
+		collections: 0,
+		requests: 0,
+	};
+
 	test("list_trash answers one page of entries, each as the engine wrote it", async () => {
 		const client = fakeClient({ listTrashPage: vi.fn().mockResolvedValue(page([TRASH_ITEM])) });
 		const res = await dispatchTool("list_trash", { q: "retired" }, ctxWith(client));
@@ -2136,6 +2148,73 @@ describe("trash tools", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toContain('"dataset"');
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry names a saved example, not a collection", async () => {
+		// Mutation check: take the `example` case out of `describeTrashEntry` (or
+		// `"example"` out of the known kinds) and this preview stops naming it.
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [EXAMPLE_TRASH_ITEM], total: 1 }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "exa_5" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain(
+			'This would permanently destroy the saved example "Happy path".'
+		);
+		expect(firstText(res)).not.toContain("collection");
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("restore_trash_entry puts a saved example back and answers the engine's entry", async () => {
+		const restored = { ...EXAMPLE_TRASH_ITEM, restored: true, reparentedToRoot: false };
+		const client = fakeClient({ restoreTrashEntry: vi.fn().mockResolvedValue(restored) });
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "exa_5" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.restoreTrashEntry).toHaveBeenCalledWith("exa_5", undefined);
+		expect(JSON.parse(firstText(res))).toMatchObject({ kind: "example", parentId: "req_2" });
+		expect(res.content.map((c) => c.text).join("\n")).not.toMatch(/top level/i);
+	});
+
+	test("restore_trash_entry surfaces the engine's 409 for an example whose request is full", async () => {
+		const message = "Request 'req_2' already holds the maximum of 100 examples";
+		const client = fakeClient({
+			restoreTrashEntry: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 409",
+						409,
+						JSON.stringify({ error: { code: "conflict", message } })
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "exa_5" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toBe(message);
+	});
+
+	test("the Trash tools describe saved examples as a kind they hold", () => {
+		const descriptions = Object.fromEntries(
+			TOOLS.filter((t) =>
+				["list_trash", "restore_trash_entry", "purge_trash_entry"].includes(t.name)
+			).map((t) => [t.name, String(t.description)])
+		);
+		expect(descriptions.list_trash).toContain("'example'");
+		expect(descriptions.list_trash).toContain("delete_request_example");
+		expect(descriptions.restore_trash_entry).toContain("saved example");
+		expect(descriptions.purge_trash_entry).toContain("saved example");
 	});
 
 	test("restore_trash_entry puts an environment back and answers the engine's entry", async () => {
@@ -2700,6 +2779,52 @@ describe("document CRUD parity", () => {
 			expect(firstText(res)).toContain("200 OK");
 			expect(firstText(res)).toMatch(/mock server/i);
 			expect(client.deleteRequestExample).not.toHaveBeenCalled();
+		});
+
+		test("delete_request_example says a saved example goes to the Trash, and how it comes back", async () => {
+			// Soft for a user-saved example since #2971: neither the preview nor the
+			// description may call it final. Mutation check: restore "This cannot be
+			// undone." for the `user` origin and this fails.
+			const client = fakeClient({
+				listRequestExamples: vi
+					.fn()
+					.mockResolvedValue([
+						{ id: "exa_1", name: "200 OK", status: 200, origin: "user" },
+					]),
+			});
+			const res = await dispatchTool(
+				"delete_request_example",
+				{ requestId: "req_1", exampleId: "exa_1" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(firstText(res)).toContain("It goes to Vayu's Trash");
+			expect(firstText(res)).toContain("restore_trash_entry");
+			expect(firstText(res)).not.toMatch(/cannot be undone|no undo/i);
+			const description = String(
+				TOOLS.find((t) => t.name === "delete_request_example")!.description
+			);
+			expect(description).toContain("list_trash");
+			expect(description).toContain("restore_trash_entry");
+			expect(description).not.toMatch(/there is no undo/i);
+		});
+
+		test.each([
+			["an imported example", { origin: "import" }],
+			["one that states no origin", {}],
+		])("delete_request_example does not promise a restore for %s", async (_what, origin) => {
+			const client = fakeClient({
+				listRequestExamples: vi
+					.fn()
+					.mockResolvedValue([{ id: "exa_1", name: "200 OK", status: 200, ...origin }]),
+			});
+			const res = await dispatchTool(
+				"delete_request_example",
+				{ requestId: "req_1", exampleId: "exa_1" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(firstText(res)).toContain("it is not trashed");
+			expect(firstText(res)).toContain("re-importing the document will");
+			expect(firstText(res)).not.toContain("goes to Vayu's Trash");
 		});
 
 		test("confirmed, it deletes; unknown, it says so and deletes nothing", async () => {

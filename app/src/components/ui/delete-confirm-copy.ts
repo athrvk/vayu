@@ -68,3 +68,24 @@ export function environmentDeleteDescription(environment: {
 		"You can restore it from Trash."
 	);
 }
+
+/**
+ * The description a saved example's delete dialog needs beyond the generic
+ * template: what a mock server does with the row, and what could bring it back.
+ * That differs by origin because what the engine does with the row does
+ * (#2971, and #722 before it). A saved (`user`) example goes to the Trash, so
+ * the dialog points there. An imported one is not trashed: the engine keeps the
+ * delete as a spec-sync tombstone, so a later sync does not write it back, and
+ * re-importing the document is the one way it returns.
+ */
+export function exampleDeleteDescription(origin: "import" | "user"): string {
+	const mockServer =
+		"The example is removed from this request. A mock server for this collection " +
+		"stops answering with it once it is restarted. ";
+	return (
+		mockServer +
+		(origin === "import"
+			? "Syncing this collection with its spec won't bring it back; re-importing the document will."
+			: "You can restore it from Trash.")
+	);
+}

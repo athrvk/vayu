@@ -811,6 +811,7 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
 static std::pair<int, nlohmann::json> update_request_locked (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
@@ -818,6 +819,9 @@ const std::function<void ()>& before_write) {
     auto existing = db.get_request (id);
     if (!existing) {
         return { 404, error_body (404, "Request not found") };
+    }
+    if (auto held = check_if_match (if_match, existing->updated_at); !held) {
+        return as_response (held.error ());
     }
 
     vayu::db::Request r = *existing;
@@ -842,7 +846,7 @@ const std::function<void ()>& before_write) {
     if (order_is_defaulted (json) && (moved || json.contains ("order"))) {
         r.order = append_order (db, r);
     }
-    r.updated_at = now_ms ();
+    r.updated_at = next_updated_at (existing->updated_at);
 
     if (before_write) {
         before_write ();
@@ -876,21 +880,32 @@ const std::function<void ()>& before_write) {
  *        overload rather than the defaulted parameter `reorder_response` uses
  *        because ten test files already declare the three-argument form, and a
  *        defaulted parameter would move the symbol they link against.
+ * @param if_match The request's `If-Match`, judged inside the same scope; a
+ *        row it no longer names is a 412 (#2433).
  */
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
-    db.with_lock (
-    [&] { result = update_request_locked (db, id, json, before_write); });
+    db.with_lock ([&] {
+        result = update_request_locked (db, id, json, if_match, before_write);
+    });
     return result;
 }
 
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    return update_request_response (db, id, json, std::nullopt, before_write);
+}
+
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
 const nlohmann::json& json) {
-    return update_request_response (db, id, json, nullptr);
+    return update_request_response (db, id, json, std::nullopt, nullptr);
 }
 
 namespace {
@@ -933,7 +948,13 @@ void handle_update_request (RouteContext& ctx, const httplib::Request& req, http
             refuse_request_body (res, "PUT /requests/:id", json.error ());
             return;
         }
-        auto [status, body] = update_request_response (ctx.db, request_id, *json);
+        const auto if_match = read_if_match (req);
+        if (!if_match) {
+            refuse_request_body (res, "PUT /requests/:id", if_match.error ());
+            return;
+        }
+        auto [status, body] =
+        update_request_response (ctx.db, request_id, *json, *if_match, nullptr);
         if (status != 200) {
             vayu::utils::log_warning ("http", "PUT /requests/:id failed",
             { { "status", status }, { "id", request_id },
@@ -943,6 +964,7 @@ void handle_update_request (RouteContext& ctx, const httplib::Request& req, http
             { { "id", request_id }, { "name", body["name"].get<std::string> () } });
         }
         res.status = status;
+        set_entity_tag (res, status, body);
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error (
@@ -989,9 +1011,9 @@ void register_request_routes (RouteContext& ctx) {
      * GET /requests/:id
      * Retrieves a single request by id in one lookup, so a restored tab or a
      * design-run copy does not have to fetch every collection's list and scan
-     * them. Returns 200 with the request, or 404 if it genuinely does not
-     * exist (as opposed to a transport failure, which the app must treat
-     * differently). Path params: id - The request ID to fetch.
+     * them. Returns 200 with the request and its ETag (#2433), or 404 if it
+     * genuinely does not exist (as opposed to a transport failure, which the
+     * app must treat differently). Path params: id - The request ID to fetch.
      */
     ctx.server.Get (R"(/requests/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -1003,6 +1025,7 @@ void register_request_routes (RouteContext& ctx) {
                 "http", "GET /requests/:id - Request not found: " + request_id);
             }
             res.status = status;
+            set_entity_tag (res, status, body);
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
@@ -1038,7 +1061,9 @@ void register_request_routes (RouteContext& ctx) {
      * null resets to the default). Update only - a missing id is a 404, never a
      * silent create (issue #95).
      * Path params: id - The request ID to update.
-     * Returns: The updated request object, 404 if it does not exist, or 400.
+     * Headers: If-Match (optional) - the row's `W/"<updatedAt>"` (#2433).
+     * Returns: The updated request object with its ETag, 404 if it does not
+     * exist, 412 if If-Match no longer names it, or 400.
      */
     ctx.server.Put (R"(/requests/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

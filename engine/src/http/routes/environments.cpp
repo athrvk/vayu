@@ -92,6 +92,7 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 static std::pair<int, nlohmann::json> update_environment_locked (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
@@ -100,12 +101,15 @@ const std::function<void ()>& before_write) {
     if (!existing) {
         return { 404, error_body (404, "Environment not found") };
     }
+    if (auto held = check_if_match (if_match, existing->updated_at); !held) {
+        return as_response (held.error ());
+    }
 
     vayu::db::Environment e = *existing;
     if (auto outcome = apply_environment_fields (e, json, /*is_create=*/false); !outcome) {
         return as_response (outcome.error ());
     }
-    e.updated_at = now_ms ();
+    e.updated_at = next_updated_at (existing->updated_at);
 
     if (before_write) {
         before_write ();
@@ -123,11 +127,11 @@ const std::function<void ()>& before_write) {
  * **The read, the merge and the write are one lock scope** (#1440), for the
  * reason `update_request_response` states: a merge-patch write carries the
  * fields the body did not name, so a read that is not held to the write loses
- * whichever writer read first. This resource is the one with a second reader
- * inside its own window - MCP's `update_environment` merges across two HTTP
- * round trips (`app/electron/mcp/tools/environments.tools.ts`), which this
- * lock cannot close; what it closes is the engine's own.
+ * whichever writer read first. A client that merges across two round trips
+ * (MCP's `update_environment`) closes its own window with @p if_match, which
+ * is judged inside this scope (#2433).
  *
+ * @param if_match The request's `If-Match`; a row it no longer names is a 412.
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
@@ -135,17 +139,26 @@ const std::function<void ()>& before_write) {
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
-    db.with_lock (
-    [&] { result = update_environment_locked (db, id, json, before_write); });
+    db.with_lock ([&] {
+        result = update_environment_locked (db, id, json, if_match, before_write);
+    });
     return result;
 }
 
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    return update_environment_response (db, id, json, std::nullopt, before_write);
+}
+
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
 const nlohmann::json& json) {
-    return update_environment_response (db, id, json, nullptr);
+    return update_environment_response (db, id, json, std::nullopt, nullptr);
 }
 
 /**
@@ -229,7 +242,9 @@ void register_environment_routes (RouteContext& ctx) {
      * value, null resets to the default - `variables: null` resets to `{}`).
      * Update only - a missing id is a 404, never a silent create (issue #95).
      * Path params: id - The environment ID to update.
-     * Returns: The updated environment object, 404 if it does not exist, or 400.
+     * Headers: If-Match (optional) - the row's `W/"<updatedAt>"` (#2433).
+     * Returns: The updated environment object with its ETag, 404 if it does
+     * not exist, 412 if If-Match no longer names it, or 400.
      */
     ctx.server.Put (R"(/environments/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -239,9 +254,14 @@ void register_environment_routes (RouteContext& ctx) {
             refuse_request_body (res, "PUT /environments/:id", json.error ());
             return;
         }
+        const auto if_match = read_if_match (req);
+        if (!if_match) {
+            refuse_request_body (res, "PUT /environments/:id", if_match.error ());
+            return;
+        }
         try {
-            auto [status, body] =
-            update_environment_response (ctx.db, environment_id, *json);
+            auto [status, body] = update_environment_response (
+            ctx.db, environment_id, *json, *if_match, nullptr);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /environments/:id failed",
                 { { "status", status }, { "id", environment_id },
@@ -251,6 +271,7 @@ void register_environment_routes (RouteContext& ctx) {
                 { { "id", environment_id }, { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
+            set_entity_tag (res, status, body);
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
