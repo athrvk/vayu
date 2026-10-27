@@ -21,6 +21,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/json_depth.hpp"
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/ordered_json.hpp"
 
@@ -30,6 +31,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1027,6 +1029,41 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
     return index;
 }
 
+namespace {
+
+/**
+ * The first response schema in @p index that loops without reaching a value,
+ * named by operation and status, or nothing.
+ *
+ * Validating such a schema would recurse until the engine's stack ran out
+ * (#3016), and the answer for it at the first response is "unchecked", so it is
+ * refused when the document is added instead (#3018).
+ */
+std::optional<std::string> looping_response_schema (const nlohmann::ordered_json& index) {
+    const nlohmann::json roots = index.contains ("refRoots") ?
+    nlohmann::json (index.at ("refRoots")) :
+    nlohmann::json::object ();
+    for (const auto& operation : index.at ("operations")) {
+        for (const auto& response : operation.at ("responses")) {
+            const auto schema = response.find ("schema");
+            if (schema == response.end ()) {
+                continue;
+            }
+            if (const auto loop =
+                vayu::core::find_schema_loop (nlohmann::json (*schema), roots)) {
+                return "Response schema of " +
+                operation.value ("method", std::string ()) + " " +
+                operation.value ("path", std::string ()) + " (" +
+                response.value ("status", std::string ()) +
+                ") refers to itself without describing any value (" + *loop + ")";
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
 SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap) {
     SpecIndexes indexes;
     std::vector<WalkedOperation> walked = walk_operations (document);
@@ -1058,6 +1095,10 @@ SpecIndexes spec_indexes_of (const nlohmann::ordered_json& document, size_t inde
 
     const nlohmann::ordered_json schemas = response_schemas_of (document);
     if (schemas.is_null ()) {
+        return indexes;
+    }
+    if (auto loop = looping_response_schema (schemas)) {
+        indexes.error = std::move (*loop);
         return indexes;
     }
     std::string stored = schemas.dump ();

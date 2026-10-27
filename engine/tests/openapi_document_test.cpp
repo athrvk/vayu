@@ -797,6 +797,33 @@ TEST (DeriveSpecIndexes, ADocumentWhereNothingDeclaresASchemaStoresNoSchemaIndex
     EXPECT_TRUE (index.response_schemas.empty ());
 }
 
+// A response schema that loops without reaching a value is refused when the
+// document is added (#3018), not on the first response (#3016).
+TEST (DeriveSpecIndexes, ARefLoopThatNeverReachesAValueIsRefusedNamingTheOperation) {
+    const auto index = derive_spec_indexes (
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":)"
+    R"({"application/json":{"schema":{"$ref":"#/components/schemas/A"}}}}}}}},)"
+    R"("components":{"schemas":{"A":{"allOf":[{"$ref":"#/components/schemas/A"}]}}}})",
+    INDEX_CAP);
+    EXPECT_FALSE (index.ok ());
+    EXPECT_NE (index.error.find ("GET /pets (200) refers to itself"), std::string::npos)
+    << index.error;
+    EXPECT_NE (index.error.find ("#/components/schemas/A"), std::string::npos)
+    << index.error;
+    EXPECT_TRUE (index.response_schemas.empty ());
+}
+
+TEST (DeriveSpecIndexes, ARecursiveSchemaThroughAPropertyIsStillIndexed) {
+    const auto index = derive_spec_indexes (
+    R"({"openapi":"3.0.0","paths":{"/tree":{"get":{"responses":{"200":{"content":)"
+    R"({"application/json":{"schema":{"$ref":"#/components/schemas/Node"}}}}}}}},)"
+    R"("components":{"schemas":{"Node":{"type":"object","properties":)"
+    R"({"child":{"$ref":"#/components/schemas/Node"}}}}}})",
+    INDEX_CAP);
+    EXPECT_TRUE (index.ok ()) << index.error;
+    EXPECT_FALSE (index.response_schemas.empty ());
+}
+
 TEST (DeriveSpecIndexes, TheSchemaIndexIdentityIsTheOperationIndexIdentity) {
     // Including #715's rule: a repeated `operationId` names nothing, so the
     // second operation carries only what it can still state unambiguously. Both

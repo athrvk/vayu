@@ -402,6 +402,19 @@ const nlohmann::json& body);
 validate_document_against_schema (const nlohmann::json& schema, const nlohmann::json& document);
 
 /**
+ * @brief The `$ref` loop in @p schema that never reaches a value, as
+ *        `#/a -> #/b -> #/a`, or nothing when there is none.
+ *
+ * `run_validator` refuses a schema this answers for (valijson would recurse
+ * through it until the engine died), and the spec import refuses it when the
+ * document is added, so the user hears about it then (#3018). @p ref_roots is
+ * the shared `components` / `definitions` object, as in
+ * `validate_body_against_schema`; it is read in place, not merged.
+ */
+[[nodiscard]] std::optional<std::string>
+find_schema_loop (const nlohmann::json& schema, const nlohmann::json& ref_roots);
+
+/**
  * @brief Count the schema keywords a draft-07 validator cannot evaluate.
  *
  * Walks @p schema, following in-document `$ref`s through @p ref_roots with a

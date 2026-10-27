@@ -451,6 +451,9 @@ void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visi
     }
 }
 
+/// Locations a loop's description names before it says "...".
+constexpr size_t MAX_LOOP_LOCATIONS = 3;
+
 /// A subschema that applies to the same value as the one that reaches it.
 struct SameValueFrame {
     const nlohmann::json* schema;
@@ -477,15 +480,28 @@ const std::vector<std::string>& same_value_map_keys () {
     return keys;
 }
 
+/// A `$ref` target in the schema itself or, failing that, in the shared ref
+/// roots: what `validation_root` would resolve, without copying the roots into
+/// a merged document for every schema checked.
+const nlohmann::json* resolve_in_either (const nlohmann::json& schema_root,
+const nlohmann::json& ref_roots,
+const std::string& ref) {
+    if (const nlohmann::json* hit = resolve_pointer (schema_root, ref)) {
+        return hit;
+    }
+    return resolve_pointer (ref_roots, ref);
+}
+
 void add_ref_edge (const nlohmann::json& schema,
-const nlohmann::json& root,
+const nlohmann::json& schema_root,
+const nlohmann::json& ref_roots,
 std::vector<SameValueFrame>& edges) {
     auto ref = schema.find ("$ref");
     if (ref == schema.end () || !ref->is_string ()) {
         return;
     }
     const auto text = ref->get<std::string> ();
-    if (const nlohmann::json* target = resolve_pointer (root, text)) {
+    if (const nlohmann::json* target = resolve_in_either (schema_root, ref_roots, text)) {
         edges.push_back ({ target, nlohmann::json::json_pointer (text.substr (1)) });
     }
 }
@@ -525,12 +541,13 @@ std::vector<SameValueFrame>& edges) {
 /// to a child value.
 std::vector<SameValueFrame> same_value_edges (const nlohmann::json& schema,
 const nlohmann::json::json_pointer& at,
-const nlohmann::json& root) {
+const nlohmann::json& schema_root,
+const nlohmann::json& ref_roots) {
     std::vector<SameValueFrame> edges;
     if (!schema.is_object ()) {
         return edges;
     }
-    add_ref_edge (schema, root, edges);
+    add_ref_edge (schema, schema_root, ref_roots, edges);
     for (const auto& key : same_value_keys ()) {
         if (auto found = schema.find (key); found != schema.end () && found->is_object ()) {
             edges.push_back ({ &*found, at / key });
@@ -553,7 +570,8 @@ const nlohmann::json& root) {
  * Iterative, with the same node budget as `walk_schema`, so the check itself
  * cannot overflow on the schema it is guarding against.
  */
-std::optional<std::vector<std::string>> find_same_value_cycle (const nlohmann::json& root) {
+std::optional<std::vector<std::string>>
+find_same_value_cycle (const nlohmann::json& root, const nlohmann::json& ref_roots) {
     struct Open {
         std::string at;
         std::vector<SameValueFrame> edges;
@@ -566,7 +584,8 @@ std::optional<std::vector<std::string>> find_same_value_cycle (const nlohmann::j
 
     const nlohmann::json::json_pointer top;
     state[top.to_string ()] = ON_PATH;
-    path.push_back ({ top.to_string (), same_value_edges (root, top, root), 0 });
+    path.push_back (
+    { top.to_string (), same_value_edges (root, top, root, ref_roots), 0 });
     size_t visited = 1;
 
     while (!path.empty () && visited < limits::MAX_SCHEMA_NODES) {
@@ -592,12 +611,29 @@ std::optional<std::vector<std::string>> find_same_value_cycle (const nlohmann::j
             return loop;
         }
         ++visited;
-        path.push_back ({ at, same_value_edges (*edge.schema, edge.pointer, root), 0 });
+        path.push_back (
+        { at, same_value_edges (*edge.schema, edge.pointer, root, ref_roots), 0 });
     }
     return std::nullopt;
 }
 
 } // namespace
+
+std::optional<std::string> find_schema_loop (const nlohmann::json& schema,
+const nlohmann::json& ref_roots) {
+    const auto loop = find_same_value_cycle (schema, ref_roots);
+    if (!loop) {
+        return std::nullopt;
+    }
+    std::string named;
+    for (size_t i = 0; i < std::min (loop->size (), MAX_LOOP_LOCATIONS); ++i) {
+        named += (i == 0 ? "" : " -> ") + (*loop)[i];
+    }
+    if (loop->size () > MAX_LOOP_LOCATIONS) {
+        named += " -> ...";
+    }
+    return named;
+}
 
 std::vector<std::pair<std::string, size_t>>
 collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json& ref_roots) {
@@ -754,18 +790,11 @@ const nlohmann::json& body) {
     ValidationVerdict verdict;
     verdict.unevaluated_keywords = collect_unevaluated_keywords (schema, ref_roots);
 
-    const nlohmann::json root = validation_root (schema, ref_roots);
-    if (const auto loop = find_same_value_cycle (root)) {
-        std::string named;
-        for (size_t i = 0; i < std::min (loop->size (), MAX_NAMED_SCHEMA_PATHS); ++i) {
-            named += (i == 0 ? "" : " -> ") + (*loop)[i];
-        }
-        if (loop->size () > MAX_NAMED_SCHEMA_PATHS) {
-            named += " -> ...";
-        }
+    if (const auto loop = find_schema_loop (schema, ref_roots)) {
         return std::unexpected (std::format (
-        "the schema refers to itself without describing any value ({})", named));
+        "the schema refers to itself without describing any value ({})", *loop));
     }
+    const nlohmann::json root = validation_root (schema, ref_roots);
     valijson::Schema parsed;
     valijson::ValidationResults results;
     bool accepted = false;
