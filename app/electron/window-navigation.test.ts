@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
@@ -193,5 +193,32 @@ describe("main.ts wiring", () => {
 			"installWindowNavigationGuard(mainWindow.webContents, rendererUrl);"
 		);
 		expect(mainSource).not.toContain("loadFile(");
+	});
+});
+
+describe("the renderer's web security", () => {
+	/*
+	 * Setting `webSecurity` to false switches off the same-origin policy for the
+	 * window that carries it, and nothing in the app needs that since the `file:`
+	 * localStorage hand-off, the one window that did, was retired (#2763).
+	 * Mutation check: add the option to any non-test source under electron/ and
+	 * this goes red.
+	 */
+	const electronDir = dirname(fileURLToPath(import.meta.url));
+	const sources = readdirSync(electronDir, { recursive: true, encoding: "utf8" })
+		.filter((file) => /\.(ts|cjs|mjs|js)$/.test(file) && !/\.test\.ts$/.test(file))
+		.map((file) => ({ file, text: readFileSync(join(electronDir, file), "utf8") }));
+
+	it("scanned the main-process sources", () => {
+		// A scan over an empty list would pass for ever.
+		expect(sources.length).toBeGreaterThan(20);
+		expect(sources.map((s) => s.file)).toContain("main.ts");
+	});
+
+	it("never turns it off", () => {
+		const offenders = sources
+			.filter(({ text }) => /webSecurity\s*:\s*false/.test(text))
+			.map(({ file }) => file);
+		expect(offenders).toEqual([]);
 	});
 });
