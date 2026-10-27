@@ -449,7 +449,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
-| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash | none: `sync_schema ()` adds the nullable columns, the migration only stamps |
+| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -512,6 +512,13 @@ argument and under the same gate: the last release still stamps `7`, and
 a release shipped `9` without it, it needs its own bump and its own row here.
 The release that carries `9` names #2973 beside #2971, #2970 and #2937 under
 Changed.
+
+The #3006 index `idx_requests_deleted_at` joined version `9` under the same gate:
+any change to `make_vayu_storage`'s mapping bumps the version, an index
+included, and `sync_schema ()` creates it on every start whatever the stamp, so
+a database an earlier build of this branch stamped `9` still gets it. If a
+release shipped `9` without it, it needs its own bump and its own row here. The release that carries `9` names #3006 beside #2971, #2970 and
+#2937 under Changed.
 
 ---
 
@@ -2603,7 +2610,8 @@ it; one that had picked Normal or Full keeps its choice.
 
 Declared alongside the tables in `make_vayu_storage()` (`engine/src/db/database_impl.hpp`). `sqlite_orm`
 requires index arguments to precede the table arguments. `sync_schema()` creates them on startup
-for fresh **and** pre-existing databases, so adding an index is additive and needs no migration.
+for fresh **and** pre-existing databases, so adding an index is additive and needs no migration step;
+it still counts as a mapping change for [the schema version](#schema-versions).
 
 | Index                        | Column                  | Query paths that rely on it                                                                                                                       |
 |------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -2618,6 +2626,7 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | `idx_inbox_requests_inbox_id`| `inbox_requests.inbox_id`| Every inbox read - the capture page, the live poll, the per-insert retention trim and `DELETE /inbox/:id/requests`                |
 | `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 | `idx_request_examples_request_id` | `request_examples.request_id` | Every example read - `GET /requests/:id/examples`, the create path's append scan, and the `remove_all` in both the request and collection cascades |
+| `idx_requests_deleted_at`    | `requests.deleted_at`   | `Database::get_trash`'s request listing (`GET /trash`), which otherwise scans every request row and walks the overflow pages of a large body to reach the stamp (#3006). **Partial:** `WHERE deleted_at IS NOT NULL`, so it holds only the trashed rows and a live write never touches it; a query reaches it only by filtering `deleted_at IS NOT NULL`, which is what the listing does |
 
 `metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per
 second (the retired EAV `metrics` table cost roughly 20 rows for the same second) - so without `run_id`

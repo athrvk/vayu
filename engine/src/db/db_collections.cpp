@@ -185,10 +185,10 @@ void Database::purge_collection_locked (const std::string& id) {
             // Examples first, and by request id rather than by collection: they
             // hang off the request, so deleting the requests before them would
             // leave rows no read can reach and no later delete can find.
-            for (const auto& r : impl_->storage.get_all<Request> (
-                 where (c (&Request::collection_id) == *it))) {
+            for (const auto& request_id : impl_->storage.select (
+                 &Request::id, where (c (&Request::collection_id) == *it))) {
                 impl_->storage.remove_all<RequestExample> (
-                where (c (&RequestExample::request_id) == r.id));
+                where (c (&RequestExample::request_id) == request_id));
             }
             impl_->storage.remove_all<Request> (
             where (c (&Request::collection_id) == *it));

@@ -9,12 +9,15 @@
  * @file tests/trash_listing_cost_test.cpp
  * @brief What listing the trash reads (#2972): the columns an entry shows and
  *        nothing else, in a number of statements set by the tables the trash
- *        spans rather than by how many folders a trashed root holds.
+ *        spans rather than by how many folders a trashed root holds; and the
+ *        request columns a purge reads to remove a trashed root's examples; and
+ *        the index the stamped requests are reached through (#3006).
  *
- * Both are observed on the storage's own connection through an auto-extension
+ * Each is observed on the storage's own connection through an auto-extension
  * (`sqlite_auto_extension.hpp`): SQLite's authorizer, which it consults for
  * every column a statement reads as the statement is prepared, and the trace
- * of every statement begun. Neither reading depends on the clock.
+ * of every statement begun. The index's plan is then read with EXPLAIN QUERY
+ * PLAN on a separate handle. No reading depends on the clock.
  */
 
 #include <gtest/gtest.h>
@@ -299,6 +302,80 @@ TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotSho
     }
 }
 
+// Purging a trashed collection finds the requests whose examples it removes by
+// their ids alone: a request holding a megabyte body, headers and elements is
+// destroyed without any of them being read. The allowed set is the columns the
+// purge keys on (a request's id and owner, an example's request) plus the stamp
+// its outcome's entry is looked up by, so a read that widens fails here naming
+// the column. Mutation check: walk the requests with `get_all<Request>` again in
+// `purge_collection_locked` and `requests.body` is read.
+TEST_F (TrashListingCostTest, PurgeNeverReadsARequestColumnBeyondItsIds) {
+    const std::string large (LARGE_BODY_BYTES, 'x');
+    make_collection ("col_root");
+    make_collection ("col_child", "col_root");
+    for (const std::string owner : { "col_root", "col_child" }) {
+        Request r;
+        r.id            = owner + "_req";
+        r.collection_id = owner;
+        r.name          = r.id;
+        r.method        = vayu::HttpMethod::POST;
+        r.url           = "https://example.test/" + r.id;
+        r.headers       = R"([{"key":"X-Large","value":")" + large + R"("}])";
+        r.body          = large;
+        r.elements = R"([{"kind":"script.pre","config":{"source":")" + large + R"("}}])";
+        r.created_at = 1;
+        r.updated_at = 1;
+        db_->save_request (r);
+
+        RequestExample example;
+        example.id         = owner + "_ex";
+        example.request_id = r.id;
+        example.name       = "saved";
+        example.status     = 200;
+        example.headers    = "[]";
+        example.body       = large;
+        example.origin = vayu::core::constants::request_example::ORIGIN_USER;
+        example.created_at = 1;
+        example.updated_at = 1;
+        db_->save_request_example (example);
+    }
+    db_->delete_collection ("col_root");
+
+    reopen_with_statement_log ();
+    if (HasFatalFailure ()) {
+        return;
+    }
+    std::optional<TrashOutcome> purged;
+    const auto recorded =
+    record ([&] { purged = db_->purge_deleted ("col_root"); });
+
+    // The purge took both folders' requests and their examples with them.
+    ASSERT_HAS_VALUE (purged);
+    EXPECT_EQ (purged->entry.requests, 2);
+    EXPECT_FALSE (db_->get_request_example ("col_root_ex").has_value ());
+    EXPECT_FALSE (db_->get_request_example ("col_child_ex").has_value ());
+    EXPECT_FALSE (db_->get_request ("col_root_req").has_value ());
+    EXPECT_FALSE (db_->get_request ("col_child_req").has_value ());
+
+    // A log that saw nothing passes forever.
+    ASSERT_TRUE (recorded.columns_read.contains ("requests.collection_id"))
+    << "the authorizer did not see the purge's statements";
+
+    const std::set<std::string> allowed{
+        "requests.id",
+        "requests.collection_id",
+        "requests.deleted_at",
+        "request_examples.request_id",
+    };
+    for (const auto& column : recorded.columns_read) {
+        const bool of_a_request = column.starts_with ("requests.") ||
+        column.starts_with ("request_examples.");
+        if (of_a_request) {
+            EXPECT_TRUE (allowed.contains (column)) << "the purge read " << column;
+        }
+    }
+}
+
 // A trashed root's counts take no statement per folder: listing a root of 300
 // folders runs as many statements as listing a root of one, and no more than
 // one per table the trash spans. Healthy: 5 either way. The per-folder shape
@@ -330,6 +407,95 @@ TEST_F (TrashListingCostTest, ListingARootOfThreeHundredFoldersRunsAStatementCou
     ASSERT_FALSE (small.statements.empty ()) << "the trace saw nothing";
     EXPECT_EQ (large.statements.size (), small.statements.size ()) << large.listing ();
     EXPECT_LE (large.statements.size (), TRASH_TABLES) << large.listing ();
+}
+
+/// The plan SQLite chooses for @p sql on a fresh connection to the test
+/// database, one `detail` line per row.
+std::string query_plan_of (const std::string& sql) {
+    sqlite3* handle = nullptr;
+    std::string plan;
+    if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "could not open " << TEST_DB_PATH;
+        sqlite3_close (handle);
+        return plan;
+    }
+    sqlite3_stmt* stmt        = nullptr;
+    const std::string explain = "EXPLAIN QUERY PLAN " + sql;
+    if (sqlite3_prepare_v2 (handle, explain.c_str (), -1, &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << "could not plan " << sql << ": " << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return plan;
+    }
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        plan += column_text (stmt, 3);
+        plan += '\n';
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return plan;
+}
+
+/// The `CREATE INDEX` text SQLite stored for @p name, empty when it has none.
+std::string index_ddl_of (const std::string& name) {
+    sqlite3* handle = nullptr;
+    std::string ddl;
+    if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "could not open " << TEST_DB_PATH;
+        sqlite3_close (handle);
+        return ddl;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+        -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text (stmt, 1, name.c_str (), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step (stmt) == SQLITE_ROW) {
+            ddl = column_text (stmt, 0);
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return ddl;
+}
+
+// The listing reaches the stamped requests through `idx_requests_deleted_at`
+// rather than walking every request row, whose overflow pages hold a large
+// body, to find the few that are stamped (#3006). The statement is the one the
+// listing ran, taken from the trace, so a rewrite of its WHERE that the partial
+// index no longer covers fails here too. Mutation check: remove the
+// `idx_requests_deleted_at` line from `make_vayu_storage` and the plan is a
+// SCAN of requests.
+TEST_F (TrashListingCostTest, ListingTheStampedRequestsSearchesTheDeletedAtIndex) {
+    reopen_with_statement_log ();
+    if (HasFatalFailure ()) {
+        return;
+    }
+    make_collection ("col_live");
+    make_request ("req_live", "col_live", std::string (LARGE_BODY_BYTES, 'x'));
+    make_request ("req_trashed", "col_live", std::string (LARGE_BODY_BYTES, 'x'));
+    db_->delete_request ("req_trashed");
+
+    std::vector<TrashEntry> listed;
+    const auto recorded = record ([&] { listed = db_->get_trash (); });
+    ASSERT_EQ (listed.size (), 1U) << recorded.listing ();
+
+    std::vector<std::string> request_selects;
+    for (const auto& sql : recorded.statements) {
+        if (sql.starts_with ("SELECT") && sql.contains ("FROM \"requests\"") &&
+        sql.contains ("\"deleted_at\" IS NOT NULL")) {
+            request_selects.push_back (sql);
+        }
+    }
+    ASSERT_EQ (request_selects.size (), 1U) << recorded.listing ();
+
+    const std::string plan = query_plan_of (request_selects.front ());
+    EXPECT_TRUE (plan.contains ("USING INDEX idx_requests_deleted_at")) << plan;
+    EXPECT_FALSE (plan.contains ("SCAN")) << plan;
+
+    // Partial is the point: a full index would hold an entry per live request.
+    // Mutation check: drop the `where (...)` from the index and this fails.
+    const std::string ddl = index_ddl_of ("idx_requests_deleted_at");
+    EXPECT_TRUE (ddl.contains ("WHERE")) << ddl;
+    EXPECT_TRUE (ddl.contains ("IS NOT NULL")) << ddl;
 }
 
 // The listing and a restore count one cohort the same way, from the same

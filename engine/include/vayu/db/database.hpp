@@ -70,7 +70,8 @@ namespace vayu::db {
  *     `environments.deleted_at`, the environment trash (#2970),
  *     `request_examples.deleted_at`, the example trash (#2971), and
  *     `client_certificates.deleted_at`, the certificate trash (#2973), all
- *     folded into the same unreleased version.
+ *     folded into the same unreleased version; the partial index
+ *     `idx_requests_deleted_at` (#3006) joins it too.
  */
 inline constexpr int SCHEMA_VERSION = 9;
 
