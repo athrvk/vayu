@@ -1150,7 +1150,9 @@ TEST_F (LoadStrategyTest, SaturatedRunEndsAtDeadlineAndRecordsTheShortfall) {
     const double RPS      = 500.0;
     const double DUR_S    = 1.0;
     nlohmann::json config = {
-        { "mode", "constant_rps" }, { "duration", "1s" }, { "targetRps", RPS },
+        { "mode", "constant_rps" },
+        { "duration", "1s" },
+        { "targetRps", RPS },
         { "maxInFlight", 5 }, // far below what a 500ms endpoint can retire
     };
 
@@ -1668,8 +1670,10 @@ TEST_F (LoadStrategyTest, RunContextResolvesTheSamplingConfigOnce) {
 // and the outlier below stops reaching the slow store at all.
 TEST_F (LoadStrategyTest, OutliersAndExemplarsCaptureBodiesButPlainSamplesDoNot) {
     nlohmann::json config = {
-        { "mode", "constant_rps" }, { "slow_threshold_ms", 100 },
-        { "save_timing_breakdown", true }, { "success_sample_rate", 1 }, // every completion is sampled
+        { "mode", "constant_rps" },
+        { "slow_threshold_ms", 100 },
+        { "save_timing_breakdown", true },
+        { "success_sample_rate", 1 }, // every completion is sampled
     };
     auto context = std::make_shared<vayu::core::RunContext> ("test-capture", config);
     vayu::db::Database db (TEST_DB_PATH);
@@ -1871,9 +1875,12 @@ TEST_F (LoadStrategyTest, CapacityStopsOnErrorsAgainstAFailingEndpoint) {
 // knee it never observed.
 TEST_F (LoadStrategyTest, CapacityStopsAtTheCapAgainstAFastEndpoint) {
     nlohmann::json config = {
-        { "mode", "capacity" }, { "duration", "30s" }, { "stepDuration", "1s" },
+        { "mode", "capacity" },
+        { "duration", "30s" },
+        { "stepDuration", "1s" },
         { "sloMs", 2000 }, // far above anything /fast can produce
-        { "startConcurrency", 2 }, { "concurrency", 3 }, // one step-up and the search is at its ceiling
+        { "startConcurrency", 2 },
+        { "concurrency", 3 }, // one step-up and the search is at its ceiling
     };
 
     vayu::db::Database db (TEST_DB_PATH);
@@ -2990,8 +2997,8 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreSetsAPasswordThatReachesTheWireThroug
     vayu::db::Database db (TEST_DB_PATH);
 
     auto config    = request_elements_payload (echo.url (), 2, 1,
-       nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
-       { "config", { { "script", "pm.environment.set('password', 's3cret');" }, { "inline", true } } } } }));
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "pm.environment.set('password', 's3cret');" }, { "inline", true } } } } }));
     config["auth"] = { { "mode", "basic" }, { "username", "user" },
         { "password", "{{password}}" } };
 
@@ -3008,8 +3015,8 @@ TEST_F (LoadStrategyTest, ARowAndAScriptEachAnswerHalfOfABasicPairThroughLateAut
     vayu::db::Database db (TEST_DB_PATH);
 
     auto config    = request_elements_payload (echo.url (), 1, 1,
-       nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
-       { "config", { { "script", "pm.environment.set('password', 's3cret');" }, { "inline", true } } } } }));
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "pm.environment.set('password', 's3cret');" }, { "inline", true } } } } }));
     config["auth"] = { { "mode", "basic" }, { "username", "{{data.user}}" },
         { "password", "{{password}}" } };
     config["data"] = nlohmann::json::array ({ { { "user", "ada" } } });
@@ -3071,8 +3078,8 @@ TEST_F (LoadStrategyTest, TheAllInlineScriptsOverrideForcesAnUnmarkedScriptPreIn
     vayu::db::Database db (TEST_DB_PATH);
 
     auto config        = request_elements_payload (echo.url (), 2, 1,
-           nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
-           { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" } } } } }));
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" } } } } }));
     config["elements"] = { { "scripts", "allInline" } };
 
     const auto summary =

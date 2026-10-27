@@ -322,9 +322,9 @@ class VendorJsFixture : public ::testing::Test {
 
     nlohmann::json manifest () const {
         const nlohmann::json plain   = { { "name", "plain" },
-              { "path", "plain/plain.min.js" }, { "sha256", sha_of (LIBRARY_BYTES) },
-              { "packages", nlohmann::json::array ({ package ("plain") }) },
-              { "build", { { "kind", "verbatim" }, { "source", "dist/plain.min.js" } } } };
+            { "path", "plain/plain.min.js" }, { "sha256", sha_of (LIBRARY_BYTES) },
+            { "packages", nlohmann::json::array ({ package ("plain") }) },
+            { "build", { { "kind", "verbatim" }, { "source", "dist/plain.min.js" } } } };
         const nlohmann::json bundled = { { "name", "bundled" },
             { "path", "bundled/bundled.min.js" }, { "sha256", sha_of (LIBRARY_BYTES) },
             { "packages", nlohmann::json::array ({ package ("bundled") }) },

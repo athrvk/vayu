@@ -749,8 +749,8 @@ BlobIds& fresh_blob_ids) {
         row.run_id        = result.run_id;
         row.headers       = pending->headers;
         row.blob_id       = pending->body_hash.empty () ?
-              0 :
-              blob_id_for (storage, *pending, result.run_id, committed_blob_ids, fresh_blob_ids);
+        0 :
+        blob_id_for (storage, *pending, result.run_id, committed_blob_ids, fresh_blob_ids);
         row.body_bytes    = pending->body_bytes;
         row.truncated     = pending->truncated;
         row.is_binary     = pending->binary;

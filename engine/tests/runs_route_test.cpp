@@ -3200,7 +3200,7 @@ std::string judged_summary (bool meets) {
     const double error_limit = meets ? 25 : 1;
     inputs.thresholds        = vayu::core::evaluate_thresholds (
     nlohmann::json{
-           { "thresholds", { { "latencyP99Ms", 50 }, { "maxErrorRatePct", error_limit } } } },
+    { "thresholds", { { "latencyP99Ms", 50 }, { "maxErrorRatePct", error_limit } } } },
     inputs);
     return vayu::core::build_run_summary_payload (inputs).dump ();
 }

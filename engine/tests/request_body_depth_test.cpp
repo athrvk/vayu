@@ -278,12 +278,12 @@ TEST_F (RequestBodyDepthRouteTest, ADeepValueIsRefusedOnEveryRouteBeforeAnything
     { "POST", "/collections", R"({"name":"planted",)" + deep_auth + "}" },
     { "PUT", "/collections/" + collection_id, "{" + deep_auth + "}" },
     { "POST", "/requests",
-               R"({"collectionId":")" + collection_id +
-               R"(","name":"planted","method":"GET","url":"http://x.test/",)" + deep_auth + "}" },
+    R"({"collectionId":")" + collection_id +
+    R"(","name":"planted","method":"GET","url":"http://x.test/",)" + deep_auth + "}" },
     { "PUT", "/requests/" + request_id, "{" + deep_auth + "}" },
     { "POST", "/specs", R"({"content":"openapi: 3.0.0","sourceUrl":)" + deep + "}" },
     { "POST", "/specs/diff",
-               R"({"collectionId":")" + collection_id + R"(","spec":{"content":)" + deep + "}}" },
+    R"({"collectionId":")" + collection_id + R"(","spec":{"content":)" + deep + "}}" },
     });
     for (const auto& [method, path, body] : cases) {
         const auto [status, answer] = send_text (method, path, body);

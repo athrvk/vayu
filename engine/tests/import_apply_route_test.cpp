@@ -276,12 +276,12 @@ TEST_F (ImportApplyRouteTest, ConsecutiveOrdersSpanBothKindsUnderOneParent) {
     json second_folder            = collection_item ("c3", "second folder");
     second_folder["parentTempId"] = "c1";
     auto [status, response]       = import_apply_response (*db_,
-          json{ { "requests",
-                json::array ({ request_item ("r1", "c1", "first request"),
-                request_item ("r2", "c1", "second request"),
-                request_item ("r3", "c2", "in the first folder") }) },
-          { "collections",
-          json::array ({ collection_item ("c1", "root"), first_folder, second_folder }) } });
+    json{ { "requests",
+          json::array ({ request_item ("r1", "c1", "first request"),
+          request_item ("r2", "c1", "second request"),
+          request_item ("r3", "c2", "in the first folder") }) },
+    { "collections",
+    json::array ({ collection_item ("c1", "root"), first_folder, second_folder }) } });
     ASSERT_EQ (status, 200) << response.dump ();
 
     const auto order_of_collection = [&] (const char* temp) {

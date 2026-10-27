@@ -102,7 +102,10 @@ TEST (DbLayout, TheGuardSeesTheHeaderName) {
 /// constructor's own recovery branch reaches through `get_collection`, and
 /// the transaction-retry helper. Everything else moved to a family file.
 constexpr std::array<std::string_view, 5> kAllowedInDatabaseCpp = {
-    "path", "with_lock", "owner_is_absent_locked", "retry_on_busy",
+    "path",
+    "with_lock",
+    "owner_is_absent_locked",
+    "retry_on_busy",
     "Database", // constructor and destructor: `Database::Database` / `Database::~Database`
 };
 

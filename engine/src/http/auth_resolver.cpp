@@ -94,8 +94,8 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
     AuthApplyResult out;
     out.ok          = false;
     out.code        = err.code == "oauth2_interactive_required" ?
-           vayu::ErrorCode::AuthRequired :
-           vayu::ErrorCode::AuthFailed;
+    vayu::ErrorCode::AuthRequired :
+    vayu::ErrorCode::AuthFailed;
     out.message     = err.message;
     out.detail_code = err.code;
     return out;

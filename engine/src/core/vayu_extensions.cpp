@@ -458,7 +458,7 @@ std::string drop_userinfo_password (std::string_view head, int& omitted) {
     const auto authority_end          = head.find ('/', authority_start);
     const std::string_view authority  = head.substr (authority_start,
     authority_end == std::string_view::npos ? std::string_view::npos :
-                                               authority_end - authority_start);
+                                              authority_end - authority_start);
     const auto at                     = authority.rfind ('@');
     if (at == std::string_view::npos ||
     (!has_scheme && authority.find_first_of (" \t") != std::string_view::npos)) {

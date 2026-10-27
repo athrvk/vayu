@@ -177,9 +177,9 @@ class AnyPathServer final : public httplib::Server {
         bool websocket_upgraded = false;
         const auto ret          = serve_guarded ([&] () {
             return httplib::detail::process_server_socket (svr_sock_, sock,
-                     keep_alive_max_count_, keep_alive_timeout_sec_, read_timeout_sec_,
-                     read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
-                     [&] (httplib::Stream& strm, bool close_connection, bool& connection_closed) {
+            keep_alive_max_count_, keep_alive_timeout_sec_, read_timeout_sec_,
+            read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
+            [&] (httplib::Stream& strm, bool close_connection, bool& connection_closed) {
                 return process_request (
                 strm, remote_addr, remote_port, local_addr, local_port,
                 close_connection, connection_closed,
@@ -221,7 +221,7 @@ InboxLimits read_inbox_limits (vayu::db::Database& db) {
     constants::inbox::MIN_BODY_BYTES,
     static_cast<int64_t> (constants::inbox::MAX_PAYLOAD_BYTES));
     limits.max_captures   = read ("inboxMaxCaptures", defaults.max_captures,
-      constants::inbox::MIN_CAPTURES, constants::inbox::CAPTURES_CEILING);
+    constants::inbox::MIN_CAPTURES, constants::inbox::CAPTURES_CEILING);
     limits.live_poll_interval_ms =
     static_cast<int> (read ("inboxLivePollIntervalMs",
     defaults.live_poll_interval_ms, constants::inbox::MIN_LIVE_POLL_INTERVAL_MS,
@@ -602,8 +602,8 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         capture_row.body_bytes = static_cast<int64_t> (req.body.size ());
         capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
         capture_row.body        = capture_row.body_truncated ?
-               req.body.substr (0, static_cast<size_t> (raw->limits.max_body_bytes)) :
-               req.body;
+        req.body.substr (0, static_cast<size_t> (raw->limits.max_body_bytes)) :
+        req.body;
         capture_row.remote_addr = req.remote_addr;
 
         try {

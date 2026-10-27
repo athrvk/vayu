@@ -1724,8 +1724,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.sending_duration_s      = totals.sending_window_s;
     inputs.completed_while_sending = totals.completed_while_sending;
     inputs.send_rate               = totals.sending_window_s > 0 ?
-                  static_cast<double> (inputs.requests_sent) / totals.sending_window_s :
-                  0.0;
+    static_cast<double> (inputs.requests_sent) / totals.sending_window_s :
+    0.0;
     inputs.queue_wait_avg_ms = context->metrics_collector->average_queue_wait ();
     inputs.bytes_sent     = context->metrics_collector->total_bytes_sent ();
     inputs.bytes_received = context->metrics_collector->total_bytes_received ();
@@ -2545,10 +2545,10 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     summary["http_version_downgraded"] = inputs.http_version_downgraded;
     summary["status_codes"]            = codes;
     summary["latency"]                 = { { "min", inputs.latency.min },
-                        { "max", inputs.latency.max }, { "avg", inputs.latency_avg_ms },
-                        { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
-                        { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
-                        { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
+        { "max", inputs.latency.max }, { "avg", inputs.latency_avg_ms },
+        { "p50", inputs.latency.p50 }, { "p75", inputs.latency.p75 },
+        { "p90", inputs.latency.p90 }, { "p95", inputs.latency.p95 },
+        { "p99", inputs.latency.p99 }, { "p999", inputs.latency.p999 } };
     // Always written, the downgrade's rule: absent is a run stored before
     // #2799, whose report then omits `connectionReplays`.
     summary["connection_replays"] = inputs.connection_replays;
@@ -2678,16 +2678,16 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (inputs.stream.has_value ()) {
         const auto& stream = *inputs.stream;
         summary["stream"]  = { { "completions", stream.completions },
-             { "totalEvents", stream.total_events }, { "capped", stream.capped },
-             { "eventsPerSecond",
+            { "totalEvents", stream.total_events }, { "capped", stream.capped },
+            { "eventsPerSecond",
             inputs.test_duration_s > 0.0 ?
-             static_cast<double> (stream.total_events) / inputs.test_duration_s :
-             0.0 },
-             { "events",
-             { { "min", stream.events.min }, { "max", stream.events.max },
-             { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
-             { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
-             { "count", stream.events.count } } } };
+            static_cast<double> (stream.total_events) / inputs.test_duration_s :
+            0.0 },
+            { "events",
+            { { "min", stream.events.min }, { "max", stream.events.max },
+            { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
+            { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
+            { "count", stream.events.count } } } };
     }
     // What this run did not do (issue #1503). Omitted entirely for a run
     // with nothing to report, so the report's `warnings` key reads as "this

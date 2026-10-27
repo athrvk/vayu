@@ -288,7 +288,7 @@ Text request_url (const json& report) {
         return out;
     }
     const auto authority = scheme_end + 3;
-    const auto at        = std::string_view (out)
+    const auto at = std::string_view (out)
                     .substr (authority, out.find ('/', authority) - authority)
                     .rfind ('@');
     if (at != std::string_view::npos) {

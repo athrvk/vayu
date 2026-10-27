@@ -371,8 +371,8 @@ RouteResult read_saved_from (const nlohmann::json& json, std::optional<SavedFrom
         const double seconds = std::floor (received->get<double> () / 1000.0);
         constexpr auto LAST  = std::numeric_limits<std::time_t>::max ();
         saved.received_at    = seconds >= static_cast<double> (LAST) ?
-           LAST :
-           static_cast<std::time_t> (seconds);
+        LAST :
+        static_cast<std::time_t> (seconds);
     }
     out = std::move (saved);
     return {};
@@ -390,8 +390,8 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
     auto headers =
     vayu::utils::parse_ordered_json (x.headers, vayu::utils::ORDERED_JSON_UNBOUNDED);
     example.headers    = headers && headers->is_array () ?
-       std::move (*headers) :
-       nlohmann::ordered_json::array ();
+    std::move (*headers) :
+    nlohmann::ordered_json::array ();
     x.postman_response = vayu::core::postman_saved_response_text (saved.request,
     example, saved.status_text, saved.response_time_ms,
     saved.received_at.value_or (std::time (nullptr)));

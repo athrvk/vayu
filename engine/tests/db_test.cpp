@@ -2932,7 +2932,7 @@ TEST_F (DatabaseTest, MigrationLeavesAnAlreadyFoldedRowWithNoDuplicate) {
         r.updated_at    = 1;
         r.elements      = nlohmann::json::array (
         { nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" }, { "enabled", true },
-             { "config", { { "script", "pm.environment.set('x', 1);" } } } } })
+        { "config", { { "script", "pm.environment.set('x', 1);" } } } } })
                      .dump ();
         db.save_request (r);
     }

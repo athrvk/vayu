@@ -208,9 +208,9 @@ class RunExportSchemaTest : public ::testing::Test {
         result.status_code = 200;
         result.latency_ms  = 2.0;
         result.trace_data  = json{ { "dnsMs", 1.0 }, { "connectMs", 1.0 },
-             { "tlsMs", 1.0 }, { "firstByteMs", 1.0 }, { "downloadMs", 1.0 },
-             { "error_type", "timeout" } }
-                            .dump ();
+            { "tlsMs", 1.0 }, { "firstByteMs", 1.0 }, { "downloadMs", 1.0 },
+            { "error_type", "timeout" } }
+                             .dump ();
         db_->add_result (result);
 
         vayu::db::MetricTick tick;

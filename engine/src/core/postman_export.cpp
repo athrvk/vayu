@@ -1452,7 +1452,7 @@ std::optional<std::string> js_date_utc (std::time_t at) {
     static constexpr std::array<std::string_view, 7> WEEKDAYS = { "Sun", "Mon",
         "Tue", "Wed", "Thu", "Fri", "Sat" };
     static constexpr std::array<std::string_view, 12> MONTHS  = { "Jan", "Feb",
-         "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+        "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
     constexpr sys_days FIRST = year::min () / January / 1;
     constexpr sys_days LAST  = year::max () / December / 31;
     const sys_seconds time{ seconds{ static_cast<seconds::rep> (at) } };

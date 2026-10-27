@@ -495,8 +495,15 @@ namespace {
  * deliberate follow-up, not a schema oversight to work around.
  */
 constexpr std::array<std::string_view, 10> REQUEST_ELEMENTS_SUPPORTED_KINDS{
-    "extract.json", "extract.regex", "extract.boundary", "assert.status",
-    "assert.jsonpath", "assert.contains", "assert.duration", "assert.size", "timer.think",
+    "extract.json",
+    "extract.regex",
+    "extract.boundary",
+    "assert.status",
+    "assert.jsonpath",
+    "assert.contains",
+    "assert.duration",
+    "assert.size",
+    "timer.think",
     // script.pre / script.post checked separately below - HotPathClass::Script,
     // not a literal comparison, per the extensibility contract's rule 1.
 };

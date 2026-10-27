@@ -409,9 +409,9 @@ TEST (ThresholdEval, AnAssertionBudgetJudgesTheWorseOfTheExactAndSampledRates) {
     for (const size_t exact_passed : { size_t{ 2 }, size_t{ 200 } }) {
         RunSummaryInputs inputs = measured_run ();
         inputs.assertions       = AssertionPopulations{
-                  .exact       = { .passed = exact_passed, .failed = 0 },
-                  .sampled     = { .passed = 1, .failed = 1 },
-                  .sample_rate = 100,
+            .exact       = { .passed = exact_passed, .failed = 0 },
+            .sampled     = { .passed = 1, .failed = 1 },
+            .sample_rate = 100,
         };
 
         auto pass = only_check (evaluate_thresholds (
@@ -431,9 +431,9 @@ TEST (ThresholdEval, AnAssertionBudgetJudgesTheWorseOfTheExactAndSampledRates) {
 TEST (ThresholdEval, AFailingExactPopulationIsNotDilutedByACleanSampledOne) {
     RunSummaryInputs inputs = measured_run ();
     inputs.assertions       = AssertionPopulations{
-              .exact       = { .passed = 18, .failed = 2 }, // 10%
-              .sampled     = { .passed = 500, .failed = 0 },
-              .sample_rate = 10,
+        .exact       = { .passed = 18, .failed = 2 }, // 10%
+        .sampled     = { .passed = 500, .failed = 0 },
+        .sample_rate = 10,
     };
     auto check = only_check (evaluate_thresholds (
     config_with ({ { "maxAssertionFailureRatePct", 9 } }), inputs));
@@ -447,7 +447,7 @@ TEST (ThresholdEval, AFailingExactPopulationIsNotDilutedByACleanSampledOne) {
 TEST (ThresholdEval, ASampledOnlyAssertionPopulationIsEvaluated) {
     RunSummaryInputs inputs = measured_run ();
     inputs.assertions       = AssertionPopulations{
-              .exact = {}, .sampled = { .passed = 3, .failed = 1 }, .sample_rate = 10
+        .exact = {}, .sampled = { .passed = 3, .failed = 1 }, .sample_rate = 10
     };
     auto check = only_check (evaluate_thresholds (
     config_with ({ { "maxAssertionFailureRatePct", 30 } }), inputs));
@@ -463,9 +463,9 @@ TEST (ThresholdEval, ASampledOnlyAssertionPopulationIsEvaluated) {
 TEST (ThresholdEval, AnAssertionCheckPayloadNamesBothPopulations) {
     RunSummaryInputs inputs = measured_run ();
     inputs.assertions       = AssertionPopulations{
-              .exact       = { .passed = 200, .failed = 0 },
-              .sampled     = { .passed = 1, .failed = 1 },
-              .sample_rate = 100,
+        .exact       = { .passed = 200, .failed = 0 },
+        .sampled     = { .passed = 1, .failed = 1 },
+        .sample_rate = 100,
     };
     auto outcome = evaluate_thresholds (
     config_with ({ { "maxAssertionFailureRatePct", 10 } }), inputs);
@@ -486,7 +486,7 @@ TEST (ThresholdEval, AnAssertionCheckPayloadNamesBothPopulations) {
 TEST (ThresholdEval, AnExactOnlyAssertionCheckNamesNoSampleRate) {
     RunSummaryInputs inputs = measured_run ();
     inputs.assertions       = AssertionPopulations{
-              .exact = { .passed = 18, .failed = 2 }, .sampled = {}, .sample_rate = 1
+        .exact = { .passed = 18, .failed = 2 }, .sampled = {}, .sample_rate = 1
     };
     auto outcome = evaluate_thresholds (
     config_with ({ { "maxAssertionFailureRatePct", 10 } }), inputs);
@@ -508,7 +508,7 @@ TEST (ThresholdEval, AnExactOnlyAssertionCheckNamesNoSampleRate) {
 TEST (ThresholdEval, OnlyAnEvaluatedAssertionCheckCarriesPopulations) {
     RunSummaryInputs inputs = measured_run ();
     inputs.assertions       = AssertionPopulations{
-              .exact = { .passed = 1, .failed = 0 }, .sampled = {}, .sample_rate = 1
+        .exact = { .passed = 1, .failed = 0 }, .sampled = {}, .sample_rate = 1
     };
     auto outcome = evaluate_thresholds (
     config_with ({ { "maxErrorRatePct", 5 }, { "maxAssertionFailureRatePct", 5 } }), inputs);

@@ -224,7 +224,7 @@ group_by (const std::vector<const ExportExample*>& items, KeyOf key_of) {
     for (const ExportExample* item : items) {
         const std::string key = key_of (*item);
         const auto found      = std::find_if (groups.begin (), groups.end (),
-             [&] (const auto& group) { return group.first == key; });
+        [&] (const auto& group) { return group.first == key; });
         if (found == groups.end ()) {
             groups.push_back ({ key, { item } });
         } else {
@@ -263,8 +263,8 @@ const std::vector<const ExportExample*>& examples,
 const std::vector<Json>& values) {
     for (size_t index = 0; index < examples.size (); ++index) {
         const std::string wanted    = examples[index]->name.empty () ?
-           "example-" + std::to_string (index + 1) :
-           examples[index]->name;
+        "example-" + std::to_string (index + 1) :
+        examples[index]->name;
         map[free_key (map, wanted)] = Json{ { "value", values[index] } };
     }
 }
@@ -2594,10 +2594,10 @@ const BoundWrite& write) {
     const AuthDisposition request_disp = disposition_of (entry.auth);
     const auto own_security            = operation.find ("security");
     const bool already_said            = own_security == operation.end () ?
-               same_disposition (request_disp, write.context.collection) ||
+    same_disposition (request_disp, write.context.collection) ||
     request_disp.kind == AuthDisposition::Kind::Inherit ||
     request_disp.kind == AuthDisposition::Kind::Unsupported :
-               security_says (&*own_security, request_disp, *write.schemes);
+    security_says (&*own_security, request_disp, *write.schemes);
     if (!already_said) {
         if (request_disp.kind == AuthDisposition::Kind::None) {
             operation["security"] = Json::array ();

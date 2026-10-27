@@ -1018,10 +1018,10 @@ std::to_array<std::pair<std::string_view, std::string_view>> ({
 ReportText difference_line (const ordered& difference) {
     const std::string field = text_at (difference, { "field" });
     const auto found        = std::ranges::find (DIFFERENCE_LABELS, field,
-           &std::pair<std::string_view, std::string_view>::first);
+    &std::pair<std::string_view, std::string_view>::first);
     const ReportText label  = found == DIFFERENCE_LABELS.end () ?
-     user (field) :
-     words (std::string (found->second));
+    user (field) :
+    words (std::string (found->second));
     return label + ": " + user (text_at (difference, { "base" })) +
     " in the base run, " + user (text_at (difference, { "target" })) + " in this one";
 }
@@ -1227,8 +1227,8 @@ ReportText consecutive_measurements (const ReportText& step_length) {
 ReportText errors_detail (const ordered& capacity, const ReportText& step_length) {
     const auto limit = number_at (capacity, { "maxErrorPct" });
     ReportText lead  = limit ?
-     words ("More than " + format_run_figure (*limit) + "% of requests failed across ") :
-     ReportText ("More requests failed than the limit allows across ");
+    words ("More than " + format_run_figure (*limit) + "% of requests failed across ") :
+    ReportText ("More requests failed than the limit allows across ");
     return lead + consecutive_measurements (step_length) + ".";
 }
 
@@ -1339,8 +1339,8 @@ std::vector<double>& seen) {
     const auto error_pct   = number_at (level, { "errorPct" });
     const auto error_limit = number_at (capacity, { "maxErrorPct" });
     Row row                = { level_concurrency_cell (level, seen),
-                       cell (figure_text (number_at (level, { "rps" }), format_run_figure)),
-                       flagged_cell (p99, format_run_figure, p99 && slo && *p99 > *slo, "over budget") };
+        cell (figure_text (number_at (level, { "rps" }), format_run_figure)),
+        flagged_cell (p99, format_run_figure, p99 && slo && *p99 > *slo, "over budget") };
     if (columns.errors) {
         row.push_back (flagged_cell (error_pct, format_run_percent,
         error_pct && error_limit && *error_pct > *error_limit, "over limit"));

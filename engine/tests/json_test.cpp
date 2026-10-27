@@ -343,7 +343,7 @@ TEST (JsonTest, SerializesNoHeaderLinesAsAnEmptyArray) {
 // when nothing was followed, on the `headerLines` rule above.
 TEST (JsonTest, SerializesRedirectHopsWithTheirStatusAndHeaderLines) {
     Response response;
-    response.status_code   = 200;
+    response.status_code = 200;
     response.redirect_hops = { { 302, "Found",
                                { { "Set-Cookie", "hop=1; Path=/" }, { "Location", "/home" } },
                                "https://a.test/login", true },

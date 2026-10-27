@@ -316,7 +316,7 @@ compute_spin_tail_us (int64_t remaining_us, int64_t divisor, int64_t base_us, in
     // (`engine/CMakeLists.txt`), so `vayu-engine`, `vayu-cli` and the test
     // target never get it. An unparenthesized `std::min` there macro-expands
     // to `windows.h`'s `min(a,b)` and fails to compile with MSVC's C2589.
-    return (std::min) ((remaining_us / divisor) + base_us, cap_us);
+    return (std::min)((remaining_us / divisor) + base_us, cap_us);
 }
 } // namespace detail
 

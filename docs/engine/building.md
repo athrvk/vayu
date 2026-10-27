@@ -1394,21 +1394,22 @@ should be that code change instead.
 `engine/vendor/` has a `DisableFormat: true` config of its own and is never
 touched.
 
-**Use clang-format 19.** It is pinned, in the `Engine formatting` job of
+**Use clang-format 22.** It is pinned, in the `Engine formatting` job of
 `.github/workflows/pr-tests.yml` and in
 [CONTRIBUTING.md](https://github.com/athrvk/vayu/blob/master/CONTRIBUTING.md),
-and the pin is load-bearing rather than tidy-mindedness: 39 of the 285 engine
-sources format differently under clang-format 18 than under 19. Ubuntu 24.04
-ships 18 by default, so `apt install clang-format-19` - the same major the
-clang-tidy gate uses, so one LLVM install answers for both.
+and the pin is load-bearing rather than tidy-mindedness: another major formats
+some engine sources differently. Ubuntu 24.04 ships 18 and has no 22, so on
+Linux `bash scripts/install-clang-tidy.sh clang-format` installs it from
+apt.llvm.org - the same source and major as the clang-tidy gate, so one LLVM
+answers for both.
 
 ```bash
 # Check, the way CI does
-clang-format-19 --style=file --dry-run -Werror \
+clang-format-22 --style=file --dry-run -Werror \
   $(git ls-files -- engine/src engine/include engine/tests | grep -E '\.(c|cpp|h|hpp)$')
 
 # Fix
-clang-format-19 --style=file -i <file>...
+clang-format-22 --style=file -i <file>...
 ```
 
 It runs in two places, and both of them can stop a change:
@@ -1421,10 +1422,10 @@ It runs in two places, and both of them can stop a change:
 Unlike the two clang-tidy gates below, these two agree on scope, because
 formatting has no backlog to grandfather - so the hook can be exactly as strict
 as CI and no stricter, which is what keeps `--no-verify` from becoming a reflex
-(#908). The hook looks for `clang-format-19` first and a plain `clang-format`
-second - `apt install clang-format-19` leaves the plain name at Ubuntu's 18,
-while Homebrew's LLVM 19 installs it under the plain name - and when neither is
-a 19 it says so and checks nothing, on the same reasoning as the clang-tidy
+(#908). The hook looks for `clang-format-22` first and a plain `clang-format`
+second - `apt install clang-format-22` leaves the plain name at Ubuntu's 18,
+while Homebrew's LLVM 22 installs it under the plain name - and when neither is
+a 22 it says so and checks nothing, on the same reasoning as the clang-tidy
 probe: the pin is exact, so an answer from another major is a wrong answer
 rather than a missing one. That two-name lookup lives in
 `scripts/lib/llvm-tools.sh` and is

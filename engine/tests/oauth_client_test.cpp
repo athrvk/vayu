@@ -220,7 +220,7 @@ TEST (OAuthCacheKey, CredentialRowsAreKeyedByNameAlone) {
 // on one token URL do not.
 TEST (OAuthCacheKey, ExtraParamsSeparateTokensButNotRowOrder) {
     const json base   = { { "grantType", "client_credentials" },
-          { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
     const json first  = { { "key", "audience" }, { "value", "api-1" } };
     const json second = { { "key", "organization" }, { "value", "org" } };
 

@@ -972,7 +972,7 @@ class ScriptEngine::Impl {
     void fire_next_timer (JSContext* js_ctx, ContextData& data, ScriptResult& result) const {
         ScriptTimer timer = data.timers.take_next (js_ctx);
         JSValue returned  = JS_Call (js_ctx, timer.callback, JS_UNDEFINED,
-         static_cast<int> (timer.args.size ()), timer.args.data ());
+        static_cast<int> (timer.args.size ()), timer.args.data ());
         if (JS_IsException (returned)) {
             record_script_error (result, take_exception_message (js_ctx));
         }

@@ -1757,10 +1757,10 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         // Not returned as an Error: the load strategy processes this as a
         // "failed response" rather than an "unexpected error".
         const Error error      = data->body_limit_exceeded ?
-             Error{ ErrorCode::InternalError,
+        Error{ ErrorCode::InternalError,
             "Response body exceeded the " + std::to_string (data->max_response_bytes) +
             " byte cap (maxResponseBodyBytes)" } :
-             curl_to_error (curl, result, data->errors, &data->request);
+        curl_to_error (curl, result, data->errors, &data->request);
         response.error_code    = error.code;
         response.error_message = error.message;
         response.status_code   = 0;

@@ -187,10 +187,10 @@ TEST (SvgChartTest, EveryYAxisStartsAtZeroWhateverTheDataDoes) {
     // A series that never goes near zero still has its axis start there.
     const auto far_from_zero = per_second (30, [] (std::size_t) { return 950.0; });
     const Chart chart     = { "c", "Two panels", "Seconds from start",
-            { { "Throughput (req/s)",
-              { series_of ("Throughput", "rps", far_from_zero, " req/s") }, std::nullopt },
-            { "Virtual users", { series_of ("Virtual users", "vus", far_from_zero) },
-            std::nullopt } } };
+        { { "Throughput (req/s)",
+          { series_of ("Throughput", "rps", far_from_zero, " req/s") }, std::nullopt },
+        { "Virtual users", { series_of ("Virtual users", "vus", far_from_zero) },
+        std::nullopt } } };
     const std::string svg = render_svg_chart (chart);
     const auto panels     = panels_in (svg);
     ASSERT_EQ (panels.size (), 2U);
@@ -309,8 +309,8 @@ std::vector<double> label_ys (const std::string& svg) {
 TEST (SvgChartTest, LinesThatEndTogetherKeepTheirLabelsApart) {
     const auto same = per_second (10, [] (std::size_t) { return 100.0; });
     const auto svg  = render_svg_chart (one_panel ("t",
-     { series_of ("p50", "p50", same), series_of ("p95", "p95", same),
-     series_of ("p99", "p99", same) }));
+    { series_of ("p50", "p50", same), series_of ("p95", "p95", same),
+    series_of ("p99", "p99", same) }));
     auto ys         = label_ys (svg);
     ASSERT_EQ (ys.size (), 3U);
     std::ranges::sort (ys);

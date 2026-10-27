@@ -184,14 +184,14 @@ class RunExportTest : public ::testing::Test {
         tick.run_id    = id;
         tick.timestamp = START_MS + 1000;
         json payload   = json{ { "timestamp", START_MS + 1000 },
-              { "elapsed_seconds", 1.0 }, { "requests_completed", 6 },
-              { "requests_failed", 1 }, { "http_errors", 1 }, { "no_response", 0 },
-              { "cancelled", 0 }, { "current_rps", 6.0 }, { "current_concurrency", 2 },
-              { "send_rate", 6.0 }, { "throughput", 6.0 }, { "backpressure", 0 },
-              { "error_rate", 16.7 }, { "dropped_requests", 0 },
-              { "bytes_sent", 10 }, { "bytes_received", 20 },
-              { "status_codes", { { "200", 5 }, { "500", 1 } } }, { "latency_p50_ms", 1.0 },
-              { "latency_p95_ms", 2.0 }, { "latency_p99_ms", 3.0 } };
+            { "elapsed_seconds", 1.0 }, { "requests_completed", 6 },
+            { "requests_failed", 1 }, { "http_errors", 1 }, { "no_response", 0 },
+            { "cancelled", 0 }, { "current_rps", 6.0 }, { "current_concurrency", 2 },
+            { "send_rate", 6.0 }, { "throughput", 6.0 }, { "backpressure", 0 },
+            { "error_rate", 16.7 }, { "dropped_requests", 0 },
+            { "bytes_sent", 10 }, { "bytes_received", 20 },
+            { "status_codes", { { "200", 5 }, { "500", 1 } } }, { "latency_p50_ms", 1.0 },
+            { "latency_p95_ms", 2.0 }, { "latency_p99_ms", 3.0 } };
         if (!status_seconds.is_null ()) {
             payload["status_seconds"] = status_seconds;
         }

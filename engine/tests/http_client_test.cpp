@@ -1222,7 +1222,7 @@ Result<Response> send_into_a_hung_handshake (Client& client, Request request) {
     // `std::async` futures wait for their task on destruction, so no early
     // return leaves the send running past `client`.
     auto sent           = std::async (std::launch::async,
-              [&client, &request] () { return client.send (request); });
+    [&client, &request] () { return client.send (request); });
     const bool returned = vayu::tests::wait_until (
     [&sent] () {
         return sent.wait_for (std::chrono::seconds (0)) == std::future_status::ready;

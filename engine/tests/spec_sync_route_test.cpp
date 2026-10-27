@@ -644,7 +644,7 @@ TEST_F (SpecSyncRouteTest, RefusesAnExampleListWhereADecisionBelongs) {
 // 200 having done nothing would report a sync that did not happen.
 TEST_F (SpecSyncRouteTest, RefusesARefreshForARequestTheDocumentDoesNotDeclare) {
     const std::string stranger  = create_request (root_,
-     json{ { "specOperation", json{ { "method", "GET" }, { "path", "/nowhere" } } } });
+    json{ { "specOperation", json{ { "method", "GET" }, { "path", "/nowhere" } } } });
     const std::string unstamped = create_request (root_);
 
     auto [missing, missing_body] = routes::spec_sync_response (*db_,
@@ -797,7 +797,7 @@ TEST_F (SpecSyncRouteTest, AnUnknownCollectionIsA404AndAnUnboundOneA400) {
 
     const std::string unbound = create_collection (json{ { "name", "Plain" } });
     auto [status, response]   = routes::spec_sync_response (*db_,
-      json{ { "collectionId", unbound }, { "spec", json{ { "content", FETCHED_DOC } } } });
+    json{ { "collectionId", unbound }, { "spec", json{ { "content", FETCHED_DOC } } } });
     EXPECT_EQ (status, 400) << response.dump ();
 }
 
@@ -1000,7 +1000,7 @@ TEST_F (SpecSyncRouteTest, PolicyCreatesWhatTheDocumentAddedAndDeletesNothing) {
     const auto created = db_->get_requests_in_collection (root_);
     const auto folders = db_->get_collections ();
     const auto owners  = std::find_if (folders.begin (), folders.end (),
-     [&] (const vayu::db::Collection& c) { return c.name == "owners"; });
+    [&] (const vayu::db::Collection& c) { return c.name == "owners"; });
     ASSERT_NE (owners, folders.end ())
     << "the tag folder an import files this under";
     ASSERT_EQ (owners->parent_id.value_or (""), root_);

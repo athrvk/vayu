@@ -288,7 +288,7 @@ TEST (BoundExport, WritesOneStoredExampleAsExampleAndSeveralAsANamedMap) {
 
     const Exported exported = export_json (requests, bound_fixture ());
     const json& listed      = operation_of (exported.document, "/pets",
-         "get")["responses"]["200"]["content"]["application/json"];
+    "get")["responses"]["200"]["content"]["application/json"];
     EXPECT_EQ (listed["example"], json::parse (R"({"id":"p1","name":"Rex"})"));
     // The declared schema is the contract's; an example never replaces it.
     EXPECT_EQ (listed["schema"], json::parse (R"({"$ref":"#/components/schemas/Pet"})"));
@@ -386,7 +386,7 @@ TEST (BoundExport, AddsAKeptResponseBesideTheDocumentsExamplesRatherThanOverThem
 
     const Exported exported = export_json (requests, refs_fixture ());
     const json& media       = operation_of (exported.document, "/pets",
-          "get")["responses"]["200"]["content"]["application/json"];
+    "get")["responses"]["200"]["content"]["application/json"];
     // Both declared entries, their summaries, and the kept one after them. The
     // old behaviour wrote `example` and erased this map with the other example
     // of the user's own contract inside it.
@@ -408,7 +408,7 @@ TEST (BoundExport, RewritesAnEditedImportedExampleIntoTheKeyItCameFromRatherThan
 
     const Exported exported = export_json (requests, refs_fixture ());
     const json& media       = operation_of (exported.document, "/pets",
-          "get")["responses"]["200"]["content"]["application/json"];
+    "get")["responses"]["200"]["content"]["application/json"];
     // The entry it was imported from, not a new one beside it: both original
     // keys survive, `two`'s summary is untouched, and only its value changed.
     EXPECT_EQ (keys_of (media["examples"]), (std::vector<std::string>{ "two", "none" }));
@@ -429,7 +429,7 @@ TEST (BoundExport, AddsANewEntryWhenItsRecordedKeyIsNoLongerInTheDocument) {
 
     const Exported exported = export_json (requests, refs_fixture ());
     const json& media       = operation_of (exported.document, "/pets",
-          "get")["responses"]["200"]["content"]["application/json"];
+    "get")["responses"]["200"]["content"]["application/json"];
     EXPECT_EQ (keys_of (media["examples"]),
     (std::vector<std::string>{ "two", "none", "Rex alone" }));
     EXPECT_EQ (exported.notes.examples_written, 1);
@@ -564,7 +564,7 @@ TEST (BoundExport, NeverWritesATruncatedBodyAndCountsTheOnesItLeftOut) {
 
     const Exported exported = export_json (requests, bound_fixture ());
     const json& media       = operation_of (exported.document, "/pets",
-          "get")["responses"]["200"]["content"]["application/json"];
+    "get")["responses"]["200"]["content"]["application/json"];
     // The complete example is the one that lands, as `example` rather than a
     // two-entry map: the truncated one never reaches the grouping that would
     // have made it the second.
@@ -833,7 +833,7 @@ TEST (SkeletonExport, WritesAGraphqlBodyAsTheEnvelopeAServerReceives) {
     // query that is not that envelope is wrapped as one.
     ExportRequest enveloped = request ("POST", "{{baseUrl}}/graphql");
     enveloped.body          = { "graphql",
-                 R"({"query":"{ pets { id } }","variables":{"n":1}})", {} };
+        R"({"query":"{ pets { id } }","variables":{"n":1}})", {} };
     ExportRequest bare      = request ("POST", "{{baseUrl}}/bare");
     bare.body               = { "graphql", "query { pets { id } }", {} };
 
@@ -856,7 +856,7 @@ TEST (SkeletonExport, DeclaresAFormsFieldsAndItsEnabledValuesAsTheExample) {
 
     const Exported exported = export_json ({ posted });
     const json& media       = operation_of (exported.document, "/pets",
-          "post")["requestBody"]["content"]["multipart/form-data"];
+    "post")["requestBody"]["content"]["multipart/form-data"];
     EXPECT_EQ (media["schema"], json::parse (R"({"type":"object","properties":{
         "name":{"type":"string","description":"The name"},
         "tag":{"type":"string"},
@@ -968,7 +968,7 @@ TEST (SkeletonExport, WritesEveryAuthModeOpenApiCanName) {
     apikey.auth          = auth ("apikey", "X-Api-Key", "header");
     ExportRequest oauth2 = request ("GET", "{{baseUrl}}/d");
     oauth2.auth          = auth ("oauth2", "", "", "client_credentials", "",
-             "https://auth.example.com/token", "", "read write");
+    "https://auth.example.com/token", "", "read write");
     ExportRequest digest = request ("GET", "{{baseUrl}}/e");
     digest.auth          = auth ("digest");
 
@@ -1057,7 +1057,7 @@ TEST (SkeletonExport, WritesXVayuMockBesideXVayuElementsAndNoneOnFirst) {
     // what happens when there is only one.
     ExportRequest fixed      = request ("GET", "{{baseUrl}}/pets");
     fixed.examples           = { example ("one", 200, R"({"id":"p1"})"),
-                  example ("two", 200, R"({"id":"p2"})") };
+        example ("two", 200, R"({"id":"p2"})") };
     fixed.mock_response_mode = "fixed";
     fixed.mock_example_index = 1;
 

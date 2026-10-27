@@ -758,7 +758,7 @@ TEST (ScriptCompletions, MomentIsOfferedThroughRequireAndHasNoGlobal) {
     response.status_code = 200;
     const auto result    = engine.execute_test (
     "if (typeof moment !== 'undefined' || require('moment').version !== "
-       "'2.31.0') throw new Error('not the shelf moment');",
+    "'2.31.0') throw new Error('not the shelf moment');",
     request, response, env);
     EXPECT_TRUE (result.success) << result.error_message;
 }
@@ -824,8 +824,8 @@ TEST (ScriptCompletions, Xml2jsIsOfferedThroughRequireAndXml2JsonAsItsParse) {
     response.status_code = 200;
     const auto result    = engine.execute_test (
     "if (typeof xml2js !== 'undefined' || typeof xml2Json !== 'function' || "
-       "xml2Json('<a><b> 1 </b></a>').a.b !== '1') throw new Error('not the "
-       "shelf xml2Json');",
+    "xml2Json('<a><b> 1 </b></a>').a.b !== '1') throw new Error('not the "
+    "shelf xml2Json');",
     request, response, env);
     EXPECT_TRUE (result.success) << result.error_message;
 }
@@ -850,7 +850,7 @@ TEST (ScriptCompletions, ChaiIsOfferedThroughRequireAndHasNoGlobal) {
     response.status_code = 200;
     const auto result    = engine.execute_test (
     "if (typeof chai !== 'undefined' || typeof require('chai').expect !== "
-       "'function') throw new Error('not the shelf chai');",
+    "'function') throw new Error('not the shelf chai');",
     request, response, env);
     EXPECT_TRUE (result.success) << result.error_message;
 }
@@ -1158,7 +1158,7 @@ struct FullyBoundContext {
 
         response.status_code = 200;
         response.headers     = { { "content-type", "application/json" },
-                { "set-cookie", "session=abc; Path=/" } };
+            { "set-cookie", "session=abc; Path=/" } };
         response.body        = R"({"ok": true})";
         // Binds pm.response.errorCode / errorMessage, which exist only here.
         response.error_code    = vayu::ErrorCode::Timeout;
@@ -1368,7 +1368,7 @@ TEST (ScriptCompletions, TheOfferedLegacyGlobalsAreWhatTheRuntimeBinds) {
     const auto completions = get_script_completions ();
     constexpr auto roots   = std::to_array<const char*> (
     { "tests", "responseBody", "responseCode", "responseHeaders", "responseTime",
-      "responseCookies", "environment", "globals", "data", "iteration", "request" });
+    "responseCookies", "environment", "globals", "data", "iteration", "request" });
     std::string script;
     for (const char* root : roots) {
         EXPECT_NE (find_by_label (completions, root), nullptr) << root << " is not offered";

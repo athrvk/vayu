@@ -342,7 +342,7 @@ TEST_F (ScriptRequestUrlTest, AnEmptyUrlIsStillRejectedAndAppliesNothing) {
         pm.request.headers['X-Signature'] = 'abc123';
         pm.request.url = '';
     )JS",
-             request, env);
+    request, env);
 
     EXPECT_FALSE (result.success);
     EXPECT_NE (result.error_message.find ("pm.request.url"), std::string::npos)
@@ -563,7 +563,7 @@ TEST_F (ScriptRequestUrlTest, AddQueryParamsEncodesLikeQueryAdd) {
         pm.request.url.query.add({ key: 'k', value: 'a b' });
         pm.request.url.query.add({ key: 'x=y', value: 'c#d' });
     )JS",
-     false);
+    false);
     const std::string via_many = run (R"JS(
         pm.request.url.addQueryParams([{ key: 'k', value: 'a b' }, { key: 'x=y', value: 'c#d' }]);
     )JS",
@@ -803,7 +803,7 @@ TEST_F (ScriptRequestUrlTest, ASegmentThatIsNotAStringIsRefused) {
     const auto result          = engine.execute_prerequest (R"JS(
         pm.request.url.path.push({ a: 1 });
     )JS",
-             request, env);
+    request, env);
 
     EXPECT_FALSE (result.success);
     EXPECT_NE (result.error_message.find ("path"), std::string::npos) << result.error_message;

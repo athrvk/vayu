@@ -571,7 +571,7 @@ TEST (PostmanExport, FormDataFilePartsNameTheirPath) {
     PostmanExportRequest entry = request ("r", "u");
     entry.method               = "POST";
     entry.body                 = ordered{ { "mode", "form-data" },
-                        { "fields", ordered::array ({ row ("title", "T"), file, renamed, unpicked }) } };
+        { "fields", ordered::array ({ row ("title", "T"), file, renamed, unpicked }) } };
     PostmanExportFolder root   = collection ();
     root.requests.push_back (entry);
     const auto outcome = run (root);
@@ -788,7 +788,7 @@ TEST (PostmanExport, UnknownAuthModeIsANote) {
 TEST (PostmanExport, DataOnlyAuthTypesAreTheirPostmanType) {
     PostmanExportRequest entry = request ("r", "u");
     entry.auth                 = ordered{ { "mode", "hawk" },
-                        { "config", { { "authId", "id" }, { "includePayloadHash", "true" } } } };
+        { "config", { { "authId", "id" }, { "includePayloadHash", "true" } } } };
     EXPECT_EQ (only_item (entry)["request"]["auth"].dump (),
     R"({"type":"hawk","hawk":[{"key":"authId","value":"id","type":"string"},{"key":"includePayloadHash","value":true,"type":"boolean"}]})");
 }
@@ -858,7 +858,7 @@ TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
     PostmanExportRequest plain = request ("r", "u");
     plain.auth                 = oauth2 (
     { { "grantType", "client_credentials" }, { "queryParamName", "access_token" },
-                    { "autoFetchToken", true }, { "audience", "a" }, { "resource", "r" } });
+    { "autoFetchToken", true }, { "audience", "a" }, { "resource", "r" } });
     PostmanExportFolder root = collection ();
     root.requests.push_back (plain);
     EXPECT_TRUE (run (root).notes.not_carried.empty ());
@@ -975,10 +975,10 @@ TEST (PostmanExport, SecretsAreBlankedAndCountedUnlessAskedFor) {
         { "in", "header" } };
     PostmanExportRequest oauth = request ("oauth", "u");
     oauth.auth                 = oauth2 ({ { "grantType", "password" },
-                    { "clientSecret", "cs" }, { "password", "pw" }, { "clientId", "id" } });
+    { "clientSecret", "cs" }, { "password", "pw" }, { "clientId", "id" } });
     PostmanExportRequest aws   = request ("aws", "u");
     aws.auth                   = ordered{ { "mode", "aws" },
-                          { "config", { { "accessKey", "A" }, { "secretKey", "S" }, { "region", "r" } } } };
+        { "config", { { "accessKey", "A" }, { "secretKey", "S" }, { "region", "r" } } } };
     // An imported OAuth 2.0 block kept as the auth's source: its PKCE
     // verifier and the credentials in its extra request parameters are
     // nested where a top-level walk does not look.
@@ -1509,9 +1509,9 @@ TEST (PostmanExport, AHeaderAQueryParamAndAnIamKeyAreBlankedAndCounted) {
     entry.headers = ordered::array ({ row ("Authorization", "Bearer HEADER-SECRET"),
     row ("X-Api-Key", "{{apiKey}}"), row ("Accept", "application/json") });
     entry.auth               = ordered{ { "mode", "aws" },
-                      { "config",
-                      { { "secretAccessKey", "IAM-SECRET" }, { "region", "us-east-1" },
-                      { "service", "s3" } } } };
+        { "config",
+        { { "secretAccessKey", "IAM-SECRET" }, { "region", "us-east-1" },
+        { "service", "s3" } } } };
     PostmanExportFolder root = collection ();
     root.requests.push_back (entry);
 
@@ -1575,7 +1575,7 @@ TEST (PostmanExport, AnApiKeyAuthsNameMakesThatHeaderAndParameterACredential) {
     folder.requests.push_back (inherits);
     PostmanExportRequest direct = request ("direct", "u");
     direct.auth    = ordered{ { "mode", "apikey" }, { "key", "X-Own-Key" },
-           { "value", "{{own}}" }, { "in", "header" } };
+        { "value", "{{own}}" }, { "in", "header" } };
     direct.headers = ordered::array (
     { row ("X-Own-Key", "OWN-SECRET"), row ("X-Tenant-Token", "NOT-OURS") });
     root.folders.push_back (folder);

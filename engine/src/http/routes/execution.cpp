@@ -1089,7 +1089,7 @@ const vayu::ScriptResult& post_script_result) {
      */
     nlohmann::json test_results = nlohmann::json::array ();
     const auto append_tests     = [&test_results] (const char* source,
-                              const std::vector<vayu::TestResult>& tests) {
+                                  const std::vector<vayu::TestResult>& tests) {
         for (const auto& test : tests) {
             nlohmann::json test_json;
             test_json["name"]   = test.name;

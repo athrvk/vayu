@@ -75,9 +75,9 @@ TEST (InboxParseStart, EmptyBodyStartsALoopbackInboxAnswering200) {
 
 TEST (InboxParseStart, ReadsEveryResponseField) {
     const json body   = { { "port", 0 }, { "bind", "127.0.0.1" },
-          { "response",
-          { { "status", 503 }, { "body", "retry later" }, { "delayMs", 25 },
-          { "headers", { { "Retry-After", "1" } } } } } };
+        { "response",
+        { { "status", 503 }, { "body", "retry later" }, { "delayMs", 25 },
+        { "headers", { { "Retry-After", "1" } } } } } };
     const auto parsed = vayu::http::parse_inbox_start (body);
     ASSERT_HAS_VALUE (parsed);
     EXPECT_EQ (parsed->response.status, 503);
@@ -410,7 +410,7 @@ TEST_F (InboxListenerTest, ServesTheCannedResponseIncludingItsDelay) {
     request.response.body     = "try again";
     request.response.delay_ms = 120;
     request.response.headers  = { { "Retry-After", "3" },
-         { "Content-Type", "text/plain; charset=utf-8" } };
+        { "Content-Type", "text/plain; charset=utf-8" } };
     auto started              = start (request);
     auto client               = client_for (started.info);
 

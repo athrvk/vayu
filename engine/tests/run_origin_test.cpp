@@ -361,9 +361,9 @@ TEST_F (RunOriginRouteTest, ARunRowTheDatabaseRefusesAnswers500) {
     ASSERT_EQ (sqlite3_open (DB_PATH, &handle), SQLITE_OK);
     char* err                = nullptr;
     const int rc             = sqlite3_exec (handle,
-                "CREATE TRIGGER refuse_runs BEFORE INSERT ON runs "
-                            "BEGIN SELECT RAISE (ABORT, 'disk I/O error'); END",
-                nullptr, nullptr, &err);
+    "CREATE TRIGGER refuse_runs BEFORE INSERT ON runs "
+    "BEGIN SELECT RAISE (ABORT, 'disk I/O error'); END",
+    nullptr, nullptr, &err);
     const std::string reason = err ? err : "";
     sqlite3_free (err);
     sqlite3_close (handle);
@@ -383,9 +383,9 @@ TEST_F (RunOriginRouteTest, ADesignSendRowTheDatabaseRefusesAnswers500) {
     ASSERT_EQ (sqlite3_open (DB_PATH, &handle), SQLITE_OK);
     char* err                = nullptr;
     const int rc             = sqlite3_exec (handle,
-                "CREATE TRIGGER refuse_runs BEFORE INSERT ON runs "
-                            "BEGIN SELECT RAISE (ABORT, 'disk I/O error'); END",
-                nullptr, nullptr, &err);
+    "CREATE TRIGGER refuse_runs BEFORE INSERT ON runs "
+    "BEGIN SELECT RAISE (ABORT, 'disk I/O error'); END",
+    nullptr, nullptr, &err);
     const std::string reason = err ? err : "";
     sqlite3_free (err);
     sqlite3_close (handle);

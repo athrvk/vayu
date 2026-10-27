@@ -37,17 +37,17 @@ nlohmann::json mock_activity_entry_json (const MockActivityEntry& entry) {
     out["method"]        = entry.method;
     out["path"]          = entry.path;
     out["requestId"]     = entry.request_id.has_value () ?
-        nlohmann::json (*entry.request_id) :
-        nlohmann::json (nullptr);
+    nlohmann::json (*entry.request_id) :
+    nlohmann::json (nullptr);
     out["requestName"]   = entry.request_name.has_value () ?
-      nlohmann::json (*entry.request_name) :
-      nlohmann::json (nullptr);
+    nlohmann::json (*entry.request_name) :
+    nlohmann::json (nullptr);
     out["exampleId"]     = entry.example_id.has_value () ?
-        nlohmann::json (*entry.example_id) :
-        nlohmann::json (nullptr);
+    nlohmann::json (*entry.example_id) :
+    nlohmann::json (nullptr);
     out["exampleName"]   = entry.example_name.has_value () ?
-      nlohmann::json (*entry.example_name) :
-      nlohmann::json (nullptr);
+    nlohmann::json (*entry.example_name) :
+    nlohmann::json (nullptr);
     out["status"]        = entry.status;
     out["injectedError"] = entry.injected_error;
     return out;

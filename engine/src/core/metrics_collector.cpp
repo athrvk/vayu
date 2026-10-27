@@ -1042,7 +1042,7 @@ double value) {
         const double clamped = std::max (value, 0.0);
         const auto scaled    = static_cast<int64_t> (
         std::min (clamped * constants::metrics_collector::CUSTOM_METRIC_VALUE_SCALE,
-           static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US)));
+        static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US)));
         hdr_record_value_atomic (slot->histogram, std::max<int64_t> (scaled, 1));
         break;
     }

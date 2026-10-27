@@ -46,7 +46,7 @@ const std::atomic<bool>* cancel) {
     }
 
     auto auth         = apply_auth (out.request,
-            config.value ("auth", nlohmann::json ()), db, target_policy, cancel);
+    config.value ("auth", nlohmann::json ()), db, target_policy, cancel);
     out.auth_fetch_ms = auth.token_fetch_ms;
     if (!auth.ok) {
         out.ok            = false;

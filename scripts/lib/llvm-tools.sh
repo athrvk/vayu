@@ -13,6 +13,12 @@
 # the hook cannot pin different majors.
 CLANG_TIDY_MAJOR=22
 
+# The clang-format major CI checks with and the pre-commit hook requires. The
+# same release as clang-tidy, so one LLVM answers for both checks and
+# `scripts/install-clang-tidy.sh clang-format` installs it from the same apt
+# repository (#2784).
+CLANG_FORMAT_MAJOR=22
+
 # Add common Homebrew paths for LLVM on macOS to ensure clang-tidy and
 # clang-format are found - one LLVM install carries both.
 if [ -d "/opt/homebrew/opt/llvm/bin" ]; then
@@ -22,9 +28,9 @@ elif [ -d "/usr/local/opt/llvm/bin" ]; then
 fi
 
 # Finds the binary for a pinned LLVM tool, which is not simply its plain name.
-# `apt install clang-format-19` - what CONTRIBUTING.md tells an Ubuntu
-# contributor to run - installs `/usr/bin/clang-format-19` and leaves the plain
-# `clang-format` at the distribution's 18, while Homebrew's LLVM 19 and the
+# `apt install clang-format-22` - what CONTRIBUTING.md tells an Ubuntu
+# contributor to run - installs `/usr/bin/clang-format-22` and leaves the plain
+# `clang-format` at the distribution's 18, while Homebrew's LLVM 22 and the
 # Windows installer both use the plain name. Only apt splits them, so both names
 # are tried, versioned first.
 #

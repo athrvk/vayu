@@ -1281,10 +1281,10 @@ TEST_F (RequestComposerTest, AValueCarryingTokensResolvesThroughThemAndStopsOnAC
 TEST_F (RequestComposerTest, ANestedValueCarryingCrlfIsRefusedByTheNameThatCarriesIt) {
     seed_environment ("env_1", R"({"outer":{"value":"pre-{{inner}}","enabled":true},
                                    "inner":{"value":"ok\r\nX-Admin: true","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "X-Note", "{{outer}}" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "X-Note", "{{outer}}" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1299,7 +1299,7 @@ TEST_F (RequestComposerTest, InlineOverlayReplacesStoredFieldsAndStillResolves) 
     db_->save_request (r);
 
     const json body        = { { "requestId", "req_1" },
-               { "request", { { "url", "https://{{host}}/overridden" }, { "method", "put" } } } };
+        { "request", { { "url", "https://{{host}}/overridden" }, { "method", "put" } } } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
     ASSERT_EQ (status, 200);
     EXPECT_EQ (payload["url"], "https://stored.test/overridden");
@@ -1382,10 +1382,10 @@ TEST_F (RequestComposerTest, ComposedOutputIsNeverInterpolatedTwice) {
     // exactly once - and because /execute never interpolates, sending the
     // composed payload cannot resolve it again (D12).
     seed_environment ("env_1", R"({"tpl":{"value":"{{name}} says hi","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "POST" }, { "url", "https://example.test" },
-                               { "body", { { "mode", "text" }, { "content", "{{tpl}}" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "POST" }, { "url", "https://example.test" },
+                        { "body", { { "mode", "text" }, { "content", "{{tpl}}" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
     ASSERT_EQ (status, 200);
     EXPECT_EQ (payload["body"]["content"], "{{name}} says hi");
@@ -1504,10 +1504,10 @@ TEST_F (RequestComposerTest, DataColumnsMustBeAListOfNames) {
 
 TEST_F (RequestComposerTest, AVariableCarryingCrlfIntoAHeaderValueIsRefusedByName) {
     seed_environment ("env_1", R"({"note":{"value":"ok\r\nX-Admin: true","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "X-Note", "{{note}}" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "X-Note", "{{note}}" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1543,10 +1543,10 @@ TEST_F (RequestComposerTest, EitherByteAndEitherHalfOfTheHeaderIsRefused) {
 // same refusal, with its own clause (#738 item 3).
 TEST_F (RequestComposerTest, AVariableCarryingANulIntoAHeaderIsRefusedToo) {
     seed_environment ("env_1", R"({"nul":{"value":"ok\u0000dropped","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "X-Note", "{{nul}}" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "X-Note", "{{nul}}" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1583,10 +1583,10 @@ TEST_F (RequestComposerTest, TheSameVariableIsFineEverywhereElse) {
 // pre-send gate, which names the header instead (see curl_utils_test).
 TEST_F (RequestComposerTest, ALiteralLineBreakInTheHeaderIsNotBlamedOnAVariable) {
     seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "X-Note", "typed\r\nX-Admin: true {{ok}}" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "X-Note", "typed\r\nX-Admin: true {{ok}}" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (header_of (payload, "X-Note"), "typed\r\nX-Admin: true fine");
@@ -1633,10 +1633,10 @@ TEST_F (RequestComposerTest, TheComposerRuleIsTheOneSharedHeaderTextRule) {
 TEST_F (RequestComposerTest, TwoTemplatedHeaderNamesResolvingAlikeAreRefused) {
     seed_environment ("env_1",
     R"({"a":{"value":"X-Tenant","enabled":true},"b":{"value":"X-Tenant","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1693,10 +1693,10 @@ TEST_F (RequestComposerTest, TheHeaderNameCollisionIsJudgedWithoutCase) {
 // literal collided into it.
 TEST_F (RequestComposerTest, TheCollisionIsRefusedWhicheverNameResolvedFirst) {
     seed_environment ("env_1", R"({"suffix":{"value":"~Tenant","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "X{{suffix}}", "acme" }, { "X~Tenant", "legacy" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "X{{suffix}}", "acme" }, { "X~Tenant", "legacy" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1712,11 +1712,11 @@ TEST_F (RequestComposerTest, TheCollisionIsRefusedWhicheverNameResolvedFirst) {
 // the bind-time rule draws in `docs/engine/api-reference.md`).
 TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
     seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", json::parse (R"([{"name":"Authorization","value":"Bearer {{ok}}"},
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", json::parse (R"([{"name":"Authorization","value":"Bearer {{ok}}"},
             {"name":"authorization","value":"Bearer other"}])") } } },
-               { "environmentId", "env_1" } };
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();
@@ -1728,11 +1728,11 @@ TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
 // alike, so both lines go out whatever the template answers.
 TEST_F (RequestComposerTest, OneTemplateTypedTwiceIsNotThisRefusal) {
     seed_environment ("env_1", R"({"h":{"value":"X-Trace","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", json::parse (R"([{"name":"{{h}}","value":"a"},
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", json::parse (R"([{"name":"{{h}}","value":"a"},
             {"name":"{{h}}","value":"b"}])") } } },
-               { "environmentId", "env_1" } };
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();
@@ -1745,11 +1745,11 @@ TEST_F (RequestComposerTest, OneTemplateTypedTwiceIsNotThisRefusal) {
 // collides into it.
 TEST_F (RequestComposerTest, AResolutionCollisionIsRefusedInTheLineForm) {
     seed_environment ("env_1", R"({"h":{"value":"x-dup","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", json::parse (R"([{"name":"X-Dup","value":"one"},
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", json::parse (R"([{"name":"X-Dup","value":"one"},
             {"name":"{{h}}","value":"two"}])") } } },
-               { "environmentId", "env_1" } };
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1789,8 +1789,8 @@ TEST_F (RequestComposerTest, RepeatedStoredHeaderRowsComposeToOrderedLines) {
 // back in the line form like every composed payload.
 TEST_F (RequestComposerTest, AnInlineHeaderObjectComposesToLines) {
     const json body        = { { "request",
-           { { "method", "GET" }, { "url", "https://x.test/" },
-           { "headers", { { "Accept", "application/json" } } } } } };
+    { { "method", "GET" }, { "url", "https://x.test/" },
+    { "headers", { { "Accept", "application/json" } } } } } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();
@@ -1846,10 +1846,10 @@ TEST_F (RequestComposerTest, AHeaderNameResolvingToNothingIsRefused) {
     // An enabled variable with a blank value, which is what the D17 rule stores
     // for a row the author left empty - an ordinary value, not an exotic one.
     seed_environment ("env_1", R"({"blank":{"value":"","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "{{blank}}", "acme" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "{{blank}}", "acme" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1866,10 +1866,10 @@ TEST_F (RequestComposerTest, AHeaderNameResolvingToNothingIsRefused) {
 TEST_F (RequestComposerTest, TwoNamesResolvingToNothingAreRefusedAsNameless) {
     seed_environment ("env_1",
     R"({"a":{"value":"","enabled":true},"b":{"value":"","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "{{a}}", "acme" }, { "{{b}}", "legacy" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     EXPECT_EQ (status, 400) << payload.dump ();
@@ -1880,10 +1880,10 @@ TEST_F (RequestComposerTest, TwoNamesResolvingToNothingAreRefusedAsNameless) {
 // name holding a token: a name a variable answers is composed as ever.
 TEST_F (RequestComposerTest, ANameThatResolvesToANameIsNotThisRefusal) {
     seed_environment ("env_1", R"({"tenant_header":{"value":"X-Tenant","enabled":true}})");
-    const json body        = { { "request",
-                               { { "method", "GET" }, { "url", "https://x.test/" },
-                               { "headers", { { "{{tenant_header}}", "acme" } } } } },
-               { "environmentId", "env_1" } };
+    const json body = { { "request",
+                        { { "method", "GET" }, { "url", "https://x.test/" },
+                        { "headers", { { "{{tenant_header}}", "acme" } } } } },
+        { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();
@@ -1949,10 +1949,10 @@ TEST_F (RequestComposerTest, APaddedBodyModeRowStillCarriesItsMarker) {
 
 TEST_F (RequestComposerTest, AnInlineHeaderNameIsTrimmedAndAPaddedRepeatIsStillARepeat) {
     const json body        = { { "request",
-           { { "method", "GET" }, { "url", "https://x.test/" },
-           { "headers",
-           json::array ({ { { "name", " X-A\t" }, { "value", "1" } },
-           { { "name", "X-A" }, { "value", "2" } } }) } } } };
+    { { "method", "GET" }, { "url", "https://x.test/" },
+    { "headers",
+    json::array ({ { { "name", " X-A\t" }, { "value", "1" } },
+    { { "name", "X-A" }, { "value", "2" } } }) } } } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();

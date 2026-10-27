@@ -317,7 +317,7 @@ ElementKind make_script_post_kind () {
 
 ElementKind make_script_setup_kind () {
     auto kind            = make_script_kind (Phase::RunStart, "script.setup",
-               "Setup script", "Runs once, on a collection, before the run starts.");
+    "Setup script", "Runs once, on a collection, before the run starts.");
     kind.collection_only = true;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptSetupElement> (config);
@@ -327,7 +327,7 @@ ElementKind make_script_setup_kind () {
 
 ElementKind make_script_teardown_kind () {
     auto kind            = make_script_kind (Phase::RunEnd, "script.teardown",
-               "Teardown script", "Runs once, on a collection, after the run ends.");
+    "Teardown script", "Runs once, on a collection, after the run ends.");
     kind.collection_only = true;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptTeardownElement> (config);

@@ -801,8 +801,8 @@ std::vector<vayu::db::Collection>& out) {
         nlohmann::json fields = item;
         auto parent           = temps.parent_of.find (temp);
         fields["parentId"]    = parent == temps.parent_of.end () ?
-           nlohmann::json (nullptr) :
-           nlohmann::json (temps.real.at (parent->second));
+        nlohmann::json (nullptr) :
+        nlohmann::json (temps.real.at (parent->second));
 
         if (auto outcome = refuse_file_bindings (item, temp); !outcome) {
             return outcome;
@@ -1603,7 +1603,7 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
     const auto transport   = vayu::http::resolve_transport_policy (ctx.db);
     res.set_content_provider ("text/event-stream",
     [body, transport, &stopping = ctx.server_stopping] (size_t, httplib::DataSink& sink) {
-        size_t frame    = 0;
+        size_t frame = 0;
         const auto emit = [&sink, &frame] (
                           const std::string& event, const nlohmann::json& data) {
             if (!sink.is_writable ()) {

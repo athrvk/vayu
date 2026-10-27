@@ -350,11 +350,11 @@ TEST_F (ElementsRouteTest, PutWithAValidListStoresAndListsItThroughBothSerialize
 TEST_F (ElementsRouteTest, AnElementWithNoIdGetsOneAssignedRatherThanRefused) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.test" },
-             { "elements",
-             json::array ({ json{ { "kind", "inherit.disable" },
-             { "config", { { "elementId", "el_ancestor" } } } } }) } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.test" },
+    { "elements",
+    json::array ({ json{ { "kind", "inherit.disable" },
+    { "config", { { "elementId", "el_ancestor" } } } } }) } });
     ASSERT_EQ (status, 200);
     ASSERT_EQ (body["elements"].size (), 1u);
     const auto id = body["elements"][0].value ("id", "");
@@ -365,9 +365,9 @@ TEST_F (ElementsRouteTest, AnElementWithNoIdGetsOneAssignedRatherThanRefused) {
 TEST_F (ElementsRouteTest, PutWithAnUnknownKindReturns400NamingIt) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.test" },
-             { "elements", json::array ({ json{ { "id", "el_1" }, { "kind", "not.a.kind" } } }) } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.test" },
+    { "elements", json::array ({ json{ { "id", "el_1" }, { "kind", "not.a.kind" } } }) } });
     ASSERT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("not.a.kind"),
     std::string::npos);
@@ -393,11 +393,11 @@ TEST_F (ElementsRouteTest, LegacyScriptFieldsAreRefused) {
 TEST_F (ElementsRouteTest, NeitherSerializerEmitsTheRetiredScriptKeys) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.test" },
-             { "elements",
-             json::array ({ json{ { "kind", "script.pre" },
-             { "config", { { "script", "pm.test('ok', () => {});" } } } } }) } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.test" },
+    { "elements",
+    json::array ({ json{ { "kind", "script.pre" },
+    { "config", { { "script", "pm.test('ok', () => {});" } } } } }) } });
     ASSERT_EQ (status, 200);
     EXPECT_FALSE (body.contains ("preRequestScript"));
     EXPECT_FALSE (body.contains ("postRequestScript"));

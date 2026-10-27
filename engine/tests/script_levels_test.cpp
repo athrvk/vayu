@@ -259,7 +259,7 @@ TEST_F (ScriptLevelFold, ACleanScriptIsOkWithNoMessage) {
     const auto before = run (Phase::StepBefore,
     json::array ({ script_element ("script.pre", "pre", "request") }));
     const auto after  = run (Phase::StepAfter,
-     json::array ({ script_element ("script.post", "post", "request") }));
+    json::array ({ script_element ("script.post", "post", "request") }));
 
     ASSERT_EQ (before.size (), 1u);
     EXPECT_EQ (before[0].status, "ok");
@@ -306,8 +306,8 @@ TEST_F (ScriptLevelFold, AnEarlierAssertionSurvivesALaterScript) {
 TEST_F (ScriptLevelFold, AnEarlierSkipSurvivesALaterScriptThatAskedForNothing) {
     answers["request_pre"] = vayu::ScriptResult{};
     json skip_unless_gold  = { { "id", "el_if" }, { "kind", "control.if" },
-         { "config", { { "condition", "{{tier}} == gold" } } },
-         { "origin", origin_of ("collection") } };
+        { "config", { { "condition", "{{tier}} == gold" } } },
+        { "origin", origin_of ("collection") } };
 
     run (Phase::StepBefore,
     json::array (

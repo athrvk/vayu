@@ -2399,8 +2399,8 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     // reads "Import environments & variables", and globals are variables.
     int skipped_variable_metadata = 0;
     const json variables          = options.import_environments ?
-             to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false) :
-             json::object ();
+    to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false) :
+    json::object ();
 
     json environments = json::array ();
     if (!globals && options.import_environments) {
@@ -2513,8 +2513,8 @@ json insomnia_bearer (const json* auth) {
     std::string prefix      = nv (as_string (prop (auth, "prefix")));
     const size_t begin      = prefix.find_first_not_of (" \t\n\r\f\v");
     prefix                  = begin == std::string::npos ?
-                     std::string () :
-                     prefix.substr (begin, prefix.find_last_not_of (" \t\n\r\f\v") - begin + 1);
+    std::string () :
+    prefix.substr (begin, prefix.find_last_not_of (" \t\n\r\f\v") - begin + 1);
     if (!prefix.empty () && vayu::utils::ascii_lower (prefix) != "bearer") {
         std::string value = prefix + " " + token;
         const size_t last = value.find_last_not_of (" \t\n\r\f\v");
@@ -3031,8 +3031,8 @@ class InsomniaTree {
             // on both sides.
             const json* named = prop (base, "name");
             const json name   = named == nullptr || named->is_null () ?
-              resource_name (workspace, "Environment") :
-              *named;
+            resource_name (workspace, "Environment") :
+            *named;
             out.push_back (
             { { "name", name }, { "description", "" }, { "variables", base_vars } });
             return;
@@ -3439,8 +3439,8 @@ resolve_url (const std::string& reference, const std::string& base) {
         return scheme + authority + (base_path.empty () ? "/" : base_path) + reference;
     } else {
         const size_t slash = base_path.find_last_of ('/');
-        path               = (slash == std::string::npos ? std::string ("/") :
-                                                           base_path.substr (0, slash + 1)) +
+        path = (slash == std::string::npos ? std::string ("/") :
+                                             base_path.substr (0, slash + 1)) +
         reference;
     }
     // A query or fragment on the reference rides along untouched.
@@ -4517,8 +4517,8 @@ walk::Dialect dialect) {
     root["name"]        = title == nullptr ? "Imported API" : *title;
     root["description"] = about == nullptr ? "" : *about;
     root["variables"]   = base.base_url.empty () ?
-      json::object () :
-      json{ { "baseUrl", { { "value", base.base_url }, { "enabled", true } } } };
+    json::object () :
+    json{ { "baseUrl", { { "value", base.base_url }, { "enabled", true } } } };
     root["auth"]        = collection_primary_auth (scheme, v3, tally);
     if (std::optional<json> elements = collection_elements (document, tally)) {
         root["elements"] = std::move (*elements);
@@ -4803,8 +4803,8 @@ SiblingPositions sibling_positions (const json& folders, const json& requests) {
     for (size_t at = 0; at < entries.size (); ++at) {
         const Entry& entry     = entries[at];
         auto& slots            = entry.kind == vayu::db::SiblingKind::Folder ?
-                   positions.folders :
-                   positions.requests;
+        positions.folders :
+        positions.requests;
         slots.at (entry.index) = static_cast<int> (at);
     }
     return positions;
