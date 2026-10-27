@@ -21,12 +21,12 @@ import {
 import { secretsShape, withheldPointer, withholdRowSecrets } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
-	callEngine,
 	callEngineStructured,
 	echoShape,
 	engineErrorResult,
 	errorResult,
 	isRecord,
+	mergeAndWrite,
 	str,
 	stringArray,
 	structuredResult,
@@ -186,27 +186,22 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			// `POST /globals` saves the singleton whole - it is the one resource
 			// with no create/update split, so an absent `variables` there means
 			// `{}`, not "keep". The read is what makes this a merge rather than a
-			// replace.
-			let stored: unknown;
-			try {
-				stored = await ctx.client.getGlobals(signal);
-			} catch (err) {
-				return engineErrorResult(err, ctx);
-			}
-			const merged = mergeVariables(
-				isRecord(stored) ? stored.variables : undefined,
-				patch,
-				removals,
-				ctx
-			);
-			const result = await callEngine(
-				ctx,
-				() => ctx.client.saveGlobals({ variables: merged.variables }, signal),
-				echoShape(ctx)
-			);
+			// replace, and the save is conditioned on the version it read.
+			let absentRemovals: string[] = [];
+			const result = await mergeAndWrite(ctx, {
+				subject: "the set of globals",
+				read: () => ctx.client.getGlobals(signal),
+				merge: (stored) => {
+					const merged = mergeVariables(stored.variables, patch, removals, ctx);
+					absentRemovals = merged.absentRemovals;
+					return { variables: merged.variables };
+				},
+				write: (payload, ifMatch) => ctx.client.saveGlobals(payload, signal, ifMatch),
+				shape: echoShape(ctx),
+			});
 			return result.isError
 				? result
-				: withCaveat(result, absentRemovalCaveat(merged.absentRemovals));
+				: withCaveat(result, absentRemovalCaveat(absentRemovals));
 		},
 	},
 ];

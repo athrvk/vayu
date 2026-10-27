@@ -328,7 +328,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count); a soft delete - the environment goes to the Trash, inactive |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
 | `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused, the rule every send follows; secret values withheld unless revealed) |
-| `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
+| `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge, with `If-Match`; a `412` re-reads and merges once) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `get_cookies`          | read     | `GET /cookies?q=&limit=&offset=`             | - (paged as `list_collections`, one cookie a row with its jar's `environmentId`, `q` matching the name or domain; a summary row is `environmentId`, `name`, `domain`, `path`, `expires` and never the value; `fields: "full"` adds the flags and the value, withheld unless revealed) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
@@ -970,10 +970,12 @@ Notes:
 - **`update_globals` has to read first.** Globals is the one resource with no
   create/update split - one row, one id - so `POST /globals` saves the blob
   whole and an absent `variables` means `{}`, not "keep". The tool reads
-  `GET /globals` and posts the merged result, the read-merge-write
-  `update_environment` does for the same blob-replacement reason, without its
-  version check: `POST /globals` takes no `If-Match` yet, so a concurrent edit
-  to the globals can still be lost (#2988).
+  `GET /globals` and posts the merged result under the version it read
+  (`If-Match: W/"<updatedAt>"`, #2988), the conditioned read-merge-write
+  `update_environment` does for the same blob-replacement reason, with the same
+  one re-read on a `412` and the same `transient` answer on a second. An engine
+  that never saved any globals answers `updatedAt: 0`, and `W/"0"` is a version
+  like any other, so a first save is conditioned too.
 - **`clear_cookies` has three scopes, not two.** Omitting `environmentId`
   clears every jar, passing an id clears that environment's, and passing `null`
   clears the jar used when no environment is selected - the engine reads an
@@ -2146,7 +2148,7 @@ by the wrapper `server.ts` puts in front of its `tools/call` handler.
 | `policy` | false | A rule the user or the endpoint sets refused it; the advice names who can lift it | The allowlist, the load and sample caps, write access off, a tool switched off in Settings, Reveal secrets to agents off (agent scripts, clearing a secret flag), Network settings off, an inline file body, `verifySSL: false` on a one-off send, the `authorization_code` grant, the engine's target-policy refusal, an engine 403, an endpoint that disallows introspection, no Vayu window to ask (`get_app_focus`, which the stdio CLI never has) |
 | `input` | false | The arguments, or the request they name, are wrong; change them | A missing or malformed argument (including one the SDK's schema check refuses), an unknown tool, a URL whose host cannot be determined, a duration or iteration count that is not one, an argument that does not apply to the run, an engine 400, 409 (the id exists, the spec is still bound, the restore needs its parent) or 413, and every other engine 4xx |
 | `not_found` | false | An id the call named does not exist | An engine 404, and the lookups that find no such run, collection, request, environment, example, inbox or trash entry; worded as below |
-| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, a merge another client's write beat twice (`update_environment`, `update_collection`: two `412`s, nothing written), an engine answer the server could not use, a secret-masking lookup that failed (when its cause is no engine failure, else it is worded as that failure, below), a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
+| `transient` | true | The engine was reached and the call did not complete; it may already have taken effect, so the advice says what to check first (per tool, below) | A client-budget timeout, a cancelled call, an engine 5xx including 507 (disk full) and the busy-database 503, a merge another client's write beat twice (`update_environment`, `update_collection`, `update_globals`: two `412`s, nothing written), an engine answer the server could not use, a secret-masking lookup that failed (when its cause is no engine failure, else it is worded as that failure, below), a 5xx from an endpoint `get_graphql_schema` introspects, and any error nothing above names (`Unexpected error: ...`) |
 | `unreachable` | true | A host the call needs did not answer; retry once it is up | An engine that refused the connection, the 503 an engine answers while shutting down, an endpoint `get_graphql_schema` could not reach |
 
 **An id that names nothing** (#2778) is answered with the missing object and

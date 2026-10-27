@@ -975,11 +975,19 @@ export class EngineClient {
 	 * POST, and a **replace** rather than a merge - globals is one row addressed
 	 * by one id, so the engine has no create/update split for it and saves the
 	 * blob whole (`save_globals_response`). A caller preserving anything must
-	 * read first and send the merged result, which is what `update_globals`
-	 * does.
+	 * read first and send the merged result under @p ifMatch, the version it
+	 * read, which is what `update_globals` does; a 412 means another client
+	 * saved in between, as on {@link updateEnvironment}.
 	 */
-	saveGlobals(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/globals", payload, signal);
+	saveGlobals(payload: unknown, signal?: AbortSignal, ifMatch?: string): Promise<unknown> {
+		return this.request(
+			"POST",
+			"/globals",
+			payload,
+			signal,
+			this.timeoutMs,
+			ifMatchHeader(ifMatch)
+		);
 	}
 
 	/**
