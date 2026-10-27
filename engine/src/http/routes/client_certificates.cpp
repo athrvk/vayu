@@ -83,20 +83,15 @@ RouteResult apply_port_field (const nlohmann::json& json, std::optional<int>& ou
 RouteResult reject_duplicate_target (vayu::db::Database& db,
 const vayu::db::ClientCertificate& candidate,
 const std::string& self_id) {
-    for (const auto& row : db.get_client_certificates ()) {
-        if (row.id == self_id) {
-            continue;
-        }
-        if (row.host == candidate.host && row.port == candidate.port) {
-            const std::string target = candidate.port ?
-            candidate.host + ":" + std::to_string (*candidate.port) :
-            candidate.host;
-            return route_error (409,
-            "A client certificate is already registered for '" + target +
-            "' (id " + row.id + "); update or delete that entry instead");
-        }
+    const auto holder =
+    db.client_certificate_for_target (candidate.host, candidate.port, self_id);
+    if (!holder) {
+        return {};
     }
-    return {};
+    return route_error (409,
+    "A client certificate is already registered for '" +
+    vayu::http::client_cert_label (candidate.host, candidate.port) + "' (id " +
+    holder->id + "); update or delete that entry instead");
 }
 
 /// The wire spellings a `certFormat` may take, for the tail of a rejection.

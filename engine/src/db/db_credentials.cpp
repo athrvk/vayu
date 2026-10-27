@@ -24,6 +24,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -60,6 +61,22 @@ std::optional<ClientCertificate> Database::get_client_certificate (const std::st
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
+}
+
+std::optional<ClientCertificate> Database::client_certificate_for_target (
+const std::string& host,
+const std::optional<int>& port,
+const std::string& except_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    for (auto& row : impl_->storage.get_all<ClientCertificate> (where (
+         c (&ClientCertificate::host) == host && c (&ClientCertificate::id) != except_id))) {
+        // Compared here rather than in SQL, where `port = NULL` is never true
+        // and "every port" is a target like any other.
+        if (row.port == port) {
+            return std::move (row);
+        }
+    }
+    return std::nullopt;
 }
 
 void Database::delete_client_certificate (const std::string& id) {

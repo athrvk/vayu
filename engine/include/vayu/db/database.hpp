@@ -744,8 +744,8 @@ class Database {
 
     /**
      * Client-certificate registry (issue #707). Plain CRUD: the routes own
-     * validation and the uniqueness rule, because both belong to the one place
-     * that can answer with a status code.
+     * validation and the answer to a uniqueness clash, because both belong to
+     * the one place that can answer with a status code.
      *
      * `get_client_certificates` is read once per resolved transport policy -
      * per design send, and *once per run* on the load and collection paths -
@@ -755,6 +755,12 @@ class Database {
     void save_client_certificate (const ClientCertificate& c);
     std::vector<ClientCertificate> get_client_certificates ();
     std::optional<ClientCertificate> get_client_certificate (const std::string& id);
+    /// The entry other than @p except_id that claims @p host and @p port, or
+    /// nothing - the one definition of "one entry per target" (#707). A
+    /// decision built on the answer holds the DB mutex across it and the write.
+    std::optional<ClientCertificate> client_certificate_for_target (const std::string& host,
+    const std::optional<int>& port,
+    const std::string& except_id = {});
     void delete_client_certificate (const std::string& id);
 
     /**

@@ -390,7 +390,15 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
 }
 
 std::string client_cert_label (const ClientCertRule& rule) {
-    return rule.port ? rule.host + ":" + std::to_string (*rule.port) : rule.host;
+    return client_cert_label (rule.host, rule.port);
+}
+
+std::string client_cert_label (std::string_view host, const std::optional<int>& port) {
+    std::string label (host);
+    if (port) {
+        label += ":" + std::to_string (*port);
+    }
+    return label;
 }
 
 std::array<ClientCertFormat, 2> all_client_cert_formats () {
