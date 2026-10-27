@@ -200,7 +200,8 @@ export class EngineClient {
 		path: string,
 		body?: unknown,
 		signal?: AbortSignal,
-		timeoutMs = this.timeoutMs
+		timeoutMs = this.timeoutMs,
+		headers: Record<string, string> = {}
 	): Promise<T> {
 		const controller = new AbortController();
 		let expired = false;
@@ -213,7 +214,10 @@ export class EngineClient {
 		try {
 			const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
 				method,
-				headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+				headers:
+					body !== undefined
+						? { "Content-Type": "application/json", ...headers }
+						: headers,
 				body: body !== undefined ? JSON.stringify(body) : undefined,
 				signal: combined,
 			});
@@ -737,10 +741,23 @@ export class EngineClient {
 	/**
 	 * Update a collection: `PUT /collections/:id`. The engine merge-patches -
 	 * absent fields keep their stored value - so the body carries only what the
-	 * caller stated.
+	 * caller stated. @p ifMatch (an {@link entityTagOf} the merge was read with)
+	 * makes it a 412 when the row has moved since.
 	 */
-	updateCollection(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("PUT", `/collections/${encodeURIComponent(id)}`, payload, signal);
+	updateCollection(
+		id: string,
+		payload: unknown,
+		signal?: AbortSignal,
+		ifMatch?: string
+	): Promise<unknown> {
+		return this.request(
+			"PUT",
+			`/collections/${encodeURIComponent(id)}`,
+			payload,
+			signal,
+			this.timeoutMs,
+			ifMatchHeader(ifMatch)
+		);
 	}
 
 	/**
@@ -923,9 +940,24 @@ export class EngineClient {
 		return this.request("POST", "/environments", payload, signal);
 	}
 
-	/** Update an environment: `PUT /environments/:id` (merge-patch body). */
-	updateEnvironment(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("PUT", `/environments/${encodeURIComponent(id)}`, payload, signal);
+	/**
+	 * Update an environment: `PUT /environments/:id` (merge-patch body), a 412
+	 * when @p ifMatch no longer names the stored row, as on {@link updateCollection}.
+	 */
+	updateEnvironment(
+		id: string,
+		payload: unknown,
+		signal?: AbortSignal,
+		ifMatch?: string
+	): Promise<unknown> {
+		return this.request(
+			"PUT",
+			`/environments/${encodeURIComponent(id)}`,
+			payload,
+			signal,
+			this.timeoutMs,
+			ifMatchHeader(ifMatch)
+		);
 	}
 
 	/**
@@ -1447,6 +1479,22 @@ export class EngineClient {
 	): Promise<unknown> {
 		return this.request("PUT", `/inbox/${encodeURIComponent(inboxId)}`, response, signal);
 	}
+}
+
+/**
+ * The engine's entity tag for a row it answered, `W/"<updatedAt>"` (#2433), or
+ * undefined for a row with no integer `updatedAt`. Built from the row because
+ * collections and environments are read from their list, which carries no
+ * per-row header.
+ */
+export function entityTagOf(row: unknown): string | undefined {
+	if (!row || typeof row !== "object") return undefined;
+	const { updatedAt } = row as { updatedAt?: unknown };
+	return Number.isSafeInteger(updatedAt) ? `W/"${updatedAt as number}"` : undefined;
+}
+
+function ifMatchHeader(ifMatch: string | undefined): Record<string, string> {
+	return ifMatch === undefined ? {} : { "If-Match": ifMatch };
 }
 
 /** True for the rejection a fetch produces when its signal aborts. */

@@ -552,6 +552,7 @@ static std::pair<int, nlohmann::json> update_request_example_locked (vayu::db::D
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, example_id); !outcome) {
         return as_response (outcome.error ());
@@ -563,11 +564,15 @@ const std::function<void ()>& before_write) {
     if (auto outcome = load_owned_example (db, request_id, example_id, x); !outcome) {
         return as_response (outcome.error ());
     }
+    if (auto held = check_if_match (if_match, x.updated_at); !held) {
+        return as_response (held.error ());
+    }
 
+    const int64_t stored_updated_at = x.updated_at;
     if (auto outcome = apply_request_example_fields (x, json, /*is_create=*/false); !outcome) {
         return as_response (outcome.error ());
     }
-    x.updated_at = now_ms ();
+    x.updated_at = next_updated_at (stored_updated_at);
 
     if (before_write) {
         before_write ();
@@ -586,6 +591,8 @@ const std::function<void ()>& before_write) {
  * released the lock before the write would answer for a row a concurrent
  * `delete_request` cascade could take in between.
  *
+ * @param if_match The request's `If-Match`, judged inside the same scope; a
+ *        row it no longer names is a 412 (#2433).
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
@@ -594,10 +601,12 @@ std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Databa
 const std::string& request_id,
 const std::string& example_id,
 const nlohmann::json& json,
+const std::optional<vayu::http::IfMatch>& if_match,
 const std::function<void ()>& before_write) {
     std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
     db.with_lock ([&] {
-        result = update_request_example_locked (db, request_id, example_id, json, before_write);
+        result = update_request_example_locked (
+        db, request_id, example_id, json, if_match, before_write);
     });
     return result;
 }
@@ -605,8 +614,18 @@ const std::function<void ()>& before_write) {
 std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    return update_request_example_response (
+    db, request_id, example_id, json, std::nullopt, before_write);
+}
+
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
 const nlohmann::json& json) {
-    return update_request_example_response (db, request_id, example_id, json, nullptr);
+    return update_request_example_response (
+    db, request_id, example_id, json, std::nullopt, nullptr);
 }
 
 /**
@@ -738,7 +757,9 @@ void register_request_example_routes (RouteContext& ctx) {
      * Updates one saved example (merge-patch: absent keeps, null resets).
      * Update only - a missing example is a 404, never a silent create, and so is
      * one stored under a different request.
-     * Returns: the updated example, 404, or 400.
+     * Headers: If-Match (optional) - the row's `W/"<updatedAt>"` (#2433).
+     * Returns: the updated example with its ETag, 404, 412 if If-Match no
+     * longer names it, or 400.
      */
     ctx.server.Put (R"(/requests/([^/]+)/examples/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -750,15 +771,22 @@ void register_request_example_routes (RouteContext& ctx) {
             res, "PUT /requests/:id/examples/:exampleId", json.error ());
             return;
         }
+        const auto if_match = read_if_match (req);
+        if (!if_match) {
+            refuse_request_body (
+            res, "PUT /requests/:id/examples/:exampleId", if_match.error ());
+            return;
+        }
         try {
-            auto [status, body] =
-            update_request_example_response (ctx.db, request_id, example_id, *json);
+            auto [status, body] = update_request_example_response (
+            ctx.db, request_id, example_id, *json, *if_match, nullptr);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /requests/:id/examples/:exampleId failed",
                 { { "status", status }, { "id", example_id },
                 { "error", error_message_of (body) } });
             }
             res.status = status;
+            set_entity_tag (res, status, body);
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
