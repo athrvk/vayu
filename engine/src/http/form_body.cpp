@@ -176,8 +176,8 @@ std::vector<FormField> parse_urlencoded (const std::string& encoded) {
             field.key =
             percent_decode (eq == std::string::npos ? kv : kv.substr (0, eq));
             field.value   = eq == std::string::npos ?
-              std::string{} :
-              percent_decode (kv.substr (eq + 1));
+            std::string{} :
+            percent_decode (kv.substr (eq + 1));
             field.enabled = true;
             fields.push_back (std::move (field));
         }

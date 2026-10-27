@@ -995,8 +995,8 @@ TEST_F (ResourceWriteRouteTest, RequestNullNoDefaultFieldIsRejected) {
 TEST_F (ResourceWriteRouteTest, RequestInvalidMethodIsRejected) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" },
-             { "method", "TELEPORT" }, { "url", "https://example.com" } });
+    json{ { "collectionId", collection }, { "name", "R" },
+    { "method", "TELEPORT" }, { "url", "https://example.com" } });
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("method"),
     std::string::npos);
@@ -1011,8 +1011,8 @@ TEST_F (ResourceWriteRouteTest, RequestInvalidMethodIsRejected) {
 TEST_F (ResourceWriteRouteTest, RequestCreateAbsentMethodSourceIsNull) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" } });
     ASSERT_EQ (status, 200);
     ASSERT_TRUE (body.contains ("methodSource"));
     EXPECT_TRUE (body["methodSource"].is_null ());
@@ -1024,8 +1024,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateAbsentMethodSourceIsNull) {
 TEST_F (ResourceWriteRouteTest, RequestCreateStoresMethodSourceGraphql) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "POST" },
-             { "url", "https://example.com" }, { "methodSource", "graphql" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "POST" },
+    { "url", "https://example.com" }, { "methodSource", "graphql" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["methodSource"], "graphql");
     const auto stored_request = db_->get_request (body["id"].get<std::string> ());
@@ -1085,8 +1085,8 @@ TEST_F (ResourceWriteRouteTest, MethodSourceReadsBackThroughBothSerializers) {
     // above for why both are asserted rather than one.
     const std::string collection = make_collection ();
     auto [status, created]       = create_request_response (*db_,
-          json{ { "collectionId", collection }, { "name", "R" }, { "method", "POST" },
-          { "url", "https://example.com" }, { "methodSource", "graphql" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "POST" },
+    { "url", "https://example.com" }, { "methodSource", "graphql" } });
     ASSERT_EQ (status, 200);
 
     const json listed =
@@ -1105,8 +1105,8 @@ TEST_F (ResourceWriteRouteTest, MethodSourceReadsBackThroughBothSerializers) {
 TEST_F (ResourceWriteRouteTest, RequestCreateDefaultsMockResponseModeToFirst) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["mockResponseMode"], "first");
     EXPECT_TRUE (body["mockExampleId"].is_null ());
@@ -1120,7 +1120,7 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateStoresFixedModeAndTarget) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
     auto [status, body]          = update_request_response (*db_, id,
-             json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } });
+    json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["mockResponseMode"], "fixed");
     EXPECT_EQ (body["mockExampleId"], "exa_1");
@@ -1184,8 +1184,8 @@ TEST_F (ResourceWriteRouteTest, RequestNonStringMockResponseModeIsRejectedCleanl
 TEST_F (ResourceWriteRouteTest, MockResponseModeReadsBackThroughBothSerializers) {
     const std::string collection = make_collection ();
     auto [status, created]       = create_request_response (*db_,
-          json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-          { "url", "https://example.com" }, { "mockResponseMode", "random" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "mockResponseMode", "random" } });
     ASSERT_EQ (status, 200);
     const json listed =
     json::parse (vayu::http::routes::list_requests_body (*db_, collection));
@@ -1197,9 +1197,9 @@ TEST_F (ResourceWriteRouteTest, MockResponseModeReadsBackThroughBothSerializers)
 TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" },
-             { "headers", json::array ({ json{ { "key", "X" } } }) } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" },
+    { "headers", json::array ({ json{ { "key", "X" } } }) } });
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"]["message"].get<std::string> ().find ("index 0"),
     std::string::npos);
@@ -1339,8 +1339,8 @@ TEST_F (ResourceWriteRouteTest, RequestMaxRedirectsIsClamped) {
 TEST_F (ResourceWriteRouteTest, RequestCreateAbsentVerifySSLVerifies) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" } });
     ASSERT_EQ (status, 200);
     ASSERT_TRUE (body.contains ("verifySSL"));
     EXPECT_EQ (body["verifySSL"], true);
@@ -1352,8 +1352,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateAbsentVerifySSLVerifies) {
 TEST_F (ResourceWriteRouteTest, RequestCreateStoresVerifySSLFalse) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" }, { "verifySSL", false } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "verifySSL", false } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["verifySSL"], false);
     const auto stored_request = db_->get_request (body["id"].get<std::string> ());
@@ -1392,8 +1392,8 @@ TEST_F (ResourceWriteRouteTest, VerifySSLReadsBackThroughBothSerializers) {
     // and not the other before.
     const std::string collection = make_collection ();
     auto [status, created]       = create_request_response (*db_,
-          json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-          { "url", "https://internal.example.com" }, { "verifySSL", false } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://internal.example.com" }, { "verifySSL", false } });
     ASSERT_EQ (status, 200);
 
     const json listed =
@@ -1422,8 +1422,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateAbsentHttpVersionSeedsFromGlobal) {
     // it yet in a fresh test DB.
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["httpVersion"], "auto");
 }
@@ -1437,8 +1437,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateAbsentHttpVersionSeedsFromConfigure
 
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["httpVersion"], "http2");
 }
@@ -1449,8 +1449,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateNullHttpVersionSeedsFromConfiguredG
 
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" }, { "httpVersion", nullptr } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "httpVersion", nullptr } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["httpVersion"], "http2");
 }
@@ -1458,8 +1458,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateNullHttpVersionSeedsFromConfiguredG
 TEST_F (ResourceWriteRouteTest, RequestCreateValidHttpVersionIsStored) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" }, { "httpVersion", "http1.1" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "httpVersion", "http1.1" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["httpVersion"], "http1.1");
     const auto stored_request = db_->get_request (body["id"].get<std::string> ());
@@ -1470,8 +1470,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateValidHttpVersionIsStored) {
 TEST_F (ResourceWriteRouteTest, RequestCreateInvalidHttpVersionIsRejectedAndNotStored) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" }, { "httpVersion", "http3" } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "httpVersion", "http3" } });
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
     EXPECT_NE (message.find ("httpVersion"), std::string::npos)
@@ -1492,8 +1492,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateNonStringHttpVersionIsRejected) {
     // exists for.
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
-             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.com" }, { "httpVersion", 2 } });
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "httpVersion", 2 } });
     EXPECT_EQ (status, 400);
     EXPECT_NE (
     body["error"]["message"].get<std::string> ().find ("httpVersion"), std::string::npos);
@@ -1578,8 +1578,8 @@ TEST_F (ResourceWriteRouteTest, RequestAllHttpVersionsAreAcceptedAndRoundTrip) {
     for (const auto version : vayu::all_http_versions ()) {
         const std::string wire = vayu::to_string (version);
         auto [status, body]    = create_request_response (*db_,
-           json{ { "collectionId", collection }, { "name", "R-" + wire }, { "method", "GET" },
-           { "url", "https://example.com" }, { "httpVersion", wire } });
+        json{ { "collectionId", collection }, { "name", "R-" + wire }, { "method", "GET" },
+        { "url", "https://example.com" }, { "httpVersion", wire } });
         ASSERT_EQ (status, 200) << "rejected valid value '" << wire << "'";
         EXPECT_EQ (body["httpVersion"], wire);
     }
@@ -1893,7 +1893,7 @@ TEST_F (ResourceWriteRouteTest, AConcurrentEnvironmentUpdateWaitsAndKeepsBothFie
     json other_body;
     CompetingWriter other ([&] {
         auto result  = update_environment_response (*db_, id,
-         json{ { "variables", json{ { "host", "api.example.com" } } } });
+        json{ { "variables", json{ { "host", "api.example.com" } } } });
         other_status = result.first;
         other_body   = result.second;
     });
@@ -2038,7 +2038,7 @@ TEST_F (ResourceWriteRouteTest, TwoEnvironmentWritesFromOneReadLandOnlyOnce) {
     json other_body;
     CompetingWriter other ([&] {
         auto result  = update_environment_response (*db_, id,
-         json{ { "variables", json{ { "host", "other" } } } }, tag, nullptr);
+        json{ { "variables", json{ { "host", "other" } } } }, tag, nullptr);
         other_status = result.first;
         other_body   = result.second;
     });

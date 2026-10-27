@@ -359,21 +359,21 @@ ScriptsOverrideMode scripts_mode) {
     for (size_t i = 0; i < count; ++i) {
         const auto percentiles = steps.percentiles (i);
         nlohmann::json entry   = { { "index", plan.steps[i].index },
-              // Identity beside the numbers: a breakdown indexed only by position
-              // is unreadable next to a 40-step sequence.
-              { "name", plan.steps[i].name }, { "requestId", plan.steps[i].request_id },
-              { "method", vayu::to_string (plan.steps[i].request.method) },
-              { "executed", steps.completed (i) }, { "errors", steps.errors (i) },
-              { "httpErrors", steps.http_errors (i) },
-              { "noResponse", steps.no_response (i) },
-              // Requests this step sent with a `{{token}}` composition never
-              // resolved (issue #1503) - counted, not refused, so a literal
-              // brace a caller meant to send still goes out.
-              { "unresolvedTokens", steps.unresolved_tokens (i) },
-              { "latency",
-              { { "min", percentiles.min }, { "p50", percentiles.p50 },
-              { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
-              { "max", percentiles.max } } } };
+            // Identity beside the numbers: a breakdown indexed only by position
+            // is unreadable next to a 40-step sequence.
+            { "name", plan.steps[i].name }, { "requestId", plan.steps[i].request_id },
+            { "method", vayu::to_string (plan.steps[i].request.method) },
+            { "executed", steps.completed (i) }, { "errors", steps.errors (i) },
+            { "httpErrors", steps.http_errors (i) },
+            { "noResponse", steps.no_response (i) },
+            // Requests this step sent with a `{{token}}` composition never
+            // resolved (issue #1503) - counted, not refused, so a literal
+            // brace a caller meant to send still goes out.
+            { "unresolvedTokens", steps.unresolved_tokens (i) },
+            { "latency",
+            { { "min", percentiles.min }, { "p50", percentiles.p50 },
+            { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
+            { "max", percentiles.max } } } };
         auto element_outcomes  = elements.build (plan, i);
         // Kept as the field's pre-#1495 meaning for a step whose `script.pre`
         // is still left behind; one that ran inline reports its real outcome
@@ -1545,7 +1545,7 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
 
     auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,
-               make_coverage_tally (execution), std::move (base_scopes), script_config);
+    make_coverage_tally (execution), std::move (base_scopes), script_config);
     state->data_row_count = execution.data_rows.size ();
     state->scripts_mode   = context->scripts_override;
     // The same cycle guard the sequential run's own `setNextRequest` walk
@@ -1616,8 +1616,8 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     std::numeric_limits<int64_t>::max () :
     duration_field_ms (config, "duration", 60000);
     const int64_t ramp_ms     = *type == LoadTestType::RampUp ?
-        duration_field_ms (config, "rampUpDuration", 10000) :
-        0;
+    duration_field_ms (config, "rampUpDuration", 10000) :
+    0;
 
     maintain_concurrency (
     context, [&driver] () { return driver.submit_one (); },

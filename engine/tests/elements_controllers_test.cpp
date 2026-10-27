@@ -315,7 +315,7 @@ int64_t wait_after_first_ms = 0) {
     vayu::core::ScenarioPlan plan;
     for (size_t i = 0; i < member_ms.size (); ++i) {
         auto step  = step_with ("m" + std::to_string (i),
-         { element ("el_txn", "control.transaction", config) });
+        { element ("el_txn", "control.transaction", config) });
         step.index = i;
         plan.steps.push_back (std::move (step));
     }

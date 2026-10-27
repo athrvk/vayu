@@ -816,7 +816,7 @@ TEST (RunExportHtmlTest, TheCountedStatusChartSaysItIsPerSecondAndTheOldOneStays
 
 TEST (RunExportHtmlTest, ACountedEntryFoldsItsClassesAndDividesByItsSpan) {
     const std::string html       = counted_html ({ counted_tick (1,
-          { status_entry (0, 2, { 20, 10, 4, 2, 6 }), status_entry (2, 1, { 1, 1, 0, 0, 0 }) }) });
+    { status_entry (0, 2, { 20, 10, 4, 2, 6 }), status_entry (2, 1, { 1, 1, 0, 0, 0 }) }) });
     const std::string_view panel = status_panel (html);
     expect_values (panel, "2xx", { 15, 2 });
     expect_values (panel, "4xx", { 2, 0 });
@@ -858,14 +858,14 @@ TEST (RunExportHtmlTest, ARunThatClosedNoSecondDrawsNoStatusChart) {
 
 TEST (RunExportHtmlTest, AMalformedEntryIsSkippedAndAZeroSpanNeverDivides) {
     const ordered_json bad_span     = { { "second", 0 }, { "span", 0 },
-            { "counts", { 9, 0, 0, 0, 0 } } };
+        { "counts", { 9, 0, 0, 0, 0 } } };
     const ordered_json short_counts = { { "second", 1 }, { "span", 1 },
         { "counts", { 9, 0, 0, 0 } } };
     const ordered_json negative     = { { "second", 2 }, { "span", 1 },
-            { "counts", { -9, 0, 0, 0, 0 } } };
+        { "counts", { -9, 0, 0, 0, 0 } } };
     const std::string html          = counted_html ({ counted_tick (1,
-             { bad_span, short_counts, negative, status_entry (3, 1, { 4, 0, 0, 0, 0 }),
-             status_entry (4, 1, { 6, 0, 0, 0, 0 }) }) });
+    { bad_span, short_counts, negative, status_entry (3, 1, { 4, 0, 0, 0, 0 }),
+    status_entry (4, 1, { 6, 0, 0, 0, 0 }) }) });
     expect_values (status_panel (html), "2xx", { 4, 6 });
 }
 

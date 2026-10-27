@@ -629,8 +629,8 @@ TEST_F (PostmanExportRouteTest, ARemovedSetCookieRowTakesItsCookieWithIt) {
     ASSERT_EQ (collection_status, 200) << collection.dump ();
     const std::string collection_id = collection["id"].get<std::string> ();
     auto [request_status, request]  = create_request_response (*db_,
-     json{ { "collectionId", collection_id }, { "name", "Login" },
-     { "method", "GET" }, { "url", "{{baseUrl}}/login" } });
+    json{ { "collectionId", collection_id }, { "name", "Login" },
+    { "method", "GET" }, { "url", "{{baseUrl}}/login" } });
     ASSERT_EQ (request_status, 200) << request.dump ();
     const std::string request_id = request["id"].get<std::string> ();
 
@@ -673,8 +673,8 @@ TEST_F (PostmanExportRouteTest, AnUnrelatedHeaderEditKeepsTheRecordedCookies) {
     ASSERT_EQ (collection_status, 200) << collection.dump ();
     const std::string collection_id = collection["id"].get<std::string> ();
     auto [request_status, request]  = create_request_response (*db_,
-     json{ { "collectionId", collection_id }, { "name", "Login" },
-     { "method", "GET" }, { "url", "{{baseUrl}}/login" } });
+    json{ { "collectionId", collection_id }, { "name", "Login" },
+    { "method", "GET" }, { "url", "{{baseUrl}}/login" } });
     ASSERT_EQ (request_status, 200) << request.dump ();
     const std::string request_id = request["id"].get<std::string> ();
 

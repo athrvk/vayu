@@ -313,7 +313,7 @@ TEST (ReadLoadDataSet, TheLimitsAreTheOnesACollectionRunIsHeldTo) {
     tight.max_data_rows  = 1;
     tight.max_data_bytes = 1024;
     const json payload   = { { "url", "https://example.test/" },
-          { "data", json::array ({ json{ { "id", "a" } }, json{ { "id", "b" } } }) } };
+        { "data", json::array ({ json{ { "id", "a" } }, json{ { "id", "b" } } }) } };
 
     auto read = read_load_data_set (payload, tight, false);
     EXPECT_FALSE (read.ok);

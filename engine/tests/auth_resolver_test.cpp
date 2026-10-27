@@ -78,17 +78,17 @@ TEST (AuthResolver, BasicCredentialsAreNotTrimmed) {
 TEST (AuthResolver, ApiKeyNameAndValueAreTrimmedInBothPlacements) {
     auto header_req = make_request ();
     auto header     = vayu::http::apply_auth (header_req,
-        json{ { "mode", "apikey" }, { "key", " X-Api-Key " },
-        { "value", " secret " }, { "in", "header" } },
-        nullptr);
+    json{ { "mode", "apikey" }, { "key", " X-Api-Key " },
+    { "value", " secret " }, { "in", "header" } },
+    nullptr);
     EXPECT_TRUE (header.ok);
     EXPECT_EQ (header_req.headers.at ("X-Api-Key"), "secret");
     EXPECT_EQ (header_req.secret_header_names, std::vector<std::string>{ "X-Api-Key" });
 
     auto query_req = make_request ("https://api.example.com/v1");
     auto query     = vayu::http::apply_auth (query_req,
-        json{ { "mode", "apikey" }, { "key", " key " }, { "value", " v " }, { "in", "query" } },
-        nullptr);
+    json{ { "mode", "apikey" }, { "key", " key " }, { "value", " v " }, { "in", "query" } },
+    nullptr);
     EXPECT_TRUE (query.ok);
     EXPECT_EQ (query_req.url, "https://api.example.com/v1?key=v");
     EXPECT_EQ (query_req.auth_query_param, "key");
@@ -198,8 +198,8 @@ TEST (AuthResolver, ApiKeyInQueryIsWrittenAsTypedWhenUrlEncodingIsOff) {
     auto req                 = make_request ("https://api.example.com/v1");
     req.disable_url_encoding = true;
     auto result              = vayu::http::apply_auth (req,
-                 json{ { "mode", "apikey" }, { "key", "k|1" }, { "value", "a|b" }, { "in", "query" } },
-                 nullptr);
+    json{ { "mode", "apikey" }, { "key", "k|1" }, { "value", "a|b" }, { "in", "query" } },
+    nullptr);
     EXPECT_TRUE (result.ok);
     EXPECT_EQ (req.url, "https://api.example.com/v1?k|1=a|b");
 }

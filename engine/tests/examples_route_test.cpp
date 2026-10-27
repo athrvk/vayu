@@ -587,21 +587,21 @@ TEST_F (ExamplesRouteTest, CreateRejectsAMalformedSavedFrom) {
         { json ("nope"), "savedFrom" },
         { json::array (), "savedFrom" },
         { with ([] (json& s) { s.erase ("request"); }), "savedFrom.request" },
-        { with ([] (json& s) { s["request"]               = "GET /"; }), "savedFrom.request" },
+        { with ([] (json& s) { s["request"] = "GET /"; }), "savedFrom.request" },
         { with ([] (json& s) { s["request"].erase ("method"); }), "savedFrom.request.method" },
-        { with ([] (json& s) { s["request"]["method"]     = "FETCH"; }), "savedFrom.request.method" },
-        { with ([] (json& s) { s["request"]["method"]     = 1; }), "savedFrom.request.method" },
+        { with ([] (json& s) { s["request"]["method"] = "FETCH"; }), "savedFrom.request.method" },
+        { with ([] (json& s) { s["request"]["method"] = 1; }), "savedFrom.request.method" },
         { with ([] (json& s) { s["request"].erase ("url"); }), "savedFrom.request.url" },
-        { with ([] (json& s) { s["request"]["url"]        = 5; }), "savedFrom.request.url" },
-        { with ([] (json& s) { s["request"]["params"]     = json::object (); }), "savedFrom.request.params" },
-        { with ([] (json& s) { s["request"]["headers"]    = "X: 1"; }), "savedFrom.request.headers" },
-        { with ([] (json& s) { s["request"]["body"]       = "raw"; }), "savedFrom.request.body" },
+        { with ([] (json& s) { s["request"]["url"] = 5; }), "savedFrom.request.url" },
+        { with ([] (json& s) { s["request"]["params"] = json::object (); }), "savedFrom.request.params" },
+        { with ([] (json& s) { s["request"]["headers"] = "X: 1"; }), "savedFrom.request.headers" },
+        { with ([] (json& s) { s["request"]["body"] = "raw"; }), "savedFrom.request.body" },
         { with ([] (json& s) { s.erase ("statusText"); }), "savedFrom.statusText" },
-        { with ([] (json& s) { s["statusText"]            = 200; }), "savedFrom.statusText" },
-        { with ([] (json& s) { s["responseTimeMs"]        = -1; }), "savedFrom.responseTimeMs" },
-        { with ([] (json& s) { s["responseTimeMs"]        = "12"; }), "savedFrom.responseTimeMs" },
-        { with ([] (json& s) { s["receivedAt"]            = -1; }), "savedFrom.receivedAt" },
-        { with ([] (json& s) { s["receivedAt"]            = "1767225600000"; }), "savedFrom.receivedAt" },
+        { with ([] (json& s) { s["statusText"] = 200; }), "savedFrom.statusText" },
+        { with ([] (json& s) { s["responseTimeMs"] = -1; }), "savedFrom.responseTimeMs" },
+        { with ([] (json& s) { s["responseTimeMs"] = "12"; }), "savedFrom.responseTimeMs" },
+        { with ([] (json& s) { s["receivedAt"] = -1; }), "savedFrom.receivedAt" },
+        { with ([] (json& s) { s["receivedAt"] = "1767225600000"; }), "savedFrom.receivedAt" },
     };
     for (const auto& [saved, field] : cases) {
         auto [status, body] = routes::create_request_example_response (
@@ -638,11 +638,11 @@ TEST_F (ExamplesRouteTest, SavedFromReceivedAtIsWhenAMaxAgeCountsFrom) {
     saved["receivedAt"]        = 1767225600500.0; // 2026-01-01T00:00:00.5Z
     saved["request"]["method"] = "pAtCh";
     const std::string id       = create_example ("req_1",
-          json{ { "name", "Timed" }, { "status", 200 },
-          { "headers",
-          json::array ({ json{ { "key", "Set-Cookie" },
-          { "value", "a=1; Max-Age=60" }, { "enabled", true } } }) },
-          { "savedFrom", saved } });
+    json{ { "name", "Timed" }, { "status", 200 },
+    { "headers",
+    json::array ({ json{ { "key", "Set-Cookie" },
+    { "value", "a=1; Max-Age=60" }, { "enabled", true } } }) },
+    { "savedFrom", saved } });
     const auto stored          = db_->get_request_example (id);
     ASSERT_HAS_VALUE (stored);
     ASSERT_HAS_VALUE (stored->postman_response);

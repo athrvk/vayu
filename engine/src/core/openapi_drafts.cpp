@@ -934,7 +934,7 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
         // leaves (issue #714).
         const json* response = sampler.deref (&entry.value ());
         auto example         = response_example (entry.key (), response, tally,
-                [&] (const json& node) -> std::optional<ExamplePayload> {
+        [&] (const json& node) -> std::optional<ExamplePayload> {
             const json* content = as_record (prop (&node, "content"));
             if (content == nullptr) {
                 return std::nullopt;

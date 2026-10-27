@@ -488,8 +488,8 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     summary["status_codes"]   = std::move (codes);
     summary["test_duration"]  = inputs.duration_s;
     summary["rps"]            = inputs.duration_s > 0 ?
-               static_cast<double> (requests_sent) / inputs.duration_s :
-               0.0;
+    static_cast<double> (requests_sent) / inputs.duration_s :
+    0.0;
 
     // The steps that sent, the same sample a latency budget judges. A run in
     // which none did stores only `count: 0`: a block of zeros would read as
@@ -1451,8 +1451,8 @@ RunManager& manager) {
         vayu::runtime::RunSummaryInfo run_summary_info;
         run_summary_info.requests_sent     = summary.steps_executed;
         run_summary_info.error_rate        = summary.steps_executed > 0 ?
-               (static_cast<double> (summary.errored) / static_cast<double> (summary.steps_executed)) * 100.0 :
-               0.0;
+        (static_cast<double> (summary.errored) / static_cast<double> (summary.steps_executed)) * 100.0 :
+        0.0;
         run_summary_info.assertions_passed = summary.passed;
         run_summary_info.assertions_failed = summary.failed;
 
@@ -1498,8 +1498,8 @@ RunManager& manager) {
     threshold_inputs.status_codes = summary.status_codes;
     threshold_inputs.latency      = summary.latency.percentiles;
     threshold_inputs.throughput   = summary.duration_s > 0 ?
-      static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
-      0.0;
+    static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
+    0.0;
     // Every step's assertions ran on every send, so the whole tally is the
     // exact population and nothing was sampled (#2892).
     if (summary.assertions.total () > 0) {

@@ -521,7 +521,7 @@ TEST_F (ElementKindsTest, AssertDurationPassesUnderTheBound) {
     response                 = ok_json_response (200, "");
     response.timing.total_ms = 120.0;
     auto elements            = one_element (nlohmann::json{ { "id", "e1" },
-               { "kind", "assert.duration" }, { "config", { { "maxMs", 500 } } } });
+    { "kind", "assert.duration" }, { "config", { { "maxMs", 500 } } } });
 
     EXPECT_EQ (run_after (elements)[0].status, "ok");
 }
@@ -530,7 +530,7 @@ TEST_F (ElementKindsTest, AssertDurationFailsOverTheBound) {
     response                 = ok_json_response (200, "");
     response.timing.total_ms = 900.0;
     auto elements            = one_element (nlohmann::json{ { "id", "e1" },
-               { "kind", "assert.duration" }, { "config", { { "maxMs", 500 } } } });
+    { "kind", "assert.duration" }, { "config", { { "maxMs", 500 } } } });
 
     EXPECT_EQ (run_after (elements)[0].status, "failed");
 }

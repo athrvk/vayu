@@ -552,8 +552,8 @@ std::string run_title (const RunExportRun& run) {
     std::string name = string_member (run.config_snapshot, "requestName");
     const auto first = name.find_first_not_of (" \t");
     name             = first == std::string::npos ?
-                std::string () :
-                name.substr (first, name.find_last_not_of (" \t") - first + 1);
+    std::string () :
+    name.substr (first, name.find_last_not_of (" \t") - first + 1);
     if (!name.empty () && name != DEFAULT_REQUEST_NAME) {
         return name;
     }

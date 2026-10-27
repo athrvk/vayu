@@ -108,7 +108,7 @@ constexpr std::array<const char*, 10> FIRST_NAMES = { "Ada", "Ravi", "Mina",
 constexpr std::array<const char*, 10> LAST_NAMES = { "Lovelace", "Iyer", "Kowalski",
     "Okafor", "Rossi", "Nakamura", "Haddad", "Silva", "Novak", "Petrov" };
 constexpr std::array<const char*, 6> COMPANY_WORDS    = { "Northwind", "Acme",
-       "Umbra", "Lumen", "Kestrel", "Basalt" };
+    "Umbra", "Lumen", "Kestrel", "Basalt" };
 constexpr std::array<const char*, 5> COMPANY_SUFFIXES = { "Inc", "LLC", "Group",
     "Labs", "Systems" };
 constexpr std::array<const char*, 4> DOMAINS = { "example.com", "example.org",
@@ -351,7 +351,7 @@ constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 { "$randomAbbreviation", [] { return std::string (pick (ABBREVIATIONS)); } },
 { "$randomPrice",
 [] {
-    const int cents                                         = random_int (0, 100000);
+    const int cents = random_int (0, 100000);
     return std::to_string (cents / 100) + "." + zero_padded (cents % 100, 2);
 } },
 { "$randomCurrencyCode", [] { return std::string (pick (CURRENCY_CODES)); } },
@@ -1008,7 +1008,7 @@ const std::string& origin_name) {
         }
         nlohmann::json stamped = element;
         nlohmann::json origin  = { { "kind", origin_kind },
-             { "scope", origin_scope }, { "id", origin_id } };
+            { "scope", origin_scope }, { "id", origin_id } };
         if (!origin_name.empty ()) {
             origin["name"] = origin_name;
         }

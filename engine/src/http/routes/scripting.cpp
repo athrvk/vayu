@@ -2265,10 +2265,10 @@ nlohmann::json get_script_completions () {
         const std::string label = std::string ("tv4.") + member.name;
         const bool is_function  = member.kind == KIND_FUNCTION;
         nlohmann::json entry    = { { "label", label }, { "kind", member.kind },
-               { "insertText", is_function ? label + "($0)" : label },
-               { "detail", is_function ? label + member.signature : member.signature },
-               { "documentation", member.documentation },
-               { "sortText", "2_tv4_" + std::string (member.name) } };
+            { "insertText", is_function ? label + "($0)" : label },
+            { "detail", is_function ? label + member.signature : member.signature },
+            { "documentation", member.documentation },
+            { "sortText", "2_tv4_" + std::string (member.name) } };
         if (is_function) {
             entry["insertTextRules"] = INSERT_AS_SNIPPET;
         }

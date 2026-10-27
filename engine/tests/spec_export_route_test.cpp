@@ -443,7 +443,7 @@ TEST_F (SpecExportRouteTest, RoundTripsAFixedMockModeThroughXVayuMock) {
 
     const auto new_examples = db_->get_request_examples (new_request.id);
     const auto target       = std::find_if (new_examples.begin (),
-          new_examples.end (), [&] (const vayu::db::RequestExample& example) {
+    new_examples.end (), [&] (const vayu::db::RequestExample& example) {
         return example.id == *new_request.mock_example_id;
     });
     ASSERT_NE (target, new_examples.end ());

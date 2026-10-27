@@ -276,7 +276,7 @@ TEST (ResponseSchemaRefTest, RefsResolveThroughTheSharedRoots) {
     }}})");
     const auto index     = ResponseSchemaIndex::parse (
     one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Pet"})"),
-        "200", "application/json", ref_roots));
+    "200", "application/json", ref_roots));
     ASSERT_HAS_VALUE (index);
 
     // Nested through two refs - the assertion that reddens if the shared roots
@@ -299,7 +299,7 @@ TEST (ResponseSchemaRefTest, ARecursiveSchemaTerminates) {
     }}})");
     const auto index     = ResponseSchemaIndex::parse (
     one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Node"})"),
-        "200", "application/json", ref_roots));
+    "200", "application/json", ref_roots));
     ASSERT_HAS_VALUE (index);
 
     const auto verdict = index->check (GET_PET, 200, "application/json",
@@ -322,7 +322,7 @@ ValidationVerdict check_against_any_depth (const std::string& body) {
     }}})");
     const auto index     = ResponseSchemaIndex::parse (
     one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Any"})"),
-        "200", "application/json", ref_roots));
+    "200", "application/json", ref_roots));
     if (!index) {
         ADD_FAILURE () << "the any-depth schema did not index";
         return {};

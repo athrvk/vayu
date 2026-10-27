@@ -434,7 +434,7 @@ TEST (CookieJarStore, ReconcileReadsAReSpeltButIdenticalLineAsUnchanged) {
     // value a concurrent transfer stored meanwhile.
     CookieJar jar;
     const auto seeded  = netscape_line ("example.com", "FALSE", "/", "FALSE",
-     std::to_string (FAR_FUTURE), "session", "old");
+    std::to_string (FAR_FUTURE), "session", "old");
     const auto respelt = netscape_line ("example.com", "FALSE", "/", "FALSE",
     "00" + std::to_string (FAR_FUTURE), "session", "old");
     jar.store ("env_a",

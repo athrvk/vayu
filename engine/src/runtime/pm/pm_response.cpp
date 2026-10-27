@@ -859,8 +859,8 @@ int magic) {
     const auto which = static_cast<ResponseMeasure> (magic_row (magic));
     const ResponseSizeBytes size = response_size_bytes (*response);
     const double measured        = which == ResponseMeasure::Time ?
-           response->timing.total_ms :
-           static_cast<double> (size.body + size.header);
+    response->timing.total_ms :
+    static_cast<double> (size.body + size.header);
     return response_measure_chain (ctx, measured, magic_negated (magic), which);
 }
 

@@ -445,8 +445,8 @@ class ScenarioLoadTest : public ::testing::Test {
     json run_sequentially_to_report (vayu::core::ScenarioExecution execution, size_t iterations) {
         execution.request.iterations = iterations;
         const json config            = { { "scenario",
-                   { { "source", "collection" }, { "collectionId", "col_test" },
-                   { "iterations", iterations } } } };
+        { { "source", "collection" }, { "collectionId", "col_test" },
+        { "iterations", iterations } } } };
         const std::string run_id     = "run_sequential_report";
         vayu::db::Run run;
         run.id              = run_id;
@@ -1018,9 +1018,9 @@ TEST_F (ScenarioLoadTest, LoadStepOutcomesAreDisjointAndSumToStepsExecuted) {
     { status_ok ("el_status"), status_ok ("el_status_again") });
 
     constexpr size_t ITERATIONS = 4;
-    auto state                  = run (json{ { "mode", "iterations" },
-                                       { "iterations", ITERATIONS }, { "concurrency", 1 } },
-                     execution);
+    auto state = run (json{ { "mode", "iterations" },
+                      { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
     const auto summary =
     vayu::core::build_scenario_load_summary (*state, execution.plan);
     const auto count = [&summary] (const char* key) {
@@ -1110,9 +1110,9 @@ TEST_F (ScenarioLoadTest, AnInlineScriptPostThatThrewIsErroredWithoutAbandoningI
     { one_inline_script ("script.post", "throw new Error('x');") });
 
     constexpr size_t ITERATIONS = 3;
-    auto state                  = run (json{ { "mode", "iterations" },
-                                       { "iterations", ITERATIONS }, { "concurrency", 1 } },
-                     execution);
+    auto state = run (json{ { "mode", "iterations" },
+                      { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
     const auto summary =
     vayu::core::build_scenario_load_summary (*state, execution.plan);
 
@@ -1138,9 +1138,9 @@ TEST_F (ScenarioLoadTest, AnInlineScriptPreThatThrewIsErroredAndItsRequestStillS
     { one_inline_script ("script.pre", "throw new Error('x');") });
 
     constexpr size_t ITERATIONS = 3;
-    auto state                  = run (json{ { "mode", "iterations" },
-                                       { "iterations", ITERATIONS }, { "concurrency", 1 } },
-                     execution);
+    auto state = run (json{ { "mode", "iterations" },
+                      { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
     const auto summary =
     vayu::core::build_scenario_load_summary (*state, execution.plan);
 
@@ -2438,7 +2438,7 @@ TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelinesTimeIntoTheRecordedL
     vayu::tests::compiled_elements ({ vayu::tests::script_element_json (
     "el_post", "script.post", slow_script, /*inline_script=*/true) });
     const json excluded_config    = { { "mode", "iterations" },
-           { "iterations", 1 }, { "concurrency", 1 } };
+        { "iterations", 1 }, { "concurrency", 1 } };
     auto excluded_state           = run (excluded_config, excluded_execution);
     const double excluded_latency = vayu::core::build_scenario_load_summary (
     *excluded_state, excluded_execution.plan)["steps"][0]["latency"]["min"];
@@ -2650,7 +2650,7 @@ TEST_F (ScenarioLoadTest, EveryUninlinedScriptPostOfAStepIsReplayedAndADisabledO
     ScenarioMockServer server;
     auto execution      = plan_over ({ server.url ("/echo") });
     auto disabled       = vayu::tests::script_element_json ("el_disabled",
-          "script.post", "pm.test('never', function () { throw new Error('x'); });");
+    "script.post", "pm.test('never', function () { throw new Error('x'); });");
     disabled["enabled"] = false;
     execution.plan.steps[0].elements = vayu::tests::compiled_elements ({
     vayu::tests::script_element_json ("el_a",
@@ -3334,7 +3334,7 @@ TEST_F (ScenarioLoadTest, AThinkTimeRunsMeanInFlightIsItsShareOfTimeOnTheWire) {
     { json{ { "id", "el_think" }, { "kind", "timer.think" },
     { "enabled", true }, { "config", { { "ms", 200 } } } } });
 
-    const size_t VUS  = 10;
+    const size_t VUS = 10;
     const json report = run_to_report (json{ { "mode", "constant_concurrency" },
                                        { "duration", "1s" }, { "concurrency", VUS } },
     execution);
@@ -3368,7 +3368,7 @@ TEST_F (ScenarioLoadTest, ANoThinkTimeRunsMeanInFlightIsAboutItsUserCount) {
     ScenarioMockServer server;
     const auto execution = plan_over ({ server.url ("/slow"), server.url ("/slow") });
 
-    const size_t VUS  = 10;
+    const size_t VUS = 10;
     const json report = run_to_report (json{ { "mode", "constant_concurrency" },
                                        { "duration", "1s" }, { "concurrency", VUS } },
     execution);

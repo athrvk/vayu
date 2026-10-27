@@ -295,9 +295,9 @@ class TargetPolicyRouteTest : public ::testing::Test {
         r.url           = url;
         r.headers       = "[]";
         r.elements      = pre_script.empty () ?
-             json::array ().dump () :
-             json::array ({ { { "id", "el_pre" }, { "kind", "script.pre" },
-                          { "enabled", true }, { "config", config } } })
+        json::array ().dump () :
+        json::array ({ { { "id", "el_pre" }, { "kind", "script.pre" },
+                     { "enabled", true }, { "config", config } } })
         .dump ();
         r.auth          = auth.dump ();
         r.created_at    = 1;

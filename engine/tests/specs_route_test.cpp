@@ -414,7 +414,7 @@ TEST_F (SpecsRouteTest, RejectsABindingToASpecThatDoesNotExist) {
 TEST_F (SpecsRouteTest, AnUpdateThatSaysNothingAboutTheBindingKeepsIt) {
     const std::string spec_id = store_spec ();
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-     { "openapi", { { "specId", spec_id }, { "syncedAt", 42 } } } });
+    { "openapi", { { "specId", spec_id }, { "syncedAt", 42 } } } });
 
     auto [status, body] =
     routes::update_collection_response (*db_, col_id, json{ { "name", "Pets v2" } });
@@ -599,11 +599,11 @@ TEST_F (SpecsRouteTest, OperationIdentityIsUnsetByAnExplicitNullOnUpdate) {
 TEST_F (SpecsRouteTest, RejectsAnOperationIdentityThatIsNotOne) {
     const std::string col_id = create_collection (json{ { "name", "Pets" } });
     const auto bad           = std::to_array<json> ({
-    json ("GET /pets"),                            // not an object
-    json{ { "operationId", "listPets" } },         // no method/path
-    json{ { "method", "GET" } },                   // no path
-    json{ { "path", "/pets" } },                   // no method
-    json{ { "method", "" }, { "path", "/pets" } }, // empty method
+    json ("GET /pets"),                              // not an object
+    json{ { "operationId", "listPets" } },           // no method/path
+    json{ { "method", "GET" } },                     // no path
+    json{ { "path", "/pets" } },                     // no method
+    json{ { "method", "" }, { "path", "/pets" } },   // empty method
     json{ { "method", "GET" }, { "path", "pets" } }, // not a template path
     json{ { "method", "GET" }, { "path", "https://x/p" } }, // a concrete URL
     json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", 7 } },
@@ -668,7 +668,7 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
 TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
     const std::string spec_id = store_spec ();
     json payload              = { { "collections",
-                 { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } } } } };
+    { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } } } } };
 
     auto [status, body] = routes::import_apply_response (*db_, payload);
     ASSERT_EQ (status, 200) << body.dump ();
@@ -748,7 +748,7 @@ TEST_F (SpecsRouteTest, ImportRefusesAnUnresolvableBindingAndWritesNothing) {
     for (const auto& binding :
     { json{ { "specTempId", "nobody" } }, json{ { "specId", "spec_ghost" } } }) {
         json payload        = { { "collections",
-               { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", binding } } } } };
+        { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", binding } } } } };
         auto [status, body] = routes::import_apply_response (*db_, payload);
         EXPECT_EQ (status, 400) << binding.dump () << " -> " << body.dump ();
         EXPECT_TRUE (db_->get_collections ().empty ())
@@ -785,7 +785,7 @@ TEST_F (SpecsRouteTest, ABoundCollectionsRunStampsTheSpecIdAndHash) {
     const std::string spec_id = store_spec ();
     const std::string hash    = routes::spec_content_hash (PETSTORE);
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-     { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
+    { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
     create_request (col_id);
 
     vayu::core::ScenarioResolveOptions options;
@@ -794,7 +794,7 @@ TEST_F (SpecsRouteTest, ABoundCollectionsRunStampsTheSpecIdAndHash) {
     options.limits.max_data_rows  = 10;
     options.limits.max_data_bytes = 4096;
     auto resolved                 = vayu::core::resolve_scenario (*db_,
-                    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
+    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     ASSERT_TRUE (resolved.spec.bound ());
 
@@ -815,7 +815,7 @@ TEST_F (SpecsRouteTest, AnUnboundCollectionsRunStampsNothingAtAll) {
     options.limits.max_data_rows  = 10;
     options.limits.max_data_bytes = 4096;
     auto resolved                 = vayu::core::resolve_scenario (*db_,
-                    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
+    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_FALSE (resolved.spec.bound ());
 
@@ -830,7 +830,7 @@ TEST_F (SpecsRouteTest, TheStampRecordsWhatTheRunWasPlannedAgainstNotTheLatestBi
     const std::string spec_id = store_spec ();
     const std::string hash    = routes::spec_content_hash (PETSTORE);
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-     { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
+    { "openapi", { { "specId", spec_id }, { "specHash", hash } } } });
     create_request (col_id);
 
     vayu::core::ScenarioResolveOptions options;
@@ -839,7 +839,7 @@ TEST_F (SpecsRouteTest, TheStampRecordsWhatTheRunWasPlannedAgainstNotTheLatestBi
     options.limits.max_data_rows  = 10;
     options.limits.max_data_bytes = 4096;
     auto resolved                 = vayu::core::resolve_scenario (*db_,
-                    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
+    json{ { "source", "collection" }, { "collectionId", col_id } }, options);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     const json manifest = vayu::core::build_scenario_manifest (
     resolved.request, resolved.plan, resolved.spec);
@@ -966,8 +966,8 @@ TEST_F (SpecsRouteTest, AResolvedPlanCarriesTheBoundDocumentsOperations) {
     ASSERT_EQ (status, 200) << stored.dump ();
     const std::string spec_id = stored.value ("id", std::string{});
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-     { "openapi",
-     { { "specId", spec_id }, { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+    { "openapi",
+    { { "specId", spec_id }, { "specHash", routes::spec_content_hash (PETSTORE) } } } });
     create_request (col_id);
 
     auto resolved = resolve (col_id);
@@ -1085,8 +1085,8 @@ TEST_F (SpecsRouteTest, ATagSubCollectionRunIsMeasuredAgainstTheRootsContract) {
 TEST_F (SpecsRouteTest, ACollectionCarryingItsOwnBindingDisclosesNothingToDisclose) {
     const std::string spec_id = store_spec ();
     const std::string col_id  = create_collection (json{ { "name", "Pets" },
-     { "openapi",
-     { { "specId", spec_id }, { "specHash", routes::spec_content_hash (PETSTORE) } } } });
+    { "openapi",
+    { { "specId", spec_id }, { "specHash", routes::spec_content_hash (PETSTORE) } } } });
     create_request (col_id);
 
     auto resolved = resolve (col_id);
@@ -1128,8 +1128,8 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
     ASSERT_EQ (leaf_status, 200) << leaf.dump ();
     const std::string leaf_id = leaf.value ("id", std::string{});
     const std::string req_id  = create_request (leaf_id,
-     json{ { "specOperation",
-     { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
+    json{ { "specOperation",
+    { { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
 
     auto resolved = resolve (leaf_id);
     ASSERT_TRUE (resolved.ok) << resolved.error;

@@ -1676,7 +1676,7 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
     const bool retargets  = !value_form && !state->negated;
     JSValue read_value    = JS_UNDEFINED;
     const auto presence   = find_chain_property (ctx, state->actual, segments,
-      state->own, (value_form || retargets) ? &read_value : nullptr);
+    state->own, (value_form || retargets) ? &read_value : nullptr);
     const ScopedValue property_value (ctx, read_value);
     if (presence == PropertyPresence::Failed) {
         return JS_EXCEPTION;

@@ -144,9 +144,9 @@ TEST (SanitizeConfigSnapshot, WithholdsATypedAuthorizationHeaderAndKeepsItsName)
 
 TEST (SanitizeConfigSnapshot, MatchesCredentialHeaderNamesCaseInsensitively) {
     const json cfg     = { { "url", "https://x" },
-            { "headers",
-            { { "set-cookie", "sid=abc123" }, { "X-API-KEY", "k-123456" }, { "cookie", "a=b" },
-            { "proxy-authorization", "Basic dTpw" }, { "X-Request-Source", "ui" } } } };
+        { "headers",
+        { { "set-cookie", "sid=abc123" }, { "X-API-KEY", "k-123456" }, { "cookie", "a=b" },
+        { "proxy-authorization", "Basic dTpw" }, { "X-Request-Source", "ui" } } } };
     const auto headers = sanitized (cfg)["headers"];
     EXPECT_EQ (headers["set-cookie"], "<redacted>");
     EXPECT_EQ (headers["X-API-KEY"], "<redacted>");
@@ -159,10 +159,10 @@ TEST (SanitizeConfigSnapshot, MatchesCredentialHeaderNamesCaseInsensitively) {
 // read for it before it is collapsed to its mode.
 TEST (SanitizeConfigSnapshot, WithholdsTheHeaderAnApiKeyAuthNames) {
     const json cfg    = { { "url", "https://x" },
-           { "headers", { { "x-tenant-key", "tenant-secret-9" }, { "X-Tenant", "acme" } } },
-           { "auth",
-           { { "mode", "apikey" }, { "key", "X-Tenant-Key" },
-           { "value", "tenant-secret-9" }, { "in", "header" } } } };
+        { "headers", { { "x-tenant-key", "tenant-secret-9" }, { "X-Tenant", "acme" } } },
+        { "auth",
+        { { "mode", "apikey" }, { "key", "X-Tenant-Key" },
+        { "value", "tenant-secret-9" }, { "in", "header" } } } };
     const auto parsed = sanitized (cfg);
     EXPECT_EQ (parsed["headers"]["x-tenant-key"], "<redacted>");
     EXPECT_EQ (parsed["headers"]["X-Tenant"], "acme");
@@ -172,16 +172,16 @@ TEST (SanitizeConfigSnapshot, WithholdsTheHeaderAnApiKeyAuthNames) {
 TEST (SanitizeConfigSnapshot, MasksASecretValueWhereverItWasResolved) {
     const std::string secret = "s3cr3t-value";
     const json cfg           = { { "method", "POST" },
-                  { "url", "https://api.example.com/items?key=" + secret + "&page=2" },
-                  { "params",
-                  json::array ({ { { "key", "key" }, { "value", secret }, { "enabled", true } },
-                  { { "key", "page" }, { "value", "2" }, { "enabled", true } } }) },
-                  { "headers", { { "X-Trace", "trace-" + secret }, { "Accept", "*/*" } } },
-                  { "body",
-                  { { "mode", "json" }, { "content", R"({"password":")" + secret + R"(","n":1})" },
-                  { "fields",
-                  json::array ({ { { "key", "token" }, { "value", secret } },
-                  { { "key", "name" }, { "value", "bob" } } }) } } } };
+        { "url", "https://api.example.com/items?key=" + secret + "&page=2" },
+        { "params",
+        json::array ({ { { "key", "key" }, { "value", secret }, { "enabled", true } },
+        { { "key", "page" }, { "value", "2" }, { "enabled", true } } }) },
+        { "headers", { { "X-Trace", "trace-" + secret }, { "Accept", "*/*" } } },
+        { "body",
+        { { "mode", "json" }, { "content", R"({"password":")" + secret + R"(","n":1})" },
+        { "fields",
+        json::array ({ { { "key", "token" }, { "value", secret } },
+        { { "key", "name" }, { "value", "bob" } } }) } } } };
     const auto parsed        = sanitized (cfg, { secret });
 
     EXPECT_EQ (parsed.dump ().find (secret), std::string::npos) << parsed.dump (2);
@@ -212,7 +212,7 @@ TEST (SanitizeConfigSnapshot, MasksTheSecretsJsonEscapedForm) {
     const std::string secret  = R"(pa"ss\word-12345)";
     const std::string content = R"({"t": "pa\"ss\\word-12345", "n": 1})";
     const json cfg            = { { "url", "https://x" },
-                   { "body", { { "mode", "json" }, { "content", content } } } };
+        { "body", { { "mode", "json" }, { "content", content } } } };
     const auto parsed         = sanitized (cfg, { secret });
     EXPECT_EQ (parsed["body"]["content"], R"({"t": "<redacted>", "n": 1})");
     EXPECT_EQ (parsed.dump ().find ("word-12345"), std::string::npos) << parsed.dump (2);
@@ -222,7 +222,7 @@ TEST (SanitizeConfigSnapshot, MasksTheSecretsJsonEscapedForm) {
 TEST (SanitizeConfigSnapshot, MasksAJsonEscapedSecretHoldingControlCharacters) {
     const std::string secret = "line1\nline2\ttab";
     const json cfg           = { { "url", "https://x" },
-                  { "body", { { "mode", "json" }, { "content", R"({"t":"line1\nline2\ttab"})" } } } };
+        { "body", { { "mode", "json" }, { "content", R"({"t":"line1\nline2\ttab"})" } } } };
     EXPECT_EQ (sanitized (cfg, { secret })["body"]["content"], R"({"t":"<redacted>"})");
 }
 
@@ -231,12 +231,12 @@ TEST (SanitizeConfigSnapshot, MasksAJsonEscapedSecretHoldingControlCharacters) {
 TEST (SanitizeConfigSnapshot, MasksTheSecretsXmlEscapedForms) {
     const std::string secret = R"(a&b<c>"d'e-12345)";
     const json cfg           = { { "url", "https://x" },
-                  { "body",
-                  { { "mode", "xml" },
-                  { "content",
-                  "<p k=\"a&amp;b&lt;c&gt;&quot;d'e-12345\" "
-                            "j='a&amp;b&lt;c&gt;\"d&apos;e-12345'>"
-                            "a&amp;b&lt;c&gt;\"d'e-12345</p>" } } } };
+        { "body",
+        { { "mode", "xml" },
+        { "content",
+        "<p k=\"a&amp;b&lt;c&gt;&quot;d'e-12345\" "
+        "j='a&amp;b&lt;c&gt;\"d&apos;e-12345'>"
+        "a&amp;b&lt;c&gt;\"d'e-12345</p>" } } } };
     EXPECT_EQ (sanitized (cfg, { secret })["body"]["content"],
     "<p k=\"<redacted>\" j='<redacted>'><redacted></p>");
 }
@@ -261,7 +261,7 @@ TEST (SanitizeConfigSnapshot, MasksBeforeTheBodyCapCanSplitASecret) {
     const std::string secret  = "straddling-secret";
     const std::string content = std::string (kMaxBodyBytes - 5, 'x') + secret;
     const json cfg            = { { "url", "https://x" },
-                   { "body", { { "mode", "text" }, { "content", content } } } };
+        { "body", { { "mode", "text" }, { "content", content } } } };
     const auto parsed         = sanitized (cfg, { secret });
     const auto stored         = parsed["body"]["content"].get<std::string> ();
     EXPECT_EQ (stored.find ("strad"), std::string::npos);

@@ -468,7 +468,7 @@ TEST_F (MockIssuerTest, SlowModeDelaysTheTokenEndpoint) {
 
     const auto started = std::chrono::steady_clock::now ();
     auto result        = vayu::http::oauth::acquire_token (*db_,
-           client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
+    client_credentials_config (issuer), false, std::nullopt, TOKEN_TIMEOUT_MS);
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - started)
                             .count ();

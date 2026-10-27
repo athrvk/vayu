@@ -2207,7 +2207,7 @@ TEST (ScenarioSummaryPayload, CoverageIsItsOwnSectionAndAbsentWhenNotMeasured) {
     EXPECT_FALSE (vayu::core::build_scenario_summary_payload (inputs).contains ("coverage"));
 
     inputs.coverage    = nlohmann::json{ { "operationsTotal", 2 },
-           { "operationsCovered", 1 }, { "operations", nlohmann::json::array ({ 1 }) } };
+        { "operationsCovered", 1 }, { "operations", nlohmann::json::array ({ 1 }) } };
     const auto summary = vayu::core::build_scenario_summary_payload (inputs);
     ASSERT_TRUE (summary.contains ("coverage")) << summary.dump ();
     EXPECT_EQ (summary["coverage"]["operationsCovered"], 1);

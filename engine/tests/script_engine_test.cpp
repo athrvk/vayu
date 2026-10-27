@@ -52,7 +52,7 @@ class ScriptEngineTest : public ::testing::Test {
         response.status_text = "OK";
         response.body = R"({"id": 1, "name": "John Doe", "email": "john@example.com"})";
         response.headers         = { { "Content-Type", "application/json" },
-                    { "X-Request-Id", "abc123" } };
+            { "X-Request-Id", "abc123" } };
         response.timing.total_ms = 150.5;
 
         // Setup environment
@@ -2040,7 +2040,7 @@ TEST_F (ScriptEngineTest, ResponseAssertionsKeepSameValueZero) {
         pm.test("jsonBody", function() { pm.response.to.have.jsonBody("n", 0); });
         pm.test("body", function() { pm.response.to.have.body({n: 0}); });
     )",
-      request, response, env);
+    request, response, env);
 
     ASSERT_EQ (result.tests.size (), 2u);
     for (const auto& test : result.tests) {
@@ -2294,7 +2294,7 @@ TEST_F (ScriptEngineTest, ResponseJsonBodyNoArgFailsOnNonJson) {
             pm.response.to.have.jsonBody();
         });
     )",
-      request, response, env);
+    request, response, env);
 
     EXPECT_FALSE (result.success);
     ASSERT_EQ (result.tests.size (), 1);
@@ -6063,7 +6063,7 @@ TEST_F (ScriptEngineTest, ADrainedRuntimeIsPooledAgain) {
         (async () => { await null; await null; })();
         Promise.resolve(1).then(function () {});
     )JS",
-     drained);
+    drained);
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (pooled.idle_runtime_count (), 1U);
 
@@ -6139,7 +6139,7 @@ TEST_F (ScriptEngineTest, AnAsyncTestThatAwaitsThenFailsIsReported) {
             pm.expect(code).to.equal(500);
         });
     )JS",
-        ctx);
+    ctx);
 
     EXPECT_FALSE (result.success);
     EXPECT_NE (result.error_message.find (R"(Unhandled promise rejection in test "after await": )"),
@@ -6196,7 +6196,7 @@ TEST_F (ScriptEngineTest, AHandledRejectionIsNotAnError) {
             try { await Promise.reject(new Error("inner")); } catch (e) {}
         });
     )JS",
-        ctx);
+    ctx);
 
     EXPECT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["caught"].value, "awaited");
@@ -6311,7 +6311,7 @@ TEST_F (ScriptEngineTest, AThrowStaysTheErrorAndItsQueuedJobsStillRun) {
         Promise.reject(new Error("also unhandled"));
         throw new Error("the script's own");
     )JS",
-        ctx);
+    ctx);
 
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message, "Error: the script's own");
@@ -6341,7 +6341,7 @@ TEST_F (ScriptEngineTest, TimersFireInDueOrderBeforeTheScriptEnds) {
         Promise.resolve().then(() => order.push("job"));
         setTimeout(() => pm.environment.set("order", order.join(",")), 60000);
     )JS",
-        ctx);
+    ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["order"].value, "job,no delay,a,a-job,b,cd");
@@ -6360,7 +6360,7 @@ TEST_F (ScriptEngineTest, ClearTimeoutCancelsATimer) {
         clearTimeout("not an id");
         setTimeout(() => pm.environment.set("kept", "1"), 30);
     )JS",
-        ctx);
+    ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env.count ("cancelled"), 0U);
@@ -6385,7 +6385,7 @@ TEST_F (ScriptEngineTest, SetIntervalRepeatsUntilClearIntervalStopsIt) {
         setTimeout(() => order.push("t25"), 25);
         setTimeout(() => pm.environment.set("order", order.join(",")), 1000);
     )JS",
-        ctx);
+    ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["order"].value, "tick1,tick2,t25,tick3");
@@ -6435,7 +6435,7 @@ TEST_F (ScriptEngineTest, ATimerThatThrowsIsTheErrorAndTheQueueDrainsOn) {
         setTimeout(() => { throw new Error("from the timer"); }, 10);
         setTimeout(() => pm.environment.set("after", "1"), 20);
     )JS",
-        ctx);
+    ctx);
 
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message, "Error: from the timer");
@@ -6555,7 +6555,7 @@ TEST_F (ScriptEngineTest, ATopLevelAwaitOfAResolvedPromiseRuns) {
         const value = await Promise.resolve(41);
         pm.environment.set("value", String(value + 1));
     )JS",
-        ctx);
+    ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["value"].value, "42");
@@ -6590,7 +6590,7 @@ TEST_F (ScriptEngineTest, ATopLevelAwaitOfATimerResumesWhenItFires) {
         await new Promise((resolve) => setTimeout(resolve, 60000));
         pm.environment.set("order", order.join(","));
     )JS",
-        ctx);
+    ctx);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["order"].value, "t10,t20,t25,t30");
@@ -6606,7 +6606,7 @@ TEST_F (ScriptEngineTest, AThrowAfterATopLevelAwaitIsTheScriptsError) {
         await null;
         throw new Error("after await");
     )JS",
-        ctx);
+    ctx);
 
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message, "Error: after await");
@@ -6646,7 +6646,7 @@ TEST_F (ScriptEngineTest, ATopLevelReturnStillEndsTheScript) {
         if (pm.response.code === 200) return;
         pm.environment.set("after", "1");
     )JS",
-        ctx);
+    ctx);
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["before"].value, "1");
     EXPECT_EQ (env.count ("after"), 0U);
@@ -6698,7 +6698,7 @@ TEST_F (ScriptEngineTest, ABodyAwaitingAPromiseThatNeverSettlesIsReported) {
         await new Promise(() => {});
         pm.environment.set("after", "1");
     )JS",
-        ctx);
+    ctx);
 
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message,
@@ -7950,7 +7950,7 @@ TEST_F (ScriptEngineTest, LegacyResponseCodeIsPostmansDetails) {
             pm.expect(Object.keys(responseCode)).to.eql(["name", "detail", "code", "standardName"]);
         });
     )JS",
-             request, response, env);
+    request, response, env);
 
     ASSERT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1u);
@@ -7967,7 +7967,7 @@ TEST_F (ScriptEngineTest, LegacyResponseHeadersKeepTheNamesAsTheyArrived) {
         tests["the last repeat"] = responseHeaders["X-Repeat"] === "last";
         tests["case-sensitive"] = responseHeaders["content-type"] === undefined;
     )JS",
-              request, response, env);
+    request, response, env);
 
     ASSERT_EQ (result.tests.size (), 3u) << result.error_message;
     for (const auto& test : result.tests) {
@@ -9287,7 +9287,7 @@ TEST_F (ScriptEngineTest, RequireShelfChaiFailureInsidePmTestIsAFailedTest) {
         });
         pm.test('assert fails', function () { assert.strictEqual('a', 'b'); });
     )JS",
-       request, response, env);
+    request, response, env);
 
     // A failed test fails the run, but the script did not error.
     EXPECT_FALSE (result.success);
@@ -9456,7 +9456,7 @@ TEST_F (ScriptEngineTest, RequireChaiResponseAssertionFailureCarriesTheNativeMes
         pm.test('chai spelling', function () { expect(pm.response).to.have.status(200); });
         pm.test('native spelling', function () { pm.response.to.have.status(200); });
     )JS",
-       request, response, env);
+    request, response, env);
 
     ASSERT_EQ (result.tests.size (), 2u);
     EXPECT_FALSE (result.tests[0].passed);
@@ -9482,7 +9482,7 @@ TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsChainOn) {
             expect(pm.response).to.have.status(404).and.to.have.status(200);
         });
     )JS",
-       request, response, env);
+    request, response, env);
 
     ASSERT_EQ (result.tests.size (), 2u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
@@ -9552,7 +9552,7 @@ TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsSurviveAReplacedPm) {
         pm = realPm;
         pm.environment.set('out', out);
     )JS",
-       request, response, env);
+    request, response, env);
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["out"].value, "held");
 }
@@ -9582,7 +9582,7 @@ TEST_F (ScriptEngineTest, RequireChaiResponseAssertionsApplyOncePerExecution) {
         pm.environment.set('same', String(first === second));
         second.expect(pm.response).to.have.status(200);
     )JS",
-      request, response, env);
+    request, response, env);
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["same"].value, "true");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
@@ -9724,7 +9724,7 @@ TEST_F (ScriptEngineTest, RequireShelfAjvInsidePmTest) {
             pm.expect(validate(pm.response.json()), JSON.stringify(validate.errors)).to.be.true;
         });
     )JS",
-       request, response, env);
+    request, response, env);
 
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message, "");

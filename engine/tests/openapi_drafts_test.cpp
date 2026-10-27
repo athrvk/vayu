@@ -109,8 +109,8 @@ json as_json (const SpecRequestDraft& draft) {
     out["params"]      = rows_of (draft.draft.params);
     out["headers"]     = rows_of (draft.draft.headers);
     out["body"]        = { { "mode", draft.draft.body.mode },
-               { "content", draft.draft.body.content },
-               { "fields", rows_of (draft.draft.body.fields) } };
+        { "content", draft.draft.body.content },
+        { "fields", rows_of (draft.draft.body.fields) } };
     out["examples"]    = examples_of (draft.draft.examples);
     return out;
 }

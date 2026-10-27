@@ -678,7 +678,7 @@ TEST (ScenarioDataUrlTest, ABoundValueIsEncodedByTheSetOfItsComponent) {
     "http://{{data.host}}/u/{{data.name}}?q={{data.q}}#{{data.f}}");
 
     const json row    = { { "host", "BÜcher.de" }, { "name", "John Doe{}" },
-           { "q", "a b{}" }, { "f", "c d`" } };
+        { "q", "a b{}" }, { "f", "c d`" } };
     const auto result = bind_data_row (request, row, 0);
 
     ASSERT_TRUE (result.ok) << result.error;

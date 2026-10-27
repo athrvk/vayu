@@ -130,8 +130,8 @@ std::string_view cert_path,
 bool is_create) {
     const auto seed = [&] () {
         const auto sniffed = vayu::http::sniff_client_cert_format (cert_path);
-        out                = sniffed ? vayu::http::to_string (*sniffed) :
-                                       vayu::http::to_string (vayu::http::ClientCertFormat::Pem);
+        out = sniffed ? vayu::http::to_string (*sniffed) :
+                        vayu::http::to_string (vayu::http::ClientCertFormat::Pem);
     };
     if (!json.contains ("certFormat")) {
         if (is_create) {

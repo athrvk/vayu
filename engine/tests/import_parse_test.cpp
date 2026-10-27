@@ -144,8 +144,8 @@ json skip_counts (const json& skipped) {
     for (const json& entry : skipped) {
         const std::string kind = entry.at ("kind").get<std::string> ();
         counts[kind]           = counts.contains (kind) ?
-                  counts[kind].get<int> () + entry.at ("count").get<int> () :
-                  entry.at ("count").get<int> ();
+        counts[kind].get<int> () + entry.at ("count").get<int> () :
+        entry.at ("count").get<int> ();
     }
     return counts;
 }
@@ -1784,10 +1784,10 @@ TEST (PostmanImport, ARawBodyOfAHundredThousandMembersIsSniffedInLinearTime) {
     const json document   = {
         { "info", { { "schema", POSTMAN_SCHEMA } } },
         { "item",
-          json::array ({ { { "name", "R" },
-          { "request",
-          { { "method", "POST" }, { "url", "https://x.com" },
-          { "body", { { "mode", "raw" }, { "raw", raw } } } } } } }) },
+        json::array ({ { { "name", "R" },
+        { "request",
+        { { "method", "POST" }, { "url", "https://x.com" },
+        { "body", { { "mode", "raw" }, { "raw", raw } } } } } } }) },
     };
     const std::string text = document.dump ();
 
@@ -1810,12 +1810,12 @@ TEST (PostmanImport, AGraphqlVariablesPaneOfAHundredThousandMembersIsReadInLinea
     const json document         = {
         { "info", { { "schema", POSTMAN_SCHEMA } } },
         { "item",
-                json::array ({ { { "name", "R" },
-                { "request",
-                { { "method", "POST" }, { "url", "https://x.com" },
-                { "body",
-                { { "mode", "graphql" },
-                { "graphql", { { "query", "{ me }" }, { "variables", variables } } } } } } } } }) },
+        json::array ({ { { "name", "R" },
+        { "request",
+        { { "method", "POST" }, { "url", "https://x.com" },
+        { "body",
+        { { "mode", "graphql" },
+        { "graphql", { { "query", "{ me }" }, { "variables", variables } } } } } } } } }) },
     };
     const std::string text = document.dump ();
 
@@ -1844,10 +1844,10 @@ TEST (InsomniaImport, AGraphqlBodyOfAHundredThousandMembersIsSniffedInLinearTime
         { "_type", "export" },
         { "__export_format", 4 },
         { "resources",
-           json::array ({ { { "_id", "wrk" }, { "_type", "workspace" }, { "name", "W" } },
-           { { "_id", "req" }, { "_type", "request" }, { "parentId", "wrk" },
-           { "name", "G" }, { "method", "POST" }, { "url", "https://x.com/g" },
-           { "body", { { "mimeType", "application/graphql" }, { "text", text } } } } }) },
+        json::array ({ { { "_id", "wrk" }, { "_type", "workspace" }, { "name", "W" } },
+        { { "_id", "req" }, { "_type", "request" }, { "parentId", "wrk" },
+        { "name", "G" }, { "method", "POST" }, { "url", "https://x.com/g" },
+        { "body", { { "mimeType", "application/graphql" }, { "text", text } } } } }) },
     };
     const std::string source = document.dump ();
 
@@ -2836,18 +2836,18 @@ TEST (PostmanImport, ReadsAStringRequestHeaderTheWayPostmanParsesIt) {
     R"(Hawk id="dh37fgj492je", ts="1353832234", nonce="j4h3g2", )"
     R"(ext="some-app-ext-data", mac="6R4rV5iE+NPoym+WwjeHzjAGXUtLNIxmo1vpMofpLAE=")";
     const json document      = { { "info", { { "schema", POSTMAN_SCHEMA } } },
-             { "item",
-             json::array ({ header_request ("Crlf",
-                            "Authorization: " + hawk +
-                            "\r\nContent-Type: application/json\r\n"
-                                 "X-Folded: one\r\n  two\r\n\tthree\r\n"
-                                 "no colon here\r\n"
-                                 "\r\n"
-                                 " Indented: skipped\r\n"
-                                 "Spaced : skipped\r\n"
-                                 "Empty:\r\n"
-                                 "X-Time:   12:30:45  \r\n"),
-             header_request ("Lf", "A: 1\nB:{{ token }}\n") }) } };
+        { "item",
+        json::array ({ header_request ("Crlf",
+                       "Authorization: " + hawk +
+                       "\r\nContent-Type: application/json\r\n"
+                       "X-Folded: one\r\n  two\r\n\tthree\r\n"
+                       "no colon here\r\n"
+                       "\r\n"
+                       " Indented: skipped\r\n"
+                       "Spaced : skipped\r\n"
+                       "Empty:\r\n"
+                       "X-Time:   12:30:45  \r\n"),
+        header_request ("Lf", "A: 1\nB:{{ token }}\n") }) } };
     const ImportParse parsed = parse_import (document.dump (), {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& requests = parsed.result.at ("collections")[0].at ("requests");
@@ -3734,20 +3734,20 @@ json body_on_get_names (const std::string& top_level, const std::vector<std::str
 TEST (PostmanImport, CountsAGetOrHeadThatCarriesABodyPostmanWouldPrune) {
     const std::string raw = R"({"mode":"raw","raw":"blahblah"})";
     const json names      = body_on_get_names ("",
-         { postman_item_text ("201", "GET", raw), postman_item_text ("Head", "HEAD", raw),
-         postman_item_text ("Lowercase", "get", raw),
-         postman_item_text ("Urlencoded", "GET",
-         R"({"mode":"urlencoded","urlencoded":[{"key":"off","value":"1","disabled":true},{"key":"a","value":"1"}]})"),
-         postman_item_text ("Formdata", "GET",
-         R"({"mode":"formdata","formdata":[{"key":"f","type":"file","src":"/tmp/a.bin"}]})"),
-         postman_item_text ("Graphql", "GET",
-         R"({"mode":"graphql","graphql":{"query":"{ me { id } }","variables":""}})"),
-         postman_item_text ("File", "GET", R"({"mode":"file","file":{"src":"/tmp/a.bin"}})"),
-         postman_item_text ("FalseSetting", "GET", raw, R"({"disableBodyPruning":false})"),
-         postman_item_text ("NotABoolean", "GET", raw, R"({"disableBodyPruning":"true"})"),
-         // The shape of the real collection's request "201": no `method` key,
-         // which Postman and `to_method` both read as GET.
-         R"({"name":"NoMethod","request":{"body":{"mode":"raw","raw":"blahblah"},"url":"https://x.com"}})" });
+    { postman_item_text ("201", "GET", raw), postman_item_text ("Head", "HEAD", raw),
+    postman_item_text ("Lowercase", "get", raw),
+    postman_item_text ("Urlencoded", "GET",
+    R"({"mode":"urlencoded","urlencoded":[{"key":"off","value":"1","disabled":true},{"key":"a","value":"1"}]})"),
+    postman_item_text ("Formdata", "GET",
+    R"({"mode":"formdata","formdata":[{"key":"f","type":"file","src":"/tmp/a.bin"}]})"),
+    postman_item_text ("Graphql", "GET",
+    R"({"mode":"graphql","graphql":{"query":"{ me { id } }","variables":""}})"),
+    postman_item_text ("File", "GET", R"({"mode":"file","file":{"src":"/tmp/a.bin"}})"),
+    postman_item_text ("FalseSetting", "GET", raw, R"({"disableBodyPruning":false})"),
+    postman_item_text ("NotABoolean", "GET", raw, R"({"disableBodyPruning":"true"})"),
+    // The shape of the real collection's request "201": no `method` key,
+    // which Postman and `to_method` both read as GET.
+    R"({"name":"NoMethod","request":{"body":{"mode":"raw","raw":"blahblah"},"url":"https://x.com"}})" });
     EXPECT_EQ (names,
     json::array ({ "201", "Head", "Lowercase", "Urlencoded", "Formdata",
     "Graphql", "File", "FalseSetting", "NotABoolean", "NoMethod" }));
@@ -3756,20 +3756,20 @@ TEST (PostmanImport, CountsAGetOrHeadThatCarriesABodyPostmanWouldPrune) {
 TEST (PostmanImport, DoesNotCountABodyPostmanSendsOrVayuDoesNot) {
     const std::string raw = R"({"mode":"raw","raw":"blahblah"})";
     const json names      = body_on_get_names ("",
-         { postman_item_text ("Post", "POST", raw),
-         postman_item_text ("Put", "PUT", raw), postman_item_text ("NoBody", "GET", ""),
-         postman_item_text ("EmptyRaw", "GET", R"({"mode":"raw","raw":""})"),
-         postman_item_text ("ModeNone", "GET", R"({"mode":"none"})"),
-         postman_item_text ("Disabled", "GET", R"({"mode":"raw","raw":"x","disabled":true})"),
-         postman_item_text ("OnlyDisabledFields", "GET",
-         R"({"mode":"urlencoded","urlencoded":[{"key":"a","value":"1","disabled":true}]})"),
-         postman_item_text ("NoFields", "GET", R"({"mode":"formdata","formdata":[]})"),
-         // Postman's unselected file body; Vayu refuses to send one (#2540).
-         postman_item_text ("FileNoSrc", "GET", R"({"mode":"file","file":{"src":null}})"),
-         postman_item_text ("FileEmptySrc", "GET", R"({"mode":"file","file":{"src":""}})"),
-         postman_item_text ("FileNoMember", "GET", R"({"mode":"file"})"),
-         postman_item_text ("OptedOut", "GET", raw, R"({"disableBodyPruning":true})"),
-         postman_item_text ("Verb", "PROPFIND", raw) });
+    { postman_item_text ("Post", "POST", raw),
+    postman_item_text ("Put", "PUT", raw), postman_item_text ("NoBody", "GET", ""),
+    postman_item_text ("EmptyRaw", "GET", R"({"mode":"raw","raw":""})"),
+    postman_item_text ("ModeNone", "GET", R"({"mode":"none"})"),
+    postman_item_text ("Disabled", "GET", R"({"mode":"raw","raw":"x","disabled":true})"),
+    postman_item_text ("OnlyDisabledFields", "GET",
+    R"({"mode":"urlencoded","urlencoded":[{"key":"a","value":"1","disabled":true}]})"),
+    postman_item_text ("NoFields", "GET", R"({"mode":"formdata","formdata":[]})"),
+    // Postman's unselected file body; Vayu refuses to send one (#2540).
+    postman_item_text ("FileNoSrc", "GET", R"({"mode":"file","file":{"src":null}})"),
+    postman_item_text ("FileEmptySrc", "GET", R"({"mode":"file","file":{"src":""}})"),
+    postman_item_text ("FileNoMember", "GET", R"({"mode":"file"})"),
+    postman_item_text ("OptedOut", "GET", raw, R"({"disableBodyPruning":true})"),
+    postman_item_text ("Verb", "PROPFIND", raw) });
     EXPECT_EQ (names, json::array ());
 }
 
@@ -3794,9 +3794,9 @@ TEST (PostmanImport, ABodyPruningOptOutIsResolvedThroughFoldersNearestWinning) {
 TEST (PostmanImport, AFolderBodyPruningOptOutDoesNotReachItsSiblings) {
     const std::string raw = R"({"mode":"raw","raw":"blahblah"})";
     const json names      = body_on_get_names ("",
-         { postman_folder_text ("Opted", R"({"disableBodyPruning":true})",
-           { postman_item_text ("Inside", "GET", raw) }),
-         postman_item_text ("Outside", "GET", raw) });
+    { postman_folder_text ("Opted", R"({"disableBodyPruning":true})",
+      { postman_item_text ("Inside", "GET", raw) }),
+    postman_item_text ("Outside", "GET", raw) });
     EXPECT_EQ (names, json::array ({ "Outside" }));
 }
 

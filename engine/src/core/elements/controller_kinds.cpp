@@ -434,20 +434,20 @@ ElementKind make_control_throughput_kind () {
     kind.config_schema         = {
         { "type", "object" },
         { "properties",
-                { { "percent",
-                  { { "type", "number" }, { "minimum", 0 }, { "maximum", 100 },
-                  { "title", "Percent" }, { "x-vayu-unit", "%" },
-                  { "description",
-                  "Runs this share of occurrences, decided on the producer's "
-                          "own counter." } } },
-                { "everyN",
-                { { "type", "integer" }, { "minimum", 1 }, { "title", "Every Nth" },
-                { "description", "Runs only every Nth occurrence." } } },
-                { "perUser",
-                { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
-                { "description",
-                "Counts occurrences per virtual user instead of sharing "
-                        "one counter across all of them." } } } } },
+        { { "percent",
+          { { "type", "number" }, { "minimum", 0 }, { "maximum", 100 },
+          { "title", "Percent" }, { "x-vayu-unit", "%" },
+          { "description",
+          "Runs this share of occurrences, decided on the producer's "
+          "own counter." } } },
+        { "everyN",
+        { { "type", "integer" }, { "minimum", 1 }, { "title", "Every Nth" },
+        { "description", "Runs only every Nth occurrence." } } },
+        { "perUser",
+        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { "description",
+        "Counts occurrences per virtual user instead of sharing "
+        "one counter across all of them." } } } } },
         { "additionalProperties", false },
     };
     return kind;
