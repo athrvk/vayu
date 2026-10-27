@@ -417,6 +417,28 @@ std::string query_plan_of (const std::string& sql) {
     return plan;
 }
 
+/// The `CREATE INDEX` text SQLite stored for @p name, empty when it has none.
+std::string index_ddl_of (const std::string& name) {
+    sqlite3* handle = nullptr;
+    std::string ddl;
+    if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "could not open " << TEST_DB_PATH;
+        sqlite3_close (handle);
+        return ddl;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+        -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text (stmt, 1, name.c_str (), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step (stmt) == SQLITE_ROW) {
+            ddl = column_text (stmt, 0);
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return ddl;
+}
+
 // The listing reaches the stamped requests through `idx_requests_deleted_at`
 // rather than walking every request row, whose overflow pages hold a large
 // body, to find the few that are stamped (#3006). The statement is the one the
@@ -450,6 +472,12 @@ TEST_F (TrashListingCostTest, ListingTheStampedRequestsSearchesTheDeletedAtIndex
     const std::string plan = query_plan_of (request_selects.front ());
     EXPECT_TRUE (plan.contains ("USING INDEX idx_requests_deleted_at")) << plan;
     EXPECT_FALSE (plan.contains ("SCAN")) << plan;
+
+    // Partial is the point: a full index would hold an entry per live request.
+    // Mutation check: drop the `where (...)` from the index and this fails.
+    const std::string ddl = index_ddl_of ("idx_requests_deleted_at");
+    EXPECT_TRUE (ddl.contains ("WHERE")) << ddl;
+    EXPECT_TRUE (ddl.contains ("IS NOT NULL")) << ddl;
 }
 
 // The listing and a restore count one cohort the same way, from the same
