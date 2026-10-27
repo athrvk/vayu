@@ -334,7 +334,7 @@ whatever their stamp, so a trashed example never outlives its request.
 one row, it hangs under nothing, and it is always a trash root, named by its
 `host` or `host:port`. Both registry reads filter the stamp out, and the
 transport policy every send resolves is built from them, so a trashed
-certificate is presented to no host from the delete on. Its restore can be
+certificate is presented to no host by any send or run that starts after the delete. Its restore can be
 refused for one reason: the registry holds one entry per host and port, so a
 live entry that has taken the target since the delete makes the restore a `409`
 naming it. The row keeps its plaintext passphrase until a purge, explicit or by

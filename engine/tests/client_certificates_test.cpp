@@ -1007,6 +1007,8 @@ TEST_F (ClientCertificateDbTest, DeletingAMissingEntryIs404) {
 
 // The trashed row no longer claims its target, so a fresh entry may take it;
 // bringing the trashed one back is then the restore's 409 (`trash_test.cpp`).
+// Mutation check: drop the `is_null (deleted_at)` filter in
+// `client_certificate_for_target` and the fresh create answers 409.
 TEST_F (ClientCertificateDbTest, ATrashedEntryNoLongerHoldsItsTarget) {
     const auto [status, created] =
     routes::create_client_certificate_response (*db_, body ("api.example.com", 8443));

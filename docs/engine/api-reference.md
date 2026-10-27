@@ -2250,7 +2250,7 @@ A client certificate hangs under nothing, like an environment: its delete
 stamps its one row and it is always a root, named by its target (`host`, or
 `host:port` when the entry names a port). **A trashed certificate is never
 presented.** The transport policy every send resolves reads live entries only,
-so from the delete on no design send, stream, collection run or load run offers
+so from the delete on no new design send, stream, collection run or load run offers
 it to its host, and the target is free for a new entry. That is also why a
 restore can be refused: the registry holds one entry per host and port, so
 restoring a certificate while a live entry claims its target is a `409` naming
