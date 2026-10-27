@@ -449,7 +449,8 @@ The project uses GitHub Actions for automated builds:
   some runs and not others. A `Script lint` step refuses the moving label, so
   moving to a new release is a pull request of its own (#2633 for 26.04).
   Where the release's glibc floor needs 22.04, the job runs in the
-  `ubuntu:22.04` container on an `ubuntu-24.04` runner (see
+  `vayu-linux-build` container (Ubuntu 22.04 with GCC 13) on an
+  `ubuntu-24.04` runner (see
   [the release baseline](engine/building.md#the-release-is-built-on-the-oldest-supported-ubuntu-lts)).
 
 These workflows use the same CMakePresets as local development for consistency.

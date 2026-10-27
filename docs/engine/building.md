@@ -773,16 +773,17 @@ So the release's Linux leg builds on **Ubuntu 22.04**, the oldest LTS still in
 standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
 21, Debian 12, Fedora 36 or later.
 
-The 22.04 userland comes from the **`ubuntu:22.04` container image**, run on an
-`ubuntu-24.04` runner (`container: ubuntu:22.04` on the job), not from the
+The 22.04 userland comes from the **`vayu-linux-build` container image**
+(`ghcr.io/athrvk/vayu-linux-build`, built from `.github/linux-build/Dockerfile`
+on `ubuntu:22.04`), run on an `ubuntu-24.04` runner, not from the
 `ubuntu-22.04` runner image, which GitHub removes on 2027-04-17 (#2634). The
 floor is the image's glibc, so it is unchanged; only where the userland comes
 from moved. The matrix labels that leg `container-ubuntu-22.04`, and the steps
-that belong to it alone gate on `matrix.container`. A bare image has none of
-the runner image's tools, so the leg installs `git` and `zstd` before checkout
-(`actions/cache` versions an entry by its compression, so a gzip-only job
-misses what a zstd job saved), the toolchain action installs the rest, and
-CMake and Ninja are the copies vcpkg pins at `VCPKG_COMMIT` (`vcpkg fetch`).
+that belong to it alone gate on `matrix.container`. A bare `ubuntu:22.04` has
+none of the runner image's tools, so the image carries them, including `git`
+and `zstd` for the steps before checkout (`actions/cache` versions an entry by
+its compression, so a gzip-only job misses what a zstd job saved), and CMake
+and Ninja are the copies vcpkg pins at `VCPKG_COMMIT` (`vcpkg fetch`).
 Inside a container job the runner rewrites a value that starts with the host
 workspace path to the mounted one (`/__w`), in `with:` inputs and env values
 alike. A value that only contains the path is left alone, so
@@ -797,11 +798,11 @@ it with `mksquashfs` and prepends the runtime, and never runs an AppImage.
 
 Four pieces hold the floor:
 
-- **`.github/actions/linux-release-toolchain`** installs the build tools the
-  bare image lacks and GCC 13 from the Ubuntu toolchain PPA (22.04 ships GCC
-  12, which cannot build C++23 here), and exports GCC 13 as `CC`/`CXX`, so
-  vcpkg's ports and the engine are built by the same compiler. It runs as root
-  in the container, where there is no `sudo`, and through `sudo` elsewhere.
+- **`.github/actions/linux-release-toolchain`** checks the job runs in the
+  image and exports its GCC 13 (22.04 ships GCC 12, which cannot build C++23
+  here) as `CC`/`CXX`, so vcpkg's ports and the engine are built by the same
+  compiler. It installs nothing: a missing `g++-13` fails the step naming the
+  image, rather than fetching the compiler.
   `release.yml` uses it, `cache-warm.yml` warms the caches with it, and
   `pr-tests.yml` runs it as the `container-ubuntu-22.04` engine leg on every
   engine pull request, so a break surfaces there rather than on a tag. It
@@ -836,6 +837,21 @@ Four pieces hold the floor:
   changes no ABI costs nothing; the guard in `cache-warm.yml` requires the
   toolchain step beside every key line.
 
+GCC 13 comes from the Ubuntu toolchain PPA on Launchpad, which answers 5xx now
+and then, so it is installed once, into the image, and never by a job. The
+image workflow (`.github/workflows/linux-build-image.yml`) runs when the
+Dockerfile changes, or by hand from the Actions tab, and publishes
+`ghcr.io/athrvk/vayu-linux-build:<date>-<sha>`. To change the toolchain:
+
+1. Edit `.github/linux-build/Dockerfile` and merge. The workflow's job summary
+   prints the new digest (`ghcr.io/athrvk/vayu-linux-build@sha256:...`). The
+   package must stay public so jobs pull it without credentials.
+2. Put that digest in `container:` in `release.yml`, `pr-tests.yml` and
+   `cache-warm.yml` (the Linux build leg of each), in one pull request. The
+   pull request's glibc leg is the proof the new image holds the floor.
+
+The jobs pin the digest, not a tag, so a rebuilt image is a reviewed change.
+
 To check a local build the same way:
 
 ```bash
@@ -846,9 +862,9 @@ A build on a newer distribution fails the glibc half of that by design; only
 the release baseline has a floor to hold.
 
 Raising the floor is a user-visible support change. When 22.04 leaves standard
-support (April 2027), move the three workflows' container image and its
-`container-ubuntu-*` label, the version check in the toolchain action and the
-script's default floor together, and update the supported-platform lines in
+support (April 2027), move the Dockerfile's base image, the three workflows'
+image digest and `container-ubuntu-*` label, the version check in the
+toolchain action and the script's default floor together, and update the supported-platform lines in
 `README.md` and `docs/index.md`; `cache-warm.yml`'s guard fails if the warmed
 labels and `release.yml`'s drift apart.
 

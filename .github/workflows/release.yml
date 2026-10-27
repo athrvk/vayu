@@ -66,7 +66,7 @@ jobs:
         # 22.04 ("version `GLIBC_2.38' not found"). The toolchain step and the
         # glibc check below hold it there; cache-warm.yml warms the same image.
         #
-        # The 22.04 userland is the `ubuntu:22.04` container on an ubuntu-24.04
+        # The 22.04 userland is the `vayu-linux-build` container on an ubuntu-24.04
         # runner, because the ubuntu-22.04 runner image is removed on
         # 2027-04-17 (#2634). `os` is the leg's label and the vcpkg cache key's
         # image component, so it names the container rather than the runner.
@@ -78,7 +78,7 @@ jobs:
         include:
           - os: container-ubuntu-22.04
             runner: ubuntu-24.04
-            container: ubuntu:22.04
+            container: ghcr.io/athrvk/vayu-linux-build@sha256:4832fdf1f5e92e75f0bb5696e167755d6fd6ec8b67685b6794f6d142ccde40e7
             preset: linux-prod
           - os: windows-latest
             preset: windows-prod
@@ -87,18 +87,6 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      # The bare container has neither. Without git, actions/checkout
-      # downloads a tarball with no repository behind it. Without zstd,
-      # actions/cache compresses with gzip, and it versions an entry by its
-      # compression, so every container job must have zstd before its first
-      # cache step or it misses what another one saved. Everything else the
-      # Linux leg needs is installed by the toolchain action below.
-      - name: Install git and zstd (container)
-        if: matrix.container
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
