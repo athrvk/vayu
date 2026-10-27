@@ -306,6 +306,16 @@ TEST_F (ResponseAssertionTest, JsonBodyRefusesAPathThatIsNotAString) {
 constexpr const char* ID_SCHEMA =
 R"({ type: "object", required: ["id"], properties: { id: { type: "integer" } } })";
 
+// #3016: a schema that loops without reaching a value used to kill the engine.
+TEST_F (ResponseAssertionTest, JsonSchemaRefusesASchemaThatReferencesItself) {
+    const std::string loop =
+    R"({ $ref: "#/components/schemas/A", components: { schemas: { A: { $ref: "#/components/schemas/A" } } } })";
+    expect_type_error ("pm.response.to.have.jsonSchema(" + loop + ")",
+    "refers to itself without describing any value");
+    // The engine is still up: a later script still runs.
+    expect_pass ("pm.response.to.have.jsonSchema(" + std::string (ID_SCHEMA) + ")");
+}
+
 TEST_F (ResponseAssertionTest, JsonSchemaOnTheResponseJudgesTheBody) {
     const std::string schema = ID_SCHEMA;
     expect_pass ("pm.response.to.have.jsonSchema(" + schema + ")");

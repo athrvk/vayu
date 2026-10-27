@@ -1196,3 +1196,88 @@ TEST (SchemaValidationHotPathTest, NoValidationIsReachableFromTheCompletionPath)
     EXPECT_EQ (validators,
     (std::vector<std::string>{ "run_manager.cpp", "scenario_runner.cpp", "specs.cpp" }));
 }
+
+// ─── A `$ref` loop that never reaches a value (#3016) ────────────────────────────
+//
+// valijson recurses through such a loop until the stack runs out, so the
+// refusal has to come before it runs: reaching the next assertion at all is
+// the proof the process survived.
+
+namespace {
+
+std::string refusal_of (const std::string& schema_text) {
+    const auto refused =
+    validate_document_against_schema (json::parse (schema_text), json::object ());
+    EXPECT_FALSE (refused.has_value ()) << schema_text;
+    return refused.has_value () ? std::string () : refused.error ();
+}
+
+} // namespace
+
+TEST (SchemaRefLoopTest, ASchemaThatReferencesItselfIsRefusedNamingTheLoop) {
+    const auto reason = refusal_of (
+    R"({"$ref":"#/components/schemas/A","components":{"schemas":{"A":{"$ref":"#/components/schemas/A"}}}})");
+    EXPECT_NE (reason.find ("refers to itself without describing any value"), std::string::npos)
+    << reason;
+    EXPECT_NE (reason.find ("#/components/schemas/A -> #/components/schemas/A"),
+    std::string::npos)
+    << reason;
+}
+
+TEST (SchemaRefLoopTest, ALoopThroughTwoSchemasIsRefused) {
+    const auto reason = refusal_of (
+    R"({"$ref":"#/components/schemas/A","components":{"schemas":{)"
+    R"("A":{"$ref":"#/components/schemas/B"},"B":{"$ref":"#/components/schemas/A"}}}})");
+    EXPECT_NE (
+    reason.find ("#/components/schemas/A -> #/components/schemas/B -> "
+                 "#/components/schemas/A"),
+    std::string::npos)
+    << reason;
+}
+
+TEST (SchemaRefLoopTest, ALoopThroughACombinatorIsRefused) {
+    for (const char* keyword : { "allOf", "anyOf", "oneOf" }) {
+        const std::string schema =
+        std::string (R"({"$ref":"#/components/schemas/A","components":{"schemas":{"A":{")") +
+        keyword + R"(":[{"$ref":"#/components/schemas/A"}]}}}})";
+        EXPECT_NE (refusal_of (schema).find ("without describing any value"), std::string::npos)
+        << keyword;
+    }
+    for (const char* keyword : { "not", "if", "then", "else" }) {
+        const std::string schema =
+        std::string (R"({"$ref":"#/components/schemas/A","components":{"schemas":{"A":{")") +
+        keyword + R"(":{"$ref":"#/components/schemas/A"}}}}})";
+        EXPECT_NE (refusal_of (schema).find ("without describing any value"), std::string::npos)
+        << keyword;
+    }
+}
+
+TEST (SchemaRefLoopTest, ARootThatReferencesItselfIsRefused) {
+    EXPECT_NE (refusal_of (R"({"$ref":"#"})").find ("# -> #"), std::string::npos);
+}
+
+TEST (SchemaRefLoopTest, ALoopThatStepsIntoAPropertyStillValidates) {
+    constexpr const char* TREE =
+    R"({"$ref":"#/components/schemas/N","components":{"schemas":{"N":{"type":"object",)"
+    R"("properties":{"child":{"$ref":"#/components/schemas/N"},"v":{"type":"integer"}}}}}})";
+    expect_accepted (TREE, R"({"v":1,"child":{"v":2,"child":{"v":3}}})");
+    expect_rejected (TREE, R"({"v":1,"child":{"v":"x"}})");
+}
+
+TEST (SchemaRefLoopTest, ALoopThatStepsIntoAnItemStillValidates) {
+    constexpr const char* NESTED =
+    R"({"$ref":"#/components/schemas/L","components":{"schemas":{"L":{"type":"array",)"
+    R"("items":{"anyOf":[{"type":"integer"},{"$ref":"#/components/schemas/L"}]}}}}})";
+    expect_accepted (NESTED, "[1,[2,[3]]]");
+    expect_rejected (NESTED, R"([1,["x"]])");
+}
+
+TEST (SchemaRefLoopTest, ARefLoopInABoundSpecLeavesTheResponseUnchecked) {
+    const json schema = json::parse (R"({"$ref":"#/components/schemas/A"})");
+    const json roots  = json::parse (
+    R"({"components":{"schemas":{"A":{"$ref":"#/components/schemas/A"}}}})");
+    const auto verdict = validate_body_against_schema (schema, roots, json::object ());
+    EXPECT_FALSE (verdict.checked);
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::NoIndex);
+}

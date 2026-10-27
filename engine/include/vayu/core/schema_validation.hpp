@@ -68,6 +68,15 @@
  * location and a description per failure, and collects every failure in one
  * pass rather than throwing at the first.
  *
+ * ### A schema that loops without reaching a value
+ *
+ * A recursive schema is a pointer that resolves, but a loop through `$ref` and
+ * the keywords that apply to the same value (`allOf`, `anyOf`, `oneOf`, `not`,
+ * `if`/`then`/`else`, `dependencies`) never reaches one, and valijson recurses
+ * through it until the stack runs out. `run_validator` refuses such a schema
+ * first, iteratively, with the reason; a loop through `properties` or `items`
+ * is a tree node and still validates.
+ *
  * ### Dialect honesty
  *
  * The validator targets **draft-07**. OpenAPI 3.0's dialect normalises into it
