@@ -374,6 +374,12 @@ Notes on the edges:
   `allOf` member, a `$ref` target, ...) is not, because valijson builds it from
   its parent's node path and so never runs its own subschema (#2729), where
   ajv does evaluate it.
+  A schema that refers to itself without describing any value (`A` is
+  `{ "$ref": "#/components/schemas/A" }`, or loops through `allOf`, `anyOf`,
+  `oneOf`, `not` or `if`) is refused: `jsonSchema` throws a `TypeError` that
+  names the loop, as it does for any schema the validator cannot read. The validator would otherwise recurse until the engine
+  died. A recursive schema that steps into a property or an item (a tree node)
+  is fine.
   `options` is ajv's and is accepted and not read. `format` is checked for
   `date`, `time`, `date-time`, `ipv4`, `email`, `uri`, `uuid`, `hostname` and
   `ipv6`; any other name (`uri-reference`, `int64`, ...) is an annotation and

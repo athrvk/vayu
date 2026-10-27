@@ -7797,7 +7797,7 @@ on such a schema, as it does for any unevaluated keyword.
 | Code | What happened |
 |---|---|
 | `no_operation` | The request carries no `spec_operation` - it is not an operation |
-| `no_index` | The bound document carries no response schemas, or its schema could not be read |
+| `no_index` | The bound document carries no response schemas, or its schema could not be read (including one that refers to itself without describing any value, which is refused before it can run) |
 | `hash_mismatch` | The stored document no longer hashes to what the binding recorded |
 | `never_stamped` | The binding names a document and no version of it, so nothing can be compared - re-bind the collection. Distinct from `hash_mismatch` because a sync of an unchanged document would not repair it |
 | `operation_not_declared` | The document does not declare this identity |

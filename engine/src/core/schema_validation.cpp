@@ -24,7 +24,9 @@
 #include <algorithm>
 #include <format>
 #include <map>
+#include <optional>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
@@ -449,6 +451,152 @@ void walk_schema (const nlohmann::json& schema, const nlohmann::json& root, Visi
     }
 }
 
+/// A subschema that applies to the same value as the one that reaches it.
+struct SameValueFrame {
+    const nlohmann::json* schema;
+    nlohmann::json::json_pointer pointer;
+};
+
+/// Where a keyword holds one subschema that applies to the value the keyword
+/// sits on, not to a child of it.
+const std::vector<std::string>& same_value_keys () {
+    static const std::vector<std::string> keys = { "not", "if", "then", "else" };
+    return keys;
+}
+
+/// The combinators: lists of subschemas that each apply to the same value.
+/// `prefixItems` is not one, it steps into array items.
+const std::vector<std::string>& same_value_list_keys () {
+    static const std::vector<std::string> keys = { "allOf", "anyOf", "oneOf" };
+    return keys;
+}
+
+/// Where a map of subschemas applies to the same value as the map's owner.
+const std::vector<std::string>& same_value_map_keys () {
+    static const std::vector<std::string> keys = { "dependencies", "dependentSchemas" };
+    return keys;
+}
+
+void add_ref_edge (const nlohmann::json& schema,
+const nlohmann::json& root,
+std::vector<SameValueFrame>& edges) {
+    auto ref = schema.find ("$ref");
+    if (ref == schema.end () || !ref->is_string ()) {
+        return;
+    }
+    const auto text = ref->get<std::string> ();
+    if (const nlohmann::json* target = resolve_pointer (root, text)) {
+        edges.push_back ({ target, nlohmann::json::json_pointer (text.substr (1)) });
+    }
+}
+
+void add_list_edges (const nlohmann::json& schema,
+const nlohmann::json::json_pointer& at,
+std::vector<SameValueFrame>& edges) {
+    for (const auto& key : same_value_list_keys ()) {
+        auto found = schema.find (key);
+        if (found == schema.end () || !found->is_array ()) {
+            continue;
+        }
+        for (size_t index = 0; index < found->size (); ++index) {
+            edges.push_back ({ &(*found)[index], at / key / index });
+        }
+    }
+}
+
+void add_map_edges (const nlohmann::json& schema,
+const nlohmann::json::json_pointer& at,
+std::vector<SameValueFrame>& edges) {
+    for (const auto& key : same_value_map_keys ()) {
+        auto found = schema.find (key);
+        if (found == schema.end () || !found->is_object ()) {
+            continue;
+        }
+        for (const auto& [name, child] : found->items ()) {
+            if (child.is_object ()) {
+                edges.push_back ({ &child, at / key / name });
+            }
+        }
+    }
+}
+
+/// The subschemas that apply to the very same value as @p schema does: `$ref`
+/// and the combinators, and not `properties`, `items` and the rest, which step
+/// to a child value.
+std::vector<SameValueFrame> same_value_edges (const nlohmann::json& schema,
+const nlohmann::json::json_pointer& at,
+const nlohmann::json& root) {
+    std::vector<SameValueFrame> edges;
+    if (!schema.is_object ()) {
+        return edges;
+    }
+    add_ref_edge (schema, root, edges);
+    for (const auto& key : same_value_keys ()) {
+        if (auto found = schema.find (key); found != schema.end () && found->is_object ()) {
+            edges.push_back ({ &*found, at / key });
+        }
+    }
+    add_list_edges (schema, at, edges);
+    add_map_edges (schema, at, edges);
+    return edges;
+}
+
+/**
+ * The locations of a cycle in which every step applies to the same value, or
+ * nothing when there is none.
+ *
+ * Following such a cycle never reaches a value, so valijson recurses through it
+ * until the stack runs out and the engine dies, which no `catch` stops. A cycle
+ * through a keyword that steps into a child (a tree node's `properties`) is a
+ * legitimate recursive schema and is not one of these.
+ *
+ * Iterative, with the same node budget as `walk_schema`, so the check itself
+ * cannot overflow on the schema it is guarding against.
+ */
+std::optional<std::vector<std::string>> find_same_value_cycle (const nlohmann::json& root) {
+    struct Open {
+        std::string at;
+        std::vector<SameValueFrame> edges;
+        size_t next = 0;
+    };
+    constexpr int ON_PATH = 1;
+    constexpr int DONE    = 2;
+    std::unordered_map<std::string, int> state;
+    std::vector<Open> path;
+
+    const nlohmann::json::json_pointer top;
+    state[top.to_string ()] = ON_PATH;
+    path.push_back ({ top.to_string (), same_value_edges (root, top, root), 0 });
+    size_t visited = 1;
+
+    while (!path.empty () && visited < limits::MAX_SCHEMA_NODES) {
+        if (path.back ().next == path.back ().edges.size ()) {
+            state[path.back ().at] = DONE;
+            path.pop_back ();
+            continue;
+        }
+        SameValueFrame edge = std::move (path.back ().edges[path.back ().next++]);
+        const std::string at         = edge.pointer.to_string ();
+        const auto [entry, inserted] = state.try_emplace (at, ON_PATH);
+        if (!inserted) {
+            if (entry->second != ON_PATH) {
+                continue;
+            }
+            std::vector<std::string> loop;
+            const auto start = std::find_if (path.begin (), path.end (),
+            [&] (const Open& open) { return open.at == at; });
+            for (auto it = start; it != path.end (); ++it) {
+                loop.push_back ("#" + it->at);
+            }
+            loop.push_back ("#" + at);
+            return loop;
+        }
+        ++visited;
+        path.push_back ({ at, same_value_edges (*edge.schema, edge.pointer, root), 0 });
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 std::vector<std::pair<std::string, size_t>>
@@ -607,6 +755,17 @@ const nlohmann::json& body) {
     verdict.unevaluated_keywords = collect_unevaluated_keywords (schema, ref_roots);
 
     const nlohmann::json root = validation_root (schema, ref_roots);
+    if (const auto loop = find_same_value_cycle (root)) {
+        std::string named;
+        for (size_t i = 0; i < std::min (loop->size (), MAX_NAMED_SCHEMA_PATHS); ++i) {
+            named += (i == 0 ? "" : " -> ") + (*loop)[i];
+        }
+        if (loop->size () > MAX_NAMED_SCHEMA_PATHS) {
+            named += " -> ...";
+        }
+        return std::unexpected (std::format (
+        "the schema refers to itself without describing any value ({})", named));
+    }
     valijson::Schema parsed;
     valijson::ValidationResults results;
     bool accepted = false;
