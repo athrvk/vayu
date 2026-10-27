@@ -417,22 +417,59 @@ TrashEntry collection_entry (const TrashGraph& graph, const std::string& root_id
     return entry;
 }
 
+/// Whether the row @p entry names is still stamped: one indexed count on its
+/// own kind's table, for a caller that needs the answer and not the entry.
+bool still_trashed (Storage& storage, const TrashEntry& entry) {
+    const std::string& id = entry.id;
+    if (entry.kind == "collection") {
+        return storage.count<Collection> (where (c (&Collection::id) == id &&
+               is_not_null (&Collection::deleted_at))) > 0;
+    }
+    if (entry.kind == "request") {
+        return storage.count<Request> (where (
+               c (&Request::id) == id && is_not_null (&Request::deleted_at))) > 0;
+    }
+    if (entry.kind == "environment") {
+        return storage.count<Environment> (where (c (&Environment::id) == id &&
+               is_not_null (&Environment::deleted_at))) > 0;
+    }
+    if (entry.kind == "example") {
+        return storage.count<RequestExample> (where (c (&RequestExample::id) == id &&
+               is_not_null (&RequestExample::deleted_at))) > 0;
+    }
+    throw std::logic_error (
+    "Trash entry '" + id + "' has unknown kind '" + entry.kind + "'");
+}
+
 } // namespace
 
 std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
     auto& storage = impl_->storage;
 
-    if (storage.count<Collection> (where (
-        c (&Collection::id) == id && is_not_null (&Collection::deleted_at))) > 0) {
-        auto graph = read_collection_graph (storage);
-        const int64_t stamp =
-        vayu::utils::invariant_value (graph.collections.at (id).deleted_at, STAMPED);
-        // Only the cohort's requests can count, so only they are read.
-        for (const auto& collection_id : storage.select (&Request::collection_id,
-             where (c (&Request::deleted_at) == stamp))) {
-            graph.count_stamped_request (collection_id, stamp);
+    // One root, so its subtree is walked through the parent_id and
+    // collection_id indexes rather than read whole the way the listing reads
+    // every root's: a restore, a purge or retention's re-check of one entry
+    // must not cost a scan of either table. `TheListingAndTheRestoreCountTheSameCohort`
+    // holds the two to the same counts.
+    const auto collections = storage.select (
+    columns (&Collection::name, &Collection::parent_id, &Collection::deleted_at),
+    where (c (&Collection::id) == id && is_not_null (&Collection::deleted_at)));
+    if (!collections.empty ()) {
+        const auto& [name, parent_id, deleted_at] = collections.front ();
+        const int64_t stamp = vayu::utils::invariant_value (deleted_at, STAMPED);
+        TrashEntry entry{ id, "collection", name, stamp, parent_id, 0, 0, std::nullopt };
+        // The cohort's counts, as `collection_entry` takes them.
+        for (const auto& descendant_id : collection_subtree_locked (id)) {
+            if (descendant_id != id) {
+                entry.collections +=
+                storage.count<Collection> (where (c (&Collection::id) == descendant_id &&
+                c (&Collection::deleted_at) == stamp));
+            }
+            entry.requests +=
+            storage.count<Request> (where (c (&Request::collection_id) == descendant_id &&
+            c (&Request::deleted_at) == stamp));
         }
-        return collection_entry (graph, id);
+        return entry;
     }
     if (auto entry = first_entry (request_entries (storage,
         where (c (&Request::id) == id && is_not_null (&Request::deleted_at))))) {
@@ -662,8 +699,9 @@ int64_t Database::purge_expired_trash (int retention_days, int64_t now) {
     for (const auto& entry : expired) {
         // A root purged as part of an ancestor's subtree is already gone. It
         // cannot happen to a *root* by construction, but the re-read is what
-        // says so rather than assuming it.
-        if (!trash_entry_locked (entry.id)) {
+        // says so rather than assuming it, with a count rather than a whole
+        // entry: this runs once per expired root before `/health` answers.
+        if (!still_trashed (impl_->storage, entry)) {
             continue;
         }
         purge_trash_entry_locked (entry);
