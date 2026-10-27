@@ -10,7 +10,8 @@
  * @brief What listing the trash reads (#2972): the columns an entry shows and
  *        nothing else, in a number of statements set by the tables the trash
  *        spans rather than by how many folders a trashed root holds; and the
- *        request columns a purge reads to remove a trashed root's examples.
+ *        request columns a purge reads to remove a trashed root's examples; and
+ *        the index the stamped requests are reached through (#3006).
  *
  * Both are observed on the storage's own connection through an auto-extension
  * (`sqlite_auto_extension.hpp`): SQLite's authorizer, which it consults for
@@ -387,6 +388,67 @@ TEST_F (TrashListingCostTest, ListingARootOfThreeHundredFoldersRunsAStatementCou
     ASSERT_FALSE (small.statements.empty ()) << "the trace saw nothing";
     EXPECT_EQ (large.statements.size (), small.statements.size ()) << large.listing ();
     EXPECT_LE (large.statements.size (), TRASH_TABLES) << large.listing ();
+}
+
+/// The plan SQLite chooses for @p sql on a fresh connection to the test
+/// database, one `detail` line per row.
+std::string query_plan_of (const std::string& sql) {
+    sqlite3* handle = nullptr;
+    std::string plan;
+    if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "could not open " << TEST_DB_PATH;
+        sqlite3_close (handle);
+        return plan;
+    }
+    sqlite3_stmt* stmt        = nullptr;
+    const std::string explain = "EXPLAIN QUERY PLAN " + sql;
+    if (sqlite3_prepare_v2 (handle, explain.c_str (), -1, &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << "could not plan " << sql << ": " << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return plan;
+    }
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        plan += column_text (stmt, 3);
+        plan += '\n';
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return plan;
+}
+
+// The listing reaches the stamped requests through `idx_requests_deleted_at`
+// rather than walking every request row, whose overflow pages hold a large
+// body, to find the few that are stamped (#3006). The statement is the one the
+// listing ran, taken from the trace, so a rewrite of its WHERE that the partial
+// index no longer covers fails here too. Mutation check: remove the
+// `idx_requests_deleted_at` line from `make_vayu_storage` and the plan is a
+// SCAN of requests.
+TEST_F (TrashListingCostTest, ListingTheStampedRequestsSearchesTheDeletedAtIndex) {
+    reopen_with_statement_log ();
+    if (HasFatalFailure ()) {
+        return;
+    }
+    make_collection ("col_live");
+    make_request ("req_live", "col_live", std::string (LARGE_BODY_BYTES, 'x'));
+    make_request ("req_trashed", "col_live", std::string (LARGE_BODY_BYTES, 'x'));
+    db_->delete_request ("req_trashed");
+
+    std::vector<TrashEntry> listed;
+    const auto recorded = record ([&] { listed = db_->get_trash (); });
+    ASSERT_EQ (listed.size (), 1U) << recorded.listing ();
+
+    std::vector<std::string> request_selects;
+    for (const auto& sql : recorded.statements) {
+        if (sql.starts_with ("SELECT") && sql.contains ("FROM \"requests\"") &&
+        sql.contains ("\"deleted_at\" IS NOT NULL")) {
+            request_selects.push_back (sql);
+        }
+    }
+    ASSERT_EQ (request_selects.size (), 1U) << recorded.listing ();
+
+    const std::string plan = query_plan_of (request_selects.front ());
+    EXPECT_TRUE (plan.contains ("USING INDEX idx_requests_deleted_at")) << plan;
+    EXPECT_FALSE (plan.contains ("SCAN")) << plan;
 }
 
 // The listing and a restore count one cohort the same way, from the same
