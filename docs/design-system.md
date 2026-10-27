@@ -3609,18 +3609,22 @@ Three shapes, and each has a component rather than a recipe to copy:
 
 Two lanes, decided once here rather than per module (issue #1683/#1689):
 
-- **Collections, requests, environments and saved examples go to Trash, with
-  Undo.** Deleting any of them is recoverable for the retention window Settings shows - the undo
+- **Collections, requests, environments, saved examples and client
+  certificates go to Trash, with Undo.** Deleting any of them is recoverable for the retention window Settings shows - the undo
   toast (`hooks/useTrashUndo.ts`, one for every Trash-bound delete) handles the
   immediate "I clicked the wrong row", and Trash's own restore handles
   everything after that. Environments joined in #2970 (item 1 of #2431) and
-  saved examples in #2971 (item 2), and their deletes still open
-  `DeleteConfirmDialog` first, with copy that points at the Trash rather than
-  calling the delete final: the Trash-bound deletes that ask. Only a *saved*
-  example is trashed: an imported one is a spec-sync tombstone, its dialog keeps
-  the sync and re-import wording, and no Undo follows.
+  saved examples in #2971 (item 2) and client certificates in #2973 (also #2431),
+  and their deletes still open `DeleteConfirmDialog` first, with copy that
+  points at the Trash rather than calling the delete final: the Trash-bound
+  deletes that ask. Only a *saved* example is trashed: an imported one is a
+  spec-sync tombstone, its dialog keeps the sync and re-import wording, and no
+  Undo follows. A certificate's purge from the Trash is the one place its
+  stored passphrase is destroyed, so that dialog says so (and that the files on
+  disk are untouched); a restore the engine refuses because a live entry holds
+  the host and port shows the engine's message.
 - **Everything else confirms and deletes permanently**: history runs,
-  load-test examples, inbox listeners and their captures, certificates. The
+  load-test examples, inbox listeners and their captures. The
   owner decided this deliberately (#1683) - a second Trash lane for every other
   entity is not coming, so a module reaching for one should reach for
   `DeleteConfirmDialog` instead; #2431 is where the owner names the entities

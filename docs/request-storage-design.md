@@ -329,6 +329,17 @@ request already holds its 100 live examples: the delete freed a slot a later
 save may have taken. Purging a request or collection removes its examples
 whatever their stamp, so a trashed example never outlives its request.
 
+**A client certificate goes there as well** (#2973), in the environment's shape:
+`DELETE /client-certificates/:id` stamps `client_certificates.deleted_at` on its
+one row, it hangs under nothing, and it is always a trash root, named by its
+`host` or `host:port`. Both registry reads filter the stamp out, and the
+transport policy every send resolves is built from them, so a trashed
+certificate is presented to no host by any send or run that starts after the delete. Its restore can be
+refused for one reason: the registry holds one entry per host and port, so a
+live entry that has taken the target since the delete makes the restore a `409`
+naming it. The row keeps its plaintext passphrase until a purge, explicit or by
+retention, removes it.
+
 ### 6. Response Viewer
 
 The Response Viewer shows the **RESOLVED** request in the "Raw Request" tab:

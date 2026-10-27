@@ -13,7 +13,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { environmentDeleteDescription, exampleDeleteDescription } from "./delete-confirm-copy";
+import {
+	clientCertificateDeleteDescription,
+	clientCertificatePurgeDescription,
+	environmentDeleteDescription,
+	exampleDeleteDescription,
+} from "./delete-confirm-copy";
 
 const withVariables = (count: number) => ({
 	variables: Object.fromEntries(Array.from({ length: count }, (_, i) => [`v${i}`, {}])),
@@ -70,5 +75,34 @@ describe("exampleDeleteDescription", () => {
 		expect(exampleDeleteDescription(origin)).toContain(
 			"A mock server for this collection stops answering with it once it is restarted."
 		);
+	});
+});
+
+/**
+ * A client certificate's delete is soft since #2973, but its purge is the end of
+ * the stored passphrase. Mutation check: put "This can't be undone." into the
+ * delete description, or drop the passphrase from the purge one, and the
+ * matching case fails.
+ */
+describe("clientCertificateDeleteDescription", () => {
+	it("says what the host loses, that the files stay, and that the Trash gives it back", () => {
+		const description = clientCertificateDeleteDescription("api.example.com:8443");
+
+		expect(description).toContain(
+			"Requests to api.example.com:8443 will be sent without a client certificate."
+		);
+		expect(description).toContain("The certificate and key files themselves are not touched.");
+		expect(description).toContain("You can restore it from Trash.");
+		expect(description).not.toMatch(/can't be undone|cannot be undone|permanent/);
+	});
+});
+
+describe("clientCertificatePurgeDescription", () => {
+	it("names the passphrase that goes for good and the files that stay", () => {
+		const description = clientCertificatePurgeDescription("api.example.com");
+
+		expect(description).toContain('"api.example.com" is removed permanently');
+		expect(description).toContain("stored passphrase");
+		expect(description).toContain("files on disk are not touched");
 	});
 });

@@ -4008,6 +4008,8 @@ export type McpDataEntity =
 	| "service"
 	/** The engine's OAuth 2.0 token cache - fetched, refreshed or cleared. */
 	| "oauth"
+	/** The client-certificate registry: what a trash restore puts an entry back into. */
+	| "clientCertificate"
 	/** Variables a script or extractor saved back during a run: environment, globals, collection. */
 	| "variables";
 

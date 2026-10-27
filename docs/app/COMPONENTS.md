@@ -153,7 +153,7 @@ Resizable sidebar (220–480px, one width shared by every view - `layout-store` 
 | **`history`** | `HistoryList` (past runs, filtered/sorted) | run count |
 | **`variables`** | `VariablesCategoryTree` (globals, environments, collections) | - |
 | **`services`** | `ServicesPanel` (webhook inboxes, OAuth issuers, mock servers) | new inbox, new issuer |
-| **`trash`** | `TrashList` (deleted collections, requests, environments and saved examples, restore or purge for good) | item count |
+| **`trash`** | `TrashList` (deleted collections, requests, environments, saved examples and client certificates, restore or purge for good) | item count |
 | **`settings`** | `SettingsCategoryTree` (app + engine setting categories) | - |
 
 Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.

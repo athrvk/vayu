@@ -123,6 +123,11 @@
  * 216,547 / 212,150 B. Those two caps went to 216,800 / 212,400; `list_trash`
  * is the one read tool it touched and stays within the writes-off margin, so
  * those caps are untouched.
+ *
+ * #2973's client-certificate Trash kind (the same three trash tools name it, and
+ * `list_trash` and `list_client_certificates` each gained a sentence) took the
+ * rows to 147,481 / 144,755 / 217,136 / 212,739 B, and the four caps went to
+ * 147,600 / 144,900 / 217,300 / 212,900.
  */
 
 import { describe, it, expect } from "vitest";
@@ -142,10 +147,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_200 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 144_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 216_800 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 212_400 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_600 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 144_900 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 217_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 212_900 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

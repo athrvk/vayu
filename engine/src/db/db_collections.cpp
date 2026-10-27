@@ -30,6 +30,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -327,6 +328,23 @@ std::vector<TrashEntry> example_entries (Storage& storage, Clauses&&... clauses)
     return entries;
 }
 
+template <typename... Clauses>
+std::vector<TrashEntry> client_certificate_entries (Storage& storage, Clauses&&... clauses) {
+    std::vector<TrashEntry> entries;
+    for (auto& [id, host, port, deleted_at] :
+    storage.select (columns (&ClientCertificate::id, &ClientCertificate::host,
+                    &ClientCertificate::port, &ClientCertificate::deleted_at),
+    std::forward<Clauses> (clauses)...)) {
+        // Named by its target, which is how the Settings card and a trace name
+        // it too; `?q=` matches that.
+        entries.push_back (TrashEntry{ std::move (id), "clientCertificate",
+        vayu::http::client_cert_label (host, port),
+        vayu::utils::invariant_value (deleted_at, STAMPED), std::nullopt, 0, 0,
+        std::nullopt });
+    }
+    return entries;
+}
+
 std::optional<TrashEntry> first_entry (std::vector<TrashEntry> entries) {
     if (entries.empty ()) {
         return std::nullopt;
@@ -437,6 +455,10 @@ bool still_trashed (Storage& storage, const TrashEntry& entry) {
         return storage.count<RequestExample> (where (c (&RequestExample::id) == id &&
                is_not_null (&RequestExample::deleted_at))) > 0;
     }
+    if (entry.kind == "clientCertificate") {
+        return storage.count<ClientCertificate> (where (c (&ClientCertificate::id) == id &&
+               is_not_null (&ClientCertificate::deleted_at))) > 0;
+    }
     throw std::logic_error (
     "Trash entry '" + id + "' has unknown kind '" + entry.kind + "'");
 }
@@ -479,8 +501,12 @@ std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
         where (c (&Environment::id) == id && is_not_null (&Environment::deleted_at))))) {
         return entry;
     }
-    return first_entry (example_entries (storage,
-    where (c (&RequestExample::id) == id && is_not_null (&RequestExample::deleted_at))));
+    if (auto entry = first_entry (example_entries (storage,
+        where (c (&RequestExample::id) == id && is_not_null (&RequestExample::deleted_at))))) {
+        return entry;
+    }
+    return first_entry (client_certificate_entries (storage,
+    where (c (&ClientCertificate::id) == id && is_not_null (&ClientCertificate::deleted_at))));
 }
 
 std::vector<TrashEntry> Database::get_trash () {
@@ -523,6 +549,11 @@ std::vector<TrashEntry> Database::get_trash () {
          where (and_ (is_not_null (&RequestExample::deleted_at),
          is_null (&Request::deleted_at))))) {
         entries.push_back (std::move (example));
+    }
+    // Nothing owns a client certificate either (#2973).
+    for (auto& certificate : client_certificate_entries (
+         storage, where (is_not_null (&ClientCertificate::deleted_at)))) {
+        entries.push_back (std::move (certificate));
     }
 
     // Newest first - what a trash view shows at the top - with `id` as the
@@ -637,6 +668,9 @@ const std::string& id) {
     if (entry->kind == "example") {
         return restore_example_locked (*entry);
     }
+    if (entry->kind == "clientCertificate") {
+        return restore_client_certificate_locked (*entry);
+    }
     throw std::logic_error (
     "Trash entry '" + id + "' has unknown kind '" + entry->kind + "'");
 }
@@ -656,6 +690,10 @@ void Database::purge_trash_entry_locked (const TrashEntry& entry) {
     }
     if (entry.kind == "example") {
         purge_example_locked (entry.id);
+        return;
+    }
+    if (entry.kind == "clientCertificate") {
+        purge_client_certificate_locked (entry.id);
         return;
     }
     throw std::logic_error (

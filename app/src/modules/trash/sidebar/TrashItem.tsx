@@ -12,6 +12,7 @@ import {
 	Copy,
 	Folder,
 	FileJson,
+	KeyRound,
 	Loader2,
 	RotateCcw,
 	Trash2,
@@ -39,13 +40,15 @@ interface TrashItemProps {
  * the engine adds fails to compile here until it has a glyph and a word, rather
  * than rendering as whichever kind the ternary's last branch named. The
  * environment's glyph is the one the Variables view draws for an environment,
- * and the example's is the bookmark family "Save as example" uses.
+ * the example's is the bookmark family "Save as example" uses, and the
+ * certificate's is the one its Settings card is headed by.
  */
 const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string }> = {
 	collection: { icon: Folder, label: "Collection" },
 	request: { icon: FileJson, label: "Request" },
 	environment: { icon: Cloud, label: "Environment" },
 	example: { icon: Bookmark, label: "Example" },
+	clientCertificate: { icon: KeyRound, label: "Client certificate" },
 };
 
 /**

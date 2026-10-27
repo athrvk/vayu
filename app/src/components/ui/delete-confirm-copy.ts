@@ -89,3 +89,30 @@ export function exampleDeleteDescription(origin: "import" | "user"): string {
 			: "You can restore it from Trash.")
 	);
 }
+
+/**
+ * The description a client certificate's remove dialog needs beyond the generic
+ * template: what its host does without it, that the files are the user's and
+ * stay where they are, and that the Trash can give it back (the delete is soft
+ * since #2973). `target` is the `host` or `host:port` the registry names it by.
+ */
+export function clientCertificateDeleteDescription(target: string): string {
+	return (
+		`Requests to ${target} will be sent without a client certificate. ` +
+		"The certificate and key files themselves are not touched. " +
+		"You can restore it from Trash."
+	);
+}
+
+/**
+ * The Trash's purge description for a client certificate. The generic "removed
+ * permanently" cannot say the two things this entry makes worth saying: the
+ * stored key passphrase goes with the row (it is kept nowhere else), and the
+ * files the entry only pointed at are untouched.
+ */
+export function clientCertificatePurgeDescription(target: string): string {
+	return (
+		`"${target}" is removed permanently, along with its stored passphrase. ` +
+		"The certificate and key files on disk are not touched."
+	);
+}

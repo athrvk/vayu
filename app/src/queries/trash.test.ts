@@ -116,12 +116,14 @@ describe("useRestoreTrashMutation", () => {
 		expect(invalidatedKeys()).toContain(queryKeys.trash.all.join("/"));
 	});
 
-	it("invalidates exactly the trash, the tree, the environments and every composition", async () => {
+	it("invalidates exactly the trash, the tree, the environments, every composition and the certificate registry", async () => {
 		// The whole list, so a key added or dropped here is a decision a test
 		// names. `environments.all` covers the list and the details the
 		// Variables view reads, and `compose.all` the compositions a restored
-		// environment's variables feed (#2970). Mutation check: drop the
-		// environments line from the restore's `onSuccess` and this fails.
+		// environment's variables feed (#2970); `clientCertificates.all` is the
+		// registry card a restored certificate must reappear in (#2973).
+		// Mutation check: drop the environments or the certificates line from the
+		// restore's `onSuccess` and this fails.
 		const { result } = renderHook(() => useRestoreTrashMutation(), { wrapper });
 
 		await result.current.mutateAsync("e1");
@@ -134,6 +136,7 @@ describe("useRestoreTrashMutation", () => {
 				queryKeys.requests.all,
 				queryKeys.environments.all,
 				queryKeys.compose.all,
+				queryKeys.clientCertificates.all,
 			]
 				.map((k) => k.join("/"))
 				.sort()

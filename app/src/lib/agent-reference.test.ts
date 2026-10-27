@@ -128,6 +128,11 @@ describe("one line per kind", () => {
 		expect(trashReference({ id: "exa_9", kind: "example", name: "Old" })).toBe(
 			'Vayu trash entry "Old" (exa_9) - example'
 		);
+		// The wire token, camel-cased as it is: it is what list_trash returns
+		// and what an agent will match against (#2973).
+		expect(
+			trashReference({ id: "cert_9", kind: "clientCertificate", name: "api.test:8443" })
+		).toBe('Vayu trash entry "api.test:8443" (cert_9) - clientCertificate');
 	});
 
 	it("variable: its name and the scope it lives in, never a value", () => {

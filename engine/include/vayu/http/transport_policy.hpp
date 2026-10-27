@@ -219,9 +219,11 @@ struct ClientCertRule {
  *
  * One spelling, because the response pane, the log line and the Settings card
  * all name the same row and three renderings of it would be three things to
- * cross-reference by eye.
+ * cross-reference by eye. The target form is what a stored row, a route's 409
+ * and a trash entry (#2973) are named by.
  */
 std::string client_cert_label (const ClientCertRule& rule);
+std::string client_cert_label (std::string_view host, const std::optional<int>& port);
 
 /**
  * @brief Why this registry entry cannot be stored, or nullopt when it can.

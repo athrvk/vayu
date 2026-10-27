@@ -56,6 +56,8 @@ export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
 export {
 	deleteConfirmCopy,
+	clientCertificateDeleteDescription,
+	clientCertificatePurgeDescription,
 	environmentDeleteDescription,
 	exampleDeleteDescription,
 } from "./delete-confirm-copy";

@@ -101,6 +101,22 @@ describe("Copy for agent on a trash entry", () => {
 		expect(writeText).toHaveBeenCalledWith('Vayu trash entry "Happy path" (exa_1) - example');
 	});
 
+	it("names a client certificate entry by its wire kind and its target", async () => {
+		fireEvent.click(
+			renderItem({
+				...ENTRY,
+				id: "cert_1",
+				kind: "clientCertificate",
+				name: "api.example.com:8443",
+			})
+		);
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(writeText).toHaveBeenCalledWith(
+			'Vayu trash entry "api.example.com:8443" (cert_1) - clientCertificate'
+		);
+	});
+
 	it("swaps the glyph to a check and raises no toast", async () => {
 		const button = renderItem();
 		expect(liveGlyph(button)).toContain("lucide-copy");

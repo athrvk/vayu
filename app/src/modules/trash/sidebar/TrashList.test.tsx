@@ -56,6 +56,15 @@ function exampleEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 	return collectionEntry({ id: "x1", kind: "example", name: "Happy path", ...over });
 }
 
+function certificateEntry(over: Partial<TrashEntry> = {}): TrashEntry {
+	return collectionEntry({
+		id: "cert_1",
+		kind: "clientCertificate",
+		name: "api.example.com:8443",
+		...over,
+	});
+}
+
 function environmentEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 	return collectionEntry({
 		id: "e1",
@@ -167,6 +176,7 @@ describe("the list", () => {
 			collectionEntry({ id: "r1", kind: "request", name: "Charge" }),
 			environmentEntry(),
 			exampleEntry(),
+			certificateEntry(),
 		];
 		renderTrash();
 
@@ -174,6 +184,18 @@ describe("the list", () => {
 		expect(screen.getByText(/^Request · Deleted/)).toBeInTheDocument();
 		expect(screen.getByText(/^Environment · Deleted/)).toBeInTheDocument();
 		expect(screen.getByText(/^Example · Deleted/)).toBeInTheDocument();
+		expect(screen.getByText(/^Client certificate · Deleted/)).toBeInTheDocument();
+	});
+
+	it("labels a client certificate by its target and draws it with the key", () => {
+		state.items = [certificateEntry()];
+		renderTrash();
+
+		expect(screen.getByText("api.example.com:8443")).toBeInTheDocument();
+		expect(rowFor("cert_1")?.querySelector("svg.lucide-key-round")).not.toBeNull();
+		expect(rowFor("cert_1")?.querySelector("svg.lucide-file-json")).toBeNull();
+		// It takes nothing with it, so the row has no "with ..." tail.
+		expect(rowFor("cert_1")?.textContent).not.toMatch(/with/);
 	});
 
 	it("labels an example and draws it with the bookmark, not as a request", () => {
@@ -250,13 +272,18 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(screen.getByText("Trash is empty")).toBeInTheDocument();
-		// Every kind a delete sends here, environments (#2970) and examples (#2971)
-		// included - and the sentence before them is gone.
+		// Every kind a delete sends here, environments (#2970), examples (#2971)
+		// and client certificates (#2973) included - and the sentence before them
+		// is gone.
 		expect(
-			screen.getByText(/^Deleted collections, requests, environments and examples wait here/)
+			screen.getByText(
+				/^Deleted collections, requests, environments, examples and client certificates wait here/
+			)
 		).toBeInTheDocument();
 		expect(
-			screen.queryByText(/^Deleted collections, requests and environments wait here/)
+			screen.queryByText(
+				/^Deleted collections, requests, environments and examples wait here/
+			)
 		).not.toBeInTheDocument();
 	});
 
@@ -372,6 +399,48 @@ describe("restoring an example", () => {
 
 		expect(await screen.findByText('Delete "Happy path" forever?')).toBeInTheDocument();
 		expect(screen.queryByText(/and everything inside it/)).not.toBeInTheDocument();
+	});
+});
+
+describe("restoring a client certificate", () => {
+	it("repeats the engine's 409 verbatim when a live entry holds the target", async () => {
+		const message =
+			"Client certificate 'cert_1' cannot be restored - 'api.example.com:8443' is already registered to client certificate 'cert_9', so delete that entry first";
+		state.items = [certificateEntry()];
+		restore.mockRejectedValue(new Error(message));
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Restore api.example.com:8443" }));
+
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith(message, "error"));
+		expect(restore).toHaveBeenCalledWith("cert_1");
+	});
+
+	it("says in the purge dialog that the passphrase goes and the files stay", async () => {
+		state.items = [certificateEntry()];
+		renderTrash();
+
+		fireEvent.click(
+			screen.getByRole("button", { name: "Delete api.example.com:8443 forever" })
+		);
+
+		const dialog = await screen.findByRole("dialog");
+		expect(dialog).toHaveTextContent('"api.example.com:8443" is removed permanently');
+		expect(dialog).toHaveTextContent("stored passphrase");
+		expect(dialog).toHaveTextContent("files on disk are not touched");
+		expect(dialog.textContent).not.toMatch(/everything inside it/);
+	});
+
+	it("purges the certificate once confirmed", async () => {
+		state.items = [certificateEntry()];
+		renderTrash();
+
+		fireEvent.click(
+			screen.getByRole("button", { name: "Delete api.example.com:8443 forever" })
+		);
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete forever$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("cert_1"));
 	});
 });
 

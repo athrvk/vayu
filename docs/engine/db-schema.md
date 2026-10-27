@@ -449,7 +449,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
-| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
+| `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -505,6 +505,13 @@ argument and under the same gate: the last release still stamps `7`, and
 `sync_schema ()` adds the nullable column on every start whatever the stamp. If
 a release shipped `9` without it, it needs its own bump and its own row here.
 The release that carries `9` names #2971 beside #2970 and #2937 under Changed.
+
+The #2973 `client_certificates.deleted_at` column joined version `9` by the same
+argument and under the same gate: the last release still stamps `7`, and
+`sync_schema ()` adds the nullable column on every start whatever the stamp. If
+a release shipped `9` without it, it needs its own bump and its own row here.
+The release that carries `9` names #2973 beside #2971, #2970 and #2937 under
+Changed.
 
 The #3006 index `idx_requests_deleted_at` joined version `9` under the same gate:
 any change to `make_vayu_storage`'s mapping bumps the version, an index
@@ -1332,6 +1339,7 @@ matching rule.
 | `passphrase` | TEXT    | The key's passphrase, `""` when it has none. **Plaintext** - see below |
 | `created_at` | INTEGER | Unix ms                                                   |
 | `updated_at` | INTEGER | Unix ms                                                   |
+| `deleted_at` | INTEGER | Nullable, Unix ms. NULL while live; the delete's instant once it is in the trash (#2973) |
 
 **The private key never enters this database.** `cert_path` and `key_path` are
 paths, and the engine opens the files at send time - the strongest storage
@@ -1354,6 +1362,17 @@ its own change, touching every stored credential rather than this one column.
 The wire is narrower than the file: reads never echo the passphrase, answering
 `hasPassphrase` instead.
 
+**A trashed row is never presented.** `DELETE /client-certificates/:id` stamps
+`deleted_at`, and both reads (`get_client_certificates`,
+`get_client_certificate`) filter `deleted_at IS NULL`. The first is what
+`resolve_transport_policy` reads, so the stamp takes the entry off every send at
+once. An entry owns no rows, so, as with [`environments`](#environments), its
+stamp is no cohort key: it is always its own trash root, a restore clears the
+stamp alone, and a purge (`DELETE /trash/:id`, or retention) removes the row.
+**The passphrase stays on a trashed row, in plaintext, until that purge** - a
+restore gives the entry back exactly as it was, and nothing short of the purge
+removes the value from the file.
+
 `port` is nullable rather than a sentinel because "every port" is the *absence*
 of a port, the same distinction `result_bodies.stream_events` draws. At most one
 row may claim a given `host` + `port` pair - the routes answer `409` on the
@@ -1361,7 +1380,10 @@ second, and a wildcard pattern is a `host` like any other, so the rule covers it
 unchanged. Several rows may still *match* one transfer once patterns overlap
 (#803), and they are ranked rather than tie-broken: closest host, then port. A
 tie would need the same host and port twice, which is the pair the `409`
-forbids.
+forbids. The rule counts live rows only (`client_certificate_for_target`, the
+one definition the routes and the trash share): a trashed entry frees its
+target, and restoring it while a live row has taken that target is the
+restore's `409`.
 
 ---
 

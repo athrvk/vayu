@@ -13,11 +13,11 @@
  * Deleting a collection used to be irreversible, with the confirm dialog as the
  * entire safety net: one misclick destroyed a subtree and nothing in the engine
  * could give it back. `Database::delete_collection`, `delete_request`,
- * `delete_environment` (#2970) and `delete_request_example` (a user's own
- * example, #2971) now stamp rows instead of removing them, and these three
- * routes are the whole of what that stamp is for - the list of what
- * is recoverable, the undo, and the one deliberate way to make a delete
- * permanent before retention does.
+ * `delete_environment` (#2970), `delete_request_example` (a user's own
+ * example, #2971) and `delete_client_certificate` (#2973) now stamp rows
+ * instead of removing them, and these three routes are the whole of what that
+ * stamp is for - the list of what is recoverable, the undo, and the one
+ * deliberate way to make a delete permanent before retention does.
  *
  * The trash lists *roots* - the rows a user asked to delete - and never what a
  * cascade took with them, because "restore this" is a question about the thing
@@ -38,9 +38,9 @@ namespace {
 /// One trash entry as the wire carries it. `parentId` is a collection's parent,
 /// a request's owning collection and an example's owning *request* - the same
 /// edge under three names in the tables, one name here, since a client
-/// restoring any of them asks the same question of it; an environment's is
-/// always `null`. `variables` is an environment's alone: the other kinds omit
-/// the key rather than send 0.
+/// restoring any of them asks the same question of it; an environment's and a
+/// client certificate's are always `null`. `variables` is an environment's
+/// alone: the other kinds omit the key rather than send 0.
 nlohmann::json trash_entry_json (const vayu::db::TrashEntry& entry) {
     nlohmann::json item{ { "id", entry.id }, { "kind", entry.kind },
         { "name", entry.name }, { "deletedAt", entry.deleted_at },
@@ -100,9 +100,10 @@ trash_list_response (vayu::db::Database& db, const ListPageQuery& page_query) {
  * hold - a live row, or one already purged. **409** is a shape a restore cannot
  * express: a request whose collection, or an example whose request, is itself
  * deleted or gone, which has no root to come back to the way a collection
- * does; or an example whose request is already at its example cap (#2971).
- * The message names the way forward (restore the owner, delete an example)
- * rather than reporting only that this failed.
+ * does; an example whose request is already at its example cap (#2971); or a
+ * client certificate whose host and port a live entry now claims (#2973). The
+ * message names the way forward (restore the owner, delete an example or the
+ * live entry) rather than reporting only that this failed.
  */
 std::pair<int, nlohmann::json>
 trash_restore_response (vayu::db::Database& db, const std::string& id) {
@@ -146,9 +147,9 @@ void register_trash_routes (RouteContext& ctx) {
      * (#2443).
      * Returns: {items: [{id, kind, name, deletedAt, parentId, collections,
      * requests, variables?}], total}, or that envelope; 400 for a bad `limit`
-     * or `offset`. `kind` is collection, request, environment or example
-     * (whose `parentId` is its request), and only an environment carries
-     * `variables`.
+     * or `offset`. `kind` is collection, request, environment, example
+     * (whose `parentId` is its request) or clientCertificate (named by its
+     * `host` or `host:port`), and only an environment carries `variables`.
      */
     ctx.server.Get ("/trash", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
@@ -164,12 +165,13 @@ void register_trash_routes (RouteContext& ctx) {
 
     /**
      * POST /trash/:id/restore
-     * Puts a deleted collection, request, environment or example back, with
-     * everything the same delete took. A restored environment comes back
-     * inactive. Takes no body.
+     * Puts a deleted collection, request, environment, example or client
+     * certificate back, with everything the same delete took. A restored
+     * environment comes back inactive. Takes no body.
      * Returns: the restored entry, 404 if the trash does not hold that id, or
      * 409 for a request whose collection (or an example whose request) is
-     * itself deleted or gone, or an example whose request is at its cap.
+     * itself deleted or gone, an example whose request is at its cap, or a
+     * client certificate whose target a live entry holds.
      */
     ctx.server.Post (R"(/trash/([^/]+)/restore)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -192,9 +194,9 @@ void register_trash_routes (RouteContext& ctx) {
 
     /**
      * DELETE /trash/:id
-     * Destroys a deleted collection, request, environment or example for
-     * good, with its whole subtree. There is no undo for this one - it is the undo's
-     * counterpart.
+     * Destroys a deleted collection, request, environment, example or client
+     * certificate for good, with its whole subtree. There is no undo for this
+     * one - it is the undo's counterpart.
      * Returns: the purged entry, or 404 if the trash does not hold that id.
      */
     ctx.server.Delete (R"(/trash/([^/]+))",
