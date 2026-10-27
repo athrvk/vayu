@@ -89,8 +89,11 @@ constexpr long info_category (long info) {
  * frame, not a narrowing conversion. `CURLINFO_PTR` and `CURLINFO_SLIST` share
  * a value, so that category is spelled as "some pointer" rather than a type.
  */
+// Dependent false: GCC 15 rejects `Category != Category` as a tautology.
+template <long> inline constexpr bool unknown_info_category = false;
+
 template <long Category> struct info_result {
-    static_assert (Category != Category, "unknown CURLINFO category");
+    static_assert (unknown_info_category<Category>, "unknown CURLINFO category");
 };
 
 template <> struct info_result<CURLINFO_STRING> {
