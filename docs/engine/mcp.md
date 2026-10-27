@@ -290,7 +290,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000; `pagination.nextOffset` / `note` as `list_runs`; a tick's `status_seconds` (#2866) is passed through as the engine stored it - the responses that completed in the seconds the tick closed, by class, `[]` for a tick that closed none, absent on a tick stored before it |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds and `pagination.nextOffset` / `note` as `get_run_timeseries`; raw samples, never `maxPoints`-downsampled |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
-| `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
+| `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase; an entry the user removed is in the Trash and not listed until restored, #2973) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number from 1 to 3000 (refused above, not clamped: 3000 is the stock live buffer, `liveReplayWindowMs` 300,000 ms at the 100 ms tick cadence), and there is no `offset` - it answers the tail of the buffer, so a page position has nothing to count from; the answer is `{ticks, completed}` (#2955): `completed` is the stream's own `complete` event, `true` once the run ended and `false` when the time budget ended the read with the run still going, and only when `true` a `note` says the final tick's latency window may be empty (its percentiles can read 0) and the run's percentiles come from `get_run_report`; a tick that closes a second carries `statusSeconds` (#2866, as the engine sends it: the responses that completed in each second it closed, `[]` for none), the others do not; a capacity run's ticks carry `capacity` (#2928, as the engine sends it: `{level, levelElapsedMs, levelsJudged, stopReason?}`, `stopReason` once the search has ended), other runs' do not. The ticks that carry `statusSeconds` also carry `cumulativeLatency` / `cumulativePhases` (the run-so-far distributions) and, for a scenario load run, `scenario` (#2823: `{iterations, iterationsCompleted, iterationsAbandoned, stepsExecuted, steps: [{index, name, executed, errors}]}`, no latency; the final tick included). The engine keeps a run's live buffer `liveRetentionMs` after it ends (60 s by default); past that the call is a `not_found` that says the buffer expired and the run still exists, pointing at `get_run_report` (#2779) |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, a capacity search's result, a scenario's sequence and transactions, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
@@ -314,9 +314,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `timeout` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts; the returned row is withheld as `list_requests` answers it |
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
-| `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it; collections, requests, environments and saved examples) |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a saved example is refused with the engine's 409 when its request is gone or full |
-| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - an environment's variable count, a saved example's name); names the entry with `entryId` |
+| `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it; collections, requests, environments, saved examples and client certificates, whose `name` is `host` or `host:port`) |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a saved example is refused with the engine's 409 when its request is gone or full, and a client certificate when a live entry holds its host and port |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - an environment's variable count, a saved example's name, that a client certificate's registry entry and stored passphrase go while its files stay); names the entry with `entryId` |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
@@ -766,7 +766,10 @@ Notes:
   prompt names the request and its URL rather than an opaque id.
 - **The Trash tools (issue #1071) close the loop those two deletes open**, and
   the one `delete_environment` opens since #2970 and the one
-  `delete_request_example` opens for a saved example since #2971. `list_trash`
+  `delete_request_example` opens for a saved example since #2971. A client
+  certificate joins them in #2973 although no tool deletes one (the user removes
+  it in Settings): its entry is `kind: "clientCertificate"`, named by its
+  target, a root with `parentId` null and both counts 0. `list_trash`
   answers a page of `GET /trash` (#2443), each entry unchanged - roots only,
   with `collections` / `requests` counting what each entry's delete took, an
   environment entry carrying `variables` and an example entry carrying its
@@ -779,12 +782,14 @@ Notes:
   itself in the trash; a restored environment comes back inactive, and
   `activate_environment` is what makes it the active one again. A saved
   example whose request is deleted or gone, or already holds the 100 examples a
-  request may, is refused with the engine's 409 text.
+  request may, is refused with the engine's 409 text, and so is a client
+  certificate while a live entry holds the same host and port.
   `purge_trash_entry` is the Trash's own hard delete and is gated exactly like
   `delete_collection`: it reads the entry off `GET /trash` first, so the
   confirmation prompt names what a mistyped id would otherwise destroy sight
   unseen (a collection's sub-collections and requests, an environment's
-  variable count, a saved example's name), and an entry the trash does not hold - or one of a kind this
+  variable count, a saved example's name, a client certificate's registry entry
+  and stored passphrase with its files untouched), and an entry the trash does not hold - or one of a kind this
   build does not know - is a refusal before any prompt is shown. Both name the entry with `entryId`, not a bare `id`
   (#2446: an `id` beside `requestId` / `runId` / `environmentId` reads as "the
   id of something else"). A call that sends only `id` is refused with
@@ -2903,7 +2908,7 @@ Each tool declares the data families it changes (`invalidates` in `tools/*.tools
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
 (`collection`, `collectionRow`, `request`, `environment`, `run`, `cookie`,
-`config`, `service`, `oauth`, `variables`)
+`config`, `service`, `oauth`, `clientCertificate`, `variables`)
 plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call
 itself named; it carries no engine data, so the
 renderer still reads every row through its query layer. The five hints are read
@@ -2948,7 +2953,13 @@ declares `request`, whose invalidator takes the trash list and the named
 request's detail key, under which the Examples list sits, so the drawer and an
 open Examples panel both refetch. A restored example reaches the panel through
 the trash tools' `collection` family, whose invalidator takes `requests.all`
-(the Examples key sits under it); their `request` family names no row.
+(the Examples key sits under it); their `request` family names no row. A
+client certificate does need one (#2973): the Settings card lists live entries
+only and nothing else a trash tool declares reaches `clientCertificates.all`, so
+the two trash tools also declare `clientCertificate`, whose renderer
+invalidator refetches the registry. No tool writes that family on its own; it is
+not folded into `config`, whose invalidator would refetch every config and
+request-default read for it.
 
 **One field on the event is not a hint at all.** `startedRun` rides the `run`
 event of the two tools that *create* a run - `start_load_run` and

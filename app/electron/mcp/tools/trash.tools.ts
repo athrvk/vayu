@@ -8,7 +8,7 @@
 /**
  * @file trash.tools.ts
  * @brief The trash: listing, restoring and purging deleted collections, requests,
- *        environments and saved examples.
+ *        environments, saved examples and client certificates.
  */
 
 import { z } from "zod";
@@ -41,9 +41,9 @@ export const TRASH_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List what delete_collection / delete_request / delete_environment / delete_request_example have sent to Vayu's Trash and can still be restored, newest first. " +
+			"List what delete_collection / delete_request / delete_environment / delete_request_example have sent to Vayu's Trash, plus any client certificate the user removed (no tool deletes one), that can still be restored, newest first. " +
 			listPageSentence("entries", "name") +
-			" Answers ROOTS ONLY - the row a delete actually targeted, never what its cascade took with it: a deleted collection's whole subtree is one entry here, with `collections` and `requests` counting the sub-collections and saved requests that same delete took (0 for every other kind). Each entry also carries `kind` ('collection' | 'request' | 'environment' | 'example'), `name`, `deletedAt` (Unix ms) and `parentId` (the collection's old parent, the owning collection of a request, the owning request of an example, null for an environment); an environment entry alone also carries `variables`, how many variables it holds. Put one back with restore_trash_entry, or destroy it for good with purge_trash_entry. Rows are also purged automatically once older than the `trashRetentionDays` config entry (30 days by default; `0` keeps them forever - see get_engine_config). " +
+			" Answers ROOTS ONLY - the row a delete actually targeted, never what its cascade took with it: a deleted collection's whole subtree is one entry here, with `collections` and `requests` counting the sub-collections and saved requests that same delete took (0 for every other kind). Each entry also carries `kind` ('collection' | 'request' | 'environment' | 'example' | 'clientCertificate'), `name`, `deletedAt` (Unix ms) and `parentId` (the collection's old parent, the owning collection of a request, the owning request of an example, null for an environment and a client certificate); a client certificate's `name` is its target, `host` or `host:port`; an environment entry alone also carries `variables`, how many variables it holds. Put one back with restore_trash_entry, or destroy it for good with purge_trash_entry. Rows are also purged automatically once older than the `trashRetentionDays` config entry (30 days by default; `0` keeps them forever - see get_engine_config). " +
 			PAGE_CURSOR_SENTENCE,
 		annotations: {
 			title: "List trash",
@@ -64,11 +64,11 @@ export const TRASH_TOOLS: McpTool[] = [
 		// Every family a delete sends here: a restore can bring back any kind,
 		// and there is no argument here that says which in advance - the same
 		// reasoning move_item's pair carries.
-		invalidates: ["collection", "request", "environment"],
+		invalidates: ["collection", "request", "environment", "clientCertificate"],
 		description:
-			"Put a deleted collection, saved request, environment or saved example back from Vayu's Trash, with everything its delete took along - a restored collection's whole subtree returns too, scoped to that one delete's cohort (see list_trash), and an environment returns inactive, with all its variables. " +
+			"Put a deleted collection, saved request, environment, saved example or client certificate back from Vayu's Trash, with everything its delete took along - a restored collection's whole subtree returns too, scoped to that one delete's cohort (see list_trash), and an environment returns inactive, with all its variables. " +
 			GUARDED_WRITE_SENTENCE +
-			". This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. A saved example is refused the same way when its request is deleted or gone, or already holds 100 examples. An `entryId` the trash does not hold - a live row, or one already purged - is a 404.",
+			". This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. A saved example is refused the same way when its request is deleted or gone, or already holds 100 examples. A client certificate is refused with a 409 naming the live entry when one has since been registered for the same host and port. An `entryId` the trash does not hold - a live row, or one already purged - is a 404.",
 		annotations: {
 			title: "Restore from Trash",
 			readOnlyHint: false,
@@ -113,9 +113,9 @@ export const TRASH_TOOLS: McpTool[] = [
 	{
 		name: "purge_trash_entry",
 		category: "write",
-		invalidates: ["collection", "request", "environment"],
+		invalidates: ["collection", "request", "environment", "clientCertificate"],
 		description:
-			"Permanently destroy one entry in Vayu's Trash, with its whole subtree - requests, and the examples they own - or, for an environment, every variable in it, or, for a saved example, that one example. THERE IS NO UNDO: this is the Trash's own hard delete, on top of the soft delete delete_collection / delete_request / delete_environment / delete_request_example already did, and once it runs the row is gone the way a delete used to be before Trash existed. " +
+			"Permanently destroy one entry in Vayu's Trash, with its whole subtree - requests, and the examples they own - or, for an environment, every variable in it, or, for a saved example, that one example, or, for a client certificate, its registry entry and its stored passphrase (the certificate and key files on disk are never touched). THERE IS NO UNDO: this is the Trash's own hard delete, on top of the soft delete delete_collection / delete_request / delete_environment / delete_request_example already did, and once it runs the row is gone the way a delete used to be before Trash existed. " +
 			GUARDED_WRITE_SENTENCE +
 			", and confirmation: if the client supports elicitation the user is prompted with the entry's name and what it holds; otherwise call once for a preview, then again with `confirmed: true`. An `entryId` the trash does not hold is a 404, which also stops a mistyped id from destroying anything live.",
 		annotations: {

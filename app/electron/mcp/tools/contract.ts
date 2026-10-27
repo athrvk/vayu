@@ -73,6 +73,13 @@ export const MCP_DATA_ENTITIES = [
 	// long enough for an agent to clear a token, say so, and leave the window
 	// showing the entry it just destroyed.
 	"oauth",
+	// The client-certificate registry (#2973). No tool writes it directly (the
+	// user adds and removes entries), but a trash restore puts one back, so it
+	// has a reader to refresh: the Settings card. Its own family rather than a
+	// fold into `config`, whose invalidator would also refetch every config and
+	// request-default read for a registry those do not serve, or into
+	// `environment`, whose readers a certificate does not touch.
+	"clientCertificate",
 	// Variables a script or extractor wrote back while a send ran (#1916), with
 	// no `update_*` call behind them. Its own family rather than `environment`/`collection` because
 	// the run tools that cause it cannot name which scope changed, and borrowing

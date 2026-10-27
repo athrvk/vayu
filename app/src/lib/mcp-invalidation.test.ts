@@ -543,6 +543,15 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toEqual([queryKeys.oauth.all]);
 	});
 
+	test("a client-certificate change refetches the registry the Settings card lists", () => {
+		// `restore_trash_entry` and `purge_trash_entry` declare this family (#2973),
+		// so a certificate an agent restores reappears in an open card. Mutation
+		// check: empty the `clientCertificate` invalidator and this fails.
+		const { handled, keys } = keysFor({ entity: "clientCertificate" });
+		expect(handled).toBe(true);
+		expect(keys).toEqual([queryKeys.clientCertificates.all]);
+	});
+
 	test("the prefix reaches a status query cached under any key", () => {
 		// The event carries no cache key - a fetch's key is derived engine-side
 		// and appears only in the answer - so the prefix has to cover an entry

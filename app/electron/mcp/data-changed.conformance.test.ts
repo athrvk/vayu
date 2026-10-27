@@ -40,6 +40,7 @@ const RENDERER_ENTITIES: Record<McpDataEntity, true> = {
 	config: true,
 	service: true,
 	oauth: true,
+	clientCertificate: true,
 	variables: true,
 };
 

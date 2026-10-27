@@ -15,15 +15,21 @@ import { type EngineClient, EngineRequestError } from "../engine-client.js";
 import { engineSentence } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
-const TRASH_KINDS = ["collection", "request", "environment", "example"] as const;
+const TRASH_KINDS = [
+	"collection",
+	"request",
+	"environment",
+	"example",
+	"clientCertificate",
+] as const;
 
 /** One `GET /trash` row, as `purge_trash_entry` needs it to name what it destroys. */
 export interface TrashRow {
 	kind: (typeof TRASH_KINDS)[number];
 	name: string;
-	/** Sub-collections this row's delete took with it. Always 0 for a request, an environment or an example. */
+	/** Sub-collections this row's delete took with it. Always 0 for every kind but a collection. */
 	collections: number;
-	/** Requests this row's delete took with it. Always 0 for a request, an environment or an example. */
+	/** Requests this row's delete took with it. Always 0 for every kind but a collection. */
 	requests: number;
 	/** The environment's variable count; the engine sends it on environment rows only. */
 	variables: number;
@@ -79,6 +85,14 @@ export function describeTrashEntry(entry: TrashRow): string {
 			return `the saved request "${entry.name}"`;
 		case "example":
 			return `the saved example "${entry.name}"`;
+		case "clientCertificate":
+			// `name` is the target (`host` or `host:port`). The row also holds the
+			// plaintext passphrase, which nothing else keeps; the files it only
+			// points at are the user's and stay.
+			return (
+				`the client certificate registry entry for "${entry.name}" and its stored ` +
+				"passphrase, if it has one (the certificate and key files on disk are not touched)"
+			);
 		case "collection": {
 			const subject = `the collection "${entry.name}"`;
 			if (entry.collections === 0 && entry.requests === 0) return subject;

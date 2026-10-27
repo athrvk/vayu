@@ -164,13 +164,14 @@ describe("the registry declares its effects", () => {
 			create_request: ["request"],
 			update_request: ["request"],
 			delete_request: ["request"],
-			// Trash (#1071). A restore can bring back any of the three families a
-			// delete sends there (environments since #2970), and there is no
-			// argument that says which in advance - the same reasoning `move_item`
-			// carries the pair for. A purge only ever destroys what a delete
-			// already took, so it touches the same families a delete would have.
-			restore_trash_entry: ["collection", "request", "environment"],
-			purge_trash_entry: ["collection", "request", "environment"],
+			// Trash (#1071). A restore can bring back any family a delete sends
+			// there (environments since #2970, and a client certificate's registry
+			// entry since #2973), and there is no argument that says which in
+			// advance - the same reasoning `move_item` carries the pair for. A purge
+			// only ever destroys what a delete already took, so it touches the same
+			// families a delete would have.
+			restore_trash_entry: ["collection", "request", "environment", "clientCertificate"],
+			purge_trash_entry: ["collection", "request", "environment", "clientCertificate"],
 			// Document CRUD (#759). The example tools take the `request` family
 			// because that is where their rows live: the examples query key is
 			// nested under `requests.detail(id)`, so invalidating the request the

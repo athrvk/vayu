@@ -2013,6 +2013,122 @@ describe("trash tools", () => {
 		requests: 0,
 	};
 
+	// A client certificate (#2973): a root named by its target, owning no parent.
+	const CERTIFICATE_TRASH_ITEM = {
+		id: "cert_3",
+		kind: "clientCertificate",
+		name: "api.example.com:8443",
+		deletedAt: 1_755_000_000_000,
+		parentId: null,
+		collections: 0,
+		requests: 0,
+	};
+
+	test("list_trash answers a client certificate row as the engine wrote it", async () => {
+		const client = fakeClient({
+			listTrashPage: vi.fn().mockResolvedValue(page([CERTIFICATE_TRASH_ITEM])),
+		});
+		const res = await dispatchTool("list_trash", {}, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(JSON.parse(firstText(res))).toEqual(lastPageAnswer(page([CERTIFICATE_TRASH_ITEM])));
+	});
+
+	test("purge_trash_entry says a certificate's registry entry and passphrase go and its files stay", async () => {
+		// Mutation check: take the `clientCertificate` case out of
+		// `describeTrashEntry` (or the kind out of the known list) and the preview
+		// stops naming it, or the purge is refused as an unknown kind.
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [CERTIFICATE_TRASH_ITEM], total: 1 }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "cert_3" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain(
+			'This would permanently destroy the client certificate registry entry for "api.example.com:8443" and its stored passphrase'
+		);
+		expect(firstText(res)).toContain("files on disk are not touched");
+		expect(firstText(res)).not.toContain("collection");
+		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry purges a client certificate once confirmed", async () => {
+		const client = fakeClient({
+			listTrash: vi.fn().mockResolvedValue({ items: [CERTIFICATE_TRASH_ITEM], total: 1 }),
+			purgeTrashEntry: vi.fn().mockResolvedValue({ ...CERTIFICATE_TRASH_ITEM, purged: true }),
+		});
+		const res = await dispatchTool(
+			"purge_trash_entry",
+			{ entryId: "cert_3", confirmed: true },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.purgeTrashEntry).toHaveBeenCalledWith("cert_3", undefined);
+	});
+
+	test("restore_trash_entry puts a client certificate back and answers the engine's entry", async () => {
+		const restored = { ...CERTIFICATE_TRASH_ITEM, restored: true, reparentedToRoot: false };
+		const client = fakeClient({ restoreTrashEntry: vi.fn().mockResolvedValue(restored) });
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "cert_3" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.restoreTrashEntry).toHaveBeenCalledWith("cert_3", undefined);
+		expect(JSON.parse(firstText(res))).toMatchObject({
+			kind: "clientCertificate",
+			name: "api.example.com:8443",
+		});
+		expect(res.content.map((c) => c.text).join("\n")).not.toMatch(/top level/i);
+	});
+
+	test("restore_trash_entry surfaces the engine's 409 when a live certificate holds the target", async () => {
+		const message =
+			"Client certificate 'cert_3' cannot be restored - 'api.example.com:8443' is already registered to client certificate 'cert_9', so delete that entry first";
+		const client = fakeClient({
+			restoreTrashEntry: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError(
+						"Engine responded 409",
+						409,
+						JSON.stringify({ error: { code: "conflict", message } })
+					)
+				),
+		});
+		const res = await dispatchTool(
+			"restore_trash_entry",
+			{ entryId: "cert_3" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toBe(message);
+	});
+
+	test("the Trash tools describe client certificates as a kind they hold, and refresh the registry", () => {
+		const trash = Object.fromEntries(
+			TOOLS.filter((t) =>
+				["list_trash", "restore_trash_entry", "purge_trash_entry"].includes(t.name)
+			).map((t) => [t.name, t])
+		);
+		expect(String(trash.list_trash.description)).toContain("'clientCertificate'");
+		expect(String(trash.restore_trash_entry.description)).toContain("client certificate");
+		expect(String(trash.purge_trash_entry.description)).toContain("stored passphrase");
+		expect(trash.restore_trash_entry.invalidates).toContain("clientCertificate");
+		expect(trash.purge_trash_entry.invalidates).toContain("clientCertificate");
+	});
+
+	test("list_client_certificates says a removed entry is in the Trash, not listed", () => {
+		const description = String(
+			TOOLS.find((t) => t.name === "list_client_certificates")?.description
+		);
+		expect(description).toContain("Trash");
+		expect(description).toContain("neither listed nor presented");
+	});
+
 	test("list_trash answers one page of entries, each as the engine wrote it", async () => {
 		const client = fakeClient({ listTrashPage: vi.fn().mockResolvedValue(page([TRASH_ITEM])) });
 		const res = await dispatchTool("list_trash", { q: "retired" }, ctxWith(client));

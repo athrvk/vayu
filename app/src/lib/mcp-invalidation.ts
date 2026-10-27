@@ -350,6 +350,22 @@ const INVALIDATORS: Record<
 	},
 
 	/*
+	 * The registry the Settings card lists (#2973). No MCP tool writes it - an
+	 * entry is added and removed by the user - so the one event is a trash
+	 * restore (and a purge, which declares the same set as the restore because
+	 * the tool cannot say which kind it will meet): the card lists live rows
+	 * only, and a restored entry is presented to its host again on the next
+	 * send, so a card left showing the old list misstates what is registered.
+	 *
+	 * Not `trash`: the tools that declare this family declare `collection`
+	 * beside it, whose invalidator already refetches the Trash list, and an
+	 * entry here carrying it again would be a second refetch of the same read.
+	 */
+	clientCertificate: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.clientCertificates.all });
+	},
+
+	/*
 	 * Variables a script or extractor saved back while a send ran (issue #1916):
 	 * the engine persists environment, globals and collection variables after the
 	 * run tools finish, and none of them declares a variable family of its own.
