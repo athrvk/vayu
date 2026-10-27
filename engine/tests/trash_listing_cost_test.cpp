@@ -13,10 +13,11 @@
  *        request columns a purge reads to remove a trashed root's examples; and
  *        the index the stamped requests are reached through (#3006).
  *
- * Both are observed on the storage's own connection through an auto-extension
+ * Each is observed on the storage's own connection through an auto-extension
  * (`sqlite_auto_extension.hpp`): SQLite's authorizer, which it consults for
  * every column a statement reads as the statement is prepared, and the trace
- * of every statement begun. Neither reading depends on the clock.
+ * of every statement begun. The index's plan is then read with EXPLAIN QUERY
+ * PLAN on a separate handle. No reading depends on the clock.
  */
 
 #include <gtest/gtest.h>

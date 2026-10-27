@@ -509,8 +509,8 @@ The release that carries `9` names #2971 beside #2970 and #2937 under Changed.
 The #3006 index `idx_requests_deleted_at` joined version `9` under the same gate:
 any change to `make_vayu_storage`'s mapping bumps the version, an index
 included, and `sync_schema ()` creates it on every start whatever the stamp, so
-a database an earlier build of this branch stamped `9` still gets it. If a release shipped `9` without it, it needs its own bump and its
-own row here. The release that carries `9` names #3006 beside #2971, #2970 and
+a database an earlier build of this branch stamped `9` still gets it. If a
+release shipped `9` without it, it needs its own bump and its own row here. The release that carries `9` names #3006 beside #2971, #2970 and
 #2937 under Changed.
 
 ---

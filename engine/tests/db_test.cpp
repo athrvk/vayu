@@ -841,8 +841,9 @@ TEST_F (DatabaseTest, ATrashedEnvironmentGivesUpTheActiveSlot) {
 // Every index declared in make_vayu_storage(), each backing a hot query path:
 // metric_ticks/results by run_id, requests by collection_id, collections by
 // parent_id, runs by start_time, stamped requests by deleted_at. See the
-// comments there for which queries rely on which. Named explicitly rather than counted, because sqlite also
-// creates sqlite_autoindex_* entries of its own.
+// comments there for which queries rely on which. Named explicitly rather
+// than counted, because sqlite also creates sqlite_autoindex_* entries of its
+// own.
 constexpr std::array<const char*, 9> EXPECTED_INDEXES = {
     "idx_metric_ticks_run_id", "idx_results_run_id",
     "idx_requests_collection_id", "idx_collections_parent_id",
