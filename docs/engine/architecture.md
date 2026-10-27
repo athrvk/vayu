@@ -124,7 +124,9 @@ These shapes need it, and all of them are in the code today:
   other row already claims a candidate's host and port is only as good as the
   window between that proof and the write, so the create holds the lock across
   both, in a `create_*_locked` core of the same shape as the merge-patch
-  update's.
+  update's. A certificate's restore from the trash (#2973) asks the same
+  question (`client_certificate_for_target`) under the lock `restore_deleted`
+  holds for its write.
 - **The script-variable write-back** - `persist_script_variables` (issue
   #1878), which a design send, a stream and a sequential collection run call
   once when they end. The scopes were loaded when the run started, possibly
@@ -880,11 +882,12 @@ See [Database Schema](db-schema.md) for the full column list.
    kind to `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
-3. **Trash retention**: collections, requests, environments and saved
-   examples deleted more than `trashRetentionDays` ago are destroyed for good
-   (issue #988, environments #2970, examples #2971) - the subtree, its requests
-   and their examples, or the environment's or example's one row. Until then a delete is only a stamp, and
-   `POST /trash/:id/restore` puts it back.
+3. **Trash retention**: collections, requests, environments, saved examples
+   and client certificates deleted more than `trashRetentionDays` ago are
+   destroyed for good (issue #988, environments #2970, examples #2971, client
+   certificates #2973) - the subtree, its requests and their examples, or the
+   environment's, example's or certificate's one row. Until then a delete is
+   only a stamp, and `POST /trash/:id/restore` puts it back.
 
 All three passes are best-effort: a failure is logged and never blocks startup.
 

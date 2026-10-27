@@ -372,6 +372,27 @@ const nlohmann::json& json) {
     return update_client_certificate_response (db, id, json, nullptr);
 }
 
+/**
+ * Testable core of DELETE /client-certificates/:id - a soft delete (#2973): the
+ * row is stamped, `GET /trash` lists it, the transport policy stops presenting
+ * it, and every read here answers 404 for it, a second delete included. The
+ * existence check and the stamp are one lock scope, so of two racing deletes
+ * only one answers 200.
+ */
+std::pair<int, nlohmann::json>
+delete_client_certificate_response (vayu::db::Database& db, const std::string& id) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock ([&] {
+        if (!db.get_client_certificate (id)) {
+            result = error_response (404, "Client certificate not found");
+            return;
+        }
+        db.delete_client_certificate (id);
+        result = { 200, nlohmann::json{ { "success", true } } };
+    });
+    return result;
+}
+
 void register_client_certificate_routes (RouteContext& ctx) {
     /**
      * GET /client-certificates
@@ -460,20 +481,31 @@ void register_client_certificate_routes (RouteContext& ctx) {
 
     /**
      * DELETE /client-certificates/:id
-     * Removes an entry. The files it named are untouched - they are the user's,
-     * and this registry only ever held the way to find them.
+     * Moves an entry to the trash (#2973): restorable through
+     * `POST /trash/:id/restore` until a purge or retention destroys it, and
+     * presented to no host meanwhile. The files it named are untouched - they
+     * are the user's, and this registry only ever held the way to find them.
+     * Returns: {success: true}, or 404 if no live entry has that id.
      */
     ctx.server.Delete (R"(/client-certificates/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-
-        if (!ctx.db.get_client_certificate (id)) {
-            send_error (res, 404, "Client certificate not found");
-            return;
+        try {
+            auto [status, body] = delete_client_certificate_response (ctx.db, id);
+            if (status != 200) {
+                vayu::utils::log_warning ("http", "DELETE /client-certificates/:id failed",
+                { { "status", status }, { "id", id }, { "error", error_message_of (body) } });
+            } else {
+                vayu::utils::log_info (
+                "http", "Deleted client certificate", { { "id", id } });
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("http",
+            "DELETE /client-certificates/:id - Error: " + std::string (e.what ()));
+            send_exception (res, e);
         }
-
-        ctx.db.delete_client_certificate (id);
-        res.set_content (R"({"success": true})", "application/json");
     });
 }
 

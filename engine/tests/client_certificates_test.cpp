@@ -61,6 +61,8 @@ std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Dat
 const std::string& id,
 const nlohmann::json& json,
 const std::function<void ()>& before_write);
+std::pair<int, nlohmann::json>
+delete_client_certificate_response (vayu::db::Database& db, const std::string& id);
 } // namespace vayu::http::routes
 
 namespace vayu::http {
@@ -967,14 +969,53 @@ TEST_F (ClientCertificateDbTest, UpdatingAMissingEntryIs404) {
     EXPECT_TRUE (db_->get_client_certificates ().empty ());
 }
 
-TEST_F (ClientCertificateDbTest, DeletesAnEntry) {
+// A delete moves the entry to the trash (#2973). Mutation check: drop the
+// `is_null (deleted_at)` filter from `get_client_certificate` and the PUT and
+// the second DELETE answer 200.
+TEST_F (ClientCertificateDbTest, DeletingAnEntryTrashesItAndHidesItFromEveryRead) {
     const auto [status, created] =
     routes::create_client_certificate_response (*db_, body ("api.example.com"));
     ASSERT_EQ (status, 200) << created.dump ();
+    const std::string id = created["id"];
 
-    db_->delete_client_certificate (created["id"]);
+    const auto [deleted_status, deleted] =
+    routes::delete_client_certificate_response (*db_, id);
+    ASSERT_EQ (deleted_status, 200) << deleted.dump ();
+    EXPECT_EQ (deleted, (json{ { "success", true } }));
+
     EXPECT_TRUE (db_->get_client_certificates ().empty ());
-    EXPECT_FALSE (db_->get_client_certificate (created["id"]).has_value ());
+    EXPECT_FALSE (db_->get_client_certificate (id).has_value ());
+    const auto trash = db_->get_trash ();
+    ASSERT_EQ (trash.size (), 1u) << "stamped, not removed";
+    EXPECT_EQ (trash.front ().id, id);
+
+    const auto [put_status, put_body] =
+    routes::update_client_certificate_response (*db_, id, json{ { "port", 8443 } });
+    EXPECT_EQ (put_status, 404) << put_body.dump ();
+    const auto [again_status, again_body] =
+    routes::delete_client_certificate_response (*db_, id);
+    EXPECT_EQ (again_status, 404) << "a second delete finds nothing live";
+    EXPECT_EQ (again_body["error"]["message"], "Client certificate not found");
+}
+
+TEST_F (ClientCertificateDbTest, DeletingAMissingEntryIs404) {
+    const auto [status, error] =
+    routes::delete_client_certificate_response (*db_, "cert_nope");
+    EXPECT_EQ (status, 404) << error.dump ();
+    EXPECT_TRUE (db_->get_trash ().empty ());
+}
+
+// The trashed row no longer claims its target, so a fresh entry may take it;
+// bringing the trashed one back is then the restore's 409 (`trash_test.cpp`).
+TEST_F (ClientCertificateDbTest, ATrashedEntryNoLongerHoldsItsTarget) {
+    const auto [status, created] =
+    routes::create_client_certificate_response (*db_, body ("api.example.com", 8443));
+    ASSERT_EQ (status, 200) << created.dump ();
+    ASSERT_EQ (routes::delete_client_certificate_response (*db_, created["id"]).first, 200);
+
+    EXPECT_EQ (routes::create_client_certificate_response (*db_, body ("api.example.com", 8443))
+               .first,
+    200);
 }
 
 // ---------------------------------------------------------------------------
@@ -994,6 +1035,30 @@ TEST_F (ClientCertificateDbTest, TheRegistryReachesTheResolvedPolicy) {
     ASSERT_NE (matched, nullptr);
     EXPECT_EQ (matched->cert_path, cert_.path ());
     EXPECT_EQ (matched->key_path, key_.path ());
+}
+
+// The policy is the one funnel every driver presents a certificate through -
+// design send, stream, collection and load run - so a trashed entry missing
+// here is missing from all of them (#2973). Mutation check: drop the
+// `is_null (deleted_at)` filter from `get_client_certificates` and the trashed
+// entry still answers for its host.
+TEST_F (ClientCertificateDbTest, ATrashedEntryIsNeverInTheResolvedPolicy) {
+    const auto [trashed_status, trashed] =
+    routes::create_client_certificate_response (*db_, body ("api.example.com", 8443));
+    ASSERT_EQ (trashed_status, 200) << trashed.dump ();
+    ASSERT_EQ (routes::create_client_certificate_response (*db_, body ("other.example.com"))
+               .first,
+    200);
+    ASSERT_NE (
+    match_client_certificate (resolve_transport_policy (*db_), "api.example.com", 8443), nullptr);
+
+    ASSERT_EQ (routes::delete_client_certificate_response (*db_, trashed["id"]).first, 200);
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (policy.client_certificates.size (), 1u)
+    << "the live entry stays";
+    EXPECT_EQ (match_client_certificate (policy, "api.example.com", 8443), nullptr);
+    EXPECT_NE (match_client_certificate (policy, "other.example.com", 443), nullptr);
 }
 
 // The request's host reaches the matcher in the ASCII form libcurl dials

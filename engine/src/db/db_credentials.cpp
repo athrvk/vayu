@@ -7,9 +7,9 @@
 
 /**
  * @file db_credentials.cpp
- * @brief Client-certificate registry (issue #707), the allowed folders and
- * picked files for request bodies (`file_roots`, `file_grants`) and the OAuth
- * token cache (issue #1614).
+ * @brief Client-certificate registry (issue #707) and its trash (#2973), the
+ * allowed folders and picked files for request bodies (`file_roots`,
+ * `file_grants`) and the OAuth token cache (issue #1614).
  */
 
 #include "database_impl.hpp"
@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
 using namespace sqlite_orm;
@@ -49,15 +50,19 @@ void Database::save_client_certificate (const ClientCertificate& c) {
     impl_->storage.replace (c);
 }
 
+// Deleted rows are excluded here rather than at each caller (#2973): the
+// transport policy every driver applies is built from this list, so a trashed
+// entry that slipped through would be presented to its host on the next send.
 std::vector<ClientCertificate> Database::get_client_certificates () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<ClientCertificate> ();
+    return impl_->storage.get_all<ClientCertificate> (
+    where (is_null (&ClientCertificate::deleted_at)));
 }
 
 std::optional<ClientCertificate> Database::get_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto rows = impl_->storage.get_all<ClientCertificate> (
-    where (c (&ClientCertificate::id) == id));
+    auto rows = impl_->storage.get_all<ClientCertificate> (where (
+    c (&ClientCertificate::id) == id && is_null (&ClientCertificate::deleted_at)));
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
@@ -69,7 +74,8 @@ const std::optional<int>& port,
 const std::string& except_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     for (auto& row : impl_->storage.get_all<ClientCertificate> (where (
-         c (&ClientCertificate::host) == host && c (&ClientCertificate::id) != except_id))) {
+         c (&ClientCertificate::host) == host && c (&ClientCertificate::id) != except_id &&
+         is_null (&ClientCertificate::deleted_at)))) {
         // Compared here rather than in SQL, where `port = NULL` is never true
         // and "every port" is a target like any other.
         if (row.port == port) {
@@ -79,9 +85,49 @@ const std::string& except_id) {
     return std::nullopt;
 }
 
+// Soft delete (#2973): the row is stamped, not removed, and leaves the policy
+// with the stamp - `get_client_certificates` is what the policy reads.
 void Database::delete_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting client certificate", { { "id", id } });
+    vayu::utils::log_debug ("db", "Deleting client certificate (soft)", { { "id", id } });
+    const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                          .count ();
+    impl_->storage.transaction ([&] {
+        for (auto& certificate : impl_->storage.get_all<ClientCertificate> (where (
+             c (&ClientCertificate::id) == id && is_null (&ClientCertificate::deleted_at)))) {
+            certificate.deleted_at = stamp;
+            impl_->storage.update (certificate);
+        }
+        return true; // Commit
+    });
+}
+
+std::expected<TrashOutcome, RestoreFailure>
+Database::restore_client_certificate_locked (const TrashEntry& entry) {
+    // The registry's one-entry-per-target rule, which only code enforces: a
+    // live entry registered for the same host and port since the delete keeps
+    // it, and the way forward is named.
+    auto certificate = vayu::utils::invariant_value (
+    impl_->storage.get_optional<ClientCertificate> (entry.id),
+    "a client certificate's trash entry names a stored row");
+    if (const auto holder = client_certificate_for_target (
+        certificate.host, certificate.port, certificate.id)) {
+        return std::unexpected (RestoreFailure{ RestoreRefusal::TargetTaken,
+        "Client certificate '" + entry.id + "' cannot be restored - '" +
+        entry.name + "' is already registered to client certificate '" +
+        holder->id + "', so delete that entry first" });
+    }
+
+    // Clears the stamp and nothing else, so the row comes back as it went in.
+    certificate.deleted_at.reset ();
+    impl_->storage.update (certificate);
+    vayu::utils::log_info (
+    "db", "Restored client certificate from trash", { { "id", entry.id } });
+    return TrashOutcome{ entry, false };
+}
+
+void Database::purge_client_certificate_locked (const std::string& id) {
     impl_->storage.remove_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
 }
 

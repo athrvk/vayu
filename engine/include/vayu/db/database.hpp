@@ -67,9 +67,10 @@ namespace vayu::db {
  * 8 - `collections.spec_file` and `collections.data_file`, the files a
  *     collection's Spec and Data tabs are bound to (#2765);
  * 9 - `requests.timeout_ms`, a request's own timeout (#2937);
- *     `environments.deleted_at`, the environment trash (#2970), and
- *     `request_examples.deleted_at`, the example trash (#2971), both folded
- *     into the same unreleased version.
+ *     `environments.deleted_at`, the environment trash (#2970),
+ *     `request_examples.deleted_at`, the example trash (#2971), and
+ *     `client_certificates.deleted_at`, the certificate trash (#2973), all
+ *     folded into the same unreleased version.
  */
 inline constexpr int SCHEMA_VERSION = 9;
 
@@ -189,25 +190,27 @@ struct DesignResultOutcome {
  */
 struct TrashEntry {
     std::string id;
-    /// "collection", "request", "environment" or "example" - the four tables
-    /// the trash spans, so a client knows which shape it is looking at without
-    /// a second read. Every dispatch on it names all four and throws on
-    /// anything else.
+    /// "collection", "request", "environment", "example" or
+    /// "clientCertificate" (#2973) - the five tables the trash spans, so a
+    /// client knows which shape it is looking at without a second read. Every
+    /// dispatch on it names all five and throws on anything else.
     std::string kind;
+    /// A certificate has no name of its own: its entry is named by its target,
+    /// `host` or `host:port`, the label a trace shows for it.
     std::string name;
     /// When the delete ran, in Unix ms. Also the cohort key - see
     /// `Collection::deleted_at`.
     int64_t deleted_at = 0;
     /// The row this one hung under: a collection's parent (absent at the tree
     /// root), a request's owning collection (always present), an example's
-    /// owning *request* (always present, #2971). Absent for an environment,
-    /// which hangs under nothing.
+    /// owning *request* (always present, #2971). Absent for an environment
+    /// and a client certificate, which hang under nothing.
     std::optional<std::string> parent_id;
     /// Descendants *this delete* took with it - the cohort, and therefore
     /// exactly what a restore puts back. A purge may take more (a row an
     /// earlier delete left inside the same subtree), which is the one place
     /// these counts are a floor rather than the whole. Both 0 for a request,
-    /// an environment and an example.
+    /// an environment, an example and a client certificate.
     int64_t collections = 0;
     int64_t requests    = 0;
     /// How many variables an environment holds, as `parse_variables` reads its
@@ -237,8 +240,15 @@ struct RunHistoryCleared {
 /// carries that id; `OwnerGone` is a 409 - a request whose collection, or an
 /// example whose request, is itself deleted or missing, which has no root to
 /// come back to; `OverLimit` is a 409 - an example whose request already holds
-/// `request_example::MAX_PER_REQUEST` live examples (#2971).
-enum class RestoreRefusal : std::uint8_t { NotFound, OwnerGone, OverLimit };
+/// `request_example::MAX_PER_REQUEST` live examples (#2971); `TargetTaken` is a
+/// 409 - a client certificate whose host and port a live entry now claims
+/// (#2973).
+enum class RestoreRefusal : std::uint8_t {
+    NotFound,
+    OwnerGone,
+    OverLimit,
+    TargetTaken
+};
 
 /// A refused restore, as the route reports it (issue #988).
 struct RestoreFailure {
@@ -462,6 +472,8 @@ class Database {
     /// deleted example is a root only while its request is live (#2971): under
     /// a trashed request it is part of that request's entry, and with no
     /// request row at all it is listed nowhere, having nothing to come back to.
+    /// A deleted client certificate has no owner either and is always a root
+    /// (#2973).
     std::vector<TrashEntry> get_trash ();
 
     /**
@@ -483,6 +495,11 @@ class Database {
      * An example comes back only under a live request and only while that
      * request has room under `MAX_PER_REQUEST` (#2971); either refusal is a
      * 409 and leaves the row in the trash.
+     *
+     * A client certificate comes back only while no live entry claims its
+     * host and port (#2973): two rows for one target would leave the
+     * certificate presented to row order. The refusal is a 409 naming the
+     * live entry, decided under the same lock as the write.
      */
     std::expected<TrashOutcome, RestoreFailure> restore_deleted (const std::string& id);
 
@@ -749,18 +766,23 @@ class Database {
      *
      * `get_client_certificates` is read once per resolved transport policy -
      * per design send, and *once per run* on the load and collection paths -
-     * never per transfer; see `vayu::http::resolve_transport_policy`.
+     * never per transfer; see `vayu::http::resolve_transport_policy`. Both
+     * reads see live rows only (#2973), so a trashed entry is presented to no
+     * host and a PUT or second DELETE of one is a 404.
      */
     // db_credentials.cpp
     void save_client_certificate (const ClientCertificate& c);
     std::vector<ClientCertificate> get_client_certificates ();
     std::optional<ClientCertificate> get_client_certificate (const std::string& id);
-    /// The entry other than @p except_id that claims @p host and @p port, or
-    /// nothing - the one definition of "one entry per target" (#707). A
-    /// decision built on the answer holds the DB mutex across it and the write.
+    /// The live entry other than @p except_id that claims @p host and @p port,
+    /// or nothing - the one definition of "one entry per target" (#707), asked
+    /// by the create and update routes and by a restore (#2973). A decision
+    /// built on the answer holds the DB mutex across it and the write.
     std::optional<ClientCertificate> client_certificate_for_target (const std::string& host,
     const std::optional<int>& port,
     const std::string& except_id = {});
+    /// Stamps a live entry as deleted (#2973); the row, passphrase included,
+    /// stays for `GET /trash` until a restore or a purge.
     void delete_client_certificate (const std::string& id);
 
     /**
@@ -1352,8 +1374,8 @@ class Database {
 
     /**
      * @brief Destroy a collection subtree, a single request, a single
-     *        environment or a single example outright - examples, requests,
-     *        then collections, deepest first.
+     *        environment, a single example or a single client certificate
+     *        outright - examples, requests, then collections, deepest first.
      *
      * The hard cascade soft delete replaced (issue #988), kept as the one
      * definition purge and retention both reach for. A collection purge takes
@@ -1366,6 +1388,7 @@ class Database {
     void purge_request_locked (const std::string& id);     // db_requests.cpp
     void purge_environment_locked (const std::string& id); // db_environments.cpp
     void purge_example_locked (const std::string& id);     // db_requests.cpp
+    void purge_client_certificate_locked (const std::string& id); // db_credentials.cpp
 
     /**
      * @brief Destroy the trash entry @p entry names, by its kind - the one
@@ -1411,11 +1434,11 @@ class Database {
     bool request_is_absent_locked (const std::string& request_id); // db_requests.cpp
 
     /**
-     * @brief The four shapes of `restore_deleted`, split by what a row can
+     * @brief The five shapes of `restore_deleted`, split by what a row can
      *        come back to: a request needs a live collection and refuses
      *        without one, a collection re-parents to the tree root instead, an
-     *        environment needs nothing, and an example needs a live request
-     *        with room for it.
+     *        environment needs nothing, an example needs a live request with
+     *        room for it, and a client certificate needs its target free.
      *
      * Named steps rather than one function with every shape inside it (#1033's
      * rule, and what `readability-function-cognitive-complexity` reports).
@@ -1434,6 +1457,10 @@ class Database {
     /// stamp and nothing else (#2971).
     std::expected<TrashOutcome, RestoreFailure> restore_example_locked (
     const TrashEntry& entry); // db_requests.cpp
+    /// Refuses while a live entry claims the same host and port
+    /// (`TargetTaken`); otherwise clears the stamp and nothing else (#2973).
+    std::expected<TrashOutcome, RestoreFailure> restore_client_certificate_locked (
+    const TrashEntry& entry); // db_credentials.cpp
 
     /**
      * @brief Clear `is_active` on every environment except @p keep_id.

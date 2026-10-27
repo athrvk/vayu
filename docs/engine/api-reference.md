@@ -1105,7 +1105,7 @@ governs what a run measures rather than what it keeps:
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
-| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests, environments and saved examples deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
+| `trashRetentionDays` | `30`     | 0–3650       | Destroy collections, requests, environments, saved examples and client certificates deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
 | `monitorMaxSeries`  | `8`       | 1–64         | How many metric names one run may chart from its monitored endpoint. A longer `series` list is a `400`. Raising it past 4 repeats chart colours (the categorical palette has four line-legible hues). |
 | `monitorScrapeTimeoutMs` | `0`  | 0–60000      | How long one scrape may take before it counts as a gap. `0` derives it from the cadence in force for that run - three quarters of the interval. Set it explicitly for an exposition that is slow to render: one taking longer than three quarters of the interval fails *every* scrape otherwise, and the only other way out is a slower cadence, which also thins the data. A value longer than the interval a run scrapes at is shortened to it (logged once per run), because a scrape that outlives its own cadence puts the loop behind itself. |
@@ -2204,14 +2204,16 @@ the full kind table.
 
 ## Trash
 
-What deleting a collection, a request, an environment or a saved example now
-does, and how to undo it (issue #988; environments #2970; examples #2971).
-`DELETE /collections/:id`, `DELETE /requests/:id`, `DELETE /environments/:id`
-and, for an example a person saved (`origin: "user"`),
-`DELETE /requests/:id/examples/:exampleId` stamp rows instead of removing them;
-every other read surface filters stamped rows out, so the tree, the environment
-list and a request's examples look the same as after a hard delete, and these
-three endpoints are the whole of what the stamp buys. An imported example is
+What deleting a collection, a request, an environment, a saved example or a
+client certificate now does, and how to undo it (issue #988; environments
+#2970; examples #2971; client certificates #2973). `DELETE /collections/:id`,
+`DELETE /requests/:id`, `DELETE /environments/:id`,
+`DELETE /client-certificates/:id` and, for an example a person saved
+(`origin: "user"`), `DELETE /requests/:id/examples/:exampleId` stamp rows
+instead of removing them; every other read surface filters stamped rows out, so
+the tree, the environment list, a request's examples and the certificate
+registry look the same as after a hard delete, and these three endpoints are
+the whole of what the stamp buys. An imported example is
 not trashed: its delete leaves the tombstone a spec sync reads (see
 [DELETE /requests/:id/examples/:exampleId](#delete-requestsidexamplesexampleid)).
 
@@ -2244,6 +2246,17 @@ first, and so is restoring one into a request that already holds the maximum of
 100 examples. A stamped example whose request row is gone entirely is listed
 nowhere.
 
+A client certificate hangs under nothing, like an environment: its delete
+stamps its one row and it is always a root, named by its target (`host`, or
+`host:port` when the entry names a port). **A trashed certificate is never
+presented.** The transport policy every send resolves reads live entries only,
+so from the delete on no design send, stream, collection run or load run offers
+it to its host, and the target is free for a new entry. That is also why a
+restore can be refused: the registry holds one entry per host and port, so
+restoring a certificate while a live entry claims its target is a `409` naming
+that entry. The row keeps its passphrase, stored plaintext like every live
+entry's, until a purge removes it.
+
 Rows sit in the trash until they are purged: explicitly through
 `DELETE /trash/:id`, or by the startup sweep once they are older than
 `trashRetentionDays` (default 30; `0` keeps them forever).
@@ -2252,8 +2265,8 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count. Every deleted environment is a root; a
-deleted example is one while its request is live.
+`collections` and `requests` count. Every deleted environment and client
+certificate is a root; a deleted example is one while its request is live.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2293,27 +2306,38 @@ deleted example is one while its request is live.
       "parentId": "req_1234567890",
       "collections": 0,
       "requests": 0
+    },
+    {
+      "id": "cert_1234567890",
+      "kind": "clientCertificate",
+      "name": "api.example.com:8443",
+      "deletedAt": 1787745300000,
+      "parentId": null,
+      "collections": 0,
+      "requests": 0
     }
   ],
-  "total": 3
+  "total": 4
 }
 ```
 
-`kind` is `"collection"`, `"request"`, `"environment"` or `"example"`.
-`parentId` is a collection's parent (`null` at the tree root), a request's
-owning collection, an example's owning **request**, or `null` for an
-environment. `collections` and `requests` are `0` for a request, an environment
-and an example. `variables` is carried by an environment entry only - the
-number of variables its stored map holds - and is absent, not `0`, on the other
-three kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
+`kind` is `"collection"`, `"request"`, `"environment"`, `"example"` or
+`"clientCertificate"`. A client certificate's `name` is its target, `host` or
+`host:port`, which is what `q` matches. `parentId` is a collection's parent
+(`null` at the tree root), a request's owning collection, an example's owning
+**request**, or `null` for an environment and a client certificate.
+`collections` and `requests` are `0` for every kind but a collection.
+`variables` is carried by an environment entry only - the number of variables
+its stored map holds - and is absent, not `0`, on the other four kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
 
 ### POST /trash/:id/restore
 
-Put a deleted collection, request, environment or example back, with
-everything the same delete took. Takes no body. An environment comes back
-exactly as it was deleted except that it is inactive (see [Trash](#trash)), and
-its answer carries `variables` like its list entry. An example comes back
-exactly as it was deleted, `order` included.
+Put a deleted collection, request, environment, example or client certificate
+back, with everything the same delete took. Takes no body. An environment comes
+back exactly as it was deleted except that it is inactive (see [Trash](#trash)),
+and its answer carries `variables` like its list entry. An example comes back
+exactly as it was deleted, `order` included, and so does a client certificate,
+passphrase included.
 
 **Response:** the entry that was restored, plus what happened to it:
 ```json
@@ -2338,12 +2362,14 @@ exactly as it was deleted, `order` included.
 | `409` | A request whose collection is itself deleted or gone; restore the collection first |
 | `409` | An example whose request is itself deleted or gone; restore the request first |
 | `409` | An example whose request already holds the maximum of 100 examples; delete one first |
+| `409` | A client certificate whose host and port a live entry now claims; the message names that entry, to delete first |
 
 ### DELETE /trash/:id
 
-Destroy a deleted collection, request, environment or example for good, with
-its whole subtree - requests, and the examples they own, trashed ones included;
-an environment or an example is its one row. This is the hard cascade soft
+Destroy a deleted collection, request, environment, example or client
+certificate for good, with its whole subtree - requests, and the examples they
+own, trashed ones included; an environment, an example or a client certificate
+is its one row (a certificate's passphrase goes with it). This is the hard cascade soft
 delete replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
@@ -5362,7 +5388,7 @@ is left for the backend to judge rather than refused here.
 
 ### GET /client-certificates
 
-Every registered entry.
+Every registered entry; a trashed one is not listed.
 
 **Response:**
 ```json
@@ -5437,9 +5463,31 @@ A storage failure answers `507`, `503` or `500`, never `400` - see
 
 ### DELETE /client-certificates/:id
 
-Remove an entry; `404` if it does not exist. The certificate and key files
-themselves are never touched - the registry only ever held the way to find
-them.
+Delete an entry. **The delete is soft** (#2973): the row is stamped
+`deleted_at` and [`GET /trash`](#get-trash) lists it, named by its target, until
+a purge. From then on it is **never presented**: the transport policy reads live
+entries only, so the next design send, stream, collection run or load run to its
+host goes without it. Every route here treats the id as missing -
+`GET /client-certificates` leaves it out, `PUT` and a second `DELETE` are a
+`404` - and its `host` + `port` is free for a new entry. The certificate and key
+files themselves are never touched - the registry only ever held the way to
+find them. The stored passphrase stays on the trashed row until it is purged.
+
+Restore it with [`POST /trash/:id/restore`](#post-trashidrestore), which is a
+`409` while a live entry claims the same `host` + `port`; destroy it for good
+with [`DELETE /trash/:id`](#delete-trashid), which is also what the startup
+sweep does once `trashRetentionDays` has passed.
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+**Errors:** `404` if no live entry has that id, a trashed one included. A
+storage failure answers `507`, `503` or `500` - see
+[A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
 ## Allowed folders (file roots)
 

@@ -542,7 +542,9 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("cert_format", &ClientCertificate::cert_format, default_value ("pem")),
     make_column ("passphrase", &ClientCertificate::passphrase),
     make_column ("created_at", &ClientCertificate::created_at),
-    make_column ("updated_at", &ClientCertificate::updated_at)),
+    make_column ("updated_at", &ClientCertificate::updated_at),
+    // Soft delete (#2973), the `environments.deleted_at` shape: NULL is live.
+    make_column ("deleted_at", &ClientCertificate::deleted_at)),
 
     // Folders the user allowed request-body files to be read from (schema
     // version 3). A new table, created outright by sync_schema() like

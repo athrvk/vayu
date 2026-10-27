@@ -8,8 +8,8 @@
 /**
  * @file tests/trash_test.cpp
  * @brief Soft delete for collections, requests (issue #988), environments
- *        (#2970) and a user's saved examples (#2971), and the three trash
- *        routes on top of it.
+ *        (#2970), a user's saved examples (#2971) and client certificates
+ *        (#2973), and the three trash routes on top of it.
  *
  * What is pinned here is what a soft delete can silently get wrong, and each of
  * these fails on a plausible implementation of the same feature:
@@ -219,6 +219,36 @@ class TrashTest : public ::testing::Test {
         for (const auto& env : db_->get_environments ()) {
             if (env.id == id) {
                 return vayu::json::serialize (env).dump ();
+            }
+        }
+        return {};
+    }
+
+    /// A registry row written straight to the table: the trash never reads the
+    /// files a row names, so none need to exist here.
+    void make_client_certificate (const std::string& id,
+    const std::string& host,
+    std::optional<int> port           = std::nullopt,
+    std::optional<int64_t> deleted_at = std::nullopt) {
+        ClientCertificate cert;
+        cert.id         = id;
+        cert.host       = host;
+        cert.port       = port;
+        cert.cert_path  = "/certs/" + id + ".pem";
+        cert.key_path   = "/certs/" + id + ".key";
+        cert.passphrase = "hunter2";
+        cert.created_at = 1;
+        cert.updated_at = 1;
+        cert.deleted_at = deleted_at;
+        db_->save_client_certificate (cert);
+    }
+
+    /// What `GET /client-certificates` writes for @p id, or "" when it lists
+    /// no such row - the text a restore must give back unchanged.
+    std::string served_client_certificate (const std::string& id) {
+        for (const auto& cert : db_->get_client_certificates ()) {
+            if (cert.id == id) {
+                return vayu::json::serialize (cert).dump ();
             }
         }
         return {};
@@ -891,19 +921,21 @@ TEST_F (TrashTest, RetentionPurgesEveryExpiredRootOfEveryKind) {
     make_request ("req_owner", "col_live");
     make_user_example ("ex_1", "req_owner");
     make_environment ("env_1");
+    make_client_certificate ("cert_1", "api.example.com");
 
     db_->delete_collection ("col_1");
     db_->delete_collection ("col_3");
     db_->delete_request ("req_2");
     db_->delete_request_example ("ex_1");
     db_->delete_environment ("env_1");
-    ASSERT_EQ (db_->get_trash ().size (), 5U);
+    db_->delete_client_certificate ("cert_1");
+    ASSERT_EQ (db_->get_trash ().size (), 6U);
 
     int64_t newest = 0;
     for (const auto& entry : db_->get_trash ()) {
         newest = std::max (newest, entry.deleted_at);
     }
-    EXPECT_EQ (db_->purge_expired_trash (30, newest + (31 * DAY_MS)), 5);
+    EXPECT_EQ (db_->purge_expired_trash (30, newest + (31 * DAY_MS)), 6);
     EXPECT_TRUE (db_->get_trash ().empty ());
     EXPECT_FALSE (db_->get_request ("req_1").has_value ());
     EXPECT_TRUE (db_->get_request ("req_owner").has_value ());
@@ -1422,6 +1454,142 @@ TEST_F (TrashTest, RetentionPurgesAnExamplePastTheWindowAndKeepsARecentOne) {
     EXPECT_EQ (stored_rows ("request_examples", "exa_old"), 0);
     EXPECT_EQ (stored_rows ("request_examples", "exa_recent"), 1);
     EXPECT_TRUE (entry_for ("exa_recent").has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// Client certificates (#2973): no owner, named by their target, and a restore
+// must not put two entries on one host and port. The registry-side reads and
+// the transport policy are pinned in `client_certificates_test.cpp`.
+// ---------------------------------------------------------------------------
+
+TEST_F (TrashTest, ADeletedClientCertificateIsARootNamedByItsTarget) {
+    make_client_certificate ("cert_port", "api.example.com", 8443);
+    make_client_certificate ("cert_any", "*.example.com");
+    db_->delete_client_certificate ("cert_port");
+    db_->delete_client_certificate ("cert_any");
+    EXPECT_EQ (stored_rows ("client_certificates", "cert_port"), 1)
+    << "stamped, not removed";
+
+    auto entry = entry_for ("cert_port");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->kind, "clientCertificate");
+    EXPECT_EQ (entry->name, "api.example.com:8443");
+    EXPECT_GT (entry->deleted_at, 0);
+    EXPECT_FALSE (entry->parent_id.has_value ());
+    EXPECT_EQ (entry->collections, 0);
+    EXPECT_EQ (entry->requests, 0);
+    EXPECT_FALSE (entry->variables.has_value ());
+    auto every_port = entry_for ("cert_any");
+    ASSERT_HAS_VALUE (every_port);
+    EXPECT_EQ (every_port->name, "*.example.com") << "no port, no ':'";
+
+    const auto body = routes::trash_list_body (*db_);
+    ASSERT_EQ (body["total"], 2);
+    for (const auto& item : body["items"]) {
+        EXPECT_EQ (item["kind"], "clientCertificate");
+        EXPECT_TRUE (item["parentId"].is_null ());
+        EXPECT_FALSE (item.contains ("variables")) << item.dump ();
+    }
+
+    const auto [status, page] = routes::trash_list_response (*db_, { .q = "API.example" });
+    ASSERT_EQ (status, 200) << page.dump ();
+    ASSERT_EQ (page["data"].size (), 1U) << page.dump ();
+    EXPECT_EQ (page["data"][0]["id"], "cert_port");
+}
+
+// Mutation check: make `delete_client_certificate` remove the row again and
+// the restore is a 404.
+TEST_F (TrashTest, RestoringAClientCertificateServesItByteForByteAsBefore) {
+    make_client_certificate ("cert_1", "api.example.com", 8443);
+    const std::string before = served_client_certificate ("cert_1");
+    ASSERT_NE (before, "");
+    db_->delete_client_certificate ("cert_1");
+    EXPECT_EQ (served_client_certificate ("cert_1"), "");
+
+    auto [status, body] = routes::trash_restore_response (*db_, "cert_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["kind"], "clientCertificate");
+    EXPECT_EQ (body["name"], "api.example.com:8443");
+    EXPECT_TRUE (body["restored"].get<bool> ());
+    EXPECT_FALSE (body["reparentedToRoot"].get<bool> ());
+
+    EXPECT_EQ (served_client_certificate ("cert_1"), before);
+    auto restored = db_->get_client_certificate ("cert_1");
+    ASSERT_HAS_VALUE (restored);
+    EXPECT_EQ (restored->passphrase, "hunter2")
+    << "the passphrase the wire never echoes came back too";
+    EXPECT_FALSE (entry_for ("cert_1").has_value ()) << "it has left the trash";
+}
+
+// The registry allows one entry per host and port, and only code enforces it,
+// so a restore that ignored a live entry registered since the delete would
+// leave the certificate presented to row order. Mutation check: drop the
+// `client_certificate_for_target` refusal from
+// `restore_client_certificate_locked` and the 409 is a 200.
+TEST_F (TrashTest, RestoringAClientCertificateWhoseTargetIsTakenIsRefused) {
+    make_client_certificate ("cert_old", "api.example.com", 8443);
+    db_->delete_client_certificate ("cert_old");
+    make_client_certificate ("cert_new", "api.example.com", 8443);
+    make_client_certificate ("cert_other_port", "api.example.com", 9443);
+    make_client_certificate ("cert_every_port", "api.example.com");
+
+    auto [status, body] = routes::trash_restore_response (*db_, "cert_old");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Client certificate 'cert_old' cannot be restored - 'api.example.com:8443' "
+    "is already registered to client certificate 'cert_new', so delete that "
+    "entry first");
+    EXPECT_TRUE (entry_for ("cert_old").has_value ()) << "still in the trash";
+    EXPECT_FALSE (db_->get_client_certificate ("cert_old").has_value ());
+
+    db_->delete_client_certificate ("cert_new");
+    EXPECT_EQ (routes::trash_restore_response (*db_, "cert_old").first, 200)
+    << "a trashed entry holds no target, and another port is another target";
+    EXPECT_TRUE (db_->get_client_certificate ("cert_old").has_value ());
+}
+
+// Mutation check: drop the clientCertificate branch from
+// `purge_trash_entry_locked` and the purge throws.
+TEST_F (TrashTest, PurgingAClientCertificateRemovesTheRowAndItsPassphrase) {
+    make_client_certificate ("cert_1", "api.example.com");
+    db_->delete_client_certificate ("cert_1");
+
+    auto [status, body] = routes::trash_purge_response (*db_, "cert_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["kind"], "clientCertificate");
+    EXPECT_TRUE (body["purged"].get<bool> ());
+
+    EXPECT_EQ (stored_rows ("client_certificates", "cert_1"), 0)
+    << "the row, and the plaintext passphrase on it, are gone";
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    EXPECT_EQ (routes::trash_restore_response (*db_, "cert_1").first, 404)
+    << "nothing left to restore";
+}
+
+TEST_F (TrashTest, RestoringOrPurgingALiveClientCertificateIsA404) {
+    make_client_certificate ("cert_1", "api.example.com");
+
+    EXPECT_EQ (routes::trash_restore_response (*db_, "cert_1").first, 404);
+    EXPECT_EQ (routes::trash_purge_response (*db_, "cert_1").first, 404);
+    EXPECT_EQ (stored_rows ("client_certificates", "cert_1"), 1)
+    << "a mistyped id destroys nothing";
+    EXPECT_TRUE (db_->get_client_certificate ("cert_1").has_value ());
+}
+
+// Mutation check: drop the clientCertificate branch from `still_trashed` and
+// the sweep throws on the expired entry.
+TEST_F (TrashTest, RetentionPurgesAClientCertificatePastTheWindowAndKeepsARecentOne) {
+    constexpr int64_t DELETED = 1000;
+    make_client_certificate ("cert_old", "old.example.com", std::nullopt, DELETED);
+    make_client_certificate (
+    "cert_recent", "recent.example.com", std::nullopt, DELETED + (20 * DAY_MS));
+    make_client_certificate ("cert_live", "live.example.com");
+
+    EXPECT_EQ (db_->purge_expired_trash (30, DELETED + (31 * DAY_MS)), 1);
+    EXPECT_EQ (stored_rows ("client_certificates", "cert_old"), 0);
+    EXPECT_EQ (stored_rows ("client_certificates", "cert_recent"), 1);
+    EXPECT_TRUE (entry_for ("cert_recent").has_value ());
+    EXPECT_TRUE (db_->get_client_certificate ("cert_live").has_value ());
 }
 
 } // namespace

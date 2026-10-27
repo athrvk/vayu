@@ -133,9 +133,9 @@ template <typename Call> Recorded record (const Call& call) {
     return { log.statements, log.columns_read };
 }
 
-/// The four tables the trash spans: collections, requests, environments and
-/// request examples.
-constexpr size_t TRASH_TABLES = 4;
+/// The five tables the trash spans: collections, requests, environments,
+/// request examples and client certificates.
+constexpr size_t TRASH_TABLES = 5;
 
 class TrashListingCostTest : public ::testing::Test {
     protected:
@@ -208,9 +208,11 @@ class TrashListingCostTest : public ::testing::Test {
 
 // Listing a trashed request whose body is a megabyte reads the columns an
 // entry shows, never the body, the headers or the elements; nor is a trashed
-// example's body read, nor a collection's variables. The allowed set is ids,
-// names, owners, stamps and an environment's variables, which its entry
-// counts, so a read that widens fails here naming the column. Mutation check:
+// example's body read, nor a collection's variables, nor a client
+// certificate's paths or passphrase. The allowed set is ids, names, owners,
+// stamps, an environment's variables, which its entry counts, and a
+// certificate's host and port, which name it, so a read that widens fails here
+// naming the column. Mutation check:
 // list stamped requests with `get_all<Request>` again and `requests.body` is
 // read.
 TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotShow) {
@@ -244,6 +246,18 @@ TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotSho
     db_->save_environment (env);
     db_->delete_environment ("env_1");
 
+    ClientCertificate cert;
+    cert.id         = "cert_1";
+    cert.host       = "api.example.com";
+    cert.port       = 8443;
+    cert.cert_path  = "/certs/client.pem";
+    cert.key_path   = "/certs/client.key";
+    cert.passphrase = "hunter2";
+    cert.created_at = 1;
+    cert.updated_at = 1;
+    db_->save_client_certificate (cert);
+    db_->delete_client_certificate ("cert_1");
+
     reopen_with_statement_log ();
     if (HasFatalFailure ()) {
         return;
@@ -253,7 +267,7 @@ TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotSho
     record ([&] { listed = vayu::http::routes::trash_list_body (*db_); });
 
     // What was listed is every kind, so every kind's read is in the record.
-    ASSERT_EQ (listed["total"], 4) << listed.dump ();
+    ASSERT_EQ (listed["total"], 5) << listed.dump ();
     // A log that saw nothing passes forever.
     ASSERT_TRUE (recorded.columns_read.contains ("requests.name"))
     << "the authorizer did not see the listing's statements";
@@ -275,6 +289,10 @@ TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotSho
         "request_examples.name",
         "request_examples.request_id",
         "request_examples.deleted_at",
+        "client_certificates.id",
+        "client_certificates.host",
+        "client_certificates.port",
+        "client_certificates.deleted_at",
     };
     for (const auto& column : recorded.columns_read) {
         EXPECT_TRUE (shown.contains (column)) << "the listing read " << column;
@@ -283,7 +301,7 @@ TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotSho
 
 // A trashed root's counts take no statement per folder: listing a root of 300
 // folders runs as many statements as listing a root of one, and no more than
-// one per table the trash spans. Healthy: 4 either way. The per-folder shape
+// one per table the trash spans. Healthy: 5 either way. The per-folder shape
 // this replaced ran a subtree query and two counts per folder, about 900 for
 // 300 folders. Mutation check: count each subtree row with its own
 // `count<Request>` again and the 300-folder listing exceeds the bound.
