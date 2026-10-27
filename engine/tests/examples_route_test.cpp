@@ -785,7 +785,10 @@ TEST_F (ExamplesRouteTest, UpdateRejectsMismatchedBodyId) {
 // Delete and the cascades
 // ---------------------------------------------------------------------------
 
-TEST_F (ExamplesRouteTest, DeleteRemovesAUserSavedRowOutright) {
+// A user's own example goes to the trash (#2971), not to the tombstones a spec
+// sync reads (#722): nothing re-creates a saved response, so the trash is the
+// only way back. `trash_test.cpp` holds the restore and purge.
+TEST_F (ExamplesRouteTest, DeleteMovesAUserSavedRowToTheTrash) {
     const std::string id =
     create_example ("req_1", json{ { "name", "x" }, { "origin", "user" } });
 
@@ -793,13 +796,35 @@ TEST_F (ExamplesRouteTest, DeleteRemovesAUserSavedRowOutright) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["id"], id);
     EXPECT_FALSE (db_->get_request_example (id).has_value ());
-    // Nothing can re-create a saved response, so there is no intent to record
-    // and no tombstone to leave behind (issue #722).
     EXPECT_TRUE (db_->get_suppressed_request_examples ("req_1").empty ());
+    const auto trash = db_->get_trash ();
+    ASSERT_EQ (trash.size (), 1u);
+    EXPECT_EQ (trash[0].id, id);
+    EXPECT_EQ (trash[0].kind, "example");
 
     // A second delete is a 404 rather than a silent success.
     auto [again, _] = routes::delete_request_example_response (*db_, "req_1", id);
     EXPECT_EQ (again, 404);
+}
+
+// The create route's collision check reads this, because its `replace` would
+// overwrite whatever row holds the id - and a trashed or tombstoned row is one
+// `get_request_example` hides (#2971). Mutation check: filter hidden rows out
+// of `request_example_id_taken` and both stay-taken assertions red.
+TEST_F (ExamplesRouteTest, AHiddenExampleKeepsItsIdTaken) {
+    const std::string trashed =
+    create_example ("req_1", json{ { "name", "mine" }, { "origin", "user" } });
+    const std::string tombstoned =
+    create_example ("req_1", json{ { "name", "imported" } });
+    ASSERT_EQ (routes::delete_request_example_response (*db_, "req_1", trashed).first, 200);
+    ASSERT_EQ (
+    routes::delete_request_example_response (*db_, "req_1", tombstoned).first, 200);
+
+    EXPECT_FALSE (db_->get_request_example (trashed).has_value ());
+    EXPECT_TRUE (db_->request_example_id_taken (trashed));
+    EXPECT_FALSE (db_->get_request_example (tombstoned).has_value ());
+    EXPECT_TRUE (db_->request_example_id_taken (tombstoned));
+    EXPECT_FALSE (db_->request_example_id_taken ("exa_never_written"));
 }
 
 // Issue #722. The row stays as a tombstone so a later spec sync knows not to

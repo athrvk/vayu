@@ -142,6 +142,20 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.trash.all);
 	});
 
+	test("a deleted example reaches the Trash drawer and the request's open Examples list", () => {
+		// `delete_request_example` declares the `request` family alone. A saved
+		// example's delete stamps a row the drawer lists (#2971), and the examples
+		// list sits under `requests.detail(<id>)`, so the named request's detail
+		// invalidation covers it. Mutation check: drop the trash line from the
+		// `request` invalidator, or its detail line, and this fails.
+		const { keys } = keysFor({ entity: "request", requestId: "req_3" });
+		expect(keys).toContainEqual(queryKeys.trash.all);
+		const detail = queryKeys.requests.detail("req_3");
+		const examples = queryKeys.requests.examples("req_3");
+		expect(keys).toContainEqual(detail);
+		expect(examples.slice(0, detail.length)).toEqual([...detail]);
+	});
+
 	test("a purge that named every family still leaves one trash invalidation per event", () => {
 		// `purge_trash_entry` and `restore_trash_entry` declare `collection`,
 		// `request` and `environment`, so the drawer is covered whichever event is

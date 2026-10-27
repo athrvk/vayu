@@ -7,8 +7,9 @@
 
 /**
  * @file tests/trash_test.cpp
- * @brief Soft delete for collections, requests (issue #988) and environments
- *        (#2970), and the three trash routes on top of it.
+ * @brief Soft delete for collections, requests (issue #988), environments
+ *        (#2970) and a user's saved examples (#2971), and the three trash
+ *        routes on top of it.
  *
  * What is pinned here is what a soft delete can silently get wrong, and each of
  * these fails on a plausible implementation of the same feature:
@@ -53,6 +54,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/list_page.hpp"
+#include "vayu/http/mock_server.hpp"
 #include "vayu/utils/json.hpp"
 
 using nlohmann::json;
@@ -68,6 +70,18 @@ std::pair<int, nlohmann::json>
 trash_purge_response (vayu::db::Database& db, const std::string& id);
 std::pair<int, nlohmann::json> list_request_examples_response (vayu::db::Database& db,
 const std::string& request_id);
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json);
+std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id);
+// Defined in postman_export.cpp / spec_export.cpp.
+std::pair<int, nlohmann::json>
+export_postman_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+export_spec_response (vayu::db::Database& db, const nlohmann::json& json);
 // Defined in collections.cpp.
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
@@ -145,17 +159,44 @@ class TrashTest : public ::testing::Test {
         db_->save_request (r);
     }
 
-    void make_example (const std::string& id, const std::string& request_id) {
+    void make_example (const std::string& id,
+    const std::string& request_id,
+    const std::string& origin = vayu::core::constants::request_example::ORIGIN_IMPORT,
+    std::optional<int64_t> deleted_at = std::nullopt) {
         RequestExample e;
-        e.id         = id;
-        e.request_id = request_id;
-        e.name       = id;
-        e.status     = 200;
-        e.headers    = "[]";
-        e.body       = "{}";
-        e.created_at = 1;
-        e.updated_at = 1;
+        e.id           = id;
+        e.request_id   = request_id;
+        e.name         = id;
+        e.status       = 200;
+        e.headers      = "[]";
+        e.body         = R"({"marker":")" + id + R"("})";
+        e.content_type = "application/json";
+        e.created_at   = 1;
+        e.updated_at   = 1;
+        e.origin       = origin;
+        e.deleted_at   = deleted_at;
         db_->save_request_example (e);
+    }
+
+    /// A user-saved example - the only origin a delete sends to the trash.
+    void make_user_example (const std::string& id, const std::string& request_id) {
+        make_example (id, request_id, vayu::core::constants::request_example::ORIGIN_USER);
+    }
+
+    /// What `GET /requests/:id/examples` writes for @p id, or "" when it lists
+    /// no such row - the text a restore must give back unchanged.
+    std::string served_example (const std::string& request_id, const std::string& id) {
+        const auto [status, listed] =
+        routes::list_request_examples_response (*db_, request_id);
+        if (status != 200) {
+            return {};
+        }
+        for (const auto& example : listed) {
+            if (example.at ("id").get<std::string> () == id) {
+                return example.dump ();
+            }
+        }
+        return {};
     }
 
     void make_environment (const std::string& id,
@@ -869,19 +910,19 @@ TEST_F (TrashTest, RetentionIsConfiguredAndSeededAtThirtyDays) {
 // while in the trash
 // ---------------------------------------------------------------------------
 
-/// How many `environments` rows carry @p id, stamped ones included - read past
+/// How many rows of @p table carry @p id, stamped ones included - read past
 /// every filter `Database` applies, so a purge is seen to remove the row.
-int64_t environment_rows (const std::string& id) {
+int64_t stored_rows (const std::string& table, const std::string& id) {
     sqlite3* handle = nullptr;
     if (sqlite3_open (TEST_DB_PATH, &handle) != SQLITE_OK) {
         sqlite3_close (handle);
         ADD_FAILURE () << "could not open " << TEST_DB_PATH;
         return -1;
     }
-    sqlite3_stmt* stmt = nullptr;
-    int64_t count      = -1;
-    if (sqlite3_prepare_v2 (handle, "SELECT COUNT(*) FROM environments WHERE id = ?1",
-        -1, &stmt, nullptr) == SQLITE_OK) {
+    sqlite3_stmt* stmt    = nullptr;
+    int64_t count         = -1;
+    const std::string sql = "SELECT COUNT(*) FROM " + table + " WHERE id = ?1";
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text (stmt, 1, id.c_str (), -1, SQLITE_TRANSIENT);
         if (sqlite3_step (stmt) == SQLITE_ROW) {
             count = sqlite3_column_int64 (stmt, 0);
@@ -907,7 +948,8 @@ TEST_F (TrashTest, ADeletedEnvironmentIsAbsentFromEveryReadSurface) {
     EXPECT_EQ (served_environment ("env_1"), "");
     EXPECT_EQ (db_->get_environments ().size (), 1U)
     << "the live one is still listed";
-    EXPECT_EQ (environment_rows ("env_1"), 1) << "stamped, not removed";
+    EXPECT_EQ (stored_rows ("environments", "env_1"), 1)
+    << "stamped, not removed";
 
     auto [put_status, put_body] =
     routes::update_environment_response (*db_, "env_1", json{ { "name", "Back" } });
@@ -1030,7 +1072,7 @@ TEST_F (TrashTest, PurgingAnEnvironmentRemovesTheRow) {
     EXPECT_EQ (body["variables"], 1);
     EXPECT_TRUE (body["purged"].get<bool> ());
 
-    EXPECT_EQ (environment_rows ("env_1"), 0);
+    EXPECT_EQ (stored_rows ("environments", "env_1"), 0);
     EXPECT_TRUE (db_->get_trash ().empty ());
     auto [restore_status, restore_body] = routes::trash_restore_response (*db_, "env_1");
     EXPECT_EQ (restore_status, 404) << "nothing left to restore";
@@ -1041,7 +1083,7 @@ TEST_F (TrashTest, RestoringOrPurgingALiveEnvironmentIsA404) {
 
     EXPECT_EQ (routes::trash_restore_response (*db_, "env_1").first, 404);
     EXPECT_EQ (routes::trash_purge_response (*db_, "env_1").first, 404);
-    EXPECT_EQ (environment_rows ("env_1"), 1)
+    EXPECT_EQ (stored_rows ("environments", "env_1"), 1)
     << "a mistyped id destroys nothing";
     EXPECT_TRUE (db_->get_environment ("env_1").has_value ());
 }
@@ -1056,12 +1098,299 @@ TEST_F (TrashTest, RetentionPurgesAnEnvironmentPastTheWindowAndLeavesALiveOne) {
     ASSERT_HAS_VALUE (entry);
 
     EXPECT_EQ (db_->purge_expired_trash (30, entry->deleted_at + (29 * DAY_MS)), 0);
-    EXPECT_EQ (environment_rows ("env_trashed"), 1);
+    EXPECT_EQ (stored_rows ("environments", "env_trashed"), 1);
 
     EXPECT_EQ (db_->purge_expired_trash (30, entry->deleted_at + (31 * DAY_MS)), 1);
-    EXPECT_EQ (environment_rows ("env_trashed"), 0);
+    EXPECT_EQ (stored_rows ("environments", "env_trashed"), 0);
     EXPECT_TRUE (db_->get_trash ().empty ());
     EXPECT_TRUE (db_->get_environment ("env_live").has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// Examples (#2971): a user's saved example waits under its live request; an
+// imported one is still a tombstone
+// ---------------------------------------------------------------------------
+
+/// The `text` an export core answered, or "" (with a failure) on any other
+/// answer - the bytes a person would save, searched for an example's marker.
+std::string exported_text (const std::pair<int, json>& outcome) {
+    if (outcome.first != 200 || !outcome.second.contains ("text")) {
+        ADD_FAILURE ()
+        << "export answered " << outcome.first << ": " << outcome.second.dump ();
+        return {};
+    }
+    return outcome.second["text"].get<std::string> ();
+}
+
+// Mutation check: drop `is_null (deleted_at)` from `live_examples_of` and the
+// list, count, mock and export assertions find the row again; drop it from
+// `get_request_example` and the PUT and second DELETE answer 200.
+TEST_F (TrashTest, ADeletedUserExampleIsAbsentFromEveryReadSurface) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_kept", "req_1");
+    make_user_example ("exa_gone", "req_1");
+
+    auto [deleted_status, deleted_body] =
+    routes::delete_request_example_response (*db_, "req_1", "exa_gone");
+    ASSERT_EQ (deleted_status, 200) << deleted_body.dump ();
+    EXPECT_EQ (stored_rows ("request_examples", "exa_gone"), 1)
+    << "stamped, not removed";
+
+    EXPECT_EQ (served_example ("req_1", "exa_gone"), "");
+    EXPECT_NE (served_example ("req_1", "exa_kept"), "")
+    << "the live one is still listed";
+    EXPECT_EQ (db_->count_request_examples ("req_1"), 1);
+    EXPECT_FALSE (db_->get_request_example ("exa_gone").has_value ());
+
+    auto [put_status, put_body] = routes::update_request_example_response (
+    *db_, "req_1", "exa_gone", json{ { "name", "back" } });
+    EXPECT_EQ (put_status, 404);
+    EXPECT_EQ (error_field (put_body, "message"), "Example not found");
+    auto [again_status, again_body] =
+    routes::delete_request_example_response (*db_, "req_1", "exa_gone");
+    EXPECT_EQ (again_status, 404) << "a second delete finds nothing live";
+    EXPECT_EQ (error_field (again_body, "message"), "Example not found");
+
+    const auto mock_routes = vayu::http::build_mock_routes (*db_, "col_1");
+    ASSERT_EQ (mock_routes.size (), 1U);
+    ASSERT_EQ (mock_routes[0].examples.size (), 1U);
+    EXPECT_EQ (mock_routes[0].examples[0].id, "exa_kept");
+
+    const std::string postman = exported_text (
+    routes::export_postman_response (*db_, json{ { "collectionId", "col_1" } }));
+    EXPECT_NE (postman.find ("exa_kept"), std::string::npos);
+    EXPECT_EQ (postman.find ("exa_gone"), std::string::npos);
+
+    const std::string spec = exported_text (
+    routes::export_spec_response (*db_, json{ { "collectionId", "col_1" } }));
+    EXPECT_NE (spec.find ("exa_kept"), std::string::npos);
+    EXPECT_EQ (spec.find ("exa_gone"), std::string::npos);
+}
+
+// Regression for the branch #2971 left alone: an imported example is a spec
+// sync's tombstone (#722), never a trash entry a restore could bring back
+// under a document that dropped it.
+TEST_F (TrashTest, DeletingAnImportedExampleStillTombstonesItOutsideTheTrash) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_example ("exa_imported", "req_1");
+
+    auto [status, body] =
+    routes::delete_request_example_response (*db_, "req_1", "exa_imported");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    const auto tombstones = db_->get_suppressed_request_examples ("req_1");
+    ASSERT_EQ (tombstones.size (), 1U);
+    EXPECT_EQ (tombstones[0].id, "exa_imported");
+    EXPECT_FALSE (tombstones[0].deleted_at.has_value ());
+    EXPECT_EQ (routes::trash_restore_response (*db_, "exa_imported").first, 404);
+}
+
+TEST_F (TrashTest, ADeletedExampleIsARootNamingItsRequest) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    db_->delete_request_example ("exa_1");
+
+    auto entry = entry_for ("exa_1");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->kind, "example");
+    EXPECT_EQ (entry->name, "exa_1");
+    EXPECT_GT (entry->deleted_at, 0);
+    ASSERT_HAS_VALUE (entry->parent_id);
+    EXPECT_EQ (*entry->parent_id, "req_1") << "the request, not the collection";
+    EXPECT_EQ (entry->collections, 0);
+    EXPECT_EQ (entry->requests, 0);
+    EXPECT_FALSE (entry->variables.has_value ());
+
+    const auto body = routes::trash_list_body (*db_);
+    ASSERT_EQ (body["total"], 1);
+    const auto& item = body["items"][0];
+    EXPECT_EQ (item["kind"], "example");
+    EXPECT_EQ (item["name"], "exa_1");
+    EXPECT_EQ (item["parentId"], "req_1");
+    EXPECT_EQ (item["collections"], 0);
+    EXPECT_EQ (item["requests"], 0);
+    EXPECT_FALSE (item.contains ("variables")) << item.dump ();
+}
+
+// Under a trashed request the example is part of what that request's entry
+// stands for; once the request is back, the example's own earlier delete is
+// a root again - the cohort rule, one level down.
+TEST_F (TrashTest, AnExampleUnderATrashedRequestIsListedOnlyThroughTheRequest) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    db_->delete_request_example ("exa_1");
+    db_->delete_request ("req_1");
+
+    EXPECT_FALSE (entry_for ("exa_1").has_value ());
+    EXPECT_TRUE (entry_for ("req_1").has_value ());
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("req_1"));
+    EXPECT_TRUE (entry_for ("exa_1").has_value ());
+    EXPECT_EQ (served_example ("req_1", "exa_1"), "")
+    << "restoring the request leaves the example's own delete standing";
+}
+
+// A stamped example with no request row at all - nothing purges a request
+// without its examples, so this is seeded - has nothing to come back under:
+// it is listed nowhere, its restore says why, and a purge by id still clears it.
+TEST_F (TrashTest, AnExampleWhoseRequestIsGoneIsUnlistedAndUnrestorable) {
+    make_example ("exa_orphan", "req_missing",
+    vayu::core::constants::request_example::ORIGIN_USER, int64_t{ 1000 });
+
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    auto [status, body] = routes::trash_restore_response (*db_, "exa_orphan");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Example 'exa_orphan' cannot be restored on its own - the request it "
+    "belongs to is gone");
+
+    EXPECT_EQ (routes::trash_purge_response (*db_, "exa_orphan").first, 200);
+    EXPECT_EQ (stored_rows ("request_examples", "exa_orphan"), 0);
+}
+
+// Mutation check: make `delete_request_example` remove the row again and the
+// restore is a 404.
+TEST_F (TrashTest, RestoringAnExampleServesItByteForByteAsBefore) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    const std::string before = served_example ("req_1", "exa_1");
+    ASSERT_NE (before, "");
+    auto [deleted_status, deleted_body] =
+    routes::delete_request_example_response (*db_, "req_1", "exa_1");
+    ASSERT_EQ (deleted_status, 200) << deleted_body.dump ();
+
+    auto [status, body] = routes::trash_restore_response (*db_, "exa_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["kind"], "example");
+    EXPECT_EQ (body["parentId"], "req_1");
+    EXPECT_TRUE (body["restored"].get<bool> ());
+    EXPECT_FALSE (body["reparentedToRoot"].get<bool> ());
+
+    EXPECT_EQ (served_example ("req_1", "exa_1"), before);
+    EXPECT_FALSE (entry_for ("exa_1").has_value ()) << "it has left the trash";
+}
+
+// Mutation check: drop the `request_is_absent_locked` refusal from
+// `restore_example_locked` and the restore answers 200 under a trashed request.
+TEST_F (TrashTest, RestoringAnExampleUnderATrashedRequestIsRefused) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    db_->delete_request_example ("exa_1");
+    db_->delete_request ("req_1");
+
+    auto [status, body] = routes::trash_restore_response (*db_, "exa_1");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Example 'exa_1' cannot be restored on its own - the request it belongs to "
+    "is in the trash, so restore that first");
+
+    EXPECT_EQ (stored_rows ("request_examples", "exa_1"), 1);
+    ASSERT_HAS_VALUE (db_->restore_deleted ("req_1"));
+    EXPECT_EQ (served_example ("req_1", "exa_1"), "")
+    << "the refusal cleared nothing";
+    EXPECT_TRUE (entry_for ("exa_1").has_value ());
+}
+
+// A delete makes room under `MAX_PER_REQUEST` that a later create may take;
+// restoring into a full request would hold more examples than any write path
+// allows. Mutation check: drop the cap refusal and the 409 is a 200.
+TEST_F (TrashTest, RestoringAnExampleIntoAFullRequestIsRefused) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_trashed", "req_1");
+    db_->delete_request_example ("exa_trashed");
+    const auto limit = vayu::core::constants::request_example::MAX_PER_REQUEST;
+    for (size_t i = 0; i < limit; ++i) {
+        make_user_example ("exa_live_" + std::to_string (i), "req_1");
+    }
+
+    auto [status, body] = routes::trash_restore_response (*db_, "exa_trashed");
+    EXPECT_EQ (status, 409);
+    EXPECT_EQ (error_field (body, "message"),
+    "Example 'exa_trashed' cannot be restored - its request already holds the "
+    "maximum of " +
+    std::to_string (limit) + " examples, so delete one first");
+    EXPECT_TRUE (entry_for ("exa_trashed").has_value ())
+    << "still in the trash";
+
+    db_->delete_request_example ("exa_live_0");
+    EXPECT_EQ (routes::trash_restore_response (*db_, "exa_trashed").first, 200)
+    << "a trashed example does not count against the cap";
+}
+
+TEST_F (TrashTest, RestoringOrPurgingALiveExampleIsA404) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+
+    EXPECT_EQ (routes::trash_restore_response (*db_, "exa_1").first, 404);
+    EXPECT_EQ (routes::trash_purge_response (*db_, "exa_1").first, 404);
+    EXPECT_EQ (stored_rows ("request_examples", "exa_1"), 1)
+    << "a mistyped id destroys nothing";
+    EXPECT_TRUE (db_->get_request_example ("exa_1").has_value ());
+}
+
+// Mutation check: drop the example branch from `purge_trash_entry_locked` and
+// the purge throws.
+TEST_F (TrashTest, PurgingAnExampleRemovesTheRow) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    db_->delete_request_example ("exa_1");
+
+    auto [status, body] = routes::trash_purge_response (*db_, "exa_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["kind"], "example");
+    EXPECT_TRUE (body["purged"].get<bool> ());
+
+    EXPECT_EQ (stored_rows ("request_examples", "exa_1"), 0);
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    EXPECT_EQ (routes::trash_restore_response (*db_, "exa_1").first, 404)
+    << "nothing left to restore";
+}
+
+// The request and collection purges remove examples by request id, stamp or
+// no stamp, so a trashed example never outlives the request it answered.
+TEST_F (TrashTest, PurgingTheRequestOrItsCollectionLeavesNoTrashedExample) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    db_->delete_request_example ("exa_1");
+    db_->delete_request ("req_1");
+    ASSERT_HAS_VALUE (db_->purge_deleted ("req_1"));
+    EXPECT_EQ (stored_rows ("request_examples", "exa_1"), 0);
+
+    make_collection ("col_2", "Nested", "col_1");
+    make_request ("req_2", "col_2");
+    make_user_example ("exa_2", "req_2");
+    db_->delete_request_example ("exa_2");
+    db_->delete_collection ("col_1");
+    ASSERT_HAS_VALUE (db_->purge_deleted ("col_1"));
+    EXPECT_EQ (stored_rows ("request_examples", "exa_2"), 0);
+}
+
+// Mutation check: drop the example branch from `purge_trash_entry_locked`
+// and the sweep throws on the expired example.
+TEST_F (TrashTest, RetentionPurgesAnExamplePastTheWindowAndKeepsARecentOne) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    constexpr int64_t DELETED = 1000;
+    make_example ("exa_old", "req_1",
+    vayu::core::constants::request_example::ORIGIN_USER, DELETED);
+    make_example ("exa_recent", "req_1",
+    vayu::core::constants::request_example::ORIGIN_USER, DELETED + (20 * DAY_MS));
+
+    EXPECT_EQ (db_->purge_expired_trash (30, DELETED + (31 * DAY_MS)), 1);
+    EXPECT_EQ (stored_rows ("request_examples", "exa_old"), 0);
+    EXPECT_EQ (stored_rows ("request_examples", "exa_recent"), 1);
+    EXPECT_TRUE (entry_for ("exa_recent").has_value ());
 }
 
 } // namespace

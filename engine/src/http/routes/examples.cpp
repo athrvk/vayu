@@ -512,7 +512,9 @@ const nlohmann::json& json) {
     }
 
     const std::string id = vayu::utils::generate_id ("exa_");
-    if (db.get_request_example (id).has_value ()) {
+    // Every row, hidden ones included: `get_request_example` misses a
+    // tombstone or a trashed row, and the `replace` below would overwrite it.
+    if (db.request_example_id_taken (id)) {
         const std::string conflict = "Example '" + id +
         "' already exists; use PUT /requests/:id/examples/:exampleId to update";
         return { 409, error_body (409, conflict) };
@@ -608,21 +610,10 @@ const nlohmann::json& json) {
 }
 
 /**
- * Testable core of DELETE /requests/:id/examples/:exampleId.
- *
- * **An imported example is tombstoned rather than removed** (issue #722). A
- * spec sync replaces every `origin="import"` row of a request it applies any
- * change to, so a removed row came back on the next rename-only sync and the
- * delete this route performs was not a decision that lasted. Keeping the row
- * as a tombstone (`suppressed`) is what records the decision - the sync reads
- * them and leaves that status alone.
- *
- * A user's own example is still removed outright: nothing re-creates one, so
- * there is no intent to remember and a hidden row would be a leak with no
- * reader. Either way the answer is the same, because from the caller's side it
- * is: the example is gone from every read.
+ * The check-and-write of DELETE /requests/:id/examples/:exampleId, run under the
+ * caller's lock.
  */
-std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
+static std::pair<int, nlohmann::json> delete_request_example_locked (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id) {
     if (auto outcome = reject_missing_request (db, request_id); !outcome) {
@@ -640,6 +631,32 @@ const std::string& example_id) {
     }
     return { 200,
         nlohmann::json{ { "message", "Example deleted successfully" }, { "id", example_id } } };
+}
+
+/**
+ * Testable core of DELETE /requests/:id/examples/:exampleId.
+ *
+ * **An imported example is tombstoned rather than trashed** (issue #722). A
+ * spec sync replaces every `origin="import"` row of a request it applies any
+ * change to, so a removed row came back on the next rename-only sync and the
+ * delete this route performs was not a decision that lasted. Keeping the row
+ * as a tombstone (`suppressed`) is what records the decision - the sync reads
+ * them and leaves that status alone.
+ *
+ * **A user's own example goes to the trash** (#2971): nothing re-creates one,
+ * so the delete is the only copy of the decision and the row is the only copy
+ * of the response; `POST /trash/:id/restore` brings it back. Either way the
+ * answer is the same, because from the caller's side it is: the example is
+ * gone from every read. The check and the write are one lock scope, so the
+ * origin read is the origin acted on.
+ */
+std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = delete_request_example_locked (db, request_id, example_id); });
+    return result;
 }
 
 void register_request_example_routes (RouteContext& ctx) {
@@ -752,7 +769,9 @@ void register_request_example_routes (RouteContext& ctx) {
 
     /**
      * DELETE /requests/:id/examples/:exampleId
-     * Deletes one saved example. Returns a message and the id, or 404.
+     * Deletes one saved example: a user's own goes to the trash (#2971), an
+     * imported one becomes a tombstone (#722). Returns a message and the id,
+     * or 404.
      */
     ctx.server.Delete (R"(/requests/([^/]+)/examples/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

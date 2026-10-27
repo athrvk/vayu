@@ -94,6 +94,13 @@ describe("Copy for agent on a trash entry", () => {
 		expect(writeText).toHaveBeenCalledWith('Vayu trash entry "Staging" (env_1) - environment');
 	});
 
+	it("names an example entry by its kind", async () => {
+		fireEvent.click(renderItem({ ...ENTRY, id: "exa_1", kind: "example", name: "Happy path" }));
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(writeText).toHaveBeenCalledWith('Vayu trash entry "Happy path" (exa_1) - example');
+	});
+
 	it("swaps the glyph to a check and raises no toast", async () => {
 		const button = renderItem();
 		expect(liveGlyph(button)).toContain("lucide-copy");

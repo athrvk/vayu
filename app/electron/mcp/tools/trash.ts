@@ -15,15 +15,15 @@ import { type EngineClient, EngineRequestError } from "../engine-client.js";
 import { engineSentence } from "./failure.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
-const TRASH_KINDS = ["collection", "request", "environment"] as const;
+const TRASH_KINDS = ["collection", "request", "environment", "example"] as const;
 
 /** One `GET /trash` row, as `purge_trash_entry` needs it to name what it destroys. */
 export interface TrashRow {
 	kind: (typeof TRASH_KINDS)[number];
 	name: string;
-	/** Sub-collections this row's delete took with it. Always 0 for a request or an environment. */
+	/** Sub-collections this row's delete took with it. Always 0 for a request, an environment or an example. */
 	collections: number;
-	/** Requests this row's delete took with it. Always 0 for a request or an environment. */
+	/** Requests this row's delete took with it. Always 0 for a request, an environment or an example. */
 	requests: number;
 	/** The environment's variable count; the engine sends it on environment rows only. */
 	variables: number;
@@ -77,6 +77,8 @@ export function describeTrashEntry(entry: TrashRow): string {
 			);
 		case "request":
 			return `the saved request "${entry.name}"`;
+		case "example":
+			return `the saved example "${entry.name}"`;
 		case "collection": {
 			const subject = `the collection "${entry.name}"`;
 			if (entry.collections === 0 && entry.requests === 0) return subject;

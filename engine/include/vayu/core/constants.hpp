@@ -1357,9 +1357,9 @@ constexpr int MAX_DESIGN_RUNS_RETAINED = 100;
 /// Run retention: delete runs older than N days (0 = unlimited).
 constexpr int RUN_RETENTION_DAYS = 30;
 /**
- * Trash retention: purge collections, requests and environments deleted more
- * than N days ago (0 = keep them forever), swept at startup (issue #988,
- * environments #2970).
+ * Trash retention: purge collections, requests, environments and saved
+ * examples deleted more than N days ago (0 = keep them forever), swept at
+ * startup (issue #988, environments #2970, examples #2971).
  *
  * Thirty days for the same reason runs get thirty: the mistake soft delete
  * exists to undo - a collection removed by a misclick - is usually noticed the

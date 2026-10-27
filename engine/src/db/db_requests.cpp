@@ -29,6 +29,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/sibling_order.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
 using namespace sqlite_orm;
@@ -244,18 +245,34 @@ void Database::save_request_example (const RequestExample& e) {
     impl_->storage.replace (e);
 }
 
+namespace {
+
+// The one definition of "an example a reader may see" (issues #722, #2971):
+// neither a tombstone nor a trashed row. The list and the count share it, so
+// the list route, the mock server, both exports, the spec sync and the cap
+// cannot disagree about which rows exist; `get_request_example` states the
+// same two conditions by id.
+auto live_examples_of (const std::string& request_id) {
+    return where (c (&RequestExample::request_id) == request_id &&
+    c (&RequestExample::suppressed) == false && is_null (&RequestExample::deleted_at));
+}
+
+} // namespace
+
 /**
- * One example by id - a tombstoned row reads as gone (issue #722).
+ * One example by id - a tombstoned or trashed row reads as gone (issues #722,
+ * #2971).
  *
  * The filter is here rather than in each caller because this is what the
  * owner check of every `/requests/:id/examples/:exampleId` route reads: a
- * suppressed row answering 200 would let a `PUT` bring a deleted example back
- * by writing over its tombstone.
+ * hidden row answering 200 would let a `PUT` bring a deleted example back by
+ * writing over it.
  */
 std::optional<RequestExample> Database::get_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto rows = impl_->storage.get_all<RequestExample> (where (
-    c (&RequestExample::id) == id and c (&RequestExample::suppressed) == false));
+    auto rows = impl_->storage.get_all<RequestExample> (
+    where (c (&RequestExample::id) == id && c (&RequestExample::suppressed) == false &&
+    is_null (&RequestExample::deleted_at)));
     if (rows.empty ())
         return std::nullopt;
     return rows.front ();
@@ -269,12 +286,7 @@ std::vector<RequestExample> Database::get_request_examples (const std::string& r
     // has to lead, because a bulk import writes every example of one request in
     // the same millisecond - on `created_at` alone they all tie and the id
     // tiebreak returns the author's list shuffled.
-    // Tombstoned rows are excluded here and not by the callers, so a deleted
-    // imported example is invisible to the list route, the mock server and the
-    // export alike (issue #722).
-    return impl_->storage.get_all<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id and
-    c (&RequestExample::suppressed) == false),
+    return impl_->storage.get_all<RequestExample> (live_examples_of (request_id),
     multi_order_by (order_by (&RequestExample::order),
     order_by (&RequestExample::created_at), order_by (&RequestExample::id)));
 }
@@ -290,22 +302,83 @@ std::vector<RequestExample> Database::get_suppressed_request_examples (
 const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id and
-    c (&RequestExample::suppressed) == true));
+    where (c (&RequestExample::request_id) == request_id &&
+    c (&RequestExample::suppressed) == true && is_null (&RequestExample::deleted_at)));
 }
 
 int64_t Database::count_request_examples (const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // Tombstones do not count against `MAX_PER_REQUEST`: a user who deletes an
-    // imported example has fewer examples, not the same number with one hidden.
-    return impl_->storage.count<RequestExample> (
-    where (c (&RequestExample::request_id) == request_id and
-    c (&RequestExample::suppressed) == false));
+    // Neither tombstones nor trashed rows count against `MAX_PER_REQUEST`: a
+    // user who deletes an example has fewer examples, not the same number with
+    // one hidden. A restore re-checks the cap for the same reason.
+    return impl_->storage.count<RequestExample> (live_examples_of (request_id));
 }
 
+bool Database::request_example_id_taken (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<RequestExample> (where (c (&RequestExample::id) == id)) > 0;
+}
+
+// Soft delete (#2971): the row is stamped, not removed. A user's example is the
+// one thing on a request a person makes by hand that a delete used to destroy
+// outright; now it waits in `GET /trash` like the request it hangs under.
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting request example", { { "id", id } });
+    vayu::utils::log_debug ("db", "Deleting request example (soft)", { { "id", id } });
+    const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                          .count ();
+    impl_->storage.transaction ([&] {
+        for (auto& example : impl_->storage.get_all<RequestExample> (where (
+             c (&RequestExample::id) == id && is_null (&RequestExample::deleted_at)))) {
+            example.deleted_at = stamp;
+            impl_->storage.update (example);
+        }
+        return true; // Commit
+    });
+}
+
+bool Database::request_is_absent_locked (const std::string& request_id) {
+    return impl_->storage.count<Request> (where (
+           c (&Request::id) == request_id && is_null (&Request::deleted_at))) == 0;
+}
+
+std::expected<TrashOutcome, RestoreFailure> Database::restore_example_locked (
+const TrashEntry& entry) {
+    const std::string& request_id = vayu::utils::invariant_value (
+    entry.parent_id, "an example's trash entry carries its request id");
+    // The `restore_request_locked` rule one level down: an example has no root
+    // to come back to without its request, and the way forward is named.
+    if (request_is_absent_locked (request_id)) {
+        const bool gone =
+        impl_->storage.count<Request> (where (c (&Request::id) == request_id)) == 0;
+        return std::unexpected (RestoreFailure{ RestoreRefusal::OwnerGone,
+        "Example '" + entry.id + "' cannot be restored on its own - the request it belongs to is " +
+        (gone ? "gone" : "in the trash, so restore that first") });
+    }
+    // The create route's cap, counted the same way: a delete made room that a
+    // later create may have taken.
+    const auto limit = vayu::core::constants::request_example::MAX_PER_REQUEST;
+    if (count_request_examples (request_id) >= static_cast<int64_t> (limit)) {
+        return std::unexpected (RestoreFailure{ RestoreRefusal::OverLimit,
+        "Example '" + entry.id + "' cannot be restored - its request already holds the maximum of " +
+        std::to_string (limit) + " examples, so delete one first" });
+    }
+
+    impl_->storage.transaction ([&] {
+        for (auto& example : impl_->storage.get_all<RequestExample> (
+             where (c (&RequestExample::id) == entry.id &&
+             is_not_null (&RequestExample::deleted_at)))) {
+            example.deleted_at.reset ();
+            impl_->storage.update (example);
+        }
+        return true; // Commit
+    });
+    vayu::utils::log_info ("db", "Restored example from trash", { { "id", entry.id } });
+    return TrashOutcome{ entry, false };
+}
+
+void Database::purge_example_locked (const std::string& id) {
     impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
 }
 

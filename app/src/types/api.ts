@@ -1285,27 +1285,28 @@ export interface WorkspaceBackupResult {
  *
  * An environment (#2970) is always a root and takes nothing with it: its
  * variables live on its own row, so they are counted in `variables` rather than
- * as a cascade.
+ * as a cascade. A saved example (#2971) likewise takes nothing with it.
  */
 export interface TrashEntry {
 	id: string;
-	kind: "collection" | "request" | "environment";
+	kind: "collection" | "request" | "environment" | "example";
 	name: string;
 	/** When it was deleted, in Unix ms - the stamp the retention purge reads. */
 	deletedAt: number;
 	/*
 	 * The engine also sends `parentId` - the collection's old parent, the
-	 * request's owning collection, null for an environment - and this type
-	 * deliberately does not claim it, the way `RequestExample` omits the `order`
-	 * and timestamps it does not use. Nothing here reads it: a trash row names
-	 * the item, not its old location, and resolving the id to a name would fail
-	 * for exactly the parents worth naming (a parent that is itself deleted is
-	 * not in the live tree). Add it back with the reader, not before. The whole
-	 * wire shape is in `docs/engine/api-reference.md` under Trash.
+	 * request's owning collection, the example's owning request, null for an
+	 * environment - and this type deliberately does not claim it, the way
+	 * `RequestExample` omits the `order` and timestamps it does not use. Nothing
+	 * here reads it: a trash row names the item, not its old location, and
+	 * resolving the id to a name would fail for exactly the parents worth naming
+	 * (a parent that is itself deleted is not in the live tree). Add it back
+	 * with the reader, not before. The whole wire shape is in
+	 * `docs/engine/api-reference.md` under Trash.
 	 */
-	/** Sub-collections this delete took with it. Always 0 for a request or an environment. */
+	/** Sub-collections this delete took with it. Always 0 for a request, an environment or an example. */
 	collections: number;
-	/** Requests this delete took with it. Always 0 for a request or an environment. */
+	/** Requests this delete took with it. Always 0 for a request, an environment or an example. */
 	requests: number;
 	/** How many variables the environment holds. Sent on environment entries only. */
 	variables?: number;

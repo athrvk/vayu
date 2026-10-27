@@ -41,6 +41,7 @@ vi.mock("@/queries", () => ({
 		isPending: false,
 		error: null,
 	}),
+	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	// The mock-mode control (issue #481 phase 3) reads the persisted request
 	// through this hook rather than context; undefined data keeps it from
 	// rendering here, which is fine - these tests are about the chip.

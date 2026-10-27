@@ -220,12 +220,13 @@ describe("Examples tab", () => {
 			expect(screen.queryByText(/This can't be undone/i)).toBeNull();
 		});
 
-		it("tells a saved row that nothing brings it back", async () => {
+		it("tells a saved row the Trash can give it back", async () => {
 			listRequestExamples.mockResolvedValue([example({ origin: "user" })]);
 			renderExamplesTab({ id: "req_1" });
 
 			fireEvent.click(await screen.findByRole("button", { name: /delete example 200 OK/i }));
-			expect(screen.getByText(/This can't be undone/i)).toBeTruthy();
+			expect(screen.getByText(/You can restore it from Trash/i)).toBeTruthy();
+			expect(screen.queryByText(/This can't be undone/i)).toBeNull();
 			expect(screen.queryByText(/re-importing the document/i)).toBeNull();
 		});
 

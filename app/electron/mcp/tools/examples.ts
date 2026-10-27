@@ -106,6 +106,24 @@ export function exampleWritePayload(args: Record<string, unknown>): Record<strin
 	return payload;
 }
 
+/**
+ * What deleting this example leads to, as the delete prompt and preview say it.
+ *
+ * Differs by origin because the engine's delete does (#2971): a `user` example
+ * goes to the Trash, an imported one becomes a spec-sync tombstone. Anything
+ * but a known `user` origin gets the tombstone wording, the engine's own default
+ * for a row that states none, so the prompt never promises a restore that
+ * `restore_trash_entry` could not keep.
+ */
+export function describeExampleDeleteOutcome(example: Record<string, unknown>): string {
+	const mockServer =
+		"A mock server for this collection stops answering with it once it is restarted.";
+	if (example.origin === "user") {
+		return `${mockServer} It goes to Vayu's Trash - list_trash shows it there, and restore_trash_entry puts it back.`;
+	}
+	return `${mockServer} It is imported, so it is not trashed: syncing the collection with its spec will not bring it back, and re-importing the document will. There is no restore for it.`;
+}
+
 /** One stored example named in words, for the prompt that asks to delete it. */
 export function describeExample(exampleId: string, example: Record<string, unknown>): string {
 	const name = typeof example.name === "string" && example.name !== "" ? example.name : exampleId;
