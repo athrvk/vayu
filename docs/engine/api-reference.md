@@ -27,8 +27,8 @@ object carrying a machine-readable `code` and a human-readable `message`:
 `internal_error` (any other 5xx). Routes
 with their own vocabulary pass it instead - `invalid_config` (`POST /config`),
 `invalid_run_config` (`POST /runs`), `precondition_failed` and
-`invalid_if_match` (a whole-record `PUT`'s `If-Match`), and the `oauth2_*`
-family.
+`invalid_if_match` (the `If-Match` of a whole-record `PUT` or of
+`POST /globals`), and the `oauth2_*` family.
 
 Any per-error detail sits **inside** the same object, so a client reads one
 place for the whole failure - `item` on `POST /import/apply`, the provider's
@@ -221,13 +221,16 @@ read-merge-write across two round trips) closes its own window with
 The four whole-record `PUT`s - [collections](#put-collectionsid),
 [requests](#put-requestsid), [environments](#put-environmentsid) and
 [examples](#put-requestsidexamplesexampleid) - take an optional `If-Match`
-header (issue [#2433](https://github.com/athrvk/vayu/issues/2433)). A row's
-version is its `updatedAt`, and its entity tag is the weak `W/"<updatedAt>"`.
+header (issue [#2433](https://github.com/athrvk/vayu/issues/2433)), and so does
+the globals singleton's whole-blob save, [`POST /globals`](#post-globals)
+([#2988](https://github.com/athrvk/vayu/issues/2988)). A row's version is its
+`updatedAt`, and its entity tag is the weak `W/"<updatedAt>"`.
 
-- Every `200` from those `PUT`s, and from [`GET /requests/:id`](#get-requestsid),
-  carries the row's `ETag`. The list reads (`GET /collections`,
-  `GET /environments`, `GET /requests/:id/examples`) carry no per-row header;
-  a client builds the tag from the row's `updatedAt`, which is the same value.
+- Every `200` from those writes, and from [`GET /requests/:id`](#get-requestsid)
+  and [`GET /globals`](#get-globals), carries the row's `ETag`. The list reads
+  (`GET /collections`, `GET /environments`, `GET /requests/:id/examples`) carry
+  no per-row header; a client builds the tag from the row's `updatedAt`, which
+  is the same value.
 - `If-Match: W/"<updatedAt>"` makes the write conditional: it lands only while
   the stored row is at that version. The check runs inside the same lock
   acquisition as the read and the merge, after the `404`, so the row it judges
@@ -254,11 +257,14 @@ version is its `updatedAt`, and its entity tag is the weak `W/"<updatedAt>"`.
 
 An update through these routes always moves `updatedAt` forward, even within one
 millisecond, so two of them never share a tag. Other writers of these rows (a
-reorder, a spec sync, a run persisting script variables) stamp the current time.
-Activating an environment clears `isActive` on the one it replaces without
-restamping that row, so an environment's tag does not cover `isActive`.
-`/globals` has no `PUT` and takes no `If-Match` yet
-([#2988](https://github.com/athrvk/vayu/issues/2988)).
+reorder, a spec sync, a run persisting script variables, an import's globals)
+stamp the current time. Activating an environment clears `isActive` on the one it
+replaces without restamping that row, so an environment's tag does not cover
+`isActive`.
+
+Globals has no `404`: an engine that never saved any answers the empty set at
+`updatedAt: 0`, and `W/"0"` is that version's tag. A first conditional save
+names it, and once anything is written it is stale like any other.
 
 ### The engine owns every id
 
@@ -5105,7 +5111,8 @@ A storage failure answers `507`, `503` or `500` - see
 
 ### GET /globals
 
-Get global variables (singleton).
+Get global variables (singleton). An engine that never saved any answers the
+empty set at `updatedAt: 0`.
 
 **Response:**
 ```json
@@ -5121,6 +5128,9 @@ Get global variables (singleton).
   "updatedAt": 1234567890
 }
 ```
+
+The answer carries the row's `ETag`, `W/"<updatedAt>"` (`W/"0"` for the
+never-written row), which a later `POST /globals` may name in `If-Match`.
 
 ### POST /globals
 
@@ -5139,12 +5149,24 @@ Set global variables.
 }
 ```
 
-**Response:** The saved globals object.
+**Headers:** `If-Match` (optional), see
+[Conditional updates](#conditional-updates-with-if-match).
+
+**Response:** The saved globals object, with its `ETag`.
+
+**Errors:** `412` if `If-Match` no longer names the stored row (the stored
+`updatedAt` rides inside the error); `400` on a malformed `If-Match` or a
+non-object `variables`. Neither writes anything.
 
 Globals is a singleton, so there is no create/update pair: a `POST` **replaces**
 the whole set rather than merging into it. Every write is therefore a create as
 far as the [null-vs-absent rule](#the-null-vs-absent-rule) goes - `variables`
-absent and `variables: null` both mean the default, `{}`.
+absent and `variables: null` both mean the default, `{}`. A caller that keeps
+the globals it did not name reads first, merges, and saves under the version it
+read with `If-Match: W/"<updatedAt>"` (this is what the MCP `update_globals`
+tool does). The engine judges the tag in the same lock acquisition as the
+write, so a save that landed after the caller's read turns its write into a
+`412` rather than a silent loss.
 
 `variables: null` used to store the literal four-character text `null`, which
 parses as JSON but is not an object. `GET /globals` returns `{}` for anything it
@@ -12463,7 +12485,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 401 | OAuth 2.0 provider rejected the token request |
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
-| 412 | A whole-record `PUT` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
+| 412 | A whole-record `PUT` or a `POST /globals` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |

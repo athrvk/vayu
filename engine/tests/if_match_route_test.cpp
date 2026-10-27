@@ -7,12 +7,14 @@
 
 /**
  * @file tests/if_match_route_test.cpp
- * @brief `ETag` and `If-Match` on the whole-record PUTs (#2433), driven
- *        through the registered handlers: the header is read there and
- *        handed to the core, so only a wire test sees a handler that drops it.
+ * @brief `ETag` and `If-Match` on the whole-record PUTs (#2433) and on
+ *        `POST /globals` (#2988), driven through the registered handlers: the
+ *        header is read there and handed to the core, so only a wire test sees
+ *        a handler that drops it.
  *
  * The cores' own cases (stale, current, absent, `*`, a list, the lock) are in
- * resource_write_route_test.cpp and examples_route_test.cpp.
+ * resource_write_route_test.cpp, examples_route_test.cpp and
+ * globals_route_test.cpp.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
@@ -91,6 +93,7 @@ class IfMatchServerTest : public ::testing::Test {
         vayu::http::routes::register_request_routes (*ctx_);
         vayu::http::routes::register_environment_routes (*ctx_);
         vayu::http::routes::register_request_example_routes (*ctx_);
+        vayu::http::routes::register_globals_routes (*ctx_);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -302,6 +305,50 @@ TEST_F (IfMatchServerTest, AListRowCarriesTheTagAPutWouldJudge) {
         EXPECT_EQ (answer.status, 200) << list_path << ": " << answer.body.dump ();
         EXPECT_EQ (stored_name (resource, path), "After");
     }
+}
+
+// Globals is a singleton saved whole by `POST /globals`, not a `PUT` by id, so
+// it is outside `PUT_ROUTES`. A never-written row is version 0.
+TEST_F (IfMatchServerTest, GetGlobalsAnswersTheTagAPostWouldJudge) {
+    const Answer empty = send ("GET", "/globals");
+    ASSERT_EQ (empty.status, 200) << empty.body.dump ();
+    EXPECT_EQ (empty.etag, "W/\"0\"");
+
+    const Answer saved = send ("POST", "/globals",
+    { { "If-Match", empty.etag } }, json{ { "variables", { { "host", "a" } } } });
+    ASSERT_EQ (saved.status, 200) << saved.body.dump ();
+    EXPECT_EQ (saved.etag, tag_of (saved.body));
+    EXPECT_NE (saved.etag, empty.etag);
+
+    const Answer read = send ("GET", "/globals");
+    ASSERT_EQ (read.status, 200) << read.body.dump ();
+    EXPECT_EQ (read.etag, saved.etag);
+}
+
+// Mutation check: hand the core `std::nullopt` instead of `*if_match` in the
+// `POST /globals` handler and the stale save answers 200.
+TEST_F (IfMatchServerTest, AGlobalsPostNamingAStaleTagIs412AndWritesNothing) {
+    const Answer moved =
+    send ("POST", "/globals", {}, json{ { "variables", { { "host", "moved" } } } });
+    ASSERT_EQ (moved.status, 200) << moved.body.dump ();
+
+    const Answer answer = send ("POST", "/globals", { { "If-Match", "W/\"0\"" } },
+    json{ { "variables", { { "host", "stale" } } } });
+    ASSERT_EQ (answer.status, 412) << answer.body.dump ();
+    EXPECT_EQ (answer.body["error"]["code"], "precondition_failed");
+    EXPECT_EQ (answer.body["error"]["updatedAt"], moved.body["updatedAt"]);
+    EXPECT_TRUE (answer.etag.empty ()) << "only a 200 carries the row's tag";
+    const auto stored = db_->get_globals ();
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (json::parse (stored->variables)["host"], "moved");
+}
+
+TEST_F (IfMatchServerTest, AMalformedIfMatchOnGlobalsIs400AndWritesNothing) {
+    const Answer answer = send ("POST", "/globals",
+    { { "If-Match", "1792359304908" } }, json{ { "variables", { { "host", "a" } } } });
+    ASSERT_EQ (answer.status, 400) << answer.body.dump ();
+    EXPECT_EQ (answer.body["error"]["code"], "invalid_if_match");
+    EXPECT_FALSE (db_->get_globals ().has_value ());
 }
 
 } // namespace
