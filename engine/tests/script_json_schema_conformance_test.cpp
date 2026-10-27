@@ -79,7 +79,16 @@ pm.environment.set('verdicts', JSON.stringify(verdicts));
 
 class ScriptJsonSchemaConformanceTest : public ::testing::Test {
     protected:
-    ScriptEngine engine{ vayu::tests::library_call_config () };
+    /// The 47 cases compile every schema in ajv inside one script: 4.6 s on an
+    /// idle Windows Debug build, over the 5 s default under ASan. The budget
+    /// is a hang detector here, not a speed check.
+    static vayu::runtime::ScriptConfig conformance_config () {
+        auto config       = vayu::tests::library_call_config ();
+        config.timeout_ms = 60'000;
+        return config;
+    }
+
+    ScriptEngine engine{ conformance_config () };
     Request request;
     Response response;
     Environment env;
