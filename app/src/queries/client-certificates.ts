@@ -49,6 +49,11 @@ export function useUpdateClientCertificateMutation() {
 	});
 }
 
+/**
+ * Remove an entry from the registry. A soft delete (#2973): the engine moves it
+ * to the Trash, so `trash.all` is invalidated for an open Trash view to list
+ * it - the cross-boundary invalidation the other trashed kinds' deletes make.
+ */
 export function useDeleteClientCertificateMutation() {
 	const queryClient = useQueryClient();
 
@@ -60,6 +65,7 @@ export function useDeleteClientCertificateMutation() {
 			// new entry may claim and a hand-patched one could offer a target
 			// that is still taken.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.clientCertificates.all });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		},
 	});
 }

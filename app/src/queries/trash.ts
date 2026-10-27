@@ -9,15 +9,17 @@
  * Trash Queries
  *
  * The read side of the engine's soft delete (issue #988): deleting a collection,
- * a request or an environment (#2970) stamps the row and keeps it, and these
- * are how the app sees what it stamped.
+ * a request, an environment (#2970), a saved example (#2971) or a client
+ * certificate (#2973) stamps the row and keeps it, and these are how the app
+ * sees what it stamped.
  *
  * **Both mutations invalidate across the live/deleted boundary, in opposite
- * directions.** A restore puts rows back into the tree and the Variables view,
- * so it invalidates the collection, request and environment caches as well as
- * this list; a purge only destroys rows that were already filtered out of every
- * live read, so it invalidates nothing but this list. The delete mutations in
- * `collections.ts` and `environments.ts` are the third side of the same
+ * directions.** A restore puts rows back into the tree, the Variables view and
+ * the certificate registry, so it invalidates the collection, request,
+ * environment and client-certificate caches as well as this list; a purge only
+ * destroys rows that were already filtered out of every live read, so it
+ * invalidates nothing but this list. The delete mutations in `collections.ts`,
+ * `environments.ts` and `client-certificates.ts` are the third side of the same
  * triangle - they invalidate `trash.all`, because a delete is what *adds* an
  * entry here.
  */
@@ -63,6 +65,12 @@ export function useTrashQuery() {
  * never re-activates it (the engine returns it inactive), so the session's
  * active environment is left alone.
  *
+ * `clientCertificates.all` goes too, on the same terms: the registry card lists
+ * only live entries, and a restored certificate is presented to its host again
+ * on the next send, so a card showing the old list would misstate what is
+ * registered. A restore the engine refuses with a 409 (a live entry already
+ * holds the host and port) takes the failure path below.
+ *
  * A failure invalidates the list too (issue #1438). The row this acted on is
  * one the list said existed, so the likeliest failure is that it no longer
  * does - an agent purged it, or restored it, between the drawer's last read and
@@ -81,6 +89,7 @@ export function useRestoreTrashMutation() {
 			invalidateAllRequestLists(queryClient);
 			queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 			invalidateCompositions(queryClient);
+			queryClient.invalidateQueries({ queryKey: queryKeys.clientCertificates.all });
 		},
 		onError: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });

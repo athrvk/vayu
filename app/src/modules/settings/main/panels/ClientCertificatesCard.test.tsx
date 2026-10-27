@@ -19,6 +19,11 @@
  * key file, a host that carries a scheme, a target already taken), and a card
  * that replaced it with "could not add" would send the user back to a form with
  * no idea which field is wrong.
+ *
+ * Removing an entry moves it to the Trash (#2973): the dialog says the Trash can
+ * give it back, the shared "Moved to the Trash" toast carries the Undo, and an
+ * Undo the engine refuses (a live entry took the host and port meanwhile) shows
+ * the engine's sentence rather than a silent nothing.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -42,8 +47,13 @@ function renderCard() {
 const CERTIFICATES_EMPTY_TITLE = "Register a certificate for a host that requires mutual TLS.";
 
 const createMutate = vi.fn(() => Promise.resolve({}));
-const deleteMutate = vi.fn(() => Promise.resolve());
+const deleteMutate = vi.fn((_id: string) => Promise.resolve());
+const restoreMutate = vi.fn((_id: string) => Promise.resolve({ reparentedToRoot: false }));
 const showToast = vi.fn();
+
+/** The engine's 409 for a restore whose target a live entry has since claimed. */
+const ENGINE_TARGET_TAKEN =
+	"Client certificate 'cert_1' cannot be restored - 'api.example.com:8443' is already registered to client certificate 'cert_9', so delete that entry first";
 
 const certificates = [
 	{
@@ -85,6 +95,7 @@ vi.mock("@/queries", () => ({
 		isPending: createPending,
 	}),
 	useDeleteClientCertificateMutation: () => ({ mutateAsync: deleteMutate, isPending: false }),
+	useRestoreTrashMutation: () => ({ mutateAsync: restoreMutate, isPending: false }),
 }));
 
 vi.mock("@/stores", () => ({
@@ -95,7 +106,8 @@ vi.mock("@/stores", () => ({
 beforeEach(() => {
 	createMutate.mockClear();
 	createMutate.mockImplementation(() => Promise.resolve({}));
-	deleteMutate.mockClear();
+	deleteMutate.mockReset().mockResolvedValue(undefined);
+	restoreMutate.mockReset().mockResolvedValue({ reparentedToRoot: false });
 	showToast.mockClear();
 	queryResult = { data: certificates, isError: false };
 	createPending = false;
@@ -171,19 +183,83 @@ describe("ClientCertificatesCard", () => {
 		);
 	});
 
-	it("removes an entry by id, behind a confirmation", async () => {
+	/** Open the remove dialog for the first entry. */
+	async function openRemoveDialog() {
 		renderCard();
-
 		fireEvent.click(
 			screen.getByRole("button", { name: /remove the certificate for api.example.com:8443/i })
 		);
-		const dialog = await screen.findByRole("dialog");
+		return screen.findByRole("dialog");
+	}
+
+	/** The options object handed to the last `showToast` call. */
+	function lastToast() {
+		const calls = showToast.mock.calls;
+		return calls[calls.length - 1]?.[0];
+	}
+
+	it("removes an entry by id, behind a confirmation", async () => {
+		const dialog = await openRemoveDialog();
 		// The dialog says the files themselves survive - deleting a registry row
 		// must not read as deleting the user's certificate.
 		expect(within(dialog).getByText(/files themselves are not touched/i)).toBeInTheDocument();
 		fireEvent.click(within(dialog).getByRole("button", { name: /^remove$/i }));
 
 		await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith("cert_1"));
+	});
+
+	it("says the Trash can give it back, not that it can't be undone", async () => {
+		const dialog = await openRemoveDialog();
+
+		expect(dialog).toHaveTextContent("You can restore it from Trash.");
+		expect(dialog.textContent).not.toMatch(/can't be undone|cannot be undone|permanent/);
+	});
+
+	it("says where it went and offers it back through the Trash", async () => {
+		const dialog = await openRemoveDialog();
+		fireEvent.click(within(dialog).getByRole("button", { name: /^remove$/i }));
+
+		await waitFor(() =>
+			expect(lastToast()).toMatchObject({
+				message: 'Moved "api.example.com:8443" to the Trash',
+				variant: "info",
+				action: {
+					label: "Undo",
+					altText: "Undo deleting the client certificate api.example.com:8443",
+				},
+			})
+		);
+
+		lastToast().action.onClick();
+
+		await waitFor(() => expect(restoreMutate).toHaveBeenCalledWith("cert_1"));
+	});
+
+	it("shows the engine's refusal when the Undo is refused", async () => {
+		restoreMutate.mockRejectedValue(new Error(ENGINE_TARGET_TAKEN));
+		const dialog = await openRemoveDialog();
+		fireEvent.click(within(dialog).getByRole("button", { name: /^remove$/i }));
+		await waitFor(() => expect(lastToast()).toMatchObject({ action: { label: "Undo" } }));
+
+		lastToast().action.onClick();
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				`Couldn't restore "api.example.com:8443" - ${ENGINE_TARGET_TAKEN}`,
+				"error"
+			)
+		);
+	});
+
+	it("reports a failed remove and offers no undo", async () => {
+		deleteMutate.mockRejectedValue(new Error("database is locked"));
+		const dialog = await openRemoveDialog();
+		fireEvent.click(within(dialog).getByRole("button", { name: /^remove$/i }));
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith("Couldn't remove the certificate", "error")
+		);
+		expect(showToast).toHaveBeenCalledTimes(1);
 	});
 
 	it("prints what each row will present, and no key file for a bundle", () => {

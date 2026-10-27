@@ -179,10 +179,12 @@ scattered strings land the same way.
   real verb matching the title ("Delete environment", never "OK" or "Yes").
   Recoverable actions (anything that lands in Trash) skip the confirm dialog
   entirely and use an undo toast instead - a dialog for a reversible action
-  is friction with no purpose. The environment delete (#2970) and a saved
-  example's delete (#2971) are the exceptions today: both moved to the Trash
-  and kept their dialog, whose body says the Trash can restore it instead of
-  calling the delete final. An imported example's delete keeps a dialog too,
+  is friction with no purpose. The environment delete (#2970), a saved
+  example's delete (#2971) and a client certificate's remove (#2973) are the
+  exceptions today: all three moved to the Trash and kept their dialog, whose
+  body says the Trash can restore it instead of calling the delete final. The
+  Trash's own "Delete forever" dialog for a certificate names what is lost (the
+  stored passphrase) and what is not (the files on disk). An imported example's delete keeps a dialog too,
   but it is not trashed, so its body says what a sync and a re-import do.
 - **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format: the
   label, then the chord in a `TooltipHint` beside it, no parentheses

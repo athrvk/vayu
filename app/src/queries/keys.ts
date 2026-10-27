@@ -46,14 +46,16 @@ export const queryKeys = {
 		examples: (id: string) => [...queryKeys.requests.detail(id), "examples"] as const,
 	},
 
-	// Deleted collections, requests (issue #988) and environments (#2970). One
-	// key: the engine reports every deleted root in one call and there is no
-	// per-entry read - restoring or purging one changes that same list.
+	// Deleted collections, requests (issue #988), environments (#2970), examples
+	// (#2971) and client certificates (#2973). One key: the engine reports every
+	// deleted root in one call and there is no per-entry read - restoring or
+	// purging one changes that same list.
 	//
-	// A sibling of `collections`/`requests`/`environments` rather than a branch
-	// of them, because it is the complement of all three: what those list is
-	// exactly what this one does not, so a delete invalidates across the
-	// boundary in one direction and a restore in the other.
+	// A sibling of the live caches (`collections`, `requests`, `environments`,
+	// `clientCertificates`) rather than a branch of them, because it is their
+	// complement: what those list is exactly what this one does not, so a delete
+	// invalidates across the boundary in one direction and a restore in the
+	// other.
 	trash: {
 		all: ["trash"] as const,
 		list: () => [...queryKeys.trash.all, "list"] as const,

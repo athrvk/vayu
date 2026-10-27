@@ -56,6 +56,7 @@ import {
 	CardHeader,
 	CardTitle,
 	DeleteConfirmDialog,
+	clientCertificateDeleteDescription,
 	IconSwap,
 	Input,
 	Label,
@@ -72,6 +73,7 @@ import {
 import { EmptyState } from "@/components/shared";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { useToastStore } from "@/stores";
+import { useTrashUndo } from "@/hooks/useTrashUndo";
 import type { ClientCertificate, ClientCertificateFormat } from "@/types";
 import { fileBaseName } from "@/lib/file-path";
 import { appSetting } from "../app-settings";
@@ -228,6 +230,7 @@ export function ClientCertificatesCard() {
 	const createCertificate = useCreateClientCertificateMutation();
 	const deleteCertificate = useDeleteClientCertificateMutation();
 	const showToast = useToastStore((s) => s.showToast);
+	const offerUndo = useTrashUndo();
 
 	const [draft, setDraft] = useState(EMPTY_DRAFT);
 	const [adding, setAdding] = useState(false);
@@ -276,7 +279,7 @@ export function ClientCertificatesCard() {
 		setConfirming(null);
 		try {
 			await deleteCertificate.mutateAsync(certificate.id);
-			showToast(`Removed the certificate for ${targetLabel(certificate)}`, "success");
+			offerUndo(certificate.id, targetLabel(certificate), "clientCertificate");
 		} catch {
 			showToast("Couldn't remove the certificate", "error");
 		}
@@ -542,9 +545,7 @@ export function ClientCertificatesCard() {
 				}}
 				title="Remove this certificate?"
 				description={
-					confirming
-						? `Requests to ${targetLabel(confirming)} will be sent without a client certificate. The certificate and key files themselves are not touched.`
-						: ""
+					confirming ? clientCertificateDeleteDescription(targetLabel(confirming)) : ""
 				}
 				onConfirm={() => {
 					if (confirming !== null) void remove(confirming);

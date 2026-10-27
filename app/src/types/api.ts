@@ -1285,18 +1285,20 @@ export interface WorkspaceBackupResult {
  *
  * An environment (#2970) is always a root and takes nothing with it: its
  * variables live on its own row, so they are counted in `variables` rather than
- * as a cascade. A saved example (#2971) likewise takes nothing with it.
+ * as a cascade. A saved example (#2971) and a client certificate (#2973)
+ * likewise take nothing with them; a certificate's `name` is its target, `host`
+ * or `host:port`.
  */
 export interface TrashEntry {
 	id: string;
-	kind: "collection" | "request" | "environment" | "example";
+	kind: "collection" | "request" | "environment" | "example" | "clientCertificate";
 	name: string;
 	/** When it was deleted, in Unix ms - the stamp the retention purge reads. */
 	deletedAt: number;
 	/*
 	 * The engine also sends `parentId` - the collection's old parent, the
 	 * request's owning collection, the example's owning request, null for an
-	 * environment - and this type deliberately does not claim it, the way
+	 * environment or a client certificate - and this type deliberately does not claim it, the way
 	 * `RequestExample` omits the `order` and timestamps it does not use. Nothing
 	 * here reads it: a trash row names the item, not its old location, and
 	 * resolving the id to a name would fail for exactly the parents worth naming
@@ -1304,9 +1306,9 @@ export interface TrashEntry {
 	 * with the reader, not before. The whole wire shape is in
 	 * `docs/engine/api-reference.md` under Trash.
 	 */
-	/** Sub-collections this delete took with it. Always 0 for a request, an environment or an example. */
+	/** Sub-collections this delete took with it. Always 0 for every kind but a collection. */
 	collections: number;
-	/** Requests this delete took with it. Always 0 for a request, an environment or an example. */
+	/** Requests this delete took with it. Always 0 for every kind but a collection. */
 	requests: number;
 	/** How many variables the environment holds. Sent on environment entries only. */
 	variables?: number;

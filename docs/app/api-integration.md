@@ -731,8 +731,9 @@ apiService.restoreTrashEntry(id): Promise<RestoreTrashResponse> // POST   /trash
 apiService.purgeTrashEntry(id): Promise<PurgeTrashResponse>     // DELETE /trash/:id
 ```
 
-What `deleteCollection`, `deleteRequest`, `deleteEnvironment` (#2970) and
-`deleteRequestExample` for a saved example (#2971) now do is a soft delete
+What `deleteCollection`, `deleteRequest`, `deleteEnvironment` (#2970),
+`deleteRequestExample` for a saved example (#2971) and
+`deleteClientCertificate` (#2973) now do is a soft delete
 (issue #988): the engine stamps the row instead of removing
 it, and these three read that stamp back. No transformer on any of the three -
 a trash entry is the engine's own summary of a deleted row (a name, a stamp and
@@ -743,10 +744,13 @@ only shape.
 never a descendant the same cascade took with it. A deleted collection's whole
 subtree is represented by that one root entry, with `collections` / `requests`
 counting what that delete took along. `kind` is `"collection"`, `"request"`,
-`"environment"` or `"example"`; an environment entry is always a root, counts
-`0` for both, and alone carries `variables`, how many variables it holds. An
-example entry counts `0` for both too; the engine's `parentId` on it is the
-owning request, which `TrashEntry` does not claim because no reader needs it.
+`"environment"`, `"example"` or `"clientCertificate"`; an environment entry is
+always a root, counts `0` for both, and alone carries `variables`, how many
+variables it holds. An example entry counts `0` for both too; the engine's
+`parentId` on it is the owning request, which `TrashEntry` does not claim
+because no reader needs it. A client-certificate entry is a root with both
+counts `0` and a `null` `parentId`; its `name` is its target, `host` or
+`host:port`.
 
 `restoreTrashEntry` puts one deleted root back, with everything the same
 delete took, and answers with the entry plus `restored: true` and
@@ -757,15 +761,20 @@ or one already purged) and a `409` for a request whose collection is itself
 deleted or gone - a request has no root to land on the way a collection does,
 so the engine's message names the collection to restore first - and the same
 `409` for an example whose request is deleted or gone, or already holds the
-most examples a request may (100); surface `ApiError.message` rather than
+most examples a request may (100), and for a client certificate while a live
+entry holds the same host and port (the message names that entry); surface
+`ApiError.message` rather than
 inventing wording for it. Both the Trash view's Restore and the toast's Undo do. A restored environment
 comes back with every variable but inactive: the delete cleared its active flag
 and the restore does not set it again. A restored example reappears in its
 request's Examples list because the restore invalidates `requests.all`, under
-which the examples key sits.
+which the examples key sits; a restored client certificate reappears in
+Settings because the restore invalidates `clientCertificates.all`.
 
 `purgeTrashEntry` is the hard purge the soft delete deferred - it destroys the
-row for good, with its whole subtree, and there is no undo. It answers with the
+row for good, with its whole subtree, and there is no undo. For a client
+certificate that is the registry entry and its stored passphrase; the
+certificate and key files it names are never touched. It answers with the
 entry plus `purged: true`, or a `404` if the trash does not hold that id.
 
 The full contract - request/response bodies, the restore's cohort and

@@ -44,8 +44,8 @@ export const API_ENDPOINTS = {
 	REQUEST_BY_ID: (id: string) => `/requests/${id}`,
 	REQUESTS_UPDATE: (id: string) => `/requests/${id}`,
 
-	// Trash (issue #988). A deleted collection, request, environment or saved example is stamped
-	// rather than removed, and these three read it back: the list, the un-stamp,
+	// Trash (issue #988). A deleted collection, request, environment, saved example or client
+	// certificate is stamped rather than removed, and these three read it back: the list, the un-stamp,
 	// and the hard delete the stamp deferred. `TRASH_BY_ID` is a DELETE of an
 	// already deleted row - the path is not `COLLECTION_BY_ID`'s, because by then
 	// the engine no longer serves the row under its own resource.

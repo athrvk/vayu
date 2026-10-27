@@ -11,16 +11,22 @@ import { useToastStore } from "@/stores";
 import { restoreNotice } from "@/modules/trash";
 import type { TrashEntry } from "@/types";
 
+/** The wire token read as words for a screen reader: `clientCertificate` is "client certificate". */
+function kindWords(kind: TrashEntry["kind"]): string {
+	return kind.replace(/([A-Z])/g, " $1").toLowerCase();
+}
+
 /**
  * Raise the toast a soft delete offers: "Moved "<name>" to the Trash" with an
  * Undo that restores the row.
  *
- * Lives here rather than beside one of its callers because three surfaces delete
+ * Lives here rather than beside one of its callers because four surfaces delete
  * into the Trash - the collection tree (`useTreeCrud`), the Variables view's
- * environment deletes (#2970) and the Examples panel (#2971) - and a second,
- * hand-rolled toast would not receive this one's fixes. `restoreClientState` is whatever the caller threw
- * away on the client and wants back once the engine has restored the row; it
- * runs only after a restore that landed.
+ * environment deletes (#2970), the Examples panel (#2971) and the client
+ * certificates card (#2973) - and a second, hand-rolled toast would not receive
+ * this one's fixes. `restoreClientState` is whatever the caller threw away on
+ * the client and wants back once the engine has restored the row; it runs only
+ * after a restore that landed.
  */
 export function useTrashUndo() {
 	const restoreTrashMutation = useRestoreTrashMutation();
@@ -96,7 +102,7 @@ export function useTrashUndo() {
 				variant: "info",
 				action: {
 					label: "Undo",
-					altText: `Undo deleting the ${kind} ${name}`,
+					altText: `Undo deleting the ${kindWords(kind)} ${name}`,
 					onClick: () => void undoDelete(entityId, name, restoreClientState),
 				},
 			});

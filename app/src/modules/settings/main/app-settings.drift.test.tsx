@@ -71,6 +71,7 @@ vi.mock("@/queries", () => ({
 	useClientCertificatesQuery: () => ({ data: [], isError: false }),
 	useCreateClientCertificateMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteClientCertificateMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 beforeEach(cleanup);

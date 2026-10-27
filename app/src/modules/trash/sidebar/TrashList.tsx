@@ -17,7 +17,7 @@ import {
 	useConfigQuery,
 } from "@/queries";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
-import { Button, DeleteConfirmDialog } from "@/components/ui";
+import { Button, DeleteConfirmDialog, clientCertificatePurgeDescription } from "@/components/ui";
 import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import TrashItem from "./TrashItem";
 import { retentionCopy, retentionDaysFrom } from "../retention";
@@ -223,11 +223,11 @@ export default function TrashList() {
 								title="Trash is empty"
 								description={
 									retention
-										? `Deleted collections, requests, environments and examples wait here first. ${retention}`
+										? `Deleted collections, requests, environments, examples and client certificates wait here first. ${retention}`
 										: // No promise of an eventual purge while the window
 											// is still unknown: at `trashRetentionDays: 0` there
 											// is no automatic removal to promise.
-											"Deleted collections, requests, environments and examples wait here."
+											"Deleted collections, requests, environments, examples and client certificates wait here."
 								}
 							/>
 						)}
@@ -251,6 +251,11 @@ export default function TrashList() {
 					onOpenChange={(open) => !open && setPurgeTarget(null)}
 					title={`Delete "${purgeTarget?.name}" forever?`}
 					name={purgeTarget?.name}
+					description={
+						purgeTarget?.kind === "clientCertificate"
+							? clientCertificatePurgeDescription(purgeTarget.name)
+							: undefined
+					}
 					scope={purgeTarget?.kind === "collection" ? "cascade" : "default"}
 					confirmLabel="Delete forever"
 					onConfirm={handleConfirmPurge}
