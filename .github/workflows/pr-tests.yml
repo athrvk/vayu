@@ -89,7 +89,7 @@ jobs:
     # below read a pull request's file list. Skipped here, every job that needs
     # it is skipped too - except `engine`, whose condition admits a push.
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Both filters read the PR's file list from the API rather than cloning;
     # the checkout is for the suite fingerprints below. Stated explicitly
     # rather than inherited, since a fork PR's token is read-only regardless
@@ -577,7 +577,7 @@ jobs:
   # for what the compiler says about the same files three times.
   quality:
     name: App quality checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: changes
     # The second clause is the JavaScript outside `app/` (#1166): its lint runs
     # here, so an edit to one of those files has to be able to reach this job.
@@ -703,7 +703,7 @@ jobs:
         # cannot drift apart. Changing a platform's shard count means changing
         # its entries here *and* the count `ci-gate` expects for it - the
         # coverage check fails loudly if that is done by halves.
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-26.04, macos-latest]
         shard: [1/2, 2/2]
         include:
           - { os: windows-latest, shard: 1/3 }
@@ -809,14 +809,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, container-ubuntu-22.04, windows-latest, macos-latest]
+        os: [ubuntu-26.04, container-ubuntu-22.04, windows-latest, macos-latest]
         include:
           # VAYU_WERROR turns the GCC/Clang warning set into build errors, on
           # both legs that use it (issue #884) - a warning that only one
           # compiler emits is exactly the kind this gate exists to catch, so
           # gating Linux alone would leave Clang-only diagnostics unwatched.
           # Windows needs no flag: MSVC builds /WX unconditionally.
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           # The Linux release's own configuration: the oldest supported Ubuntu
@@ -825,12 +825,12 @@ jobs:
           # release.yml's Linux leg (#2634). release.yml runs only on a tag, so
           # without this leg a change that breaks that compiler, or pulls a
           # newer glibc symbol into the engine, would first fail with the
-          # release half-published. ubuntu-24.04 stays alongside it: the newest
+          # release half-published. ubuntu-26.04 stays alongside it: the newest
           # Ubuntu this repository has adopted, and the clang-tidy gate runs
           # there. The steps that belong to this leg alone gate on
           # `matrix.container`.
           - os: container-ubuntu-22.04
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             container: ghcr.io/athrvk/vayu-linux-build@sha256:4832fdf1f5e92e75f0bb5696e167755d6fd6ec8b67685b6794f6d142ccde40e7
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
@@ -906,11 +906,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -1000,7 +1000,7 @@ jobs:
         run: ./scripts/check-macos-min-version.sh engine/build-release/vayu-engine
 
       # The Linux counterpart, on the leg built the way the release is. The
-      # ubuntu-24.04 leg links against a newer glibc by design and would fail
+      # ubuntu-26.04 leg links against a newer glibc by design and would fail
       # it, which is the point: only the release baseline has a floor to hold.
       - name: Verify engine glibc floor
         if: matrix.container
@@ -1329,7 +1329,7 @@ jobs:
   # `DisableFormat: true` of its own besides.
   engine-format:
     name: Engine formatting
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
     permissions:
@@ -1405,7 +1405,7 @@ jobs:
         # its dry-run test exercises the real `codesign`/`xattr` call sites.
         # Windows is absent for the same reason it was absent before the split:
         # there is no shell to run it in.
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-26.04, macos-latest]
     timeout-minutes: 10
 
     steps:
@@ -1466,7 +1466,7 @@ jobs:
   # build.py edits into their matrices.
   build-script:
     name: Build script
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.build_script == 'true'
     permissions:
@@ -1514,7 +1514,7 @@ jobs:
   # looked at nothing is the one failure mode a lint gate cannot survive quietly.
   scripts:
     name: Script lint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.scripts == 'true'
     permissions:
@@ -1577,7 +1577,7 @@ jobs:
       # which is intermittent red CI by construction - and the vcpkg key, which
       # names the label, would have shared one cache between two compilers.
       # So every Linux job names its release, and moving to a new one is a pull
-      # request of its own (#2633 for 26.04). Comments may still say
+      # request of its own (#2633 moved to 26.04). Comments may still say
       # `ubuntu-latest`.
       - name: Every Linux runner names its Ubuntu release
         shell: bash
@@ -1591,7 +1591,7 @@ jobs:
           fi
           bad=$(printf '%s\n' "${labels[@]}" | grep -E "${moving}" | grep -vE "#.*${moving}" || true)
           if [[ -n "$bad" ]]; then
-            echo "::error::Name the Ubuntu release (ubuntu-24.04), not ${moving}:"
+            echo "::error::Name the Ubuntu release (ubuntu-26.04), not ${moving}:"
             printf '%s\n' "$bad"
             exit 1
           fi
@@ -1673,7 +1673,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # `changes` is a dependency as well as the work jobs, so a failure in the
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
@@ -1712,10 +1712,10 @@ jobs:
           # The app matrix's platforms and each one's shard count. A matrix
           # that gains or loses either without this following it fails below,
           # rather than leaving part of the suite run nowhere.
-          declare -A shard_count=([ubuntu-24.04]=2 [macos-latest]=2 [windows-latest]=3)
+          declare -A shard_count=([ubuntu-26.04]=2 [macos-latest]=2 [windows-latest]=3)
           status=0
 
-          for os in ubuntu-24.04 macos-latest windows-latest; do
+          for os in ubuntu-26.04 macos-latest windows-latest; do
             shards=${shard_count[$os]}
             manifests=(shard-manifests/shard-"$os"-*.txt)
             suites=(shard-manifests/full-suite-"$os"-*.txt)

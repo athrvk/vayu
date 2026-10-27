@@ -415,9 +415,12 @@ TEST_F (SpecDiffTest, NamesEveryFieldTheDocumentMovedWithTheValueItWouldWrite) {
     ASSERT_NE (listed, nullptr);
     EXPECT_EQ (field_names (*listed),
     (std::vector<std::string>{ "name", "params", "url" }));
-    EXPECT_NE (field_named (*listed, SpecField::Url)->next.find ("limit=10"),
-    std::string::npos);
-    EXPECT_EQ (field_named (*listed, SpecField::Name)->next, "List all the pets");
+    const auto* listed_url  = field_named (*listed, SpecField::Url);
+    const auto* listed_name = field_named (*listed, SpecField::Name);
+    ASSERT_NE (listed_url, nullptr);
+    ASSERT_NE (listed_name, nullptr);
+    EXPECT_NE (listed_url->next.find ("limit=10"), std::string::npos);
+    EXPECT_EQ (listed_name->next, "List all the pets");
     EXPECT_TRUE (std::none_of (listed->fields.begin (), listed->fields.end (),
     [] (const auto& field) { return field.user_touched; }));
     EXPECT_EQ (diff.unchanged, 2u);
@@ -679,11 +682,14 @@ TEST_F (SpecDiffTest, ReportsTheUsersMethodEditAsTheirsSoAnApplyCannotTakeItBack
     EXPECT_EQ (field_names (diff.changed[0]),
     (std::vector<std::string>{ "description", "method" }));
     const auto* method = field_named (diff.changed[0], SpecField::Method);
+    ASSERT_NE (method, nullptr);
     EXPECT_TRUE (method->user_touched);
     EXPECT_EQ (method->current, "HEAD");
     EXPECT_EQ (method->next, "GET");
     // The document's own change is not confused with the user's.
-    EXPECT_FALSE (field_named (diff.changed[0], SpecField::Description)->user_touched);
+    const auto* description = field_named (diff.changed[0], SpecField::Description);
+    ASSERT_NE (description, nullptr);
+    EXPECT_FALSE (description->user_touched);
 }
 
 TEST_F (SpecDiffTest, ReportsAMethodTheDocumentItselfMovedAsTheDocuments) {

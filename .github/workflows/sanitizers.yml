@@ -81,10 +81,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             sanitizer: asan
             preset: linux-asan
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             sanitizer: tsan
             preset: linux-tsan
           - os: macos-latest
@@ -177,11 +177,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -412,7 +412,7 @@ jobs:
     name: File or update the sanitizer-failure issues
     needs: sanitize
     if: ${{ always() && needs.sanitize.result == 'failure' && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       issues: write

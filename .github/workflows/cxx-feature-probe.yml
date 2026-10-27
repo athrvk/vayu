@@ -56,7 +56,7 @@ jobs:
         include:
           # The three legs the engine actually ships on, each on the compiler
           # its pr-tests.yml counterpart uses by default...
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             label: Ubuntu / default g++
           - os: macos-latest
             label: macOS / AppleClang
@@ -66,7 +66,7 @@ jobs:
           # ubuntu's default GCC fails a feature phase 2 wants, the choice is
           # between pinning this compiler on the runner and dropping the
           # feature. That is only answerable with both columns in front of you.
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             label: Ubuntu / g++-14
             cxx: g++-14
             apt: g++-14

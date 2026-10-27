@@ -36,7 +36,7 @@ permissions:
 jobs:
   javascript:
     name: Analyze JavaScript/TypeScript
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       security-events: write
       contents: read
@@ -84,7 +84,7 @@ jobs:
 
   actions:
     name: Analyze actions
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       security-events: write
       contents: read
@@ -109,7 +109,7 @@ jobs:
 
   cpp:
     name: Analyze C++
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Not on pull requests: the cold build is too slow for the path people wait
     # on. Push-to-master and the weekly schedule cover it. `workflow_dispatch`
     # is not wired up deliberately; add it if an on-demand C++ scan is wanted.
@@ -153,11 +153,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-Linux-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
+          key: vcpkg-Linux-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
           restore-keys: |
-            vcpkg-Linux-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
-            vcpkg-Linux-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-Linux-${{ matrix.os || 'ubuntu-24.04' }}-
+            vcpkg-Linux-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-Linux-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-Linux-${{ matrix.os || 'ubuntu-26.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11

@@ -126,7 +126,7 @@ jobs:
   # trusted to stay in step by hand.
   guard:
     name: Cache key agreement
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -153,7 +153,7 @@ jobs:
           # string. Normalise that one difference, require exact equality for
           # everything else.
           #
-          # The key also carries the image (`matrix.os`, with `ubuntu-24.04`
+          # The key also carries the image (`matrix.os`, with `ubuntu-26.04`
           # for the one job that has no matrix, codeql.yml's). On the Linux
           # release leg that is the label `container-ubuntu-22.04`, naming the
           # container the build runs in, not the runner hosting it. vcpkg's
@@ -432,14 +432,14 @@ jobs:
       matrix:
         # The images release.yml builds on, not the pull-request matrix's:
         # the vcpkg key carries the image (see the guard), so warming
-        # ubuntu-24.04 would fill a key the Linux release never asks for. The
+        # ubuntu-26.04 would fill a key the Linux release never asks for. The
         # guard asserts this list and release.yml's stay equal; the Linux leg
         # is release.yml's container on its runner, for the reasons given
         # there (#2634), including why the run-cmake paths are relative.
         os: [container-ubuntu-22.04, windows-latest, macos-latest]
         include:
           - os: container-ubuntu-22.04
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             container: ghcr.io/athrvk/vayu-linux-build@sha256:4832fdf1f5e92e75f0bb5696e167755d6fd6ec8b67685b6794f6d142ccde40e7
             preset: linux-prod
           - os: windows-latest
@@ -493,11 +493,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -645,14 +645,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-24.04 for pr-tests.yml's app jobs, and release.yml's container
+        # ubuntu-26.04 for pr-tests.yml's app jobs, and release.yml's container
         # as well: setup-node's key is the same in and out of it, but the
         # store's path is not (the container's HOME is /github/home), and
         # actions/cache versions an entry by its path.
-        os: [ubuntu-24.04, container-ubuntu-22.04, windows-latest, macos-latest]
+        os: [ubuntu-26.04, container-ubuntu-22.04, windows-latest, macos-latest]
         include:
           - os: container-ubuntu-22.04
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             container: ubuntu:22.04
     timeout-minutes: 20
 
