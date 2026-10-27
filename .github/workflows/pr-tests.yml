@@ -831,7 +831,7 @@ jobs:
           # `matrix.container`.
           - os: container-ubuntu-22.04
             runner: ubuntu-24.04
-            container: ubuntu:22.04
+            container: ghcr.io/athrvk/vayu-linux-build@sha256:4832fdf1f5e92e75f0bb5696e167755d6fd6ec8b67685b6794f6d142ccde40e7
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           - os: windows-latest
@@ -854,13 +854,6 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
-      # release.yml's step, for its reasons.
-      - name: Install git and zstd (container)
-        if: matrix.container
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
-
       # Depth 2, which is all the clang-tidy step below needs: `HEAD^1`, the
       # base side of the merge commit actions/checkout leaves at HEAD. It was
       # briefly full history, for a commit walk that read the pull request's own
@@ -870,7 +863,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      # The container leg's tools come from the toolchain action below.
+      # The container leg's tools come from the build image.
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux' && !matrix.container
         run: |

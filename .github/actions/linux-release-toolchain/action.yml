@@ -1,25 +1,26 @@
 name: Linux release toolchain
 description: >
-  Stand up the environment the Linux release is built in - the build tools a
-  bare Ubuntu 22.04 lacks, and GCC 13 as the compiler CMake and vcpkg pick up.
+  Check the Linux release image is the Ubuntu 22.04 one with GCC 13, and
+  select GCC 13 as the compiler CMake and vcpkg pick up.
 
 # The Linux release is built on the oldest supported Ubuntu LTS, because a
 # binary asks the loader for the glibc it was linked against and runs on that
 # release and every later one, never an earlier one. 0.37.0 was built on 24.04
 # and failed to start on 22.04 with "version `GLIBC_2.38' not found".
 #
-# The 22.04 userland comes from the `ubuntu:22.04` container image, run on an
-# ubuntu-24.04 runner, not from the ubuntu-22.04 runner image, which GitHub
-# removes on 2027-04-17 (#2634). The image holds the floor as long as Docker
-# Hub publishes it; the runner only hosts it. A bare image has none of the
-# runner image's tools, so this installs what the jobs below it use, and runs
-# as root there with no sudo (it still uses sudo when it is not root).
+# The 22.04 userland comes from the `vayu-linux-build` container image
+# (.github/linux-build/Dockerfile), run on an ubuntu-24.04 runner, not from
+# the ubuntu-22.04 runner image, which GitHub removes on 2027-04-17 (#2634).
+# The image holds the build tools and GCC 13, so no job installs anything from
+# Launchpad: .github/workflows/linux-build-image.yml is the only place that
+# does, and only when the Dockerfile changes. The jobs name the image by
+# digest, so a rebuilt image reaches them through a reviewed change.
 #
 # 22.04 ships GCC 12, which cannot build the engine (C++23; CLAUDE.md asks for
-# GCC 13+), so GCC 13 comes from the Ubuntu toolchain PPA. Its libstdc++ is
-# newer than 22.04's, which is why engine/CMakeLists.txt links the C++ runtime
-# statically on Linux; scripts/check-linux-glibc.sh asserts both halves on the
-# built binary.
+# GCC 13+), so the image carries GCC 13 from the Ubuntu toolchain PPA. Its
+# libstdc++ is newer than 22.04's, which is why engine/CMakeLists.txt links the
+# C++ runtime statically on Linux; scripts/check-linux-glibc.sh asserts both
+# halves on the built binary.
 #
 # An action rather than a step because three workflows need the identical
 # compiler: release.yml builds the artifact, cache-warm.yml fills the vcpkg and
@@ -27,15 +28,16 @@ description: >
 # and pr-tests.yml builds the same configuration on every engine pull request
 # so a break surfaces there rather than on a tag.
 #
-# Raising the baseline to the next LTS means changing the container image and
-# its `container-ubuntu-*` matrix label in those three workflows, the version
-# check below, and VAYU_LINUX_GLIBC_FLOOR's default in
-# scripts/check-linux-glibc.sh, together. See docs/engine/building.md.
+# Raising the baseline to the next LTS means changing the Dockerfile's base
+# image, the image digest and the `container-ubuntu-*` matrix label in those
+# three workflows, the version check below, and VAYU_LINUX_GLIBC_FLOOR's
+# default in scripts/check-linux-glibc.sh, together. See
+# docs/engine/building.md.
 
 runs:
   using: composite
   steps:
-    - name: Install the build tools and GCC 13, and select it
+    - name: Select GCC 13 from the build image
       shell: bash
       run: |
         set -euo pipefail
@@ -44,63 +46,14 @@ runs:
         # release. On a newer image the build would succeed and quietly raise
         # the floor again, which is the failure being fixed.
         if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "22.04" ]; then
-          echo "::error::The Linux release toolchain is pinned to Ubuntu 22.04, and this job runs on ${PRETTY_NAME:-unknown}. Run it in the ubuntu:22.04 container, or raise the baseline everywhere at once (see docs/engine/building.md)." >&2
+          echo "::error::The Linux release toolchain is pinned to Ubuntu 22.04, and this job runs on ${PRETTY_NAME:-unknown}. Run it in the vayu-linux-build container, or raise the baseline everywhere at once (see docs/engine/building.md)." >&2
           exit 1
         fi
-
-        as_root() {
-          if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
-        }
-        apt_install() {
-          as_root env DEBIAN_FRONTEND=noninteractive \
-            apt-get install -y --no-install-recommends "$@"
-        }
-
-        # What the runner image used to provide and these jobs use: vcpkg's
-        # bootstrap and ports (curl, zip, unzip, tar, pkg-config, perl for
-        # OpenSSL, the autotools for libsodium), the .deb packaging
-        # (xz-utils), the artifact checksums (perl's shasum), the glibc check
-        # (binutils, via build-essential), and add-apt-repository below. git
-        # and zstd are installed before checkout, and CMake and Ninja come
-        # from vcpkg once it is bootstrapped (see the workflows).
-        as_root apt-get update
-        apt_install \
-          build-essential \
-          pkg-config \
-          ca-certificates \
-          curl \
-          zip \
-          unzip \
-          tar \
-          xz-utils \
-          perl \
-          python3 \
-          autoconf \
-          autoconf-archive \
-          automake \
-          libtool \
-          gnupg \
-          software-properties-common
-
-        # Launchpad answers 5xx now and then: the signing key comes from its
-        # API (`GPGKeyTemporarilyNotFoundError`, HTTP 500) and the PPA host
-        # serves 503s. The whole sequence is retried so a blip is not a red
-        # release; an outage that outlasts the attempts still fails the step.
-        install_gcc13() {
-          as_root add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
-            as_root apt-get update &&
-            apt_install gcc-13 g++-13
-        }
-        if ! command -v g++-13 >/dev/null 2>&1; then
-          for attempt in 1 2 3 4 5; do
-            install_gcc13 && break
-            if [ "$attempt" -eq 5 ]; then
-              echo "::error::Could not install GCC 13 from ppa:ubuntu-toolchain-r/test after $attempt attempts." >&2
-              exit 1
-            fi
-            echo "GCC 13 install failed (attempt $attempt), retrying in $((attempt * 30))s" >&2
-            sleep "$((attempt * 30))"
-          done
+        # Never fetch the compiler here: a missing one means the job runs on
+        # the wrong image, and falling back to Launchpad would hide that.
+        if ! command -v g++-13 >/dev/null 2>&1 || ! command -v gcc-13 >/dev/null 2>&1; then
+          echo "::error::g++-13 is missing. The job must run in the vayu-linux-build image (.github/linux-build/Dockerfile), which carries GCC 13." >&2
+          exit 1
         fi
         g++-13 --version | head -1
         # CMake reads CC/CXX on a fresh configure, and vcpkg builds its ports

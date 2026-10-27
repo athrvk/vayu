@@ -440,7 +440,7 @@ jobs:
         include:
           - os: container-ubuntu-22.04
             runner: ubuntu-24.04
-            container: ubuntu:22.04
+            container: ghcr.io/athrvk/vayu-linux-build@sha256:4832fdf1f5e92e75f0bb5696e167755d6fd6ec8b67685b6794f6d142ccde40e7
             preset: linux-prod
           - os: windows-latest
             preset: windows-prod
@@ -462,13 +462,6 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
-      # release.yml's step, for its reasons.
-      - name: Install git and zstd (container)
-        if: matrix.container
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # The release's build tools and compiler, or neither the vcpkg archives
