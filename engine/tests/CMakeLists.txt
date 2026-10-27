@@ -100,6 +100,7 @@ add_executable(vayu_tests
     script_send_request_test.cpp
     script_send_request_cap_test.cpp
     script_sent_headers_test.cpp
+    script_response_redirects_test.cpp
     sent_headers_wire_test.cpp
     set_cookie_test.cpp
     cookie_jar_test.cpp

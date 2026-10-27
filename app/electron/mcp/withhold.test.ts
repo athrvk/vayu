@@ -857,6 +857,57 @@ describe("withholdRunOutput", () => {
 		});
 	});
 
+	describe("a redirect hop's url and schemeDowngrade (#2949)", () => {
+		const hop = (url: string) => ({
+			status: 302,
+			statusText: "Found",
+			headerLines: [{ name: "Location", value: "http://x.test/next" }],
+			url,
+			schemeDowngrade: true,
+		});
+
+		test("masks a credential-named query value, as the parent url is", () => {
+			const url = "https://x.test/login?page=2&api_key=typed-key&sort=asc";
+			const masked = withholdRunOutput({ url, redirects: [hop(url)] }, rule) as {
+				url: string;
+				redirects: Array<ReturnType<typeof hop>>;
+			};
+			expect(masked.url).toBe("https://x.test/login?page=2&api_key=<redacted>&sort=asc");
+			expect(masked.redirects[0].url).toBe(masked.url);
+			expect(masked.redirects[0].schemeDowngrade).toBe(true);
+		});
+
+		test("masks the parameter auth wrote even under a name no credential list holds", () => {
+			const url = "https://x.test/login?sid=live-session-9&page=2";
+			const answer = { authQueryParam: "sid", url, redirects: [hop(url)] };
+			expect(withholdRunOutput(answer, rule)).toEqual({
+				authQueryParam: "sid",
+				url: "https://x.test/login?sid=<redacted>&page=2",
+				redirects: [hop("https://x.test/login?sid=<redacted>&page=2")],
+			});
+		});
+
+		test("masks a secret variable's value wherever it sits in the url", () => {
+			const url = "https://x.test/s3cret-value/login?ref=s3cret-value";
+			expect(withholdRunOutput({ redirects: [hop(url)] }, rule)).toEqual({
+				redirects: [hop("https://x.test/<redacted>/login?ref=<redacted>")],
+			});
+		});
+
+		test("leaves a hop url without a query, and a hop from an engine before the field, as they were", () => {
+			const old = { status: 301, statusText: "Moved", headerLines: [] };
+			expect(
+				withholdRunOutput(
+					{ authQueryParam: "sid", redirects: [hop("https://x.test/login"), old] },
+					rule
+				)
+			).toEqual({
+				authQueryParam: "sid",
+				redirects: [hop("https://x.test/login"), old],
+			});
+		});
+	});
+
 	test("masks credential header rows and a sent-header map, by the shared list and the API-key name", () => {
 		const node = {
 			headers: [

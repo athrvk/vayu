@@ -1148,6 +1148,7 @@ class ScriptEngine::Impl {
         ctx_data.run_summary         = ctx.run_summary;
         ctx_data.iteration_data      = ctx.iteration_data;
         ctx_data.response_events     = ctx.response_events;
+        ctx_data.redirect_hops       = ctx.redirect_hops;
         // Both per-execution: the capability is this caller's, and the request
         // budget starts full for every script rather than carrying over
         // through a pooled context.

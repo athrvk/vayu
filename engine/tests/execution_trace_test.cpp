@@ -181,8 +181,9 @@ TEST (ExecutionTrace, AResponseWithNoHeaderLinesStoresNoHeaderLinesKey) {
 // The followed redirect hops are stored with the final response (issue #2461),
 // so History shows the cookie a redirect set the way the live pane did.
 TEST (ExecutionTrace, ResponseCarriesTheRedirectHops) {
-    auto response = make_response ();
-    response.redirect_hops = { { 302, "Found", { { "Set-Cookie", "hop=1" } } } };
+    auto response          = make_response ();
+    response.redirect_hops = { { 302, "Found", { { "Set-Cookie", "hop=1" } },
+    "https://a.test/login", true } };
 
     auto trace = build_result_trace (make_request (), response);
 
@@ -192,6 +193,10 @@ TEST (ExecutionTrace, ResponseCarriesTheRedirectHops) {
     EXPECT_EQ (hops[0]["status"], 302);
     EXPECT_EQ (hops[0]["statusText"], "Found");
     EXPECT_EQ (hops[0]["headerLines"][0]["value"], "hop=1");
+    ASSERT_TRUE (hops[0].contains ("url"));
+    ASSERT_TRUE (hops[0].contains ("schemeDowngrade"));
+    EXPECT_EQ (hops[0]["url"], "https://a.test/login");
+    EXPECT_TRUE (hops[0]["schemeDowngrade"].get<bool> ());
 }
 
 // Written only when non-empty, on the `headerLines` rule above: absent is what

@@ -344,10 +344,10 @@ TEST (JsonTest, SerializesNoHeaderLinesAsAnEmptyArray) {
 TEST (JsonTest, SerializesRedirectHopsWithTheirStatusAndHeaderLines) {
     Response response;
     response.status_code   = 200;
-    response.redirect_hops = {
-        { 302, "Found", { { "Set-Cookie", "hop=1; Path=/" }, { "Location", "/home" } } },
-        { 301, "", {} }
-    };
+    response.redirect_hops = { { 302, "Found",
+                               { { "Set-Cookie", "hop=1; Path=/" }, { "Location", "/home" } },
+                               "https://a.test/login", true },
+        { 301, "", {}, "http://a.test/home", false } };
 
     auto json = serialize (response);
 
@@ -357,9 +357,12 @@ TEST (JsonTest, SerializesRedirectHopsWithTheirStatusAndHeaderLines) {
     (Json{ { "status", 302 }, { "statusText", "Found" },
     { "headerLines",
     Json::array ({ { { "name", "Set-Cookie" }, { "value", "hop=1; Path=/" } },
-    { { "name", "Location" }, { "value", "/home" } } }) } }));
+    { { "name", "Location" }, { "value", "/home" } } }) },
+    { "url", "https://a.test/login" }, { "schemeDowngrade", true } }));
     EXPECT_EQ (json["redirects"][1]["status"], 301);
     EXPECT_TRUE (json["redirects"][1]["headerLines"].empty ());
+    EXPECT_EQ (json["redirects"][1]["url"], "http://a.test/home");
+    EXPECT_FALSE (json["redirects"][1]["schemeDowngrade"].get<bool> ());
 }
 
 TEST (JsonTest, SerializesNoRedirectHopsAsAnEmptyArray) {

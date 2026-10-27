@@ -180,6 +180,23 @@ describe("MCP sensitive parameter name conformance", () => {
 		}
 	);
 
+	it.each(fixture.sensitiveParamNames)(
+		"withholds a %s value in a redirect hop's url, as in the request's (#2949)",
+		(name) => {
+			for (const spelled of [name, name.toUpperCase()]) {
+				const hop = (url: string) => ({ status: 302, url, schemeDowngrade: true });
+				expect(
+					withholdRunOutput(
+						{ redirects: [hop(`https://x.test/p?${spelled}=v&page=2`)] },
+						{ forms: [], apiKeyHeaders: [] }
+					)
+				).toEqual({
+					redirects: [hop(`https://x.test/p?${spelled}=<redacted>&page=2`)],
+				});
+			}
+		}
+	);
+
 	it.each(fixture.sensitiveParamNames)("matches %s as a whole name only", (name) => {
 		const row = { url: `/p?${name}x=v`, params: [{ key: `${name}x`, value: "v" }] };
 		expect(withholdRowSecrets(row)).toEqual(row);

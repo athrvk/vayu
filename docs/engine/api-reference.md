@@ -6125,16 +6125,25 @@ headers). Header names are matched case-insensitively, so `authorization` or
 appended regardless. The app's code snippets apply the same rule
 (`engine/tests/fixtures/auth-header-precedence.json`).
 
-**Redirects.** With `followRedirects` on, a redirect to another host (a different
-host name or port) drops the `Authorization` header and a typed `Cookie`, so
+**Redirects.** With `followRedirects` on, a redirect to a different scheme, host
+name or port drops the `Authorization` header and a typed `Cookie`, so
 `bearer`, `basic` and an `oauth2` token placed in the header stop at the first
-host, as libcurl does.
+origin, as libcurl does.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
-the request carries - is sent to the host the redirect leads to. A query-located
+the request carries - is sent to the origin the redirect leads to, **including
+over `http` after an `https` hop**. That is a documented exception, not an
+oversight: the engine does not run its own redirect loop, so it cannot hold a
+header back where libcurl does not. It applies to all three drivers (a design
+send, a load run and a stream). A query-located
 key is part of the URL as sent; the next hop is whatever the response's
 `Location` names, so the key reaches it only if that URL repeats it. Set
-`followRedirects: false` on a request whose key must not leave the host it was
+`followRedirects: false` on a request whose key must not leave the origin it was
 sent to; the app says this beside the API Key fields.
+A design send makes the downgrade visible: each entry of the answer's
+`redirects` records the `url` its request went to and `schemeDowngrade`, true
+when that request was `https` and the next one `http` (see
+[`redirects`](#post-execute)) and `pm.response.redirects` shows them to a
+post-request script. A load run and a stream record no hops.
 (`engine/tests/redirect_credentials_test.cpp`)
 
 ### OAuth 2.0 token cache
@@ -7510,7 +7519,9 @@ run-shaped way of stating the same field, not a second store.
       "headerLines": [
         { "name": "Set-Cookie", "value": "session=abc; Path=/" },
         { "name": "Location", "value": "/users" }
-      ]
+      ],
+      "url": "https://api.example.com/login",
+      "schemeDowngrade": false
     }
   ],
   "requestHeaders": { "accept": "*/*" },
@@ -7753,17 +7764,30 @@ path is the hot path and records no lines.
 
 **`redirects` lists the redirect responses the
 send followed** (issue #2461), in the order they arrived, each as
-`{status, statusText, headerLines}` with `headerLines` shaped as above. `headers`
+`{status, statusText, headerLines, url, schemeDowngrade}` with `headerLines`
+shaped as above. `headers`
 and `headerLines` hold the final hop only, so a `Set-Cookie` or `Location` on an
 earlier hop - the `302` that answers a login and sets the session cookie - is
-readable nowhere else. Only 3xx responses are hops: a `1xx` interim response
+readable nowhere else. `url` is the URL of the request that hop answered: the URL the
+send went to for the first hop, the previous hop's `Location` resolved against it
+for each later one (userinfo is removed), with the value of the request's auth-written query parameter, and
+of any query parameter named like a credential, blanked; `""` when libcurl
+reported none. `schemeDowngrade` is true when that
+request went over `https` and the next one over `http`: the one hop on which an
+API-key header, which libcurl does not withhold, travels in clear text (see the
+Redirects paragraph under [Authentication](#authentication)). A row stored before these two members
+existed lacks them. Only 3xx responses are hops: a `1xx` interim response
 such as `100 Continue` is not. It is always present on a design answer, an empty
 array when nothing was followed (`followRedirects: false` always gives an empty
 one, the 3xx being the answer), and holds at most `maxRedirects` entries, so a
 loop that ends in `TOO_MANY_REDIRECTS` reports the hops it made. The stored
 `trace_data.response` carries it too, written only when non-empty; a load-run
 sample records none. It reports what the server sent: see the cross-origin
-paragraph above for why a hop's cookie is not necessarily one the jar kept.
+paragraph above for why a hop's cookie is not necessarily one the jar kept. A post-request script reads
+the same hops as
+[`pm.response.redirects`](scripting.md#pmresponseredirects---the-hops-a-send-followed)
+(`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where
+the chain is not recorded.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when

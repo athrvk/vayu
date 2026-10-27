@@ -21,6 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import { render } from "@/test/render-with-tooltips";
+import type { RedirectHop } from "@/types/domain";
 import ResponseCookies from "./ResponseCookies";
 import { parseSetCookie, parseSetCookieLine } from "./parse-set-cookie";
 
@@ -293,5 +294,87 @@ describe("cookies set during redirects (issue #2461)", () => {
 			<ResponseCookies headers={{}} headerLines={[]} redirects={[HOP_LOGIN]} />
 		).container;
 		expect(hopsOnly.textContent).not.toContain("No cookies in response");
+	});
+});
+
+describe("an https to http redirect (issue #2949)", () => {
+	const QUIET_DOWNGRADE = {
+		status: 301,
+		statusText: "Moved Permanently",
+		headerLines: [{ name: "Location", value: "/plain" }],
+		url: "https://api.example.com/start",
+		schemeDowngrade: true,
+	};
+	const COOKIE_DOWNGRADE = {
+		status: 302,
+		statusText: "Found",
+		headerLines: [
+			{ name: "Set-Cookie", value: "session=abc; Path=/" },
+			{ name: "Location", value: "http://api.example.com/home" },
+		],
+		url: "https://api.example.com/login",
+		schemeDowngrade: true,
+	};
+	const SAME_SCHEME = { ...QUIET_DOWNGRADE, schemeDowngrade: false };
+	const OLD_ENGINE = {
+		status: 301,
+		statusText: "Moved Permanently",
+		headerLines: [{ name: "Location", value: "/plain" }],
+	};
+
+	const NOTICE = "Redirected from https to http";
+	const show = (redirects: RedirectHop[], headerLines = [{ name: "Set-Cookie", value: "f=1" }]) =>
+		render(<ResponseCookies headers={{}} headerLines={headerLines} redirects={redirects} />)
+			.container;
+
+	it("warns about a downgrade that set no cookie, naming the hop's url and Location", () => {
+		const container = show([QUIET_DOWNGRADE], []);
+
+		expect(container.textContent).toContain(NOTICE);
+		expect(container.textContent).toContain(
+			"301 Moved Permanently from https://api.example.com/start, to /plain"
+		);
+		// No cookie group, but the empty state still says what the tab holds.
+		expect(container.textContent).toContain("No cookies in response");
+		expect(container.querySelectorAll("table")).toHaveLength(0);
+	});
+
+	it("says nothing when the hop stayed on its scheme", () => {
+		expect(show([SAME_SCHEME]).textContent).not.toContain(NOTICE);
+	});
+
+	it("says nothing for a hop from an engine that records no downgrade flag", () => {
+		const container = show([OLD_ENGINE], []);
+		expect(container.textContent).not.toContain(NOTICE);
+		expect(container.textContent).toContain("No cookies in response");
+	});
+
+	it("lists only the downgrading hops when the chain mixes them", () => {
+		const container = show([SAME_SCHEME, COOKIE_DOWNGRADE], []);
+
+		const items = Array.from(container.querySelectorAll("li")).map((li) => li.textContent);
+		expect(items).toEqual([
+			"302 Found from https://api.example.com/login, to http://api.example.com/home",
+		]);
+	});
+
+	it("keeps the cookie groups beside the notice", () => {
+		const container = show([COOKIE_DOWNGRADE]);
+
+		expect(container.textContent).toContain(NOTICE);
+		expect(
+			Array.from(container.querySelectorAll('[data-slot="eyebrow"]')).map(
+				(e) => e.textContent
+			)
+		).toEqual(["Set by this response", "Set during redirects"]);
+		expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+	});
+
+	it("labels a cookie hop with the resolved url when the engine sent one", () => {
+		const container = show([{ ...COOKIE_DOWNGRADE, schemeDowngrade: false }], []);
+
+		expect(container.querySelector("section p.font-mono")?.textContent).toBe(
+			"302 Found from https://api.example.com/login, to http://api.example.com/home"
+		);
 	});
 });

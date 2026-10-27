@@ -1145,6 +1145,10 @@ struct FullyBoundContext {
                     nlohmann::json::array ({ nlohmann::json{ { "event", "tick" },
                     { "data", "1" }, { "sourceId", "e0" } } }) },
         { "totalEvents", 3 }, { "eventsTruncated", true }, { "endReason", "completed" } };
+    /// A recorded redirect chain, which binds pm.response.redirects - absent
+    /// without one (#2949).
+    std::vector<vayu::RedirectHop> hops = { { 302, "Found", {},
+    "https://api.example.com/a", false } };
     vayu::runtime::ScriptContext ctx;
 
     FullyBoundContext () {
@@ -1169,6 +1173,7 @@ struct FullyBoundContext {
         ctx.iteration_count     = 4;
         ctx.iteration_data      = &row;
         ctx.response_events     = &events;
+        ctx.redirect_hops       = &hops;
         ctx.in_scenario         = true;
     }
 };
@@ -1235,7 +1240,7 @@ constexpr const char* ENUMERATE_PM = R"JS(
     var names = [];
     var data = [];
     var DATA_MAPS = ['pm.request.headers', 'pm.response.headers', 'pm.response.cookies',
-                     'pm.response.events'];
+                     'pm.response.events', 'pm.response.redirects'];
 
     function descend(path, value) {
         var isDataMap = DATA_MAPS.indexOf(path) !== -1;
