@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# The pre-commit hook: clang-format 19 over the whole of every staged
+# The pre-commit hook: clang-format 22 over the whole of every staged
 # `engine/{src,include,tests}` source (issue #908), mirroring CI's
 # `Engine formatting` gate. Dropping the `|| FORMAT_STATUS=1` that keeps its
 # status, or widening the scope past those three roots, reddens the cases below.
@@ -57,7 +57,7 @@ make_repo_engine() {
 
 # Runs the hook in a repo built by $1 (default make_repo), always on the
 # sandbox PATH, so the only clang-format in reach is the stub: a machine with a
-# real 19 installed would otherwise answer instead. FORMAT_STUB_VERSION, when
+# real 22 installed would otherwise answer instead. FORMAT_STUB_VERSION, when
 # set, puts a clang-format stub of that version on PATH under FORMAT_STUB_NAME,
 # reporting files matching FORMAT_STUB_DIRTY as unformatted. Sets HOOK_OUTPUT
 # and HOOK_STATUS.
@@ -91,7 +91,7 @@ echo "pre-commit clang-format check"
 # Mutation-check: drop the `|| FORMAT_STATUS=1` from the clang-format
 # invocation in scripts/pre-commit, or the `-Werror` that gives it a status to
 # keep, and this case reddens.
-FORMAT_STUB_VERSION="19.1.7"
+FORMAT_STUB_VERSION="22.1.8"
 FORMAT_STUB_DIRTY="engine.cpp"
 run_hook make_repo_engine
 if [[ "$HOOK_STATUS" -ne 0 ]]; then
@@ -132,8 +132,8 @@ else
     fail "a clean source commits through" "exit $HOOK_STATUS: $HOOK_OUTPUT"
 fi
 
-# The pin is 19 *exactly*: 39 of the 285 engine sources format differently under
-# 18, so an 18 that reported "clean" would be a wrong answer rather than a
+# The pin is 22 *exactly*: another major formats some engine sources
+# differently, so an 18 that reported "clean" would be a wrong answer rather than a
 # missing one. It must skip, loudly, and check nothing - and still let the
 # commit through, because CI is the gate and a local toolchain is a convenience.
 FORMAT_STUB_VERSION="18.1.3"
@@ -172,11 +172,11 @@ else
 fi
 
 # Ubuntu 24.04's shape, and the reason the hook looks under two names: `apt
-# install clang-format-19` leaves plain `clang-format` at the distribution's 18,
+# install clang-format-22` leaves plain `clang-format` at the distribution's 18,
 # so a hook that probed only the plain name would skip on the very setup
 # CONTRIBUTING.md tells contributors to build.
 repo="$(make_repo_engine)"
-versioned="$(make_format_stub clang-format-19 19.1.7 engine.cpp)"
+versioned="$(make_format_stub clang-format-22 22.1.8 engine.cpp)"
 plain="$(make_format_stub clang-format 18.1.3 "")"
 sandbox="$(make_sandbox_path)"
 set +e
@@ -184,10 +184,10 @@ out="$(cd "$repo" && PATH="$plain:$versioned:$sandbox" bash "$HOOK" 2>&1)"
 status=$?
 set -e
 rm -rf "$repo" "$versioned" "$plain" "$sandbox"
-if [[ "$status" -ne 0 && "$out" == *"clang-format-19"* ]]; then
-    pass "clang-format-19 is preferred over a plain clang-format that is not 19"
+if [[ "$status" -ne 0 && "$out" == *"clang-format-22"* ]]; then
+    pass "clang-format-22 is preferred over a plain clang-format that is not 22"
 else
-    fail "clang-format-19 is found beside an 18" "exit $status: $out"
+    fail "clang-format-22 is found beside an 18" "exit $status: $out"
 fi
 
 FORMAT_STUB_VERSION=""
@@ -203,7 +203,7 @@ echo "pre-commit runs no clang-tidy"
 # Mutation-check: put a clang-tidy invocation back in scripts/pre-commit.
 repo="$(make_repo_engine)"
 tidy="$(make_stub 19.1.0 .cpp)"
-fstub="$(make_format_stub clang-format 19.1.7 "")"
+fstub="$(make_format_stub clang-format 22.1.8 "")"
 sandbox="$(make_sandbox_path)"
 set +e
 out="$(cd "$repo" && PATH="$tidy:$fstub:$sandbox" bash "$HOOK" 2>&1)"
@@ -218,7 +218,7 @@ fi
 
 # Run as `.git/hooks/pre-commit`, a symlink, it must still find its helper.
 repo="$(make_repo_engine)"
-fstub="$(make_format_stub clang-format 19.1.7 "")"
+fstub="$(make_format_stub clang-format 22.1.8 "")"
 sandbox="$(make_sandbox_path)"
 mkdir -p "$repo/.git/hooks"
 ln -sf "$HOOK" "$repo/.git/hooks/pre-commit"

@@ -395,17 +395,18 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 
 ## Formatting and linting
 
-- **clang-format 19 exactly** (`.clang-format` at repo root; the pin exists
-  because 18 formats a measured share of the sources differently). A
-  patch-level difference inside 19 can still matter (one 19.1.x pair disagrees
-  about three continuation lines in the QuickJS glue under `src/runtime/`), so
+- **clang-format 22 exactly** (`.clang-format` at repo root; the pin exists
+  because another major formats a measured share of the sources differently). A
+  patch-level difference inside a major can still matter (one 19.1.x pair
+  disagreed about three continuation lines in the QuickJS glue under
+  `src/runtime/`), so
   after `clang-format -i` read `git diff` for reindentation you did not intend
   and put it back: the
   tree as committed is what CI's binary accepts. `Engine formatting` in
   `pr-tests.yml` runs `--dry-run -Werror` over the whole of
   `engine/{src,include,tests}` (#886) and `scripts/pre-commit` runs the same
   check over what a commit stages (#908), skipping loudly without a
-  clang-format 19 rather than answering from another major. The config's two
+  clang-format 22 rather than answering from another major. The config's two
   odd-looking settings (`ColumnLimit: 80` with `PenaltyExcessCharacter: 1`,
   `ContinuationIndentWidth: 0`) are what the code is written to; both are
   commented in the file, and a "tidier" value costs a five-figure-line rewrite.

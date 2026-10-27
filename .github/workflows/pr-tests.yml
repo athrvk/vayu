@@ -1349,27 +1349,27 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 19, the same major the clang-tidy gate pins on Linux and the same one
-      # CONTRIBUTING.md tells contributors to install, so one LLVM answers for
-      # both checks and a local run means what this one means. It is not a free
-      # choice: 39 of the 285 engine sources format differently under 18 than
-      # under 19, so an unpinned `clang-format` would fail pull requests over
-      # whichever version a contributor's distribution happened to ship.
-      - name: Install clang-format 19
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-format-19
+      # 22, the same major the clang-tidy gate pins and the one CONTRIBUTING.md
+      # tells contributors to install, so one LLVM answers for both checks and
+      # a local run means what this one means. It is not a free choice: another
+      # major formats some engine sources differently, so an unpinned
+      # `clang-format` would fail pull requests over whichever version a
+      # contributor's distribution happened to ship. Ubuntu 24.04's archive has
+      # no 22, so it comes from apt.llvm.org through the script the clang-tidy
+      # gate uses (#2784).
+      - name: Install clang-format 22
+        run: bash scripts/install-clang-tidy.sh clang-format
 
       - name: Check engine formatting
         shell: bash
         run: |
           # Asserted rather than trusted, on the pattern the clang-tidy step
-          # uses: apt could satisfy `clang-format-19` from a package that moved
+          # uses: apt could satisfy `clang-format-22` from a package that moved
           # on, and a version this check did not expect is a wrong answer rather
           # than a missing one.
-          major=$(clang-format-19 --version | grep -oE '[0-9]+' | head -1)
-          if [[ "$major" != "19" ]]; then
-            echo "::error::clang-format ${major:-(version unreadable)} is not the 19 this gate and CONTRIBUTING.md pin"
+          major=$(clang-format-22 --version | grep -oE '[0-9]+' | head -1)
+          if [[ "$major" != "22" ]]; then
+            echo "::error::clang-format ${major:-(version unreadable)} is not the 22 this gate and CONTRIBUTING.md pin"
             exit 1
           fi
 
@@ -1396,7 +1396,7 @@ jobs:
           fi
           echo "- clang-format $major checked **${#files[@]}** engine source(s)" >> "$GITHUB_STEP_SUMMARY"
 
-          clang-format-19 --style=file --dry-run -Werror "${files[@]}"
+          clang-format-22 --style=file --dry-run -Werror "${files[@]}"
 
   installer:
     name: Installer script on ${{ matrix.os }}

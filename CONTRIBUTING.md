@@ -100,25 +100,26 @@ vayu/
   generated from them and `scripts/test/third_party_notices_test.py` fails
   without one.
 - **Style:** Google C++ Style Guide (with modifications)
-- **Formatting:** clang-format, **19 exactly**. `.clang-format` at the repository
+- **Formatting:** clang-format, **22 exactly**. `.clang-format` at the repository
   root governs `engine/{src,include,tests}`; `engine/vendor/` is excluded by a
-  `DisableFormat: true` config of its own. The major is pinned because 39 of the
-  285 engine sources format differently under 18 than under 19 - Ubuntu 24.04
-  ships 18 by default, so `apt install clang-format-19`, which is also the major
-  the clang-tidy gate uses. Check the way CI does, or fix in place:
+  `DisableFormat: true` config of its own. The major is pinned because another
+  major formats some engine sources differently - Ubuntu 24.04 ships 18 and has
+  no 22, so on Linux run `bash scripts/install-clang-tidy.sh clang-format`
+  (apt.llvm.org, the same source and major as the clang-tidy gate); on macOS
+  `brew install llvm@22`. Check the way CI does, or fix in place:
 
   ```bash
-  clang-format-19 --style=file --dry-run -Werror \
+  clang-format-22 --style=file --dry-run -Werror \
     $(git ls-files -- engine/src engine/include engine/tests | grep -E '\.(c|cpp|h|hpp)$')
 
-  clang-format-19 --style=file -i <file>...
+  clang-format-22 --style=file -i <file>...
   ```
 
   The `scripts/pre-commit` hook runs the same check over the engine sources you
   stage and refuses the commit on a difference, so the gate is reachable before
-  the push (#908). It looks for `clang-format-19` first and a plain
+  the push (#908). It looks for `clang-format-22` first and a plain
   `clang-format` second, and skips - loudly, checking nothing - when neither is
-  a 19, because a check by another major is a wrong answer rather than a missing
+  a 22, because a check by another major is a wrong answer rather than a missing
   one.
 
   The `Engine formatting` job checks the **whole tree**, not just your changed

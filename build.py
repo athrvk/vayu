@@ -1069,7 +1069,7 @@ def setup_environment(project_root: Path):
 
     # ── Git hooks ─────────────────────────────────────────────────────────────
     # Installed here rather than left to the contributor: the pre-commit hook
-    # runs clang-format 19 over staged C++ and the pre-push hook runs clang-tidy
+    # runs clang-format 22 over staged C++ and the pre-push hook runs clang-tidy
     # over what a push carries, and every clone starts without them -
     # `.git/hooks` is not tracked. A session that never ran
     # `scripts/install-git-hooks.sh` by hand commits unformatted, and the first

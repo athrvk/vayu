@@ -29,8 +29,8 @@
 #     question is closed - do not reopen it without a measurement that says
 #     something new.
 #
-# clang-format 19 is the pinned version (CONTRIBUTING.md); the bulk-format
-# commit in .git-blame-ignore-revs was produced by it.
+# clang-format 22 is the pinned version (CONTRIBUTING.md); the bulk-format
+# commits in .git-blame-ignore-revs were produced by 19 and 22.
 #
 # engine/vendor/ carries `DisableFormat: true` and is never touched.
 

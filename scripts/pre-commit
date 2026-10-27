@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# clang-format 19 over the whole of every staged engine source, mirroring CI's
+# clang-format 22 over the whole of every staged engine source, mirroring CI's
 # `Engine formatting` gate (issue #908). It takes well under a second, so it
 # runs on every commit.
 #
@@ -55,7 +55,6 @@ fi
 # Files are read from the working tree, as the tidy pass reads them, rather than
 # from the index: a hook that reported on blobs the working tree no longer
 # matches would name lines the author cannot see in their editor.
-CLANG_FORMAT_MAJOR=19
 
 FORMAT_STATUS=0
 FORMAT_FILES=()
