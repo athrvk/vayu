@@ -8,7 +8,7 @@
 /**
  * Trash Module
  *
- * Where a deleted collection, request, environment or saved example goes, and how it comes
+ * Where a deleted collection, request, environment, saved example or client certificate goes, and how it comes
  * back.
  *
  * The engine's delete has been soft since issue #988 - the row is stamped with
