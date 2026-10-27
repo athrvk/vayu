@@ -464,6 +464,62 @@ const std::vector<std::string>& same_value_keys () {
     return keys;
 }
 
+/// The combinators: lists of subschemas that each apply to the same value.
+/// `prefixItems` is not one, it steps into array items.
+const std::vector<std::string>& same_value_list_keys () {
+    static const std::vector<std::string> keys = { "allOf", "anyOf", "oneOf" };
+    return keys;
+}
+
+/// Where a map of subschemas applies to the same value as the map's owner.
+const std::vector<std::string>& same_value_map_keys () {
+    static const std::vector<std::string> keys = { "dependencies", "dependentSchemas" };
+    return keys;
+}
+
+void add_ref_edge (const nlohmann::json& schema,
+const nlohmann::json& root,
+std::vector<SameValueFrame>& edges) {
+    auto ref = schema.find ("$ref");
+    if (ref == schema.end () || !ref->is_string ()) {
+        return;
+    }
+    const auto text = ref->get<std::string> ();
+    if (const nlohmann::json* target = resolve_pointer (root, text)) {
+        edges.push_back ({ target, nlohmann::json::json_pointer (text.substr (1)) });
+    }
+}
+
+void add_list_edges (const nlohmann::json& schema,
+const nlohmann::json::json_pointer& at,
+std::vector<SameValueFrame>& edges) {
+    for (const auto& key : same_value_list_keys ()) {
+        auto found = schema.find (key);
+        if (found == schema.end () || !found->is_array ()) {
+            continue;
+        }
+        for (size_t index = 0; index < found->size (); ++index) {
+            edges.push_back ({ &(*found)[index], at / key / index });
+        }
+    }
+}
+
+void add_map_edges (const nlohmann::json& schema,
+const nlohmann::json::json_pointer& at,
+std::vector<SameValueFrame>& edges) {
+    for (const auto& key : same_value_map_keys ()) {
+        auto found = schema.find (key);
+        if (found == schema.end () || !found->is_object ()) {
+            continue;
+        }
+        for (const auto& [name, child] : found->items ()) {
+            if (child.is_object ()) {
+                edges.push_back ({ &child, at / key / name });
+            }
+        }
+    }
+}
+
 /// The subschemas that apply to the very same value as @p schema does: `$ref`
 /// and the combinators, and not `properties`, `items` and the rest, which step
 /// to a child value.
@@ -474,36 +530,14 @@ const nlohmann::json& root) {
     if (!schema.is_object ()) {
         return edges;
     }
-    if (auto ref = schema.find ("$ref"); ref != schema.end () && ref->is_string ()) {
-        const auto text = ref->get<std::string> ();
-        if (const nlohmann::json* target = resolve_pointer (root, text)) {
-            edges.push_back ({ target, nlohmann::json::json_pointer (text.substr (1)) });
-        }
-    }
+    add_ref_edge (schema, root, edges);
     for (const auto& key : same_value_keys ()) {
         if (auto found = schema.find (key); found != schema.end () && found->is_object ()) {
             edges.push_back ({ &*found, at / key });
         }
     }
-    for (const auto& key : subschema_list_keys ()) {
-        if (key == "prefixItems") {
-            continue;
-        }
-        if (auto found = schema.find (key); found != schema.end () && found->is_array ()) {
-            for (size_t index = 0; index < found->size (); ++index) {
-                edges.push_back ({ &(*found)[index], at / key / index });
-            }
-        }
-    }
-    for (const auto& key : { "dependencies", "dependentSchemas" }) {
-        if (auto found = schema.find (key); found != schema.end () && found->is_object ()) {
-            for (const auto& [name, child] : found->items ()) {
-                if (child.is_object ()) {
-                    edges.push_back ({ &child, at / key / name });
-                }
-            }
-        }
-    }
+    add_list_edges (schema, at, edges);
+    add_map_edges (schema, at, edges);
     return edges;
 }
 
