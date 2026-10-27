@@ -775,7 +775,7 @@ standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
 
 The 22.04 userland comes from the **`vayu-linux-build` container image**
 (`ghcr.io/athrvk/vayu-linux-build`, built from `.github/linux-build/Dockerfile`
-on `ubuntu:22.04`), run on an `ubuntu-24.04` runner, not from the
+on `ubuntu:22.04`), run on an `ubuntu-26.04` runner, not from the
 `ubuntu-22.04` runner image, which GitHub removes on 2027-04-17 (#2634). The
 floor is the image's glibc, so it is unchanged; only where the userland comes
 from moved. The matrix labels that leg `container-ubuntu-22.04`, and the steps
@@ -791,7 +791,7 @@ alike. A value that only contains the path is left alone, so
 vcpkg wrote its archives where the cache step never looked. Each container leg
 re-sets it from `$GITHUB_WORKSPACE` through `GITHUB_ENV` before vcpkg runs.
 `cache-warm.yml` warms the pnpm store in the container as well as on
-`ubuntu-24.04`: setup-node's key is the same in both, but the store's path is
+`ubuntu-26.04`: setup-node's key is the same in both, but the store's path is
 not, and `actions/cache` versions an entry by its path.
 The AppImage needs no FUSE or privileged container: electron-builder writes
 it with `mksquashfs` and prepends the runtime, and never runs an AppImage.
@@ -817,7 +817,7 @@ Four pieces hold the floor:
   `libstdc++`/`libgcc_s` among its `NEEDED` libraries, and no glibc symbol
   version above `VAYU_LINUX_GLIBC_FLOOR` (default 2.35). It runs in
   `release.yml` and on the `container-ubuntu-22.04` leg of `pr-tests.yml`,
-  on a binary built inside the container. The `ubuntu-24.04` leg is not
+  on a binary built inside the container. The `ubuntu-26.04` leg is not
   checked: it links against 24.04's glibc by design.
 - **The vcpkg cache key carries the image** (`matrix.os`, which on the
   release leg is the `container-ubuntu-22.04` label, so no entry an

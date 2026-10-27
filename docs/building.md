@@ -443,14 +443,14 @@ The project uses GitHub Actions for automated builds:
     request's Windows lint reads; a push to `master` runs no lint step to save
     it otherwise
 
-- **Linux runners name their Ubuntu release** (`ubuntu-24.04`), never
+- **Linux runners name their Ubuntu release** (`ubuntu-26.04`), never
   `ubuntu-latest`. That label moves to a new image over a weeks-long rollout,
   during which each job lands on either image at random: a new compiler on
   some runs and not others. A `Script lint` step refuses the moving label, so
-  moving to a new release is a pull request of its own (#2633 for 26.04).
+  moving to a new release is a pull request of its own (#2633 moved to 26.04).
   Where the release's glibc floor needs 22.04, the job runs in the
   `vayu-linux-build` container (Ubuntu 22.04 with GCC 13) on an
-  `ubuntu-24.04` runner (see
+  `ubuntu-26.04` runner (see
   [the release baseline](engine/building.md#the-release-is-built-on-the-oldest-supported-ubuntu-lts)).
 
 These workflows use the same CMakePresets as local development for consistency.
@@ -487,7 +487,7 @@ flag - so an entry serves only a build that compiles exactly the same way.
 - `pr-tests.yml` builds its own **pull-request** engine matrix on every push to
   `master` that touches the engine. The pull-request legs compile differently
   from the release (`-DVAYU_WERROR=ON` on Linux and macOS, `macos-prod` rather
-  than `macos-prod-arm64`, an `ubuntu-24.04` leg), so the release warm-up never
+  than `macos-prod-arm64`, an `ubuntu-26.04` leg), so the release warm-up never
   served them: the first push of a one-file pull request read 28 hits against
   371 misses on three legs. Building the same job definition on `master` keeps
   writer and reader identical by construction. That run builds only - tests,

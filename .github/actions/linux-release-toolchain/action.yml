@@ -9,7 +9,7 @@ description: >
 # and failed to start on 22.04 with "version `GLIBC_2.38' not found".
 #
 # The 22.04 userland comes from the `vayu-linux-build` container image
-# (.github/linux-build/Dockerfile), run on an ubuntu-24.04 runner, not from
+# (.github/linux-build/Dockerfile), run on an ubuntu-26.04 runner, not from
 # the ubuntu-22.04 runner image, which GitHub removes on 2027-04-17 (#2634).
 # The image holds the build tools and GCC 13, so no job installs anything from
 # Launchpad: .github/workflows/linux-build-image.yml is the only place that

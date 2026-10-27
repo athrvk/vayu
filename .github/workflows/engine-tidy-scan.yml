@@ -67,7 +67,7 @@ on:
         default: windows-latest
         options:
           - windows-latest
-          - ubuntu-24.04
+          - ubuntu-26.04
 
 # One scan at a time per ref: this is the longest job in the repository and
 # re-running it against a newer commit makes the older answer worthless.
@@ -110,7 +110,7 @@ jobs:
           ${{ fromJSON(
             github.event_name == 'workflow_dispatch'
               && format('["{0}"]', github.event.inputs.os)
-              || '["ubuntu-24.04", "windows-latest"]'
+              || '["ubuntu-26.04", "windows-latest"]'
           ) }}
     name: Whole-tree clang-tidy on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -160,11 +160,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-${{ steps.vcpkg-toolchain.outputs.id }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-26.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -349,7 +349,7 @@ jobs:
     name: File or update the tidy-scan-failure issues
     needs: scan
     if: ${{ always() && needs.scan.result == 'failure' && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       issues: write
