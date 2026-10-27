@@ -1328,8 +1328,10 @@ class Database {
      * @brief Every collection id in @p root_id's subtree, @p root_id first.
      *
      * The single definition of "the subtree", shared by the delete cascade, the
-     * restore, the purge and the trash's counts, so all four agree about what
-     * one collection owns. `All` walks stamped and live rows alike: a walk that
+     * restore and the purge; the trash's counts run the same walk
+     * (`walk_subtree` in db_collections.cpp) over the collection rows the
+     * listing has already read (#2972), so all four agree about what one
+     * collection owns. `All` walks stamped and live rows alike: a walk that
      * skipped deleted rows could not find what a restore has to put back.
      * `StampedOnly` stops at a live row, which is what a purge destroys (#1883).
      *
@@ -1375,8 +1377,10 @@ class Database {
      * By id rather than by root, because restore and purge both take an id and
      * a row a cascade took is not a root - so answering only about roots would
      * make the re-parent rule unreachable and "restore this one request" a 404.
-     * The listing filters roots out of *its* answer; these three still agree
-     * about what an entry says. The caller must already hold the DB mutex.
+     * The listing filters roots out of *its* answer and builds its entries
+     * from the same helpers (db_collections.cpp), counting a collection's
+     * cohort from rows it has already read (#2972); both agree about what an
+     * entry says. The caller must already hold the DB mutex.
      */
     std::optional<TrashEntry> trash_entry_locked (const std::string& id); // db_collections.cpp
 

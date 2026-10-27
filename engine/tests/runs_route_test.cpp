@@ -34,6 +34,7 @@
 
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
+#include "sqlite_auto_extension.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -1300,36 +1301,6 @@ const sqlite3_api_routines* /*api*/) {
     return SQLITE_OK;
 }
 
-// sqlite3_auto_extension takes its entry point type-erased and casts it back
-// to `sqlite3_loadext_entry` before calling it.
-auto snapshot_predicate_counters_entry () {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return reinterpret_cast<void (*) ()> (&install_snapshot_predicate_counters);
-}
-
-// Installs an auto-extension entry point on every connection opened while
-// this lives. A test cannot reach the storage's own connection, so it reopens
-// the database inside one. Cancelled on scope exit because a direct run of the
-// binary (no ctest) keeps one process for every test after this one.
-class ScopedAutoExtension {
-    public:
-    explicit ScopedAutoExtension (void (*entry) ())
-    : registered (sqlite3_auto_extension (entry)), entry_ (entry) {
-    }
-    ~ScopedAutoExtension () {
-        sqlite3_cancel_auto_extension (entry_);
-    }
-    ScopedAutoExtension (const ScopedAutoExtension&)            = delete;
-    ScopedAutoExtension& operator= (const ScopedAutoExtension&) = delete;
-    ScopedAutoExtension (ScopedAutoExtension&&)                 = delete;
-    ScopedAutoExtension& operator= (ScopedAutoExtension&&)      = delete;
-
-    const int registered;
-
-    private:
-    void (*entry_) ();
-};
-
 // The 5 s History poll lists and counts with no `q` and no collection, so
 // neither filter's predicate may touch a snapshot then; each set filter must
 // still reach its function once per row, which is also what proves the
@@ -1344,7 +1315,7 @@ TEST_F (RunsRouteTest, AnUnfilteredListNeverEvaluatesTheSnapshotPredicates) {
     }
 
     db_.reset ();
-    const ScopedAutoExtension counters (snapshot_predicate_counters_entry ());
+    const vayu::tests::ScopedAutoExtension counters (&install_snapshot_predicate_counters);
     ASSERT_EQ (counters.registered, SQLITE_OK);
     // No `init ()`: its retention pass would prune the set to maxRunsRetained.
     db_ = std::make_unique<vayu::db::Database> (DB_PATH);
@@ -1443,11 +1414,6 @@ int install_like_counter (sqlite3* db, char** /*error*/, const sqlite3_api_routi
     db, "like", 2, SQLITE_UTF8, nullptr, &count_matching_like, nullptr, nullptr);
 }
 
-auto like_counter_entry () {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return reinterpret_cast<void (*) ()> (&install_like_counter);
-}
-
 constexpr int DEEP_RUNS       = 2000;
 constexpr int64_t DEEP_LIMIT  = 50;
 constexpr int64_t LAST_OFFSET = DEEP_RUNS - DEEP_LIMIT; // page 40 of 40
@@ -1501,7 +1467,7 @@ TEST_F (RunsRouteTest, KeysetPageFortyMatchesTheOffsetPage) {
 TEST_F (RunsRouteTest, ADeepKeysetPageReadsAboutLimitRows) {
     seed_numbered (DEEP_RUNS);
     db_.reset ();
-    const ScopedAutoExtension counter (like_counter_entry ());
+    const vayu::tests::ScopedAutoExtension counter (&install_like_counter);
     ASSERT_EQ (counter.registered, SQLITE_OK);
     // No `init ()`: its retention pass would prune the set to maxRunsRetained.
     db_ = std::make_unique<vayu::db::Database> (DB_PATH);

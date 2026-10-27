@@ -878,6 +878,37 @@ TEST_F (TrashTest, RetentionPurgesOnlyWhatIsPastTheWindow) {
     EXPECT_TRUE (db_->get_trash ().empty ());
 }
 
+// The sweep re-checks each expired root before purging it (#2972), so every
+// kind must pass that check. Mutation check: answer false from
+// `still_trashed` for any one kind and that root is left behind.
+TEST_F (TrashTest, RetentionPurgesEveryExpiredRootOfEveryKind) {
+    make_collection ("col_1", "API");
+    make_collection ("col_2", "Nested", "col_1");
+    make_request ("req_1", "col_2");
+    make_collection ("col_3", "Other");
+    make_collection ("col_live", "Live");
+    make_request ("req_2", "col_live");
+    make_request ("req_owner", "col_live");
+    make_user_example ("ex_1", "req_owner");
+    make_environment ("env_1");
+
+    db_->delete_collection ("col_1");
+    db_->delete_collection ("col_3");
+    db_->delete_request ("req_2");
+    db_->delete_request_example ("ex_1");
+    db_->delete_environment ("env_1");
+    ASSERT_EQ (db_->get_trash ().size (), 5U);
+
+    int64_t newest = 0;
+    for (const auto& entry : db_->get_trash ()) {
+        newest = std::max (newest, entry.deleted_at);
+    }
+    EXPECT_EQ (db_->purge_expired_trash (30, newest + (31 * DAY_MS)), 5);
+    EXPECT_TRUE (db_->get_trash ().empty ());
+    EXPECT_FALSE (db_->get_request ("req_1").has_value ());
+    EXPECT_TRUE (db_->get_request ("req_owner").has_value ());
+}
+
 TEST_F (TrashTest, ARetentionOfZeroKeepsTheTrashForever) {
     make_collection ("col_1", "API");
     db_->delete_collection ("col_1");
