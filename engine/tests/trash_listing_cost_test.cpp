@@ -9,7 +9,8 @@
  * @file tests/trash_listing_cost_test.cpp
  * @brief What listing the trash reads (#2972): the columns an entry shows and
  *        nothing else, in a number of statements set by the tables the trash
- *        spans rather than by how many folders a trashed root holds.
+ *        spans rather than by how many folders a trashed root holds; and the
+ *        request columns a purge reads to remove a trashed root's examples.
  *
  * Both are observed on the storage's own connection through an auto-extension
  * (`sqlite_auto_extension.hpp`): SQLite's authorizer, which it consults for
@@ -278,6 +279,80 @@ TEST_F (TrashListingCostTest, ListingNeverReadsABodyOrAnyColumnAnEntryDoesNotSho
     };
     for (const auto& column : recorded.columns_read) {
         EXPECT_TRUE (shown.contains (column)) << "the listing read " << column;
+    }
+}
+
+// Purging a trashed collection finds the requests whose examples it removes by
+// their ids alone: a request holding a megabyte body, headers and elements is
+// destroyed without any of them being read. The allowed set is the columns the
+// purge keys on (a request's id and owner, an example's request) plus the stamp
+// its outcome's entry is looked up by, so a read that widens fails here naming
+// the column. Mutation check: walk the requests with `get_all<Request>` again in
+// `purge_collection_locked` and `requests.body` is read.
+TEST_F (TrashListingCostTest, PurgeNeverReadsARequestColumnBeyondItsIds) {
+    const std::string large (LARGE_BODY_BYTES, 'x');
+    make_collection ("col_root");
+    make_collection ("col_child", "col_root");
+    for (const std::string owner : { "col_root", "col_child" }) {
+        Request r;
+        r.id            = owner + "_req";
+        r.collection_id = owner;
+        r.name          = r.id;
+        r.method        = vayu::HttpMethod::POST;
+        r.url           = "https://example.test/" + r.id;
+        r.headers       = R"([{"key":"X-Large","value":")" + large + R"("}])";
+        r.body          = large;
+        r.elements = R"([{"kind":"script.pre","config":{"source":")" + large + R"("}}])";
+        r.created_at = 1;
+        r.updated_at = 1;
+        db_->save_request (r);
+
+        RequestExample example;
+        example.id         = owner + "_ex";
+        example.request_id = r.id;
+        example.name       = "saved";
+        example.status     = 200;
+        example.headers    = "[]";
+        example.body       = large;
+        example.origin = vayu::core::constants::request_example::ORIGIN_USER;
+        example.created_at = 1;
+        example.updated_at = 1;
+        db_->save_request_example (example);
+    }
+    db_->delete_collection ("col_root");
+
+    reopen_with_statement_log ();
+    if (HasFatalFailure ()) {
+        return;
+    }
+    std::optional<TrashOutcome> purged;
+    const auto recorded =
+    record ([&] { purged = db_->purge_deleted ("col_root"); });
+
+    // The purge took both folders' requests and their examples with them.
+    ASSERT_HAS_VALUE (purged);
+    EXPECT_EQ (purged->entry.requests, 2);
+    EXPECT_FALSE (db_->get_request_example ("col_root_ex").has_value ());
+    EXPECT_FALSE (db_->get_request_example ("col_child_ex").has_value ());
+    EXPECT_FALSE (db_->get_request ("col_root_req").has_value ());
+    EXPECT_FALSE (db_->get_request ("col_child_req").has_value ());
+
+    // A log that saw nothing passes forever.
+    ASSERT_TRUE (recorded.columns_read.contains ("requests.collection_id"))
+    << "the authorizer did not see the purge's statements";
+
+    const std::set<std::string> allowed{
+        "requests.id",
+        "requests.collection_id",
+        "requests.deleted_at",
+        "request_examples.request_id",
+    };
+    for (const auto& column : recorded.columns_read) {
+        const bool of_a_request = column.starts_with ("requests.") ||
+        column.starts_with ("request_examples.");
+        if (of_a_request) {
+            EXPECT_TRUE (allowed.contains (column)) << "the purge read " << column;
+        }
     }
 }
 
