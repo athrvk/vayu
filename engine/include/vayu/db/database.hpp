@@ -1328,8 +1328,10 @@ class Database {
      * @brief Every collection id in @p root_id's subtree, @p root_id first.
      *
      * The single definition of "the subtree", shared by the delete cascade, the
-     * restore, the purge and the trash's counts, so all four agree about what
-     * one collection owns. `All` walks stamped and live rows alike: a walk that
+     * restore and the purge; the trash's counts run the same walk
+     * (`walk_subtree` in db_collections.cpp) over the collection rows the
+     * listing has already read (#2972), so all four agree about what one
+     * collection owns. `All` walks stamped and live rows alike: a walk that
      * skipped deleted rows could not find what a restore has to put back.
      * `StampedOnly` stops at a live row, which is what a purge destroys (#1883).
      *
