@@ -840,16 +840,19 @@ TEST_F (DatabaseTest, ATrashedEnvironmentGivesUpTheActiveSlot) {
 
 // Every index declared in make_vayu_storage(), each backing a hot query path:
 // metric_ticks/results by run_id, requests by collection_id, collections by
-// parent_id, runs by start_time. See the comments there for which queries
-// rely on which. Named explicitly rather than counted, because sqlite also
-// creates sqlite_autoindex_* entries of its own.
-constexpr std::array<const char*, 8> EXPECTED_INDEXES = {
+// parent_id, runs by start_time, stamped requests by deleted_at. See the
+// comments there for which queries rely on which. Named explicitly rather
+// than counted, because sqlite also creates sqlite_autoindex_* entries of its
+// own.
+constexpr std::array<const char*, 9> EXPECTED_INDEXES = {
     "idx_metric_ticks_run_id", "idx_results_run_id",
     "idx_requests_collection_id", "idx_collections_parent_id",
     "idx_runs_start_time", "idx_result_bodies_run_id", "idx_body_blobs_run_id",
     // Examples are read only by request id - the list route and both cascades -
     // so this one backs every access the table has.
-    "idx_request_examples_request_id"
+    "idx_request_examples_request_id",
+    // Partial: only the trashed rows, which is all get_trash reads (#3006).
+    "idx_requests_deleted_at"
 };
 
 // Reads index names straight out of sqlite_master on a separate connection,

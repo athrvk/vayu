@@ -171,6 +171,11 @@ inline auto make_vayu_storage (const std::string& path) {
     make_index ("idx_body_blobs_run_id", &BodyBlob::run_id),
     // Sidebar load (get_requests_in_collection) and cascade delete.
     make_index ("idx_requests_collection_id", &Request::collection_id),
+    // get_trash lists the stamped requests. Without this, SQLite walks every
+    // request row's overflow pages (a large body) to reach deleted_at. Partial,
+    // so it holds only the trashed rows and costs a live write nothing (#3006).
+    make_index ("idx_requests_deleted_at", &Request::deleted_at,
+    where (is_not_null (&Request::deleted_at))),
     // Every example read is per-request (the list route, the request cascade,
     // and the collection cascade one request at a time).
     make_index ("idx_request_examples_request_id", &RequestExample::request_id),

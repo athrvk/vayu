@@ -69,7 +69,8 @@ namespace vayu::db {
  * 9 - `requests.timeout_ms`, a request's own timeout (#2937);
  *     `environments.deleted_at`, the environment trash (#2970), and
  *     `request_examples.deleted_at`, the example trash (#2971), both folded
- *     into the same unreleased version.
+ *     into the same unreleased version; the partial index
+ *     `idx_requests_deleted_at` (#3006) joins it too.
  */
 inline constexpr int SCHEMA_VERSION = 9;
 
