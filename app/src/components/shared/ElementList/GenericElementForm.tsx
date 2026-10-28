@@ -33,7 +33,7 @@
  * an expanded card on two integers.
  */
 
-import { useId } from "react";
+import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import {
 	NumberSettingRow,
@@ -41,6 +41,7 @@ import {
 	ToggleRow,
 } from "@/modules/settings/main/panels/SettingControls";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label } from "@/components/ui";
+import { FieldError } from "@/components/shared/FieldError";
 import { cn } from "@/lib/utils";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
 
@@ -164,6 +165,108 @@ function PropertyRows({
 	);
 }
 
+/** An array field's typed text split into items, with the entries that are not one. */
+interface ParsedList {
+	items: Array<string | number>;
+	/** Entries the item type refuses, in typed order; empty when `items` is saveable. */
+	invalid: string[];
+}
+
+/**
+ * Splits comma-separated text into the array a config stores. An `integer`
+ * item must read as a whole number: `Number("200.5")` and `Number("0x10")`
+ * both succeed, and a value the engine would reject must not be saved looking
+ * like one. Any other item type stays a trimmed string.
+ */
+function parseList(text: string, itemType: string | undefined): ParsedList {
+	const parts = text
+		.split(",")
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+	if (itemType !== "integer") return { items: parts, invalid: [] };
+	const items: number[] = [];
+	const invalid: string[] = [];
+	for (const part of parts) {
+		const n = Number(part);
+		if (/^-?\d+$/.test(part) && Number.isSafeInteger(n)) items.push(n);
+		else invalid.push(part);
+	}
+	return { items, invalid };
+}
+
+/**
+ * A comma-separated list field. The text lives in a draft of its own because
+ * the stored array cannot spell an unfinished entry: deriving the input from
+ * `value` rewrote `200,` to `200` under the caret, so the next digit fused with
+ * the last (#3042). The array is written only while every entry is valid; an
+ * invalid draft stays on screen with its message and the stored value is left
+ * as it was.
+ *
+ * `value` changing from outside (another step, an undo) replaces the draft,
+ * unless the new value is what the draft already parses to - that is this
+ * field's own write coming back, and replacing the text then would undo the
+ * spacing the user typed.
+ */
+function ArrayField({
+	label,
+	hint,
+	itemType,
+	value,
+	onChange,
+}: {
+	label: string;
+	hint: string | undefined;
+	itemType: string | undefined;
+	value: unknown;
+	onChange: (value: unknown) => void;
+}) {
+	const inputId = useId();
+	const errorId = useId();
+	const stored = Array.isArray(value) ? value : [];
+	const storedText = stored.join(", ");
+	const [draft, setDraft] = useState(storedText);
+	const [seenText, setSeenText] = useState(storedText);
+
+	if (storedText !== seenText) {
+		setSeenText(storedText);
+		const parsed = parseList(draft, itemType);
+		if (parsed.invalid.length > 0 || parsed.items.join(", ") !== storedText) {
+			setDraft(storedText);
+		}
+	}
+
+	const { invalid } = parseList(draft, itemType);
+	const error =
+		invalid.length === 0
+			? undefined
+			: `${invalid.map((entry) => `"${entry}"`).join(", ")} ${
+					invalid.length === 1 ? "is not a whole number" : "are not whole numbers"
+				}. Not saved until fixed.`;
+
+	return (
+		<div className="space-y-1">
+			<Label htmlFor={inputId} className="text-xs font-medium">
+				{label}
+			</Label>
+			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+			<Input
+				size="sm"
+				id={inputId}
+				value={draft}
+				placeholder="Comma-separated values"
+				aria-invalid={error ? true : undefined}
+				aria-describedby={error ? errorId : undefined}
+				onChange={(e) => {
+					setDraft(e.target.value);
+					const parsed = parseList(e.target.value, itemType);
+					if (parsed.invalid.length === 0) onChange(parsed.items);
+				}}
+			/>
+			<FieldError id={errorId}>{error}</FieldError>
+		</div>
+	);
+}
+
 /** One property row, dispatched by the schema's declared type. */
 function PropertyRow({
 	name,
@@ -240,32 +343,14 @@ function PropertyRow({
 	}
 
 	if (property.type === "array") {
-		const items = Array.isArray(value) ? value : [];
-		const itemType = property.items?.type;
 		return (
-			<div className="space-y-1">
-				<Label htmlFor={inputId} className="text-xs font-medium">
-					{label}
-				</Label>
-				{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-				<Input
-					size="sm"
-					id={inputId}
-					value={items.join(", ")}
-					placeholder="Comma-separated values"
-					onChange={(e) => {
-						const parts = e.target.value
-							.split(",")
-							.map((part) => part.trim())
-							.filter((part) => part.length > 0);
-						onChange(
-							itemType === "integer"
-								? parts.map(Number).filter((n) => !isNaN(n))
-								: parts
-						);
-					}}
-				/>
-			</div>
+			<ArrayField
+				label={label}
+				hint={hint}
+				itemType={property.items?.type}
+				value={value}
+				onChange={onChange}
+			/>
 		);
 	}
 
