@@ -2723,6 +2723,13 @@ Like `operations`, it is not a field of the body; sending one is a `400`:
 }
 ```
 
+**A response schema that refers to itself without describing any value is a
+`400`** (#3018): `Response schema of GET /pets (200) refers to itself without
+describing any value (#/components/schemas/A -> #/components/schemas/A)`. The
+loop runs only through `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`
+or `dependencies`, so it never reaches a value and cannot be validated. A
+recursive schema that steps into a property or an item (a tree node) is fine.
+
 Schemas are **JSON Schema**, not OpenAPI's dialect: the engine translates
 `nullable` into a union with `null`, draft-04's boolean `exclusiveMinimum` into
 draft-07's numeric one, and drops the OpenAPI-only keywords that constrain no
