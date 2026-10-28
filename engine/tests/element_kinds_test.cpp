@@ -732,14 +732,23 @@ struct UnreadableBody {
     std::string body;
 };
 
+/// Built by appending to a named string: the one-expression
+/// `literal + std::string (N, 'x') + literal` trips GCC 13's -Warray-bounds
+/// false positive in the -O3 -Werror leg.
+std::string body_padded_to (size_t padding) {
+    std::string body = R"({"n": 7, "padding": ")";
+    body.append (padding, 'x');
+    body += R"("})";
+    return body;
+}
+
 std::vector<UnreadableBody> unreadable_bodies () {
     constexpr size_t PAST_DEFAULT_BOUND = size_t{ 3 } * 512 * 1024;
     return {
         { "html", "<html><body><h1>503 Service Unavailable</h1></body></html>" },
         { "empty", "" },
         { "too deep", body_nested_to (BODY_DEPTH + 1) },
-        { "over the byte bound",
-        R"({"n": 7, "padding": ")" + std::string (PAST_DEFAULT_BOUND, 'x') + R"("})" },
+        { "over the byte bound", body_padded_to (PAST_DEFAULT_BOUND) },
     };
 }
 
