@@ -16,6 +16,7 @@
  * test rather than a refusal at Start.
  */
 
+import { pickByCount } from "@/modules/dashboard/utils/format";
 import type { ResolvedElement } from "@/types";
 
 /** Kinds that need a scenario's state: a pacing clock, a throughput share, a plan scan, a custom series. */
@@ -55,7 +56,7 @@ export function scenarioOnlyError(elements: readonly ResolvedElement[]): string 
 	if (elements.length === 0) return null;
 	const named = elements.map((el) => `${el.kind} (${describeOrigin(el)})`).join("; ");
 
-	return `A single-request load test can't run ${named}. Disable or remove ${
-		elements.length === 1 ? "it" : "them"
-	}, or run the collection instead.`;
+	const them = pickByCount(elements.length, { one: "it", other: "them" });
+
+	return `A single-request load test can't run ${named}. Disable or remove ${them}, or run the collection instead.`;
 }
