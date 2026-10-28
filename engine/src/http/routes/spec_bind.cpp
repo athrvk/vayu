@@ -82,7 +82,8 @@ nlohmann::json operation_json (const vayu::core::MatchableOperation& operation) 
 }
 
 /**
- * The document row this bind stores.
+ * The document row this bind stores, and the base paths its servers name
+ * (#3030), which the match reads beside the operations.
  *
  * The document is read here and nowhere else in this route. One that cannot be
  * read is a 400 *before* anything is written, which is what leaves the
@@ -93,14 +94,17 @@ const nlohmann::json& spec_item,
 const std::string& content,
 size_t cap,
 int64_t now,
-vayu::db::SpecDocument& spec) {
+vayu::db::SpecDocument& spec,
+std::vector<std::string>& base_paths) {
     spec.id         = vayu::utils::generate_id ("spec_");
     spec.content    = content;
     spec.hash       = spec_content_hash (content);
     spec.fetched_at = now;
-    if (auto reason = read_spec_indexes (spec_item, spec, cap)) {
+    nlohmann::ordered_json document;
+    if (auto reason = read_spec_indexes (spec_item, spec, cap, &document)) {
         return body_error (*reason);
     }
+    base_paths = vayu::core::base_paths_of (document);
     if (spec_item.contains ("sourceUrl") && !spec_item["sourceUrl"].is_null ()) {
         if (!spec_item["sourceUrl"].is_string ()) {
             return body_error (
@@ -130,13 +134,15 @@ struct StampOutcome {
  * index this write is about to store rather than out of the document a second
  * time: the identity a request is stamped with has to be one
  * `OperationIndex::resolve` will find in the stored column, and reading both out
- * of one derivation is what guarantees it. `parse_declared_operations` returns
+ * of one derivation is what guarantees it. @p base_paths come off that same
+ * read (`read_bound_document`). `parse_declared_operations` returns
  * nothing for a document that declares none, which matches nothing and clears
  * everything - the honest outcome of binding a contract with no operations in it.
  */
 std::optional<std::pair<int, nlohmann::json>> stamp_subtree (vayu::db::Database& db,
 const std::vector<vayu::db::Request>& stored,
 const vayu::db::SpecDocument& spec,
+const std::vector<std::string>& base_paths,
 int64_t now,
 vayu::db::SpecSyncBatch& batch,
 StampOutcome& outcome) {
@@ -155,7 +161,7 @@ StampOutcome& outcome) {
         }
     }
 
-    const auto match = vayu::core::match_operations (matchable, operations);
+    const auto match = vayu::core::match_operations (matchable, operations, base_paths);
 
     std::unordered_set<size_t> matched_requests;
     matched_requests.reserve (match.matched.size ());
@@ -224,7 +230,9 @@ const std::string& content) {
 
     const int64_t now = now_ms ();
     vayu::db::SpecSyncBatch batch;
-    if (auto refusal = read_bound_document (spec_item, content, cap, now, batch.spec)) {
+    std::vector<std::string> base_paths;
+    if (auto refusal =
+        read_bound_document (spec_item, content, cap, now, batch.spec, base_paths)) {
         return *refusal;
     }
 
@@ -232,7 +240,8 @@ const std::string& content) {
     const auto stored  = collection_subtree_requests (db, collections, subtree);
 
     StampOutcome outcome;
-    if (auto refusal = stamp_subtree (db, stored, batch.spec, now, batch, outcome)) {
+    if (auto refusal =
+        stamp_subtree (db, stored, batch.spec, base_paths, now, batch, outcome)) {
         return *refusal;
     }
 
@@ -317,8 +326,8 @@ void register_spec_bind_routes (RouteContext& ctx) {
      * subtree is stamped with the operation it matched or has its stamp
      * cleared - all in one transaction, so a bind either happened or did not.
      * The pairing is the engine's (`core::match_operations`, the rule
-     * `POST /specs/match` previews with); the caller sends the document, never
-     * a pairing.
+     * `POST /specs/match` previews with, under the base paths the document's
+     * servers name); the caller sends the document, never a pairing.
      * Body params: collectionId (required), spec ({content, sourceUrl?} -
      * `id`, `hash`, `fetchedAt` and both indexes are engine-owned and
      * rejected). Returns: 200 `{specId, specHash, syncedAt, stamped, cleared,

@@ -33,7 +33,16 @@
  * (`/pets/42`), and a matcher that only compared shapes would find nothing
  * outside collections that were already imported from a spec.
  *
- * Ambiguity is refused rather than guessed at, in both passes: when two requests
+ * A third pass reads the server's base path (#3030). A request written as a
+ * literal URL carries it (`https://h/v1/pets`) while the document writes
+ * `/pets` under a server of `https://h/v1`, so whatever the first two passes
+ * left open is offered again with each base path the caller names taken off
+ * its front - whole segments only, so `/v1` never strips `/v10/pets` - and
+ * goes through the same two comparisons. A request under two base paths is
+ * offered under both, and the ambiguity rule below judges the candidates of
+ * all of them together rather than letting the first base path win.
+ *
+ * Ambiguity is refused rather than guessed at, in every pass: when two requests
  * reduce to the same shape, or one request could be two operations, neither is
  * matched and the count says so. A wrong identity is worse than none - the sync
  * (#627) applies changes *by* it.
@@ -48,7 +57,8 @@
  *
  * It parses no OpenAPI, which is the division `core/spec_coverage.hpp` states:
  * the caller supplies the operation identities a document declares, the same
- * ones it stores as the `operations` index, and nothing here reads a document.
+ * ones it stores as the `operations` index, and the base paths its servers
+ * name (`core::base_paths_of`); nothing here reads a document.
  */
 
 #include <cstddef>
@@ -94,7 +104,8 @@ struct OperationPairing {
  */
 struct MatchResult {
     /// Requests that resolved to exactly one operation, and it to exactly one
-    /// of them, in the order the first pass then the second pass found them.
+    /// of them, in the order the passes found them: each pass in turn, and
+    /// within a pass in request order.
     std::vector<OperationPairing> matched;
     /// Requests left over - no operation, or an ambiguous shape. Input order.
     std::vector<size_t> unmatched_requests;
@@ -169,8 +180,14 @@ operation_shape_key (std::string_view method, std::string_view path_shape);
  *
  * Neither side is mutated and nothing is written: the caller decides what to do
  * with the result, and shows the counts before it does.
+ *
+ * @p base_paths are the path parts of the document's server URLs (`/v1`), read
+ * only by the third pass. Each is reduced like a spec path, so a templated
+ * `/{version}` stands for any one segment; an entry that does not start with
+ * `/`, or reduces to the root, names nothing to strip and is ignored.
  */
 [[nodiscard]] MatchResult match_operations (const std::vector<MatchableRequest>& requests,
-const std::vector<MatchableOperation>& operations);
+const std::vector<MatchableOperation>& operations,
+const std::vector<std::string>& base_paths = {});
 
 } // namespace vayu::core

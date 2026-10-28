@@ -163,12 +163,29 @@ struct DocumentRead {
 const nlohmann::ordered_json& document);
 
 /**
+ * @brief The base paths @p document's operation paths sit under (issue #3030),
+ *        in document order, for `core::match_operations`' third pass.
+ *
+ * 3.x: the path of **every** `servers[].url`, each `{name}` its server's
+ * `variables` default for substituted first - every server, not only the
+ * `servers[0]` an import turns into `{{baseUrl}}`, because a collection may
+ * have been written against any of them. The path is what follows the
+ * authority (`https://h/v1` -> `/v1`), or the whole URL when it is
+ * already a path; a server URL relative to the document (`v1`) or one with no
+ * path names none. 2.0: `basePath`. A trailing `/` is dropped; empty, `/`, a
+ * path that does not start with `/` and a repeat are left out, since none
+ * leaves anything new to strip. A document that is not a contract has none.
+ */
+[[nodiscard]] std::vector<std::string> base_paths_of (const nlohmann::ordered_json& document);
+
+/**
  * What a document is, for a caller deciding whether to bind it (issue #869).
  *
  * The three things the Spec tab's card said about a picked document while the
  * renderer still parsed it: which dialect claimed the bytes, what the document
  * calls itself, and the operations it declares - the identities a bind will
- * stamp. `POST /specs/describe` is this struct.
+ * stamp - plus the base paths a bind matches under. `POST /specs/describe` is
+ * this struct.
  */
 struct DocumentDescription {
     /**
@@ -188,6 +205,9 @@ struct DocumentDescription {
     /// Every operation it declares, in document order - empty when @ref format
     /// is empty, since a document that is not a contract declares none.
     std::vector<DeclaredOperation> operations;
+    /// `base_paths_of` the document, which a caller hands to `POST /specs/match`
+    /// beside @ref operations so a preview pairs what the bind will.
+    std::vector<std::string> base_paths;
 
     /// Whether these bytes are an OpenAPI document at all.
     [[nodiscard]] bool is_spec () const {

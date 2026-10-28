@@ -50,6 +50,10 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+describe_spec_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+match_spec_operations_response (vayu::db::Database& db, const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -82,6 +86,20 @@ std::string orders_document () {
         { { "operationId", "listOrders" },
         { "responses", { { "200", { { "description", "ok" } } } } } } } } } } } }
     .dump ();
+}
+
+/// `pets_document ()` served under a base path (#3030): a 3.x `servers[0]` of
+/// `https://h/v1`, or a 2.0 `basePath` of `/v1`.
+std::string pets_document_under_v1 (bool swagger) {
+    json document = json::parse (pets_document ());
+    if (swagger) {
+        document.erase ("openapi");
+        document["swagger"]  = "2.0";
+        document["basePath"] = "/v1";
+    } else {
+        document["servers"] = json::array ({ json{ { "url", "https://h/v1" } } });
+    }
+    return document.dump ();
 }
 
 class SpecBindRouteTest : public ::testing::Test {
@@ -284,6 +302,53 @@ TEST_F (SpecBindRouteTest, LeavesARequestOutsideTheSubtreeAlone) {
     EXPECT_EQ (json::parse (stamp_of (alien))["operationId"], "somethingElse");
     EXPECT_TRUE (binding_of (other).empty ());
     EXPECT_EQ (json::parse (stamp_of (mine))["operationId"], "listPets");
+}
+
+/// Issue #3030: a collection written as literal URLs carries the server's base
+/// path, and binding it stamps every request that matches once that is taken
+/// off. Mutation check: pass no base paths from `stamp_subtree` and nothing is
+/// stamped.
+TEST_F (SpecBindRouteTest, StampsLiteralUrlsUnderTheServersBasePath) {
+    for (const bool swagger : { false, true }) {
+        const std::string collection =
+        create_collection (json{ { "name", swagger ? "Swagger" : "OpenAPI 3" } });
+        const std::string list = create_request (collection, "GET", "https://h/v1/pets");
+        const std::string get = create_request (collection, "GET", "https://h/v1/pets/7");
+
+        const auto body = bind_ok (pets_document_under_v1 (swagger), collection);
+
+        EXPECT_EQ (body["stamped"], 2u) << (swagger ? "basePath" : "servers[0]");
+        EXPECT_TRUE (body["unmatchedRequests"].empty ()) << body.dump ();
+        EXPECT_EQ (json::parse (stamp_of (list))["operationId"], "listPets");
+        EXPECT_EQ (json::parse (stamp_of (get))["operationId"], "getPet");
+    }
+}
+
+/// The preview the app shows (`describe`, then `match` with what it answered)
+/// pairs exactly what the bind stamps, base paths included.
+TEST_F (SpecBindRouteTest, PairsWhatTheDescribeAndMatchPreviewPaired) {
+    create_request (root_, "GET", "https://h/v1/pets");
+    create_request (root_, "GET", "https://h/v1/pets/7");
+    create_request (root_, "GET", "https://h/v10/pets");
+    const std::string content = pets_document_under_v1 (false);
+
+    auto [described_status, described] =
+    routes::describe_spec_response (*db_, json{ { "content", content } });
+    ASSERT_EQ (described_status, 200) << described.dump ();
+    auto [matched_status, preview] = routes::match_spec_operations_response (*db_,
+    json{ { "collectionId", root_ }, { "operations", described["operations"] },
+    { "basePaths", described["basePaths"] } });
+    ASSERT_EQ (matched_status, 200) << preview.dump ();
+    ASSERT_EQ (preview["matched"].size (), 2u) << preview.dump ();
+
+    const auto body = bind_ok (content);
+
+    EXPECT_EQ (body["stamped"], preview["matched"].size ());
+    EXPECT_EQ (body["unmatchedRequests"], preview["unmatchedRequests"]);
+    for (const auto& pair : preview["matched"]) {
+        EXPECT_EQ (json::parse (stamp_of (pair["requestId"].get<std::string> ())),
+        pair["operation"]);
+    }
 }
 
 TEST_F (SpecBindRouteTest, ADocumentThatCannotBeReadChangesNothing) {

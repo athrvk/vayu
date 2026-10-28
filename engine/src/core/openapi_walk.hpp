@@ -22,12 +22,14 @@
  * failure that produces is silent - a stamp resolving to the wrong operation.
  */
 
+#include "js_json.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 #include <array>
 #include <cstdint>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -112,6 +114,53 @@ dialect_format_name (const nlohmann::ordered_json& document, Dialect dialect) {
 /// Whether the document claims to be one of the two formats Vayu imports.
 inline bool is_openapi (const nlohmann::ordered_json& document) {
     return spec_dialect (document) != Dialect::None;
+}
+
+/**
+ * A 3.x Server Object's `url` with each `{name}` its `variables` give a
+ * scalar `default` for substituted (issue #719), or nothing when @p server
+ * names no URL (not an object, no `url`, an empty one).
+ *
+ * A `{name}` with no usable default is kept as written. Shared by the import,
+ * which turns `servers[0]` into `{{baseUrl}}`, and `base_paths_of`, which
+ * reads every server's path, so the two cannot disagree about a server.
+ */
+inline std::optional<std::string> server_url_with_defaults (
+const nlohmann::ordered_json* server) {
+    const std::string* declared = js::as_str (js::prop (server, "url"));
+    if (declared == nullptr || declared->empty ()) {
+        return std::nullopt;
+    }
+    const nlohmann::ordered_json* variables =
+    js::as_record (js::prop (server, "variables"));
+
+    std::string substituted;
+    for (size_t at = 0; at < declared->size ();) {
+        if ((*declared)[at] != '{') {
+            substituted += (*declared)[at];
+            ++at;
+            continue;
+        }
+        const size_t close = declared->find_first_of ("{}/", at + 1);
+        if (close == std::string::npos || (*declared)[close] != '}' || close == at + 1) {
+            substituted += (*declared)[at];
+            ++at;
+            continue;
+        }
+        const std::string name = declared->substr (at + 1, close - at - 1);
+        const nlohmann::ordered_json* value =
+        js::prop (js::as_record (js::prop (variables, name)), "default");
+        // A default is `string` per the specification; a number or boolean is
+        // what a hand-written document produces and reads the same on the wire.
+        if (value == nullptr || value->is_structured () || value->is_null ()) {
+            substituted += declared->substr (at, close - at + 1);
+        } else {
+            substituted += value->is_string () ? value->get<std::string> () :
+                                                 js::js_string_of (*value);
+        }
+        at = close + 1;
+    }
+    return substituted;
 }
 
 /**

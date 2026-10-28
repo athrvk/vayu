@@ -126,8 +126,8 @@ describe_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
 
     return { 200,
-        nlohmann::json{ { "format", described.format },
-        { "title", described.title }, { "operations", std::move (operations) } } };
+        nlohmann::json{ { "format", described.format }, { "title", described.title },
+        { "operations", std::move (operations) }, { "basePaths", described.base_paths } } };
 }
 
 void register_spec_describe_routes (RouteContext& ctx) {
@@ -137,8 +137,8 @@ void register_spec_describe_routes (RouteContext& ctx) {
      * what it calls itself, and every operation it declares. Reads only - a
      * caller may ask about a document it has not decided to bind.
      * Body params: content (required - the document's text, verbatim).
-     * Returns: {format, title, operations}, or 400 for bytes that are over the
-     * size cap, cannot be read, or are not an OpenAPI document.
+     * Returns: {format, title, operations, basePaths}, or 400 for bytes that
+     * are over the size cap, cannot be read, or are not an OpenAPI document.
      */
     ctx.server.Post ("/specs/describe",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

@@ -492,7 +492,7 @@ Key endpoints:
 | GET | `/requests/:id/examples` | A request's saved example responses (#481), in stored order |
 | POST | `/specs` | Store an OpenAPI document (#637) and derive its operation index (#853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (#712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (#655): new document, moved binding and the created/updated/deleted requests in one transaction |
-| POST | `/specs/describe` | What a picked document is: dialect, title, declared operations (#869); reads only |
+| POST | `/specs/describe` | What a picked document is: dialect, title, declared operations (#869) and every server's base path (`basePaths`, #3030); reads only |
 | POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (#761); reads only |
 | POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (#854); reads only, applying is `POST /specs/sync` |
 | POST | `/specs/bind` | Bind a collection to a document (#862): the document, the binding and every stamp, written **and cleared**, in one transaction |
@@ -754,16 +754,23 @@ logged as a warning: it means a client skipped composition.
     collection's subtree with a document's declared identities by structure:
     both sides reduced to a path shape with origin, query and fragment dropped
     and every placeholder (`{{petId}}`, a request's `:petId`, `{petId}`)
-    flattened to `{}`. Ambiguity
+    flattened to `{}`. A third pass (#3030) retries what the first two left
+    open with each of the document's base paths taken off the request's
+    front, whole segments only, judged by the same ambiguity rule across all
+    of them. Ambiguity
     is refused in both directions, because the sync applies changes *by*
-    identity. It parses no OpenAPI: the caller hands it the identities, which
-    since #869 come from **`POST /specs/describe`** (dialect, `info.title`,
-    declared operations; a readable file that is not a contract is a `400`).
+    identity. It parses no OpenAPI: the caller hands it the identities and the
+    base paths, which since #869 come from **`POST /specs/describe`** (dialect,
+    `info.title`, declared operations, `core::base_paths_of`: every 3.x server
+    rather than the importer's `servers[0]`, or the 2.0 `basePath`; a readable
+    file that is not a contract is a `400`).
     `tests/fixtures/operation-shape-conformance.json` is this side's own table.
   - **`POST /specs/bind`** (#862) takes a document and a collection, never a
     pairing: it reads the document, derives the indexes, matches the subtree
     with the same `core::match_operations` over the same
-    `collection_subtree_requests` walk `/specs/match` previews with, and
+    `collection_subtree_requests` walk `/specs/match` previews with (base
+    paths from the same read of the document, through `read_spec_indexes`'
+    `document_out`), and
     commits document, binding and every stamp through `spec_sync_apply` with
     the create and delete halves empty. Both halves of stamping are that one
     walk: a matched request is stamped and a stamped request that matched

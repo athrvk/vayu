@@ -10,8 +10,11 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <optional>
 #include <unordered_map>
+#include <utility>
 
 namespace vayu::core {
 
@@ -253,130 +256,241 @@ std::string operation_shape_key (std::string_view method, std::string_view path_
 
 namespace {
 
+/// The path shapes each request is offered under, by request index: none for a
+/// request that states no path, its own shape in the first two passes, and one
+/// per base path it sits under in the third.
+using RequestShapes = std::vector<std::vector<std::string>>;
+
+/** What every pass reads and extends: the pairs so far, and who is taken. */
+struct MatchState {
+    MatchResult result;
+    std::vector<bool> request_claimed;
+    std::vector<bool> operation_claimed;
+};
+
 /**
- * Pass one: a request and an operation whose method and path *shape* are equal,
- * and which are the only ones with that shape on their side.
+ * The pairings one pass found possible, before the ambiguity rule decides which
+ * it may make - the one place that rule is written, for every pass.
  *
- * The buckets are insertion-ordered, so `matched` comes back in the order the
- * caller offered its requests rather than in a hash order that could change
- * under it. A request that states no path is in no bucket and stays unmatched.
+ * A pass adds each (request, operation) pair at most once; a request offered
+ * under several shapes is still one claimant.
+ */
+class CandidatePairs {
+    public:
+    void add (size_t request, size_t operation) {
+        auto [entry, inserted] = candidates_for_.try_emplace (request);
+        if (inserted) {
+            open_requests_.push_back (request);
+        }
+        entry->second.push_back (operation);
+        claimants_of_[operation].push_back (request);
+    }
+
+    /**
+     * Pair every request that has exactly one candidate, where that operation
+     * has exactly one claimant - see the ambiguity rule in the file header.
+     * Requests are visited in the order they were offered, so `matched` does
+     * not follow a hash order that could change under the caller.
+     */
+    void claim_unambiguous (MatchState& state) const {
+        for (const size_t request : open_requests_) {
+            const auto& candidates = candidates_for_.at (request);
+            if (candidates.size () != 1) {
+                continue;
+            }
+            const size_t operation = candidates[0];
+            if (claimants_of_.at (operation).size () != 1) {
+                continue;
+            }
+            state.result.matched.push_back ({ request, operation });
+            state.request_claimed[request]     = true;
+            state.operation_claimed[operation] = true;
+        }
+    }
+
+    private:
+    std::vector<size_t> open_requests_;
+    std::unordered_map<size_t, std::vector<size_t>> candidates_for_;
+    std::unordered_map<size_t, std::vector<size_t>> claimants_of_;
+};
+
+/**
+ * A request and an operation whose method and path *shape* are equal, and which
+ * are the only ones with that shape on their side. A request that states no
+ * path has no shape and stays unmatched.
  */
 void match_exact_shapes (const std::vector<MatchableRequest>& requests,
 const std::vector<MatchableOperation>& operations,
-const std::vector<std::optional<std::string>>& request_shapes,
+const RequestShapes& request_shapes,
 const std::vector<std::string>& operation_shapes,
-MatchResult& result,
-std::vector<bool>& request_claimed,
-std::vector<bool>& operation_claimed) {
-    // Insertion-ordered buckets, so `matched` comes back in the order the caller
-    // offered its requests rather than in a hash order that could change under
-    // it. A request that states no path is in no bucket and stays unmatched.
-    std::vector<std::string> request_keys;
-    std::unordered_map<std::string, std::vector<size_t>> requests_by_key;
-    for (size_t i = 0; i < requests.size (); ++i) {
-        const std::optional<std::string>& shape = request_shapes[i];
-        if (!shape) {
-            continue;
-        }
-        const std::string key = operation_shape_key (requests[i].method, *shape);
-        auto [entry, inserted] = requests_by_key.try_emplace (key);
-        if (inserted) {
-            request_keys.push_back (key);
-        }
-        entry->second.push_back (i);
-    }
+MatchState& state) {
     std::unordered_map<std::string, std::vector<size_t>> operations_by_key;
     for (size_t j = 0; j < operations.size (); ++j) {
-        operations_by_key[operation_shape_key (operations[j].method, operation_shapes[j])]
-        .push_back (j);
+        if (!state.operation_claimed[j]) {
+            operations_by_key[operation_shape_key (operations[j].method, operation_shapes[j])]
+            .push_back (j);
+        }
     }
 
-    for (const auto& key : request_keys) {
-        const auto& candidates          = requests_by_key[key];
-        const auto operation_candidates = operations_by_key.find (key);
-        // Exactly one on each side, or neither is claimed - see the ambiguity
-        // rule in the file header.
-        if (candidates.size () != 1 || operation_candidates == operations_by_key.end () ||
-        operation_candidates->second.size () != 1) {
+    CandidatePairs pairs;
+    for (size_t i = 0; i < requests.size (); ++i) {
+        if (state.request_claimed[i]) {
             continue;
         }
-        result.matched.push_back ({ candidates[0], operation_candidates->second[0] });
-        request_claimed[candidates[0]]                     = true;
-        operation_claimed[operation_candidates->second[0]] = true;
+        // One request's shapes are distinct, so their keys are too and no
+        // operation is added twice for it.
+        for (const std::string& shape : request_shapes[i]) {
+            const auto found =
+            operations_by_key.find (operation_shape_key (requests[i].method, shape));
+            if (found == operations_by_key.end ()) {
+                continue;
+            }
+            for (const size_t j : found->second) {
+                pairs.add (i, j);
+            }
+        }
     }
+    pairs.claim_unambiguous (state);
 }
 
 /**
- * Pass two, for the requests a hand-built collection is full of: a URL with the
- * id filled in (`/pets/42`) is the same operation as `/pets/{petId}`, and
- * refusing to see that would leave bind-from-here matching almost nothing
- * outside a collection that was itself imported from a document.
+ * For the requests a hand-built collection is full of: a URL with the id filled
+ * in (`/pets/42`) is the same operation as `/pets/{petId}`, and refusing to see
+ * that would leave bind-from-here matching almost nothing outside a collection
+ * that was itself imported from a document.
  *
- * It runs only over what pass one did not claim, so a literal path in the
- * document always wins over a placeholder it could also have filled - which is
- * the precedence OpenAPI itself gives (`/pets/mine` before `/pets/{petId}`).
- * The uniqueness rule is unchanged and applies in both directions: a request
- * with two candidate operations, or an operation two requests could fill, is
- * left alone.
+ * It runs only over what the exact comparison did not claim, so a literal path
+ * in the document always wins over a placeholder it could also have filled -
+ * which is the precedence OpenAPI itself gives (`/pets/mine` before
+ * `/pets/{petId}`).
  */
 void match_filled_templates (const std::vector<MatchableRequest>& requests,
 const std::vector<MatchableOperation>& operations,
-const std::vector<std::optional<std::string>>& request_shapes,
+const RequestShapes& request_shapes,
 const std::vector<std::string>& operation_shapes,
-MatchResult& result,
-std::vector<bool>& request_claimed,
-std::vector<bool>& operation_claimed) {
-    std::vector<size_t> open_requests;
-    std::unordered_map<size_t, std::vector<size_t>> candidates_for;
-    std::unordered_map<size_t, std::vector<size_t>> claimants_of;
+MatchState& state) {
+    CandidatePairs pairs;
     for (size_t i = 0; i < requests.size (); ++i) {
-        const std::optional<std::string>& shape = request_shapes[i];
-        if (request_claimed[i] || !shape) {
+        const std::vector<std::string>& shapes = request_shapes[i];
+        if (state.request_claimed[i] || shapes.empty ()) {
             continue;
         }
         const std::string method = vayu::utils::ascii_upper (requests[i].method);
         for (size_t j = 0; j < operations.size (); ++j) {
-            if (operation_claimed[j] ||
+            if (state.operation_claimed[j] ||
             vayu::utils::ascii_upper (operations[j].method) != method) {
                 continue;
             }
-            if (!fills_template (*shape, operation_shapes[j])) {
-                continue;
+            const std::string& template_shape = operation_shapes[j];
+            if (std::ranges::any_of (shapes, [&] (const std::string& shape) {
+                    return fills_template (shape, template_shape);
+                })) {
+                pairs.add (i, j);
             }
-            auto [entry, inserted] = candidates_for.try_emplace (i);
-            if (inserted) {
-                open_requests.push_back (i);
-            }
-            entry->second.push_back (j);
-            claimants_of[j].push_back (i);
         }
     }
-    for (const size_t i : open_requests) {
-        const auto& candidates = candidates_for[i];
-        if (candidates.size () != 1) {
+    pairs.claim_unambiguous (state);
+}
+
+/**
+ * The base paths a caller named, reduced the way a spec path is and with the
+ * ones that name nothing to strip dropped: an entry that is not absolute, the
+ * root, and a repeat.
+ */
+std::vector<std::string> base_path_shapes (const std::vector<std::string>& base_paths) {
+    std::vector<std::string> shapes;
+    for (const std::string& base_path : base_paths) {
+        const std::string_view written = trim (base_path);
+        if (!written.starts_with ('/')) {
             continue;
         }
-        const size_t operation = candidates[0];
-        if (claimants_of[operation].size () != 1) {
+        std::string shape = spec_path_shape (written);
+        if (shape.size () <= 1 || std::ranges::find (shapes, shape) != shapes.end ()) {
             continue;
         }
-        result.matched.push_back ({ i, operation });
-        request_claimed[i]           = true;
-        operation_claimed[operation] = true;
+        shapes.push_back (std::move (shape));
     }
+    return shapes;
+}
+
+/**
+ * @p shape with @p base taken off its front, or nothing when @p shape does not
+ * sit under it.
+ *
+ * Whole segments only: `/v1` is a prefix of `/v1/pets` and not of `/v10/pets`.
+ * A placeholder segment of the base (`{}`, from a templated `/{version}`)
+ * stands for any one non-empty segment. A request that is exactly the base
+ * path is the root operation, `/`.
+ */
+std::optional<std::string> strip_base_path (std::string_view shape, std::string_view base) {
+    // Both start with `/`; each round compares the segment after a cursor.
+    size_t shape_cursor = 0;
+    size_t base_cursor  = 0;
+    while (base_cursor < base.size ()) {
+        if (shape_cursor >= shape.size ()) {
+            return std::nullopt; // the request ends inside the base path
+        }
+        const size_t base_end =
+        std::min (base.find ('/', base_cursor + 1), base.size ());
+        const size_t shape_end =
+        std::min (shape.find ('/', shape_cursor + 1), shape.size ());
+        const std::string_view base_segment =
+        base.substr (base_cursor + 1, base_end - base_cursor - 1);
+        const std::string_view shape_segment =
+        shape.substr (shape_cursor + 1, shape_end - shape_cursor - 1);
+        const bool same = base_segment == "{}" ? !shape_segment.empty () :
+                                                 base_segment == shape_segment;
+        if (!same) {
+            return std::nullopt;
+        }
+        base_cursor  = base_end;
+        shape_cursor = shape_end;
+    }
+    return shape_cursor == shape.size () ? std::string ("/") :
+                                           std::string (shape.substr (shape_cursor));
+}
+
+/**
+ * Each still-open request's shape with every base path it sits under taken off,
+ * computed once for both comparisons of the third pass. Two base paths can
+ * leave the same shape behind (`/v1` and `/{version}` both make `/v1/pets`
+ * `/pets`), which is one shape, not two.
+ */
+RequestShapes shapes_under_base_paths (const RequestShapes& request_shapes,
+const std::vector<std::string>& base_shapes,
+const std::vector<bool>& request_claimed) {
+    RequestShapes stripped (request_shapes.size ());
+    for (size_t i = 0; i < request_shapes.size (); ++i) {
+        if (request_claimed[i]) {
+            continue;
+        }
+        for (const std::string& shape : request_shapes[i]) {
+            for (const std::string& base : base_shapes) {
+                std::optional<std::string> rest = strip_base_path (shape, base);
+                if (rest &&
+                std::ranges::find (stripped[i], *rest) == stripped[i].end ()) {
+                    stripped[i].push_back (std::move (*rest));
+                }
+            }
+        }
+    }
+    return stripped;
 }
 
 } // namespace
 
 MatchResult match_operations (const std::vector<MatchableRequest>& requests,
-const std::vector<MatchableOperation>& operations) {
-    // Both sides' shapes once, not once per comparison: the second pass is a
-    // cross product over what the first left open, and a document declaring
-    // hundreds of operations would otherwise re-flatten every path per request.
-    std::vector<std::optional<std::string>> request_shapes;
-    request_shapes.reserve (requests.size ());
-    for (const auto& request : requests) {
-        request_shapes.push_back (request_path_shape (request.url));
+const std::vector<MatchableOperation>& operations,
+const std::vector<std::string>& base_paths) {
+    // Both sides' shapes once, not once per comparison: the template comparison
+    // is a cross product over what the exact one left open, and a document
+    // declaring hundreds of operations would otherwise re-flatten every path
+    // per request.
+    RequestShapes request_shapes (requests.size ());
+    for (size_t i = 0; i < requests.size (); ++i) {
+        if (std::optional<std::string> shape = request_path_shape (requests[i].url)) {
+            request_shapes[i].push_back (std::move (*shape));
+        }
     }
     std::vector<std::string> operation_shapes;
     operation_shapes.reserve (operations.size ());
@@ -384,25 +498,31 @@ const std::vector<MatchableOperation>& operations) {
         operation_shapes.push_back (spec_path_shape (operation.path));
     }
 
-    MatchResult result;
-    std::vector<bool> request_claimed (requests.size (), false);
-    std::vector<bool> operation_claimed (operations.size (), false);
-    match_exact_shapes (requests, operations, request_shapes, operation_shapes,
-    result, request_claimed, operation_claimed);
-    match_filled_templates (requests, operations, request_shapes,
-    operation_shapes, result, request_claimed, operation_claimed);
+    MatchState state{ {}, std::vector<bool> (requests.size (), false),
+        std::vector<bool> (operations.size (), false) };
+    match_exact_shapes (requests, operations, request_shapes, operation_shapes, state);
+    match_filled_templates (requests, operations, request_shapes, operation_shapes, state);
+
+    // The third pass, over what the first two left open (see the file header).
+    if (const std::vector<std::string> bases = base_path_shapes (base_paths);
+    !bases.empty ()) {
+        const RequestShapes stripped =
+        shapes_under_base_paths (request_shapes, bases, state.request_claimed);
+        match_exact_shapes (requests, operations, stripped, operation_shapes, state);
+        match_filled_templates (requests, operations, stripped, operation_shapes, state);
+    }
 
     for (size_t i = 0; i < requests.size (); ++i) {
-        if (!request_claimed[i]) {
-            result.unmatched_requests.push_back (i);
+        if (!state.request_claimed[i]) {
+            state.result.unmatched_requests.push_back (i);
         }
     }
     for (size_t j = 0; j < operations.size (); ++j) {
-        if (!operation_claimed[j]) {
-            result.unmatched_operations.push_back (j);
+        if (!state.operation_claimed[j]) {
+            state.result.unmatched_operations.push_back (j);
         }
     }
-    return result;
+    return std::move (state.result);
 }
 
 } // namespace vayu::core
