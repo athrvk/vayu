@@ -224,9 +224,11 @@ struct VirtualUser {
     /**
      * This VU's own write layer over the run's shared variable scopes (issue
      * #1495): what an inline `extract.*` or `script.*` element wrote on an
-     * earlier step of this same iteration, read by the residual-token pass
-     * before every later step's send. Cleared at the same iteration boundary
-     * `cookies` is - a new iteration is a new user. Written and read under the
+     * earlier step, read by the residual-token pass before every later
+     * step's send. Its environment, collection and globals entries outlive
+     * the iteration that wrote them (#3044), so a `control.once` login's
+     * token reaches every later iteration; only its run-local scope is
+     * cleared at the boundary `cookies` is. Written and read under the
      * same `busy` acquire/release pairing the struct comment describes; no
      * VU-local lock is needed for the same reason none is needed for
      * `cookies`.
@@ -249,8 +251,8 @@ struct VirtualUser {
      * `control.transaction` (issue #1515), on the same isolation
      * `scope_overlay` gives an inline `extract.*` write - one VU's count is
      * never another's. Never cleared at an iteration boundary the way
-     * `scope_overlay` / `cookies` are: `control.once` must survive every
-     * iteration of this VU's life, and `control.transaction`'s own
+     * `cookies` is: `control.once` must survive every iteration of this VU's
+     * life, and `control.transaction`'s own
      * per-iteration accumulator keys itself with the iteration number
      * instead, so a stale entry from an abandoned iteration is orphaned
      * rather than misread.
@@ -271,7 +273,7 @@ struct VirtualUser {
     /// Per-node "when did this node last start" state for this VU's own
     /// `timer.pacing` elements (issue #1498), keyed by element id - the
     /// load-path sibling of `RunContext::pacing_state`'s sequential-run
-    /// version. Cleared at no boundary (unlike `cookies` / `scope_overlay`):
+    /// version. Cleared at no boundary (unlike `cookies`):
     /// pacing measures across iterations by design, not within one.
     std::unordered_map<std::string, int64_t> pacing_state;
     /// This VU's own generator (issue #1498), derived once at construction

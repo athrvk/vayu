@@ -9464,7 +9464,12 @@ knob.
   its own overlay, never the run's shared scopes, so a name one user's step 1
   writes (an `extract.json`'s target, an inline script's
   `pm.environment.set`) is visible only to that same user's later steps, never
-  to another user's concurrent one. `pm.execution` still throws - a *script*
+  to another user's concurrent one. Those saved names outlive the iteration
+  that wrote them (#3044): a `control.once` login's extracted token still
+  answers every later iteration of that user. What resets at each iteration
+  boundary is the user's cookies and its run-local scope
+  (`pm.variables.set`); a bound data row's columns are the new row's.
+  `pm.execution` still throws - a *script*
   cannot redirect the sequence under load. A **controller** element can
   (issue #1515): `control.if`, `control.once` and `control.throughput` skip a
   step the way `pm.execution.skipRequest()` would, counted in the run's

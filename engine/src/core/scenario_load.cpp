@@ -1478,10 +1478,11 @@ class ScenarioLoadDriver {
         ++vu.iteration;
         vu.steps_this_iteration = 0;
         vu.recent_steps.clear ();
-        // Empty at the start of each iteration: a new iteration is a new
-        // user, not the same one logging in twice.
+        // The session and the run-local scope start each iteration empty;
+        // the VU's saved variables do not (#3044), or a `control.once`
+        // login's token is gone by the iteration that needs it.
         vu.cookies.clear ();
-        vu.scope_overlay.clear ();
+        vu.scope_overlay.clear_local ();
     }
 
     const std::shared_ptr<RunContext>& context_;

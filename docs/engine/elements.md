@@ -421,8 +421,11 @@ both sides).
 (`extract.*`'s target variable, an inline `script.*`'s `pm.environment.set`) cannot land in
 the run's shared scopes the way a design send's or the sequential run's does - two VUs
 writing the same name would be reading and overwriting each other's state. Each `VirtualUser`
-instead carries a small `ScopeOverlay`: a handful of names this VU has written, cleared at
-every iteration boundary exactly `cookies` is. The run's shared scopes are flattened once at
+instead carries a small `ScopeOverlay`: a handful of names this VU has written. What it saves
+to the environment, collection or globals scope lives as long as the VU (#3044), so a
+`control.once` login's extracted token still answers every later iteration's `{{token}}`; only
+the run-local scope (`pm.variables.set`) is emptied at the iteration boundary, beside
+`cookies`. The run's shared scopes are flattened once at
 setup (`flatten_variable_scopes`); the residual-token pass (`resolve_residual_tokens`, see
 [`architecture.md`](architecture.md)) reads a copy of that flattened map with the VU's overlay
 merged on top - proportional to what the VU actually wrote, not to the run's whole variable
