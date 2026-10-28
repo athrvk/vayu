@@ -9,9 +9,10 @@
  * @file core/run_export_markdown.cpp
  * @brief The run-report document as Markdown (#2131): a verdict, the run, the
  *        headline numbers, latency against budgets, a capacity search's
- *        result, a scenario's sequence and transactions, errors, the
- *        comparison and the warnings, in that order. What each section says is
- *        `run_export_view.cpp`; this file is Markdown's syntax and escaping.
+ *        result, the contract's coverage and schema checks, a scenario's
+ *        sequence and transactions, errors, the comparison and the warnings, in
+ *        that order. What each section says is `run_export_view.cpp`; this file
+ *        is Markdown's syntax and escaping.
  */
 
 #include "vayu/core/run_export_markdown.hpp"
@@ -308,6 +309,25 @@ std::string capacity_block (const ReportView& view) {
     return out;
 }
 
+/// Empty when the document holds neither coverage nor schema validation.
+std::string contract_block (const ReportView& view) {
+    if (!view.contract) {
+        return {};
+    }
+    const ReportContract& contract = *view.contract;
+    std::string out                = "## Contract\n";
+    for (const ReportText* line :
+    { &contract.coverage, &contract.validation, &contract.unchecked }) {
+        if (!line->empty ()) {
+            out += '\n' + markdown_text (*line) + '\n';
+        }
+    }
+    if (!contract.operations.rows.empty ()) {
+        out += '\n' + render_table (contract.operations);
+    }
+    return out;
+}
+
 /// Empty when the run was not a scenario run, or the document says nothing
 /// about its iterations or steps.
 std::string sequence_block (const ReportView& view) {
@@ -380,7 +400,7 @@ std::string render_run_export_markdown (const nlohmann::ordered_json& document) 
     const ReportView view = build_run_report_view (document);
     std::string out;
     for (const auto section : { title_block, verdict_block, run_block, results_block,
-         latency_block, capacity_block, sequence_block, transactions_block,
+         latency_block, capacity_block, contract_block, sequence_block, transactions_block,
          errors_block, comparison_block, warnings_block, footer_block }) {
         if (const std::string block = section (view); !block.empty ()) {
             add_block (out, block);
