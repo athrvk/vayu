@@ -87,7 +87,8 @@ function enginePortFromArgv(argv: readonly string[]): number | null {
  * Writes what a `file:` build persisted into this origin, once, before any
  * page script reads it (#2380). Main appends the flag only while it holds the
  * entries; it filtered them to `vayu*` keys. A key this origin already has is
- * never overwritten. The report is what tells main the hand-off is complete.
+ * overwritten: 0.46.0 shipped without this hand-off, and what it wrote since is
+ * almost all first-launch defaults (#3021). The report is what tells main the hand-off is complete.
  *
  * The flag and both channels mirror `LEGACY_STORAGE_ARG`,
  * `LEGACY_STORAGE_TAKE_CHANNEL` and `LEGACY_STORAGE_TAKEN_CHANNEL` in
@@ -99,15 +100,11 @@ function adoptLegacyStorage(argv: readonly string[]): void {
 	if (!argv.includes("--vayu-legacy-storage")) return;
 	const entries: unknown = ipcRenderer.sendSync("legacy-storage:take");
 	if (entries === null || typeof entries !== "object") return;
-	const report = { written: 0, kept: 0, failed: 0 };
+	const report = { written: 0, failed: 0 };
 	for (const [key, value] of Object.entries(entries)) {
 		try {
-			if (window.localStorage.getItem(key) !== null) {
-				report.kept++;
-			} else {
-				window.localStorage.setItem(key, String(value));
-				report.written++;
-			}
+			window.localStorage.setItem(key, String(value));
+			report.written++;
 		} catch {
 			// A full quota or a refused store; main retries on a later launch.
 			report.failed++;

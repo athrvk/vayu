@@ -252,8 +252,8 @@ describe("createLegacyStorageMigration", () => {
 		const { migration, record, log } = migrationWith();
 		await migration.prepare();
 
-		migration.taken({ written: 3, kept: 0, failed: 0 });
-		migration.taken({ written: 3, kept: 0, failed: 0 });
+		migration.taken({ written: 3, failed: 0 });
+		migration.taken({ written: 3, failed: 0 });
 
 		expect(record.writes.filter(([key]) => key === "done")).toEqual([["done", true]]);
 		expect(migration.hasPending()).toBe(false);
@@ -261,18 +261,18 @@ describe("createLegacyStorageMigration", () => {
 		expect(log).toHaveBeenCalledWith(
 			"info",
 			expect.stringContaining("Carried saved state over"),
-			{ written: 3, kept: 0, failed: 0 }
+			{ written: 3, failed: 0 }
 		);
 	});
 
 	it("ignores a report when nothing was handed out", () => {
 		const { migration, record } = migrationWith();
-		migration.taken({ written: 1, kept: 0, failed: 0 });
+		migration.taken({ written: 1, failed: 0 });
 		expect(record.writes).toEqual([]);
 	});
 
 	it.each([
-		["a write that failed", { written: 2, kept: 0, failed: 1 }],
+		["a write that failed", { written: 2, failed: 1 }],
 		["a report that is not one", { written: "3" }],
 		["no report", undefined],
 	])("leaves the hand-off open after %s", async (_name, report) => {
@@ -408,8 +408,8 @@ describe("registerLegacyStorageIpc", () => {
 			LEGACY_STORAGE_TAKEN_CHANNEL,
 		]);
 		expect(deliver(LEGACY_STORAGE_TAKE_CHANNEL).returnValue).toEqual({ "vayu.tabs": "{}" });
-		deliver(LEGACY_STORAGE_TAKEN_CHANNEL, { written: 1, kept: 0, failed: 0 });
-		expect(migration.taken).toHaveBeenCalledWith({ written: 1, kept: 0, failed: 0 });
+		deliver(LEGACY_STORAGE_TAKEN_CHANNEL, { written: 1, failed: 0 });
+		expect(migration.taken).toHaveBeenCalledWith({ written: 1, failed: 0 });
 	});
 
 	it("answers anything else with null, still answering, and ignores its report", () => {
@@ -418,7 +418,7 @@ describe("registerLegacyStorageIpc", () => {
 
 		const event = deliver(LEGACY_STORAGE_TAKE_CHANNEL);
 		expect(event).toHaveProperty("returnValue", null);
-		deliver(LEGACY_STORAGE_TAKEN_CHANNEL, { written: 0, kept: 0, failed: 0 });
+		deliver(LEGACY_STORAGE_TAKEN_CHANNEL, { written: 0, failed: 0 });
 		expect(migration.take).not.toHaveBeenCalled();
 		expect(migration.taken).not.toHaveBeenCalled();
 	});
@@ -479,7 +479,7 @@ describe("the preload's half", () => {
 		expect(setItem).not.toHaveBeenCalled();
 	});
 
-	it("writes each key the origin lacks and never overwrites one it has", async () => {
+	it("writes every key, overwriting one the origin already has (#3021)", async () => {
 		const { storage, setItem, items } = fakeStorage({ "vayu-theme-source": "light" });
 		const ipc = await runPreload({
 			argv: [LEGACY_STORAGE_ARG],
@@ -491,10 +491,13 @@ describe("the preload's half", () => {
 		});
 
 		expect(ipc.sendSync.mock.calls).toEqual([[LEGACY_STORAGE_TAKE_CHANNEL]]);
-		expect(setItem.mock.calls).toEqual([["vayu.spec-files", OLD_ORIGIN["vayu.spec-files"]]]);
-		expect(items.get("vayu-theme-source")).toBe("light");
+		expect(setItem.mock.calls).toEqual([
+			["vayu-theme-source", "dark"],
+			["vayu.spec-files", OLD_ORIGIN["vayu.spec-files"]],
+		]);
+		expect(items.get("vayu-theme-source")).toBe("dark");
 		expect(ipc.send.mock.calls).toEqual([
-			[LEGACY_STORAGE_TAKEN_CHANNEL, { written: 1, kept: 1, failed: 0 }],
+			[LEGACY_STORAGE_TAKEN_CHANNEL, { written: 2, failed: 0 }],
 		]);
 	});
 
@@ -508,7 +511,7 @@ describe("the preload's half", () => {
 
 		expect(items.get("vayu-theme-source")).toBe("dark");
 		expect(ipc.send.mock.calls).toEqual([
-			[LEGACY_STORAGE_TAKEN_CHANNEL, { written: 1, kept: 0, failed: 1 }],
+			[LEGACY_STORAGE_TAKEN_CHANNEL, { written: 1, failed: 1 }],
 		]);
 	});
 
@@ -550,7 +553,7 @@ describe("main and the preload together", () => {
 		expect(doneWhenAsked).toBeUndefined();
 		expect(record.data.done).toBe(true);
 		expect(Object.fromEntries(items)).toEqual({
-			"vayu-theme-source": "light",
+			"vayu-theme-source": "dark",
 			"vayu.spec-files": OLD_ORIGIN["vayu.spec-files"],
 			"vayu:lastLoadTestConfig": '{"vus":10}',
 		});

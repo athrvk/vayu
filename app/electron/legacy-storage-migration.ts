@@ -204,7 +204,6 @@ export interface LegacyStorageMigrationDeps {
 /** What the preload reports once it has written; anything else counts as a failure. */
 interface TakenReport {
 	written: number;
-	kept: number;
 	failed: number;
 }
 
@@ -213,10 +212,8 @@ function parseReport(report: unknown): TakenReport {
 		const value = (report as Record<string, unknown> | null)?.[name];
 		return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : -1;
 	};
-	const parsed = { written: field("written"), kept: field("kept"), failed: field("failed") };
-	return parsed.written < 0 || parsed.kept < 0 || parsed.failed < 0
-		? { written: 0, kept: 0, failed: 1 }
-		: parsed;
+	const parsed = { written: field("written"), failed: field("failed") };
+	return parsed.written < 0 || parsed.failed < 0 ? { written: 0, failed: 1 } : parsed;
 }
 
 export interface LegacyStorageMigration {
