@@ -109,3 +109,40 @@ describe("withContentType", () => {
 		expect(withContentType(set, "")).toEqual(entity);
 	});
 });
+
+describe("the file name a file part is sent under (#3022)", () => {
+	function open(container: HTMLElement) {
+		const button = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Name the upload of VersionData"]'
+		);
+		if (!button) throw new Error("no rename control rendered - the cell markup changed");
+		fireEvent.click(button);
+		const input = document.querySelector<HTMLInputElement>(
+			'input[aria-label="File name sent in the part"]'
+		);
+		if (!input) throw new Error("the rename popover did not open");
+		return input;
+	}
+
+	it("sets the part's file name, keeping the path and type", () => {
+		const { container, onChange } = editor([upload]);
+		fireEvent.change(open(container), { target: { value: "report.pdf" } });
+
+		const row = rowOf(lastRows(onChange), "r2");
+		expect(row?.fileName).toBe("report.pdf");
+		expect(row?.src).toBe("/tmp/Q1.pdf");
+		expect(row?.contentType).toBe("application/pdf");
+	});
+
+	it("drops the member when emptied, so the file's own name is sent", () => {
+		const { container, onChange } = editor([upload]);
+		fireEvent.change(open(container), { target: { value: "" } });
+
+		expect("fileName" in rowOf(lastRows(onChange), "r2")!).toBe(false);
+	});
+
+	it("offers no control on a text part", () => {
+		const { container } = editor([entity]);
+		expect(container.querySelector('button[aria-label^="Name the upload"]')).toBeNull();
+	});
+});

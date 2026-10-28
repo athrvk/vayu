@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { refusalsText, type BoundField, type DataFieldContext } from "@/lib/data-bind-escaping";
 import { deferredNamesIn, deferredNote } from "@/lib/deferred-note";
-import { isBlankRow } from "./key-value";
+import { isBlankRow, withFileName } from "./key-value";
 import { keyValueGrid } from "./grid";
 import type { KeyValueItem, KeyValueRowExtra, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
@@ -336,6 +336,12 @@ function KeyValueRow({
 					unresolved={item.unresolved}
 					disabled={valueReadOnly || !item.enabled}
 					onPick={(file) => onPickFile(item.id, file)}
+					partName={item.key}
+					onRename={
+						onReplaceItem &&
+						((name) => onReplaceItem(item.id, withFileName(item, name)))
+					}
+					variables={variables}
 				/>
 			) : (
 				<VariableInput
