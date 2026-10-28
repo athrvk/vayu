@@ -26,11 +26,13 @@
 
 #include <gtest/gtest.h>
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <memory>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "optional_assert.hpp"
 #include "step_elements_test_helper.hpp"
@@ -97,9 +99,10 @@ class ElementBodyBoundTest : public ::testing::Test {
         vayu::http::global_cleanup ();
     }
 
-    /// One exchange against the big body, with an `extract.json` element
-    /// bound to `maxElementBodyBytes` = @p bound.
-    vayu::http::routes::ExchangeOutcome send (size_t bound) {
+    /// One exchange against the big body with @p entries attached, bound to
+    /// `maxElementBodyBytes` = @p bound.
+    vayu::http::routes::ExchangeOutcome
+    send (size_t bound, std::vector<nlohmann::json> entries) {
         vayu::runtime::ScriptEngine engine;
         vayu::http::CookieJar jar;
         vayu::http::routes::ScriptVariableScopes scopes;
@@ -110,10 +113,15 @@ class ElementBodyBoundTest : public ::testing::Test {
 
         vayu::http::routes::ExchangeInputs inputs;
         inputs.request  = std::move (request);
-        inputs.elements = vayu::tests::compiled_elements (
-        { vayu::tests::extract_json_element_json ("el1", "$.value", "extracted") });
+        inputs.elements = vayu::tests::compiled_elements (std::move (entries));
         inputs.max_element_body_bytes = bound;
         return execute_exchange (engine, jar, "", scopes, std::move (inputs));
+    }
+
+    /// The same, with one `extract.json` element.
+    vayu::http::routes::ExchangeOutcome send (size_t bound) {
+        return send (bound,
+        { vayu::tests::extract_json_element_json ("el1", "$.value", "extracted") });
     }
 
     std::unique_ptr<BigJsonServer> server_;
@@ -127,6 +135,28 @@ TEST_F (ElementBodyBoundTest, ABodyOverTheBoundIsSkippedRatherThanParsed) {
     EXPECT_EQ (first.status, "skipped");
     ASSERT_HAS_VALUE (first.message);
     EXPECT_NE (first.message->find ("maxElementBodyBytes"), std::string::npos);
+}
+
+// A JSON assertion that cannot read the body fails the send rather than
+// passing it (#3041), whatever sets the bound.
+TEST_F (ElementBodyBoundTest, ABodyOverTheBoundFailsAJsonAssertionAndARequiredExtractor) {
+    const nlohmann::json assertion = { { "id", "el_assert" },
+        { "kind", "assert.jsonpath" }, { "enabled", true },
+        { "config", { { "path", "$.value" }, { "exists", true } } } };
+    nlohmann::json extractor =
+    vayu::tests::extract_json_element_json ("el_extract", "$.value", "extracted");
+    extractor["config"]["required"] = true;
+    const auto outcome = send (PADDING_BYTES / 2, { assertion, extractor });
+
+    ASSERT_EQ (outcome.element_outcomes.size (), 2u);
+    EXPECT_EQ (outcome.element_outcomes[0].status, "failed");
+    EXPECT_EQ (outcome.element_outcomes[1].status, "missing");
+    ASSERT_EQ (outcome.post_script_result.tests.size (), 2u);
+    for (const auto& test : outcome.post_script_result.tests) {
+        EXPECT_FALSE (test.passed) << test.name;
+        EXPECT_NE (test.error_message.find ("maxElementBodyBytes"), std::string::npos)
+        << test.error_message;
+    }
 }
 
 TEST_F (ElementBodyBoundTest, ABodyUnderTheBoundIsParsedAndExtracted) {

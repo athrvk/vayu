@@ -133,8 +133,7 @@ class ExtractJsonElement final : public Element {
         }
         const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
-            ctx.outcome_status  = "skipped";
-            ctx.outcome_message = constants::elements::BODY_UNREADABLE_MESSAGE;
+            report_unreadable_body (ctx);
             return;
         }
         const auto matches = detail::evaluate_json_path (*body, *path_);
@@ -146,6 +145,20 @@ class ExtractJsonElement final : public Element {
     }
 
     private:
+    /// A required extractor that cannot read the body is a miss the step fails
+    /// on, whatever its `default` (which stands in for "no match", not for "no
+    /// body to match in"); an optional one is `skipped` and writes nothing.
+    void report_unreadable_body (ElementContext& ctx) const {
+        const std::string reason (constants::elements::BODY_UNREADABLE_MESSAGE);
+        ctx.outcome_message = reason;
+        if (!required_) {
+            ctx.outcome_status = "skipped";
+            return;
+        }
+        ctx.outcome_status = "missing";
+        mark_required_miss (ctx, variable_, reason);
+    }
+
     nlohmann::json config_;
     std::optional<std::vector<detail::JsonPathStep>> path_;
     std::string variable_;

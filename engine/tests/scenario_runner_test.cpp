@@ -155,6 +155,12 @@ class ScenarioMockServer {
             res.set_content (R"({"token":"tok-)" + std::to_string (++logins) + "\"}",
             "application/json");
         });
+        // A 200 that is a page, not the JSON a step's assertions were
+        // written against (#3041): what a gateway answers during an outage.
+        svr.Get ("/html", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content ("<html><body>Service Unavailable</body></html>", "text/html");
+        });
         svr.Get ("/echo-auth", [record] (const httplib::Request& req, httplib::Response& res) {
             record (req);
             res.set_content (
@@ -1310,6 +1316,41 @@ TEST_F (ScenarioRunnerTest, AFailingAssertStatusElementFailsTheStepWithoutAnyScr
     auto scenario = summary_of (run_id)["scenario"];
     EXPECT_EQ (scenario["failed"].get<size_t> (), 1u);
     EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// A 200 whose body is not JSON fails the step through `assert.jsonpath` and a
+// `required` `extract.json`, and leaves an optional extractor `skipped` (#3041).
+// Mutation check: restore the `skipped` branch in `AssertJsonPathElement` and
+// the first row reads "passed".
+TEST_F (ScenarioRunnerTest, AnUnreadableBodyFailsJsonAssertionsAndRequiredExtractors) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/html",
+    json::array ({ json{ { "id", "el_assert" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.ok" }, { "exists", true } } } } }));
+    seed_request_with_elements ("req_b", 1, "/html",
+    json::array ({ json{ { "id", "el_extract" }, { "kind", "extract.json" },
+    { "config", { { "path", "$.token" }, { "variable", "token" }, { "required", true } } } } }));
+    seed_request_with_elements ("req_c", 2, "/html",
+    json::array ({ json{ { "id", "el_extract" }, { "kind", "extract.json" },
+    { "config", { { "path", "$.token" }, { "variable", "token" } } } } }));
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 3u);
+    for (const size_t failing : { size_t{ 0 }, size_t{ 1 } }) {
+        const auto trace = json::parse (rows[failing].trace_data);
+        EXPECT_EQ (trace["outcome"].get<std::string> (), "failed") << failing;
+        EXPECT_NE (rows[failing].error.find ("exceeds maxElementBodyBytes"), std::string::npos)
+        << rows[failing].error;
+    }
+    const auto optional_trace = json::parse (rows[2].trace_data);
+    EXPECT_EQ (optional_trace["outcome"].get<std::string> (), "passed");
+    ASSERT_EQ (optional_trace["elements"].size (), 1u);
+    EXPECT_EQ (optional_trace["elements"][0]["outcome"], "skipped");
+
+    EXPECT_EQ (summary_of (run_id)["scenario"]["failed"].get<size_t> (), 2u);
 }
 
 // `timer.think` waits between steps, outside either one's own latency, and

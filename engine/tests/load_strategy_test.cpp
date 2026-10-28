@@ -2971,6 +2971,30 @@ TEST_F (LoadStrategyTest, AnAssertStatusElementTalliesOneFailurePerIteration) {
     EXPECT_EQ (entry["passed"], 0u);
 }
 
+// A body that is not JSON fails `assert.jsonpath` on every submission and
+// leaves an optional `extract.json` skipped (#3041). Mutation check: restore
+// the `skipped` branch in `AssertJsonPathElement` and `failed` reads 0.
+TEST_F (LoadStrategyTest, AnUnreadableBodyFailsAJsonAssertionOnEverySubmission) {
+    const size_t ITERATIONS = 4;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-unreadable-body",
+    request_elements_payload (mock_server->html_url (), ITERATIONS, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_assert" }, { "kind", "assert.jsonpath" },
+                             { "config", { { "path", "$.ok" }, { "exists", true } } } },
+    nlohmann::json{ { "id", "el_extract" }, { "kind", "extract.json" },
+    { "config", { { "path", "$.token" }, { "variable", "token" } } } } })));
+
+    const auto assertion = element_entry (summary, "el_assert");
+    ASSERT_FALSE (assertion.is_null ()) << summary.dump ();
+    EXPECT_EQ (assertion["failed"], ITERATIONS);
+    EXPECT_EQ (assertion["passed"], 0u);
+
+    const auto extractor = element_entry (summary, "el_extract");
+    ASSERT_FALSE (extractor.is_null ()) << summary.dump ();
+    EXPECT_EQ (extractor["failed"], 0u) << "an optional extractor never fails";
+}
+
 // An inline `script.pre` mutates the request the submission actually sends,
 // not a copy that is then thrown away - asserted off the listener, because a
 // header written onto the wrong copy still reaches `pm.request` and would

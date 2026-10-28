@@ -98,9 +98,11 @@ void seed_limits (ConfigSeeder& seed, int64_t now) {
     seed (unit ("bytes") (ConfigEntry{ "maxElementBodyBytes",
     std::to_string (vayu::core::constants::elements::MAX_BODY_BYTES), "integer", "Max element body",
     "Largest response body an extract.json or assert.jsonpath element will "
-    "parse as JSON. A larger response is not parsed at all: every "
-    "JSON-reading element on that step reports skipped, with the reason, "
-    "instead of paying for - or failing on - a parse of an oversized body. "
+    "parse as JSON. A larger response is not parsed at all, instead of "
+    "paying for - or failing on - a parse of an oversized body, and the step "
+    "does not pass on it: an assert.jsonpath fails and a required "
+    "extract.json fails the step, both with the reason, while an optional "
+    "extract.json reports skipped with it. "
     "The one shared parse is reused by every such element on the same step, "
     "so this is a per-step cost, not a per-element one.",
     "limits", std::to_string (vayu::core::constants::elements::MAX_BODY_BYTES),

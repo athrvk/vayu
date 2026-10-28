@@ -1443,10 +1443,12 @@ constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
 /// levels; 100 leaves them every margin.
 constexpr size_t MAX_BODY_DEPTH = 100;
 
-/// The `skipped` reason every JSON-reading kind reports when
-/// `ensure_parsed_body` returns null. One literal, so the kinds cannot drift
-/// apart on what a skip means. `maxElementBodyBytes` stays in it: the setting
-/// is the one a user can act on, and `element_body_bound_test.cpp` pins it.
+/// What every JSON-reading kind says when `ensure_parsed_body` returns null:
+/// the `skipped` reason of an optional `extract.json`, and the failure message
+/// of an `assert.jsonpath` or a `required` `extract.json`. One literal, so the
+/// kinds cannot drift apart on what an unreadable body means.
+/// `maxElementBodyBytes` stays in it: the setting is the one a user can act
+/// on, and `element_body_bound_test.cpp` pins it.
 constexpr std::string_view BODY_UNREADABLE_MESSAGE =
 "response body is not JSON, nests too deeply, or exceeds maxElementBodyBytes";
 } // namespace elements

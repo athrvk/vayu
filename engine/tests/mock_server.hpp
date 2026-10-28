@@ -38,6 +38,10 @@ class SlowMockServer {
         svr.Get ("/fast", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("{}", "application/json");
         });
+        // A 200 that is a page, not JSON: what a gateway answers in an outage.
+        svr.Get ("/html", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("<html><body>Service Unavailable</body></html>", "text/html");
+        });
         // An overloaded target shedding load: it answers at once, with a 503.
         svr.Get ("/error", [] (const httplib::Request&, httplib::Response& res) {
             res.status = 503;
@@ -175,6 +179,10 @@ class SlowMockServer {
 
     std::string fast_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/fast";
+    }
+
+    std::string html_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/html";
     }
 
     std::string stall_once_url () const {

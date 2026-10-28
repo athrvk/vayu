@@ -456,7 +456,7 @@
           "title": "Expected value"
         },
         "negate": {
-          "description": "Flips the assertion's pass/fail verdict.",
+          "description": "Flips the assertion's pass/fail verdict. A response body that cannot be read as JSON fails it either way.",
           "title": "Negate",
           "type": "boolean"
         },
