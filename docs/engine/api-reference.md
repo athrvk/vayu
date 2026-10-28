@@ -7164,7 +7164,8 @@ never refuses: see [Authentication](#authentication) and
   "timeout": 30000,                    // Optional, ms, 1-86400000 - see below
   "elements": [                        // Optional, typed behaviours - see Elements. The only
                                        // script source; preRequestScript/postRequestScript(s)/tests
-                                       // are refused (400, naming "elements")
+                                       // are refused (400, naming "elements"), and so is a list
+                                       // the element registry refuses - see below
     { "kind": "script.post", "config": { "script":
       "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));" } }
   ],
@@ -7545,6 +7546,18 @@ is `collection` for the root, `folder` for every collection below it and
 `request` for the request's own (#2522); `kind` keeps its two values. It is
 what each script result's `scope` (below) is read from, falling back to
 `kind` for an `origin` that carries none.
+
+**`elements` is validated like a stored request's** (#3052): a list the element
+registry refuses (an unrecognized kind, a setting the kind does not declare, a
+repeated id, a `script.setup` on the request, a value that is not an array) is a
+`400` carrying the message [`POST /requests`](#post-requests) answers for the
+same list, before any run row exists and with nothing sent. An entry without an
+`id` is given one rather than refused. The list is a composed one, so an entry
+whose `origin.kind` is `collection` (a collection or folder level) is judged as
+a collection's own, each on its own: it may be a `script.setup` or
+`script.teardown`, and ids repeated across levels are allowed. Every other entry
+is judged together as a request's, and an `Item N` in a refusal counts within
+those. `null` or an absent `elements` sends none.
 
 `vayu::core::ElementPipeline` runs the compiled list at each phase this send
 reaches: `script.pre` elements at `step.before`, immediately before the

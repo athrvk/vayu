@@ -1314,7 +1314,11 @@ path; the renderer's inline path builds the same shape client-side
 client-side copy). `elements` is the only script source `POST /execute`
 accepts - `preRequestScript(s)` / `postRequestScript(s)` / `tests` are all
 refused outright, naming `elements` as the replacement
-(`refuse_legacy_script_fields`, `routes.hpp`). `POST /runs` reads the same
+(`refuse_legacy_script_fields`, `routes.hpp`), and it validates them like a
+stored list (#3052, `validate_execute_elements`): a collection-origin entry is
+judged alone as a collection's own, so a composed `script.setup` and ids
+repeated across levels pass, and the rest are judged together as a request's.
+`POST /runs` reads the same
 kinds under two different keys depending on shape: a scenario's steps carry
 their own resolved elements off the plan, and a single-request run's own
 request reads `requestElements` (issue #1594) - both refuse the legacy

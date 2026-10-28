@@ -1577,6 +1577,62 @@ RouteResult refuse_overdeep_send_row (const nlohmann::json& json) {
     return {};
 }
 
+/// Whether a composed entry came from a collection or folder level
+/// (`origin.kind`, the two-valued answer `compose_elements` and the renderer's
+/// `elementsParts` both stamp).
+bool is_collection_origin (const nlohmann::json& entry) {
+    if (!entry.is_object ()) {
+        return false;
+    }
+    const auto origin = entry.find ("origin");
+    if (origin == entry.end () || !origin->is_object ()) {
+        return false;
+    }
+    const auto kind = origin->find ("kind");
+    return kind != origin->end () && kind->is_string () && *kind == "collection";
+}
+
+/**
+ * `POST /execute`'s inline `elements` against the registry, the check
+ * `POST /requests` and `POST /runs` make (#3052).
+ *
+ * The list is a composed one: collection and folder entries ride beside the
+ * request's own. An entry a collection level contributes is judged as a
+ * collection's (`script.setup` is allowed there, and a duplicated collection
+ * repeats ids across levels, so each is checked alone); everything else is
+ * judged together as a request's, which is what `POST /requests` does. A
+ * refusal's `Item N` therefore counts within the entries judged together.
+ *
+ * Ids the caller left off are stamped into @p json, so the send compiles
+ * the list that was validated.
+ *
+ * @return the refusal, or nothing for an absent or null `elements`.
+ */
+std::optional<std::string> validate_execute_elements (nlohmann::json& json) {
+    const auto found = json.find ("elements");
+    if (found == json.end () || found->is_null ()) {
+        return std::nullopt;
+    }
+    const auto& registry = vayu::core::Registry::instance ();
+    if (!found->is_array ()) {
+        return registry.validate (*found, vayu::core::ElementOwner::Request);
+    }
+
+    vayu::core::stamp_default_element_ids (*found);
+    nlohmann::json request_owned = nlohmann::json::array ();
+    for (const auto& entry : *found) {
+        if (!is_collection_origin (entry)) {
+            request_owned.push_back (entry);
+            continue;
+        }
+        if (auto reason = registry.validate (nlohmann::json::array ({ entry }),
+            vayu::core::ElementOwner::Collection)) {
+            return reason;
+        }
+    }
+    return registry.validate (request_owned, vayu::core::ElementOwner::Request);
+}
+
 /**
  * Everything `POST /execute` reads and can refuse before any run row exists.
  *
@@ -1649,6 +1705,11 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // / `tests` is refused before anything is built or written, exactly as
     // the two write routes refuse them.
     if (auto refusal = refuse_legacy_script_fields (json)) {
+        vayu::utils::log_warning ("http", "POST /execute - " + *refusal);
+        return refusal;
+    }
+
+    if (auto refusal = validate_execute_elements (json)) {
         vayu::utils::log_warning ("http", "POST /execute - " + *refusal);
         return refusal;
     }
