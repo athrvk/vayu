@@ -151,16 +151,23 @@ vi.mock("@/queries/runs", () => ({
 }));
 
 const importFetch = vi.fn();
+// `readDocument` is the engine's reader, which the `$ref` bundler walks a
+// document through (#877): every fixture here is JSON, so it is `JSON.parse`.
 vi.mock("@/services/api", () => ({
-	apiService: { importFetch: (url: string, maxBytes?: number) => importFetch(url, maxBytes) },
+	apiService: {
+		importFetch: (...args: unknown[]) => importFetch(...args),
+		readDocument: async (text: string) => JSON.parse(text),
+	},
 }));
 
 // The bound half of the tab renders the Sync section (issue #654), which reads
 // the engine's document cap. Stubbed here for the same reason the queries above
 // are: this file renders the tab without a QueryClient, and the cap is asserted
 // where it is used (`SpecSync.test.tsx`).
+const DEFAULT_SPEC_LIMIT = 10 * 1024 * 1024;
+let specLimit = DEFAULT_SPEC_LIMIT;
 vi.mock("@/hooks/useSpecDocumentLimit", () => ({
-	useSpecDocumentLimit: () => ({ maxBytes: 10 * 1024 * 1024 }),
+	useSpecDocumentLimit: () => ({ maxBytes: specLimit }),
 }));
 
 // Both export dialogs, stubbed to a line naming which one mounted: what each
@@ -279,6 +286,7 @@ beforeEach(() => {
 	matchArgs = [];
 	requestsLoading = false;
 	importFetch.mockReset();
+	specLimit = DEFAULT_SPEC_LIMIT;
 	requests = [];
 	readSpecMeta = () => new Promise(() => {});
 	vi.stubGlobal("electronAPI", { getFilePath: () => "/home/u/petstore.json" });
@@ -563,6 +571,143 @@ describe("binding a collection that already has requests", () => {
 		// a pairing against identities nobody has yet is not a preview.
 		expect(matchArgs[2]).toBeNull();
 		expect(matchArgs[3]).toBeNull();
+	});
+});
+
+/*
+ * Issue #3032. A pick is bundled before it is described, matched or bound: the
+ * stored document is the bundled one (as import and Sync already make it), so
+ * binding a multi-file spec stores the bundle and the next Sync has nothing to
+ * report. Mutation check: bind `reader.result` / the fetched text as it arrives
+ * and the first two cases keep a `./pet.json` ref and lose the schema.
+ */
+describe("binding a spec that references other files", () => {
+	const PET_SCHEMA = { type: "object", properties: { petTag: { type: "integer" } } };
+	const withRef = (ref: string) =>
+		JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "Pets API" },
+			paths: {
+				"/pets": {
+					get: {
+						operationId: "listPets",
+						responses: {
+							"200": { content: { "application/json": { schema: { $ref: ref } } } },
+						},
+					},
+				},
+			},
+		});
+
+	const bytesOf = (text: string) => new TextEncoder().encode(text);
+
+	/** The files beside the picked one, by the name the bundler asks for. */
+	const siblings = (files: Record<string, unknown>) =>
+		vi.fn(async (_specPath: string, refPath: string) => {
+			if (!(refPath in files)) throw new Error(`no ${refPath}`);
+			return { bytes: bytesOf(JSON.stringify(files[refPath])) };
+		});
+
+	const stubElectron = (
+		readSpecFile?: ReturnType<typeof siblings>,
+		path = "/home/u/petstore.json"
+	) =>
+		vi.stubGlobal("electronAPI", {
+			getFilePath: () => path,
+			...(readSpecFile ? { readSpecFile } : {}),
+		});
+
+	const bindAndGetContent = () => {
+		fireEvent.click(screen.getByRole("button", { name: /bind this spec/i }));
+		return bindSpec.mutate.mock.calls[0][0].content as string;
+	};
+
+	const pick = async (name: string, text: string) => {
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File([text], name)] } });
+	};
+
+	beforeEach(() => {
+		specMatchQuery.data = { matched: [], unmatchedRequests: [], unmatchedOperations: [] };
+	});
+
+	it("binds the bundle of a picked file, with its sibling inlined", async () => {
+		const readSpecFile = siblings({ "pet.json": PET_SCHEMA });
+		stubElectron(readSpecFile);
+		render(<SpecTab collection={collection()} />);
+
+		await pick("petstore.json", withRef("./pet.json"));
+		await screen.findByRole("button", { name: /bind this spec/i });
+
+		const content = bindAndGetContent();
+		expect(readSpecFile).toHaveBeenCalledWith("/home/u/petstore.json", "pet.json");
+		// The schema travelled with the document, and nothing points at the file.
+		expect(content).toContain("petTag");
+		expect(content).not.toContain("./pet.json");
+		// What the engine is asked to describe is the same bundle it will store.
+		expect(JSON.parse(content)["x-vayu-bundled"]).toBeTruthy();
+	});
+
+	it("binds the bundle of a fetched URL, following the ref beside it", async () => {
+		importFetch.mockImplementation(async (url: string) => ({
+			content:
+				url === "https://api.example.com/pet.json"
+					? JSON.stringify(PET_SCHEMA)
+					: withRef("./pet.json"),
+		}));
+		render(<SpecTab collection={collection()} />);
+
+		fireEvent.change(screen.getByPlaceholderText(/openapi.json/i), {
+			target: { value: "https://api.example.com/openapi.json" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /fetch/i }));
+		await screen.findByRole("button", { name: /bind this spec/i });
+
+		const content = bindAndGetContent();
+		expect(content).toContain("petTag");
+		expect(content).not.toContain("./pet.json");
+		expect(bindSpec.mutate.mock.calls[0][0].sourceUrl).toBe(
+			"https://api.example.com/openapi.json"
+		);
+		// The remote file is named, so the user sees what the spec pulled in.
+		expect(screen.getByText(/Fetched from: https:\/\/api.example.com\/pet.json/)).toBeTruthy();
+	});
+
+	it("discloses a reference it could not follow, and still offers the bind", async () => {
+		// No `readSpecFile`: the picked file's neighbours cannot be reached, which
+		// is also what a pasted or browser-picked document looks like.
+		stubElectron(undefined, "");
+		const raw = withRef("./pet.json");
+		render(<SpecTab collection={collection()} />);
+
+		await pick("petstore.json", raw);
+
+		await screen.findByText(/1 reference to another file couldn't be followed/);
+		expect(bindAndGetContent()).toBe(raw);
+	});
+
+	it("names a reference it refused to follow out of the picked folder", async () => {
+		const readSpecFile = siblings({});
+		stubElectron(readSpecFile);
+		render(<SpecTab collection={collection()} />);
+
+		await pick("petstore.json", withRef("../secret.json"));
+
+		await screen.findByText(/Not followed: \.\.\/secret\.json/);
+		expect(readSpecFile).not.toHaveBeenCalled();
+	});
+
+	it("refuses a spec past the engine's cap before offering a bind", async () => {
+		specLimit = 64;
+		stubElectron(siblings({}));
+		render(<SpecTab collection={collection()} />);
+
+		await pick("petstore.json", withRef("./pet.json"));
+
+		const callout = await screen.findByText("Couldn't bundle that spec");
+		expect(callout).toBeTruthy();
+		expect(screen.getByText(/one document may hold/)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /bind this spec/i })).toBeNull();
 	});
 });
 
