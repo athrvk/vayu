@@ -2588,6 +2588,24 @@ std::optional<std::string> refuse_monitor_on_collection_run (const nlohmann::jso
 }
 
 /**
+ * `failOnSchemaError: true` outside a collection run (#3039). Only the
+ * sequential collection runner reads the flag (`read_fail_on_schema_error`).
+ * `false` is the default and stays accepted; a non-boolean is left to
+ * `validate_run_config`'s type check.
+ */
+std::optional<std::string> refuse_fail_on_schema_error_outside_collection_run (
+const nlohmann::json& json, bool collection_run) {
+    const auto flag = json.find ("failOnSchemaError");
+    if (collection_run || flag == json.end () || !flag->is_boolean () || !flag->get<bool> ()) {
+        return std::nullopt;
+    }
+    return "'failOnSchemaError' is only read by a collection run - a load run "
+           "validates sampled responses once it drains and never fails a step "
+           "on them; run a 'scenario' without a load 'mode', or drop "
+           "'failOnSchemaError'";
+}
+
+/**
  * A single-request run whose payload does not parse because a header name is not
  * a token (`invalid_header_name`, issue #2467), as the message and code to
  * answer 400 with. Any other parse failure stays the run's own build to report,
@@ -2640,6 +2658,12 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
             "http", "POST /runs - Invalid collection run config: " + *invalid);
             return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
         }
+    }
+
+    if (auto invalid = refuse_fail_on_schema_error_outside_collection_run (
+        json, is_scenario && !is_scenario_load)) {
+        vayu::utils::log_warning ("http", "POST /runs - Invalid run config: " + *invalid);
+        return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
     // The `elements` override (issue #1495) is validated for both load-run

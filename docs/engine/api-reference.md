@@ -11449,7 +11449,11 @@ it too, so a run being watched and the same run read back cannot disagree
 no response to judge.
 
 **`failOnSchemaError`** is a top-level boolean on `POST /runs`, default `false`,
-type-checked before the run row is created. Left off, a schema failure does not
+type-checked before the run row is created. It is read by a collection run (a
+`scenario` without a load `mode`) alone: `true` on a single-request run or a
+scenario load run is a `400` with code `invalid_run_config` naming the flag,
+because those validate sampled responses once the run drains and never fail a
+step on them (`false` and `null` stay accepted). Left off, a schema failure does not
 change any step's outcome: it is its own verdict channel, and a response the
 document does not describe is not a failed assertion. Set, a step that passed
 everything else and whose response did not match is classified `failed`, with the
