@@ -4989,13 +4989,16 @@ the document, so it can say nothing the document does not.
 
 It holds the Markdown report's sections in the same order (title and reference
 line, verdict, run, results, latency with its budgets, a capacity search's
-result, a scenario's sequence and transactions, errors, comparison, warnings),
+result, the contract's coverage and schema checks, a scenario's sequence and
+transactions, errors, comparison, warnings),
 written as semantic HTML - one `h1`, tables with `th scope`, a description list
 for the run - from the same reading of the document, so the two cannot word a
 verdict or a capacity result differently. Capacity, Sequence and Transactions
 (#2819) are sections of paragraphs and tables like the rest, each present only
 when the document has it: the capacity sentences are paragraphs above the levels
-table, the iteration line is the paragraph above the steps table, and a level or
+table, the iteration line is the paragraph above the steps table, the Contract
+section (#3036) writes its coverage, validation and unchecked-reason lines as
+paragraphs above its operations table, and a level or
 assertion count past its limit carries the same word beside its colour (`(over
 budget)`, `18 failed`). A table's one-line caption (a scenario run's latency
 table, `All steps pooled.`) is its `<caption>`; the partial and missing-summary

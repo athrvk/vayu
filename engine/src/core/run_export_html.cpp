@@ -308,6 +308,15 @@ Section capacity_section (const ReportCapacity& capacity) {
     return section_of ("capacity", "Capacity", body);
 }
 
+Section contract_section (const ReportContract& contract) {
+    std::string body = paragraphs_markup (
+    { &contract.coverage, &contract.validation, &contract.unchecked });
+    if (!contract.operations.rows.empty ()) {
+        body += table_markup (contract.operations, "contract-h");
+    }
+    return section_of ("contract", "Contract", body);
+}
+
 Section sequence_section (const ReportSequence& sequence) {
     std::string body = paragraphs_markup ({ &sequence.iterations });
     if (!sequence.steps.rows.empty ()) {
@@ -327,6 +336,9 @@ std::vector<Section> view_sections (const ReportView& view) {
     section_of ("latency", "Latency", table_markup (view.latency, "latency-h")));
     if (view.capacity) {
         sections.push_back (capacity_section (*view.capacity));
+    }
+    if (view.contract) {
+        sections.push_back (contract_section (*view.contract));
     }
     if (view.sequence) {
         sections.push_back (sequence_section (*view.sequence));
