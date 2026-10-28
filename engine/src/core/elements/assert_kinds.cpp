@@ -398,7 +398,8 @@ ElementKind make_assert_jsonpath_kind () {
         { "description", "Passes when at least one match is found." } } },
         { "negate",
         { { "type", "boolean" }, { "title", "Negate" },
-        { "description", "Flips the assertion's pass/fail verdict. A response "
+        { "description",
+        "Flips the assertion's pass/fail verdict. A response "
         "body that cannot be read as JSON fails it either way." } } } } },
         { "required", nlohmann::json::array ({ "path" }) },
         { "additionalProperties", false },

@@ -2981,7 +2981,7 @@ TEST_F (LoadStrategyTest, AnUnreadableBodyFailsAJsonAssertionOnEverySubmission) 
     const auto summary = run_single_request_summary (db, "run-elements-unreadable-body",
     request_elements_payload (mock_server->html_url (), ITERATIONS, 1,
     nlohmann::json::array ({ nlohmann::json{ { "id", "el_assert" }, { "kind", "assert.jsonpath" },
-    { "config", { { "path", "$.ok" }, { "exists", true } } } },
+                             { "config", { { "path", "$.ok" }, { "exists", true } } } },
     nlohmann::json{ { "id", "el_extract" }, { "kind", "extract.json" },
     { "config", { { "path", "$.token" }, { "variable", "token" } } } } })));
 
