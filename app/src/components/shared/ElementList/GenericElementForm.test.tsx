@@ -20,6 +20,7 @@
  * file is the annotation-reading half issue #1607 added the schema for.
  */
 
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ElementConfigSchema } from "@/types";
@@ -299,4 +300,146 @@ describe("GenericElementForm - two short fields share a line", () => {
 	// deliberately-stacked cases stay green, which is what tells the two rules
 	// apart. Dropping `compact` from `PropertyRow`'s `NumberSettingRow` reds
 	// the density case alone.
+});
+
+describe("GenericElementForm - a comma-separated list field (#3042)", () => {
+	const integerList = schema({
+		codes: { type: "array", title: "Codes", items: { type: "integer" } },
+	});
+	const stringList = schema({
+		names: { type: "array", title: "Names", items: { type: "string" } },
+	});
+
+	/** The parent a real card is: it echoes each change back as the next `config`. */
+	function Harness({
+		formSchema,
+		onChange,
+	}: {
+		formSchema: ElementConfigSchema;
+		onChange: (config: Record<string, unknown>) => void;
+	}) {
+		const [config, setConfig] = useState<Record<string, unknown>>({});
+		return (
+			<GenericElementForm
+				schema={formSchema}
+				config={config}
+				onChange={(next) => {
+					onChange(next);
+					setConfig(next);
+				}}
+			/>
+		);
+	}
+
+	/**
+	 * Types one character at a time, each appended to what the field shows
+	 * right now - `user-event` is not a dependency, and the defect is in what
+	 * a keystroke finds in the field, so the field's own value is the base.
+	 * Returns the field's text after each keystroke.
+	 */
+	function typeCharByChar(field: HTMLElement, text: string): string[] {
+		const input = field as HTMLInputElement;
+		const shown: string[] = [];
+		for (const char of text) {
+			fireEvent.change(input, { target: { value: input.value + char } });
+			shown.push(input.value);
+		}
+		return shown;
+	}
+
+	function lastConfig(onChange: ReturnType<typeof vi.fn>): unknown {
+		return onChange.mock.calls[onChange.mock.calls.length - 1]?.[0];
+	}
+
+	it("never rewrites the typed text, and saves the parsed integers", () => {
+		const onChange = vi.fn();
+		render(<Harness formSchema={integerList} onChange={onChange} />);
+
+		const shown = typeCharByChar(screen.getByLabelText("Codes"), "200, 201");
+
+		// "200," must stay "200," - joining the saved [200] would show "200" and
+		// fuse the next digit into "2002".
+		expect(shown).toEqual(["2", "20", "200", "200,", "200, ", "200, 2", "200, 20", "200, 201"]);
+		expect(lastConfig(onChange)).toEqual({ codes: [200, 201] });
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it.each(["200.5", "abc"])("shows a hint for %s and does not save it", (typed) => {
+		const onChange = vi.fn();
+		render(<Harness formSchema={integerList} onChange={onChange} />);
+
+		// One change event: typed char by char, "200" of "200.5" is a valid list
+		// and rightly saved on the way.
+		fireEvent.change(screen.getByLabelText("Codes"), { target: { value: typed } });
+
+		expect(screen.getByRole("alert")).toHaveTextContent(`"${typed}" is not a whole number`);
+		expect(screen.getByLabelText("Codes")).toHaveAttribute("aria-invalid", "true");
+		expect(screen.getByLabelText("Codes")).toHaveValue(typed);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("keeps the last valid list saved while a later entry is invalid, and clears the hint once fixed", () => {
+		const onChange = vi.fn();
+		render(<Harness formSchema={integerList} onChange={onChange} />);
+		const field = screen.getByLabelText("Codes");
+
+		typeCharByChar(field, "200, abc");
+		expect(lastConfig(onChange)).toEqual({ codes: [200] });
+		expect(screen.getByRole("alert")).toHaveTextContent('"abc" is not a whole number');
+
+		fireEvent.change(field, { target: { value: "200, 404" } });
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect(lastConfig(onChange)).toEqual({ codes: [200, 404] });
+	});
+
+	it("replaces the text when the stored value changes from outside, even over an invalid draft", () => {
+		const view = render(
+			<GenericElementForm schema={integerList} config={{ codes: [200] }} onChange={vi.fn()} />
+		);
+		fireEvent.change(screen.getByLabelText("Codes"), { target: { value: "200, abc" } });
+
+		view.rerender(
+			<GenericElementForm
+				schema={integerList}
+				config={{ codes: [301, 302] }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(screen.getByLabelText("Codes")).toHaveValue("301, 302");
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("leaves the text alone when the value that comes back is what it already parses to", () => {
+		const view = render(
+			<GenericElementForm schema={integerList} config={{ codes: [200] }} onChange={vi.fn()} />
+		);
+		fireEvent.change(screen.getByLabelText("Codes"), { target: { value: "200,201" } });
+
+		view.rerender(
+			<GenericElementForm
+				schema={integerList}
+				config={{ codes: [200, 201] }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(screen.getByLabelText("Codes")).toHaveValue("200,201");
+	});
+
+	it("keeps a string list as trimmed strings, with no whole-number hint", () => {
+		const onChange = vi.fn();
+		render(<Harness formSchema={stringList} onChange={onChange} />);
+
+		const shown = typeCharByChar(screen.getByLabelText("Names"), "a1, b.5");
+
+		expect(shown[shown.length - 1]).toBe("a1, b.5");
+		expect(lastConfig(onChange)).toEqual({ names: ["a1", "b.5"] });
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	// Mutation check: restore the old round trip - `value={stored.join(", ")}`
+	// on the Input with `onChange` parsing every keystroke and dropping what
+	// does not parse - and the first case reds on "200," showing "200", the
+	// hint cases on the missing alert.
 });
