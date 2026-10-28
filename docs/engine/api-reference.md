@@ -2747,9 +2747,12 @@ one the response declares; 2.0 pairs each response with the operation's
 `produces`, falling back to the document's, then to `application/json`), and a
 `schema` may be `true` or `false` as well as an object. The serialized index is
 held to the same `maxSpecDocumentBytes` cap as the document, and one over it is a
-`400` naming the count and the cap. A document where no operation declares a
-schema stores "no index", read back as `null`, and every response of it reports
-`checked: false` with the reason `no_index`.
+`400` naming the count and the cap. A status that declares no schema is a
+status-only row (`{"status": "204", "contentType": ""}`, no `schema`), so a
+response under it reports `checked: false` instead of being judged by `default`.
+A document where no operation declares a status stores "no index", read back as
+`null`, and every response of it reports `checked: false` with the reason
+`no_index`.
 
 Both indexes come off **one** read of the document, which is what makes them
 agree: a status the schema index carries is a status the operation index lists
@@ -7778,8 +7781,12 @@ nothing.
 
 A status answers to the **most specific** pattern that covers it - exact, then
 `2XX`, then `default` - the same rule contract coverage counts by, shared rather
-than restated. A media type matches exactly first, then a declared `*/*` or
-`application/*`.
+than restated, over the same set of statuses: every one the operation declares,
+whether or not it carries a schema (#3028). A declared `200` with only a
+description therefore answers a 200 itself and is `no_schema_for_status`; a
+`default` or `4XX` beside it never judges that body. A media type matches
+exactly first, then a declared `*/*` or `application/*`, among the media types
+that carry a schema.
 
 **`unevaluatedKeywords` is the dialect disclosure and is not decoration.** The
 validator reads draft-07; OpenAPI 3.1 schemas are JSON Schema 2020-12, whose
@@ -7804,11 +7811,11 @@ on such a schema, as it does for any unevaluated keyword.
 | Code | What happened |
 |---|---|
 | `no_operation` | The request carries no `spec_operation` - it is not an operation |
-| `no_index` | The bound document carries no response schemas, or its schema could not be read (including one that refers to itself without describing any value, which is refused before it can run) |
+| `no_index` | The bound document declares no response, or its schema could not be read (including one that refers to itself without describing any value, which is refused before it can run) |
 | `hash_mismatch` | The stored document no longer hashes to what the binding recorded |
 | `never_stamped` | The binding names a document and no version of it, so nothing can be compared - re-bind the collection. Distinct from `hash_mismatch` because a sync of an unchanged document would not repair it |
-| `operation_not_declared` | The document does not declare this identity |
-| `no_schema_for_status` | Nothing the operation declares covers this status |
+| `operation_not_declared` | The document does not declare this identity (the operation is not in the spec, or declares no response at all) |
+| `no_schema_for_status` | Nothing the operation declares covers this status, or the status that answers it declares no schema to check a body against |
 | `no_schema_for_content_type` | The status matched; none of its media types did |
 | `no_response` | A transport error - there was no response to check |
 | `body_not_json` | The body is not JSON (or nests past 100 levels, which counts as not JSON), and a JSON Schema cannot describe it |

@@ -581,11 +581,15 @@ TEST (ResponseSchemas, DoesNotTreatAPropertyNamedLikeAKeywordAsAKeyword) {
 TEST (ResponseSchemas, ASchemaThatIsNotOneDeclaresNothingCheckable) {
     // Neither an object nor a boolean: there is nothing a validator could read,
     // and storing the row would put a value in the index no reader can use.
-    // Skipped like an absent schema rather than refusing the whole document over
-    // one malformed response.
-    EXPECT_TRUE (schema_index_of (R"({"openapi":"3.0.0","paths":{"/x":{"get":{"responses":{"200":{"content":)"
-                                  R"({"application/json":{"schema":"not a schema"}}}}}}}})")
-    .is_null ());
+    // Treated like an absent schema - the status stays, as a status-only row -
+    // rather than refusing the whole document over one malformed response.
+    const json index = schema_index_of (
+    R"({"openapi":"3.0.0","paths":{"/x":{"get":{"responses":{"200":{"content":)"
+    R"({"application/json":{"schema":"not a schema"}}}}}}}})");
+    ASSERT_FALSE (index.is_null ());
+    EXPECT_EQ (index["operations"][0]["responses"],
+    json::parse (R"([{"status":"200","contentType":""}])"))
+    << index.dump ();
 }
 
 // ─── What a 3.x document declares ───────────────────────────────────────────
@@ -593,7 +597,7 @@ TEST (ResponseSchemas, ASchemaThatIsNotOneDeclaresNothingCheckable) {
 TEST (ResponseSchemas, KeepsEveryMediaTypeWithTheStatusPatternVerbatim) {
     // Every media type, not just the JSON one: what can be validated is decided
     // at response time by what the server actually sent. A response with no
-    // `content` declares nothing to check against.
+    // `content` has nothing to check against and is listed as a status-only row.
     const json index = schema_index_of (
     R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{)"
     R"("200":{"content":{"application/JSON":{"schema":{"type":"object","nullable":true}},)"
@@ -605,15 +609,35 @@ TEST (ResponseSchemas, KeepsEveryMediaTypeWithTheStatusPatternVerbatim) {
     json::parse (R"([{"status":"200","contentType":"application/json",)"
                  R"("schema":{"type":["object","null"]}},)"
                  R"({"status":"200","contentType":"application/xml","schema":{"type":"string"}},)"
-                 R"({"status":"4XX","contentType":"application/json","schema":{"type":"object"}}])"))
+                 R"({"status":"4XX","contentType":"application/json","schema":{"type":"object"}},)"
+                 R"({"status":"304","contentType":""}])"))
     << index.dump ();
 }
 
-TEST (ResponseSchemas, SkipsAMediaTypeThatDeclaresNoSchema) {
+TEST (ResponseSchemas, AMediaTypeThatDeclaresNoSchemaIsAStatusOnlyRow) {
     // An absent schema is not an empty one: `{}` would validate everything and
-    // report a body as matching a contract that never described it.
-    EXPECT_TRUE (schema_index_of (R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":{"text/plain":{}}}}}}}})")
-    .is_null ());
+    // report a body as matching a contract that never described it. The status
+    // is still declared (#3028), so it is a row of its own with no schema.
+    const json index = schema_index_of (
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":{"text/plain":{}}}}}}}})");
+    ASSERT_FALSE (index.is_null ());
+    EXPECT_EQ (index["operations"][0]["responses"],
+    json::parse (R"([{"status":"200","contentType":""}])"))
+    << index.dump ();
+}
+
+TEST (ResponseSchemas, AStatusWithASchemafulMediaTypeKeepsOnlyThoseRows) {
+    // `application/json` carries a schema and `text/plain` does not: the status
+    // is already declared by the first, so a status-only row beside it would
+    // only be a second answer for the same status.
+    const json index = schema_index_of (
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"content":{)"
+    R"("text/plain":{},"application/json":{"schema":{"type":"object"}}}}}}}}})");
+    ASSERT_FALSE (index.is_null ());
+    EXPECT_EQ (index["operations"][0]["responses"],
+    json::parse (R"([{"status":"200","contentType":"application/json",)"
+                 R"("schema":{"type":"object"}}])"))
+    << index.dump ();
 }
 
 /// GitHub's shape: the response body lives in `components.responses` and the
@@ -639,20 +663,38 @@ TEST (ResponseSchemas, ReadsThroughAResponseThatIsItselfARef) {
     << index.dump ();
 }
 
-TEST (ResponseSchemas, StepsOverARefToAComponentThatDoesNotExist) {
-    // Nothing to extract and nothing to throw: the 422 is simply not in the
-    // index, which reads as "not checked" rather than as a pass - and the 200
-    // beside it still is. A document with one broken ref still imports.
+TEST (ResponseSchemas, ARefToAComponentThatDoesNotExistIsAStatusOnlyRow) {
+    // Nothing to extract and nothing to throw: the 422 is still a status the
+    // document declares (coverage counts it), so it stays as a status-only row
+    // and reads as "not checked" rather than as a pass - and the 200 beside it
+    // is extracted as usual. A document with one broken ref still imports.
     const json index = schema_index_of (
     R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{)"
     R"("422":{"$ref":"#/components/responses/gone_missing"},)"
     R"("200":{"content":{"application/json":{"schema":{"type":"array"}}}}}}}}})");
     ASSERT_FALSE (index.is_null ());
     EXPECT_EQ (index["operations"][0]["responses"],
-    json::parse (R"([{"status":"200","contentType":"application/json",)"
+    json::parse (R"([{"status":"422","contentType":""},)"
+                 R"({"status":"200","contentType":"application/json",)"
                  R"("schema":{"type":"array"}}])"))
     << index.dump ();
 }
+
+namespace {
+
+/// The distinct `status` values of one operation's index rows, in order.
+std::vector<std::string> distinct_statuses (const json& responses) {
+    std::vector<std::string> statuses;
+    for (const auto& response : responses) {
+        const auto status = response["status"].get<std::string> ();
+        if (std::find (statuses.begin (), statuses.end (), status) == statuses.end ()) {
+            statuses.push_back (status);
+        }
+    }
+    return statuses;
+}
+
+} // namespace
 
 TEST (ResponseSchemas, TheTwoIndexesAgreeAboutWhatOneOperationDeclares) {
     // The point of deriving both from one read (issue #860): every status the
@@ -670,16 +712,37 @@ TEST (ResponseSchemas, TheTwoIndexesAgreeAboutWhatOneOperationDeclares) {
     EXPECT_EQ (operations[0]["operationId"], schemas["operations"][0]["operationId"]);
     EXPECT_EQ (operations[0]["method"], schemas["operations"][0]["method"]);
     EXPECT_EQ (operations[0]["path"], schemas["operations"][0]["path"]);
-    // Equality, not containment, and the document is chosen so that it can be:
-    // every status it declares carries a schema. Drop the read-through and the
-    // 404 leaves one index while staying in the other; drop a status from the
-    // operation index and the same comparison reddens from the other side.
-    std::vector<std::string> with_schemas;
-    for (const auto& response : schemas["operations"][0]["responses"]) {
-        with_schemas.push_back (response["status"].get<std::string> ());
-    }
-    EXPECT_EQ (with_schemas, operations[0]["responses"].get<std::vector<std::string>> ())
+    // Equality, not containment: drop the read-through and the 404 leaves one
+    // index while staying in the other; drop a status from the operation index
+    // and the same comparison reddens from the other side.
+    EXPECT_EQ (distinct_statuses (schemas["operations"][0]["responses"]),
+    operations[0]["responses"].get<std::vector<std::string>> ())
     << indexes.operations << " vs " << indexes.response_schemas;
+}
+
+TEST (DeriveSpecIndexes, TheTwoIndexesAgreeEvenWhereAStatusDeclaresNoSchema) {
+    // #3028: the schema index used to list only the statuses carrying a schema,
+    // so the contract check and coverage disagreed about which statuses an
+    // operation declares. A schema-less 200, a 204, a `$ref` nothing resolves, a
+    // schema-less 2.0 response and a status that has both kinds of media type
+    // all stay.
+    for (const std::string document :
+    { R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{)"
+      R"("200":{"description":"ok"},"204":{},"404":{"$ref":"#/components/responses/gone"},)"
+      R"("410":{"content":{"text/plain":{}}},)"
+      R"("default":{"content":{"application/json":{"schema":{"type":"object"}}}}}}}}})",
+    R"({"swagger":"2.0","paths":{"/pets":{"get":{"responses":{)"
+    R"("200":{"description":"ok"},"404":{"$ref":"#/responses/gone"},)"
+    R"("default":{"description":"e","schema":{"type":"object"}}}}}}})" }) {
+        const auto indexes = derive_spec_indexes (document, INDEX_CAP);
+        ASSERT_TRUE (indexes.ok ()) << indexes.error;
+        const json operations = json::parse (indexes.operations);
+        const json schemas    = json::parse (indexes.response_schemas);
+        ASSERT_EQ (schemas["operations"].size (), 1u) << document;
+        EXPECT_EQ (distinct_statuses (schemas["operations"][0]["responses"]),
+        operations[0]["responses"].get<std::vector<std::string>> ())
+        << document;
+    }
 }
 
 // ─── What a 2.0 document declares ───────────────────────────────────────────
@@ -720,9 +783,26 @@ TEST (ResponseSchemas, FollowsASwaggerResponseRefIntoTheDocumentsResponsesContai
     R"("responses":{"NotFound":{"description":"gone","schema":{"$ref":"#/definitions/Error"}}},)"
     R"("definitions":{"Error":{"type":"object"}}})");
     ASSERT_FALSE (index.is_null ());
+    // `410` names a response nothing defines: still a declared status.
     EXPECT_EQ (index["operations"][0]["responses"],
     json::parse (R"([{"status":"404","contentType":"application/json",)"
-                 R"("schema":{"$ref":"#/definitions/Error"}}])"))
+                 R"("schema":{"$ref":"#/definitions/Error"}},)"
+                 R"({"status":"410","contentType":""}])"))
+    << index.dump ();
+}
+
+TEST (ResponseSchemas, ASwaggerResponseWithoutASchemaIsAStatusOnlyRowNotOnePerMediaType) {
+    // The `produces` list multiplies a schema, never a status with none to
+    // multiply: one row, whatever the operation produces.
+    const json index = schema_index_of (
+    R"({"swagger":"2.0","paths":{"/pets":{"get":{"produces":["application/json","application/xml"],)"
+    R"("responses":{"204":{"description":"gone"},)"
+    R"("200":{"schema":{"type":"object"}}}}}}})");
+    ASSERT_FALSE (index.is_null ());
+    EXPECT_EQ (index["operations"][0]["responses"],
+    json::parse (R"([{"status":"204","contentType":""},)"
+                 R"({"status":"200","contentType":"application/json","schema":{"type":"object"}},)"
+                 R"({"status":"200","contentType":"application/xml","schema":{"type":"object"}}])"))
     << index.dump ();
 }
 
@@ -773,28 +853,53 @@ TEST (ResponseSchemas, ADocumentWithNoRootsStoresNoRefRootsAtAll) {
 
 // ─── The stored index ───────────────────────────────────────────────────────
 
-TEST (DeriveSpecIndexes, IndexesOnlyTheOperationsThatDeclareSomething) {
+TEST (DeriveSpecIndexes, IndexesEveryOperationThatDeclaresAStatus) {
+    // `addPet` declares a 201 and no schema: it is still in the contract, and a
+    // body under it must read "no schema for this status", not "the spec does
+    // not declare this operation" (#3028). `purge` declares no status at all.
     const json index = schema_index_of (
     R"({"openapi":"3.0.0","paths":{"/pets":{)"
     R"("get":{"operationId":"listPets","responses":{"200":{"content":{"application/json":)"
     R"({"schema":{"type":"array"}}}}}},)"
-    R"("post":{"operationId":"addPet","responses":{"201":{"description":"created"}}}}}})");
+    R"("post":{"operationId":"addPet","responses":{"201":{"description":"created"}}},)"
+    R"("delete":{"operationId":"purge","responses":{}}}}})");
     ASSERT_FALSE (index.is_null ());
-    ASSERT_EQ (index["operations"].size (), 1u) << index.dump ();
+    ASSERT_EQ (index["operations"].size (), 2u) << index.dump ();
     EXPECT_EQ (index["operations"][0]["operationId"], "listPets");
-    EXPECT_EQ (index["operations"][0]["method"], "GET");
+    EXPECT_EQ (index["operations"][1]["operationId"], "addPet");
+    EXPECT_EQ (index["operations"][1]["responses"],
+    json::parse (R"([{"status":"201","contentType":""}])"));
 }
 
-TEST (DeriveSpecIndexes, ADocumentWhereNothingDeclaresASchemaStoresNoSchemaIndex) {
+TEST (DeriveSpecIndexes, ADocumentWhereNothingDeclaresAStatusStoresNoSchemaIndex) {
     // "No index" and "declares nothing" are stored the same way, and the honest
     // reading of a document nothing was extracted from is the first: a response
     // of it reports `checked: false`, never a body that passed.
+    for (const std::string document :
+    { R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{}}}}})",
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"operationId":"listPets"}}}})" }) {
+        const auto index = derive_spec_indexes (document, INDEX_CAP);
+        ASSERT_TRUE (index.ok ()) << index.error;
+        EXPECT_FALSE (index.operations.empty ())
+        << "the document does declare an operation";
+        EXPECT_TRUE (index.response_schemas.empty ()) << document;
+    }
+}
+
+TEST (DeriveSpecIndexes, ASchemalessStatusIsIndexedBesideTheDefaultThatHasASchema) {
+    // The #3028 shape: a `200` with only a description and a `default` that
+    // carries a schema. Dropping the first is what let `default` judge a 200.
     const auto index = derive_spec_indexes (
-    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{}}}}}})", INDEX_CAP);
+    R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{)"
+    R"("200":{"description":"ok"},)"
+    R"("default":{"content":{"application/json":{"schema":{"type":"object"}}}}}}}}})",
+    INDEX_CAP);
     ASSERT_TRUE (index.ok ()) << index.error;
-    EXPECT_FALSE (index.operations.empty ())
-    << "the document does declare an operation";
-    EXPECT_TRUE (index.response_schemas.empty ());
+    EXPECT_EQ (
+    json::parse (index.response_schemas)["operations"][0]["responses"],
+    json::parse (R"([{"status":"200","contentType":""},)"
+                 R"({"status":"default","contentType":"application/json",)"
+                 R"("schema":{"type":"object"}}])"));
 }
 
 // A response schema that loops without reaching a value is refused when the

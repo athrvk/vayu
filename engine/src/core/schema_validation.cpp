@@ -883,8 +883,11 @@ validate_document_against_schema (const nlohmann::json& schema, const nlohmann::
 /**
  * The responses one indexed operation declares.
  *
- * A row missing a status, a media type or a schema declares nothing checkable
- * and is skipped rather than costing the document its index.
+ * A row with a status and a media type but no schema is the status-only row
+ * `response_schemas_of` writes for a status with nothing to check (#3028): the
+ * status is a candidate, and no body is judged against it. Any other row
+ * missing a status, a media type or a schema declares nothing and is skipped
+ * rather than costing the document its index.
  */
 void ResponseSchemaIndex::read_declared_responses (const nlohmann::json& row,
 IndexedOperation& operation) {
@@ -900,13 +903,19 @@ IndexedOperation& operation) {
         declared.status = response.value ("status", std::string ());
         declared.content_type =
         vayu::utils::ascii_lower (response.value ("contentType", std::string ()));
-        auto schema = response.find ("schema");
-        if (declared.status.empty () || declared.content_type.empty () ||
-        schema == response.end ()) {
-            continue;
+        const auto schema     = response.find ("schema");
+        const bool has_schema = schema != response.end ();
+        if (declared.status.empty () || declared.content_type.empty () == has_schema) {
+            continue; // no status, or a media type and a schema that are not both there
         }
-        declared.schema = *schema;
-        operation.responses.push_back (std::move (declared));
+        if (std::find (operation.statuses.begin (), operation.statuses.end (),
+            declared.status) == operation.statuses.end ()) {
+            operation.statuses.push_back (declared.status);
+        }
+        if (has_schema) {
+            declared.schema = *schema;
+            operation.responses.push_back (std::move (declared));
+        }
     }
 }
 
@@ -1064,27 +1073,29 @@ const std::string& body) const {
         return verdict;
     }
 
-    const auto& responses = operations_[*at].responses;
+    const auto& operation = operations_[*at];
 
     // Which status pattern answers, decided by the same function coverage
-    // counts with. Gathered per distinct pattern first so `2XX` declared for
-    // three media types is one candidate status, not three.
-    std::vector<std::string> patterns;
-    for (const auto& declared : responses) {
-        if (std::find (patterns.begin (), patterns.end (), declared.status) ==
-        patterns.end ()) {
-            patterns.push_back (declared.status);
-        }
-    }
-    const auto matched = match_status_pattern (patterns, status_code);
+    // counts with, over every status the operation declares - one that declares
+    // no schema included, so a wildcard cannot judge a body the spec names an
+    // exact status for.
+    const auto matched = match_status_pattern (operation.statuses, status_code);
     if (!matched) {
         verdict.reason = UncheckedReason::NoSchemaForStatus;
         return verdict;
     }
-    const std::string& status = patterns[*matched];
+    const std::string& status = operation.statuses[*matched];
 
-    const DeclaredSchema* selected =
-    select_declared_schema (responses, status, media_type_of (content_type));
+    const auto declares_schema = [&status] (const DeclaredSchema& declared) {
+        return declared.status == status;
+    };
+    if (std::none_of (operation.responses.begin (), operation.responses.end (), declares_schema)) {
+        verdict.reason = UncheckedReason::NoSchemaForStatus;
+        return verdict;
+    }
+
+    const DeclaredSchema* selected = select_declared_schema (
+    operation.responses, status, media_type_of (content_type));
     if (!selected) {
         verdict.reason = UncheckedReason::NoSchemaForContentType;
         return verdict;

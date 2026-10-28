@@ -935,12 +935,28 @@ TEST_F (SpecsRouteTest, TheSchemaIndexIsDerivedBesideTheOperationIndexOnBothWrit
        "contracts depending on how it arrived";
 }
 
-TEST_F (SpecsRouteTest, ADocumentWhoseOperationsDeclareNoSchemaStoresNoSchemaIndex) {
-    // `PETSTORE`'s one response has no `content`, so there is nothing to check
-    // against - and "no index" is the honest storage of that. An empty index
-    // would report `checked: false` just the same, but a `{}` in the column
-    // reads as a contract that was extracted and found empty.
+TEST_F (SpecsRouteTest, ADocumentWhoseResponsesDeclareNoSchemaStoresStatusOnlyRows) {
+    // `PETSTORE`'s one response has no `content`: nothing to check a body
+    // against, but the status is declared, so the index keeps it as a row with
+    // no schema (#3028) and a body reads "no schema for this status" instead of
+    // "the spec does not declare this operation".
     auto [read_status, read] = routes::get_spec_document_response (*db_, store_spec ());
+    ASSERT_EQ (read_status, 200) << read.dump ();
+    EXPECT_FALSE (read["operations"].is_null ()) << read.dump ();
+    EXPECT_EQ (read["responseSchemas"],
+    (json{ { "operations",
+    json::array ({ json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" },
+    { "responses", json::array ({ json{ { "status", "200" }, { "contentType", "" } } }) } } }) } }))
+    << read.dump ();
+}
+
+TEST_F (SpecsRouteTest, ADocumentThatDeclaresNoResponseStoresNoSchemaIndex) {
+    // "No index" is the honest storage of a document nothing was extracted
+    // from. An empty index would report `checked: false` just the same, but a
+    // `{}` in the column reads as a contract that was extracted and found empty.
+    auto [read_status, read] = routes::get_spec_document_response (*db_,
+    store_spec (R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.0.0"},)"
+                R"("paths":{"/pets":{"get":{"operationId":"listPets","responses":{}}}}})"));
     ASSERT_EQ (read_status, 200) << read.dump ();
     EXPECT_FALSE (read["operations"].is_null ()) << read.dump ();
     EXPECT_TRUE (read["responseSchemas"].is_null ()) << read.dump ();
