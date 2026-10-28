@@ -1849,7 +1849,7 @@ How long it lives is the run that owns it:
 |---|---|
 | A single Send or `POST /execute` (buffered or streaming) | that send: the pre-request script, the send and the test script |
 | A collection run | the whole run - every step of every iteration, `script.setup` and `script.teardown` included - and is discarded when the run ends |
-| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary, while the user's environment, collection and globals writes carry on to its next iteration (#3044) |
+| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary; the user's environment, collection and globals writes are not local and carry on (#3044) |
 | A single-request load run with `requestElements` | one submission, starting empty |
 | A load run's deferred `tests` replay | the replay pass: one scope, empty at the start and shared by every replayed sample of every step, as the replay's other writes are; never stored |
 
