@@ -384,7 +384,7 @@ describe("the dialog's scenarioOnlyElements (#3050)", () => {
 	});
 });
 
-describe("Run the collection instead (#3050)", () => {
+describe("Run collection hand-over (#3050)", () => {
 	async function openDialogFor(chain: Collection[]) {
 		ancestors = chain;
 		renderBuilder();

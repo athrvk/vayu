@@ -783,7 +783,7 @@ describe("elements a single-request run cannot carry (#3050)", () => {
 		const onRunCollection = vi.fn();
 		open({ scenarioOnlyElements: [pacing], onRunCollection });
 
-		fireEvent.click(screen.getByRole("button", { name: "Run the collection instead" }));
+		fireEvent.click(screen.getByRole("button", { name: "Run collection" }));
 
 		expect(onRunCollection).toHaveBeenCalledTimes(1);
 	});

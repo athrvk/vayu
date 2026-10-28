@@ -520,9 +520,10 @@ std::string string_member (const nlohmann::json& object, const char* key) {
 }
 
 /// Where a refused element was declared, from the `origin` composition
-/// stamps (`emit_level`, `request_composer.cpp`): a collection or folder by
-/// name, the request itself, or - for an entry written straight into the
-/// payload, which carries no origin - its id.
+/// stamps (`emit_level`, `request_composer.cpp`): a collection by name, the
+/// request itself, or - for an entry written straight into the payload, which
+/// carries no origin - its id. A folder reads as "collection": the message
+/// reaches the user, who has no folder (`docs/ux-writing.md`).
 std::string element_whereabouts (const nlohmann::json& entry) {
     const auto origin = entry.find ("origin");
     if (origin != entry.end () && origin->is_object ()) {
@@ -535,10 +536,10 @@ std::string element_whereabouts (const nlohmann::json& entry) {
             return "set on this request";
         }
         if (!scope.empty () && !name.empty ()) {
-            return std::format ("from the {} '{}'", scope, name);
+            return std::format ("from the collection '{}'", name);
         }
         if (!scope.empty ()) {
-            return std::format ("from a {}", scope);
+            return "from a collection";
         }
     }
     return std::format ("element '{}'", entry.value ("id", ""));

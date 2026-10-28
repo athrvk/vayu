@@ -36,14 +36,17 @@ export function scenarioOnlyElements(parts: readonly ResolvedElement[] | undefin
 	return (parts ?? []).filter((el) => el.enabled && isScenarioOnlyKind(el.kind));
 }
 
-/** Where an element was declared: this request, or the collection or folder it is inherited from. */
+/**
+ * Where an element was declared: this request, or the collection it is
+ * inherited from. A folder is a collection to the user (`docs/ux-writing.md`),
+ * so both inherited levels read "collection".
+ */
 function describeOrigin({ origin }: ResolvedElement): string {
 	if (!origin || origin.kind === "request") return "set on this request";
-	const level = origin.scope === "folder" ? "folder" : "collection";
 
 	return origin.name
-		? `inherited from the ${level} '${origin.name}'`
-		: `inherited from a ${level}`;
+		? `inherited from the collection '${origin.name}'`
+		: "inherited from a collection";
 }
 
 /**

@@ -128,7 +128,7 @@ export function buildNotices({
 					action={
 						onRunCollection && (
 							<Button size="sm" variant="outline" onClick={onRunCollection}>
-								Run the collection instead
+								Run collection
 							</Button>
 						)
 					}

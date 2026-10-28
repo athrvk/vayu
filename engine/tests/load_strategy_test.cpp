@@ -2811,7 +2811,7 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAnEnabledEntryNamingItsLa
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
     EXPECT_NE (reason->find ("Pacing"), std::string::npos) << *reason;
-    EXPECT_NE (reason->find ("from the folder 'Nightly'"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("from the collection 'Nightly'"), std::string::npos) << *reason;
     EXPECT_NE (reason->find ("scenario"), std::string::npos) << *reason;
     // The list is a merge of inherited and own entries, so a position names
     // nothing the user can find.
@@ -2827,6 +2827,8 @@ TEST (RequestElementsRunOverrideValidationTest, NamesTheRequestOrACollectionByOr
         // A client-stamped origin without `scope` falls back to `kind`,
         // as `compile_elements` reads it.
         { { { "kind", "collection" }, { "id", "col_1" } }, "from a collection" },
+        // A folder is a collection to the user, named or not.
+        { { { "kind", "collection" }, { "scope", "folder" }, { "id", "col_2" } }, "from a collection" },
     };
     for (const auto& [origin, expected] : cases) {
         const nlohmann::json config{ { "requestElements",

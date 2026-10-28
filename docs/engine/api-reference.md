@@ -8700,9 +8700,9 @@ renames a composed request's chain-then-own `elements` onto, since `POST
 `extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
 phase-0 set issue #1514 gave the design send. A `control.*` kind or
 `timer.pacing`/`timer.throughput` is a `400` naming the element by its kind
-label and where it was declared (`from the folder 'Nightly'`, `from the
-collection 'Orders'`, `set on this request`, read from the entry's `origin`;
-`element '<id>'` for an entry that carries none) - not by position, because a
+label and where it was declared (`from the collection 'Orders'` for a
+collection or a folder under it, `set on this request`, read from the entry's
+`origin`; `element '<id>'` for an entry that carries none) - not by position, because a
 composed list interleaves inherited elements with the request's own (#3050).
 It is never silently accepted and left inert: those need per-VU controller and
 pacing state (`controller_state`, `SharedThroughputCounters`,

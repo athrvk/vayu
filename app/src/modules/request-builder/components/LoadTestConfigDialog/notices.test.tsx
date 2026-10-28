@@ -129,7 +129,7 @@ describe("buildNotices", () => {
 			const [notice] = buildNotices({ ...CLEAN, scenarioOnlyError, onRunCollection });
 			render(<>{notice.node}</>);
 			expect(screen.getByText(/can't run timer\.pacing/)).toBeInTheDocument();
-			fireEvent.click(screen.getByRole("button", { name: "Run the collection instead" }));
+			fireEvent.click(screen.getByRole("button", { name: "Run collection" }));
 			expect(onRunCollection).toHaveBeenCalledTimes(1);
 			cleanup();
 		});

@@ -61,7 +61,7 @@ describe("scenarioOnlyError", () => {
 		expect(error).toContain("Disable or remove it");
 	});
 
-	it("names the collection or folder an element is inherited from", () => {
+	it("names the collection an element is inherited from, a folder included", () => {
 		const error = scenarioOnlyError([
 			element({
 				kind: "timer.pacing",
@@ -74,11 +74,11 @@ describe("scenarioOnlyError", () => {
 		]);
 
 		expect(error).toContain("timer.pacing (inherited from the collection 'Checkout')");
-		expect(error).toContain("control.loop (inherited from the folder 'Payments')");
+		expect(error).toContain("control.loop (inherited from the collection 'Payments')");
 		expect(error).toContain("Disable or remove them");
 	});
 
-	it("still places an element whose origin carries no name", () => {
+	it("still places an element whose origin carries no name (a folder reads as a collection)", () => {
 		const error = scenarioOnlyError([
 			element({
 				kind: "metric.record",
@@ -86,6 +86,6 @@ describe("scenarioOnlyError", () => {
 			}),
 		]);
 
-		expect(error).toContain("metric.record (inherited from a folder)");
+		expect(error).toContain("metric.record (inherited from a collection)");
 	});
 });
