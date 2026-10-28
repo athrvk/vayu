@@ -561,8 +561,8 @@ std::optional<std::string> refuse_scenario_only_element (const nlohmann::json& e
     kind != nullptr && kind->hot_path == vayu::core::HotPathClass::Script;
     const bool is_supported = is_script ||
     std::find (REQUEST_ELEMENTS_SUPPORTED_KINDS.begin (),
-    REQUEST_ELEMENTS_SUPPORTED_KINDS.end (), kind_name) !=
-    REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
+    REQUEST_ELEMENTS_SUPPORTED_KINDS.end (),
+    kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
     if (is_supported) {
         return std::nullopt;
     }

@@ -2781,8 +2781,8 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsADisabledScenarioOnlyKind
     };
     for (const auto& [kind, valid_config] : cases) {
         const nlohmann::json config{ { "requestElements",
-        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", kind },
-        { "enabled", false }, { "config", valid_config } } }) } };
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
+        { "kind", kind }, { "enabled", false }, { "config", valid_config } } }) } };
         auto reason = vayu::core::validate_request_elements_run_override (config);
         EXPECT_FALSE (reason.has_value ()) << kind << ": " << reason.value_or ("");
     }
@@ -2792,9 +2792,8 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsADisabledScenarioOnlyKind
 // entry, so a malformed config is caught now and not when it is switched on.
 TEST (RequestElementsRunOverrideValidationTest, StillValidatesADisabledEntryConfig) {
     const nlohmann::json config{ { "requestElements",
-    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
-    { "kind", "assert.status" }, { "enabled", false },
-    { "config", { { "expected", 200 } } } } }) } };
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "assert.status" },
+    { "enabled", false }, { "config", { { "expected", 200 } } } } }) } };
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
     EXPECT_NE (reason->find ("Assert status code"), std::string::npos) << *reason;
@@ -2806,8 +2805,9 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAnEnabledEntryNamingItsLa
                              { "config", { { "in", nlohmann::json::array ({ 200 }) } } } },
     nlohmann::json{ { "id", "el_2" }, { "kind", "timer.pacing" },
     { "enabled", true }, { "config", { { "everyMs", 1000 } } },
-    { "origin", { { "kind", "collection" }, { "scope", "folder" },
-                { "id", "col_9" }, { "name", "Nightly" } } } } }) } };
+    { "origin",
+    { { "kind", "collection" }, { "scope", "folder" }, { "id", "col_9" },
+    { "name", "Nightly" } } } } }) } };
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
     EXPECT_NE (reason->find ("Pacing"), std::string::npos) << *reason;
@@ -2820,8 +2820,7 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAnEnabledEntryNamingItsLa
 
 TEST (RequestElementsRunOverrideValidationTest, NamesTheRequestOrACollectionByOrigin) {
     const std::vector<std::pair<nlohmann::json, std::string>> cases{
-        { { { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } },
-        "set on this request" },
+        { { { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } }, "set on this request" },
         { { { "kind", "collection" }, { "scope", "collection" },
           { "id", "col_1" }, { "name", "Orders" } },
         "from the collection 'Orders'" },
@@ -2831,9 +2830,8 @@ TEST (RequestElementsRunOverrideValidationTest, NamesTheRequestOrACollectionByOr
     };
     for (const auto& [origin, expected] : cases) {
         const nlohmann::json config{ { "requestElements",
-        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
-        { "kind", "timer.pacing" }, { "config", { { "everyMs", 1000 } } },
-        { "origin", origin } } }) } };
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "timer.pacing" },
+        { "config", { { "everyMs", 1000 } } }, { "origin", origin } } }) } };
         auto reason = vayu::core::validate_request_elements_run_override (config);
         ASSERT_HAS_VALUE (reason) << origin.dump ();
         EXPECT_NE (reason->find (expected), std::string::npos) << *reason;
