@@ -18,11 +18,11 @@
 // spelling beside it.
 // NOLINTBEGIN(modernize-macro-to-enum)
 #define VAYU_VERSION_MAJOR 0
-#define VAYU_VERSION_MINOR 45
+#define VAYU_VERSION_MINOR 46
 #define VAYU_VERSION_PATCH 0
 // NOLINTEND(modernize-macro-to-enum)
 
-#define VAYU_VERSION_STRING "0.45.0"
+#define VAYU_VERSION_STRING "0.46.0"
 
 namespace vayu {
 
