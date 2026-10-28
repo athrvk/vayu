@@ -151,11 +151,12 @@ The base URL is assembled from three top-level spec fields and stored as the `ba
 ```ts
 const scheme   = (spec.schemes?.[0] as string) ?? "https";
 const basePath = spec.basePath && spec.basePath !== "/" ? spec.basePath : "";
-const baseUrl  = spec.host ? `${scheme}://${spec.host}${basePath}` : "";
+const baseUrl  = spec.host ? `${scheme}://${spec.host}${basePath}`.replace(/\/+$/, "") : "";
 ```
 
 - **Scheme** - the **first** entry of `schemes[]`; if `schemes` is absent/empty, defaults to `"https"`. Additional schemes (`http`, `ws`, `wss`, …) are **ignored** - only `schemes[0]` is used.
 - **`basePath`** - appended verbatim **unless** it is missing or exactly `"/"` (in which case it contributes nothing, avoiding a trailing `//`).
+- **Trailing slashes** - dropped from the assembled URL (issue #3029). Every request is `{{baseUrl}}` followed by a path that starts with `/`, so a `basePath` of `"/v2/"` would otherwise send each one to `.../v2//pets`.
 - **`host`** - required for a base URL. If `host` is absent, `baseUrl` is `""`, no `baseUrl` variable is added (root `variables` stays `{}`), and request URLs still carry the literal `{{baseUrl}}` prefix (resolving to empty at runtime).
 
 Examples (`host: "api.example.com"`):
@@ -163,6 +164,7 @@ Examples (`host: "api.example.com"`):
 | `schemes` | `basePath` | `baseUrl` |
 |-----------|-----------|-----------|
 | `["https"]` | `"/v2"` | `https://api.example.com/v2` |
+| `["https"]` | `"/v2/"` | `https://api.example.com/v2` (trailing `/` dropped) |
 | `["http", "https"]` | `"/v2"` | `http://api.example.com/v2` (first scheme only) |
 | (absent) | `"/"` | `https://api.example.com` (default scheme, `/` dropped) |
 | `["https"]` | (absent) | `https://api.example.com` |

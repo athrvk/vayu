@@ -3453,6 +3453,29 @@ resolve_url (const std::string& reference, const std::string& base) {
     return scheme + authority + (resolved.empty () ? "/" : resolved) + tail;
 }
 
+/**
+ * `url` without the slashes that end it (issue #3029): every imported request
+ * is `{{baseUrl}}` followed by a path that begins with `/`, so a base that ends
+ * in one makes every request go to `//path`.
+ *
+ * Never reaches into the part that is not a path: the `//` after a scheme is
+ * kept (`https://` stays as written), and so is a lone `/`, a relative base
+ * that carries no more than that.
+ */
+std::string without_trailing_slashes (std::string url) {
+    size_t keep = 1;
+    if (has_scheme (url)) {
+        const size_t after_colon = url.find (':') + 1;
+        if (url.compare (after_colon, 2, "//") == 0) {
+            keep = after_colon + 2;
+        }
+    }
+    while (url.size () > keep && url.back () == '/') {
+        url.pop_back ();
+    }
+    return url;
+}
+
 /// What is left of a `{token}` after substitution, which is what cannot resolve.
 bool has_unresolved_template (const std::string& url) {
     for (size_t at = url.find ('{'); at != std::string::npos; at = url.find ('{', at + 1)) {
@@ -4375,14 +4398,15 @@ document_base (const json& document, bool v3, const ImportSource& source, Import
             // environment an import can create (issue #1444).
             tally.add ("servers_dropped", static_cast<int> (servers->size () - 1));
         }
-        base.base_url =
-        resolve_server_url (array_at (servers, 0), source.source_url, tally);
+        base.base_url = without_trailing_slashes (
+        resolve_server_url (array_at (servers, 0), source.source_url, tally));
         base.schemes = as_record (
         prop (as_record (prop (&document, "components")), "securitySchemes"));
         return base;
     }
     // 2.0 states its base as three fields rather than a server URL. A
-    // `basePath` of exactly `/` adds nothing, and a document with no `host`
+    // `basePath` of exactly `/` adds nothing (any other trailing slash is
+    // trimmed from the assembled URL), and a document with no `host`
     // has no base at all: `{{baseUrl}}` is then not a variable, every
     // request's URL starts with the token unresolved, and the loss is counted
     // as `no_server_url` (the 3.x branch counts the same case).
@@ -4392,8 +4416,8 @@ document_base (const json& document, bool v3, const ImportSource& source, Import
     declared_base != nullptr && *declared_base != "/" ? *declared_base : std::string ();
     if (const std::string* host = as_str (prop (&document, "host"));
     host != nullptr && !host->empty ()) {
-        base.base_url =
-        (wire_scheme == nullptr ? "https" : *wire_scheme) + "://" + *host + base_path;
+        base.base_url = without_trailing_slashes (
+        (wire_scheme == nullptr ? "https" : *wire_scheme) + "://" + *host + base_path);
     } else {
         tally.add ("no_server_url");
     }
