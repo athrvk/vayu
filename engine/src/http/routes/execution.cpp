@@ -1594,8 +1594,7 @@ bool is_collection_origin (const nlohmann::json& entry) {
 
 /**
  * `POST /execute`'s inline `elements` against the registry, the check
- * `POST /requests` and `POST /runs` make (#3052), so a misspelled kind or a
- * bad setting is the same 400 here and not a send with the element dropped.
+ * `POST /requests` and `POST /runs` make (#3052).
  *
  * The list is a composed one: collection and folder entries ride beside the
  * request's own. An entry a collection level contributes is judged as a
