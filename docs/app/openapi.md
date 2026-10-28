@@ -819,7 +819,10 @@ The one the document declares for this response's status and content type:
 
 - The **status** matches the most specific pattern that covers it - `200` before
   `2XX` before `default` - the same rule [contract
-  coverage](#contract-coverage) counts by.
+  coverage](#contract-coverage) counts by, over the same statuses: one the
+  document declares without a schema (a `204`, or a `200` with only a
+  description) still answers its own status, so a `default` or `4XX` schema
+  never judges that body.
 - The **content type** matches exactly first, then a declared `*/*` or
   `application/*`.
 
@@ -834,7 +837,7 @@ Not a failure, and it says which of these it was:
 | The stored document has changed | The binding names a version this document no longer is. Sync |
 | The binding never recorded a version | The collection is bound to a document and to no version of it, so there is nothing to compare - re-bind. Vayu stamps the version on every write and repairs older bindings at startup, so this means the database was edited from outside |
 | The spec no longer declares this operation | The contract moved and this request did not |
-| The spec declares no response for this status | A 500 nothing documented, for instance |
+| The spec declares no schema for this status | A 500 nothing documented, or a status the document declares without a schema, a `204` for instance |
 | No schema for this content type | The status is declared; this media type is not |
 | The body is not JSON, or nests past 100 levels | A JSON Schema cannot describe HTML, and a body that deep is not walked |
 | There was no response | The request never reached a server |
@@ -845,13 +848,19 @@ spec uses for nearly every response - is read through to the component it names,
 so it is checked like any other.
 
 **A collection bound before that was true keeps the index it was stored with**,
-and reports *the spec declares no response for this status* against every
+and reports *the spec declares no schema for this status* against every
 `$ref`-ed response in it. The index is rebuilt when the document is stored
 again, so the remedy is to **re-bind** the collection from the
 [Spec tab](#binding-a-collection-you-already-have) - or to sync it, if the
 document upstream has genuinely changed. A **Check for changes** against a
 document whose bytes are identical reports *unchanged* and stops there, by
 design: it compares bytes, and these bytes did not move.
+
+The same holds for a status declared without a schema. An index stored before
+the check counted those statuses lists only the schemaful ones, so a `default`
+or `4XX` schema still judges a body under such a status, and an operation whose
+responses all lack schemas reads *the spec no longer declares this operation*,
+until the document is stored again.
 
 ### Where OpenAPI stops being JSON Schema
 

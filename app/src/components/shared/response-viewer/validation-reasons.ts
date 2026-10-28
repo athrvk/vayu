@@ -26,7 +26,7 @@ export const UNCHECKED_REASONS: Record<ValidationUncheckedReason, string> = {
 	never_stamped:
 		"This collection's binding never recorded which version of the document it was bound to. Re-bind the collection.",
 	operation_not_declared: "The spec no longer declares this operation.",
-	no_schema_for_status: "The spec declares no response for this status.",
+	no_schema_for_status: "The spec declares no schema for this status.",
 	no_schema_for_content_type: "The spec declares no schema for this response's content type.",
 	no_response: "There was no response to check.",
 	body_not_json:

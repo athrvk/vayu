@@ -7778,8 +7778,12 @@ nothing.
 
 A status answers to the **most specific** pattern that covers it - exact, then
 `2XX`, then `default` - the same rule contract coverage counts by, shared rather
-than restated. A media type matches exactly first, then a declared `*/*` or
-`application/*`.
+than restated, over the same set of statuses: every one the operation declares,
+whether or not it carries a schema (#3028). A declared `200` with only a
+description therefore answers a 200 itself and is `no_schema_for_status`; a
+`default` or `4XX` beside it never judges that body. A media type matches
+exactly first, then a declared `*/*` or `application/*`, among the media types
+that carry a schema.
 
 **`unevaluatedKeywords` is the dialect disclosure and is not decoration.** The
 validator reads draft-07; OpenAPI 3.1 schemas are JSON Schema 2020-12, whose
@@ -7807,8 +7811,8 @@ on such a schema, as it does for any unevaluated keyword.
 | `no_index` | The bound document carries no response schemas, or its schema could not be read (including one that refers to itself without describing any value, which is refused before it can run) |
 | `hash_mismatch` | The stored document no longer hashes to what the binding recorded |
 | `never_stamped` | The binding names a document and no version of it, so nothing can be compared - re-bind the collection. Distinct from `hash_mismatch` because a sync of an unchanged document would not repair it |
-| `operation_not_declared` | The document does not declare this identity |
-| `no_schema_for_status` | Nothing the operation declares covers this status |
+| `operation_not_declared` | The document does not declare this identity (the operation is not in the spec, or declares no response at all) |
+| `no_schema_for_status` | Nothing the operation declares covers this status, or the status that answers it declares no schema to check a body against |
 | `no_schema_for_content_type` | The status matched; none of its media types did |
 | `no_response` | A transport error - there was no response to check |
 | `body_not_json` | The body is not JSON (or nests past 100 levels, which counts as not JSON), and a JSON Schema cannot describe it |

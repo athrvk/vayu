@@ -16,7 +16,7 @@
  * reads a document in exactly one place (`core/openapi_document.hpp`, issue
  * #853), and the schema index is one of the two things read there (issue #860).
  * What arrives here is already JSON Schema: `response_schemas_of` extracts each
- * operation's declared response schemas as the document is stored, normalises
+ * operation's declared responses as the document is stored, normalises
  * the OpenAPI-only spellings (3.0's `nullable`, its draft-04 boolean
  * `exclusiveMinimum`, `discriminator`) into the dialect a validator can read,
  * and the write stores the result in `spec_documents.response_schemas`. This
@@ -149,9 +149,11 @@ enum class UncheckedReason : std::uint8_t {
      * database was edited from outside.
      */
     NeverStamped,
-    /// The identity is not one the index declares.
+    /// The identity is not one the index declares: the operation is not in the
+    /// spec.
     OperationNotDeclared,
-    /// The operation declares responses, none matching this status.
+    /// The operation declares no status matching this one, or the one it
+    /// matches (the same rule coverage counts with) declares no schema.
     NoSchemaForStatus,
     /// The status matched, none of its media types did.
     NoSchemaForContentType,
@@ -247,8 +249,8 @@ class ResponseSchemaIndex {
     const std::string& content_type,
     const std::string& body) const;
 
-    /// Operations the index declares. Zero is possible and honest: a document
-    /// whose operations all declare unschema'd responses.
+    /// Operations the index declares. Zero is possible and honest: a stored
+    /// index whose rows were all unusable.
     [[nodiscard]] size_t size () const {
         return operations_.size ();
     }
@@ -260,12 +262,18 @@ class ResponseSchemaIndex {
         nlohmann::json schema;
     };
     struct IndexedOperation {
+        /// Every distinct status the operation declares, as written and in
+        /// document order - the candidates a response status is matched
+        /// against. Includes a status that declares no schema.
+        std::vector<std::string> statuses;
+        /// The schemaful rows only; a status-only row adds to `statuses` alone.
         std::vector<DeclaredSchema> responses;
     };
 
-    /// The responses one indexed row declares. A response missing a status, a
-    /// media type or a schema declares nothing checkable and is skipped rather
-    /// than costing the document its index.
+    /// The responses one indexed row declares. A status-only row (a status, an
+    /// empty media type, no schema) declares the status and nothing to check;
+    /// any other row missing a status, a media type or a schema is skipped
+    /// rather than costing the document its index.
     static void read_declared_responses (const nlohmann::json& row,
     IndexedOperation& operation);
 

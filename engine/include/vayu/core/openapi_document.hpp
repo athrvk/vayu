@@ -208,17 +208,22 @@ struct DocumentDescription {
 [[nodiscard]] DocumentDescription describe_document (const nlohmann::ordered_json& document);
 
 /**
- * @brief The response schemas @p document declares, as JSON Schema (issue
- *        #860), or `null` when it declares none.
+ * @brief The responses @p document declares, with their schemas as JSON Schema
+ *        (issue #860), or `null` when it declares no response at all.
  *
  * The index `spec_documents.response_schemas` stores: `refRoots` (absent when
  * the document has none) beside an `operations` array whose rows carry the same
  * identity `declared_operations_of` produces and a `responses` list of
- * `{status, contentType, schema}`. An operation declaring no schema has no row,
- * and a document where none does has no index at all - "no index" and "declares
- * nothing" are one state in storage, and the honest reading of a document
- * nothing was extracted from is the first: a response of it reports
- * `checked: false`, never a body that passed.
+ * `{status, contentType, schema}`. Every status an operation declares is listed
+ * (issue #3028), the set coverage counts: a status with no schema to check
+ * against - no `content`, only schema-less media types, a `$ref` that resolves
+ * to nothing, a 2.0 response with no `schema` - is one status-only row, an
+ * empty `contentType` and no `schema`, so the contract check can say "this
+ * status declares no schema" instead of letting `default` or `4XX` judge it. An
+ * operation declaring no status has no row, and a document where none does has
+ * no index at all - "no index" and "declares nothing" are one state in storage,
+ * and the honest reading of a document nothing was extracted from is the first:
+ * a response of it reports `checked: false`, never a body that passed.
  *
  * Two jobs, and the second is the one that cannot be skipped:
  *

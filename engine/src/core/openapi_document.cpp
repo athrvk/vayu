@@ -786,6 +786,18 @@ const nlohmann::ordered_json& schema) {
     return row;
 }
 
+/// The row of a status that declares no schema to check a body against: just
+/// the status, with an empty `contentType` and no `schema`. It keeps the status
+/// in the index, because the contract check must agree with coverage on which
+/// statuses the operation declares - a body under it is unchecked, and a
+/// wildcard (`default`, `4XX`) must not judge it instead.
+nlohmann::ordered_json status_only_response (const std::string& status) {
+    nlohmann::ordered_json row;
+    row["status"]      = status;
+    row["contentType"] = "";
+    return row;
+}
+
 /// A schema position that holds something JSON Schema cannot read - `null`, a
 /// string, a number - declares nothing checkable. Skipped like an absent one:
 /// storing the row would put a value in the index no validator can use, and
@@ -796,14 +808,42 @@ bool is_schema (const nlohmann::ordered_json& node) {
 }
 
 /**
- * An OpenAPI 3.x operation's declared response schemas.
+ * Appends the schemaful media types of one OpenAPI 3.x response to @p declared.
  *
  * Every media type is kept, not just the JSON one: what can be validated is
  * decided at response time by what the server actually sent, and a document
  * declaring both `application/json` and `application/xml` describes two real
- * responses. A media type whose response declares no schema is skipped - there
- * is nothing to check against, and an empty schema would claim everything is
- * valid.
+ * responses. A media type that declares no schema is skipped - there is nothing
+ * to check against, and an empty schema would claim everything is valid.
+ */
+void append_media_schemas_v3 (nlohmann::ordered_json& declared,
+const std::string& status,
+const nlohmann::ordered_json& response) {
+    const nlohmann::ordered_json* content = find_object (response, "content");
+    if (content == nullptr) {
+        return;
+    }
+    for (auto media = content->begin (); media != content->end (); ++media) {
+        if (!media.value ().is_object ()) {
+            continue;
+        }
+        const auto schema = media.value ().find ("schema");
+        if (schema == media.value ().end () || !is_schema (*schema)) {
+            continue;
+        }
+        declared.push_back (
+        declared_response (status, vayu::utils::ascii_lower (media.key ()), *schema));
+    }
+}
+
+/**
+ * An OpenAPI 3.x operation's declared responses.
+ *
+ * Every status the `responses` map names is in the result, the same set
+ * `declared_responses_of` hands coverage. A status with at least one schemaful
+ * media type contributes those rows alone; any other - no `content`, only
+ * schema-less media types, a response that is a `$ref` nothing resolves -
+ * contributes a status-only row.
  */
 nlohmann::ordered_json response_schemas_v3 (const nlohmann::ordered_json& document,
 const nlohmann::ordered_json& operation) {
@@ -816,25 +856,13 @@ const nlohmann::ordered_json& operation) {
         if (entry.key ().empty ()) {
             continue;
         }
-        const nlohmann::ordered_json* response =
-        resolve_single_hop (document, entry.value ());
-        if (response == nullptr) {
-            continue;
+        const size_t before = declared.size ();
+        if (const nlohmann::ordered_json* response =
+            resolve_single_hop (document, entry.value ())) {
+            append_media_schemas_v3 (declared, entry.key (), *response);
         }
-        const nlohmann::ordered_json* content = find_object (*response, "content");
-        if (content == nullptr) {
-            continue;
-        }
-        for (auto media = content->begin (); media != content->end (); ++media) {
-            if (!media.value ().is_object ()) {
-                continue;
-            }
-            const auto schema = media.value ().find ("schema");
-            if (schema == media.value ().end () || !is_schema (*schema)) {
-                continue;
-            }
-            declared.push_back (declared_response (
-            entry.key (), vayu::utils::ascii_lower (media.key ()), *schema));
+        if (declared.size () == before) {
+            declared.push_back (status_only_response (entry.key ()));
         }
     }
     return declared;
@@ -871,7 +899,19 @@ const nlohmann::ordered_json& operation) {
     return types;
 }
 
-/// A Swagger 2.0 operation's declared response schemas.
+/// The schema a Swagger 2.0 response declares, or `nullptr` for a response that
+/// is absent, unresolvable, or states none a validator could read.
+const nlohmann::ordered_json* response_schema_v2 (const nlohmann::ordered_json* response) {
+    if (response == nullptr) {
+        return nullptr;
+    }
+    const auto schema = response->find ("schema");
+    return schema != response->end () && is_schema (*schema) ? &(*schema) : nullptr;
+}
+
+/// A Swagger 2.0 operation's declared responses, on the rule
+/// `response_schemas_v3` states: every status is there, and one with no
+/// `schema` is a status-only row.
 nlohmann::ordered_json response_schemas_v2 (const nlohmann::ordered_json& document,
 const nlohmann::ordered_json& operation) {
     nlohmann::ordered_json declared = nlohmann::ordered_json::array ();
@@ -884,13 +924,10 @@ const nlohmann::ordered_json& operation) {
         if (entry.key ().empty ()) {
             continue;
         }
-        const nlohmann::ordered_json* response =
-        resolve_single_hop (document, entry.value ());
-        if (response == nullptr) {
-            continue;
-        }
-        const auto schema = response->find ("schema");
-        if (schema == response->end () || !is_schema (*schema)) {
+        const nlohmann::ordered_json* schema =
+        response_schema_v2 (resolve_single_hop (document, entry.value ()));
+        if (schema == nullptr) {
+            declared.push_back (status_only_response (entry.key ()));
             continue;
         }
         for (const std::string& content_type : media_types) {
@@ -1006,7 +1043,7 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
         response_schemas_v3 (document, *walked.node) :
         response_schemas_v2 (document, *walked.node);
         if (responses.empty ()) {
-            continue;
+            continue; // declares no status, so there is nothing to answer for
         }
         nlohmann::ordered_json row;
         if (!walked.identity.operation_id.empty ()) {
@@ -1018,7 +1055,7 @@ nlohmann::ordered_json response_schemas_of (const nlohmann::ordered_json& docume
         rows.push_back (std::move (row));
     }
     if (rows.empty ()) {
-        return nullptr;
+        return nullptr; // no operation declares a status: nothing to answer for
     }
 
     nlohmann::ordered_json index = nlohmann::ordered_json::object ();

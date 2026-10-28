@@ -230,6 +230,184 @@ TEST (ResponseSchemaIndexTest, EveryUncheckableCaseNamesItself) {
     EXPECT_EQ (*verdict.reason, UncheckedReason::BodyNotJson);
 }
 
+namespace {
+
+/// The stored `response_schemas` text for `GET /pets/{petId}` declaring
+/// @p responses (rows as `response_schemas_of` writes them).
+std::string pet_index_with (const json& responses) {
+    json index;
+    index["operations"] = json::array ({ json{ { "operationId", "getPet" },
+    { "method", "GET" }, { "path", "/pets/{petId}" }, { "responses", responses } } });
+    return index.dump ();
+}
+
+json status_only_row (const std::string& status) {
+    return json{ { "status", status }, { "contentType", "" } };
+}
+
+json schema_row (const std::string& status) {
+    return json{ { "status", status }, { "contentType", "application/json" },
+        { "schema", pet_schema () } };
+}
+
+const char* const NOT_A_PET_BODY = R"({"id":"not a number"})";
+
+} // namespace
+
+TEST (ResponseSchemaIndexTest, AStatusWithNoSchemaIsNotJudgedByDefault) {
+    // #3028: the `200` declares no schema, so the `default` that does must not
+    // judge its body. Build the status list from the schemaful rows alone and
+    // the 200 body below is checked against `default` and fails.
+    const auto index = ResponseSchemaIndex::parse (pet_index_with (
+    json::array ({ status_only_row ("200"), schema_row ("default") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto declared = index->check (GET_PET, 200, "application/json", NOT_A_PET_BODY);
+    EXPECT_FALSE (declared.checked);
+    ASSERT_HAS_VALUE (declared.reason);
+    EXPECT_EQ (*declared.reason, UncheckedReason::NoSchemaForStatus);
+    EXPECT_TRUE (declared.matched_status.empty ());
+
+    // `default` still answers for a status nothing else declares.
+    const auto other = index->check (GET_PET, 500, "application/json", NOT_A_PET_BODY);
+    EXPECT_TRUE (other.checked);
+    EXPECT_FALSE (other.valid);
+    EXPECT_EQ (other.matched_status, "default");
+}
+
+TEST (ResponseSchemaIndexTest, AnExactStatusWithNoSchemaIsNotJudgedByARange) {
+    const auto index = ResponseSchemaIndex::parse (
+    pet_index_with (json::array ({ status_only_row ("404"), schema_row ("4XX") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto declared = index->check (GET_PET, 404, "application/json", NOT_A_PET_BODY);
+    EXPECT_FALSE (declared.checked);
+    ASSERT_HAS_VALUE (declared.reason);
+    EXPECT_EQ (*declared.reason, UncheckedReason::NoSchemaForStatus);
+    EXPECT_NE (declared.matched_status, "4XX");
+
+    const auto ranged = index->check (GET_PET, 418, "application/json", NOT_A_PET_BODY);
+    EXPECT_TRUE (ranged.checked);
+    EXPECT_EQ (ranged.matched_status, "4XX");
+}
+
+TEST (ResponseSchemaIndexTest, ARangeWithNoSchemaIsNotJudgedByDefault) {
+    const auto index = ResponseSchemaIndex::parse (pet_index_with (
+    json::array ({ status_only_row ("2XX"), schema_row ("default") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto verdict = index->check (GET_PET, 201, "application/json", NOT_A_PET_BODY);
+    EXPECT_FALSE (verdict.checked);
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForStatus);
+}
+
+TEST (ResponseSchemaIndexTest, AnOperationThatDeclaresOnlySchemalessStatusesIsStillDeclared) {
+    // `operation_not_declared` means the operation is not in the spec; a
+    // 204-only one is, and its answer is about the status.
+    const auto index = ResponseSchemaIndex::parse (
+    pet_index_with (json::array ({ status_only_row ("204") })));
+    ASSERT_HAS_VALUE (index);
+    EXPECT_EQ (index->size (), 1u);
+
+    auto verdict = index->check (GET_PET, 204, "", "");
+    EXPECT_FALSE (verdict.checked);
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForStatus);
+
+    // A status it does not declare: the same reason, as for any operation.
+    verdict = index->check (GET_PET, 200, "application/json", NOT_A_PET_BODY);
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForStatus);
+
+    verdict = index->check (R"({"method":"GET","path":"/ghosts"})", 204, "", "");
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::OperationNotDeclared);
+}
+
+TEST (ResponseSchemaIndexTest, AStatusWithSchemasStillAnswersForAMediaTypeItDoesNotDeclare) {
+    // The status declares a schema, so a mismatching media type is still
+    // `no_schema_for_content_type`, even with a status-only row beside it.
+    const auto index = ResponseSchemaIndex::parse (
+    pet_index_with (json::array ({ status_only_row ("404"), schema_row ("200") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto verdict = index->check (GET_PET, 200, "text/html", "<p/>");
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForContentType);
+}
+
+TEST (ResponseSchemaIndexTest, AStatusOnlyRowNeedsNoMediaTypeToMatch) {
+    // An empty content type must not select the status-only row as though it
+    // declared a media type: the response below has none and still is not
+    // checked against anything.
+    const auto index = ResponseSchemaIndex::parse (pet_index_with (
+    json::array ({ status_only_row ("200"), schema_row ("default") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto verdict = index->check (GET_PET, 200, "", NOT_A_PET_BODY);
+    EXPECT_FALSE (verdict.checked);
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForStatus);
+}
+
+TEST (ResponseSchemaIndexTest, OnlyAStatusAndNothingElseMakesAStatusOnlyRow) {
+    // Rows that state a media type with no schema, a schema with no media type,
+    // or no status are junk and declare nothing - the `200` below must stay
+    // undeclared so `default` still answers it.
+    const auto index = ResponseSchemaIndex::parse (pet_index_with (
+    json::array ({ json{ { "status", "200" }, { "contentType", "application/json" } },
+    json{ { "status", "200" }, { "schema", pet_schema () } }, json{ { "contentType", "" } },
+    json{ { "status", "" }, { "contentType", "" } }, schema_row ("default") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto verdict = index->check (GET_PET, 200, "application/json", NOT_A_PET_BODY);
+    EXPECT_TRUE (verdict.checked);
+    EXPECT_EQ (verdict.matched_status, "default");
+}
+
+TEST (ResponseSchemaIndexTest, AStatusOnlyRowWithoutAContentTypeKeyReadsTheSame) {
+    const auto index = ResponseSchemaIndex::parse (pet_index_with (
+    json::array ({ json{ { "status", "200" } }, schema_row ("default") })));
+    ASSERT_HAS_VALUE (index);
+
+    const auto verdict = index->check (GET_PET, 200, "application/json", NOT_A_PET_BODY);
+    EXPECT_FALSE (verdict.checked);
+}
+
+TEST (ResponseSchemaIndexTest, TheDerivedIndexJudgesEachStatusByItsOwnDeclaration) {
+    // End to end from the document, both dialects: the writer's rows and the
+    // reader's rule have to agree on what a schema-less status is.
+    const std::string v3 =
+    R"({"openapi":"3.0.0","paths":{"/pets/{petId}":{"get":{"operationId":"getPet","responses":{)"
+    R"("200":{"description":"ok"},"404":{"description":"missing"},)"
+    R"("4XX":{"content":{"application/json":{"schema":{"type":"object","required":["code"]}}}},)"
+    R"("default":{"content":{"application/json":{"schema":{"type":"object","required":["code"]}}}}}}}}})";
+    const std::string v2 =
+    R"({"swagger":"2.0","paths":{"/pets/{petId}":{"get":{"operationId":"getPet","responses":{)"
+    R"("200":{"description":"ok"},"404":{"description":"missing"},)"
+    R"("default":{"description":"err","schema":{"type":"object","required":["code"]}}}}}}})";
+
+    for (const std::string& document : { v3, v2 }) {
+        const auto derived = derive_spec_indexes (document, INDEX_CAP);
+        ASSERT_TRUE (derived.ok ()) << derived.error;
+        const auto index = ResponseSchemaIndex::parse (derived.response_schemas);
+        ASSERT_HAS_VALUE (index);
+
+        for (const int status : { 200, 404 }) {
+            const auto verdict =
+            index->check (GET_PET, status, "application/json", R"({"message":"x"})");
+            EXPECT_FALSE (verdict.checked) << status << " in " << document;
+            ASSERT_HAS_VALUE (verdict.reason);
+            EXPECT_EQ (*verdict.reason, UncheckedReason::NoSchemaForStatus);
+        }
+        const auto judged =
+        index->check (GET_PET, 500, "application/json", R"({"message":"x"})");
+        EXPECT_TRUE (judged.checked) << document;
+        EXPECT_FALSE (judged.valid) << document;
+    }
+}
+
 TEST (ResponseSchemaIndexTest, IdentityResolvesByOperationIdBeforeThePath) {
     // The path moved and the operationId did not: the document still describes
     // this request, and following the operationId is what says so.

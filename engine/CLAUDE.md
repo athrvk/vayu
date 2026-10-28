@@ -822,7 +822,10 @@ logged as a warning: it means a client skipped composition.
     name in neither place stays an annotation. A name added to the table must
     not be one valijson checks, or each failure is counted twice. `POST /execute`
     returns the node and `record_design_result` stores the *same object* on the
-    trace. `match_status_pattern` is shared with coverage. Under load the check
+    trace. `match_status_pattern` is shared with coverage, over the same
+    statuses: the index lists every declared status, a schema-less one as a
+    status-only row (#3028), which answers `no_schema_for_status` instead of
+    letting `default` or `4XX` judge it. Under load the check
     is deferred to run end (#682, `validate_sampled_responses` over the sample
     reservoirs, stored as `schemaValidation` on `runs.summary` with its own
     `sampled` denominator); a source-scan test fails if validation reaches
