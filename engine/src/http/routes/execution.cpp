@@ -2594,9 +2594,11 @@ std::optional<std::string> refuse_monitor_on_collection_run (const nlohmann::jso
  * `validate_run_config`'s type check.
  */
 std::optional<std::string> refuse_fail_on_schema_error_outside_collection_run (
-const nlohmann::json& json, bool collection_run) {
+const nlohmann::json& json,
+bool collection_run) {
     const auto flag = json.find ("failOnSchemaError");
-    if (collection_run || flag == json.end () || !flag->is_boolean () || !flag->get<bool> ()) {
+    if (collection_run || flag == json.end () || !flag->is_boolean () ||
+    !flag->get<bool> ()) {
         return std::nullopt;
     }
     return "'failOnSchemaError' is only read by a collection run - a load run "
