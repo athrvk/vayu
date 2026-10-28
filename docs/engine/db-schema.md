@@ -1233,8 +1233,8 @@ path, responses: [{status, contentType, schema?}]}]}`, read when a response come
 back with a body to check. Every status an operation declares is listed (#3028);
 one with no schema to check against is a status-only row (`contentType: ""`, no
 `schema`), so the check and coverage agree on the statuses and a `default` or
-`4XX` never judges a body under a status the document names itself. **Derived, never supplied** (issue #860), off the
-*same* read as `operations`: a write carrying a `responseSchemas` field is a
+`4XX` never judges a body under a status the document names itself.
+**Derived, never supplied** (issue #860), off the *same* read as `operations`: a write carrying a `responseSchemas` field is a
 `400`, and one read for both is what keeps them agreeing about which operation
 declares which status.
 

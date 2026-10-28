@@ -833,7 +833,7 @@ Not a failure, and it says which of these it was:
 | It says | Because |
 |---|---|
 | This request is not bound to an operation | The request carries no operation identity - match or re-bind the collection |
-| The bound document carries no response schemas | It was stored before this existed, or declares none. Sync or re-bind |
+| The bound document declares no response | It was stored before this existed, or declares none. Sync or re-bind |
 | The stored document has changed | The binding names a version this document no longer is. Sync |
 | The binding never recorded a version | The collection is bound to a document and to no version of it, so there is nothing to compare - re-bind. Vayu stamps the version on every write and repairs older bindings at startup, so this means the database was edited from outside |
 | The spec no longer declares this operation | The contract moved and this request did not |
@@ -944,7 +944,7 @@ Absent, never zeros, in each of these cases:
 - The collection is not bound to a document, and neither is any collection
   above it.
 - The run was a single request rather than a collection run.
-- The bound document carries **no response schemas** - it was stored before this
+- The bound document declares **no response** - it was stored before this
   existed, or declares none. Re-bind or sync the collection.
 - Nothing survived sampling.
 

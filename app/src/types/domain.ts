@@ -387,12 +387,13 @@ export interface DeclaredOperation {
  * same reason `DeclaredOperation.responses` keeps them that way. `schema` is
  * JSON Schema, translated out of OpenAPI's dialect by the engine as the document
  * was stored (`core/openapi_document.hpp`, issue #860), and may legally be
- * `true` or `false` as well as an object.
+ * `true` or `false` as well as an object. A status that declares no schema is
+ * a status-only row: `contentType` is `""` and `schema` is absent (#3028).
  */
 export interface DeclaredResponseSchema {
 	status: string;
 	contentType: string;
-	schema: unknown;
+	schema?: unknown;
 }
 
 /**
