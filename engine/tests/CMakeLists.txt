@@ -154,6 +154,7 @@ add_executable(vayu_tests
     user_error_wording_scan_test.cpp
     execute_auth_provenance_test.cpp
     execute_binary_body_test.cpp
+    execute_elements_validation_test.cpp
     execute_transport_failure_test.cpp
     oauth_client_test.cpp
     oauth_route_test.cpp
@@ -408,6 +409,7 @@ set(vayu_scratch_database_suites
     ConnectionReplayRunTest
     ExecuteAuthProvenanceTest
     ExecuteBinaryBodyTest
+    ExecuteElementsValidation
     ExecuteTransportFailureTest
     ExecuteByteRowTest
     CustomCaVerificationTest

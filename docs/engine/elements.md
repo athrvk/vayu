@@ -41,7 +41,9 @@ An element is `{"id", "kind", "enabled", "name"?, "config"}` in an ordered array
 `id` and `kind` are required; `kind` must be one `GET /elements/kinds` lists, and `config` must
 validate against that kind's JSON Schema - both checked by
 `vayu::core::Registry::validate` (`engine/include/vayu/core/elements.hpp`), which every write route
-runs before storing (`400` naming the index, the kind and the field on a violation). A rule the
+runs before storing and `POST /execute` runs on its inline list before sending (`400` naming the
+index, the kind and the field on a violation; `/execute` judges a collection-origin entry as a
+collection's own, see [its `elements`](api-reference.md#post-execute)). A rule the
 schema cannot express (a JSONPath that parses) is the kind's optional `validate_config` hook, run
 after the schema accepts the config and worded the same way. A setting the kind does not declare
 is refused with the keys it does (`'expected' is not a setting this element has. Settings: in,
