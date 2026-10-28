@@ -711,6 +711,7 @@ contract:
 | Declared responses seen | Status patterns the document declares that the run actually produced |
 | Undeclared statuses | Statuses the run saw that the document declares nothing for |
 | Never called | Operations with no request at all - listed first, because they are the finding |
+| Got no response | Operations whose every request was a transport error - counted as covered, but the chip is not green |
 
 A status answers to the **most specific** pattern that covers it. An operation
 declaring both `200` and `2XX` that only ever answered 200 reports `2XX` as not

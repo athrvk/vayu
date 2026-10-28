@@ -296,6 +296,22 @@ describe("ContractCoverage", () => {
 			expect(screen.getByText(/1 operation got no response\./)).toBeTruthy();
 		});
 
+		it("does not count a never-called operation as one that got no response", () => {
+			render(
+				<ContractCoverage
+					coverage={coverage({
+						operationsTotal: 2,
+						operationsCovered: 1,
+						operations: [
+							operation({ path: "/pets", statusesSeen: [200], declaredHit: ["200"] }),
+							operation({ method: "POST", path: "/pets/new", sent: 0 }),
+						],
+					})}
+				/>
+			);
+			expect(screen.queryByText(/got no response/)).toBeNull();
+		});
+
 		it("stays green and silent when failures were partial or absent", () => {
 			render(
 				<ContractCoverage
