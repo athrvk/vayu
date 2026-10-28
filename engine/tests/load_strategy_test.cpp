@@ -2770,6 +2770,88 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesTimerPacingAndThroughput)
     }
 }
 
+// A composed chain can carry a scenario-only element the user switched off
+// (#3050). The pipeline skips a disabled element before its `apply` runs, so
+// nothing can misbehave and the run is not refused. Mutation check: drop the
+// `enabled` guard in `refuse_scenario_only_element` and this reddens.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsADisabledScenarioOnlyKind) {
+    const std::vector<std::pair<std::string, nlohmann::json>> cases{
+        { "timer.pacing", { { "everyMs", 1000 } } },
+        { "control.once", nlohmann::json::object () },
+    };
+    for (const auto& [kind, valid_config] : cases) {
+        const nlohmann::json config{ { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", kind },
+        { "enabled", false }, { "config", valid_config } } }) } };
+        auto reason = vayu::core::validate_request_elements_run_override (config);
+        EXPECT_FALSE (reason.has_value ()) << kind << ": " << reason.value_or ("");
+    }
+}
+
+// Disabled skips the kind refusal only: `Registry::validate` still judges the
+// entry, so a malformed config is caught now and not when it is switched on.
+TEST (RequestElementsRunOverrideValidationTest, StillValidatesADisabledEntryConfig) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
+    { "kind", "assert.status" }, { "enabled", false },
+    { "config", { { "expected", 200 } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("Assert status code"), std::string::npos) << *reason;
+}
+
+TEST (RequestElementsRunOverrideValidationTest, RefusesAnEnabledEntryNamingItsLabelAndOrigin) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "assert.status" },
+                             { "config", { { "in", nlohmann::json::array ({ 200 }) } } } },
+    nlohmann::json{ { "id", "el_2" }, { "kind", "timer.pacing" },
+    { "enabled", true }, { "config", { { "everyMs", 1000 } } },
+    { "origin", { { "kind", "collection" }, { "scope", "folder" },
+                { "id", "col_9" }, { "name", "Nightly" } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("Pacing"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("from the folder 'Nightly'"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("scenario"), std::string::npos) << *reason;
+    // The list is a merge of inherited and own entries, so a position names
+    // nothing the user can find.
+    EXPECT_EQ (reason->find ("Step "), std::string::npos) << *reason;
+}
+
+TEST (RequestElementsRunOverrideValidationTest, NamesTheRequestOrACollectionByOrigin) {
+    const std::vector<std::pair<nlohmann::json, std::string>> cases{
+        { { { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } },
+        "set on this request" },
+        { { { "kind", "collection" }, { "scope", "collection" },
+          { "id", "col_1" }, { "name", "Orders" } },
+        "from the collection 'Orders'" },
+        // A client-stamped origin without `scope` falls back to `kind`,
+        // as `compile_elements` reads it.
+        { { { "kind", "collection" }, { "id", "col_1" } }, "from a collection" },
+    };
+    for (const auto& [origin, expected] : cases) {
+        const nlohmann::json config{ { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
+        { "kind", "timer.pacing" }, { "config", { { "everyMs", 1000 } } },
+        { "origin", origin } } }) } };
+        auto reason = vayu::core::validate_request_elements_run_override (config);
+        ASSERT_HAS_VALUE (reason) << origin.dump ();
+        EXPECT_NE (reason->find (expected), std::string::npos) << *reason;
+    }
+}
+
+// A payload written by hand carries no origin, so the entry is named by its id.
+TEST (RequestElementsRunOverrideValidationTest, FallsBackToTheIdWithoutAnOrigin) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "my_pacing" },
+    { "kind", "timer.pacing" }, { "config", { { "everyMs", 1000 } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("Pacing"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("element 'my_pacing'"), std::string::npos) << *reason;
+    EXPECT_EQ (reason->find ("Step "), std::string::npos) << *reason;
+}
+
 // The companion to the two refusals above: every phase-0 kind - the ones
 // this run shape's own hooks actually dispatch - stays accepted.
 TEST (RequestElementsRunOverrideValidationTest, AcceptsEveryPhaseZeroExtractAndAssertKind) {

@@ -8699,14 +8699,21 @@ renames a composed request's chain-then-own `elements` onto, since `POST
 **Only the kinds this run shape's own hooks actually dispatch are accepted**:
 `extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
 phase-0 set issue #1514 gave the design send. A `control.*` kind or
-`timer.pacing`/`timer.throughput` is a `400` naming the index and the kind,
-never silently accepted and left inert: those need per-VU controller and
+`timer.pacing`/`timer.throughput` is a `400` naming the element by its kind
+label and where it was declared (`from the folder 'Nightly'`, `from the
+collection 'Orders'`, `set on this request`, read from the entry's `origin`;
+`element '<id>'` for an entry that carries none) - not by position, because a
+composed list interleaves inherited elements with the request's own (#3050).
+It is never silently accepted and left inert: those need per-VU controller and
 pacing state (`controller_state`, `SharedThroughputCounters`,
 `pacing_state`) this run shape's single-submission model has no equivalent
 of, and admitting one without running it would report `"ok"` in
 `summary["elements"]` for behaviour that never happened. Run a sequence that
 needs a controller as a `"scenario"` instead, where its steps carry that
-state.
+state. **A disabled entry (`"enabled": false`) is not refused**: the pipeline
+skips it before its `apply` runs, so a switched-off pacing timer inherited
+from a collection does not block the run. It is still validated like any other
+entry, so a malformed `config` fails now rather than when it is switched on.
 
 `vayu::core::ElementPipeline` runs the compiled list per submission, the same
 phases a design send uses: `script.pre` at `step.before`, `extract.*` /

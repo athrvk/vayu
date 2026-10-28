@@ -1051,9 +1051,10 @@ through `requestElements` - the mechanism is the same shape, a per-submission
 target has no persistent virtual-user object to hold state on between
 submissions. `control.*`, `timer.pacing` and `timer.throughput` stay a
 scenario-only concern: `validate_request_elements_run_override` refuses them
-outright rather than accepting a kind that would silently no-op or misfire -
-a lone request has no sequence for a jump, skip or transaction to act on, and
-no per-VU or shared pacing state for the kind to read.
+outright (when enabled; a disabled entry is skipped by the pipeline) rather
+than accepting a kind that would silently no-op or misfire - a lone request
+has no sequence for a jump, skip or transaction to act on, and no per-VU or
+shared pacing state for the kind to read.
 
 Two things were deliberately left open: whether a **stored scenario entity**
 ever lands (the seam exists; the demand does not), and a **retry policy** for
