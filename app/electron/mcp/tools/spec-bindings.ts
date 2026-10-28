@@ -457,7 +457,10 @@ export async function previewSpecBind(
 ): Promise<Record<string, unknown>> {
 	const described = asRecord(await client.describeSpec(content, signal));
 	const operations = Array.isArray(described.operations) ? described.operations : [];
-	const match = asRecord(await client.matchSpec({ collectionId, operations }, signal));
+	const basePaths = Array.isArray(described.basePaths)
+		? described.basePaths.filter((p): p is string => typeof p === "string")
+		: undefined;
+	const match = asRecord(await client.matchSpec({ collectionId, operations, basePaths }, signal));
 	const rows = readCollectionRows(await client.listCollections(signal));
 	const subtree = collectionSubtree(rows, collectionId) ?? [collectionId];
 	const lists = await Promise.all(subtree.map((id) => client.listRequests(id, signal)));

@@ -28,7 +28,8 @@
  *   first be matched against and reported on. They are sent here, unlike on
  *   `POST /specs` - which reads them off the document it stores (issue #853) -
  *   because this route matches against a document that has not been stored yet,
- *   which is the whole point of a bind preview.
+ *   which is the whole point of a bind preview. The optional `basePaths` come
+ *   from the same `POST /specs/describe` answer (#3030).
  *
  * It writes nothing and stores nothing: the caller sees the counts, and
  * `POST /specs/bind` (issue #862) performs the write. That split is deliberate
@@ -45,6 +46,7 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <algorithm>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -98,6 +100,17 @@ match_spec_operations_response (vayu::db::Database& db, const nlohmann::json& js
         return { 400, error_body (400, *reason) };
     }
 
+    std::vector<std::string> base_paths;
+    if (const auto base_paths_field = json.find ("basePaths");
+    base_paths_field != json.end ()) {
+        if (!base_paths_field->is_array () ||
+        !std::ranges::all_of (*base_paths_field,
+        [] (const nlohmann::json& entry) { return entry.is_string (); })) {
+            return { 400, error_body (400, "Invalid 'basePaths': must be an array of strings") };
+        }
+        base_paths = base_paths_field->get<std::vector<std::string>> ();
+    }
+
     if (!db.get_collection (collection_id).has_value ()) {
         return { 404, error_body (404, "Collection not found") };
     }
@@ -121,7 +134,7 @@ match_spec_operations_response (vayu::db::Database& db, const nlohmann::json& js
         row["method"].get<std::string> (), row["path"].get<std::string> () });
     }
 
-    const auto match = vayu::core::match_operations (requests, operations);
+    const auto match = vayu::core::match_operations (requests, operations, base_paths);
 
     nlohmann::json matched = nlohmann::json::array ();
     for (const auto& pair : match.matched) {
@@ -151,7 +164,9 @@ void register_spec_match_routes (RouteContext& ctx) {
      * stored, stamped or created, so a caller may ask about a document it has
      * not decided to bind.
      * Body params: collectionId (required), operations (required - the same
-     * identity rows `POST /specs` accepts as its `operations` index).
+     * identity rows `POST /specs` accepts as its `operations` index),
+     * basePaths (optional - the document's server base paths, as
+     * `POST /specs/describe` answers them).
      * Returns: {matched, unmatchedRequests, unmatchedOperations}, 400, or 404
      * when the collection does not exist.
      */

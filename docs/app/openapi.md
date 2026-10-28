@@ -204,6 +204,13 @@ already there:
   document's `{petId}` - is flattened, so a renamed path parameter still matches.
 - A request with the id **written in** (`/pets/42`) matches `/pets/{petId}`, as
   long as no literal path in the document claims it first.
+- A request that writes the **server's base path** into its URL
+  (`https://api.example.com/v1/pets`) matches `/pets` under a server of
+  `https://api.example.com/v1` (a Swagger 2.0 `basePath` likewise). Every server
+  the document lists counts, not only the first one an import uses, and a
+  server variable's default is filled in. The base path is taken off whole
+  segments only, so `/v1` never matches `/v10/pets`, and a path the document
+  declares in full (`/v1/pets`) is matched before any base path is taken off.
 - **Ambiguity is refused.** If two requests reduce to the same path, or one
   request could be two operations, none of them is matched.
 

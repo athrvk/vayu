@@ -348,6 +348,110 @@ TEST (MatchOperations, LeavesARequestThatStatesNoPathUnmatched) {
     (std::vector<std::string>{ "root" }));
 }
 
+/// Issue #3030: a literal URL carries the server's base path the document
+/// leaves out of `paths`. Mutation check: skip the third pass and neither
+/// request matches.
+TEST (MatchOperations, MatchesALiteralUrlUnderTheServerBasePath) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "https://h/v1/pets"),
+        request ("r2", "GET", "https://h/v1/pets/42") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets", "listPets"),
+        op ("GET", "/pets/{petId}", "getPet") };
+
+    EXPECT_TRUE (match_operations (requests, operations).matched.empty ())
+    << "without a base path the two sides share no shape";
+
+    const auto result = match_operations (requests, operations, { "/v1" });
+    EXPECT_EQ (matched_ids (result, requests), (std::vector<std::string>{ "r1", "r2" }));
+    EXPECT_EQ (matched_operations (result, operations),
+    (std::vector<std::string>{ "listPets", "getPet" }));
+}
+
+/// A templated server (`/{version}`) stands for any one segment, and a trailing
+/// slash on the base path is no different base path.
+TEST (MatchOperations, ReadsATemplatedOrSlashTerminatedBasePath) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "https://h/v2/pets") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets", "listPets") };
+
+    EXPECT_EQ (matched_operations (
+               match_operations (requests, operations, { "/{version}" }), operations),
+    (std::vector<std::string>{ "listPets" }));
+    EXPECT_EQ (matched_operations (
+               match_operations (requests, operations, { "/v2/" }), operations),
+    (std::vector<std::string>{ "listPets" }));
+}
+
+/// The first two passes win: a document declaring the full path claims the
+/// request before any base path is stripped. Mutation check: run the third
+/// pass first and `r1` pairs with `listPets`.
+TEST (MatchOperations, PrefersTheDeclaredFullPathOverTheStrippedOne) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "https://h/v1/pets") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets", "listPets"),
+        op ("GET", "/v1/pets", "legacyListPets") };
+
+    const auto result = match_operations (requests, operations, { "/v1" });
+
+    EXPECT_EQ (matched_operations (result, operations),
+    (std::vector<std::string>{ "legacyListPets" }));
+    EXPECT_EQ (unmatched_operation_ids (result, operations),
+    (std::vector<std::string>{ "listPets" }));
+}
+
+/// Whole segments only: `/v1` is a prefix of neither `/v10/pets` nor
+/// `/v1pets`. A request that is exactly the base path is the root operation.
+/// Mutation check: strip the base path as a string prefix (restoring the
+/// leading `/`) and `r3` pairs with `listPets`.
+TEST (MatchOperations, StripsABasePathOnlyAtASegmentBoundary) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "https://h/v10/pets"),
+        request ("r2", "GET", "https://h/v1"), request ("r3", "GET", "https://h/v1pets") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets", "listPets"),
+        op ("GET", "/", "root") };
+
+    const auto result = match_operations (requests, operations, { "/v1" });
+
+    EXPECT_EQ (matched_ids (result, requests), (std::vector<std::string>{ "r2" }));
+    EXPECT_EQ (matched_operations (result, operations),
+    (std::vector<std::string>{ "root" }));
+    EXPECT_EQ (unmatched_request_ids (result, requests),
+    (std::vector<std::string>{ "r1", "r3" }));
+}
+
+/// The ambiguity rule judges the candidates of every base path together.
+/// Mutation check: let the first base path that strips a request win and both
+/// cases pair something.
+TEST (MatchOperations, RefusesAPairingTwoBasePathsMakeAmbiguous) {
+    // One request, two candidates: `/api` leaves `/v1/pets`, `/api/v1` leaves
+    // `/pets`, and the document declares both.
+    const std::vector<MatchableRequest> nested{ request ("r1", "GET", "https://h/api/v1/pets") };
+    const std::vector<MatchableOperation> both{ op ("GET", "/v1/pets", "versioned"),
+        op ("GET", "/pets", "listPets") };
+    const auto one_request = match_operations (nested, both, { "/api", "/api/v1" });
+    EXPECT_TRUE (one_request.matched.empty ());
+    EXPECT_EQ (unmatched_request_ids (one_request, nested),
+    (std::vector<std::string>{ "r1" }));
+
+    // One operation, two claimants: each request sits under a different server.
+    const std::vector<MatchableRequest> two_servers{ request ("r1", "GET", "https://h/v1/pets"),
+        request ("r2", "GET", "https://h/v2/pets") };
+    const std::vector<MatchableOperation> list{ op ("GET", "/pets", "listPets") };
+    const auto one_operation = match_operations (two_servers, list, { "/v1", "/v2" });
+    EXPECT_TRUE (one_operation.matched.empty ());
+    EXPECT_EQ (unmatched_operation_ids (one_operation, list),
+    (std::vector<std::string>{ "listPets" }));
+}
+
+/// A base path that names nothing to strip changes nothing: the root, an empty
+/// one, and a relative one.
+TEST (MatchOperations, IgnoresABasePathThatNamesNothingToStrip) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "https://h/v1/pets") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets", "listPets") };
+
+    const auto result = match_operations (requests, operations, { "/", "", "v1", "//" });
+
+    EXPECT_TRUE (result.matched.empty ());
+    EXPECT_EQ (unmatched_request_ids (result, requests),
+    (std::vector<std::string>{ "r1" }));
+}
+
 TEST (MatchOperations, MatchesNothingWhenThereIsNothingToMatch) {
     const std::vector<MatchableOperation> operations{ op ("GET", "/pets") };
     EXPECT_EQ (match_operations ({}, operations).unmatched_operations.size (), 1u);

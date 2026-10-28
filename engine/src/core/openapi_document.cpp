@@ -1006,6 +1006,75 @@ std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_j
     return declared;
 }
 
+namespace {
+
+/**
+ * The path of a server URL - what follows the authority, or the whole URL when
+ * it is already a path - without its query and fragment, and "" when it names
+ * none. A URL relative to the document (`v1`) is "" too: its path depends on
+ * where the document was fetched from, which a stored document does not say.
+ */
+std::string_view server_url_path (std::string_view url) {
+    url = url.substr (0, std::min (url.find_first_of ("?#"), url.size ()));
+    size_t authority = 0;
+    if (url.starts_with ("//")) {
+        authority = 2;
+    } else if (url.starts_with ('/')) {
+        return url;
+    } else if (const size_t scheme_end = url.find ("://");
+    scheme_end != std::string_view::npos && url.find ('/') == scheme_end + 1) {
+        authority = scheme_end + 3;
+    } else {
+        return {};
+    }
+    const size_t path = url.find ('/', authority);
+    return path == std::string_view::npos ? std::string_view () : url.substr (path);
+}
+
+/// The base paths @p document states, as written: every 3.x server's, or the
+/// 2.0 `basePath`.
+std::vector<std::string> stated_base_paths (const nlohmann::ordered_json& document) {
+    std::vector<std::string> stated;
+    switch (walk::spec_dialect (document)) {
+    case walk::Dialect::V3: {
+        const nlohmann::ordered_json* servers = js::prop (&document, "servers");
+        if (servers == nullptr || !servers->is_array ()) {
+            break;
+        }
+        for (const nlohmann::ordered_json& server : *servers) {
+            if (const auto url = walk::server_url_with_defaults (&server)) {
+                stated.emplace_back (server_url_path (*url));
+            }
+        }
+        break;
+    }
+    case walk::Dialect::V2:
+        if (const std::string* base = js::as_str (js::prop (&document, "basePath"))) {
+            stated.push_back (*base);
+        }
+        break;
+    case walk::Dialect::None: break;
+    }
+    return stated;
+}
+
+} // namespace
+
+std::vector<std::string> base_paths_of (const nlohmann::ordered_json& document) {
+    std::vector<std::string> base_paths;
+    for (std::string& path : stated_base_paths (document)) {
+        // A trailing slash adds no segment, and the root strips nothing.
+        const size_t last = path.find_last_not_of ('/');
+        path.erase (last == std::string::npos ? 0 : last + 1);
+        if (!path.starts_with ('/') ||
+        std::ranges::find (base_paths, path) != base_paths.end ()) {
+            continue;
+        }
+        base_paths.push_back (std::move (path));
+    }
+    return base_paths;
+}
+
 DocumentDescription describe_document (const nlohmann::ordered_json& document) {
     DocumentDescription described;
     const walk::Dialect dialect = walk::spec_dialect (document);
@@ -1025,6 +1094,7 @@ DocumentDescription describe_document (const nlohmann::ordered_json& document) {
         }
     }
     described.operations = declared_operations_of (document);
+    described.base_paths = base_paths_of (document);
     return described;
 }
 

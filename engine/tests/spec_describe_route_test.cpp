@@ -108,6 +108,49 @@ TEST_F (SpecDescribeRouteTest, ReadsYamlAndNamesTheSwaggerDialect) {
     EXPECT_EQ (body["operations"][0]["path"], "/pets");
 }
 
+// Issue #3030: every server's path, its variables' defaults substituted, so a
+// caller can hand them to `POST /specs/match` beside the operations. A server
+// with no path, one relative to the document and a repeat add nothing.
+TEST_F (SpecDescribeRouteTest, AnswersWithEveryServersBasePath) {
+    const json document{ { "openapi", "3.0.3" },
+        { "info", { { "title", "Pets" }, { "version", "1" } } },
+        { "servers",
+        json::array (
+        { json{ { "url", "https://{host}/{version}/" },
+          { "variables", { { "host", { { "default", "h" } } }, { "version", { { "default", "v2" } } } } } },
+        json{ { "url", "/v1" } }, json{ { "url", "https://h" } },
+        json{ { "url", "relative" } }, json{ { "url", "https://other/v1?x=1" } } }) },
+        { "paths",
+        { { "/pets", { { "get", { { "responses", { { "200", json::object () } } } } } } } } } };
+
+    auto [status, body] = describe (document.dump ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["basePaths"], json::array ({ "/v2", "/v1" }));
+}
+
+TEST_F (SpecDescribeRouteTest, AnswersWithTheSwaggerBasePath) {
+    auto [status, body] =
+    describe ("swagger: \"2.0\"\n"
+              "info:\n  title: Legacy\n"
+              "basePath: /api/v1\n"
+              "paths:\n  /pets:\n    get:\n      operationId: listPets\n");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["basePaths"], json::array ({ "/api/v1" }));
+}
+
+// Always present, so a caller never has to tell "none" from "not answered".
+TEST_F (SpecDescribeRouteTest, AnswersWithNoBasePathsWhenTheDocumentStatesNone) {
+    auto [status, body] = describe (PETS_V3);
+    ASSERT_EQ (status, 200) << body.dump ();
+    ASSERT_TRUE (body.contains ("basePaths"));
+    EXPECT_EQ (body["basePaths"], json::array ());
+
+    auto [root_status, root_body] =
+    describe ("swagger: \"2.0\"\nbasePath: /\npaths: {}\n");
+    ASSERT_EQ (root_status, 200) << root_body.dump ();
+    EXPECT_EQ (root_body["basePaths"], json::array ());
+}
+
 // A document that states no title is described as stating none, rather than
 // given the name an import would have invented for its collection. The card
 // renders its own placeholder; a name made up here would be this side claiming

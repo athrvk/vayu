@@ -526,8 +526,9 @@ apiService.exportRunReport(payload): Promise<RunReportExportResponse> // POST /e
 `describeSpec` is the read that replaced the last parse this app did of a spec
 document (issue #869). It sends the picked bytes and gets back what they are -
 the dialect (`"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"`), `info.title`, and the
-identities the document declares - and the Spec tab paints its card from that and
-hands those identities to `matchSpecOperations`. It parsed the file itself until
+identities the document declares, and the `basePaths` its server URLs name - and
+the Spec tab paints its card from that and hands the identities and the base paths
+to `matchSpecOperations`. It parsed the file itself until
 then, with `services/openapi/spec-operations.ts`, while the bind derived the same
 identities engine-side from the same bytes: two readers of one document, which
 could preview one pairing and commit another. A document that is not a contract,
@@ -540,9 +541,14 @@ which is what lets the Spec tab show the counts before the user commits to a
 bind. The pairing rule lives in the engine (`core/operation_match.hpp`) rather
 than in the renderer, so binding an existing collection is reachable from
 anything that is not the Spec tab - an agent over MCP first among them. The
-payload names the collection and sends the operations; it does **not** send the
-requests, because an OpenAPI import files them under tag sub-collections and the
-engine gathers the whole subtree itself.
+payload names the collection and sends the operations and the `basePaths`
+`describeSpec` answered (issue #3030); it does **not** send the requests, because
+an OpenAPI import files them under tag sub-collections and the engine gathers the
+whole subtree itself. The base paths are relayed rather than left for the engine
+to guess because they are what lets a request written as a literal URL
+(`https://h/v1/pets`) pair with the document's `/pets`: the bind derives them from
+the document it stores, so a preview that omitted them would show fewer matches
+than the bind stamps.
 
 `exportSpec` is a read for the same reason and sends even less (issue #855): a
 collection id, a format, and - for a bound collection - the mode the user chose

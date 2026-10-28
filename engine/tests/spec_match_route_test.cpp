@@ -163,6 +163,36 @@ TEST_F (SpecMatchRouteTest, DoesNotReachRequestsOutsideTheSubtree) {
     EXPECT_EQ (body["unmatchedOperations"].size (), 1u);
 }
 
+/// Issue #3030: the base paths `POST /specs/describe` answers reach the
+/// matcher. Mutation check: drop `basePaths` on the way to `match_operations`
+/// and the literal URL matches nothing.
+TEST_F (SpecMatchRouteTest, MatchesUnderTheBasePathsItIsGiven) {
+    const std::string list = create_request (root_, "GET", "https://h/v1/pets");
+    const json operations  = json::array (
+    { json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", "listPets" } } });
+
+    EXPECT_TRUE (match (operations)["matched"].empty ());
+
+    auto [status, body] = routes::match_spec_operations_response (*db_,
+    json{ { "collectionId", root_ }, { "operations", operations },
+    { "basePaths", json::array ({ "/v1" }) } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    ASSERT_EQ (body["matched"].size (), 1u);
+    EXPECT_EQ (body["matched"][0]["requestId"], list);
+    EXPECT_EQ (body["matched"][0]["operation"]["operationId"], "listPets");
+}
+
+TEST_F (SpecMatchRouteTest, RefusesBasePathsThatAreNotAnArrayOfStrings) {
+    for (const json& base_paths : { json ("/v1"), json::array ({ 1 }),
+         json::array ({ "/v1", nullptr }), json::object () }) {
+        auto [status, body] = routes::match_spec_operations_response (*db_,
+        json{ { "collectionId", root_ }, { "operations", json::array () },
+        { "basePaths", base_paths } });
+        EXPECT_EQ (status, 400) << base_paths.dump () << ": " << body.dump ();
+        EXPECT_NE (body.dump ().find ("basePaths"), std::string::npos) << body.dump ();
+    }
+}
+
 TEST_F (SpecMatchRouteTest, RefusesACollectionThatDoesNotExist) {
     // Not an empty match: "this document matches none of your requests" and
     // "you named a collection that is not there" are different answers.

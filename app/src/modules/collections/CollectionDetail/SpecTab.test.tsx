@@ -87,7 +87,13 @@ const specMetaQuery = {
  */
 const specDescribeQuery = {
 	data: undefined as
-		{ format: string; title: string; operations: Request["specOperation"][] } | undefined,
+		| {
+				format: string;
+				title: string;
+				operations: Request["specOperation"][];
+				basePaths: string[];
+		  }
+		| undefined,
 	isFetching: false,
 	isError: false,
 	error: null as Error | null,
@@ -265,6 +271,7 @@ beforeEach(() => {
 		format: "OpenAPI 3.0",
 		title: "Pets API",
 		operations: [LIST_PETS, GET_PET],
+		basePaths: ["/v1"],
 	};
 	specDescribeQuery.isFetching = false;
 	specDescribeQuery.isError = false;
@@ -534,6 +541,9 @@ describe("binding a collection that already has requests", () => {
 		// And the identities the pairing is asked about are the engine's answer,
 		// relayed - not a list this tab extracted.
 		expect(matchArgs[2]).toEqual([LIST_PETS, GET_PET]);
+		// So are the base paths its servers name (issue #3030): the bind derives
+		// them itself, and a preview that left them out would count fewer matches.
+		expect(matchArgs[3]).toEqual(["/v1"]);
 	});
 
 	it("offers no bind until the engine has read the document", async () => {
@@ -552,6 +562,7 @@ describe("binding a collection that already has requests", () => {
 		// Nothing is asked of the matcher while the document is still being read:
 		// a pairing against identities nobody has yet is not a preview.
 		expect(matchArgs[2]).toBeNull();
+		expect(matchArgs[3]).toBeNull();
 	});
 });
 

@@ -164,6 +164,7 @@ describe("preview_spec_bind", () => {
 				format: "OpenAPI 3.0",
 				title: "Pets",
 				operations: OPERATIONS,
+				basePaths: ["/v1"],
 			}),
 			matchSpec: vi.fn().mockResolvedValue({
 				matched: [{ requestId: "req_list", operation: OPERATIONS[0] }],
@@ -207,7 +208,9 @@ describe("preview_spec_bind", () => {
 		);
 		expect(result.isError).toBeFalsy();
 		expect(c.matchSpec).toHaveBeenCalledWith(
-			{ collectionId: "col_root", operations: OPERATIONS },
+			// The base paths describe answered ride along (issue #3030): the bind
+			// derives them itself, so a preview without them counts fewer matches.
+			{ collectionId: "col_root", operations: OPERATIONS, basePaths: ["/v1"] },
 			undefined
 		);
 		// The whole subtree, and nothing outside it.
@@ -226,5 +229,23 @@ describe("preview_spec_bind", () => {
 		expect(preview.unmatchedOperations).toEqual({ count: 1, operations: [OPERATIONS[1]] });
 		expect(text(result)).toContain("clear identity from 1 request");
 		expect(c.bindSpec).not.toHaveBeenCalled();
+	});
+
+	test("sends no basePaths when describe answered none to relay", async () => {
+		const c = client();
+		c.describeSpec.mockResolvedValue({
+			format: "OpenAPI 3.0",
+			title: "Pets",
+			operations: OPERATIONS,
+		});
+		await dispatchTool(
+			"preview_spec_bind",
+			{ collectionId: "col_root", content: "openapi: 3.0.0" },
+			ctxWith(c)
+		);
+		expect(c.matchSpec.mock.calls[0][0]).toEqual({
+			collectionId: "col_root",
+			operations: OPERATIONS,
+		});
 	});
 });

@@ -3514,38 +3514,13 @@ bool has_unresolved_template (const std::string& url) {
  */
 std::string
 resolve_server_url (const json* server, const std::string& source_url, ImportTally& tally) {
-    const std::string* declared = as_str (prop (server, "url"));
-    if (declared == nullptr || declared->empty ()) {
+    const std::optional<std::string> with_defaults =
+    walk::server_url_with_defaults (server);
+    if (!with_defaults) {
         tally.add ("no_server_url");
         return {};
     }
-    const json* variables = as_record (prop (server, "variables"));
-
-    std::string substituted;
-    for (size_t at = 0; at < declared->size ();) {
-        if ((*declared)[at] != '{') {
-            substituted += (*declared)[at];
-            ++at;
-            continue;
-        }
-        const size_t close = declared->find_first_of ("{}/", at + 1);
-        if (close == std::string::npos || (*declared)[close] != '}' || close == at + 1) {
-            substituted += (*declared)[at];
-            ++at;
-            continue;
-        }
-        const std::string name = declared->substr (at + 1, close - at - 1);
-        const json* value = prop (as_record (prop (variables, name)), "default");
-        // A default is `string` per the specification; a number or boolean is
-        // what a hand-written document produces and reads the same on the wire.
-        if (value == nullptr || value->is_structured () || value->is_null ()) {
-            substituted += declared->substr (at, close - at + 1);
-        } else {
-            substituted += value->is_string () ? value->get<std::string> () :
-                                                 js_string_of (*value);
-        }
-        at = close + 1;
-    }
+    const std::string& substituted = *with_defaults;
 
     if (has_unresolved_template (substituted)) {
         tally.add ("unresolved_base_url");

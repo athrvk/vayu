@@ -214,7 +214,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	 * way rather than through a second copy of it. Nothing is written by asking -
 	 * the counts below still appear before the user commits to the bind.
 	 */
-	const matchQuery = useSpecMatchQuery(collection.id, requests, described?.operations ?? null);
+	const matchQuery = useSpecMatchQuery(
+		collection.id,
+		requests,
+		described?.operations ?? null,
+		described?.basePaths ?? null
+	);
 	const match = matchQuery.data ?? null;
 
 	const mappedCount = requests.filter((r) => r.specOperation).length;

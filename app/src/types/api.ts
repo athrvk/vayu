@@ -2004,6 +2004,16 @@ export interface SpecMatchRequest {
 	 * it previews cannot pair the requests differently.
 	 */
 	operations: SpecOperation[];
+	/**
+	 * The path parts of the document's server URLs, relayed from
+	 * `POST /specs/describe` (issue #3030).
+	 *
+	 * A request written as a literal URL carries the server's base path
+	 * (`https://h/v1/pets`) where the document writes `/pets`, and the bind
+	 * derives the base paths from the document itself - so a preview that left
+	 * them out would show fewer matches than the bind stamps.
+	 */
+	basePaths?: string[];
 }
 
 /** A picked document, for `POST /specs/describe` (issue #869). */
@@ -2027,6 +2037,11 @@ export interface SpecDescribeResponse {
 	title: string;
 	/** Every operation it declares, in document order. */
 	operations: SpecOperation[];
+	/**
+	 * The path of every server URL it names, `[]` when it states none (issue
+	 * #3030). What `POST /specs/match` takes beside `operations`.
+	 */
+	basePaths: string[];
 }
 
 export interface SpecMatchResponse {

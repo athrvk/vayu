@@ -2872,7 +2872,8 @@ carried between them.
   "operations": [
     { "operationId": "listPets", "method": "GET", "path": "/pets" },
     { "method": "GET", "path": "/pets/{petId}" }
-  ]
+  ],
+  "basePaths": ["/v1"]
 }
 ```
 
@@ -2885,7 +2886,10 @@ preview. **Get them from [`POST /specs/describe`](#post-specsdescribe)** rather
 than by reading the document yourself (issue #869): that route is the same reader
 `POST /specs/bind` derives its stamps from, so a preview and the write it
 previews cannot pair the requests differently. `responses` may ride along and is
-ignored.
+ignored. `basePaths` is optional: the path parts of the document's server URLs,
+which `POST /specs/describe` answers beside the operations (issue #3030). A
+non-array, or an entry that is not a string, is a `400`; an entry that does not
+start with `/`, or is the root, names nothing to strip and is ignored.
 
 The requests are **not** sent. The engine gathers the whole subtree of
 `collectionId` itself, because an OpenAPI import binds the root and files every
@@ -2919,20 +2923,31 @@ match that turned on the parameter's spelling would report a rename as removed
 and added. A second pass then offers each remaining request to the templates it
 could be an instance of, because a hand-built collection writes the id in
 (`/pets/42`) - a literal path in the document wins first, which is OpenAPI's own
-precedence. **Ambiguity is refused in both directions**: two requests reducing to
-one shape, or one request that could be two operations, leaves all of them
-unmatched. A wrong identity is worse than none, because `POST /specs/sync`
-applies changes *by* it.
+precedence. A third pass reads `basePaths` (issue #3030): a request written as a
+literal URL carries the server's base path (`https://h/v1/pets`) where the
+document writes `/pets`, so whatever the first two passes left open is compared
+again, both ways, with each base path taken off the front of the request's path.
+A base path is taken off whole segments only (`/v1` is not a prefix of
+`/v10/pets`), a templated one (`/{version}`) stands for any one segment, and a
+request that is exactly the base path is the root operation `/`. The first two
+passes win, so a document declaring `/v1/pets` in full claims that request
+before any base path is stripped. **Ambiguity is refused in both directions**,
+in every pass: two requests reducing to one shape, or one request that could be
+two operations - under two base paths included - leaves all of them unmatched.
+A wrong identity is worse than none, because `POST /specs/sync` applies changes
+*by* it.
 
 **Errors:** `400` for a missing or empty `collectionId`, a missing `operations`,
-or an operation row the store would refuse. `404` when the collection does not
+an operation row the store would refuse, or a `basePaths` that is not an array
+of strings. `404` when the collection does not
 exist - not an empty match, since "this document matches none of your requests"
 and "you named a collection that is not there" are different answers.
 
 ### POST /specs/describe
 
 Say what a document *is*, without storing it: the dialect that claimed it, what
-it calls itself, and every operation it declares. The read behind a bind
+it calls itself, every operation it declares and the base paths its servers
+name. The read behind a bind
 preview - the app's Spec tab paints its card from this and hands the identities
 straight to [`POST /specs/match`](#post-specsmatch).
 
@@ -2957,7 +2972,8 @@ at. Describing a document that *is* stored is
   "operations": [
     { "operationId": "listPets", "method": "GET", "path": "/pets" },
     { "method": "GET", "path": "/pets/{petId}" }
-  ]
+  ],
+  "basePaths": ["/v1"]
 }
 ```
 
@@ -2967,6 +2983,17 @@ because the caller asked what the document calls itself. `operations` are in
 document order, in the shape a request's `spec_operation` records, `operationId`
 **absent** rather than `""` for an operation that declares none - the same rows
 `POST /specs/match` takes.
+
+`basePaths` (issue #3030) is always present, `[]` when the document states
+none, and is what `POST /specs/match` takes beside the operations. For 3.x it
+is the path of **every** `servers[].url`, not only the `servers[0]` an import
+turns into `{{baseUrl}}`, because a collection may have been written against any
+of them: each `{name}` with a `variables` default is substituted first (the
+importer's rule), then the path after the authority is taken
+(`https://{host}/v1` -> `/v1`), or the whole URL when it is already a path. A
+server with no path, or one relative to the document (`v1`), names none. For
+2.0 it is `basePath`. Trailing slashes are dropped, and the root and repeats are
+left out.
 
 This is the reader every spec write uses (issue #853), which is the point of the
 route: the identities answered here are the identities
@@ -3132,7 +3159,9 @@ cleared. Nothing is created or deleted - that is what a sync is for.
 **The caller sends a document, never a pairing.** The engine reads the bytes it
 is about to store, derives the `operations` index from them, and matches the
 subtree with `core::match_operations` - the same rule `POST /specs/match`
-previews with, over the same subtree walk. A pairing worked out by the caller
+previews with, over the same subtree walk, under the base paths the same read
+of the document names (the `basePaths` `POST /specs/describe` answers, issue
+#3030). A pairing worked out by the caller
 would be a second opinion about what the document declares, and an agent over
 MCP has bytes and no OpenAPI reader at all.
 
