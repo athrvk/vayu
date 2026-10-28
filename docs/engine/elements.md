@@ -146,11 +146,14 @@ every non-overlapping match, leftmost first (`$N$` past the pattern's last group
 `extract.boundary` (issue #1518, JMeter's Boundary Extractor) takes everything between the first
 occurrence of `leftBoundary` and the next occurrence of `rightBoundary` on the response body - no
 `field` selector, unlike `extract.regex`'s four, because JMeter's own Boundary Extractor has none
-either. All four - plus `extract.header` - share `variable`, `scope` (`env` | `collection` |
-`globals`), `default` and the JMeter `matchNo` convention: `1`-based picks a match, `0` picks one at
-random, `-1` writes every match as `<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr`
-count, numbered in the order the matches were found (document order for `extract.json`, leftmost
-first for the two text extractors). A miss without a `default`
+either. All four extractors share `variable`, `scope` (`env` | `collection` | `globals`), `default`
+and `required`. `extract.json`, `extract.regex` and `extract.boundary` also share the JMeter `matchNo`
+convention: `1`-based picks a match, `0` picks one at random, `-1` writes every match as
+`<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr` count, numbered in the order the matches
+were found (document order for `extract.json`, leftmost first for the two text extractors).
+`extract.header` has no `matchNo`: it reads the header's one value, and a header the response repeats
+is already folded into one comma-joined value by the transport, so two `Set-Cookie` lines extract as
+`a=1, b=2` with no way to pick one. A miss without a `default`
 reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
