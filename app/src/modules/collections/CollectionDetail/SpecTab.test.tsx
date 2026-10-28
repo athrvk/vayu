@@ -648,6 +648,27 @@ describe("binding a spec that references other files", () => {
 		expect(JSON.parse(content)["x-vayu-bundled"]).toBeTruthy();
 	});
 
+	it("will not bind the earlier pick while the next one is still being bundled", async () => {
+		let release: (v: { bytes: Uint8Array }) => void = () => {};
+		const held = new Promise<{ bytes: Uint8Array }>((resolve) => {
+			release = resolve;
+		});
+		stubElectron(vi.fn(() => held) as unknown as ReturnType<typeof siblings>);
+		render(<SpecTab collection={collection()} />);
+
+		await pick("first.json", OPENAPI);
+		await screen.findByRole("button", { name: /bind this spec/i });
+
+		await pick("second.json", withRef("./pet.json"));
+		await screen.findByText(/reading the files this spec references/i);
+		expect(screen.getByRole("button", { name: /bind this spec/i })).toBeDisabled();
+
+		release({ bytes: new TextEncoder().encode(JSON.stringify(PET_SCHEMA)) });
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: /bind this spec/i })).toBeEnabled()
+		);
+	});
+
 	it("binds the bundle of a fetched URL, following the ref beside it", async () => {
 		importFetch.mockImplementation(async (url: string) => ({
 			content:

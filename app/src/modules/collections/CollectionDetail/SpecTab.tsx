@@ -442,7 +442,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						<Button
 							variant="outline"
 							onClick={() => fileInputRef.current?.click()}
-							disabled={bindSpec.isPending || bundling}
+							disabled={bindSpec.isPending || bundling || fetching}
 						>
 							<Upload className="size-icon" data-icon-motion={ICON_MOTION.lift} />
 							Choose file
@@ -553,7 +553,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					)}
 
 					{picked && match && (
-						<Button onClick={handleBind} disabled={bindSpec.isPending}>
+						<Button
+							onClick={handleBind}
+							disabled={bindSpec.isPending || bundling || fetching}
+						>
 							{bindSpec.isPending ? (
 								<Loader2 className="size-icon animate-spin" />
 							) : (
