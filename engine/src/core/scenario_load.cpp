@@ -1479,8 +1479,7 @@ class ScenarioLoadDriver {
         vu.steps_this_iteration = 0;
         vu.recent_steps.clear ();
         // The session and the run-local scope start each iteration empty;
-        // the VU's saved variables do not (#3044), or a `control.once`
-        // login's token is gone by the iteration that needs it.
+        // the VU's saved variables do not (#3044).
         vu.cookies.clear ();
         vu.scope_overlay.clear_local ();
     }
