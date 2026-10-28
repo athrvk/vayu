@@ -564,6 +564,29 @@ TEST (ControlTransactionClose, AWaitBeforeAnyMemberRanOpensNoPass) {
     << "a wait after a skipped member opened the pass";
 }
 
+// #3054: a member counts against its transaction by the run report's own
+// definition of an error, never by `has_error ()` alone.
+TEST (ControlTransactionClose, AMemberErrsByTheReportsDefinition) {
+    using vayu::core::transaction_member_errored;
+    vayu::Response answered;
+    answered.status_code = 200;
+    EXPECT_FALSE (transaction_member_errored (&answered, false));
+    EXPECT_TRUE (transaction_member_errored (&answered, true))
+    << "a failed assertion";
+    answered.status_code = 302;
+    EXPECT_FALSE (transaction_member_errored (&answered, false))
+    << "a redirect is no error";
+    answered.status_code = 404;
+    EXPECT_TRUE (transaction_member_errored (&answered, false))
+    << "an HTTP error status";
+    vayu::Response failed;
+    failed.error_code = vayu::ErrorCode::Timeout;
+    EXPECT_TRUE (transaction_member_errored (&failed, false))
+    << "a transport failure";
+    EXPECT_TRUE (transaction_member_errored (nullptr, false))
+    << "no response at all";
+}
+
 TEST (ControlTransactionSum, ADesignSendReportsItsOneResponseInMicroseconds) {
     const auto elements = compiled_elements (
     { element ("el_txn", "control.transaction", { { "name", "checkout" } }) });
@@ -1041,6 +1064,47 @@ TEST_F (ElementsControllersTest, ControlTransactionClosesAndFailsWhenTheLastMemb
     EXPECT_EQ (entry["count"], 3);
     EXPECT_EQ (entry["errors"], 3)
     << "a member that could not be built is the pass's error";
+}
+
+// #3054: a member answering 404 counted nothing, because only a transport
+// failure (`has_error ()`) did, though the report counts every 4xx/5xx.
+// Mutation check: judge a member by `has_error ()` alone in
+// `transaction_member_errored` and errors is 0.
+TEST_F (ElementsControllersTest, ControlTransactionCountsAMemberAnsweringAnHttpError) {
+    seed_root ();
+    seed_folder ("folder_1",
+    json::array ({ element ("el_txn", "control.transaction", { { "name", "checkout" } }) }));
+    seed_request ("req_a", "folder_1", 0, "/a");
+    seed_request ("req_b", "folder_1", 1, "/not-served");
+
+    const std::string run_id = start (3);
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const json entry =
+    checkout_entry (report_of (run_id)["scenario"]["transactions"]);
+    EXPECT_EQ (entry["count"], 3);
+    EXPECT_EQ (entry["errors"], 3) << "every pass held a member answering 404";
+}
+
+// #3054: a member whose assertion failed counted nothing either. The status
+// is 200, so only the assertion can fail the pass. Mutation check: pass
+// `false` for the assertion in `settle_step_transactions` and errors is 0.
+TEST_F (ElementsControllersTest, ControlTransactionCountsAMemberWhoseAssertionFailed) {
+    seed_root ();
+    seed_folder ("folder_1",
+    json::array ({ element ("el_txn", "control.transaction", { { "name", "checkout" } }) }));
+    seed_request ("req_a", "folder_1", 0, "/a",
+    json::array ({ element ("el_status", "assert.status", { { "in", { 201 } } }) }));
+    seed_request ("req_b", "folder_1", 1, "/b");
+
+    const std::string run_id = start (3);
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const json entry =
+    checkout_entry (report_of (run_id)["scenario"]["transactions"]);
+    EXPECT_EQ (entry["count"], 3);
+    EXPECT_EQ (entry["errors"], 3)
+    << "every pass held a member failing its assertion";
 }
 
 // ============================================================================
@@ -1535,6 +1599,32 @@ ControlTransactionClosesAndFailsWhenTheLastMemberCannotBindUnderLoad) {
     EXPECT_EQ (entry["count"], 3);
     EXPECT_EQ (entry["errors"], 3)
     << "a member that could not be built is the pass's error";
+}
+
+// #3054, under load: an HTTP error status. Mutation check: the sequential
+// case's.
+TEST_F (ElementsControllersLoadTest, ControlTransactionCountsAMemberAnsweringAnHttpErrorUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution                      = checkout_over (server);
+    execution.plan.steps[1].request.url = server.url ("/not-served");
+
+    const json entry = checkout_after_three_iterations (execution);
+    EXPECT_EQ (entry["count"], 3);
+    EXPECT_EQ (entry["errors"], 3) << "every pass held a member answering 404";
+}
+
+// #3054, under load: a failed assertion on a 200. Mutation check: pass
+// `false` for the assertion in the completion's `transaction_error` and
+// errors is 0.
+TEST_F (ElementsControllersLoadTest, ControlTransactionCountsAMemberWhoseAssertionFailedUnderLoad) {
+    ControllerLoadMockServer server;
+    const auto execution = checkout_over (
+    server, { element ("el_status", "assert.status", { { "in", { 201 } } }) });
+
+    const json entry = checkout_after_three_iterations (execution);
+    EXPECT_EQ (entry["count"], 3);
+    EXPECT_EQ (entry["errors"], 3)
+    << "every pass held a member failing its assertion";
 }
 
 } // namespace

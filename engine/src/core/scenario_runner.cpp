@@ -1041,13 +1041,15 @@ TransactionHistograms& transactions) {
     if (!step.elements) {
         return;
     }
-    const bool bound = data_bind_error.empty ();
+    const bool bound            = data_bind_error.empty ();
+    const bool assertion_failed = record.tests && record.tests->failed > 0;
     vayu::core::settle_transactions (*step.elements, ctx.element_spans,
     vayu::core::TransactionMember{
-    .step_index    = step.index,
-    .iteration     = ctx.iteration,
-    .attempted     = exchange.sent || !bound,
-    .errored       = !bound || exchange.response.has_error (),
+    .step_index = step.index,
+    .iteration  = ctx.iteration,
+    .attempted  = exchange.sent || !bound,
+    .errored    = vayu::core::transaction_member_errored (
+    bound ? &exchange.response : nullptr, assertion_failed),
     .next_position = next_position,
     },
     ctx.controller_state, record.elements);

@@ -924,11 +924,13 @@ class ScenarioLoadDriver {
             // that counted only successes would report the send as if it never
             // happened.
             state->coverage.record (step_index, response.status_code);
+            const bool assertion_failed = assertion_failed_before || after.assertion_failed;
             finish_step (context, state, plan, vu, step_index,
             StepSignals{ .no_response = errored,
             .sent                     = true,
-            .script_threw = script_threw_before || after.script_threw,
-            .assertion_failed = assertion_failed_before || after.assertion_failed },
+            .script_threw     = script_threw_before || after.script_threw,
+            .assertion_failed = assertion_failed,
+            .transaction_error = transaction_member_errored (&response, assertion_failed) },
             session_after (errored, step_ptr->request, response, *vu),
             std::move (after.outcomes), next_target_before);
             handle_result (context, db, result,
@@ -1168,6 +1170,10 @@ class ScenarioLoadDriver {
         bool sent             = false;
         bool script_threw     = false;
         bool assertion_failed = false;
+        /// The answer counts against a `control.transaction` the step is a
+        /// member of (`transaction_member_errored`); an execution with no
+        /// response always does.
+        bool transaction_error = false;
     };
 
     /**
@@ -1381,7 +1387,7 @@ class ScenarioLoadDriver {
             .step_index = step_index,
             .iteration  = vu.iteration,
             .attempted  = signals.sent || signals.no_response,
-            .errored    = signals.no_response,
+            .errored    = signals.no_response || signals.transaction_error,
             .next_position =
             next.end_iteration ? std::nullopt : std::optional (next.position),
             },

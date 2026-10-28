@@ -363,8 +363,12 @@ one HdrHistogram per declared name allocated up front from a plan scan, so recor
 either. Only the close carries `duration_us`, and no timer sets it, which is what tells a close from an
 accumulating pass. The close also sets `waited_ms` (`waitedMs` in the step trace's JSON) to the sum
 rounded to whole milliseconds; `duration_us` itself is not serialised. A pass is `"failed"`, and
-counts in `errors`, when an attempted member got no response: a transport failure, or a request
-that could not be built. `includeTimers: true` (issue #1569)
+counts in `errors`, when an attempted member is an error by the run report's own definition
+(`transaction_member_errored`): no response (a transport failure, or a request that could not be
+built), a status outside 2xx/3xx (`vayu::is_success_status`, so a 404 counts), or a failed assertion
+(an `assert.*` element or a `pm.test`). A script that threw is none of these. A design send has no
+pass to fold into: its one response is the whole transaction, judged on the response alone because
+its assertions may run after the element. `includeTimers: true` (issue #1569)
 also folds a between-member `timer.*` wait (whole milliseconds, added as microseconds) into the same
 running sum - the runner's own `step.between` dispatch does this fold generically
 (`fold_between_wait_into_open_transactions`, shared by both run modes, found through the registry's

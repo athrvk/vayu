@@ -890,6 +890,17 @@ struct TransactionMember {
 };
 
 /**
+ * Whether an attempted member counts against its `control.transaction`
+ * (#3054), by the run report's own definition of an error: no response
+ * (@p response null) or a transport failure, a status outside 2xx/3xx
+ * (`vayu::is_success_status`), or a failed assertion (an `assert.*` element
+ * or a `pm.test`, @p assertion_failed). Both runners and the design send
+ * judge a member here.
+ */
+[[nodiscard]] bool transaction_member_errored (const vayu::Response* response,
+bool assertion_failed);
+
+/**
  * Settles every `control.transaction` on a step after its execution (#3054):
  * records an attempted member's error, and closes the pass when the iteration
  * leaves the folder - after the folder's last member however that member

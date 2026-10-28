@@ -80,9 +80,11 @@ class ControlTransactionElement final : public Element {
         }
         if (ctx.controller_state == nullptr) {
             // No accumulator to fold into (a design send) - this one
-            // response is the whole transaction.
+            // response is the whole transaction. Its assertions may run
+            // after this element, so only the response is judged here.
             report_close (ctx, config_.value ("name", ""),
-            member_duration_us (*ctx.response), ctx.response->has_error ());
+            member_duration_us (*ctx.response),
+            transaction_member_errored (ctx.response, false));
             return;
         }
         (*ctx.controller_state)[transaction_sum_key (ctx.element_id, ctx.iteration)] +=
@@ -136,6 +138,11 @@ std::vector<ElementOutcome>& outcomes) {
 }
 
 } // namespace
+
+bool transaction_member_errored (const vayu::Response* response, bool assertion_failed) {
+    return response == nullptr || response->has_error () ||
+    !vayu::is_success_status (response->status_code) || assertion_failed;
+}
 
 void settle_transactions (const std::vector<CompiledElement>& elements,
 const std::unordered_map<std::string, ElementSpan>& spans,
