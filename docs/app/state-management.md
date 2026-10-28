@@ -2468,7 +2468,8 @@ against a picked document's operations, answered by `POST /specs/match` since
 the matcher moved engine-side. There is no id to key it by - the document has
 not been stored, because the tab asks before the user commits to the bind - so
 the key carries a fingerprint of **both** inputs, exactly the fields the matcher
-reads off them (a request's id, method and URL; an operation's identity). That
+reads off them (a request's id, method and URL; an operation's identity; the
+document's server base paths, issue #3030). That
 is what makes its `staleTime: Infinity` honest: an answer cannot go stale while
 both inputs are pinned in its key, and either of them changing is a different
 key rather than a stale entry under this one.

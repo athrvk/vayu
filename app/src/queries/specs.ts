@@ -239,23 +239,29 @@ export function useSpecDescribeQuery(token: string | null, content: string) {
  * @param operations `null` while there is no document to match - a picked file
  *        that did not parse, or nothing picked - which disables the query
  *        rather than asking the engine about an empty document.
+ * @param basePaths The document's server base paths, as `POST /specs/describe`
+ *        answered them (issue #3030). They decide which literal-URL requests
+ *        match, so they are part of the key like the operations are.
  */
 export function useSpecMatchQuery(
 	collectionId: string,
 	requests: readonly RequestSummary[],
-	operations: SpecOperation[] | null
+	operations: SpecOperation[] | null,
+	basePaths: string[] | null
 ) {
 	const fingerprint = useMemo(() => {
 		if (!operations) return "";
 		// Every part of an input that changes the answer, and nothing else: a
-		// request's id, method and URL decide what it matches, and an operation's
-		// identity is what a match carries onto it.
+		// request's id, method and URL decide what it matches, an operation's
+		// identity is what a match carries onto it, and the base paths decide which
+		// literal-URL requests reach an operation (issue #3030).
 		const requestPart = requests.map((r) => `${r.id} ${r.method} ${r.url}`).join("\n");
 		const operationPart = operations
 			.map((o) => `${o.operationId ?? ""} ${o.method} ${o.path}`)
 			.join("\n");
-		return `${requestPart}\u0000${operationPart}`;
-	}, [requests, operations]);
+		const basePathPart = (basePaths ?? []).join("\n");
+		return `${requestPart}\u0000${operationPart}\u0000${basePathPart}`;
+	}, [requests, operations, basePaths]);
 
 	return useQuery({
 		queryKey: queryKeys.specs.match(collectionId, fingerprint),
@@ -263,6 +269,7 @@ export function useSpecMatchQuery(
 			apiService.matchSpecOperations({
 				collectionId,
 				operations: operations as SpecOperation[],
+				basePaths: basePaths ?? undefined,
 			}),
 		enabled: !!collectionId && !!operations,
 		staleTime: Infinity,
