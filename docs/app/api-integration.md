@@ -135,7 +135,8 @@ where libcurl would write `application/x-www-form-urlencoded` (issue #2464). A
 a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
 sends the path the user picked - never the bytes - and the engine opens the file
 at send time. A text part may carry just `contentType`, the type it declares for
-itself (a Postman import keeps one, #2539); the renderer sends it, resolved like
+itself (a Postman import keeps one, #2539, and the form-data editor's Content
+type column sets it by hand, #3022); the renderer sends it, resolved like
 the file members, and a part without it sends none. A **`binary`** body is one file as the whole body,
 `{mode: "binary", file: {src, fileName?, contentType?}}`, built from
 `RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
