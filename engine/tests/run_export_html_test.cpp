@@ -81,14 +81,14 @@ using vayu::utils::escape_html;
 /// Every document the Markdown goldens use, so the page is exercised on stopped
 /// runs, collection runs, comparisons and hostile text as well as the goldens.
 constexpr auto ALL_CASES = std::to_array<std::string_view> ({ "healthy-passed",
-"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed",
-"no-budgets", "collection-load", "hostile-text", "status-seconds",
-"skipped-requests", "capacity-slo-exceeded", "scenario-sequence" });
+"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed", "no-budgets",
+"collection-load", "hostile-text", "status-seconds", "skipped-requests",
+"capacity-slo-exceeded", "scenario-sequence", "contract-bound" });
 
 /// The cases whose rendered page is pinned byte for byte.
-constexpr auto GOLDEN_CASES =
-std::to_array<std::string_view> ({ "healthy-passed", "errors-and-budget-failed",
-"status-seconds", "skipped-requests", "capacity-slo-exceeded", "scenario-sequence" });
+constexpr auto GOLDEN_CASES = std::to_array<std::string_view> (
+{ "healthy-passed", "errors-and-budget-failed", "status-seconds", "skipped-requests",
+"capacity-slo-exceeded", "scenario-sequence", "contract-bound" });
 
 constexpr std::size_t SIZE_LIMIT_BYTES = 300000;
 
@@ -311,8 +311,8 @@ R"(&lt;img src=x onerror=alert(1)&gt;')",
 
 /// A document that writes every kind of free text: the run's name and comment,
 /// its URL and configuration strings, error keys, warnings, a custom budget, a
-/// comparison with a differing data file, a capacity search's result and a
-/// scenario's steps and transactions.
+/// comparison with a differing data file, a capacity search's result, a
+/// contract's operations and a scenario's steps and transactions.
 ordered_json full_document () {
     ordered_json document       = read_document ("errors-and-budget-failed");
     const ordered_json baseline = read_document ("vs-baseline-regressed");
@@ -321,6 +321,9 @@ ordered_json full_document () {
     read_document ("capacity-slo-exceeded")["report"]["capacity"];
     document["report"]["scenario"] =
     read_document ("scenario-sequence")["report"]["scenario"];
+    for (const char* key : { "coverage", "schemaValidation" }) {
+        document["report"][key] = read_document ("contract-bound")["report"][key];
+    }
     document["run"]["comment"]                              = "a comment";
     document["config"]["configuration"]["mode"]             = "ramp_up";
     document["config"]["configuration"]["startConcurrency"] = 10;
@@ -409,6 +412,18 @@ constexpr auto HOSTILE_FIELDS = std::to_array<HostileField> ({
 [] (ordered_json& d, const std::string& t) {
     d["report"]["capacity"]["stopReason"] = t;
 } },
+{ "operation id",
+[] (ordered_json& d, const std::string& t) {
+    d["report"]["coverage"]["operations"][0]["operationId"] = t;
+} },
+{ "operation path",
+[] (ordered_json& d, const std::string& t) {
+    d["report"]["coverage"]["operations"][0]["path"] = t;
+} },
+{ "unchecked reason",
+[] (ordered_json& d, const std::string& t) {
+    d["report"]["schemaValidation"]["uncheckedReasons"][t] = 9;
+} },
 { "step name",
 [] (ordered_json& d, const std::string& t) {
     d["report"]["scenario"]["steps"][0]["name"] = t;
@@ -465,8 +480,8 @@ std::string section_html (const std::string& html, std::string_view id) {
     return html.substr (open, html.find ("</section>", open) - open);
 }
 
-constexpr auto SEARCH_AND_SEQUENCE_SECTIONS =
-std::to_array<std::string_view> ({ "capacity", "sequence", "transactions" });
+constexpr auto SEARCH_AND_SEQUENCE_SECTIONS = std::to_array<std::string_view> (
+{ "capacity", "contract", "sequence", "transactions" });
 
 // Mutation check: drop the capacity push from `view_sections` and this fails,
 // as does the golden.
@@ -497,6 +512,43 @@ TEST (RunExportHtmlTest, ACapacitySearchIsASectionOfItsSentencesAndItsLevels) {
     std::string::npos);
     EXPECT_NE (capacity.find ("<th scope=\"row\">51 (re-measured)</th>"), std::string::npos);
     EXPECT_EQ (html.find ("<section id=\"sequence\""), std::string::npos);
+}
+
+// Mutation check: drop the contract push from `view_sections` and this fails,
+// as does the golden.
+TEST (RunExportHtmlTest, AContractIsASectionOfItsSentencesAndItsOperations) {
+    const std::string html =
+    render_run_export_html (read_document ("contract-bound"));
+    const std::string contract = section_html (html, "contract");
+    ASSERT_FALSE (contract.empty ());
+    EXPECT_NE (html.find ("<li><a href=\"#contract\">Contract</a></li>"), std::string::npos);
+    for (const char* line : { "<p>Coverage: 3 of 5 operations covered; "
+                              "declared-response coverage 80.0% (8 of 10).</p>",
+         "<p>Schema validation (sampled): 100 responses sampled, 90 checked "
+         "(87 valid, 3 "
+         "failed), 10 unchecked.</p>",
+         "<p>Unchecked: body is not JSON or nests too deeply (6), no schema "
+         "for the status "
+         "(4).</p>",
+         "<th scope=\"row\">GET "
+         "/pets/{id}</th><td>getPet</td><td>29,000</td><td>2</td>"
+         "<td>0</td>" }) {
+        EXPECT_NE (contract.find (line), std::string::npos) << line << "\n"
+                                                            << contract;
+    }
+    EXPECT_NE (contract.find ("<table aria-labelledby=\"contract-h\">"), std::string::npos);
+}
+
+TEST (RunExportHtmlTest, AHostileOperationIsTextInItsRow) {
+    ordered_json document  = read_document ("contract-bound");
+    auto& first            = document["report"]["coverage"]["operations"][0];
+    first["operationId"]   = "get|Pet <script>";
+    first["path"]          = "/x|y <img src=x>";
+    const std::string html = render_run_export_html (document);
+    EXPECT_NE (html.find ("<th scope=\"row\">GET /x|y &lt;img src=x&gt;</th>"),
+    std::string::npos);
+    EXPECT_NE (html.find ("<td>get|Pet &lt;script&gt;</td>"), std::string::npos);
+    EXPECT_EQ (markup_only (html).find ("<script"), std::string::npos);
 }
 
 TEST (RunExportHtmlTest, AScenarioRunHasItsSequenceAndTransactionsAsTables) {
@@ -966,7 +1018,7 @@ TEST (RunExportHtmlTest, SectionsComeInTheMarkdownReportsOrderThenChartsThenFoot
     std::size_t from       = 0;
     for (const std::string_view marker : { "<h1>", "<section id=\"verdict\"",
          "<section id=\"run\"", "<section id=\"results\"", "<section id=\"latency\"",
-         "<section id=\"capacity\"", "<section id=\"sequence\"",
+         "<section id=\"capacity\"", "<section id=\"contract\"", "<section id=\"sequence\"",
          "<section id=\"transactions\"", "<section id=\"errors\"", "<section id=\"comparison\"",
          "<section id=\"warnings\"", "<section id=\"charts\"", "<footer>" }) {
         const auto at = html.find (marker, from);

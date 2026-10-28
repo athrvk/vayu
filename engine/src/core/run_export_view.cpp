@@ -9,9 +9,9 @@
  * @file core/run_export_view.cpp
  * @brief The run-report document read into the sections every text renderer
  *        shares (#2131, #2135): a verdict, the run, the headline numbers,
- *        latency against budgets, a capacity search's result, a scenario's
- *        sequence and transactions, errors, the comparison and the warnings
- *        (#2819).
+ *        latency against budgets, a capacity search's result, the contract
+ *        coverage and schema checks (#3036), a scenario's sequence and
+ *        transactions, errors, the comparison and the warnings (#2819).
  */
 
 #include "vayu/core/run_export_view.hpp"
@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <ctime>
 #include <format>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -1547,6 +1548,178 @@ std::optional<ReportSequence> sequence_of (const ordered& document) {
     return out;
 }
 
+// --- contract ---------------------------------------------------------------------------------------------------------
+
+/// `1 response`, `2 responses`, or `-` for a count the document lacks.
+std::string counted (const std::optional<double>& count, std::string_view noun) {
+    if (!count) {
+        return std::string (ABSENT) + ' ' + std::string (noun) + 's';
+    }
+    return format_run_count (*count) + ' ' + std::string (noun) + (*count == 1 ? "" : "s");
+}
+
+std::string count_or_dash (const ordered& source, std::string_view key) {
+    const auto count = number_at (source, { key });
+    return count ? format_run_count (*count) : std::string (ABSENT);
+}
+
+/// `3 of 5 operations covered`; empty when the document holds neither figure.
+std::string operations_covered_sentence (const ordered& coverage) {
+    if (!number_at (coverage, { "operationsCovered" }) &&
+    !number_at (coverage, { "operationsTotal" })) {
+        return {};
+    }
+    return count_or_dash (coverage, "operationsCovered") + " of " +
+    count_or_dash (coverage, "operationsTotal") + " operations covered";
+}
+
+/// `declared-response coverage 80.0% (8 of 10)`, the percentage the document
+/// holds; empty when it holds none.
+std::string declared_responses_sentence (const ordered& coverage) {
+    const auto pct = number_at (coverage, { "declaredResponseCoveragePct" });
+    if (!pct) {
+        return {};
+    }
+    std::string out = "declared-response coverage " + format_run_percent (*pct) + '%';
+    if (number_at (coverage, { "declaredResponsesHit" }) &&
+    number_at (coverage, { "declaredResponsesTotal" })) {
+        out += " (" + count_or_dash (coverage, "declaredResponsesHit") +
+        " of " + count_or_dash (coverage, "declaredResponsesTotal") + ')';
+    }
+    return out;
+}
+
+/// Empty when the document holds no coverage figure.
+ReportText coverage_text (const ordered& coverage) {
+    std::string out;
+    for (const std::string& sentence : { operations_covered_sentence (coverage),
+         declared_responses_sentence (coverage) }) {
+        if (!sentence.empty ()) {
+            out += (out.empty () ? "Coverage: " : "; ") + sentence;
+        }
+    }
+    return out.empty () ? ReportText () : words (out + '.');
+}
+
+/// A load run's check walks a reservoir of the responses it stored, so its
+/// figures describe a sample unless the document says `exact`.
+ReportText validation_text (const ordered& validation) {
+    const ordered& exact_flag = member (validation, "exact");
+    const bool exact   = exact_flag.is_boolean () && exact_flag.get<bool> ();
+    const auto sampled = number_at (validation, { "sampled" });
+    const auto checked = number_at (validation, { "checked" });
+    const std::string unchecked = sampled && checked ?
+    format_run_count (std::max (*sampled - *checked, 0.0)) :
+    std::string (ABSENT);
+    return words ("Schema validation (" +
+    std::string (exact ? "every step checked" : "sampled") +
+    "): " + counted (sampled, "response") + (exact ? "" : " sampled") + ", " +
+    count_or_dash (validation, "checked") + " checked (" +
+    count_or_dash (validation, "valid") + " valid, " +
+    count_or_dash (validation, "failed") + " failed), " + unchecked + " unchecked.");
+}
+
+struct UncheckedReason {
+    std::string_view key;
+    std::string_view label;
+};
+
+/// The app's `UNCHECKED_REASONS` (`response-viewer/validation-reasons.ts`),
+/// shortened to fit a clause. A code not here keeps its raw key, as an engine
+/// newer than this one may send it.
+constexpr auto UNCHECKED_REASONS = std::to_array<UncheckedReason> ({
+{ "no_operation", "request not bound to an operation" },
+{ "no_index", "document carries no response schemas" },
+{ "hash_mismatch", "document changed since the collection was bound" },
+{ "never_stamped", "binding never recorded a document version" },
+{ "operation_not_declared", "operation no longer declared" },
+{ "no_schema_for_status", "no schema for the status" },
+{ "no_schema_for_content_type", "no schema for the content type" },
+{ "no_response", "no response to check" },
+{ "body_not_json", "body is not JSON or nests too deeply" },
+});
+
+/// How many reasons are named before the rest are counted.
+constexpr std::size_t MAX_UNCHECKED_REASONS = 3;
+
+ReportText unchecked_reason_label (const std::string& key) {
+    const auto found = std::ranges::find (UNCHECKED_REASONS, key, &UncheckedReason::key);
+    return found == UNCHECKED_REASONS.end () ? user (key) :
+                                               words (std::string (found->label));
+}
+
+/// `Unchecked: body is not JSON (4), no schema for the status (2) and 1 more
+/// reason.` - the commonest first, ties in document order. Empty when no
+/// response went unchecked.
+ReportText unchecked_text (const ordered& validation) {
+    const ordered& reasons = member (validation, "uncheckedReasons");
+    std::vector<std::pair<std::string, double>> counts;
+    if (reasons.is_object ()) {
+        for (const auto& [key, count] : reasons.items ()) {
+            if (count.is_number () && count.get<double> () > 0) {
+                counts.emplace_back (key, count.get<double> ());
+            }
+        }
+    }
+    if (counts.empty ()) {
+        return {};
+    }
+    std::ranges::stable_sort (
+    counts, std::ranges::greater (), &std::pair<std::string, double>::second);
+    ReportText out = "Unchecked: ";
+    for (std::size_t at = 0; at < counts.size () && at < MAX_UNCHECKED_REASONS; ++at) {
+        out += (at == 0 ? ReportText () : ReportText (", ")) +
+        unchecked_reason_label (counts[at].first) +
+        words (" (" + format_run_count (counts[at].second) + ')');
+    }
+    if (counts.size () > MAX_UNCHECKED_REASONS) {
+        const std::size_t hidden = counts.size () - MAX_UNCHECKED_REASONS;
+        out += words (" and " + format_run_count (static_cast<double> (hidden)) +
+        " more reason" + (hidden == 1 ? "" : "s"));
+    }
+    return out + ".";
+}
+
+/// `GET /pets/{id}`: the method and path are the author's text.
+Row operation_row (const ordered& operation, std::size_t /*position*/) {
+    const std::string id = text_at (operation, { "operationId" });
+    const auto count_of  = [&operation] (std::string_view key) {
+        const ordered& names = member (operation, key);
+        return plain_cell (format_run_count (
+        names.is_array () ? static_cast<double> (names.size ()) : 0));
+    };
+    return { cell (user (text_at (operation, { "method" }) + ' ' +
+             text_at (operation, { "path" }))),
+        cell (id.empty () ? absent () : user (id)), count_cell (operation, "sent"),
+        count_of ("declaredHit"), count_of ("declaredMissed") };
+}
+
+Table operations_table (const ordered& coverage) {
+    return folded_table (
+    { { "Operation", "Id", "Sent", "Declared hit", "Declared missed" }, {} },
+    member (coverage, "operations"), operation_row, "operation");
+}
+
+/// Empty when the document holds neither section: a run of a collection that
+/// binds no document has nothing to say about a contract.
+std::optional<ReportContract> contract_of (const ordered& document) {
+    const ordered& coverage = at_path (document, { "report", "coverage" });
+    const ordered& validation = at_path (document, { "report", "schemaValidation" });
+    ReportContract out;
+    if (coverage.is_object ()) {
+        out.coverage   = coverage_text (coverage);
+        out.operations = operations_table (coverage);
+    }
+    if (validation.is_object ()) {
+        out.validation = validation_text (validation);
+        out.unchecked  = unchecked_text (validation);
+    }
+    if (out.coverage.empty () && out.validation.empty () && out.operations.rows.empty ()) {
+        return std::nullopt;
+    }
+    return out;
+}
+
 // --- warnings -------------------------------------------------------------------------------------------------------------
 
 ReportText warning_names (const ordered& names) {
@@ -1615,6 +1788,7 @@ ReportView build_run_report_view (const ordered& document) {
     view.results   = results_table (document);
     view.latency   = latency_table (document);
     view.capacity  = capacity_of (document);
+    view.contract  = contract_of (document);
     view.sequence  = sequence_of (document);
     view.transactions = transactions_table (scenario_of (document));
     view.errors       = errors_table (document);

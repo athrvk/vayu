@@ -1,0 +1,310 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_c0n7r4",
+    "reference": "Vayu run \"Pets API\" (run_c0n7r4) - load test, GET /pets/{id}, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187860000,
+    "name": "Pets API",
+    "comment": "bound to petstore.yaml",
+    "baseline": false
+  },
+  "verdict": {
+    "state": "passed",
+    "stoppedEarly": false,
+    "reason": "budgets_met"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/pets/7",
+    "headerNames": [
+      "Accept"
+    ],
+    "paramNames": [
+      "page"
+    ],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "bearer"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "60s",
+      "concurrency": 50,
+      "timeout": "30s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 29944,
+      "successfulRequests": 29944,
+      "failedRequests": 0,
+      "httpErrorRequests": 0,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 0.0,
+      "totalDurationSeconds": 60.0,
+      "avgRps": 499.07,
+      "testDuration": 60.0,
+      "sendRate": 499.07,
+      "throughput": 499.07,
+      "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
+      "peakConcurrency": 50,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 2995200,
+      "bytesReceived": 38400000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 640000,
+      "sendingDurationSeconds": 59.6,
+      "completedWhileSending": 29894
+    },
+    "latency": {
+      "min": 3.1,
+      "max": 412.7,
+      "avg": 98.4,
+      "median": 94.2,
+      "p50": 94.2,
+      "p75": 120.5,
+      "p90": 148.9,
+      "p95": 171.34,
+      "p99": 238.0,
+      "p999": 331.6
+    },
+    "statusCodes": {
+      "200": 29944
+    },
+    "errors": {
+      "total": 0,
+      "withDetails": 0,
+      "types": {}
+    },
+    "coverage": {
+      "operationsTotal": 5,
+      "operationsCovered": 3,
+      "declaredResponsesTotal": 10,
+      "declaredResponsesHit": 8,
+      "declaredResponseCoveragePct": 80.0,
+      "undeclaredStatusesSeen": 1,
+      "operations": [
+        {
+          "operationId": "getPet",
+          "method": "GET",
+          "path": "/pets/{id}",
+          "sent": 29000,
+          "statusesSeen": [
+            200,
+            404
+          ],
+          "declaredHit": [
+            "200",
+            "404"
+          ],
+          "declaredMissed": [],
+          "undeclaredSeen": []
+        },
+        {
+          "operationId": "listPets",
+          "method": "GET",
+          "path": "/pets",
+          "sent": 900,
+          "statusesSeen": [
+            200,
+            429
+          ],
+          "declaredHit": [
+            "200"
+          ],
+          "declaredMissed": [
+            "default"
+          ],
+          "undeclaredSeen": [
+            429
+          ]
+        },
+        {
+          "operationId": "createPet",
+          "method": "POST",
+          "path": "/pets",
+          "sent": 44,
+          "statusesSeen": [
+            201
+          ],
+          "declaredHit": [
+            "201"
+          ],
+          "declaredMissed": [
+            "400",
+            "409"
+          ],
+          "undeclaredSeen": []
+        },
+        {
+          "operationId": "deletePet",
+          "method": "DELETE",
+          "path": "/pets/{id}",
+          "sent": 0,
+          "statusesSeen": [],
+          "declaredHit": [],
+          "declaredMissed": [
+            "204",
+            "404"
+          ],
+          "undeclaredSeen": []
+        }
+      ]
+    },
+    "schemaValidation": {
+      "sampled": 100,
+      "checked": 90,
+      "valid": 87,
+      "failed": 3,
+      "unevaluated": 0,
+      "failuresTotal": 3,
+      "uncheckedReasons": {
+        "no_schema_for_status": 4,
+        "body_not_json": 6
+      }
+    },
+    "thresholdValidation": {
+      "checks": [
+        {
+          "metric": "latencyP95Ms",
+          "limit": 300,
+          "actual": 171.34,
+          "passed": true,
+          "evaluated": true
+        },
+        {
+          "metric": "maxErrorRatePct",
+          "limit": 1,
+          "actual": 0.0,
+          "passed": true,
+          "evaluated": true
+        },
+        {
+          "metric": "minThroughputRps",
+          "limit": 400,
+          "actual": 499.07,
+          "passed": true,
+          "evaluated": true
+        }
+      ],
+      "passed": 3,
+      "failed": 0,
+      "verdict": "passed"
+    }
+  },
+  "timeSeries": [
+    {
+      "elapsed_seconds": 1.0,
+      "requests_completed": 220,
+      "requests_failed": 0,
+      "current_rps": 220.0,
+      "current_concurrency": 18,
+      "throughput": 220.0,
+      "error_rate": 0.0,
+      "status_codes": {
+        "200": 220
+      },
+      "latency_p50_ms": 90.0,
+      "latency_p95_ms": 170.0,
+      "latency_p99_ms": 252.0
+    },
+    {
+      "elapsed_seconds": 2.0,
+      "requests_completed": 726,
+      "requests_failed": 0,
+      "current_rps": 506.0,
+      "current_concurrency": 50,
+      "throughput": 363.0,
+      "error_rate": 0.0,
+      "status_codes": {
+        "200": 726
+      },
+      "latency_p50_ms": 92.0,
+      "latency_p95_ms": 173.0,
+      "latency_p99_ms": 239.0
+    },
+    {
+      "elapsed_seconds": 3.0,
+      "requests_completed": 1229,
+      "requests_failed": 0,
+      "current_rps": 503.0,
+      "current_concurrency": 50,
+      "throughput": 409.7,
+      "error_rate": 0.0,
+      "status_codes": {
+        "200": 1229
+      },
+      "latency_p50_ms": 94.0,
+      "latency_p95_ms": 169.0,
+      "latency_p99_ms": 235.0
+    },
+    {
+      "elapsed_seconds": 4.0,
+      "requests_completed": 1741,
+      "requests_failed": 0,
+      "current_rps": 512.0,
+      "current_concurrency": 50,
+      "throughput": 435.2,
+      "error_rate": 0.0,
+      "status_codes": {
+        "200": 1741
+      },
+      "latency_p50_ms": 94.0,
+      "latency_p95_ms": 169.0,
+      "latency_p99_ms": 233.0
+    },
+    {
+      "elapsed_seconds": 5.0,
+      "requests_completed": 2250,
+      "requests_failed": 0,
+      "current_rps": 509.0,
+      "current_concurrency": 50,
+      "throughput": 450.0,
+      "error_rate": 0.0,
+      "status_codes": {
+        "200": 2250
+      },
+      "latency_p50_ms": 95.0,
+      "latency_p95_ms": 169.0,
+      "latency_p99_ms": 235.0
+    },
+    {
+      "elapsed_seconds": 6.0,
+      "requests_completed": 2759,
+      "requests_failed": 0,
+      "current_rps": 509.0,
+      "current_concurrency": 50,
+      "throughput": 459.8,
+      "error_rate": 0.0,
+      "status_codes": {
+        "200": 2759
+      },
+      "latency_p50_ms": 92.0,
+      "latency_p95_ms": 167.0,
+      "latency_p99_ms": 244.0
+    }
+  ],
+  "comparison": null,
+  "notCarried": [
+    {
+      "code": "request_values",
+      "message": "Header and parameter values and the request body are left out; names, the body mode and its size are kept"
+    }
+  ]
+}

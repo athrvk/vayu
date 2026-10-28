@@ -152,6 +152,23 @@ struct ReportCapacity {
     ReportTable levels;
 };
 
+/// How a run measured up against the OpenAPI document its collection binds
+/// (`report.coverage` and `report.schemaValidation`, #3036). Each part is empty
+/// when the document lacks its section.
+struct ReportContract {
+    /// `3 of 5 operations covered; declared-response coverage 80.0% (8 of 10)`.
+    /// The percentage is the document's, never recomputed.
+    ReportText coverage;
+    /// What the schema check covered and found. A load run's check walks a
+    /// reservoir and says `sampled`; only `exact: true` says every step.
+    ReportText validation;
+    /// The most common reasons responses went unchecked; empty when none did.
+    ReportText unchecked;
+    /// One row per operation in document order, folded past a fixed row count
+    /// into `and 35 more operations`; no rows when the document lists none.
+    ReportTable operations;
+};
+
 /// What a scenario run's sequence did (`report.scenario`), beyond the totals.
 struct ReportSequence {
     /// `2,105 iterations started, 2,100 completed, 3 abandoned`; empty when the
@@ -164,8 +181,8 @@ struct ReportSequence {
 
 /// The sections of a report, each already worded. A section the document has
 /// no data for is empty (`errors.rows`, `capacity`, `sequence`, `comparison`,
-/// `warnings`) so a renderer omits it; the rest read "-" for what the document
-/// lacks.
+/// `warnings`, `contract`) so a renderer omits it; the rest read "-" for what
+/// the document lacks.
 struct ReportView {
     ReportText title;
     ReportText reference;
@@ -179,6 +196,8 @@ struct ReportView {
     ReportTable latency;
     /// Empty for a run that is not a capacity search.
     std::optional<ReportCapacity> capacity;
+    /// Empty for a run whose collection binds no OpenAPI document.
+    std::optional<ReportContract> contract;
     /// Empty for a run that is not a scenario run.
     std::optional<ReportSequence> sequence;
     /// Named transactions of a scenario run, folded like @ref ReportSequence::steps;
