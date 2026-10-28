@@ -874,14 +874,71 @@ TEST (ImportParse, ResolvesARelativeServerUrlAgainstTheDocumentsOwn) {
     EXPECT_EQ (base_url ("/v3", source), "https://api.example.com/v3");
     EXPECT_EQ (base_url ("api", source), "https://api.example.com/specs/v1/api");
     EXPECT_EQ (base_url ("../../v2", source), "https://api.example.com/v2");
-    // The last segment being `..` keeps the trailing slash - `/specs/v1/..` is
-    // `/specs/`, and dropping it would name a different resource.
-    EXPECT_EQ (base_url ("..", source), "https://api.example.com/specs/");
+    // `/specs/v1/..` resolves to `/specs/`; the slash that resolution keeps is
+    // then trimmed like any other (issue #3029), since a request path follows.
+    EXPECT_EQ (base_url ("..", source), "https://api.example.com/specs");
     EXPECT_EQ (base_url ("//other.example.com/v1", source), "https://other.example.com/v1");
     // Already absolute: nothing to resolve against.
     EXPECT_EQ (base_url ("https://other.example.com/v1", source), "https://other.example.com/v1");
     // A base that is not absolute resolves nothing; the URL imports as written.
     EXPECT_EQ (base_url ("/v3", "not-a-url"), "/v3");
+}
+
+/**
+ * Every imported request is `{{baseUrl}}` + a path that starts with `/`, so a
+ * base URL that ends in `/` sent each one to `//path` (issue #3029). Both
+ * dialects trim it; what is not a path is left alone - the `//` after a scheme
+ * and a lone `/`. Mutation check: returning `url` unchanged from
+ * `without_trailing_slashes` fails every trimmed expectation.
+ */
+TEST (ImportParse, TrimsTheTrailingSlashFromTheBaseUrlInBothDialects) {
+    const auto base_url = [] (const std::string& document, const std::string& source = "") {
+        ImportSource from;
+        from.source_url          = source;
+        const ImportParse parsed = parse_import (document, {}, from);
+        EXPECT_TRUE (parsed.ok ()) << parsed.error;
+        const json variables =
+        json::parse (parsed.result.at ("collections")[0].at ("variables").dump ());
+        return variables.contains ("baseUrl") ?
+        variables.at ("baseUrl").at ("value").get<std::string> () :
+        std::string ();
+    };
+    const auto v3 = [&] (const std::string& server, const std::string& source = "") {
+        return base_url (R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{"url":")" +
+        server + R"("}],"paths":{}})",
+        source);
+    };
+    const auto v2 = [&] (const std::string& base_path) {
+        return base_url (R"({"swagger":"2.0","info":{"title":"T"},"host":"h","basePath":")" +
+        base_path + R"(","paths":{}})");
+    };
+
+    EXPECT_EQ (v3 ("https://h/v1/"), "https://h/v1");
+    EXPECT_EQ (v3 ("https://h/"), "https://h");
+    EXPECT_EQ (v3 ("https://h/v1//"), "https://h/v1");
+    EXPECT_EQ (v3 ("https://h/v1"), "https://h/v1");
+    // A relative URL is trimmed after it resolves, not before.
+    EXPECT_EQ (v3 ("/v3/", "https://api.example.com/specs/openapi.yaml"),
+    "https://api.example.com/v3");
+    // The slashes after a scheme are not a path.
+    EXPECT_EQ (v3 ("https://"), "https://");
+    // A lone `/` with nothing to resolve against is kept as written.
+    EXPECT_EQ (v3 ("/"), "/");
+
+    EXPECT_EQ (v2 ("/v2/"), "https://h/v2");
+    EXPECT_EQ (v2 ("/v2//"), "https://h/v2");
+    EXPECT_EQ (v2 ("/v2"), "https://h/v2");
+    EXPECT_EQ (v2 ("/"), "https://h");
+}
+
+/// Trimming the slash does not turn an unresolved base into a resolved one.
+TEST (ImportParse, KeepsCountingAnUnresolvedBaseUrlWhoseSlashIsTrimmed) {
+    const ImportParse parsed = parse_import (
+    R"({"openapi":"3.0.0","info":{"title":"T"},"servers":[{"url":"/api/"}],"paths":{}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")),
+    (json{ { "unresolved_base_url", 1 } }));
 }
 
 /**

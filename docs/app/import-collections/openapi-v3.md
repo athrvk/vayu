@@ -117,6 +117,8 @@ This substitution is what a Vayu-exported skeleton round-trips through (issue #1
 
 An absolute URL is passed through untouched - not re-serialized through `URL`, so a stored document's own spelling survives.
 
+**A trailing slash is dropped from the result** (issue #3029). Every request is `{{baseUrl}}` followed by a path that starts with `/`, so `servers[0].url: https://api.acme.dev/v1/` would otherwise send each one to `https://api.acme.dev/v1//pets`. `https://api.acme.dev/v1/` becomes `https://api.acme.dev/v1` and `https://api.acme.dev/` becomes `https://api.acme.dev`; a relative URL is trimmed after step 2 resolves it. The `//` after the scheme is never trimmed, and a lone `/` that step 3 keeps as written stays `/`. Trimming changes no counts: an `unresolved_base_url` is still counted.
+
 **Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
 
 Both lists go through the walk's `parameters` guard (`openapi_drafts.cpp`) first. `parameters` is an array per the spec, but a missing `-` in hand-written YAML makes it a mapping, and spreading that used to throw `is not iterable` and abort the **whole file**. A present-but-non-array `parameters` is now treated as empty and counted as a `malformed_spec` `SkippedItem` (once per offending list); an absent `parameters` is normal and counted as nothing. Every other path in the file still imports.
