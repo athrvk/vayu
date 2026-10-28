@@ -96,3 +96,12 @@ export const toKeyValueItems = (entries: FormFieldEntry[] | undefined): KeyValue
 export const toKeyValueEntries = (items: KeyValueItem[]): FormFieldEntry[] => {
 	return items.filter((item) => !isBlankRow(item)).map(({ id: _id, ...entry }) => entry);
 };
+
+/**
+ * `item` with the file name its part is sent under set to `name`, or without
+ * one when `name` is empty: the engine then sends the file's own name (#3022).
+ */
+export function withFileName(item: KeyValueItem, name: string): KeyValueItem {
+	const { fileName: _previous, ...rest } = item;
+	return name === "" ? rest : { ...rest, fileName: name };
+}

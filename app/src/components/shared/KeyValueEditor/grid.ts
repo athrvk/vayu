@@ -32,7 +32,7 @@ export const KEY_VALUE_GRID_WITH_EXTRA =
 
 /** Both the toggle and a per-row control column. */
 export const KEY_VALUE_GRID_WITH_FILES_AND_EXTRA =
-	"grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_7rem_var(--spacing-target)_28px]";
+	"grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_14rem_var(--spacing-target)_28px]";
 
 /**
  * The extra column is opt-in, so a table that passes no `rowExtra` keeps the

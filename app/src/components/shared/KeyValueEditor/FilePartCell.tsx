@@ -22,8 +22,18 @@
  * pick clears it (`lib/file-trust.ts`).
  */
 
-import { FileUp, TriangleAlert } from "lucide-react";
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { FileUp, Pencil, TriangleAlert } from "lucide-react";
+import {
+	Button,
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui";
+import type { VariableSupport } from "@/types";
+import VariableInput from "../VariableInput";
 import { fileBaseName } from "@/lib/file-path";
 import { isUnresolved } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
@@ -40,12 +50,20 @@ export default function FilePartCell({
 	unresolved,
 	disabled,
 	onPick,
+	partName,
+	onRename,
+	variables,
 }: {
 	fileName?: string;
 	src?: string;
 	unresolved?: boolean;
 	disabled?: boolean;
 	onPick: (file: PickedFile) => void;
+	/** The part's key, for the rename control's label. */
+	partName?: string;
+	/** Sets the name the file is sent under; empty clears it. Omitted: no control. */
+	onRename?: (name: string) => void;
+	variables?: VariableSupport;
 }) {
 	const { open, inputProps } = useFilePick(onPick);
 	const name = displayName(fileName, src);
@@ -78,8 +96,10 @@ export default function FilePartCell({
 		</Button>
 	);
 
+	const ownName = fileBaseName(src ?? "");
+
 	return (
-		<div className="min-w-0">
+		<div className="flex min-w-0 items-center gap-1">
 			<input {...inputProps} />
 			<Tooltip>
 				<TooltipTrigger asChild>{button}</TooltipTrigger>
@@ -95,6 +115,40 @@ export default function FilePartCell({
 					)}
 				</TooltipContent>
 			</Tooltip>
+			{onRename && chosen && (
+				<Popover>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<PopoverTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									disabled={disabled}
+									aria-label={`Name the upload of ${partName || "this part"}`}
+									className="size-control-sm shrink-0"
+								>
+									<Pencil className="size-icon-sm" />
+								</Button>
+							</PopoverTrigger>
+						</TooltipTrigger>
+						<TooltipContent>Send the file under another name</TooltipContent>
+					</Tooltip>
+					<PopoverContent align="end" className="space-y-2">
+						<VariableInput
+							value={fileName ?? ""}
+							onChange={onRename}
+							placeholder={ownName}
+							variables={variables}
+							size="sm"
+							aria-label="File name sent in the part"
+						/>
+						<p className="text-label text-muted-foreground">
+							Empty sends the file&apos;s own name.
+						</p>
+					</PopoverContent>
+				</Popover>
+			)}
 		</div>
 	);
 }

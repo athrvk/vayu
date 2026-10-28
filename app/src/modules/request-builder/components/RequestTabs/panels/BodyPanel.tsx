@@ -75,6 +75,7 @@ import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { BodyMode } from "../../../types";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
+import { contentTypeExtra } from "@/components/shared/KeyValueEditor/ContentTypeCell";
 import { toHeaderRows } from "../../../utils/key-value";
 import { composePathParams, substitutePathVariables } from "../../../utils/path-variables";
 import { resolveUrlTemplate } from "../../../utils/query-encoding";
@@ -350,6 +351,9 @@ export default function BodyPanel() {
 		[updateField, request.bodyMode]
 	);
 
+	// Memoised on the scope alone: `rowExtra` is a prop of the memo'd rows (#1716).
+	const contentTypeRowExtra = useMemo(() => contentTypeExtra(variables), [variables]);
+
 	return (
 		/*
 		 * A column that fills the tab panel: the picker, the notice and the
@@ -514,6 +518,8 @@ export default function BodyPanel() {
 					// Only multipart can carry a file: urlencoded's wire body is a
 					// string of pairs, and the engine refuses a file part there.
 					allowFiles={request.bodyMode === "form-data"}
+					// A part's own Content-Type is multipart-only, like a file part (#3022).
+					rowExtra={request.bodyMode === "form-data" ? contentTypeRowExtra : undefined}
 					variables={variables}
 				/>
 			)}

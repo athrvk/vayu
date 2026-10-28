@@ -112,9 +112,10 @@ describe("switching a row between text and file", () => {
 });
 
 /**
- * A text part may carry the type it was imported with (#2539). The editor has
- * no control for it, so an ordinary edit has to leave it alone: it is a member
- * of the row the user did not touch.
+ * A text part may carry the type it was imported with (#2539). This editor, with
+ * no `rowExtra`, has no control for it, so an ordinary edit has to leave it
+ * alone: it is a member of the row the user did not touch. The form-data panel
+ * mounts the Content type column (`ContentTypeCell.test.tsx`).
  */
 describe("a text part that declares its own type", () => {
 	const typedRow: KeyValueItem = {
