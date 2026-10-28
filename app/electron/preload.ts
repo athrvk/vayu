@@ -83,6 +83,38 @@ function enginePortFromArgv(argv: readonly string[]): number | null {
 	return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
 }
 
+/**
+ * Writes what a `file:` build persisted into this origin, once, before any
+ * page script reads it (#2380). Main appends the flag only while it holds the
+ * entries; it filtered them to `vayu*` keys. A key this origin already has is
+ * overwritten: 0.46.0 shipped without this hand-off, and what it wrote since is
+ * almost all first-launch defaults (#3021). The report is what tells main the hand-off is complete.
+ *
+ * The flag and both channels mirror `LEGACY_STORAGE_ARG`,
+ * `LEGACY_STORAGE_TAKE_CHANNEL` and `LEGACY_STORAGE_TAKEN_CHANNEL` in
+ * electron/legacy-storage-migration.ts, inlined because this file is a
+ * CommonJS script and must not grow imports; that module's test holds them
+ * together. Retired with that module.
+ */
+function adoptLegacyStorage(argv: readonly string[]): void {
+	if (!argv.includes("--vayu-legacy-storage")) return;
+	const entries: unknown = ipcRenderer.sendSync("legacy-storage:take");
+	if (entries === null || typeof entries !== "object") return;
+	const report = { written: 0, failed: 0 };
+	for (const [key, value] of Object.entries(entries)) {
+		try {
+			window.localStorage.setItem(key, String(value));
+			report.written++;
+		} catch {
+			// A full quota or a refused store; main retries on a later launch.
+			report.failed++;
+		}
+	}
+	ipcRenderer.send("legacy-storage:taken", report);
+}
+
+adoptLegacyStorage(process.argv);
+
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -202,8 +234,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Context menu (#1359). The main process composes it from Chromium's own
 	// editing state; these two carry the half only the renderer knows.
 	//
-	// Synchronous, and the only `sendSync` a page can reach: this is called
-	// from a `contextmenu` listener, and blocking there until the main
+	// Synchronous, and the only `sendSync` a page can reach (the preload's
+	// other is `adoptLegacyStorage`, once, at load): this is called from a
+	// `contextmenu` listener, and blocking there until the main
 	// process has the announcement is what pairs it with the `context-menu`
 	// event that follows. The shape mirrors `ContextTarget` in
 	// electron/context-menu.ts, inlined because this file is a CommonJS script

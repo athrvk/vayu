@@ -676,11 +676,13 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   script it hashes; the dev server is exempt because its React-refresh
   preamble is inline. The packaged document is served from the privileged
   `vayu-app://app/` scheme (`electron/app-protocol.ts`, #2380), not `file:`,
-  so `'self'` names that one origin rather than every local file. No window
-  runs with `webSecurity: false` (`window-navigation.test.ts` scans for it).
-  Device permissions (camera, microphone, geolocation, notifications) are
-  denied on the default session and on every OAuth partition
-  (`electron/permissions.ts`).
+  so `'self'` names that one origin rather than every local file. What the
+  `file:` builds kept in localStorage is carried over once, on the first
+  packaged launch, from a script-less stub page on the `file://` origin in a
+  hidden, preload-less view (`electron/legacy-storage-migration.ts`); it is the
+  one `file:` load left, and it is retired with that module. Device
+  permissions (camera, microphone, geolocation, notifications) are denied on
+  the default session and on every OAuth partition (`electron/permissions.ts`).
   `update:openReleasePage` takes no argument and opens only the release page
   the updater offered. Electron fuses turn off `ELECTRON_RUN_AS_NODE`,
   `NODE_OPTIONS`, `--inspect`, non-ASAR loads and the extra privileges
