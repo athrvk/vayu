@@ -231,4 +231,92 @@ describe("ContractCoverage", () => {
 		);
 		expect(screen.getByText("2 / 2 operations").className).toContain("status-success");
 	});
+
+	describe("an operation that got no response", () => {
+		const operation = (over: Partial<RunCoverageOperation>): RunCoverageOperation => ({
+			operationId: "listPets",
+			method: "GET",
+			path: "/pets",
+			sent: 4,
+			statusesSeen: [],
+			declaredHit: [],
+			declaredMissed: ["200"],
+			undeclaredSeen: [],
+			...over,
+		});
+
+		it("is not green when every send of every operation failed to connect", () => {
+			// The engine counts a transport error as sent, so the operations read
+			// as fully covered while the server was never reached.
+			render(
+				<ContractCoverage
+					coverage={coverage({
+						operationsTotal: 2,
+						operationsCovered: 2,
+						declaredResponsesHit: 0,
+						declaredResponseCoveragePct: 0,
+						transportErrors: 7,
+						operations: [
+							operation({ path: "/pets", sent: 4, transportErrors: 4 }),
+							operation({
+								method: "POST",
+								path: "/pets/new",
+								sent: 3,
+								transportErrors: 3,
+							}),
+						],
+					})}
+				/>
+			);
+			const chip = screen.getByText("2 / 2 operations");
+			expect(chip.className).toContain("status-warning");
+			expect(chip.className).not.toContain("status-success");
+			expect(screen.getByText(/2 operations got no response\./)).toBeTruthy();
+		});
+
+		it("counts only the operations nothing answered, in the singular for one", () => {
+			render(
+				<ContractCoverage
+					coverage={coverage({
+						operationsTotal: 2,
+						operationsCovered: 2,
+						operations: [
+							operation({ path: "/pets", sent: 4, transportErrors: 4 }),
+							operation({
+								method: "POST",
+								path: "/pets/new",
+								sent: 3,
+								transportErrors: 1,
+							}),
+						],
+					})}
+				/>
+			);
+			expect(screen.getByText("2 / 2 operations").className).toContain("status-warning");
+			expect(screen.getByText(/1 operation got no response\./)).toBeTruthy();
+		});
+
+		it("stays green and silent when failures were partial or absent", () => {
+			render(
+				<ContractCoverage
+					coverage={coverage({
+						operationsTotal: 2,
+						operationsCovered: 2,
+						operations: [
+							operation({ path: "/pets", statusesSeen: [200], declaredHit: ["200"] }),
+							operation({
+								method: "POST",
+								path: "/pets/new",
+								statusesSeen: [201],
+								sent: 3,
+								transportErrors: 1,
+							}),
+						],
+					})}
+				/>
+			);
+			expect(screen.getByText("2 / 2 operations").className).toContain("status-success");
+			expect(screen.queryByText(/got no response/)).toBeNull();
+		});
+	});
 });

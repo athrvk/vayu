@@ -722,6 +722,12 @@ sent and as no response seen. The operation still counts as covered (something
 was tried), no declared response is hit, and the row says how many failed. Status
 `0` never appears as a status the server sent, because no server sent it.
 
+The operations chip is green only when nothing is uncovered, no undeclared status
+was seen, and **no operation got no response**. An operation got no response when
+every request sent for it was a transport error, and a run where all of them did
+reads `6 / 6 operations` in the warning tone with `6 operations got no response.`
+under it, since a connection refused on every send proves nothing about the contract.
+
 Requests whose operation the document does not declare are counted too, as
 `requests went to operations this document does not declare`. That is a
 collection that has drifted off its contract, which is exactly what the block
