@@ -839,7 +839,7 @@ logged as a warning: it means a client skipped composition.
     `load_strategy.cpp` / `scenario_load.cpp`. A collection run checks every
     step instead (#681), stamps each verdict on its trace and `step` SSE frame,
     and writes `exact: true` into the same block; `failOnSchemaError` (default
-    false, scenario-only) lets a schema failure fail an otherwise-passing step.
+    false, collection-run-only) lets a schema failure fail an otherwise-passing step.
   - **The engine reads the document itself** (#853, `core/openapi_document.hpp`,
     rapidyaml, the one YAML dependency in one translation unit). Both stored
     indexes (`operations`, `responseSchemas`) are derived on every write

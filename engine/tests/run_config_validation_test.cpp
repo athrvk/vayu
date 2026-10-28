@@ -1285,6 +1285,68 @@ TEST_F (RunConfigValidationRouteTest, ASingleRequestLoadRunKeepsItsMonitor) {
     vayu::RunStatus::Completed);
 }
 
+// Only the sequential collection runner reads `failOnSchemaError`, so `true`
+// on a single-request or scenario load run was accepted and decided nothing
+// (#3039). Mutation check: drop the
+// `refuse_fail_on_schema_error_outside_collection_run` call in
+// `validate_load_request` and each case answers 202 or `invalid_scenario`.
+TEST_F (RunConfigValidationRouteTest,
+FailOnSchemaErrorOutsideACollectionRunIsRefusedNamingTheFlag) {
+    const vayu::tests::EchoServer echo;
+    const json scenario{ { "source", "collection" }, { "collectionId", "x" } };
+    const std::vector<std::pair<std::string, json>> cases = {
+        { "single-request run", iterations_run (echo) },
+        { "scenario load run", { { "scenario", scenario }, { "mode", "iterations" } } },
+    };
+    for (const auto& [label, base] : cases) {
+        json payload                 = base;
+        payload["failOnSchemaError"] = true;
+        const auto [status, body]    = post_run (payload);
+        EXPECT_EQ (status, 400) << label << ": " << body.dump ();
+        const auto error = body.find ("error");
+        ASSERT_TRUE (error != body.end () && error->is_object ()) << body.dump ();
+        EXPECT_EQ (error->value ("code", std::string ()), "invalid_run_config")
+        << label << ": " << body.dump ();
+        EXPECT_NE (vayu::http::routes::error_message_of (body).find (
+                   "'failOnSchemaError'"),
+        std::string::npos)
+        << label << ": " << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+}
+
+// The refusal is `true` outside a collection run, nothing else: `false` is the
+// default on a single-request run, a collection run carries the flag to its
+// runner (this database holds no collection, so it stops at `invalid_scenario`
+// rather than at the flag), and a non-boolean keeps `validate_run_config`'s
+// type message.
+TEST_F (RunConfigValidationRouteTest, FailOnSchemaErrorIsStillAcceptedWhereItIsRead) {
+    const vayu::tests::EchoServer echo;
+    auto single                             = iterations_run (echo);
+    single["failOnSchemaError"]             = false;
+    const auto [single_status, single_body] = post_run (single);
+    ASSERT_EQ (single_status, 202) << single_body.dump ();
+    EXPECT_EQ (settled_status (single_body.value ("runId", std::string ())),
+    vayu::RunStatus::Completed);
+
+    const json collection{ { "scenario",
+                           { { "source", "collection" }, { "collectionId", "x" } } },
+        { "failOnSchemaError", true } };
+    const auto [collection_status, collection_body] = post_run (collection);
+    EXPECT_EQ (collection_status, 400) << collection_body.dump ();
+    EXPECT_EQ (collection_body["error"].value ("code", std::string ()), "invalid_scenario")
+    << collection_body.dump ();
+
+    auto mistyped                               = iterations_run (echo);
+    mistyped["failOnSchemaError"]               = "yes";
+    const auto [mistyped_status, mistyped_body] = post_run (mistyped);
+    EXPECT_EQ (mistyped_status, 400) << mistyped_body.dump ();
+    EXPECT_NE (vayu::http::routes::error_message_of (mistyped_body).find ("must be a boolean"),
+    std::string::npos)
+    << mistyped_body.dump ();
+}
+
 TEST_F (RunConfigValidationRouteTest, ADrainingEngineFailsTheRowItAlreadyWrote) {
     const vayu::tests::EchoServer echo;
     run_manager_.shutdown ();
