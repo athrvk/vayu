@@ -1054,7 +1054,12 @@ once the user changes the dialog's Scripts control from its `"asMarked"`
 default, the one control the single-target payload's own `preRequestScript`
 warning needs: `"allInline"` is what makes a pre-request script actually
 reach the wire under load, since an unmarked one otherwise never runs on this
-path either. `LoadTestConfigDialog` offers no Timers twin, but not because
+path either. A disabled element is left out of `requestElements` (`withoutDisabled`, issue
+#3050): the pipeline skips it, and the engine no longer refuses a disabled
+scenario-only kind there. An *enabled* `timer.pacing`, `timer.throughput`,
+`control.*` or `metric.record`, the request's own or inherited, never reaches the
+payload - the dialog blocks Start and offers the collection run instead.
+`LoadTestConfigDialog` offers no Timers twin, but not because
 the engine ignores the override there - `elements.timers` applies to a single
 target's own `timer.think` exactly the way it does to a scenario step's - the
 dialog simply has no timer control of its own on this path to pair it with

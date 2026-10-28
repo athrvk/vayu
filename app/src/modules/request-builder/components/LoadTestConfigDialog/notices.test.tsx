@@ -19,6 +19,7 @@ const CLEAN: NoticeInputs = {
 	capacityRangeError: null,
 	budgetsError: null,
 	monitoringError: null,
+	scenarioOnlyError: null,
 	hasPreRequestScript: false,
 	hasPostRequestScript: false,
 	scriptsOverride: "asMarked",
@@ -103,6 +104,41 @@ describe("buildNotices", () => {
 			expect(screen.getByText(/carried over from Orders/)).toBeInTheDocument();
 			fireEvent.click(screen.getByRole("button", { name: "Clear carried-over budgets" }));
 			expect(onClear).toHaveBeenCalledTimes(1);
+			cleanup();
+		});
+	});
+
+	describe("scenario-only elements (#3050)", () => {
+		const scenarioOnlyError =
+			"A single-request load test can't run timer.pacing (set on this request).";
+
+		it("raises a blocking notice, above the advisories", () => {
+			expect(keys({ scenarioOnlyError, hasPreRequestScript: true })).toEqual([
+				"scenario-only",
+				"pre-script",
+			]);
+			expect(buildNotices({ ...CLEAN, scenarioOnlyError })[0].severity).toBe("blocking");
+		});
+
+		it("says nothing when no element needs a scenario", () => {
+			expect(keys({ scenarioOnlyError: null })).toEqual([]);
+		});
+
+		it("shows the sentence and a button that runs the collection instead", () => {
+			const onRunCollection = vi.fn();
+			const [notice] = buildNotices({ ...CLEAN, scenarioOnlyError, onRunCollection });
+			render(<>{notice.node}</>);
+			expect(screen.getByText(/can't run timer\.pacing/)).toBeInTheDocument();
+			fireEvent.click(screen.getByRole("button", { name: "Run the collection instead" }));
+			expect(onRunCollection).toHaveBeenCalledTimes(1);
+			cleanup();
+		});
+
+		it("offers no button where the request has no collection to run", () => {
+			const [notice] = buildNotices({ ...CLEAN, scenarioOnlyError });
+			render(<>{notice.node}</>);
+			expect(screen.getByText(/can't run timer\.pacing/)).toBeInTheDocument();
+			expect(screen.queryByRole("button")).toBeNull();
 			cleanup();
 		});
 	});

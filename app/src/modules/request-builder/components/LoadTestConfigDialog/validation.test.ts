@@ -10,6 +10,7 @@ import { firstBlockingError, validateLoadTestDraft, type DraftErrors } from "./v
 import { emptyBudgetDraft } from "./budgets";
 import { emptyMonitorDraft } from "./monitor";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
+import type { ResolvedElement } from "@/types";
 
 const PROFILE: LoadTestProfile = {
 	mode: "ramp_up",
@@ -25,13 +26,18 @@ const PROFILE: LoadTestProfile = {
 	streamMaxEvents: 1000,
 };
 
-const validate = (profile: Partial<LoadTestProfile> = {}, monitorUrl = "") =>
+const validate = (
+	profile: Partial<LoadTestProfile> = {},
+	monitorUrl = "",
+	scenarioOnly: ResolvedElement[] = []
+) =>
 	validateLoadTestDraft({
 		profile: { ...PROFILE, ...profile },
 		budgets: emptyBudgetDraft(),
 		customBudgets: [],
 		monitor: { ...emptyMonitorDraft(), url: monitorUrl },
 		maxSeries: 10,
+		scenarioOnly,
 	});
 
 const NONE: DraftErrors = {
@@ -41,6 +47,7 @@ const NONE: DraftErrors = {
 	capacityRangeError: null,
 	budgetsError: null,
 	monitoringError: null,
+	scenarioOnlyError: null,
 };
 
 describe("validateLoadTestDraft", () => {
@@ -56,6 +63,18 @@ describe("validateLoadTestDraft", () => {
 	it("reads the monitoring rule from the monitor draft", () => {
 		// A URL with no metric names is the incomplete block the rule refuses.
 		expect(validate({}, "http://localhost:9100/metrics").monitoringError).not.toBeNull();
+	});
+
+	it("reads the scenario-only rule from the resolved elements (#3050)", () => {
+		const pacing: ResolvedElement = {
+			id: "p1",
+			kind: "timer.pacing",
+			enabled: true,
+			config: {},
+			origin: { kind: "request", scope: "request", id: "req_1" },
+		};
+		expect(validate({}, "", [pacing]).scenarioOnlyError).toContain("timer.pacing");
+		expect(validate({}, "", []).scenarioOnlyError).toBeNull();
 	});
 });
 
@@ -79,5 +98,12 @@ describe("firstBlockingError", () => {
 				startFloorError: "floor",
 			})
 		).toBe("floor");
+	});
+
+	it("blocks on a scenario-only element, after the rules a field can fix", () => {
+		expect(firstBlockingError({ ...NONE, scenarioOnlyError: "pacing" })).toBe("pacing");
+		expect(
+			firstBlockingError({ ...NONE, scenarioOnlyError: "pacing", monitoringError: "monitor" })
+		).toBe("monitor");
 	});
 });

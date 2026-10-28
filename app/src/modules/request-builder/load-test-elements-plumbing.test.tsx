@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useDashboardStore } from "@/stores";
@@ -100,10 +100,17 @@ vi.mock("./context", () => ({
 vi.mock("./components/RequestBuilderLayout", () => ({ default: () => null }));
 vi.mock("./components/LoadTestCommandSurface", () => ({ default: () => null }));
 vi.mock("./components/SendRequestCommandSurface", () => ({ default: () => null }));
+// Only whether it mounted and for which collection matters here; its own suite
+// covers what the dialog does.
+vi.mock("@/modules/collections/RunCollectionDialog", () => ({
+	default: ({ collection }: { collection: Collection }) => (
+		<div data-testid="run-collection-dialog" data-collection-id={collection.id} />
+	),
+}));
 vi.mock("./components/LoadTestConfigDialog", () => ({
 	default: (props: Record<string, unknown>) => {
 		dialogProps = props;
-		return null;
+		return <div data-testid="load-test-dialog" />;
 	},
 }));
 
@@ -152,10 +159,10 @@ function startedPayload(): Record<string, unknown> {
 	return startLoadTest.mock.calls[0][0] as Record<string, unknown>;
 }
 
-async function startLoadRun(config: LoadTestConfig) {
+async function startLoadRun(config: LoadTestConfig, request: RequestState = REQUEST) {
 	renderBuilder();
 	await act(async () => {
-		(providerProps.onStartLoadTest as (request: RequestState) => void)(REQUEST);
+		(providerProps.onStartLoadTest as (request: RequestState) => void)(request);
 	});
 	await act(async () => {
 		await (dialogProps.onStart as (config: LoadTestConfig) => Promise<void>)(config);
@@ -261,5 +268,153 @@ describe("the dialog's hasPostRequestScript", () => {
 			},
 		];
 		expect(await dialogHasPostRequestScript([])).toBe(true);
+	});
+});
+
+/**
+ * A switched-off element stays off the run (#3050): the pipeline skips it, and
+ * the engine would otherwise refuse the run over a scenario-only kind nobody is
+ * using. Send and code generation still carry disabled elements; only this
+ * payload filters.
+ */
+function collectionWith(
+	id: string,
+	name: string,
+	elements: ElementDef[],
+	parentId?: string
+): Collection {
+	return {
+		id,
+		name,
+		description: "",
+		order: 0,
+		variables: {},
+		auth: { mode: "none" },
+		elements,
+		parentId,
+		createdAt: "",
+		updatedAt: "",
+	} as Collection;
+}
+
+const pacing = (overrides: Partial<ElementDef> = {}, id = "el_pacing"): ElementDef => ({
+	id,
+	kind: "timer.pacing",
+	enabled: true,
+	config: { intervalMs: 1000 },
+	...overrides,
+});
+
+describe("a disabled element is left out of requestElements (#3050)", () => {
+	const sentIds = () =>
+		(startedPayload().requestElements as ElementDef[] | undefined)?.map((el) => el.id);
+
+	it("drops a disabled element on the request and keeps the enabled ones", async () => {
+		await startLoadRun(LOAD_CONFIG, {
+			...REQUEST,
+			elements: [PRE_SCRIPT, pacing({ enabled: false })],
+		});
+
+		expect(sentIds()).toEqual(["el_pre"]);
+	});
+
+	it("drops a disabled element inherited from a collection", async () => {
+		ancestors = [collectionWith("col_1", "Checkout", [pacing({ enabled: false })])];
+
+		await startLoadRun(LOAD_CONFIG);
+
+		expect(sentIds()).toEqual(["el_pre"]);
+	});
+
+	it("sends no requestElements at all when everything is disabled", async () => {
+		await startLoadRun(LOAD_CONFIG, { ...REQUEST, elements: [pacing({ enabled: false })] });
+
+		expect(startedPayload().requestElements).toBeUndefined();
+	});
+
+	it("still sends an enabled element of the same kind, for the dialog to have blocked", async () => {
+		await startLoadRun(LOAD_CONFIG, { ...REQUEST, elements: [pacing()] });
+
+		expect(sentIds()).toEqual(["el_pacing"]);
+	});
+});
+
+describe("the dialog's scenarioOnlyElements (#3050)", () => {
+	async function openDialog(elements: ElementDef[]) {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)({
+				...REQUEST,
+				elements,
+			});
+		});
+		return dialogProps.scenarioOnlyElements as { id: string; origin?: { name?: string } }[];
+	}
+
+	it("lists an enabled one on the request, with its origin", async () => {
+		const listed = await openDialog([pacing()]);
+
+		expect(listed.map((el) => el.id)).toEqual(["el_pacing"]);
+	});
+
+	it("lists an enabled one inherited from a collection, naming the collection", async () => {
+		ancestors = [collectionWith("col_1", "Checkout", [pacing()])];
+
+		const listed = await openDialog([]);
+
+		expect(listed.map((el) => [el.id, el.origin?.name])).toEqual([["el_pacing", "Checkout"]]);
+	});
+
+	it("leaves out a disabled one, on the request or inherited", async () => {
+		ancestors = [collectionWith("col_1", "Checkout", [pacing({ enabled: false }, "el_a")])];
+
+		expect(await openDialog([pacing({ enabled: false }, "el_b")])).toEqual([]);
+	});
+
+	it("leaves out one the request suppresses with inherit.disable", async () => {
+		ancestors = [collectionWith("col_1", "Checkout", [pacing()])];
+		const suppress: ElementDef = {
+			id: "el_suppress",
+			kind: "inherit.disable",
+			enabled: true,
+			config: { elementId: "el_pacing" },
+		};
+
+		expect(await openDialog([suppress])).toEqual([]);
+	});
+});
+
+describe("Run the collection instead (#3050)", () => {
+	async function openDialogFor(chain: Collection[]) {
+		ancestors = chain;
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)(REQUEST);
+		});
+	}
+
+	it("hands over to the collection-run dialog for the request's own collection", async () => {
+		await openDialogFor([
+			collectionWith("col_root", "Root", []),
+			collectionWith("col_1", "Checkout", [pacing()], "col_root"),
+		]);
+		expect(screen.getByTestId("load-test-dialog")).toBeInTheDocument();
+		expect(screen.queryByTestId("run-collection-dialog")).toBeNull();
+
+		await act(async () => {
+			(dialogProps.onRunCollection as () => void)();
+		});
+
+		expect(screen.queryByTestId("load-test-dialog")).toBeNull();
+		expect(screen.getByTestId("run-collection-dialog")).toHaveAttribute(
+			"data-collection-id",
+			"col_1"
+		);
+	});
+
+	it("offers no way out when the request's collection did not resolve", async () => {
+		await openDialogFor([]);
+
+		expect(dialogProps.onRunCollection).toBeUndefined();
 	});
 });

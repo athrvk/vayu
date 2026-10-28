@@ -50,6 +50,12 @@ export interface NoticeInputs extends DraftErrors {
 	 * (issue #2194): the sentence naming them, and what clears exactly those.
 	 */
 	carriedBudgets?: { summary: string; onClear: () => void } | null;
+	/**
+	 * Opens the collection-run flow for the request's collection; absent where
+	 * the request has no collection to run, which leaves the notice without
+	 * its action.
+	 */
+	onRunCollection?: () => void;
 }
 
 /**
@@ -64,12 +70,14 @@ export function buildNotices({
 	capacityRangeError,
 	budgetsError,
 	monitoringError,
+	scenarioOnlyError,
 	hasPreRequestScript,
 	hasPostRequestScript,
 	scriptsOverride,
 	defaultHeaderDifference,
 	remoteTarget,
 	carriedBudgets,
+	onRunCollection,
 }: NoticeInputs): Notice[] {
 	const list: Notice[] = [];
 
@@ -104,6 +112,28 @@ export function buildNotices({
 			node: (
 				<Callout severity="blocking" title="Server monitoring is incomplete">
 					{monitoringError}
+				</Callout>
+			),
+		});
+	}
+
+	if (scenarioOnlyError) {
+		list.push({
+			key: "scenario-only",
+			severity: "blocking",
+			node: (
+				<Callout
+					severity="blocking"
+					title="Some elements need a collection run"
+					action={
+						onRunCollection && (
+							<Button size="sm" variant="outline" onClick={onRunCollection}>
+								Run the collection instead
+							</Button>
+						)
+					}
+				>
+					{scenarioOnlyError}
 				</Callout>
 			),
 		});

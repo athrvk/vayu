@@ -28,7 +28,7 @@ import {
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import LoadTestConfigDialog from "./index";
-import type { LoadTestConfig, OAuth2Config } from "@/types";
+import type { LoadTestConfig, OAuth2Config, ResolvedElement } from "@/types";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useClientSettingsStore, useDataFileStore } from "@/stores";
 import {
@@ -748,6 +748,59 @@ describe("notices", () => {
 		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+	});
+});
+
+describe("elements a single-request run cannot carry (#3050)", () => {
+	const pacing: ResolvedElement = {
+		id: "el_pacing",
+		kind: "timer.pacing",
+		enabled: true,
+		config: {},
+		origin: { kind: "collection", scope: "collection", id: "col_1", name: "Checkout" },
+	};
+
+	/** The tooltip on the gated Start: hover is the same reason Tab reaches. */
+	async function startReason(): Promise<string> {
+		const hint = document.querySelector<HTMLElement>('[data-slot="disabled-hint"]');
+		expect(hint, "a gated Start renders its hint wrapper").not.toBeNull();
+		fireEvent.focus(hint as HTMLElement);
+		const [reason] = await screen.findAllByText(/^(Disable or remove|Fix the highlighted)/);
+		return reason.textContent ?? "";
+	}
+
+	it("names the element and where it came from, and disables Start with that reason", async () => {
+		open({ scenarioOnlyElements: [pacing] });
+
+		expect(screen.getByText(/can't run timer\.pacing/)).toHaveTextContent(
+			"inherited from the collection 'Checkout'"
+		);
+		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+		expect(await startReason()).toMatch(/^Disable or remove the elements named above/);
+	});
+
+	it("opens the collection run from the notice", () => {
+		const onRunCollection = vi.fn();
+		open({ scenarioOnlyElements: [pacing], onRunCollection });
+
+		fireEvent.click(screen.getByRole("button", { name: "Run the collection instead" }));
+
+		expect(onRunCollection).toHaveBeenCalledTimes(1);
+	});
+
+	it("starts normally when the request carries none", () => {
+		const { onStart } = open({ scenarioOnlyElements: [] });
+
+		expect(screen.queryByText(/can't run/)).toBeNull();
+		expect(started(onStart)).toMatchObject({ mode: expect.any(String) });
+	});
+
+	it("keeps pointing at the field when a field is also wrong", async () => {
+		open({ scenarioOnlyElements: [pacing] });
+		pickProfile("Ramp-up");
+		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
+
+		expect(await startReason()).toBe("Fix the highlighted setting above.");
 	});
 });
 
