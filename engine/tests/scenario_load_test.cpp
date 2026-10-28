@@ -97,6 +97,13 @@ class ScenarioMockServer {
             "application/json");
         });
 
+        // A 200 that is a page, not JSON: what a gateway answers in an outage
+        // (#3041).
+        svr.Get ("/html", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/html");
+            res.set_content ("<html><body>Service Unavailable</body></html>", "text/html");
+        });
+
         for (const char* path : { "/echo", "/s0", "/s1", "/s2" }) {
             svr.Get (path, [this, path] (const httplib::Request& req, httplib::Response& res) {
                 record (req, path);
@@ -2716,6 +2723,28 @@ TEST_F (ScenarioLoadTest, AFailingAssertStatusElementCountsAsAFailedAssertion) {
     const auto totals = vayu::core::exact_assertion_totals (*context_, state.get ());
     EXPECT_EQ (totals.passed, 0u);
     EXPECT_EQ (totals.failed, 2u);
+}
+
+// A 200 whose body is not JSON is a failed assertion, not a skipped one, and a
+// required extractor fails too (#3041). Mutation check: restore the `skipped`
+// branch in `AssertJsonPathElement` and `failed` reads 0 (the extractor's
+// failure alone then leaves it at 3).
+TEST_F (ScenarioLoadTest, AnUnreadableBodyCountsAsAFailedAssertion) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/html") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_assert" }, { "kind", "assert.jsonpath" }, { "enabled", true },
+      { "config", { { "path", "$.ok" }, { "exists", true } } } },
+    { { "id", "el_extract" }, { "kind", "extract.json" }, { "enabled", true },
+    { "config", { { "path", "$.token" }, { "variable", "token" }, { "required", true } } } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto totals = vayu::core::exact_assertion_totals (*context_, state.get ());
+    EXPECT_EQ (totals.passed, 0u);
+    EXPECT_EQ (totals.failed, 6u);
 }
 
 // The gap this issue closes: `script_kinds.cpp`'s `apply` reports the

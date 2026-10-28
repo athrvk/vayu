@@ -169,8 +169,8 @@ with the same reason in the message. After an empty match the search resumes one
 `-1` over a pattern that can match nothing still ends.
 
 `assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes a path with
-one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate`;
-`assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
+one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
+either way, see below); `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
 `contains` | `equals` | `matches` (an RE2 search, above) mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
 an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
@@ -221,10 +221,17 @@ the body wrote them (`nlohmann::ordered_json`, issue #2459) and costs time linea
 however wide its objects are - a body over the
 [`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
 is not parsed, and so is a body that nests deeper than 100 levels (the kinds that read the tree
-recurse over it, and a hostile server chooses its shape); every such kind on that step reports
-`skipped` with the reason, `response body is not JSON, nests too deeply, or exceeds
-maxElementBodyBytes`. `metric.record`'s `jsonpath` source reads the same shared parse, so it reports
-`missing` there. The text-reading
+recurse over it, and a hostile server chooses its shape). A body that cannot be read, whether it is
+not JSON, empty, too deep or too big, is not a pass: the reason is `response body is not JSON, nests
+too deeply, or exceeds maxElementBodyBytes`, and `assert.jsonpath` **fails** with it, whatever
+`negate` says (a body nothing can be read from satisfies neither "exists" nor "does not exist"),
+and so does an `extract.json` with `required: true`, which reports `missing` and fails the step
+like any other required miss, even when it has a `default` (that stands in for a path that did not
+match, not for a body that was never read). A load run counts both as failed assertions (the
+per-step tally still files the extractor's `missing` under `skipped`, below) and keeps no message
+per failure. An `extract.json` without `required` reports `skipped`
+with the same reason and writes nothing. `metric.record`'s `jsonpath` source reads the same shared
+parse, so it reports `missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
 

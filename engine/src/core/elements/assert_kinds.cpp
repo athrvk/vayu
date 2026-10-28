@@ -99,7 +99,8 @@ using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
 // ---------------------------------------------------------------------------
 // assert.jsonpath - the same subset `extract.json` reads: one of `expected`
 // (exact match against the first hit), `regex` (the first hit as text) or
-// `exists` (at least one hit); `negate` flips the verdict.
+// `exists` (at least one hit); `negate` flips the verdict, except that a body
+// that cannot be read always fails.
 // ---------------------------------------------------------------------------
 
 /// A string member, or "" when it is absent or not a string: read in a
@@ -130,15 +131,18 @@ class AssertJsonPathElement final : public Element {
             ctx.outcome_message = "invalid JSONPath";
             return;
         }
+        const std::string path_text        = config_.value ("path", "");
+        const std::string name             = "JSONPath '" + path_text + "'";
         const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
-            ctx.outcome_status  = "skipped";
-            ctx.outcome_message = constants::elements::BODY_UNREADABLE_MESSAGE;
+            // Recorded before `negate` is read: a body nothing can be read
+            // from satisfies neither "exists" nor "does not exist".
+            record_assertion (ctx, name, false,
+            std::string (constants::elements::BODY_UNREADABLE_MESSAGE));
             return;
         }
         const auto matches = detail::evaluate_json_path (*body, *path_);
         const bool negate  = config_.value ("negate", false);
-        const std::string path_text = config_.value ("path", "");
 
         bool passed;
         std::string failure;
@@ -176,7 +180,7 @@ class AssertJsonPathElement final : public Element {
         if (negate) {
             passed = !passed;
         }
-        record_assertion (ctx, "JSONPath '" + path_text + "'", passed, failure);
+        record_assertion (ctx, name, passed, failure);
     }
 
     private:
@@ -394,7 +398,8 @@ ElementKind make_assert_jsonpath_kind () {
         { "description", "Passes when at least one match is found." } } },
         { "negate",
         { { "type", "boolean" }, { "title", "Negate" },
-        { "description", "Flips the assertion's pass/fail verdict." } } } } },
+        { "description", "Flips the assertion's pass/fail verdict. A response "
+        "body that cannot be read as JSON fails it either way." } } } } },
         { "required", nlohmann::json::array ({ "path" }) },
         { "additionalProperties", false },
     };

@@ -102,6 +102,23 @@ class ElementKindsTest : public ::testing::Test {
         return sink;
     }
 
+    /// What a `step.after` run leaves on the step's test tally, beside the
+    /// outcomes: the channel a failing assertion reports through.
+    struct RecordedRun {
+        std::vector<ElementOutcome> outcomes;
+        std::vector<vayu::TestResult> tests;
+    };
+
+    [[nodiscard]] RecordedRun run_after_recording (
+    const std::vector<CompiledElement>& elements) {
+        RecordedRun run;
+        post_result_       = {}; // The fixture's slot outlives a loop's passes.
+        ElementContext ctx = make_context ();
+        ElementPipeline::run (Phase::StepAfter, ctx, elements, run.outcomes);
+        run.tests = ctx.post_script_result.tests;
+        return run;
+    }
+
     /// `step.before` with `{{tier}}` resolving to @p tier, which is all
     /// `control.if` reads.
     [[nodiscard]] std::vector<ElementOutcome> run_before_with_tier (
@@ -660,15 +677,14 @@ TEST_F (ElementKindsTest, ExtractJsonStillReadsABodyAtExactlyTheDepthBound) {
     std::string (BODY_DEPTH, '[') + std::string (BODY_DEPTH, ']'));
 }
 
-TEST_F (ElementKindsTest, AssertJsonPathSkipsABodyNestedPastTheDepthBound) {
+TEST_F (ElementKindsTest, AssertJsonPathFailsABodyNestedPastTheDepthBound) {
     response = ok_json_response (200, body_nested_to (BODY_DEPTH + 1));
 
-    const auto outcomes =
-    run_after (one_element (assert_jsonpath_exists ("$.n")));
-    ASSERT_EQ (outcomes.size (), 1u);
-    EXPECT_EQ (outcomes[0].status, "skipped");
-    EXPECT_NE (message_of (outcomes[0]).find ("nests too deeply"), std::string::npos)
-    << message_of (outcomes[0]);
+    const auto run = run_after_recording (one_element (assert_jsonpath_exists ("$.n")));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_NE (message_of (run.outcomes[0]).find ("nests too deeply"), std::string::npos)
+    << message_of (run.outcomes[0]);
 }
 
 TEST_F (ElementKindsTest, AssertJsonPathStillReadsABodyAtExactlyTheDepthBound) {
@@ -700,6 +716,113 @@ TEST_F (ElementKindsTest, MetricJsonPathRecordsNothingFromABodyNestedPastTheDept
     ASSERT_EQ (past_bound.size (), 1u);
     EXPECT_EQ (past_bound[0].status, "missing");
     EXPECT_TRUE (recorded.empty ());
+}
+
+// ---------------------------------------------------------------------------
+// A body the JSON kinds cannot read fails the step instead of passing it (#3041)
+// ---------------------------------------------------------------------------
+// "Cannot read" is every way `ensure_parsed_body` answers null: text that is
+// not JSON, no text, a tree past the depth bound, a body past the byte bound.
+// Mutation check: put the old `skipped` branch back in `AssertJsonPathElement`
+// and the first two tests fail; in `ExtractJsonElement::report_unreadable_body`
+// and the third does.
+
+struct UnreadableBody {
+    const char* label;
+    std::string body;
+};
+
+std::vector<UnreadableBody> unreadable_bodies () {
+    constexpr size_t PAST_DEFAULT_BOUND = size_t{ 3 } * 512 * 1024;
+    return {
+        { "html", "<html><body><h1>503 Service Unavailable</h1></body></html>" },
+        { "empty", "" },
+        { "too deep", body_nested_to (BODY_DEPTH + 1) },
+        { "over the byte bound",
+        R"({"n": 7, "padding": ")" + std::string (PAST_DEFAULT_BOUND, 'x') + R"("})" },
+    };
+}
+
+constexpr std::string_view UNREADABLE = vayu::core::constants::elements::BODY_UNREADABLE_MESSAGE;
+
+TEST_F (ElementKindsTest, AssertJsonPathFailsWithTheBodyReasonWhenTheBodyCannotBeRead) {
+    for (const auto& [label, body] : unreadable_bodies ()) {
+        SCOPED_TRACE (label);
+        response = ok_json_response (200, body);
+
+        const auto run =
+        run_after_recording (one_element (assert_jsonpath_exists ("$.n")));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        EXPECT_EQ (message_of (run.outcomes[0]), UNREADABLE);
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_EQ (run.tests[0].name, "JSONPath '$.n'");
+        EXPECT_FALSE (run.tests[0].passed);
+        EXPECT_EQ (run.tests[0].error_message, UNREADABLE);
+    }
+}
+
+// An unreadable body satisfies no claim about its content, "does not exist"
+// included, so `negate` must not turn the failure into a pass.
+TEST_F (ElementKindsTest, AssertJsonPathNegateDoesNotPassAnUnreadableBody) {
+    const std::vector<nlohmann::json> claims = {
+        { { "path", "$.n" }, { "exists", true }, { "negate", true } },
+        { { "path", "$.n" }, { "expected", 7 }, { "negate", true } },
+        { { "path", "$.n" }, { "regex", "^7$" }, { "negate", true } },
+    };
+    response = ok_json_response (200, "<html></html>");
+    for (const auto& config : claims) {
+        SCOPED_TRACE (config.dump ());
+        const auto run = run_after_recording (one_element (nlohmann::json{
+        { "id", "a1" }, { "kind", "assert.jsonpath" }, { "config", config } }));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_FALSE (run.tests[0].passed);
+    }
+}
+
+TEST_F (ElementKindsTest, RequiredExtractJsonFailsTheStepWhenTheBodyCannotBeRead) {
+    for (const bool with_default : { false, true }) {
+        for (const auto& [label, body] : unreadable_bodies ()) {
+            SCOPED_TRACE (std::string (label) + (with_default ? ", with a default" : ""));
+            nlohmann::json config = { { "path", "$.n" }, { "variable", "v" },
+                { "required", true } };
+            if (with_default) {
+                config["default"] = "fallback";
+            }
+            response = ok_json_response (200, body);
+            variables.clear ();
+
+            const auto run = run_after_recording (one_element (nlohmann::json{
+            { "id", "e1" }, { "kind", "extract.json" }, { "config", config } }));
+            ASSERT_EQ (run.outcomes.size (), 1u);
+            EXPECT_EQ (run.outcomes[0].status, "missing");
+            EXPECT_EQ (message_of (run.outcomes[0]), UNREADABLE);
+            ASSERT_EQ (run.tests.size (), 1u);
+            EXPECT_EQ (run.tests[0].name, "extract v");
+            EXPECT_FALSE (run.tests[0].passed);
+            EXPECT_EQ (run.tests[0].error_message, UNREADABLE);
+            EXPECT_TRUE (variables.empty ());
+        }
+    }
+}
+
+TEST_F (ElementKindsTest, OptionalExtractJsonIsSkippedWithTheReasonWhenTheBodyCannotBeRead) {
+    for (const auto& [label, body] : unreadable_bodies ()) {
+        SCOPED_TRACE (label);
+        response = ok_json_response (200, body);
+        variables.clear ();
+
+        const auto run =
+        run_after_recording (one_element (extract_json_at ("$.n")));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "skipped");
+        EXPECT_EQ (message_of (run.outcomes[0]), UNREADABLE);
+        EXPECT_TRUE (run.tests.empty ())
+        << "an optional extractor never fails the step";
+        EXPECT_TRUE (variables.empty ());
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -433,7 +433,8 @@ struct ElementContext {
     std::optional<nlohmann::ordered_json> parsed_body{};
     bool body_parse_attempted = false;
     /// `maxElementBodyBytes` - a response past this is not parsed, and every
-    /// JSON-reading kind on the step reports `skipped` rather than paying for
+    /// JSON-reading kind on the step reports the body unreadable
+    /// (`constants::elements::BODY_UNREADABLE_MESSAGE`) rather than paying for
     /// (or failing on) a parse of an oversized body. A body that parses but
     /// nests past `constants::elements::MAX_BODY_DEPTH` is dropped the same
     /// way. The default is the config entry's own default; a caller that
