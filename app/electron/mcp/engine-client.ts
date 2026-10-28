@@ -455,7 +455,7 @@ export class EngineClient {
 	 * `POST /specs/match`, the rule {@link bindSpec} matches with.
 	 */
 	matchSpec(
-		payload: { collectionId: string; operations: unknown },
+		payload: { collectionId: string; operations: unknown; basePaths?: string[] },
 		signal?: AbortSignal
 	): Promise<unknown> {
 		return this.request("POST", "/specs/match", payload, signal);
