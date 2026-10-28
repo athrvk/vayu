@@ -346,18 +346,31 @@ sets `ScriptControl::Next` back to the folder's first member - an ordinary loop-
 same way `control.switch`'s jump is. `control.transaction` sums every member's own response
 latency into a per-iteration accumulator (same keying) at microsecond precision, each member rounded
 to the nearest microsecond (#2387; whole milliseconds per member reported three 0.9 ms members as
-0 ms). At the folder's last member it reports the closed sum as its `ElementOutcome::duration_us`
-with the transaction's `name` in `message` - the two fields the runner (`scenario_runner.cpp` /
-`scenario_load.cpp`) reads to record the value into `TransactionHistograms`, one HdrHistogram per
-declared name allocated up front from a plan scan, so recording it takes no lock either. Only the
-close carries `duration_us`, and no timer sets it, which is what tells a close from an accumulating
-pass. The close also sets `waited_ms` (`waitedMs` in the step trace's JSON) to the sum rounded to
-whole milliseconds; `duration_us` itself is not serialised. `includeTimers: true` (issue #1569) also
-folds a between-member `timer.*` wait (whole milliseconds, added as microseconds) into the same
+0 ms). The element only accumulates; the close is the runners' (#3054). Once a step's outcome and the
+iteration's next position are known, both run modes call `settle_transactions` (`core/elements`),
+which closes the pass **when the iteration leaves the folder**: after the folder's last member however
+that member ended - sent, skipped by a controller, or failed before `step.after` (a row that would not
+bind, a load transfer with no response) - and after any member from which the iteration jumps outside
+the folder or ends (a `control.switch` target past it, a `null` jump, an errored step under
+`stopOnError`, an abandoned load iteration). A pass in which no member was attempted, every one
+skipped, records nothing; a pass a Stop or the end of a load run interrupts is not recorded either. A
+jump back inside the folder keeps the pass open, except from its last member: `control.loop`'s
+repeat starts a new pass each time round. The close writes the sum onto that step's own
+`control.transaction` outcome (appended for a step that never reached `step.after`) as
+`ElementOutcome::duration_us`, with the transaction's `name` in `message` - the two fields the runner
+(`scenario_runner.cpp` / `scenario_load.cpp`) reads to record the value into `TransactionHistograms`,
+one HdrHistogram per declared name allocated up front from a plan scan, so recording it takes no lock
+either. Only the close carries `duration_us`, and no timer sets it, which is what tells a close from an
+accumulating pass. The close also sets `waited_ms` (`waitedMs` in the step trace's JSON) to the sum
+rounded to whole milliseconds; `duration_us` itself is not serialised. A pass is `"failed"`, and
+counts in `errors`, when an attempted member got no response: a transport failure, or a request
+that could not be built. `includeTimers: true` (issue #1569)
+also folds a between-member `timer.*` wait (whole milliseconds, added as microseconds) into the same
 running sum - the runner's own `step.between` dispatch does this fold generically
-(`fold_between_wait_into_open_transactions`, shared by both run modes, found through the
-registry's `category` field rather than a `kind ==` comparison), skipped for the folder's last member,
-whose sum has already closed and reported by the time any wait after it could run. The report gains
+(`fold_between_wait_into_open_transactions`, shared by both run modes, found through the registry's
+`category` field rather than a `kind ==` comparison) - but only into an open pass, one a member has
+already run in, and never for a wait after the folder's last member, which is outside the
+transaction's span. The report gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90, p95, p99, max } }`, omitted
 for a transaction the run never closed.
 

@@ -252,8 +252,8 @@ struct VirtualUser {
      * `scope_overlay` / `cookies` are: `control.once` must survive every
      * iteration of this VU's life, and `control.transaction`'s own
      * per-iteration accumulator keys itself with the iteration number
-     * instead, so a stale entry from an abandoned iteration is orphaned
-     * rather than misread.
+     * instead, so a pass the run's end interrupted is orphaned rather than
+     * misread (every other way out of an iteration closes it, #3054).
      */
     std::unordered_map<std::string, int64_t> controller_state;
     /// How many steps this VU has executed within its current iteration

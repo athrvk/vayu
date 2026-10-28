@@ -9418,10 +9418,16 @@ kind table and every config shape.
 sums every member's own response latency, at microsecond precision, into a
 named total per pass, and the run's summary gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
-p95, p99, max } }`, omitted for a transaction the run never closed.
+p95, p99, max } }`, omitted for a transaction the run never closed. A pass
+closes when the iteration leaves the folder (#3054): after the folder's last
+member whether it was sent, skipped by a controller or failed before an
+answer, or after any member from which the iteration jumps out of the folder
+or ends. So `count` is one per iteration that attempted a member, and a pass
+whose every member was skipped, or that a Stop interrupted, is not counted.
 `includeTimers: true` (issue #1569) also folds a between-member `timer.*`
 wait into that sum - excluded by default, and always excluded for a wait
 after the folder's own last member, which is outside the transaction's span.
+[elements.md](elements.md#controllers) has the full close rule.
 The same shape reports on a scenario load run's summary, top-level rather
 than under `scenario` - see below.
 

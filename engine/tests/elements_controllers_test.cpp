@@ -29,6 +29,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -45,6 +46,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_data.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/scenario_runner.hpp"
@@ -301,10 +303,29 @@ struct TransactionPass {
     json latency; ///< The `checkout` row's `latency`; null when nothing closed.
 };
 
+/// A plan of @p count steps, every one a member of one `checkout`
+/// transaction - one element id on each is one folder's inherited occurrence.
+vayu::core::ScenarioPlan transaction_plan (size_t count, const json& config) {
+    vayu::core::ScenarioPlan plan;
+    for (size_t i = 0; i < count; ++i) {
+        auto step  = step_with ("m" + std::to_string (i),
+        { element ("el_txn", "control.transaction", config) });
+        step.index = i;
+        plan.steps.push_back (std::move (step));
+    }
+    return plan;
+}
+
+/// The next position of a straight walk through @p count members.
+std::optional<size_t> walk_on (size_t position, size_t count) {
+    return position + 1 < count ? std::optional (position + 1) : std::nullopt;
+}
+
 /// One iteration of a `checkout` transaction over one plan step per entry of
 /// @p member_ms, driven the way both runners drive it: the pipeline per
 /// member, a `step.between` wait of @p wait_after_first_ms folded after the
-/// first, and every close recorded by the runners' `duration_us` rule.
+/// first, `settle_transactions` per member, and every close recorded by the
+/// runners' `duration_us` rule.
 TransactionPass run_transaction (const std::vector<double>& member_ms,
 bool include_timers         = false,
 int64_t wait_after_first_ms = 0) {
@@ -312,13 +333,7 @@ int64_t wait_after_first_ms = 0) {
     if (include_timers) {
         config["includeTimers"] = true;
     }
-    vayu::core::ScenarioPlan plan;
-    for (size_t i = 0; i < member_ms.size (); ++i) {
-        auto step  = step_with ("m" + std::to_string (i),
-        { element ("el_txn", "control.transaction", config) });
-        step.index = i;
-        plan.steps.push_back (std::move (step));
-    }
+    const auto plan  = transaction_plan (member_ms.size (), config);
     const auto spans = vayu::core::compute_element_spans (plan);
     std::unordered_map<std::string, int64_t> controller_state;
     vayu::core::TransactionHistograms histograms (plan);
@@ -326,11 +341,21 @@ int64_t wait_after_first_ms = 0) {
     TransactionPass pass;
     for (size_t i = 0; i < member_ms.size (); ++i) {
         const auto& elements = *plan.steps[i].elements;
-        run_member (elements, member_ms[i], i, &spans, &controller_state, pass.outcomes);
+        std::vector<vayu::core::ElementOutcome> member_outcomes;
+        run_member (elements, member_ms[i], i, &spans, &controller_state, member_outcomes);
         if (i == 0 && wait_after_first_ms > 0) {
             vayu::core::fold_between_wait_into_open_transactions (
             elements, spans, i, 0, wait_after_first_ms, controller_state);
         }
+        vayu::core::settle_transactions (elements, spans,
+        { .step_index  = i,
+        .iteration     = 0,
+        .attempted     = true,
+        .errored       = false,
+        .next_position = walk_on (i, member_ms.size ()) },
+        controller_state, member_outcomes);
+        pass.outcomes.insert (
+        pass.outcomes.end (), member_outcomes.begin (), member_outcomes.end ());
     }
     for (const auto& outcome : pass.outcomes) {
         if (outcome.duration_us && outcome.message) {
@@ -388,6 +413,155 @@ TEST (ControlTransactionSum, OnlyTheClosingOutcomeCarriesADuration) {
     const json trace = pass.outcomes.back ().to_json ();
     EXPECT_EQ (trace.at ("waitedMs").get<int64_t> (), 3) << trace.dump ();
     EXPECT_EQ (trace.size (), 6u) << "an unexpected member: " << trace.dump ();
+}
+
+// ============================================================================
+// Where a pass closes (#3054): `settle_transactions` on every way a member ends
+// ============================================================================
+
+/// How one member of a three-member `checkout` folder ended in a pass.
+struct MemberEnd {
+    /// The latency it reached `step.after` with; `nullopt` when it never did
+    /// (a controller's skip, a transfer that failed before an answer).
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<double> answered_ms{};
+    bool attempted = true;
+    bool errored   = false;
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<size_t> next_position{};
+};
+
+/// One pass over a three-member folder, member by member as the runners
+/// drive it; the outcomes each member's step was left with.
+std::vector<std::vector<vayu::core::ElementOutcome>> settle_pass (
+const std::vector<MemberEnd>& members,
+std::unordered_map<std::string, int64_t>& controller_state) {
+    const auto plan  = transaction_plan (3, json{ { "name", "checkout" } });
+    const auto spans = vayu::core::compute_element_spans (plan);
+    std::vector<std::vector<vayu::core::ElementOutcome>> steps;
+    for (size_t i = 0; i < members.size (); ++i) {
+        const auto& member   = members[i];
+        const auto& elements = *plan.steps[i].elements;
+        auto& outcomes       = steps.emplace_back ();
+        if (member.answered_ms) {
+            run_member (elements, *member.answered_ms, i, &spans, &controller_state, outcomes);
+        }
+        vayu::core::settle_transactions (elements, spans,
+        { .step_index  = i,
+        .iteration     = 0,
+        .attempted     = member.attempted,
+        .errored       = member.errored,
+        .next_position = member.next_position },
+        controller_state, outcomes);
+    }
+    return steps;
+}
+
+/// The close a member's step carries, or null when the pass did not close
+/// there.
+const vayu::core::ElementOutcome* close_in (
+const std::vector<vayu::core::ElementOutcome>& outcomes) {
+    for (const auto& outcome : outcomes) {
+        if (outcome.duration_us && outcome.message) {
+            return &outcome;
+        }
+    }
+    return nullptr;
+}
+
+TEST (ControlTransactionClose, ClosesAtTheLastMemberWhenAControllerSkipsIt) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps =
+    settle_pass ({ { .answered_ms = 1.0, .next_position = 1 },
+                 { .answered_ms = 2.0, .next_position = 2 }, { .attempted = false } },
+    state);
+    EXPECT_EQ (close_in (steps[0]), nullptr);
+    EXPECT_EQ (close_in (steps[1]), nullptr);
+    const auto* close = close_in (steps[2]);
+    ASSERT_NE (close, nullptr) << "a skipped last member left the pass open";
+    EXPECT_EQ (close->duration_us, 3000);
+    EXPECT_EQ (close->status, "ok");
+    EXPECT_EQ (close->id, "el_txn");
+    EXPECT_EQ (close->kind, "control.transaction");
+    EXPECT_TRUE (state.empty ())
+    << "the closed pass left its accumulator behind";
+}
+
+TEST (ControlTransactionClose, AMemberThatFailedBeforeStepAfterStillOpensAndFailsThePass) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps = settle_pass (
+    { { .attempted = true, .errored = true, .next_position = std::nullopt } }, state);
+    const auto* close = close_in (steps[0]);
+    ASSERT_NE (close, nullptr) << "the failed member opened no pass";
+    EXPECT_EQ (close->duration_us, 0);
+    EXPECT_EQ (close->status, "failed");
+}
+
+TEST (ControlTransactionClose, ClosesWhereTheIterationEndsInsideTheFolder) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps =
+    settle_pass ({ { .answered_ms = 1.0, .next_position = std::nullopt } }, state);
+    const auto* close = close_in (steps[0]);
+    ASSERT_NE (close, nullptr)
+    << "an iteration that ended at the first member left it open";
+    EXPECT_EQ (close->duration_us, 1000);
+}
+
+TEST (ControlTransactionClose, ClosesWhereAJumpLeavesTheFolder) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps = settle_pass ({ { .answered_ms = 1.0, .next_position = 1 },
+                                    { .answered_ms = 1.0, .next_position = 7 } },
+    state);
+    const auto* close = close_in (steps[1]);
+    ASSERT_NE (close, nullptr) << "a jump past the folder left the pass open";
+    EXPECT_EQ (close->duration_us, 2000);
+}
+
+// `control.loop` walks the folder again from its last member: each walk is
+// its own pass. Mutation check: drop the `step_index == span.last` arm of
+// `leaves_span` and the first walk never closes.
+TEST (ControlTransactionClose, TheLastMemberClosesThePassEvenWhenTheIterationLoopsBack) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps = settle_pass ({ { .answered_ms = 1.0, .next_position = 1 },
+                                    { .answered_ms = 1.0, .next_position = 2 },
+                                    { .answered_ms = 1.0, .next_position = 0 } },
+    state);
+    const auto* close = close_in (steps[2]);
+    ASSERT_NE (close, nullptr)
+    << "a loop-back from the last member kept the pass open";
+    EXPECT_EQ (close->duration_us, 3000);
+}
+
+TEST (ControlTransactionClose, AJumpBackInsideTheFolderKeepsThePassOpen) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps = settle_pass ({ { .answered_ms = 1.0, .next_position = 1 },
+                                    { .answered_ms = 1.0, .next_position = 0 } },
+    state);
+    EXPECT_EQ (close_in (steps[1]), nullptr);
+    EXPECT_EQ (state.size (), 1u) << "the open pass lost its sum";
+}
+
+TEST (ControlTransactionClose, APassWhoseEveryMemberWasSkippedRecordsNothing) {
+    std::unordered_map<std::string, int64_t> state;
+    const auto steps =
+    settle_pass ({ { .attempted = false, .next_position = 1 },
+                 { .attempted = false, .next_position = 2 }, { .attempted = false } },
+    state);
+    for (const auto& outcomes : steps) {
+        EXPECT_EQ (close_in (outcomes), nullptr);
+    }
+    EXPECT_TRUE (state.empty ());
+}
+
+TEST (ControlTransactionClose, AWaitBeforeAnyMemberRanOpensNoPass) {
+    const auto plan =
+    transaction_plan (2, json{ { "name", "checkout" }, { "includeTimers", true } });
+    const auto spans = vayu::core::compute_element_spans (plan);
+    std::unordered_map<std::string, int64_t> state;
+    vayu::core::fold_between_wait_into_open_transactions (
+    *plan.steps[0].elements, spans, 0, 0, 5, state);
+    EXPECT_TRUE (state.empty ())
+    << "a wait after a skipped member opened the pass";
 }
 
 TEST (ControlTransactionSum, ADesignSendReportsItsOneResponseInMicroseconds) {
@@ -812,6 +986,63 @@ TEST_F (ElementsControllersTest, ControlTransactionExcludesTimersByDefault) {
     << "without includeTimers the wait must not reach the sum";
 }
 
+/// The `checkout` row of a `transactions` array, or null when it is absent.
+json checkout_entry (const json& transactions) {
+    for (const auto& entry : transactions) {
+        if (entry["name"] == "checkout") {
+            return entry;
+        }
+    }
+    ADD_FAILURE () << "no 'checkout' transaction in " << transactions.dump ();
+    return json ();
+}
+
+// #3054: a pass whose last member a controller skips never reached
+// `step.after`, where the close used to happen, so three iterations
+// recorded nothing. Mutation check: make `settle_transactions` skip a member
+// that was not attempted, as the old close did, and the count is 0.
+TEST_F (ElementsControllersTest, ControlTransactionClosesWhenTheLastMemberIsSkipped) {
+    seed_root (json{ { "tier", { { "value", "silver" } } } }.dump ());
+    seed_folder ("folder_1",
+    json::array ({ element ("el_txn", "control.transaction", { { "name", "checkout" } }) }));
+    seed_request ("req_a", "folder_1", 0, "/a");
+    seed_request ("req_b", "folder_1", 1, "/b",
+    json::array (
+    { element ("el_if", "control.if", { { "condition", "{{tier}} == gold" } }) }));
+
+    const std::string run_id = start (3);
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_EQ (server_->hit_count ("/b"), 0u);
+
+    const json entry =
+    checkout_entry (report_of (run_id)["scenario"]["transactions"]);
+    EXPECT_EQ (entry["count"], 3)
+    << "one close per iteration, skipped last member or not";
+    EXPECT_EQ (entry["errors"], 0);
+}
+
+// #3054: a last member whose row will not bind ends without an exchange, so
+// it never reached `step.after` either; the pass still closes, as an error.
+// Mutation check: settle it as not attempted and errors is 0.
+TEST_F (ElementsControllersTest, ControlTransactionClosesAndFailsWhenTheLastMemberCannotBind) {
+    seed_root ();
+    seed_folder ("folder_1",
+    json::array ({ element ("el_txn", "control.transaction", { { "name", "checkout" } }) }));
+    seed_request ("req_a", "folder_1", 0, "/a");
+    seed_request ("req_b", "folder_1", 1, "/b?id={{data.missing}}");
+
+    const std::string run_id = start (3, json::array ({ json{ { "tier", "gold" } } }));
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_EQ (server_->hit_count ("/b"), 0u)
+    << "the unbound member reached the wire";
+
+    const json entry =
+    checkout_entry (report_of (run_id)["scenario"]["transactions"]);
+    EXPECT_EQ (entry["count"], 3);
+    EXPECT_EQ (entry["errors"], 3)
+    << "a member that could not be built is the pass's error";
+}
+
 // ============================================================================
 // Scenario load run - `execute_scenario_load` directly, no DB collection tree
 // ============================================================================
@@ -957,6 +1188,30 @@ class ElementsControllersLoadTest : public ::testing::Test {
         execution.plan.steps.push_back (std::move (c));
 
         return execution;
+    }
+
+    /// `plan_over` with one `checkout` transaction on both steps, and
+    /// @p extra_b beside it on `b`.
+    static vayu::core::ScenarioExecution
+    checkout_over (ControllerLoadMockServer& server, std::vector<json> extra_b = {}) {
+        const json txn =
+        element ("el_txn", "control.transaction", { { "name", "checkout" } });
+        extra_b.insert (extra_b.begin (), txn);
+        return plan_over (server, { txn }, std::move (extra_b));
+    }
+
+    /// One VU walking @p execution three times, and the `checkout` row of the
+    /// run's summary.
+    json checkout_after_three_iterations (const vayu::core::ScenarioExecution& execution) {
+        const json config{ { "scenario", { { "collectionId", "col_test" } } },
+            { "mode", "iterations" }, { "concurrency", 1 }, { "iterations", 3 } };
+        auto state = run (config, execution);
+        if (state == nullptr) {
+            ADD_FAILURE () << "the load run did not start";
+            return json ();
+        }
+        return checkout_entry (vayu::core::build_scenario_load_summary (
+        *state, execution.plan)["transactions"]);
     }
 
     std::shared_ptr<vayu::core::ScenarioLoadState> run (const json& config,
@@ -1246,6 +1501,40 @@ TEST_F (ElementsControllersLoadTest, ControlTransactionExcludesTimersByDefaultUn
     EXPECT_GE (p50, 0.0);
     EXPECT_LT (p50, 60.0)
     << "without includeTimers the wait must not reach the sum";
+}
+
+// #3054, under load: a skipped step never reaches `run_step_after`, where the
+// close used to happen. Mutation check: the sequential case's.
+TEST_F (ElementsControllersLoadTest, ControlTransactionClosesWhenTheLastMemberIsSkippedUnderLoad) {
+    ControllerLoadMockServer server;
+    const auto execution = checkout_over (server,
+    { element ("el_if", "control.if", { { "condition", "{{tier}} == gold" } }) });
+
+    const json entry = checkout_after_three_iterations (execution);
+    EXPECT_EQ (server.hit_count ("/b"), 0u);
+    EXPECT_EQ (entry["count"], 3)
+    << "one close per iteration, skipped last member or not";
+    EXPECT_EQ (entry["errors"], 0);
+}
+
+// #3054, under load: a last member whose row will not bind finishes with no
+// response and abandons the iteration, without `run_step_after`; the pass
+// still closes, as an error. Mutation check: the sequential case's.
+TEST_F (ElementsControllersLoadTest,
+ControlTransactionClosesAndFailsWhenTheLastMemberCannotBindUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution      = checkout_over (server);
+    auto& last          = execution.plan.steps[1];
+    last.request.url    = server.url ("/b?id={{data.missing}}");
+    last.data_template  = vayu::core::tokenize_bindable_fields (last.request);
+    execution.data_rows = { json{ { "tier", "gold" } } };
+
+    const json entry = checkout_after_three_iterations (execution);
+    EXPECT_EQ (server.hit_count ("/b"), 0u)
+    << "the unbound member reached the wire";
+    EXPECT_EQ (entry["count"], 3);
+    EXPECT_EQ (entry["errors"], 3)
+    << "a member that could not be built is the pass's error";
 }
 
 } // namespace
