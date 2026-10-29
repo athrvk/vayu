@@ -1459,3 +1459,65 @@ TEST (SchemaRefLoopTest, ARefLoopInABoundSpecLeavesTheResponseUnchecked) {
     ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoIndex);
 }
+
+// ─── A parent that failed because a child did is not a second problem (#3033) ─
+
+TEST (StructuralWrapperTest, ThirtyBadArrayItemsAreThirtyProblems) {
+    const json schema = json::parse (R"({
+        "type": "array",
+        "items": {"type": "object", "properties": {"id": {"type": "integer"}}}
+    })");
+    json body         = json::array ();
+    for (int i = 0; i < 30; ++i) {
+        body.push_back (json{ { "id", "x" } });
+    }
+
+    const auto verdict = validate_body_against_schema (schema, json::object (), body);
+
+    EXPECT_EQ (verdict.failures_total, 30u);
+    ASSERT_EQ (verdict.failures.size (), constants::schema_validation::MAX_FAILURES);
+    for (const auto& failure : verdict.failures) {
+        EXPECT_NE (failure.path, "") << failure.message;
+    }
+}
+
+TEST (StructuralWrapperTest, AnAllOfBranchThatFailsIsOneProblem) {
+    const auto verdict =
+    judge (R"({"allOf": [{"required": ["a"]}, {"required": ["b"]}]})", "{}");
+
+    EXPECT_EQ (verdict.failures_total, 1u);
+    EXPECT_EQ (verdict.failures.size (), 1u);
+}
+
+// One case per wrapper valijson writes around a failing child. Each is one
+// problem, so a prefix valijson rewords (or this list loses) shows up as the
+// count doubling for that keyword, named in the failure.
+TEST (StructuralWrapperTest, EveryValijsonWrapperIsDroppedAndItsLeafIsKept) {
+    struct Case {
+        const char* keyword;
+        const char* schema;
+        const char* body;
+    };
+    const std::vector<Case> cases{
+        { "items", R"({"items": {"type": "integer"}})", R"(["x"])" },
+        { "items (tuple)", R"({"items": [{"type": "integer"}]})", R"(["x"])" },
+        { "additionalItems", R"({"items": [{"type": "integer"}], "additionalItems": {"type": "integer"}})",
+        R"([1, "x"])" },
+        { "allOf", R"({"allOf": [{"type": "integer"}]})", R"("x")" },
+        { "properties", R"({"properties": {"a": {"type": "integer"}}})", R"({"a": "x"})" },
+        { "patternProperties",
+        R"({"patternProperties": {"^a": {"type": "integer"}}})", R"({"ab": "x"})" },
+        { "additionalProperties",
+        R"({"additionalProperties": {"type": "integer"}})", R"({"a": "x"})" },
+        { "dependencies", R"({"dependencies": {"a": {"required": ["b"]}}})", R"({"a": 1})" },
+    };
+
+    for (const auto& c : cases) {
+        const auto verdict = judge (c.schema, c.body);
+        EXPECT_EQ (verdict.failures_total, 1u) << c.keyword;
+        ASSERT_EQ (verdict.failures.size (), 1u) << c.keyword;
+        EXPECT_EQ (
+        verdict.failures.front ().message.find ("Failed to validate"), std::string::npos)
+        << c.keyword << ": " << verdict.failures.front ().message;
+    }
+}
