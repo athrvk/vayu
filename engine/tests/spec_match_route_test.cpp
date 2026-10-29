@@ -10,6 +10,9 @@
  *    files every request under a tag sub-collection, so a route that matched
  *    only the named collection's own requests would report "0 matched" for
  *    exactly the collections this feature exists for.
+ *  - **The subtree stops at a folder bound to a different document** (issue
+ *    #3034), the boundary `POST /specs/bind` stamps within, so the preview
+ *    pairs the requests the bind will.
  *  - **Nothing is written.** The Spec tab asks this before the user has decided
  *    to bind, so a call must leave no document, no binding and no stamp behind.
  *  - **A bad index is refused here, not stored and discovered later** - through
@@ -82,6 +85,16 @@ class SpecMatchRouteTest : public ::testing::Test {
         { "method", method }, { "url", url } });
         EXPECT_EQ (status, 200) << response.dump ();
         return response.value ("id", std::string{});
+    }
+
+    /// Writes the binding straight onto the row: only `specId` is read by the
+    /// boundary, so the document need not be stored.
+    void bind (const std::string& collection_id, const std::string& spec_id) {
+        auto row = db_->get_collection (collection_id);
+        ASSERT_HAS_VALUE (row);
+        row->openapi =
+        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } }.dump ();
+        db_->create_collection (*row);
     }
 
     json match (const json& operations, const std::string& collection_id = {}) {
@@ -161,6 +174,65 @@ TEST_F (SpecMatchRouteTest, DoesNotReachRequestsOutsideTheSubtree) {
     EXPECT_TRUE (body["matched"].empty ());
     EXPECT_TRUE (body["unmatchedRequests"].empty ());
     EXPECT_EQ (body["unmatchedOperations"].size (), 1u);
+}
+
+const json LIST_PETS = json::array (
+{ json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", "listPets" } } });
+
+/// Issue #3034. Mutation check: replace `spec_contract_subtree_ids`' body with
+/// the unbounded `collection_subtree_ids` walk and the folder's request, and the
+/// one under it, are matched against this document's operation.
+TEST_F (SpecMatchRouteTest, StopsAtAFolderBoundToADifferentDocument) {
+    bind (root_, "spec_pets");
+    const std::string tag =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    const std::string own = create_request (tag, "GET", "{{baseUrl}}/pets");
+
+    const std::string other =
+    create_collection (json{ { "name", "Orders" }, { "parentId", root_ } });
+    bind (other, "spec_orders");
+    create_request (other, "GET", "{{baseUrl}}/pets");
+    // Beneath the refused folder: it goes with it, bound or not.
+    const std::string nested =
+    create_collection (json{ { "name", "nested" }, { "parentId", other } });
+    create_request (nested, "GET", "{{baseUrl}}/pets");
+
+    const auto body = match (LIST_PETS);
+
+    ASSERT_EQ (body["matched"].size (), 1u);
+    EXPECT_EQ (body["matched"][0]["requestId"], own);
+    EXPECT_TRUE (body["unmatchedRequests"].empty ());
+}
+
+TEST_F (SpecMatchRouteTest, KeepsAFolderBoundToTheSameDocument) {
+    bind (root_, "spec_pets");
+    const std::string tag =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    bind (tag, "spec_pets");
+    const std::string own = create_request (tag, "GET", "{{baseUrl}}/pets");
+
+    const auto body = match (LIST_PETS);
+
+    ASSERT_EQ (body["matched"].size (), 1u);
+    EXPECT_EQ (body["matched"][0]["requestId"], own);
+}
+
+TEST_F (SpecMatchRouteTest, AnUnboundRootStopsAtEveryBoundFolder) {
+    // Previewing a bind of a collection that binds nothing yet: another
+    // document's folder is no more this one's for that.
+    const std::string free_folder =
+    create_collection (json{ { "name", "free" }, { "parentId", root_ } });
+    const std::string own = create_request (free_folder, "GET", "{{baseUrl}}/pets");
+    const std::string other =
+    create_collection (json{ { "name", "Orders" }, { "parentId", root_ } });
+    bind (other, "spec_orders");
+    create_request (other, "GET", "{{baseUrl}}/pets");
+
+    const auto body = match (LIST_PETS);
+
+    ASSERT_EQ (body["matched"].size (), 1u);
+    EXPECT_EQ (body["matched"][0]["requestId"], own);
+    EXPECT_TRUE (body["unmatchedRequests"].empty ());
 }
 
 /// Issue #3030: the base paths `POST /specs/describe` answers reach the

@@ -1150,24 +1150,38 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
 /**
  * Every collection at or beneath @p root, from one read of the table.
  *
- * One walk for the three routes that answer for a collection's whole contract -
- * `POST /specs/sync`, which refuses to touch anything outside it,
- * `POST /specs/match`, which has to gather the requests inside it, and
- * `POST /specs/export`, which assembles them into a document. An OpenAPI import
- * binds the root and files its requests under one sub-collection per tag, so
- * "the collection" means the subtree to all of them, and three walks would be
- * three chances to disagree about where a contract stops. Defined in
- * spec_sync.cpp.
+ * The spec routes do not call this directly: they call
+ * `spec_contract_subtree_ids`, which passes the boundary a contract stops at.
+ * The boundary has no default, so a caller cannot take the whole subtree by
+ * leaving it out (issue #3034). Defined in spec_sync.cpp.
  *
- * @param descend_into Optional boundary: a child it refuses is left out with its
- *        own descendants. The export passes one, because a collection bound to a
- *        *different* document is where this contract stops (issue #721); the
- *        other two take the whole subtree and pass nothing.
+ * @param descend_into A child it refuses is left out with its own descendants.
  */
 std::unordered_set<std::string> collection_subtree_ids (
 const std::vector<vayu::db::Collection>& all,
 const std::string& root,
-const std::function<bool (const vayu::db::Collection&)>& descend_into = {});
+const std::function<bool (const vayu::db::Collection&)>& descend_into);
+
+/**
+ * Every collection in the contract @p root binds: the subtree, stopped at a
+ * child bound to a *different* document (issues #721, #3034).
+ *
+ * One walk for the five routes that answer for a collection's contract -
+ * `POST /specs/sync`, which refuses to touch anything outside it,
+ * `POST /specs/match`, `POST /specs/bind` and `POST /specs/diff`, which gather
+ * the requests inside it, and `POST /specs/export`, which assembles them into a
+ * document. An OpenAPI import binds the root and files its requests under one
+ * sub-collection per tag, so "the collection" means the subtree to all of them;
+ * a folder bound to another document is a contract of its own, and stamping,
+ * diffing or deleting its requests against this one would corrupt it.
+ *
+ * A child bound to the root's own document stays in. An unbound root has no
+ * document, so every bound child is a boundary. The refused child takes its
+ * descendants with it. Defined in spec_sync.cpp.
+ */
+std::unordered_set<std::string> spec_contract_subtree_ids (
+const std::vector<vayu::db::Collection>& all,
+const std::string& root);
 
 /**
  * Every request stored beneath @p subtree, in one canonical order.
