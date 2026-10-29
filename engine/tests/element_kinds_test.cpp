@@ -585,6 +585,19 @@ TEST_F (ElementKindsTest, AnAssertionWithNoResponseRecordsNoTest) {
     EXPECT_TRUE (ctx.post_script_result.tests.empty ());
 }
 
+// An empty `in` beside a `range` is judged by the range (#3043): validate calls
+// an empty list no operand, so run time must not let it win and fail every reply.
+TEST_F (ElementKindsTest, AssertStatusWithAnEmptyInListIsJudgedByItsRange) {
+    response      = ok_json_response (200, "");
+    auto elements = one_element (nlohmann::json{ { "id", "e1" },
+    { "kind", "assert.status" },
+    { "config",
+    { { "in", nlohmann::json::array () },
+    { "range", { { "min", 200 }, { "max", 299 } } } } } });
+
+    EXPECT_EQ (run_after (elements)[0].status, "ok");
+}
+
 // ---------------------------------------------------------------------------
 // assert.duration
 // ---------------------------------------------------------------------------

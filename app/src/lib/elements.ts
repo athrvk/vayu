@@ -73,8 +73,10 @@ export function missingRequiredKeys(
  * A kind whose schema marks nothing `required` but whose engine-side
  * `validate_config` refuses a config with none of several operands (#3043).
  * JSON Schema cannot say "one of", so the catalogue does not carry the rule;
- * this table restates it, and `elements.operands.test.ts` holds every name here
- * to a property the live catalogue declares.
+ * this table restates it, and `element-kinds.conformance.test.tsx` holds every
+ * name here to a property the live catalogue declares. That guard cannot see
+ * the C++ rule itself: a change to `assert_status_problem` or
+ * `assert_jsonpath_problem` needs a hand edit here.
  */
 interface OperandRule {
 	/** The config keys the engine accepts as the operand; checked against the catalogue. */
@@ -85,6 +87,8 @@ interface OperandRule {
 }
 
 const hasKey = (config: Record<string, unknown>, key: string) => config[key] !== undefined;
+
+const JSONPATH_OPERANDS = ["expected", "regex", "exists"] as const;
 
 export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 	// `assert_status_problem`: a non-empty `in` array, or a `range` key. An
@@ -97,9 +101,9 @@ export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 	},
 	// `assert_jsonpath_problem`: any of the three keys present, whatever its value.
 	"assert.jsonpath": {
-		properties: ["expected", "regex", "exists"],
+		properties: JSONPATH_OPERANDS,
 		needs: "a value, pattern or existence check",
-		isMet: (config) => ["expected", "regex", "exists"].some((key) => hasKey(config, key)),
+		isMet: (config) => JSONPATH_OPERANDS.some((key) => hasKey(config, key)),
 	},
 };
 

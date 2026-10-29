@@ -77,7 +77,10 @@ class AssertStatusElement final : public Element {
         const int code = ctx.response->status_code;
         bool passed    = false;
         std::string expected_desc;
-        if (config_.contains ("in") && config_["in"].is_array ()) {
+        // An empty `in` is no operand (validate refuses it): a stored row that
+        // pairs one with a `range` is judged by the range, not by "one of []".
+        if (config_.contains ("in") && config_["in"].is_array () &&
+        !config_["in"].empty ()) {
             for (const auto& value : config_["in"]) {
                 if (value.is_number_integer () && value.get<int> () == code) {
                     passed = true;

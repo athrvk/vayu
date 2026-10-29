@@ -2280,6 +2280,7 @@ one incomplete member - and throw `SaveBlockedError` instead of sending a
 payload already known to fail; `useSaveManager` reads that type to stay
 "pending" rather than backing off a retry against a payload that will not
 have changed by the next attempt.
+
 **A kind that needs one of several operands is held back the same way**
 (#3043): `assert.status` needs a non-empty `in` or a `range`, `assert.jsonpath`
 one of `expected`, `regex` or `exists`. The engine refuses an assertion with
@@ -2288,6 +2289,7 @@ none, and JSON Schema cannot say "one of", so `OPERAND_RULES`
 "Needs ..." chip ("Needs accepted codes or a range") and the same
 `hasIncompleteElement` gate; `element-kinds.conformance.test.tsx` holds every
 key in the table to a property the engine's catalogue declares.
+
 **An element the engine still refuses is named on its row** (#3043): the engine's
 `'<Kind label>' (item N): <problem>` 400 (`parseElementRefusal`) is matched
 back to the element at position N of the array that was sent, and
