@@ -104,10 +104,12 @@ function stringProblem(
 	hintKey: string
 ): string | null {
 	const { minLength, maxLength, pattern } = property;
-	if (minLength !== undefined && value.length < minLength) {
+	// The engine's validator counts code points, not UTF-16 units.
+	const length = [...value].length;
+	if (minLength !== undefined && length < minLength) {
 		return minLength <= 1 ? EMPTY_HINT : `Must be at least ${minLength} characters`;
 	}
-	if (maxLength !== undefined && value.length > maxLength) {
+	if (maxLength !== undefined && length > maxLength) {
 		return `Must be at most ${maxLength} characters`;
 	}
 	if (pattern !== undefined && !matchesPattern(pattern, value)) {

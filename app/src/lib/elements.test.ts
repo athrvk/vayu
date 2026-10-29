@@ -326,6 +326,14 @@ describe("validateElementConfig", () => {
 		expect(validate(kind, config)).toEqual({});
 	});
 
+	it("counts a string's length in code points, as the engine does", () => {
+		// 60 emoji are 120 UTF-16 units but 60 code points: under maxLength 100.
+		expect(validate("metric.record", { name: "\u{1F600}".repeat(60) })).toEqual({});
+		expect(validate("metric.record", { name: "\u{1F600}".repeat(101) })).toEqual({
+			name: "Must be at most 100 characters",
+		});
+	});
+
 	it("skips an absent optional property and a missing top-level required key", () => {
 		// The latter is `missingRequiredKeys`' chip, never a second report.
 		expect(validate("control.throughput", {})).toEqual({});
