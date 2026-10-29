@@ -258,6 +258,43 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		expect(getByText(firstProperty?.title ?? firstPropertyName)).toBeInTheDocument();
 	});
 
+	it("gives every free-form object property in the catalogue a key/value editor, saving an object", () => {
+		// `control.switch`'s `cases` declares `type: "object"` and nothing else;
+		// the plain text box it fell through to saved a string, which the engine
+		// answers with a 400 (#3047). Mutation check: remove the `object` branch
+		// from `PropertyRow` and this reds naming the kind and the property.
+		const freeForm = fixture.flatMap((kind) =>
+			Object.entries(kind.configSchema.properties ?? {})
+				.filter(([, property]) => property?.type === "object" && !property.properties)
+				.map(([name]) => ({ kind, name }))
+		);
+		expect(freeForm.length, "no free-form object property left to guard").toBeGreaterThan(0);
+
+		for (const { kind, name } of freeForm) {
+			const onChange = vi.fn();
+			const element: ElementDef = {
+				id: `el_${kind.kind}`,
+				kind: kind.kind,
+				enabled: true,
+				config: {},
+			};
+			const view = render(
+				<ElementList elements={[element]} onChange={onChange} kinds={fixture} />
+			);
+			fireEvent.click(view.getByRole("button", { name: /^Expand /i }));
+
+			fireEvent.click(view.getByRole("button", { name: "Add entry" }));
+			fireEvent.change(view.getByLabelText("Key 1"), { target: { value: "a" } });
+			fireEvent.change(view.getByLabelText("Value 1"), { target: { value: "x" } });
+
+			const written = onChange.mock.calls[onChange.mock.calls.length - 1][0] as ElementDef[];
+			expect(written[0].config[name], `${kind.kind}.${name} did not save an object`).toEqual({
+				a: "x",
+			});
+			view.unmount();
+		}
+	});
+
 	it("has a family icon for every category the fixture actually uses", () => {
 		// The picker's category map (`element-categories.ts`) and the card's
 		// family-icon map are kept in the same module so the two cannot name a

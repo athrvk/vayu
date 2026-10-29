@@ -585,3 +585,213 @@ describe("GenericElementForm - an untyped property holds any JSON value (#3046)"
 	// (`value={asString(value)}` and `onChange(e.target.value)`) and the "7"
 	// case reds on the stored "7", the object and list cases on the empty field.
 });
+
+describe("GenericElementForm - an object with no declared properties is a key/value editor (#3047)", () => {
+	const switchSchema = schema(
+		{
+			variable: { type: "string", title: "Variable" },
+			cases: {
+				type: "object",
+				title: "Cases",
+				description: "Maps a value to the step to route to.",
+			},
+			default: { type: "string", title: "Default case" },
+		},
+		["variable", "cases"]
+	);
+
+	/** The parent a real card is: it echoes each change back as the next `config`. */
+	function Harness({
+		initial = {},
+		onChange,
+	}: {
+		initial?: Record<string, unknown>;
+		onChange: (config: Record<string, unknown>) => void;
+	}) {
+		const [config, setConfig] = useState<Record<string, unknown>>(initial);
+		return (
+			<GenericElementForm
+				schema={switchSchema}
+				config={config}
+				onChange={(next) => {
+					onChange(next);
+					setConfig(next);
+				}}
+			/>
+		);
+	}
+
+	function lastConfig(onChange: ReturnType<typeof vi.fn>): unknown {
+		return onChange.mock.calls[onChange.mock.calls.length - 1]?.[0];
+	}
+
+	function type(label: string, text: string) {
+		fireEvent.change(screen.getByLabelText(label), { target: { value: text } });
+	}
+
+	function addEntry() {
+		fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+	}
+
+	function keys(): string[] {
+		return screen.getAllByLabelText(/^Key \d+$/).map((el) => (el as HTMLInputElement).value);
+	}
+
+	it("renders a labelled group with the description, and no text box for the object", () => {
+		render(<Harness onChange={vi.fn()} />);
+
+		expect(screen.getByRole("group", { name: "Cases" })).toBeInTheDocument();
+		expect(screen.getByText("Maps a value to the step to route to.")).toBeInTheDocument();
+		expect(screen.queryByRole("textbox", { name: "Cases" })).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Add entry" })).toBeInTheDocument();
+	});
+
+	it("writes the object a user builds by adding, renaming and removing entries", () => {
+		const onChange = vi.fn();
+		render(<Harness onChange={onChange} />);
+
+		addEntry();
+		type("Key 1", "a");
+		type("Value 1", "x");
+		expect(lastConfig(onChange)).toEqual({ cases: { a: "x" } });
+
+		type("Key 1", "b");
+		expect(lastConfig(onChange)).toEqual({ cases: { b: "x" } });
+
+		addEntry();
+		type("Key 2", "c");
+		type("Value 2", "y");
+		expect(lastConfig(onChange)).toEqual({ cases: { b: "x", c: "y" } });
+
+		fireEvent.click(screen.getByRole("button", { name: "Remove entry 1" }));
+		expect(lastConfig(onChange)).toEqual({ cases: { c: "y" } });
+		expect(keys()).toEqual(["c"]);
+	});
+
+	it("saves two cases and a default as the shape the engine validates", () => {
+		const onChange = vi.fn();
+		render(<Harness onChange={onChange} />);
+
+		type("Variable", "region");
+		addEntry();
+		type("Key 1", "a");
+		type("Value 1", "x");
+		addEntry();
+		type("Key 2", "b");
+		type("Value 2", "y");
+		type("Default case", "z");
+
+		expect(lastConfig(onChange)).toEqual({
+			variable: "region",
+			cases: { a: "x", b: "y" },
+			default: "z",
+		});
+	});
+
+	it("renders the rows of an object that is already stored", () => {
+		render(<Harness initial={{ cases: { a: "x", b: "y" } }} onChange={vi.fn()} />);
+
+		expect(keys()).toEqual(["a", "b"]);
+		expect(screen.getByLabelText("Value 1")).toHaveValue("x");
+		expect(screen.getByLabelText("Value 2")).toHaveValue("y");
+	});
+
+	it("shows no rows for a stored value that is not an object", () => {
+		// The string the text box used to save (#3047) is not a map.
+		render(<Harness initial={{ cases: "a=x" }} onChange={vi.fn()} />);
+
+		expect(screen.queryByLabelText(/^Key \d+$/)).not.toBeInTheDocument();
+	});
+
+	it("keeps a blank or in-progress row on screen without writing it", () => {
+		const onChange = vi.fn();
+		render(<Harness initial={{ cases: { a: "x" } }} onChange={onChange} />);
+
+		addEntry();
+		type("Value 2", "orphan");
+
+		expect(keys()).toEqual(["a", ""]);
+		expect(screen.getByLabelText("Value 2")).toHaveValue("orphan");
+		expect(onChange).not.toHaveBeenCalled();
+
+		type("Key 2", "b");
+		expect(lastConfig(onChange)).toEqual({ cases: { a: "x", b: "orphan" } });
+	});
+
+	it("drops an entry from the object when its key is cleared, keeping the row", () => {
+		const onChange = vi.fn();
+		render(<Harness initial={{ cases: { a: "x", b: "y" } }} onChange={onChange} />);
+
+		type("Key 1", "");
+
+		expect(lastConfig(onChange)).toEqual({ cases: { b: "y" } });
+		expect(keys()).toEqual(["", "b"]);
+	});
+
+	it("lets the later row win when two rows share a key, and keeps both on screen", () => {
+		const onChange = vi.fn();
+		render(<Harness initial={{ cases: { a: "x", b: "y" } }} onChange={onChange} />);
+
+		type("Key 2", "a");
+
+		expect(lastConfig(onChange)).toEqual({ cases: { a: "y" } });
+		expect(keys()).toEqual(["a", "a"]);
+	});
+
+	it("keeps a renamed row where it was, rather than moving it to the end", () => {
+		render(<Harness initial={{ cases: { a: "x", b: "y" } }} onChange={vi.fn()} />);
+
+		type("Key 1", "z");
+
+		expect(keys()).toEqual(["z", "b"]);
+		expect(screen.getByLabelText("Value 1")).toHaveValue("x");
+	});
+
+	it("replaces the rows when the stored object changes from outside", () => {
+		const view = render(
+			<GenericElementForm
+				schema={switchSchema}
+				config={{ cases: { a: "x" } }}
+				onChange={vi.fn()}
+			/>
+		);
+		addEntry();
+
+		view.rerender(
+			<GenericElementForm
+				schema={switchSchema}
+				config={{ cases: { p: "1", q: "2" } }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(keys()).toEqual(["p", "q"]);
+	});
+
+	it("never pairs the editor with a short neighbour on a grid line", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					min: { type: "integer", title: "Minimum" },
+					cases: { type: "object", title: "Cases" },
+					max: { type: "integer", title: "Maximum" },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		const group = screen.getByRole("group", { name: "Cases" });
+		expect(group.parentElement?.className ?? "").not.toContain("grid-cols-2");
+		expect(
+			document.querySelector('[data-setting-row="Minimum"]')?.parentElement?.className
+		).not.toContain("grid-cols-2");
+	});
+
+	// Mutation checks: delete the `property.type === "object"` branch in
+	// `PropertyRow` and every case but the non-object one reds (the object falls
+	// through to a text box). Reverse the rows in `recordFromRows` and the
+	// duplicate-key case reds; write on every edit instead of only when the
+	// record changes and the blank-row case reds; replace the rows on every
+	// outside change and the key-cleared and duplicate cases red.
+});
