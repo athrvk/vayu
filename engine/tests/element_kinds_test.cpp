@@ -33,6 +33,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "optional_assert.hpp"
@@ -364,11 +365,15 @@ TEST_F (ElementKindsTest, AssertJsonPathRegexReportsAnInvalidPattern) {
     one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
     { "config", { { "path", "$.id" }, { "regex", "order-(" } } } });
 
-    auto outcomes = run_after (elements);
-    ASSERT_EQ (outcomes.size (), 1u);
-    EXPECT_EQ (outcomes[0].status, "error");
-    EXPECT_TRUE (message_of (outcomes[0]).starts_with ("invalid regular expression: "))
-    << message_of (outcomes[0]);
+    const auto run = run_after_recording (elements);
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "error");
+    EXPECT_TRUE (message_of (run.outcomes[0]).starts_with ("invalid regular expression: "))
+    << message_of (run.outcomes[0]);
+    ASSERT_EQ (run.tests.size (), 1u)
+    << "an error is a failed assertion (#3043)";
+    EXPECT_FALSE (run.tests[0].passed);
+    EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
 }
 
 // ---------------------------------------------------------------------------
@@ -523,11 +528,61 @@ TEST_F (ElementKindsTest, AssertContainsMatchesReportsAnInvalidPattern) {
     one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.contains" },
     { "config", { { "text", "(?<!x)abc" }, { "mode", "matches" } } } });
 
-    auto outcomes = run_after (elements);
-    ASSERT_EQ (outcomes.size (), 1u);
-    EXPECT_EQ (outcomes[0].status, "error");
-    EXPECT_TRUE (message_of (outcomes[0]).starts_with ("invalid regular expression: "))
-    << message_of (outcomes[0]);
+    const auto run = run_after_recording (elements);
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "error");
+    EXPECT_TRUE (message_of (run.outcomes[0]).starts_with ("invalid regular expression: "))
+    << message_of (run.outcomes[0]);
+    ASSERT_EQ (run.tests.size (), 1u)
+    << "an error is a failed assertion (#3043)";
+    EXPECT_FALSE (run.tests[0].passed);
+    EXPECT_EQ (run.tests[0].name, "body matches '(?<!x)abc'");
+}
+
+// Validation refuses each of these (#3043); a row stored before it did still
+// reaches the pipeline. Every one keeps its `error` outcome and also records
+// a failed test, the channel the step verdict and every assertion count read.
+// Mutation check: put the bare `outcome_status = "error"` back in any branch
+// of `assert_kinds.cpp` and its case here has no test.
+TEST_F (ElementKindsTest, AnAssertionThatCannotRunErrorsAndFailsItsTest) {
+    response = ok_json_response (200, R"({"id": "order-42"})");
+    const std::vector<std::pair<std::string, nlohmann::json>> cases = {
+        { "assert.status", nlohmann::json::object () },
+        { "assert.jsonpath", { { "path", "$.id" } } },
+        { "assert.jsonpath", { { "path", "$[?(@.id)]" }, { "exists", true } } },
+        { "assert.jsonpath", { { "path", "$.id" }, { "regex", "[" } } },
+        { "assert.contains", { { "text", "[" }, { "mode", "matches" } } },
+    };
+    for (const auto& [kind, config] : cases) {
+        SCOPED_TRACE (kind + " " + config.dump ());
+        const auto run = run_after_recording (one_element (
+        nlohmann::json{ { "id", "e1" }, { "kind", kind }, { "config", config } }));
+
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "error");
+        ASSERT_FALSE (message_of (run.outcomes[0]).empty ());
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_FALSE (run.tests[0].passed);
+        EXPECT_FALSE (run.tests[0].name.empty ());
+        EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
+    }
+}
+
+// A missing response is not this rule's: `classify_step` already errors the
+// step, so the assertion adds no test of its own.
+TEST_F (ElementKindsTest, AnAssertionWithNoResponseRecordsNoTest) {
+    std::vector<ElementOutcome> sink;
+    ElementContext ctx = make_context ();
+    ctx.response       = nullptr;
+    ElementPipeline::run (Phase::StepAfter, ctx,
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.status" },
+    { "config", nlohmann::json::object () } }),
+    sink);
+
+    ASSERT_EQ (sink.size (), 1u);
+    EXPECT_EQ (sink[0].status, "error");
+    EXPECT_EQ (message_of (sink[0]), "no response");
+    EXPECT_TRUE (ctx.post_script_result.tests.empty ());
 }
 
 // ---------------------------------------------------------------------------

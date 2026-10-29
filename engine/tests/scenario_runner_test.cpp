@@ -2778,6 +2778,38 @@ TEST_F (ScenarioRunnerTest, AFailingAssertionFailsTheAssertionFailureRateBudget)
     EXPECT_FALSE (check.contains ("sampleRate")) << check.dump ();
 }
 
+// #3043: an assertion that cannot run (a row stored before validation refused
+// it) keeps its `error` outcome and fails the step, and its failure is in the
+// population `maxAssertionFailureRatePct` judges. Mutation check: put the bare
+// `outcome_status = "error"` back in `AssertStatusElement::apply` and the step
+// reads "passed" with an empty population.
+TEST_F (ScenarioRunnerTest, AnAssertionThatCannotRunFailsTheStepAndTheBudget) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_assert" }, { "kind", "assert.status" },
+    { "config", json::object () } } }));
+
+    const auto run_id = start_with_thresholds (
+    /*iterations=*/1, json{ { "maxAssertionFailureRatePct", 0 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace = json::parse (rows[0].trace_data);
+    EXPECT_EQ (trace["outcome"].get<std::string> (), "failed");
+    EXPECT_NE (rows[0].error.find ("needs an 'in' list or a 'range'"), std::string::npos)
+    << rows[0].error;
+    ASSERT_EQ (trace["elements"].size (), 1u);
+    EXPECT_EQ (trace["elements"][0]["outcome"], "error");
+
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["scenario"]["failed"].get<size_t> (), 1u);
+    const auto& check = summary["thresholds"]["checks"][0];
+    EXPECT_FALSE (check["passed"].get<bool> ()) << check.dump ();
+    EXPECT_EQ (check.value ("assertionsExact", json ()),
+    (json{ { "passed", 0 }, { "failed", 1 } }));
+}
+
 // `thresholds.failRun: true` sets a collection run's terminal status to
 // Failed on a missed budget, the same terminal-status gate `finish_load_test`
 // applies for a load run. Mutation check: revert the `final_status ==

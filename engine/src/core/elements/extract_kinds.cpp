@@ -442,6 +442,9 @@ ElementKind make_extract_regex_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ExtractRegexElement> (config);
     };
+    kind.validate_config = [] (const nlohmann::json& config) {
+        return user_regex_problem (config, "pattern", "pattern");
+    };
     kind.config_schema = {
         { "type", "object" },
         { "properties",

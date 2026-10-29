@@ -1525,6 +1525,24 @@ TEST (ImportParse, DropsAndCountsAnInvalidXVayuElementsArray) {
     EXPECT_TRUE (counted);
 }
 
+/// The kind's own validate rules apply too (#3043): an assertion with nothing
+/// to compare against, written by an engine that still stored one, is dropped
+/// and counted like any other invalid array.
+TEST (ImportParse, DropsAnXVayuElementsAssertionThatCannotRun) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{},
+        "x-vayu-elements":[{"id":"el_1","kind":"assert.status","enabled":true,"config":{}}]}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_FALSE (first_request (parsed.result.at ("collections")[0]).contains ("elements"));
+    const nlohmann::ordered_json& skipped =
+    parsed.result.at ("meta").at ("skipped");
+    EXPECT_TRUE (std::any_of (
+    skipped.begin (), skipped.end (), [] (const nlohmann::ordered_json& item) {
+        return item.at ("kind") == "elements_invalid";
+    }));
+}
+
 /// The document root's own `x-vayu-elements` is the collection's - a skeleton
 /// export writes a collection's scripts there. It used to be written and never
 /// read, so every re-import lost them.

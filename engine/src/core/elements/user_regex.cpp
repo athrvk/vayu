@@ -13,9 +13,11 @@
 #include "user_regex.hpp"
 
 #include <cstdint>
+#include <format>
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <re2/re2.h>
 
 namespace vayu::core {
@@ -79,6 +81,21 @@ std::expected<UserRegex, std::string> compile_user_regex (std::string_view patte
         return std::unexpected ("invalid regular expression: " + compiled->error ());
     }
     return UserRegex (std::move (compiled));
+}
+
+std::optional<std::string> user_regex_problem (const nlohmann::json& holder,
+std::string_view key,
+std::string_view label) {
+    const auto it = holder.find (key);
+    if (it == holder.end () || !it->is_string ()) {
+        return std::nullopt;
+    }
+    const re2::RE2 compiled (it->get_ref<const std::string&> (), user_regex_options ());
+    if (compiled.ok ()) {
+        return std::nullopt;
+    }
+    return std::format (
+    "'{}' is not a valid regular expression - {}", label, compiled.error ());
 }
 
 } // namespace vayu::core

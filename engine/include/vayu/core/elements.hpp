@@ -600,7 +600,8 @@ struct ElementKind {
     /// `{{names}}` left for the send (#2521), since an earlier step may have
     /// changed the value by then.
     bool writes_variables = false;
-    /// A rule `config_schema` cannot express (a JSONPath that parses), checked
+    /// A rule `config_schema` cannot express (a JSONPath that parses, a
+    /// pattern RE2 compiles, one of several optional operands present), checked
     /// by `Registry::validate` only after the schema accepted the config.
     /// Returns the problem in the wording a client reads after
     /// `'<label>' (item N): `, or `nullopt` when the config is fine. Absent

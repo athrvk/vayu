@@ -193,6 +193,21 @@ TEST_F (ExecuteElementsValidation, ASettingTheKindDoesNotTakeIsRefused) {
     { "config", { { "header", "X-Id" }, { "variable", "id" }, { "matchNo", 2 } } } } }));
 }
 
+// #3043: each of these would only ever report `error`.
+TEST_F (ExecuteElementsValidation, AnAssertionOrExtractorThatCannotRunIsRefused) {
+    const std::vector<std::pair<std::string, json>> cannot_run = {
+        { "assert.status", json::object () },
+        { "assert.jsonpath", { { "path", "$.id" } } },
+        { "assert.contains", { { "text", "[" }, { "mode", "matches" } } },
+        { "assert.jsonpath", { { "path", "$.id" }, { "regex", "[" } } },
+        { "extract.regex", { { "pattern", "(" }, { "variable", "v" } } },
+    };
+    for (const auto& [kind, config] : cannot_run) {
+        expect_refused_like_post_requests (json::array (
+        { { { "id", "el_1" }, { "kind", kind }, { "config", config } } }));
+    }
+}
+
 TEST_F (ExecuteElementsValidation, ARepeatedIdIsRefused) {
     expect_refused_like_post_requests (
     json::array ({ status_assertion ("el_1"), status_assertion ("el_1") }));

@@ -2328,6 +2328,31 @@ TEST_F (LoadRunToTerminalTest, AMixedAssertionRunStoresBothPopulations) {
     EXPECT_FALSE (check["passed"].get<bool> ());
 }
 
+// #3043 on a single-request run: an `assert.status` with no operand (the
+// route refuses it; `start_run` is reached here without that check) is a
+// failed assertion on every completion, in the exact population. Mutation
+// check: put the bare `outcome_status = "error"` back in
+// `AssertStatusElement::apply` and the summary has no thresholds verdict.
+TEST_F (LoadRunToTerminalTest, AnAssertionThatCannotRunIsInTheExactPopulation) {
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 4 }, { "concurrency", 1 },
+        { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 },
+        { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_status" },
+        { "kind", "assert.status" }, { "config", nlohmann::json::object () } } }) },
+        { "thresholds", { { "maxAssertionFailureRatePct", 50 } } } };
+
+    const auto row = run_to_terminal_row ("run-assert-cannot-run", config);
+    ASSERT_HAS_VALUE (row);
+    const auto summary = nlohmann::json::parse (row->summary);
+    ASSERT_TRUE (summary.contains ("thresholds")) << summary.dump ();
+    const auto& check = summary["thresholds"]["checks"][0];
+    EXPECT_EQ (check.value ("assertionsExact", nlohmann::json ()),
+    (nlohmann::json{ { "passed", 0 }, { "failed", 4 } }))
+    << check.dump ();
+    EXPECT_FALSE (check["passed"].get<bool> ());
+}
+
 // #2399, the completed-run producer end to end: every request to `/slow`
 // (500ms) crosses a 100ms threshold - a lower bound, so a slow runner cannot
 // fail it - and the slow store keeps 2 of the 4. The stored summary has to

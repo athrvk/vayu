@@ -243,6 +243,86 @@ TEST_F (ElementsRegistryTest, ANonStringPathKeepsTheSchemasOwnError) {
     EXPECT_EQ (absent->find ("not a supported JSONPath"), std::string::npos) << *absent;
 }
 
+// ---------------------------------------------------------------------------
+// An assertion or extractor that could only ever report `error` is refused
+// when it is written (#3043): a pattern RE2 does not compile, or an assertion
+// with nothing to compare against. Mutation check: drop the `validate_config`
+// of `assert.status`, `assert.jsonpath`, `assert.contains` or `extract.regex`
+// and its cases here are accepted.
+// ---------------------------------------------------------------------------
+
+json entry_of (const std::string& kind, const json& config) {
+    return json{ { "id", "el_1" }, { "kind", kind }, { "config", config } };
+}
+
+TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCannotRunIsRefusedNamingTheField) {
+    struct Refused {
+        json entry;
+        std::string field;
+    };
+    const std::string pattern_refusal = " is not a valid regular expression - ";
+    const std::vector<Refused> cases  = {
+        { entry_of ("assert.status", json::object ()), "'in' or 'range' is required" },
+        { entry_of ("assert.status", { { "in", json::array () } }), "'in' or 'range' is required" },
+        { entry_of ("assert.jsonpath", { { "path", "$.a" } }),
+        "one of 'expected', 'regex' or 'exists' is required" },
+        { entry_of ("assert.contains", { { "text", "[" }, { "mode", "matches" } }),
+        "'text'" + pattern_refusal + "missing ]" },
+        { entry_of ("assert.jsonpath", { { "path", "$.a" }, { "regex", "[" } }),
+        "'regex'" + pattern_refusal + "missing ]" },
+        // Checked even where `expected` would win at run time.
+        { entry_of ("assert.jsonpath",
+          { { "path", "$.a" }, { "expected", 1 }, { "regex", "[" } }),
+        "'regex'" + pattern_refusal },
+        { entry_of ("extract.regex", { { "pattern", "(" }, { "variable", "v" } }),
+        "'pattern'" + pattern_refusal + "missing )" },
+        // Java's lookaround, which a JMeter plan can carry, is outside RE2.
+        { entry_of ("extract.regex", { { "pattern", "(?<=id=)\\d+" }, { "variable", "v" } }),
+        "'pattern'" + pattern_refusal },
+    };
+    for (const auto& [entry, field] : cases) {
+        const auto reason = validate_entry (entry);
+        ASSERT_HAS_VALUE (reason) << entry.dump ();
+        EXPECT_NE (reason->find ("(item 1): "), std::string::npos) << *reason;
+        EXPECT_NE (reason->find (field), std::string::npos) << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCanRunIsAccepted) {
+    const std::vector<json> entries = {
+        entry_of ("assert.status", { { "in", json::array ({ 200 }) } }),
+        entry_of ("assert.status", { { "range", { { "min", 200 }, { "max", 299 } } } }),
+        entry_of ("assert.jsonpath", { { "path", "$.a" }, { "exists", true } }),
+        entry_of ("assert.jsonpath", { { "path", "$.a" }, { "expected", nullptr } }),
+        entry_of ("assert.jsonpath", { { "path", "$.a" }, { "regex", "^[0-9]+$" } }),
+        // An empty pattern compiles and matches anywhere.
+        entry_of ("assert.jsonpath", { { "path", "$.a" }, { "regex", "" } }),
+        entry_of ("assert.contains", { { "text", "" }, { "mode", "matches" } }),
+        // Only `matches` reads `text` as a pattern.
+        entry_of ("assert.contains", { { "text", "[" } }),
+        entry_of ("assert.contains", { { "text", "[" }, { "mode", "contains" } }),
+        entry_of ("assert.contains", { { "text", "[" }, { "mode", "equals" } }),
+        entry_of ("extract.regex", { { "pattern", "order-([0-9]+)" }, { "variable", "v" } }),
+        // A pattern is never template-resolved, so braces are judged as RE2
+        // reads them: a `{` that opens no repetition is a literal.
+        entry_of ("extract.regex", { { "pattern", "a{{n}}" }, { "variable", "v" } }),
+        entry_of ("extract.regex", { { "pattern", "{{token}}" }, { "variable", "v" } }),
+    };
+    for (const auto& entry : entries) {
+        const auto reason = validate_entry (entry);
+        EXPECT_FALSE (reason.has_value ())
+        << entry.dump () << ": " << reason.value_or ("");
+    }
+}
+
+TEST_F (ElementsRegistryTest, AMistypedPatternKeepsTheSchemasOwnError) {
+    const auto reason = validate_entry (
+    entry_of ("extract.regex", { { "pattern", 7 }, { "variable", "v" } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_EQ (reason->find ("not a valid regular expression"), std::string::npos)
+    << *reason;
+}
+
 TEST_F (ElementsRegistryTest, AMetricConditionPathIsOnlyReadWhenItsFieldIsJsonpath) {
     const json condition = { { "field", "status" }, { "jsonpath", "$x" },
         { "operator", "eq" }, { "value", 200 } };

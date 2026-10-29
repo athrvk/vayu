@@ -29,6 +29,8 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -65,5 +67,15 @@ class UserRegex {
 /// sentence every caller reports as its element's `"error"` outcome.
 [[nodiscard]] std::expected<UserRegex, std::string> compile_user_regex (
 std::string_view pattern);
+
+/**
+ * The validate-time refusal for `holder[key]` when it is a string RE2 does not
+ * compile (#3043), worded for a client and naming @p label. `nullopt` when it
+ * compiles, or when the value is absent or not a string: the kind's schema
+ * reports those. A `{{name}}` is not skipped: a pattern is never
+ * template-resolved, so the text checked here is the text that runs.
+ */
+[[nodiscard]] std::optional<std::string>
+user_regex_problem (const nlohmann::json& holder, std::string_view key, std::string_view label);
 
 } // namespace vayu::core

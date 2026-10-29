@@ -575,6 +575,42 @@ TEST (JmeterImport, ResponseAssertionOrWithMultiplePatternsIsTalliedNotAnded) {
     EXPECT_EQ (config.at ("negate").get<bool> (), false);
 }
 
+/**
+ * JMeter's patterns are Java's; one outside RE2's dialect (lookaround, a
+ * backreference) is dropped and tallied `<kind>_unmappable` (#3043) rather
+ * than imported as an element that could only ever report `error`. Mutation
+ * check: drop `assert.contains`' or `extract.regex`'s `validate_config` and
+ * its element is imported.
+ */
+TEST (JmeterImport, AJavaOnlyPatternIsTalliedUnmappableRatherThanImported) {
+    const nlohmann::ordered_json lookahead = response_assertion_plan (2, { "id(?=:)" });
+    EXPECT_FALSE (first_request (lookahead.at ("collections").at (0)).contains ("elements"));
+    EXPECT_TRUE (has_skipped_kind (lookahead.at ("meta"), "assert.contains_unmappable"));
+
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Page">
+      <stringProp name="HTTPSampler.path">/page</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree>
+      <RegexExtractor testname="Repeated word">
+        <stringProp name="RegexExtractor.refname">word</stringProp>
+        <stringProp name="RegexExtractor.regex">(\w+) \1</stringProp>
+      </RegexExtractor>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_FALSE (
+    first_request (parsed.result.at ("collections").at (0)).contains ("elements"));
+    EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "extract.regex_unmappable"));
+}
+
 /// `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) is nested inside the
 /// sampler tag itself rather than a sibling tag the generic fallback would
 /// tally on its own, so a file-only upload builds a `form-data` body row per

@@ -44,8 +44,9 @@ validate against that kind's JSON Schema - both checked by
 runs before storing and `POST /execute` runs on its inline list before sending (`400` naming the
 index, the kind and the field on a violation; `/execute` judges a collection-origin entry as a
 collection's own, see [its `elements`](api-reference.md#post-execute)). A rule the
-schema cannot express (a JSONPath that parses) is the kind's optional `validate_config` hook, run
-after the schema accepts the config and worded the same way. A setting the kind does not declare
+schema cannot express (a JSONPath that parses, a pattern RE2 compiles, an assertion having
+something to compare against) is the kind's optional `validate_config` hook, run after the schema
+accepts the config and worded the same way. A setting the kind does not declare
 is refused with the keys it does (`'expected' is not a setting this element has. Settings: in,
 range`, #2774), listed in the schema's key order (alphabetical) from the object the key sits
 in, so a nested object names its own; a schema node the message cannot resolve (a `$ref`) keeps the
@@ -165,13 +166,22 @@ no backreferences (`\1`) and no lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`); inlin
 `(?i)` (case-insensitive), `(?s)` (`.` matches a newline) and `(?m)` (`^`/`$` at line breaks) are
 available. Text is matched as bytes, as it was before RE2: a body need not be UTF-8, a UTF-8
 literal in the pattern matches the same bytes in the text, and `.` matches one byte rather than one
-character. A pattern RE2 refuses is that element's `"error"` outcome, `invalid regular expression:
-<reason>`, reported when it runs; `control.if` instead treats it as a false condition and skips,
+character. A pattern RE2 refuses is refused when it is written (#3043): `'pattern' is not a valid
+regular expression - <reason>` for `extract.regex`, `'regex'` for `assert.jsonpath` (checked
+whenever it is written, even beside an `expected` that would win when it runs) and `'text'` for
+`assert.contains` in `matches` mode: a `400` from every write route and from `POST /execute`,
+and an importer drops what holds it and counts the drop (`elements_invalid` for an
+`x-vayu-elements` array; a JMeter plan's Java pattern with lookaround or a backreference is tallied
+`<kind>_unmappable`). A pattern is never template-resolved, so a `{{name}}`
+in one is judged as the text RE2 reads (`a{{n}}` compiles: a `{` that opens no repetition is a
+literal). One stored before that check still reaches a run, where it is the element's `"error"`
+outcome, `invalid regular expression: <reason>`, and for an `assert.*` also a failed assertion (see
+[the step trace](#the-step-trace)); `control.if` instead treats it as a false condition and skips,
 with the same reason in the message. After an empty match the search resumes one byte later, so
 `-1` over a pattern that can match nothing still ends.
 
-`assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes a path with
-one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
+`assert.status` takes a non-empty `in` list or a `range`; `assert.jsonpath` takes a path with
+at least one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
 either way, see below); `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
 `contains` | `equals` | `matches` (an RE2 search, above) mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
@@ -380,6 +390,12 @@ existing `scripts` node - one entry per compiled element that ran at `step.befor
 (`step.between` too, for the sequential run), each
 `{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
+An `assert.*` whose own config leaves it nothing to judge (no operand, a JSONPath or pattern that
+does not compile: all refused when written, so only a row stored before that check reaches this)
+reports `error` with the reason and also records a failed assertion under the same reason, so the
+step fails and the failure counts wherever assertions are counted: the step's `tests`,
+`scenario.assertions` and the population `maxAssertionFailureRatePct` judges. `no response` stays
+`error` alone, because a step without a response has already errored.
 A `script.pre` / `script.post` element reports `error` with the thrown message when its script threw
 (or timed out), `failed` with the first failed assertion as its message (`Test failed - <name>:
 <message>`, or `N tests failed - <first name>: <first message>`) when the script ran and only its
