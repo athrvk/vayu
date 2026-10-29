@@ -41,6 +41,7 @@ import type {
 	Collection,
 	SpecDiffAdded,
 	SpecDiffChanged,
+	SpecDiffDeclined,
 	SpecDiffRemoved,
 	SpecDiffResponse,
 	SpecDocumentMeta,
@@ -162,6 +163,7 @@ function diffResponse(parts: Partial<SpecDiffResponse> = {}): SpecDiffResponse {
 	return {
 		identical: false,
 		added: [],
+		declined: [],
 		removed: [],
 		changed: [],
 		unchanged: 0,
@@ -788,6 +790,97 @@ describe("SpecSync", () => {
 		// Still the diff, still ticked: nothing was written, so there is nothing
 		// to re-check before trying again.
 		expect(screen.getByRole("button", { name: /apply selected/i })).toBeTruthy();
+	});
+});
+
+/*
+ * Operations whose request the user deleted (#3031). The engine lists them apart
+ * from `added` and never marks them safe; what this section owes is to draw them
+ * unticked, say why, and send a tick as an ordinary create.
+ */
+describe("operations whose request the user deleted", () => {
+	const GET_VET: SpecOperation = { operationId: "getVet", method: "GET", path: "/vets/{vetId}" };
+	const GET_VET_BOX = { name: "Get a vet (GET /vets/{vetId})" };
+
+	const declinedVet: SpecDiffDeclined = {
+		operation: GET_VET,
+		folder: "vets",
+		draft: draft({ name: "Get a vet", url: "{{baseUrl}}/vets/{{vetId}}" }),
+		safe: false,
+	};
+
+	async function renderDeclined(parts: Partial<SpecDiffResponse> = {}) {
+		diffSpec.mockResolvedValue(diffResponse({ declined: [declinedVet], ...parts }));
+		renderSync();
+		check();
+		await screen.findByText(/the document has changed/i);
+	}
+
+	it("lists them unticked, with the reason and the way back", async () => {
+		await renderDeclined();
+
+		expect(screen.getByText("Operations whose request you deleted")).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Unticked - you deleted these requests, so a sync does not bring them back. Tick one to create it again."
+			)
+		).toBeTruthy();
+		expect((screen.getByRole("checkbox", GET_VET_BOX) as HTMLInputElement).checked).toBe(false);
+		expect(screen.getByText(/1 operation whose request you deleted/i)).toBeTruthy();
+	});
+
+	it("omits the group and its count when nothing was declined", async () => {
+		diffSpec.mockResolvedValue(RENAMED_SUMMARY);
+		renderSync();
+		check();
+		await screen.findByText(/the document has changed/i);
+
+		expect(screen.queryByText("Operations whose request you deleted")).toBeNull();
+		expect(screen.queryByText(/whose request you deleted ·/i)).toBeNull();
+	});
+
+	it("does not call a diff with only declined operations document-level", async () => {
+		// Mutation check: leave `declined` out of `documentLevelOnly` and the
+		// explanation appears over a bucket the collection does map.
+		await renderDeclined();
+
+		expect(screen.queryByText(/document-level changes only/i)).toBeNull();
+	});
+
+	it("applies nothing of them by default, so only the document is stored", async () => {
+		await renderDeclined();
+
+		fireEvent.click(screen.getByRole("button", { name: /update the stored document/i }));
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		expect((syncSpec.mock.calls[0][0] as SpecSyncRequest).create).toEqual([]);
+	});
+
+	it("sends a tick as an ordinary create, and counts it in the apply summary", async () => {
+		// Mutation checks: pre-tick them in `defaultSelection` and the unticked
+		// case above reddens; drop the declined loop in `buildSyncPayload` and
+		// this reddens at the payload.
+		await renderDeclined();
+
+		fireEvent.click(screen.getByRole("checkbox", GET_VET_BOX));
+		expect(screen.getByText(/1 to create · 0 to update · 0 to delete/i)).toBeTruthy();
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		const payload = syncSpec.mock.calls[0][0] as SpecSyncRequest;
+		expect(payload.create).toHaveLength(1);
+		expect(payload.create[0]).toMatchObject({ name: "Get a vet", specOperation: GET_VET });
+		expect(payload.delete).toEqual([]);
+	});
+
+	it("asks for no delete confirm, since a tick deletes nothing", async () => {
+		await renderDeclined();
+
+		fireEvent.click(screen.getByRole("checkbox", GET_VET_BOX));
+		apply();
+
+		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(1));
+		expect(screen.queryByText(/apply and delete/i)).toBeNull();
 	});
 });
 

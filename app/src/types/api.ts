@@ -2201,6 +2201,16 @@ export interface SpecDiffAdded {
 	safe: boolean;
 }
 
+/**
+ * An operation no request claims because a person deleted its request (issue
+ * #3031). Shaped like {@link SpecDiffAdded}, since ticking one is the same
+ * create, but it is never in `added`: nothing pre-ticks it, and the engine's
+ * `safe` is always `false`.
+ */
+export interface SpecDiffDeclined extends SpecDiffAdded {
+	safe: false;
+}
+
 /** A request whose recorded operation the new document no longer declares. */
 export interface SpecDiffRemoved {
 	requestId: string;
@@ -2256,6 +2266,8 @@ export interface SpecDiffResponse {
 	/** The document is byte for byte the stored one - there is nothing to apply. */
 	identical: boolean;
 	added: SpecDiffAdded[];
+	/** Operations whose request the user deleted - listed apart, never ticked for them. */
+	declined: SpecDiffDeclined[];
 	removed: SpecDiffRemoved[];
 	changed: SpecDiffChanged[];
 	/** Requests whose operation is unchanged in every compared field. */

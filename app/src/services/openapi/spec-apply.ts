@@ -93,6 +93,12 @@ export function operationKey(operation: SpecOperation): string {
 export interface SpecApplySelection {
 	/** {@link operationKey} of each added operation to create. */
 	added: ReadonlySet<string>;
+	/**
+	 * {@link operationKey} of each declined operation the user chose to create
+	 * again (issue #3031). A tick here is the whole of "changing their mind": it
+	 * is an ordinary create, and the engine forgets the record with it.
+	 */
+	declined: ReadonlySet<string>;
 	/** Ids of the requests whose operation is gone, to delete. */
 	removed: ReadonlySet<string>;
 	changed: ReadonlyMap<string, ReadonlySet<SpecField>>;
@@ -110,6 +116,10 @@ export interface SpecApplySelection {
  * a person clicking Apply without changing a tick therefore write the same
  * rows, because there is one function deciding it rather than two that agree
  * today.
+ *
+ * **A declined operation is never offered ticked** (issue #3031), whatever its
+ * `safe` says: its request was deleted on purpose, and bringing it back is the
+ * user's tick or nothing.
  */
 export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
 	const changed = new Map<string, ReadonlySet<SpecField>>();
@@ -121,6 +131,7 @@ export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
 		added: new Set(
 			diff.added.filter((entry) => entry.safe).map((entry) => operationKey(entry.operation))
 		),
+		declined: new Set(),
 		removed: new Set(
 			diff.removed.filter((entry) => entry.safe).map((entry) => entry.requestId)
 		),
@@ -139,7 +150,10 @@ export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
  */
 export function isEmptySelection(selection: SpecApplySelection): boolean {
 	return (
-		selection.added.size === 0 && selection.removed.size === 0 && selection.changed.size === 0
+		selection.added.size === 0 &&
+		selection.declined.size === 0 &&
+		selection.removed.size === 0 &&
+		selection.changed.size === 0
 	);
 }
 
@@ -159,7 +173,7 @@ export interface BuildSyncPayloadInput {
 /**
  * The `POST /specs/sync` body for one selection.
  *
- * Added operations land where an import would have put them - the sub-collection
+ * Added operations, and the declined ones a user ticked, land where an import would have put them - the sub-collection
  * named after the operation's first tag, else the one its path names (issue
  * #710), created here when the bound collection does not have one yet, and the
  * bound collection itself for an operation that gets neither. Matching an
@@ -178,8 +192,11 @@ export function buildSyncPayload({
 	const folders = new FolderResolver(collectionId, collections);
 
 	const create: SpecSyncCreate[] = [];
-	for (const entry of diff.added) {
-		if (!selection.added.has(operationKey(entry.operation))) continue;
+	const ticked = [
+		...diff.added.filter((entry) => selection.added.has(operationKey(entry.operation))),
+		...diff.declined.filter((entry) => selection.declined.has(operationKey(entry.operation))),
+	];
+	for (const entry of ticked) {
 		create.push(createItem(entry, `tmp_req_${create.length}`, folders));
 	}
 

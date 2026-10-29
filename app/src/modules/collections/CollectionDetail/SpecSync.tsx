@@ -369,8 +369,11 @@ export default function SpecSync({
 function applySummary(selection: SpecApplySelection): string {
 	if (isEmptySelection(selection))
 		return "Stores the new document, response schemas and coverage index - no request rows change.";
+	// A ticked declined operation is a create like any other: the engine cannot
+	// tell it from an added one, and neither should the sentence.
+	const creates = selection.added.size + selection.declined.size;
 	return (
-		`${selection.added.size} to create · ${selection.changed.size} to update · ` +
+		`${creates} to create · ${selection.changed.size} to update · ` +
 		`${selection.removed.size} to delete, and the new document`
 	);
 }
@@ -383,7 +386,12 @@ function applySummary(selection: SpecApplySelection): string {
  * one reading a user cannot act on without being told what it means (#717).
  */
 function documentLevelOnly(diff: SpecDiffResponse): boolean {
-	return diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0;
+	return (
+		diff.added.length === 0 &&
+		diff.declined.length === 0 &&
+		diff.removed.length === 0 &&
+		diff.changed.length === 0
+	);
 }
 
 interface SelectionProps {
@@ -411,6 +419,13 @@ function DiffReport({
 		onChange({ ...selection, added });
 	};
 
+	const toggleDeclined = (key: string, on: boolean) => {
+		const declined = new Set(selection.declined);
+		if (on) declined.add(key);
+		else declined.delete(key);
+		onChange({ ...selection, declined });
+	};
+
 	const toggleRemoved = (id: string, on: boolean) => {
 		const removed = new Set(selection.removed);
 		if (on) removed.add(id);
@@ -431,6 +446,12 @@ function DiffReport({
 				<p className="text-xs font-semibold">The document has changed</p>
 				<p className="text-label text-muted-foreground">
 					{diff.added.length} new {pluralize(diff.added.length, "operation")} ·{" "}
+					{diff.declined.length > 0 && (
+						<>
+							{diff.declined.length} {pluralize(diff.declined.length, "operation")}{" "}
+							whose request you deleted ·{" "}
+						</>
+					)}
 					{diff.removed.length} {pluralize(diff.removed.length, "request")} whose
 					operation is gone · {diff.changed.length} changed · {diff.unchanged} unchanged
 				</p>
@@ -481,6 +502,26 @@ function DiffReport({
 							key={operationKey(entry.operation)}
 							checked={selection.added.has(operationKey(entry.operation))}
 							onChange={(on) => toggleAdded(operationKey(entry.operation), on)}
+							title={entry.draft.name}
+							detail={operationKey(entry.operation)}
+							note={entry.folder ? `into ${entry.folder}` : undefined}
+							operation={entry.operation}
+							collection={collection}
+						/>
+					))}
+				</Group>
+			)}
+
+			{diff.declined.length > 0 && (
+				<Group
+					title="Operations whose request you deleted"
+					hint="Unticked - you deleted these requests, so a sync does not bring them back. Tick one to create it again."
+				>
+					{diff.declined.map((entry) => (
+						<CheckRow
+							key={operationKey(entry.operation)}
+							checked={selection.declined.has(operationKey(entry.operation))}
+							onChange={(on) => toggleDeclined(operationKey(entry.operation), on)}
 							title={entry.draft.name}
 							detail={operationKey(entry.operation)}
 							note={entry.folder ? `into ${entry.folder}` : undefined}
