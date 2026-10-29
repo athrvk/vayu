@@ -324,6 +324,106 @@ TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCanRunIsAccepted) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// A setting the engine accepted and then ignored is refused naming the field
+// (#3055). Mutation check: drop the `validate_config` of `control.throughput`,
+// `timer.think` or `assert.contains`, or `variable_name_problem` from an
+// `extract.*` kind, and its rows here are accepted.
+// ---------------------------------------------------------------------------
+
+TEST_F (ElementsRegistryTest, ASettingThatWouldDoNothingIsRefusedNamingTheField) {
+    struct Refused {
+        json entry;
+        std::string wording;
+    };
+    const auto extract_with = [] (const std::string& kind, const json& variable) {
+        json config = { { "variable", variable } };
+        if (kind == "extract.json") {
+            config["path"] = "$.a";
+        } else if (kind == "extract.regex") {
+            config["pattern"] = "a";
+        } else if (kind == "extract.header") {
+            config["header"] = "X-A";
+        }
+        return entry_of (kind, config);
+    };
+    std::vector<Refused> cases = {
+        { entry_of ("control.throughput", json::object ()), "'percent' or 'everyN' is required" },
+        { entry_of ("control.throughput", { { "perUser", false } }),
+        "'percent' or 'everyN' is required" },
+        { entry_of ("control.throughput", { { "percent", 50 }, { "everyN", 2 } }),
+        "'percent' cannot be combined with 'everyN'" },
+        { entry_of ("timer.think", json::object ()), "'ms' is required" },
+        { entry_of ("timer.think", { { "minMs", 100 } }), "'maxMs' is required beside 'minMs'" },
+        { entry_of ("timer.think", { { "maxMs", 100 } }), "'minMs' is required beside 'maxMs'" },
+        { entry_of ("assert.contains", { { "text", "" } }), "'text' cannot be empty" },
+        { entry_of ("assert.contains", { { "text", "" }, { "mode", "contains" } }),
+        "'text' cannot be empty" },
+        { entry_of ("assert.contains", { { "text", "" }, { "negate", true } }),
+        "'text' cannot be empty" },
+    };
+    for (const char* kind :
+    { "extract.json", "extract.regex", "extract.header", "extract.boundary" }) {
+        cases.push_back (
+        { extract_with (kind, "a{b"), "'variable' cannot contain '{' or '}'" });
+        cases.push_back (
+        { extract_with (kind, "a}"), "'variable' cannot contain '{' or '}'" });
+        cases.push_back ({ extract_with (kind, " x"),
+        "'variable' cannot start or end with whitespace" });
+        cases.push_back ({ extract_with (kind, "x\t"),
+        "'variable' cannot start or end with whitespace" });
+        cases.push_back ({ extract_with (kind, "  "),
+        "'variable' cannot start or end with whitespace" });
+        cases.push_back (
+        { extract_with (kind, "data.id"), "'variable' cannot start with 'data.'" });
+        cases.push_back ({ extract_with (kind, "$vu"), "'variable' cannot be '$vu'" });
+        cases.push_back (
+        { extract_with (kind, "$iteration"), "'variable' cannot be '$iteration'" });
+    }
+    for (const auto& [entry, wording] : cases) {
+        const auto reason = validate_entry (entry);
+        ASSERT_HAS_VALUE (reason) << entry.dump ();
+        EXPECT_NE (reason->find ("(item 1): " + wording), std::string::npos)
+        << entry.dump () << ": " << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, ASettingThatDoesSomethingIsAccepted) {
+    std::vector<json> entries = {
+        entry_of ("control.throughput", { { "percent", 50 } }),
+        entry_of ("control.throughput", { { "everyN", 3 }, { "perUser", false } }),
+        entry_of ("timer.think", { { "ms", 250 } }),
+        entry_of ("timer.think", { { "ms", 0 } }),
+        entry_of ("timer.think", { { "minMs", 100 }, { "maxMs", 300 } }),
+        entry_of ("timer.think",
+        { { "gaussian", { { "meanMs", 200 }, { "deviationMs", 20 } } } }),
+        // A combination the draw order already resolves is not refused.
+        entry_of ("timer.think", { { "ms", 250 }, { "minMs", 100 } }),
+        entry_of ("assert.contains", { { "text", "ok" } }),
+        entry_of ("assert.contains", { { "text", "" }, { "mode", "equals" } }),
+        entry_of ("assert.contains", { { "text", "" }, { "mode", "matches" } }),
+        // Whitespace inside a name is part of it; `{{1 bad}}` is a token.
+        entry_of ("extract.json", { { "path", "$.a" }, { "variable", "1 bad" } }),
+        entry_of ("extract.json", { { "path", "$.a" }, { "variable", "dataset" } }),
+        entry_of ("extract.json", { { "path", "$.a" }, { "variable", "data." } }),
+        entry_of ("extract.regex", { { "pattern", "a" }, { "variable", "$guid_" } }),
+        entry_of ("extract.header", { { "header", "X-A" }, { "variable", "token" } }),
+        entry_of ("extract.boundary", { { "variable", "token" } }),
+    };
+    for (const auto& entry : entries) {
+        const auto reason = validate_entry (entry);
+        EXPECT_FALSE (reason.has_value ())
+        << entry.dump () << ": " << reason.value_or ("");
+    }
+}
+
+TEST_F (ElementsRegistryTest, AnEmptyVariableKeepsTheSchemasOwnError) {
+    const auto reason =
+    validate_entry (entry_of ("extract.boundary", { { "variable", "" } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_EQ (reason->find ("cannot"), std::string::npos) << *reason;
+}
+
 TEST_F (ElementsRegistryTest, AMistypedPatternKeepsTheSchemasOwnError) {
     const auto reason = validate_entry (
     entry_of ("extract.regex", { { "pattern", 7 }, { "variable", "v" } }));

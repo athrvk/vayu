@@ -2112,7 +2112,12 @@ pattern RE2 does not compile (`'pattern' is not a valid regular expression -
 <reason>`, likewise `'regex'` and `'text'`, #3043), an `assert.status` with
 neither a non-empty `in` nor a `range`, an `assert.jsonpath` with none of
 `expected`, `regex` or `exists`, and one that sets `exists` beside `expected` or
-`regex` (#3049). The only script
+`regex` (#3049), and what the engine would otherwise accept and ignore (#3055): a
+`control.throughput` naming neither or both of `percent` and `everyN`, a
+`timer.think` with no `ms`, `gaussian` or `minMs` + `maxMs` pair, an
+`assert.contains` with an empty `text` in `contains` mode, and an `extract.*`
+`variable` no `{{name}}` can read (a brace in it, whitespace at an edge, the
+`data.` namespace, `$vu` or `$iteration`). The only script
 source - `GET /requests/:id` and every full list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
