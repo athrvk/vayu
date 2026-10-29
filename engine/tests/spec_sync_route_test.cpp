@@ -194,6 +194,18 @@ class SpecSyncRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
+    /** A folder under the root that binds a *different* stored document. */
+    std::string create_foreign_folder (const std::string& parent_id) {
+        const std::string folder =
+        create_collection (json{ { "name", "Orders" }, { "parentId", parent_id } });
+        auto [status, response] = routes::update_collection_response (*db_, folder,
+        json{ { "openapi",
+        json{ { "specId", store_spec (NO_RESPONSES_DOC) },
+        { "specHash", "seed" }, { "syncedAt", 1 } } } });
+        EXPECT_EQ (status, 200) << response.dump ();
+        return folder;
+    }
+
     /** The `openapi` binding the collection holds right now. */
     json binding () {
         auto collection = db_->get_collection (root_);
@@ -542,6 +554,70 @@ TEST_F (SpecSyncRouteTest, RefusesAFolderParentedOutsideTheSyncedCollection) {
     json::array ({ json{ { "tempId", "t" }, { "name", "pets" }, { "parentId", other_root } } }) } }));
     ASSERT_EQ (status, 400) << response.dump ();
     EXPECT_EQ (db_->get_collections ().size (), 2u);
+}
+
+// Issue #3034: a folder bound to a different document is that document's own
+// contract, so the sync's boundary stops at it, taking what is beneath it along.
+// Mutation check: replace `spec_contract_subtree_ids`' body with the unbounded
+// `collection_subtree_ids` walk and each of these four is accepted.
+
+TEST_F (SpecSyncRouteTest, RefusesToUpdateARequestUnderAFolderBoundToADifferentDocument) {
+    const std::string foreign = create_foreign_folder (root_);
+    const std::string nested =
+    create_collection (json{ { "name", "nested" }, { "parentId", foreign } });
+    for (const std::string& collection : { foreign, nested }) {
+        const std::string request =
+        create_request (collection, json{ { "name", "not this contract's" } });
+
+        auto [status, response] = routes::spec_sync_response (*db_,
+        body (json{ { "update",
+        json::array ({ json{ { "id", request }, { "name", "taken" } } }) } }));
+        ASSERT_EQ (status, 400) << response.dump ();
+        EXPECT_EQ (response["error"]["item"].get<std::string> (), request);
+
+        const auto untouched = db_->get_request (request);
+        ASSERT_HAS_VALUE (untouched);
+        EXPECT_EQ (untouched->name, "not this contract's");
+    }
+}
+
+TEST_F (SpecSyncRouteTest, RefusesToDeleteARequestUnderAFolderBoundToADifferentDocument) {
+    const std::string foreign = create_foreign_folder (root_);
+    const std::string request = create_request (foreign);
+
+    auto [status, response] = routes::spec_sync_response (
+    *db_, body (json{ { "delete", json::array ({ request }) } }));
+    ASSERT_EQ (status, 400) << response.dump ();
+    EXPECT_TRUE (db_->get_request (request).has_value ());
+}
+
+TEST_F (SpecSyncRouteTest, RefusesAFolderParentedBeneathAFolderBoundToADifferentDocument) {
+    const std::string foreign = create_foreign_folder (root_);
+    const size_t before       = db_->get_collections ().size ();
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "collections",
+    json::array ({ json{ { "tempId", "t" }, { "name", "pets" }, { "parentId", foreign } } }) } }));
+    ASSERT_EQ (status, 400) << response.dump ();
+    EXPECT_EQ (db_->get_collections ().size (), before);
+}
+
+TEST_F (SpecSyncRouteTest, ReachesAFolderBoundToTheSameDocument) {
+    const std::string folder =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    auto [bound, bound_response] = routes::update_collection_response (*db_, folder,
+    json{ { "openapi",
+    json{ { "specId", bound_spec_ }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
+    ASSERT_EQ (bound, 200) << bound_response.dump ();
+    const std::string nested = create_request (folder, json{ { "name", "list pets" } });
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "update",
+    json::array ({ json{ { "id", nested }, { "name", "renamed" } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+    const auto stored = db_->get_request (nested);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "renamed");
 }
 
 // ---------------------------------------------------------------------------
@@ -1047,6 +1123,34 @@ TEST_F (SpecSyncRouteTest, PolicyWritesAFieldOnlyTheDocumentMoved) {
     EXPECT_EQ (updated->url, edited_url);
     EXPECT_EQ (response["skipped"]["fields"].get<size_t> (), 1u);
     EXPECT_EQ (response["skipped"]["requests"].get<size_t> (), 0u);
+}
+
+// Issue #3034. Mutation check: the unbounded walk makes the foreign folder's
+// request an update and its orphan a skipped deletion.
+TEST_F (SpecSyncRouteTest, PolicyLeavesAFolderBoundToADifferentDocumentAlone) {
+    const std::string mine = create_request (
+    root_, json{ { "name", "listPets" }, { "specOperation", list_pets () } });
+    const std::string foreign = create_foreign_folder (root_);
+    const std::string theirs  = create_request (
+    foreign, json{ { "name", "listPets" }, { "specOperation", list_pets () } });
+    const std::string orphan = create_request (foreign,
+    json{ { "name", "deletePet" }, { "method", "DELETE" },
+    { "specOperation", delete_pet () } });
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    json{ { "collectionId", root_ },
+    { "spec", json{ { "content", REWORDED_PETS_DOC } } }, { "policy", "safe" } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_EQ (response["updated"].get<size_t> (), 1u);
+    EXPECT_EQ (response["skipped"]["deletions"].get<size_t> (), 0u);
+    const auto updated = db_->get_request (mine);
+    ASSERT_HAS_VALUE (updated);
+    EXPECT_EQ (updated->name, "List all the pets");
+    const auto untouched = db_->get_request (theirs);
+    ASSERT_HAS_VALUE (untouched);
+    EXPECT_EQ (untouched->name, "listPets");
+    EXPECT_TRUE (db_->get_request (orphan).has_value ());
 }
 
 TEST_F (SpecSyncRouteTest, PolicyLeavesAFieldSomebodyEditedExactlyAsTheyLeftIt) {

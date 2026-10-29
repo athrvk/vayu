@@ -166,6 +166,44 @@ TEST_F (SpecDiffRouteTest, ComparesRequestsAnywhereBeneathTheBoundCollection) {
     EXPECT_TRUE (body["removed"].empty ());
 }
 
+/// Issue #3034. Mutation check: replace `spec_contract_subtree_ids`' body with
+/// the unbounded `collection_subtree_ids` walk and the other folder's request is
+/// reported as changed too.
+TEST_F (SpecDiffRouteTest, ReportsOnlyTheRequestsOfTheCollectionsOwnDocument) {
+    const std::string tag =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    const std::string listed = create_listed_request (tag);
+
+    const std::string other =
+    create_collection (json{ { "name", "Orders" }, { "parentId", root_ } });
+    bind (other, store_spec (FETCHED_DOC));
+    create_listed_request (other);
+    // Beneath the refused folder: it goes with it, bound or not.
+    const std::string nested =
+    create_collection (json{ { "name", "nested" }, { "parentId", other } });
+    create_listed_request (nested);
+
+    const json body = diff ();
+
+    ASSERT_EQ (body["changed"].size (), 1u);
+    EXPECT_EQ (body["changed"][0]["requestId"], listed);
+    EXPECT_EQ (body["unchanged"], 0u);
+    EXPECT_EQ (body["unmapped"], 0u);
+    EXPECT_TRUE (body["removed"].empty ());
+}
+
+TEST_F (SpecDiffRouteTest, ComparesAFolderBoundToTheSameDocument) {
+    const std::string tag =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    bind (tag, bound_spec_);
+    const std::string listed = create_listed_request (tag);
+
+    const json body = diff ();
+
+    ASSERT_EQ (body["changed"].size (), 1u);
+    EXPECT_EQ (body["changed"][0]["requestId"], listed);
+}
+
 TEST_F (SpecDiffRouteTest, ReportsTheFieldsTheDocumentMovedAndTheDraftAnApplyWouldWrite) {
     create_listed_request (root_);
 

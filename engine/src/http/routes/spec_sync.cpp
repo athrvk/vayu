@@ -70,17 +70,14 @@ namespace vayu::http::routes {
  * sidebar-sized one - the same reasoning `get_collections_bound_to_spec`
  * scans on. A cycle among stored rows cannot loop it: `seen` gates the descent.
  *
- * Shared with `POST /specs/match` and `POST /specs/export` (declared in
- * routes.hpp), which have to gather the same subtree for the same reason a sync
- * refuses to leave it: a spec-bound root usually owns no requests directly, so
- * anything that answers for a collection's contract has to mean the subtree by
- * "the collection".
+ * The walk behind `spec_contract_subtree_ids`, which is what the spec routes
+ * call (declared in routes.hpp): a spec-bound root usually owns no requests
+ * directly, so anything that answers for a collection's contract has to mean
+ * the subtree by "the collection".
  *
- * @p descend_into is where one caller's contract stops early - the export's
- * boundary at a collection bound to a *different* document (issue #721). Empty
- * for the two that take the whole subtree, and the child it refuses takes its
- * own descendants with it, which is what makes it a boundary rather than a
- * filter.
+ * @p descend_into is where a contract stops early - at a collection bound to a
+ * *different* document (issues #721, #3034). The child it refuses takes its own
+ * descendants with it, which is what makes it a boundary rather than a filter.
  */
 std::unordered_set<std::string> collection_subtree_ids (
 const std::vector<vayu::db::Collection>& all,
@@ -106,11 +103,9 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into) {
             continue;
         }
         for (const auto& child : kids->second) {
-            if (descend_into) {
-                const auto row = rows.find (child);
-                if (row != rows.end () && !descend_into (*row->second)) {
-                    continue;
-                }
+            const auto row = rows.find (child);
+            if (row != rows.end () && !descend_into (*row->second)) {
+                continue;
             }
             if (seen.insert (child).second) {
                 stack.push_back (child);
@@ -173,6 +168,18 @@ std::string bound_spec_id (const std::string& openapi) {
     } catch (const std::exception&) {
         return {};
     }
+}
+
+std::unordered_set<std::string> spec_contract_subtree_ids (
+const std::vector<vayu::db::Collection>& all,
+const std::string& root) {
+    const auto root_row = std::ranges::find (all, root, &vayu::db::Collection::id);
+    const std::string root_spec_id =
+    root_row == all.end () ? std::string () : bound_spec_id (root_row->openapi);
+    return collection_subtree_ids (all, root, [&] (const vayu::db::Collection& child) {
+        const std::string binding = bound_spec_id (child.openapi);
+        return binding.empty () || binding == root_spec_id;
+    });
 }
 
 bool binding_leaves_document (const std::string& before, const std::string& after) {
@@ -834,7 +841,7 @@ resolve_sync_scope (vayu::db::Database& db, const SyncRequest& request, SyncScop
         return std::unexpected (body_error ("Collection '" + request.collection_id +
         "' is not bound to a spec; bind it before syncing"));
     }
-    out.subtree = collection_subtree_ids (out.stored_collections, request.collection_id);
+    out.subtree = spec_contract_subtree_ids (out.stored_collections, request.collection_id);
 
     out.cap = spec_size_cap (db);
     if (request.content.size () > out.cap) {

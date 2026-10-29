@@ -2928,10 +2928,15 @@ which `POST /specs/describe` answers beside the operations (issue #3030). A
 non-array, or an entry that is not a string, is a `400`; an entry that does not
 start with `/`, or is the root, names nothing to strip and is ignored.
 
-The requests are **not** sent. The engine gathers the whole subtree of
+The requests are **not** sent. The engine gathers the subtree of
 `collectionId` itself, because an OpenAPI import binds the root and files every
 request under one sub-collection per tag: a caller sending "the collection's
-requests" would be matching against a set that excludes almost all of them.
+requests" would be matching against a set that excludes almost all of them. The
+walk **stops at a sub-collection bound to a different document** (issue #3034),
+taking its descendants with it: a folder that is another contract's own keeps
+its requests out of this pairing, exactly as `POST /specs/bind` keeps them out
+of its stamping. A sub-collection bound to the same document stays in, and an
+unbound `collectionId` stops at every bound sub-collection.
 
 **Response:**
 ```json
@@ -3074,8 +3079,9 @@ being handed this answer - the same split `POST /specs/match` and
 
 Neither the requests nor the **bound** document are sent. The engine walks the
 subtree of `collectionId` itself (an import files its requests under one
-sub-collection per tag) and reads the bound document from the collection's own
-binding: the three-way rule below is only worth anything if the "previous" side
+sub-collection per tag, and the walk stops at a sub-collection bound to a
+different document, issue #3034) and reads the bound document from the
+collection's own binding: the three-way rule below is only worth anything if the "previous" side
 is the bytes actually stored, and a caller that could supply them could turn its
 own edits into the document's - by accident, with a stale copy.
 
@@ -3272,7 +3278,10 @@ operation of the new document shares the id rather than going unread.
 
 **Nothing outside the subtree is touched**, the rule `POST /specs/sync` follows:
 a request under another collection keeps its own stamp even when it would have
-matched.
+matched. That includes a sub-collection bound to a *different* document and
+everything beneath it (issue #3034): its requests carry that document's
+operation identity, so neither a match nor a clear is applied to them. A
+sub-collection bound to the same document is in the subtree.
 
 **A bind to other bytes forgets the declined operations** (issue #3031). The
 operations deletes declined under the collection (see
@@ -3695,7 +3704,11 @@ Five rules the payload cannot opt out of:
 - **The bound subtree is the boundary.** Every request an `update` or a `delete`
   names, and every collection a created request lands in, must be the collection
   being synced or one beneath it. Anything else is a `400` naming the item -
-  without this the route would be a way to delete any row by id.
+  without this the route would be a way to delete any row by id. A
+  sub-collection bound to a *different* document (and everything beneath it) is
+  outside the boundary (issue #3034): its requests belong to that document's
+  contract, so a sync of this one cannot update or delete them, and a diff does
+  not list them. A sub-collection bound to the same document is inside.
 - **The engine mints every id**, as `/import/apply` does: new rows are named by
   `tempId` and translated through `idMap`, and a body `id` is a `400`.
 - **`examples` is a decision, and the rows are the document's** (issue #869).

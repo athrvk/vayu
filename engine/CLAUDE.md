@@ -821,8 +821,9 @@ logged as a warning: it means a client skipped composition.
     `full` writes every edit into the document's own dialect, 2.0 included
     (`BoundMode`), and an unedited `full` export changes no standard member.
     The subtree walk stops at a collection bound to a *different* document
-    and not at one bound to the same (#721), as a predicate on
-    `collection_subtree_ids`. YAML output is
+    and not at one bound to the same (#721), through
+    `spec_contract_subtree_ids`, the one walk `match`, `bind`, `diff` and
+    `sync` use too (#3034). YAML output is
     `core::emit_yaml`, beside the reader on purpose: `plain_scalar` decides
     quoting, and split across two files a document would export as
     `swagger: 2.0` and re-import as a number.

@@ -157,6 +157,23 @@ class SpecBindRouteTest : public ::testing::Test {
                                                     std::string{};
     }
 
+    /// Writes the binding straight onto the row: only `specId` is read by the
+    /// boundary, so the document need not be stored.
+    void bind_row (const std::string& collection_id, const std::string& spec_id) {
+        auto row = db_->get_collection (collection_id);
+        ASSERT_HAS_VALUE (row);
+        row->openapi =
+        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } }.dump ();
+        db_->create_collection (*row);
+    }
+
+    void set_stamp (const std::string& request_id, const std::string& operation_id) {
+        auto [status, response] = routes::update_request_response (*db_, request_id,
+        json{ { "specOperation",
+        { { "operationId", operation_id }, { "method", "GET" }, { "path", "/pets" } } } });
+        ASSERT_EQ (status, 200) << response.dump ();
+    }
+
     json binding_of (const std::string& collection_id) {
         auto collection = db_->get_collection (collection_id);
         EXPECT_TRUE (collection.has_value ());
@@ -302,6 +319,54 @@ TEST_F (SpecBindRouteTest, LeavesARequestOutsideTheSubtreeAlone) {
     EXPECT_EQ (json::parse (stamp_of (alien))["operationId"], "somethingElse");
     EXPECT_TRUE (binding_of (other).empty ());
     EXPECT_EQ (json::parse (stamp_of (mine))["operationId"], "listPets");
+}
+
+/// Issue #3034. Mutation check: replace `spec_contract_subtree_ids`' body with
+/// the unbounded `collection_subtree_ids` walk and the folder's request is
+/// stamped, and its own stamp cleared.
+TEST_F (SpecBindRouteTest, LeavesAFolderBoundToADifferentDocumentAlone) {
+    const std::string mine = create_request (root_, "GET", "{{baseUrl}}/pets");
+
+    const std::string other =
+    create_collection (json{ { "name", "Orders" }, { "parentId", root_ } });
+    bind_row (other, "spec_orders");
+    const std::string theirs = create_request (other, "GET", "{{baseUrl}}/pets");
+    set_stamp (theirs, "somethingElse");
+    // Beneath the refused folder: it goes with it, bound or not.
+    const std::string nested =
+    create_collection (json{ { "name", "nested" }, { "parentId", other } });
+    const std::string deeper = create_request (nested, "GET", "{{baseUrl}}/pets");
+    set_stamp (deeper, "deeperElse");
+
+    const auto preview = routes::match_spec_operations_response (*db_,
+    json{ { "collectionId", root_ },
+    { "operations",
+    json::array ({ json{ { "method", "GET" }, { "path", "/pets" },
+    { "operationId", "listPets" } } }) } });
+    ASSERT_EQ (preview.first, 200) << preview.second.dump ();
+
+    const auto body = bind_ok (pets_document ());
+
+    EXPECT_EQ (body["stamped"], 1u);
+    EXPECT_EQ (body["cleared"], 0u);
+    EXPECT_EQ (body["stamped"], preview.second["matched"].size ());
+    EXPECT_EQ (json::parse (stamp_of (mine))["operationId"], "listPets");
+    EXPECT_EQ (json::parse (stamp_of (theirs))["operationId"], "somethingElse");
+    EXPECT_EQ (json::parse (stamp_of (deeper))["operationId"], "deeperElse");
+    EXPECT_EQ (binding_of (other)["specId"], "spec_orders");
+}
+
+TEST_F (SpecBindRouteTest, StampsAFolderBoundToTheSameDocument) {
+    bind_row (root_, "spec_pets");
+    const std::string tag =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    bind_row (tag, "spec_pets");
+    const std::string list = create_request (tag, "GET", "{{baseUrl}}/pets");
+
+    const auto body = bind_ok (pets_document ());
+
+    EXPECT_EQ (body["stamped"], 1u);
+    EXPECT_EQ (json::parse (stamp_of (list))["operationId"], "listPets");
 }
 
 /// Issue #3030: a collection written as literal URLs carries the server's base

@@ -116,7 +116,7 @@ match_spec_operations_response (vayu::db::Database& db, const nlohmann::json& js
     }
 
     const auto collections = db.get_collections ();
-    const auto subtree = collection_subtree_ids (collections, collection_id);
+    const auto subtree = spec_contract_subtree_ids (collections, collection_id);
     // The same walk `POST /specs/bind` matches over, so the pairing this
     // previews is the pairing that one stamps.
     std::vector<vayu::core::MatchableRequest> requests;
