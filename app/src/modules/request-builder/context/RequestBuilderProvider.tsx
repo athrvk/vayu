@@ -98,6 +98,15 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"stream",
 ];
 
+function withoutFields(
+	fields: ReadonlySet<MergeableRequestField>,
+	removed: Iterable<MergeableRequestField>
+): ReadonlySet<MergeableRequestField> {
+	const next = new Set(fields);
+	for (const field of removed) next.delete(field);
+	return next;
+}
+
 interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
@@ -885,6 +894,22 @@ export default function RequestBuilderProvider({
 		);
 	}, [baseline.name]);
 
+	/** Mark `fields` as agreed with the server at the values `saved` carried. */
+	const recordSaved = useCallback(
+		(saved: RequestState, fields: ReadonlySet<MergeableRequestField>) => {
+			if (fields.size === 0) return;
+			setTouchedFields((prev) => withoutFields(prev, fields));
+			// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a
+			// plain union member here, not a generic correlated with `saved[field]`,
+			// so TypeScript cannot verify the pair matches per assignment - the same
+			// reason `updateField` below casts at the call site instead.
+			const savedPatch: Record<string, unknown> = {};
+			for (const field of fields) savedPatch[field] = saved[field];
+			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
+		},
+		[]
+	);
+
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {
 		if (!onSave) return;
@@ -898,53 +923,41 @@ export default function RequestBuilderProvider({
 		// cannot silently add to what this save already claims to have sent.
 		const changedFields = touchedFields;
 		// `buildUpdatePayload` sends the whole `elements` array whenever it is
-		// touched (issue #1635) - an element the picker just added still has
-		// `config: {}`, missing whatever its kind requires, and the engine 400s
-		// the *entire* payload on that one element's behalf. Presence-only check
-		// against the catalogue's `required` keys, the same cheap and exact test
-		// `addElement`'s fresh seed needs: throwing here (instead of calling
-		// `onSave`) keeps the request dirty and skips the network call, and
-		// `useSaveManager` reads `SaveBlockedError` to stay `"pending"` rather
-		// than backing off a retry against a payload that will not have changed.
-		if (
+		// touched (issue #1635), and the engine 400s the *entire* payload on one
+		// element it refuses - a fresh `config: {}`, or a value the schema
+		// rejects (#3048). So the list alone is held back and every other touched
+		// field still goes out: "elements" stays touched, its baseline stays the
+		// last saved list, and `SaveBlockedError` (thrown once the rest is
+		// recorded) keeps `useSaveManager` at `"pending"` rather than backing off
+		// a retry against a payload that will not have changed.
+		const elementsHeldBack =
 			changedFields.has("elements") &&
-			hasIncompleteElement(request.elements, elementKinds ?? [])
-		) {
-			throw new SaveBlockedError();
-		}
+			hasIncompleteElement(request.elements, elementKinds ?? []);
+		const sentFields = elementsHeldBack
+			? withoutFields(changedFields, ["elements"])
+			: changedFields;
+		if (elementsHeldBack && sentFields.size === 0) throw new SaveBlockedError();
 		try {
-			await onSave(request, changedFields);
+			await onSave(request, sentFields);
 		} catch (error) {
 			// The engine names the element it refused (#3043); the failure itself
 			// still propagates to `useSaveManager` for its toast and Dock status.
-			if (changedFields.has("elements")) refuseElement(error, request.elements);
+			if (sentFields.has("elements")) refuseElement(error, request.elements);
 			throw error;
 		}
 		// An edit landed, or a foreign write arrived, while this save was in
 		// flight: either way `changeTokenRef` moved and the payload that went
 		// out is not the whole story any more, so the request is still dirty
-		// and `useSaveManager` has to keep its debounce running for it. Nothing
-		// below is safe to do in that case - not clearing the fields this save
+		// and `useSaveManager` has to keep its debounce running for it. No
+		// bookkeeping is safe in that case - not clearing the fields this save
 		// carried, since a fresh edit to one of them since the snapshot above
 		// would be forgotten, and not moving the baseline, since `request` no
 		// longer describes what was actually sent.
-		if (changeTokenRef.current !== savedGeneration) return;
-		if (changedFields.size > 0) {
-			setTouchedFields((prev) => {
-				const next = new Set(prev);
-				for (const field of changedFields) next.delete(field);
-				return next;
-			});
-			// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a
-			// plain union member here, not a generic correlated with `request[field]`,
-			// so TypeScript cannot verify the pair matches per assignment - the same
-			// reason `updateField` below casts at the call site instead.
-			const savedPatch: Record<string, unknown> = {};
-			for (const field of changedFields) savedPatch[field] = request[field];
-			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
-		}
-		setHasUnsavedChanges(false);
-	}, [request, changeToken, touchedFields, onSave, elementKinds, refuseElement]);
+		const settled = changeTokenRef.current === savedGeneration;
+		if (settled) recordSaved(request, sentFields);
+		if (elementsHeldBack) throw new SaveBlockedError();
+		if (settled) setHasUnsavedChanges(false);
+	}, [request, changeToken, touchedFields, onSave, elementKinds, refuseElement, recordSaved]);
 
 	const {
 		forceSave,

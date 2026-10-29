@@ -2291,12 +2291,16 @@ top-level check `addElement`'s fresh `config: {}` can trigger, and the row shows
 whether the card is open or collapsed, since a list of collapsed cards is
 exactly where a user needs to spot which one is blocking the save without
 expanding each in turn. `RequestBuilderProvider`'s `handleSave` and
-`ElementsTab`'s `persist` hold the save back for the same reason
+`ElementsTab`'s `persist` hold the list back for the same reason
 `defaultConfigFor` exists above - a request's whole `elements` array 400s on
 one incomplete member - and throw `SaveBlockedError` instead of sending a
 payload already known to fail; `useSaveManager` reads that type to stay
 "pending" rather than backing off a retry against a payload that will not
-have changed by the next attempt.
+have changed by the next attempt. Only the list is held back (#3048): the
+builder still sends every other field the user touched (a URL, a header) and
+throws once that save lands, keeping `elements` touched and its baseline at
+the last saved list, so a retry while the element is still invalid sends
+nothing and the fixed list goes out on its own.
 
 **A value the schema refuses is held back by the same gate** (#3048):
 `validateElementConfig` (`lib/elements.ts`) walks the kind's `configSchema` and

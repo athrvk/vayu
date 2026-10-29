@@ -272,7 +272,7 @@ function ElementRow({
 	// Issue #1635: a fresh element's `config` is missing whatever its kind
 	// requires until the user fills the form below, and saving in that state
 	// 400s the whole request - `RequestBuilderProvider`/`ElementsTab` hold the
-	// save back for exactly this, so the row has to say which field is why.
+	// list back for exactly this, so the row has to say which field is why.
 	const missingLabels = missingRequiredKeys(element, kinds).map(
 		(key) => schema?.configSchema.properties?.[key]?.title ?? key
 	);
