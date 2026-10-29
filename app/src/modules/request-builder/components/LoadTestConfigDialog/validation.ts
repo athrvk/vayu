@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import type { ResolvedElement } from "@/types";
 import {
 	validateCapacityRange,
 	validateRampDuration,
@@ -18,6 +19,7 @@ import {
 	type CustomBudgetDraft,
 } from "./budgets";
 import { monitorError, type MonitorDraft } from "./monitor";
+import { scenarioOnlyError } from "./scenario-only";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /** Each rule's message, or null when the draft passes it. */
@@ -28,6 +30,8 @@ export interface DraftErrors {
 	capacityRangeError: string | null;
 	budgetsError: string | null;
 	monitoringError: string | null;
+	/** An enabled element only a scenario can run (#3050); no field in the dialog fixes it. */
+	scenarioOnlyError: string | null;
 }
 
 interface DraftToValidate {
@@ -37,6 +41,8 @@ interface DraftToValidate {
 	monitor: MonitorDraft;
 	/** The engine's `monitorMaxSeries` setting. */
 	maxSeries: number;
+	/** The enabled scenario-only elements the run would carry (`scenarioOnlyElements`). */
+	scenarioOnly: readonly ResolvedElement[];
 }
 
 export function validateLoadTestDraft({
@@ -45,6 +51,7 @@ export function validateLoadTestDraft({
 	customBudgets,
 	monitor,
 	maxSeries,
+	scenarioOnly,
 }: DraftToValidate): DraftErrors {
 	const { mode, duration, concurrency, rampDuration, startConcurrency } = profile;
 	return {
@@ -59,6 +66,7 @@ export function validateLoadTestDraft({
 		// same terms a fixed field is, so the notice reads the same either way.
 		budgetsError: budgetError(budgets) ?? customBudgetsError(customBudgets),
 		monitoringError: monitorError(monitor, maxSeries),
+		scenarioOnlyError: scenarioOnlyError(scenarioOnly),
 	};
 }
 
@@ -70,6 +78,7 @@ export function firstBlockingError(errors: DraftErrors): string | null {
 		errors.startConcurrencyError ??
 		errors.capacityRangeError ??
 		errors.budgetsError ??
-		errors.monitoringError
+		errors.monitoringError ??
+		errors.scenarioOnlyError
 	);
 }

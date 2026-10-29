@@ -8699,14 +8699,21 @@ renames a composed request's chain-then-own `elements` onto, since `POST
 **Only the kinds this run shape's own hooks actually dispatch are accepted**:
 `extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
 phase-0 set issue #1514 gave the design send. A `control.*` kind or
-`timer.pacing`/`timer.throughput` is a `400` naming the index and the kind,
-never silently accepted and left inert: those need per-VU controller and
+`timer.pacing`/`timer.throughput` is a `400` naming the element by its kind
+label and where it was declared (`from the collection 'Orders'` for a
+collection or a folder under it, `set on this request`, read from the entry's
+`origin`; `element '<id>'` for an entry that carries none) - not by position, because a
+composed list interleaves inherited elements with the request's own (#3050).
+It is never silently accepted and left inert: those need per-VU controller and
 pacing state (`controller_state`, `SharedThroughputCounters`,
 `pacing_state`) this run shape's single-submission model has no equivalent
 of, and admitting one without running it would report `"ok"` in
 `summary["elements"]` for behaviour that never happened. Run a sequence that
 needs a controller as a `"scenario"` instead, where its steps carry that
-state.
+state. **A disabled entry (`"enabled": false`) is not refused**: the pipeline
+skips it before its `apply` runs, so a switched-off pacing timer inherited
+from a collection does not block the run. It is still validated like any other
+entry, so a malformed `config` fails now rather than when it is switched on.
 
 `vayu::core::ElementPipeline` runs the compiled list per submission, the same
 phases a design send uses: `script.pre` at `step.before`, `extract.*` /
@@ -9418,10 +9425,19 @@ kind table and every config shape.
 sums every member's own response latency, at microsecond precision, into a
 named total per pass, and the run's summary gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
-p95, p99, max } }`, omitted for a transaction the run never closed.
+p95, p99, max } }`, omitted for a transaction the run never closed. A pass
+closes when the iteration leaves the folder (#3054): after the folder's last
+member whether it was sent, skipped by a controller or failed before an
+answer, or after any member from which the iteration jumps out of the folder
+or ends. So `count` is one per iteration that attempted a member, and a pass
+whose every member was skipped, or that a Stop interrupted, is not counted.
+`errors` counts the passes in which a member was an error by the report's
+own definition: no response, a status outside 2xx/3xx, or a failed
+assertion.
 `includeTimers: true` (issue #1569) also folds a between-member `timer.*`
 wait into that sum - excluded by default, and always excluded for a wait
 after the folder's own last member, which is outside the transaction's span.
+[elements.md](elements.md#controllers) has the full close rule.
 The same shape reports on a scenario load run's summary, top-level rather
 than under `scenario` - see below.
 
@@ -9477,7 +9493,12 @@ knob.
   its own overlay, never the run's shared scopes, so a name one user's step 1
   writes (an `extract.json`'s target, an inline script's
   `pm.environment.set`) is visible only to that same user's later steps, never
-  to another user's concurrent one. `pm.execution` still throws - a *script*
+  to another user's concurrent one. Those saved names outlive the iteration
+  that wrote them (#3044): a `control.once` login's extracted token still
+  answers every later iteration of that user. What resets at each iteration
+  boundary is the user's cookies and its run-local scope
+  (`pm.variables.set`); a bound data row's columns are the new row's.
+  `pm.execution` still throws - a *script*
   cannot redirect the sequence under load. A **controller** element can
   (issue #1515): `control.if`, `control.once` and `control.throughput` skip a
   step the way `pm.execution.skipRequest()` would, counted in the run's
@@ -9688,7 +9709,10 @@ it - a `control.transaction` spans a folder, not one step:
 One entry per declared `control.transaction` name that closed at least once
 this run, allocated up front from a scan of the plan - never discovered
 mid-run - so recording into it, like every other controller here, takes no
-lock.
+lock. `count` and `errors` follow the collection run's rule (#3054): a pass
+closes when the virtual user's iteration leaves the folder, including an
+abandoned iteration, and errs when a member got no response, answered
+outside 2xx/3xx or failed an inline assertion.
 
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions
 sent a `{{token}}` composition the residual-token pass still could not answer

@@ -331,8 +331,10 @@ std::vector<vayu::http::CookieWrite>* writes);
  *
  * The run-local scope (#2564) rides here too, which is what makes it per-VU:
  * it starts each iteration empty (a load run's base scopes hold no local,
- * `run_collection_setup` discards what `script.setup` set) and is cleared with
- * the rest at the iteration boundary.
+ * `run_collection_setup` discards what `script.setup` set) and is the one
+ * part `clear_local` drops at the iteration boundary. The environment,
+ * collection and globals entries live as long as the VU (#3044), so a token
+ * a `control.once` login extracted still answers every later iteration.
  */
 class ScopeOverlay {
     public:
@@ -360,9 +362,11 @@ class ScopeOverlay {
         globals_.empty () && local_.empty ();
     }
 
-    /// A new iteration is a new user, not the same one logging in twice - the
-    /// same rule `VirtualUser::cookies` follows, cleared at the same boundary.
-    void clear ();
+    /// Empty the run-local scope alone, at a VU's iteration boundary (#3044):
+    /// a `pm.variables.set` value lasts one iteration, while what the VU saved
+    /// to the environment, collection or globals scope stays for its later
+    /// iterations, the way a sequential run keeps it.
+    void clear_local ();
 
     /// Applied lowest precedence first, so the highest-precedence overlay
     /// entry a VU wrote is what survives on @p vars - the same order

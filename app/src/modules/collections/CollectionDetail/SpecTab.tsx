@@ -46,6 +46,9 @@
  * previewed here are the identities that will be stamped. It parsed the picked
  * file until then, which made the preview and the write two opinions about one
  * document.
+ * **What is bound is the bundled document** (#3032): a pick runs through the
+ * same `$ref` bundler import and Sync use before it is described, so a spec
+ * split across files is stored whole, and the next Sync compares like with like.
  * The one place this tab writes *other* request fields is the Sync section, and
  * only for the items the user ticks: it re-reads the document and says what
  * moved (#654), and applies the selection in one engine transaction (#655).
@@ -88,7 +91,14 @@ import {
 	useSpecMetaQuery,
 } from "@/queries/specs";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
+import type { RefReport } from "@/services/importers/ref-bundler";
+import {
+	bundleSpecText,
+	type RefetchedSpec,
+	type SpecTextOrigin,
+} from "@/services/openapi/spec-refetch";
 import SpecCoverageLine from "./SpecCoverageLine";
+import RefDisclosure from "./RefDisclosure";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
@@ -106,7 +116,11 @@ interface SpecTabProps {
 
 /** A document the user has chosen but not yet bound. */
 interface PickedSpec {
+	/** The bundled document (#3032): what is described, matched and bound. */
 	content: string;
+	/** What bundling could not follow, for the disclosure beside the summary. */
+	unresolvedRefs: number;
+	refReport: RefReport;
 	/**
 	 * What names *this* pick, for the read that describes it (issue #869).
 	 *
@@ -186,6 +200,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	// Which export dialog is open, if either. One field: the menu opens one.
 	const [exporting, setExporting] = useState<"openapi" | "postman" | null>(null);
 	const [fetching, setFetching] = useState(false);
+	// A picked file is being bundled: its sibling files are read, which a fetch's
+	// spinner does not cover.
+	const [bundling, setBundling] = useState(false);
 	// The bound path that did not read on the last check: moved, renamed, or
 	// restored from another machine (#2765). Learned from an attempted read,
 	// never asked for up front, and true only while the binding still names it.
@@ -242,18 +259,80 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		return match.unmatchedRequests.filter((id) => stamped.has(id));
 	}, [match, requests]);
 
+	/*
+	 * Every pick goes through the bundler before it is described (#3032): the
+	 * stored document is the bundled one, and the describe, match and bind below
+	 * all read `picked.content`. Binding the raw text of a multi-file spec would
+	 * store its relative `$ref`s unresolved, and the next Sync - which does bundle
+	 * - would report the difference as a change forever.
+	 *
+	 * Returns null after saying why: a document past the engine's cap is refused
+	 * here, in front of the preview, rather than at the bind.
+	 */
+	const bundlePick = async (
+		text: string,
+		origin: SpecTextOrigin
+	): Promise<RefetchedSpec | null> => {
+		try {
+			return await bundleSpecText(text, origin, {
+				maxBytes: specMaxBytes,
+				fetchUrl: async (refUrl, options) =>
+					(
+						await apiService.importFetch(
+							refUrl,
+							specMaxBytes,
+							undefined,
+							undefined,
+							options
+						)
+					).content,
+				...(window.electronAPI?.readSpecFile
+					? { readSpecFile: window.electronAPI.readSpecFile }
+					: {}),
+			});
+		} catch (e) {
+			setPicked(null);
+			setPickError({ title: "Couldn't bundle that spec", message: (e as Error).message });
+			return null;
+		}
+	};
+
+	const pickBundled = async (
+		text: string,
+		origin: SpecTextOrigin,
+		identity: Pick<PickedSpec, "sourceUrl" | "fileName" | "path">
+	) => {
+		const bundle = await bundlePick(text, origin);
+		if (!bundle) return;
+		setPicked({
+			content: bundle.text,
+			unresolvedRefs: bundle.unresolvedRefs,
+			refReport: { fetched: bundle.fetched, refused: bundle.refused },
+			token: nextPickToken(),
+			...identity,
+		});
+	};
+
 	const handleFile = (file: File) => {
 		const reader = new FileReader();
-		reader.onload = () => {
+		reader.onload = async () => {
 			setPickError(null);
-			setPicked({
-				content: String(reader.result),
-				token: nextPickToken(),
-				fileName: file.name,
-				// The path while there is still a `File` to take it from: the
-				// binding keeps where the file is, never its contents.
-				path: window.electronAPI?.getFilePath(file) ?? "",
-			});
+			setBundling(true);
+			// The path while there is still a `File` to take it from: the binding
+			// keeps where the file is, never its contents.
+			const path = window.electronAPI?.getFilePath(file) ?? "";
+			try {
+				await pickBundled(
+					String(reader.result),
+					{ specPath: path },
+					{
+						fileName: file.name,
+						path,
+					}
+				);
+			} finally {
+				setBundling(false);
+			}
 		};
 		reader.onerror = () => {
 			const reason = reader.error?.message;
@@ -273,7 +352,8 @@ export default function SpecTab({ collection }: SpecTabProps) {
 		setPickError(null);
 		try {
 			const { content } = await apiService.importFetch(url, specMaxBytes);
-			setPicked({ content, token: nextPickToken(), sourceUrl: url });
+			// Never throws: a bundle that fails says so through `pickError` itself.
+			await pickBundled(content, { sourceUrl: url }, { sourceUrl: url });
 		} catch (e) {
 			// A fetch that never got a document back - a bad host, a refused
 			// connection, the engine itself unreachable - is not a document that
@@ -362,7 +442,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						<Button
 							variant="outline"
 							onClick={() => fileInputRef.current?.click()}
-							disabled={bindSpec.isPending}
+							disabled={bindSpec.isPending || bundling || fetching}
 						>
 							<Upload className="size-icon" data-icon-motion={ICON_MOTION.lift} />
 							Choose file
@@ -393,12 +473,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							}}
 							placeholder="https://api.example.com/openapi.json"
 							className="flex-1"
-							disabled={fetching || bindSpec.isPending}
+							disabled={fetching || bundling || bindSpec.isPending}
 						/>
 						<Button
 							variant="outline"
 							onClick={() => void handleFetch()}
-							disabled={!url || fetching || bindSpec.isPending}
+							disabled={!url || fetching || bundling || bindSpec.isPending}
 						>
 							{fetching ? (
 								<Loader2 className="size-icon animate-spin" />
@@ -408,6 +488,13 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							Fetch
 						</Button>
 					</div>
+
+					{bundling && (
+						<p className="flex items-center gap-2 text-xs text-muted-foreground">
+							<Loader2 className="size-icon-sm animate-spin" />
+							Reading the files this spec references…
+						</p>
+					)}
 
 					{pickError && (
 						<Callout severity="blocking" title={pickError.title}>
@@ -457,8 +544,19 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						/>
 					)}
 
+					{picked && (
+						<RefDisclosure
+							unresolvedRefs={picked.unresolvedRefs}
+							refReport={picked.refReport}
+							missingFrom="the stored document"
+						/>
+					)}
+
 					{picked && match && (
-						<Button onClick={handleBind} disabled={bindSpec.isPending}>
+						<Button
+							onClick={handleBind}
+							disabled={bindSpec.isPending || bundling || fetching}
+						>
 							{bindSpec.isPending ? (
 								<Loader2 className="size-icon animate-spin" />
 							) : (

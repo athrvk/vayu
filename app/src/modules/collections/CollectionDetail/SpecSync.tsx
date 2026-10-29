@@ -74,6 +74,7 @@ import type {
 	SpecFileLocation,
 	SpecOperation,
 } from "@/types";
+import RefDisclosure from "./RefDisclosure";
 import { SaveFailed, SectionLabel } from "./shared";
 import { pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 
@@ -453,23 +454,11 @@ function DiffReport({
 				)}
 			</div>
 
-			{unresolvedRefs > 0 && (
-				<Callout severity="warning" title="Couldn't read some references">
-					{unresolvedRefs} {pluralize(unresolvedRefs, "reference")} to another file
-					couldn&apos;t be followed, so whatever they describe is missing from this
-					comparison.
-					{refReport.refused.map(({ target, reason }) => (
-						<span key={target} className="block">
-							Not followed: {target} ({reason})
-						</span>
-					))}
-				</Callout>
-			)}
-			{refReport.fetched.length > 0 && (
-				<p className="text-label text-muted-foreground">
-					Fetched from: {refReport.fetched.join(", ")}
-				</p>
-			)}
+			<RefDisclosure
+				unresolvedRefs={unresolvedRefs}
+				refReport={refReport}
+				missingFrom="this comparison"
+			/>
 
 			{diff.added.length > 0 && (
 				<Group

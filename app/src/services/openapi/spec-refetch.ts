@@ -84,6 +84,32 @@ export class NoSpecSourceError extends Error {
 
 export async function refetchSpec(source: SpecSource, io: SpecRefetchIo): Promise<RefetchedSpec> {
 	const { text, sourceUrl, specPath } = await read(source, io);
+	return bundleSpecText(text, { sourceUrl, specPath }, io);
+}
+
+/** Where a document's text came from, which is what its relative refs resolve against. */
+export interface SpecTextOrigin {
+	/** The URL it was fetched from; relative refs resolve against it. */
+	sourceUrl?: string;
+	/** The picked file's path; siblings are read beside it. Empty or absent for a paste. */
+	specPath?: string;
+}
+
+/**
+ * Bundle a document's external `$ref`s into it, the one way every entry to a
+ * spec does (import, Sync, and the Spec tab's pick): the stored document is the
+ * bundled one, so a path that stored the raw text would report every external
+ * ref as a change on the next check (#3032).
+ *
+ * @throws {SpecBundleTooLargeError} past the engine's cap; every other failure
+ * is counted into `unresolvedRefs`.
+ */
+export async function bundleSpecText(
+	text: string,
+	origin: SpecTextOrigin,
+	io: SpecRefetchIo
+): Promise<RefetchedSpec> {
+	const { sourceUrl, specPath } = origin;
 	const readSpecFile = io.readSpecFile;
 
 	// UTF-8 both ways: the file intake decodes bytes here for the same reason

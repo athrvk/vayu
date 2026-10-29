@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider, useRequestBuilderContext } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
+import RunCollectionDialog from "@/modules/collections/RunCollectionDialog";
 import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
 import EditorDraftSurface from "./components/EditorDraftSurface";
@@ -63,7 +64,13 @@ import { toHeaderItems } from "./utils/system-headers";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import { toHeaderRows } from "./utils/key-value";
-import { elementsParts, hasReplayedPostScript, scriptTextFor } from "./utils/elements-parts";
+import {
+	elementsParts,
+	hasReplayedPostScript,
+	scriptTextFor,
+	withoutDisabled,
+} from "./utils/elements-parts";
+import { scenarioOnlyElements } from "./components/LoadTestConfigDialog/scenario-only";
 import { buildComposeBody } from "./utils/compose-body";
 import {
 	disabledDefaults,
@@ -77,6 +84,7 @@ import type {
 	StartLoadTestRequest,
 	OAuth2Config,
 	UpdateRequestRequest,
+	Collection,
 } from "@/types";
 
 /**
@@ -252,6 +260,9 @@ export default function RequestBuilder() {
 	const [showLoadTestDialog, setShowLoadTestDialog] = useState(false);
 	const [isStartingLoadTest, setIsStartingLoadTest] = useState(false);
 	const [pendingLoadTestRequest, setPendingLoadTestRequest] = useState<RequestState | null>(null);
+	// The collection-run dialog the load dialog hands over to (#3050). Mounted
+	// only while a collection is set, like every other host of that dialog.
+	const [runCollectionTarget, setRunCollectionTarget] = useState<Collection | null>(null);
 
 	// Fetch request data
 	const {
@@ -299,6 +310,24 @@ export default function RequestBuilder() {
 	const { resolveObject, resolveString } = useVariableResolver({
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
+
+	// The elements a load run of the pending request would resolve, inherited
+	// ones included: what the dialog warns about is what the run composes.
+	const pendingLoadTestParts = useMemo(
+		() =>
+			pendingLoadTestRequest
+				? elementsParts(
+						collectionAncestors,
+						fetchedRequest?.id,
+						pendingLoadTestRequest.elements
+					)
+				: undefined,
+		[pendingLoadTestRequest, collectionAncestors, fetchedRequest?.id]
+	);
+	const pendingScenarioOnlyElements = useMemo(
+		() => scenarioOnlyElements(pendingLoadTestParts),
+		[pendingLoadTestParts]
+	);
 
 	// The pending load-test request's OAuth 2.0 config as written, if its auth
 	// resolves to oauth2. The shared walk lets an ancestor set to No Auth stop the
@@ -784,8 +813,10 @@ export default function RequestBuilder() {
 					// is `requestElements`' own resolved list, while `elements` on
 					// `POST /runs` is the run-level timers/scripts override object
 					// the dialog's Scripts control writes; the two must not
-					// collide under one name.
-					requestElements,
+					// collide under one name. A disabled element is left out
+					// (#3050): the pipeline skips it, so it has nothing to add, and
+					// a scenario-only kind among them must not be what refuses the run.
+					requestElements: withoutDisabled(requestElements),
 					elements: config.elements,
 					success_sample_rate: config.success_sample_period,
 					slow_threshold_ms: config.slow_threshold_ms,
@@ -880,6 +911,14 @@ export default function RequestBuilder() {
 		setShowLoadTestDialog(false);
 		setPendingLoadTestRequest(null);
 	}, []);
+
+	// The request's own collection is the last link of the root-first chain.
+	const requestCollection = collectionAncestors[collectionAncestors.length - 1];
+	const handleRunCollectionInstead = useCallback(() => {
+		if (!requestCollection) return;
+		handleCloseLoadTestDialog();
+		setRunCollectionTarget(requestCollection);
+	}, [requestCollection, handleCloseLoadTestDialog]);
 
 	// Loading state
 	if (!selectedRequestId) {
@@ -988,13 +1027,9 @@ export default function RequestBuilder() {
 					hasPreRequestScript={
 						!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")
 					}
-					hasPostRequestScript={hasReplayedPostScript(
-						elementsParts(
-							collectionAncestors,
-							fetchedRequest?.id,
-							pendingLoadTestRequest?.elements ?? []
-						)
-					)}
+					hasPostRequestScript={hasReplayedPostScript(pendingLoadTestParts)}
+					scenarioOnlyElements={pendingScenarioOnlyElements}
+					onRunCollection={requestCollection ? handleRunCollectionInstead : undefined}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					oauth2DeferredNames={pendingOAuth2DeferredNames}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
@@ -1004,6 +1039,13 @@ export default function RequestBuilder() {
 					collectionPath={collectionPath}
 					method={pendingLoadTestRequest?.method}
 					url={pendingLoadTestUrl}
+				/>
+			)}
+
+			{runCollectionTarget && (
+				<RunCollectionDialog
+					collection={runCollectionTarget}
+					onOpenChange={(open) => !open && setRunCollectionTarget(null)}
 				/>
 			)}
 		</>
