@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -1251,15 +1252,82 @@ TEST (SampledValidationTest, UnevaluatedKeywordsAreDisclosedByNameAcrossSamples)
     EXPECT_EQ (totals.unevaluated_keywords.at ("prefixItems"), 4u);
 }
 
+namespace {
+
+/// The step names the payload's `failures` array shows, in order.
+std::vector<std::string> payload_failure_steps (const SampledValidationTotals& totals) {
+    std::vector<std::string> steps;
+    const auto payload = build_sampled_validation_payload (totals);
+    for (const auto& entry : payload.at ("failures")) {
+        steps.push_back (entry.value ("step", ""));
+    }
+    return steps;
+}
+
+} // namespace
+
+// A single step (or an unnamed one, a single-request load run) still shows the
+// whole cap: the first-per-step rule must not shrink the list to one.
 TEST (SampledValidationTest, FailureExamplesAreCappedAndTheTotalStaysHonest) {
     SampledValidationTotals totals;
     for (size_t i = 0; i < constants::schema_validation::MAX_FAILURES * 3; ++i) {
         totals.record (checked_verdict (false), "step0", 500);
     }
 
-    EXPECT_EQ (totals.failure_examples.size (), constants::schema_validation::MAX_FAILURES);
+    EXPECT_EQ (payload_failure_steps (totals).size (), constants::schema_validation::MAX_FAILURES);
     // Bounded list, unbounded count - so "10 shown of 30" stays readable.
     EXPECT_EQ (totals.failures_total, constants::schema_validation::MAX_FAILURES * 3);
+    EXPECT_EQ (build_sampled_validation_payload (totals)["failuresTotal"].get<size_t> (),
+    constants::schema_validation::MAX_FAILURES * 3);
+}
+
+TEST (SampledValidationTest, AnUnnamedStepStillFillsTheCap) {
+    SampledValidationTotals totals;
+    for (size_t i = 0; i < 30; ++i) {
+        totals.record (checked_verdict (false), "", 500);
+    }
+
+    EXPECT_EQ (payload_failure_steps (totals).size (), constants::schema_validation::MAX_FAILURES);
+    EXPECT_EQ (totals.failures_total, 30u);
+}
+
+// #3038: the first failing step must not use up the list. Six steps each fail
+// several times, the first step failing most - a flat cap shows only step0..2.
+//
+// Mutation-check: restore the flat cap (admit every failure into
+// `failure_examples` until it is full) and this reddens.
+TEST (SampledValidationTest, FailureExamplesCoverDistinctStepsBeforeRepeatingOne) {
+    SampledValidationTotals totals;
+    for (int step = 0; step < 6; ++step) {
+        for (int hit = 0; hit < 5; ++hit) {
+            totals.record (checked_verdict (false), "step" + std::to_string (step), 500);
+        }
+    }
+
+    const auto steps = payload_failure_steps (totals);
+    EXPECT_EQ (steps.size (), constants::schema_validation::MAX_FAILURES);
+    const std::set<std::string> distinct (steps.begin (), steps.end ());
+    EXPECT_EQ (distinct.size (), 6u) << "a failing step was crowded out of the examples";
+    // Distinct steps lead, in the order they first failed; repeats follow.
+    for (size_t i = 0; i < 6; ++i) {
+        EXPECT_EQ (steps.at (i), "step" + std::to_string (i));
+    }
+    EXPECT_EQ (totals.failures_total, 30u);
+}
+
+TEST (SampledValidationTest, MoreFailingStepsThanTheCapStayDistinctAndBounded) {
+    SampledValidationTotals totals;
+    const size_t cap = constants::schema_validation::MAX_FAILURES;
+    for (size_t step = 0; step < cap + 5; ++step) {
+        for (int hit = 0; hit < 2; ++hit) {
+            totals.record (checked_verdict (false), "step" + std::to_string (step), 500);
+        }
+    }
+
+    const auto steps = payload_failure_steps (totals);
+    EXPECT_EQ (steps.size (), cap);
+    EXPECT_EQ (std::set<std::string> (steps.begin (), steps.end ()).size (), cap);
+    EXPECT_EQ (totals.failures_total, (cap + 5) * 2);
 }
 
 TEST (SampledValidationPayloadTest, APassThatWalkedNothingIsAnEmptyObject) {

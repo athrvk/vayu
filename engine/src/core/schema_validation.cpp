@@ -318,11 +318,13 @@ int status) {
     // is honest about both caps rather than only this one.
     failures_total += verdict.failures_total;
     for (const auto& failure : verdict.failures) {
-        if (failure_examples.size () >= limits::MAX_FAILURES) {
-            break;
+        const bool step_represented = std::ranges::any_of (failure_examples,
+        [&] (const FailureExample& held) { return held.step == step; });
+        auto& destination = step_represented ? repeat_examples : failure_examples;
+        if (destination.size () >= limits::MAX_FAILURES) {
+            continue;
         }
-        failure_examples.push_back (
-        FailureExample{ step, status, failure.path, failure.message });
+        destination.push_back (FailureExample{ step, status, failure.path, failure.message });
     }
 }
 
@@ -357,14 +359,21 @@ nlohmann::json build_sampled_validation_payload (const SampledValidationTotals& 
     }
 
     nlohmann::json failures = nlohmann::json::array ();
-    for (const auto& example : totals.failure_examples) {
+    const auto append_example = [&] (const SampledValidationTotals::FailureExample& example) {
+        if (failures.size () >= limits::MAX_FAILURES) {
+            return;
+        }
         nlohmann::json entry = { { "status", example.status },
             { "path", example.path }, { "message", example.message } };
         if (!example.step.empty ()) {
             entry["step"] = example.step;
         }
         failures.push_back (std::move (entry));
-    }
+    };
+    // One example per failing step first, then repeats of a step, so a late
+    // failing step is not crowded out by an early one (#3038).
+    std::ranges::for_each (totals.failure_examples, append_example);
+    std::ranges::for_each (totals.repeat_examples, append_example);
     node["failures"] = failures;
     // Always present, like the per-response verdict's own: a reader comparing
     // the list's length against it needs the number to be there to compare.
