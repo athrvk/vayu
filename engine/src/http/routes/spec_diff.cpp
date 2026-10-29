@@ -153,33 +153,6 @@ vayu::core::DraftBody read_body (const std::string& blob) {
     return body;
 }
 
-/**
- * `requests.spec_operation`, or absent for a request that answers to none.
- *
- * Half an identity identifies nothing - the comparison follows a stamp by its
- * method and path when it has no id - so a row missing either is a request with
- * no operation rather than one with a partial match, the same reading
- * `POST /specs/export` gives the column.
- */
-std::optional<vayu::core::DeclaredOperation> read_identity (
-const std::optional<std::string>& blob) {
-    if (!blob || blob->empty ()) {
-        return std::nullopt;
-    }
-    const auto parsed = nlohmann::json::parse (*blob, nullptr, /*allow_exceptions=*/false);
-    if (!parsed.is_object ()) {
-        return std::nullopt;
-    }
-    vayu::core::DeclaredOperation identity;
-    identity.operation_id = text_of (parsed, "operationId");
-    identity.method       = text_of (parsed, "method");
-    identity.path         = text_of (parsed, "path");
-    if (identity.method.empty () || identity.path.empty ()) {
-        return std::nullopt;
-    }
-    return identity;
-}
-
 /** One draft row, in the shape `requests.params` / `.headers` stores. */
 nlohmann::json row_json (const vayu::core::DraftField& row) {
     nlohmann::json out{ { "key", row.key }, { "value", row.value },
@@ -274,9 +247,20 @@ nlohmann::json draft_request_fields_json (const vayu::core::DraftRequest& draft)
         { "headers", rows_json (draft.headers) }, { "body", std::move (body) } };
 }
 
+std::vector<vayu::core::DeclaredOperation> declined_identities (
+const std::vector<vayu::db::DeclinedOperation>& records) {
+    std::vector<vayu::core::DeclaredOperation> identities;
+    identities.reserve (records.size ());
+    for (const auto& record : records) {
+        identities.push_back ({ record.operation_id, record.method, record.path, {} });
+    }
+    return identities;
+}
+
 RouteResult compare_bound_spec (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& collections,
 const std::unordered_set<std::string>& subtree,
+const std::string& root_id,
 const std::string& spec_id,
 const nlohmann::ordered_json& fetched_document,
 SpecComparison& out) {
@@ -316,12 +300,12 @@ SpecComparison& out) {
         entry.params      = read_rows (row.params);
         entry.headers     = read_rows (row.headers);
         entry.body        = read_body (row.body);
-        entry.operation   = read_identity (row.spec_operation);
+        entry.operation = vayu::core::parse_spec_identity (row.spec_operation);
         out.requests.push_back (std::move (entry));
     }
 
-    out.diff =
-    vayu::core::diff_spec (out.fetched, bound ? &*bound : nullptr, out.requests);
+    out.diff = vayu::core::diff_spec (out.fetched, bound ? &*bound : nullptr,
+    out.requests, declined_identities (db.get_declined_operations (root_id)));
     return {};
 }
 
@@ -396,8 +380,8 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     // that says what would change and the route that changes it read one answer,
     // so an apply cannot write rows its preview never showed.
     SpecComparison comparison;
-    if (auto outcome = compare_bound_spec (
-        db, collections, subtree, spec_id, fetched_read.root, comparison);
+    if (auto outcome = compare_bound_spec (db, collections, subtree,
+        collection_id, spec_id, fetched_read.root, comparison);
     !outcome) {
         return as_response (outcome.error ());
     }
@@ -414,14 +398,23 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     // `POST /specs/sync`'s `"policy": "safe"` applies the same one.
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
-    nlohmann::json added = nlohmann::json::array ();
-    for (size_t i = 0; i < diff.added.size (); ++i) {
-        const size_t index = diff.added[i];
-        added.push_back ({ { "operation", spec_operation_json (fetched[index].operation) },
-        { "folder", fetched[index].folder },
-        { "draft", draft_json (fetched[index].draft) }, { "safe", safe.create[i] } });
-    }
-    nlohmann::json removed = nlohmann::json::array ();
+    // A declined operation (#3031) is reported in the shape of an added one,
+    // because ticking it is the same create; only the bucket, and its `safe`,
+    // say that somebody deleted the request for it.
+    const auto creatable = [&fetched] (const std::vector<size_t>& indices,
+                           const std::vector<bool>& marks) {
+        nlohmann::json entries = nlohmann::json::array ();
+        for (size_t i = 0; i < indices.size (); ++i) {
+            const auto& entry = fetched[indices[i]];
+            entries.push_back ({ { "operation", spec_operation_json (entry.operation) },
+            { "folder", entry.folder }, { "draft", draft_json (entry.draft) },
+            { "safe", static_cast<bool> (marks[i]) } });
+        }
+        return entries;
+    };
+    nlohmann::json added    = creatable (diff.added, safe.create);
+    nlohmann::json declined = creatable (diff.declined, safe.recreate);
+    nlohmann::json removed  = nlohmann::json::array ();
     for (size_t i = 0; i < diff.removed.size (); ++i) {
         const size_t index = diff.removed[i];
         removed.push_back (
@@ -450,7 +443,8 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         nlohmann::json{ // The stored bytes rather than a hash of them: the engine hashes what it
         // stores, and a second opinion about whether two documents are the same
         // is the one thing this route exists to prevent.
-        { "identical", comparison.bound_content == content }, { "added", std::move (added) },
+        { "identical", comparison.bound_content == content },
+        { "added", std::move (added) }, { "declined", std::move (declined) },
         { "removed", std::move (removed) }, { "changed", std::move (changed) },
         { "unchanged", diff.unchanged }, { "unmapped", diff.unmapped } } };
 }
@@ -464,7 +458,8 @@ void register_spec_diff_routes (RouteContext& ctx) {
      * not decided to apply.
      * Body params: collectionId (required), spec.content (required - the
      * re-fetched document, verbatim).
-     * Returns: {identical, added, removed, changed, unchanged, unmapped}, 400,
+     * Returns: {identical, added, declined, removed, changed, unchanged,
+     * unmapped} (`declined` is what a person deleted the request for, #3031), 400,
      * 404 when the collection does not exist, or 409 when its binding names a
      * document the store no longer holds.
      */
@@ -484,6 +479,7 @@ void register_spec_diff_routes (RouteContext& ctx) {
             } else {
                 vayu::utils::log_info ("http",
                 std::to_string (body["added"].size ()) + " added, " +
+                std::to_string (body["declined"].size ()) + " declined, " +
                 std::to_string (body["removed"].size ()) + " removed, " +
                 std::to_string (body["changed"].size ()) + " changed, " +
                 std::to_string (body["unchanged"].get<size_t> ()) + " unchanged");

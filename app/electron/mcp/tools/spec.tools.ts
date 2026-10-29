@@ -182,7 +182,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.collection, idArg: "collectionId" },
 		description: (config) =>
-			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. This tool is the read half: `sync_spec` applies the safe half of a drift." +
+			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which operations the user deleted the request for (`declined`, never `added`; `sync_spec` does not re-create them), which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. This tool is the read half: `sync_spec` applies the safe half of a drift." +
 			withheldPointer(config),
 		annotations: {
 			title: "Diff OpenAPI spec against collection",
@@ -226,6 +226,12 @@ export const SPEC_TOOLS: McpTool[] = [
 				operation: entry.operation ?? null,
 				folder: entry.folder ?? null,
 			}));
+			// Shaped like `added`: ticking one is the same create. Listed apart so an
+			// agent never reads a deliberately deleted request as a missing one.
+			const declined = boundedBucket(diff.declined, (entry) => ({
+				operation: entry.operation ?? null,
+				folder: entry.folder ?? null,
+			}));
 			const removed = boundedBucket(diff.removed, (entry) => ({
 				requestId: entry.requestId ?? null,
 				name: entry.name ?? null,
@@ -233,7 +239,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			}));
 			const changed = boundedBucket(diff.changed, changedEntry);
 			const storedAuth = await readSpecDiffAuth(ctx, changed.entries, signal);
-			const truncated = [added, removed, changed].some(
+			const truncated = [added, declined, removed, changed].some(
 				(bucket) => bucket.entries.length < bucket.total
 			);
 			return withCaveat(
@@ -244,12 +250,14 @@ export const SPEC_TOOLS: McpTool[] = [
 					// `MAX_SPEC_DIFF_ENTRIES` for why the two can differ.
 					summary: {
 						added: added.total,
+						declined: declined.total,
 						removed: removed.total,
 						changed: changed.total,
 						unchanged: typeof diff.unchanged === "number" ? diff.unchanged : 0,
 						unmapped: typeof diff.unmapped === "number" ? diff.unmapped : 0,
 					},
 					added: added.entries,
+					declined: declined.entries,
 					removed: removed.entries,
 					changed: secretsShape(ctx, (entries) =>
 						withholdSpecDiffChanges(entries, storedAuth)
@@ -279,7 +287,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		description:
 			"Apply a drifted OpenAPI contract to the collection bound to it - the safe half of it. " +
 			GUARDED_WRITE_SENTENCE +
-			". Pass the collection and the re-fetched document text; the engine stores the document, moves the binding to it, and creates, updates and deletes requests in ONE transaction - nothing lands unless all of it does. WHAT IT WRITES IS NOT YOURS TO CHOOSE, deliberately: this sends `policy: \"safe\"` and the engine decides, which means every operation the document adds becomes a request, every field the document moved that nobody had edited by hand is written, and NOTHING IS DELETED and NO HAND-EDITED FIELD IS OVERWRITTEN. A request whose bound document could not be read is left alone whole, since there nobody's edit can be told from the document's change. `skipped` reports what that left: requests untouched, fields not written, deletions not made. Use `diff_spec` first to see the drift and which of it is marked safe - it is the same answer this applies. Applying anything the policy declines - a deletion, or a field somebody edited - " +
+			". Pass the collection and the re-fetched document text; the engine stores the document, moves the binding to it, and creates, updates and deletes requests in ONE transaction - nothing lands unless all of it does. WHAT IT WRITES IS NOT YOURS TO CHOOSE, deliberately: this sends `policy: \"safe\"` and the engine decides, which means every operation the document adds becomes a request, except those the user deleted the request for (`declined`), every field the document moved that nobody had edited by hand is written, and NOTHING IS DELETED and NO HAND-EDITED FIELD IS OVERWRITTEN. A request whose bound document could not be read is left alone whole, since there nobody's edit can be told from the document's change. `skipped` reports what that left: requests untouched, fields not written, deletions not made, declined operations not re-created. Use `diff_spec` first to see the drift and which of it is marked safe - it is the same answer this applies. Applying anything the policy declines - a deletion, a field somebody edited, or a declined operation - " +
 			SPEC_SYNC_TOKEN +
 			".",
 		annotations: {

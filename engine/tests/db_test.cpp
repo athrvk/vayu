@@ -3068,7 +3068,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 9);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 10);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
 
@@ -3249,6 +3249,81 @@ TEST_F (DatabaseTest, FileGrantsRoundTrip) {
     db.delete_file_grant ("fgrant_a");
     ASSERT_EQ (db.get_file_grants ().size (), 1u);
     EXPECT_EQ (db.get_file_grants ()[0].id, "fgrant_b");
+}
+
+// Schema version 10 is the `spec_declined_operations` table (#3031) and nothing
+// to move: a version-9 database is stamped current and gains it. Mutation
+// check: leave `SCHEMA_VERSION` at 9 and the stamp stays where it was.
+TEST_F (DatabaseTest, AVersionNineDatabaseIsStampedCurrentAndGainsTheDeclinedOperationsTable) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_exec (handle, "DROP TABLE spec_declined_operations",
+                   nullptr, nullptr, nullptr),
+        SQLITE_OK);
+        sqlite3_close (handle);
+    }
+    set_user_version (TEST_DB_PATH, 9);
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "spec_declined_operations", "path"));
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 10);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "spec_declined_operations", "request_id"));
+}
+
+// One record per operation under one binding: a second request's delete for
+// the same operation takes the row over rather than adding one, an operation
+// with no `operationId` is its own row, and a record under another binding is
+// another row.
+TEST_F (DatabaseTest, DeclinedOperationsRoundTripOneRowPerOperationPerBinding) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    for (const char* id : { "col_a", "col_b" }) {
+        Collection collection;
+        collection.id   = id;
+        collection.name = id;
+        db.create_collection (collection);
+    }
+    const auto stamped_request = [&db] (const std::string& id,
+                                 const std::string& collection_id, const char* identity) {
+        Request request;
+        request.id             = id;
+        request.collection_id  = collection_id;
+        request.name           = id;
+        request.spec_operation = identity;
+        db.save_request (request);
+    };
+    stamped_request ("req_1", "col_a",
+    R"({"operationId":"listPets","method":"GET","path":"/pets"})");
+    stamped_request ("req_2", "col_a",
+    R"({"operationId":"listPets","method":"GET","path":"/pets"})");
+    stamped_request ("req_3", "col_a", R"({"method":"GET","path":"/pets"})");
+    stamped_request ("req_4", "col_b",
+    R"({"operationId":"listPets","method":"GET","path":"/pets"})");
+    stamped_request ("req_5", "col_a", R"({"operationId":"half"})");
+
+    db.delete_request ("req_1", "col_a");
+    db.delete_request ("req_2", "col_a");
+    db.delete_request ("req_3", "col_a");
+    db.delete_request ("req_4", "col_b");
+    db.delete_request ("req_5", "col_a");
+
+    const auto under_a = db.get_declined_operations ("col_a");
+    ASSERT_EQ (under_a.size (), 2u) << "half an identity identifies nothing";
+    EXPECT_EQ (under_a[0].request_id, "req_2")
+    << "the later delete took the row over";
+    EXPECT_EQ (under_a[0].operation_id, "listPets");
+    EXPECT_EQ (under_a[1].request_id, "req_3");
+    EXPECT_EQ (under_a[1].operation_id, "");
+    ASSERT_EQ (db.get_declined_operations ("col_b").size (), 1u);
+    EXPECT_EQ (db.get_declined_operations ("col_b")[0].request_id, "req_4");
 }
 
 // ---------------------------------------------------------------------------
@@ -3823,7 +3898,7 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
 
     Database db (TEST_DB_PATH);
     db.init ();
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 9);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 10);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));

@@ -41,6 +41,7 @@ import {
 import type {
 	Collection,
 	SpecDiffAdded,
+	SpecDiffDeclined,
 	SpecDiffChanged,
 	SpecDiffResponse,
 	SpecDraftRequest,
@@ -79,6 +80,15 @@ function added(
 	safe = true
 ): SpecDiffAdded {
 	return { operation, folder, draft: draft({ name: operation.path, ...overrides }), safe };
+}
+
+/** A declined entry as the engine answers one: an added entry that is never safe. */
+function declined(
+	operation: SpecOperation,
+	folder: string,
+	overrides: Partial<SpecDraftRequest> = {}
+): SpecDiffDeclined {
+	return { ...added(operation, folder, overrides, false), safe: false };
 }
 
 function field(name: SpecField, userTouched = false): SpecFieldDiff {
@@ -122,6 +132,7 @@ function diffOf(parts: Partial<SpecDiffResponse> = {}): SpecDiffResponse {
 	return {
 		identical: false,
 		added: [],
+		declined: [],
 		removed: [],
 		changed: [],
 		unchanged: 0,
@@ -286,6 +297,19 @@ describe("defaultSelection reads the engine's marks", () => {
 		// which is what makes the identity write happen.
 		expect(selection.changed.has("req_renamed")).toBe(true);
 		expect([...(selection.changed.get("req_renamed") ?? [])]).toEqual([]);
+	});
+
+	it("never ticks a declined operation, whatever its mark says (issue #3031)", () => {
+		// The engine always answers `safe: false` for one; the cast states a wire
+		// answer that disagrees, which is how a test tells "never pre-ticked" from
+		// "pre-ticked when marked safe". Mutation check: build `declined` from the
+		// `safe` marks the way `added` is and this reddens.
+		const lying = { ...declined(GET_VET, "vets"), safe: true } as unknown as SpecDiffDeclined;
+		const diff = diffOf({ declined: [declined(LIST_VETS, "vets"), lying] });
+		const selection = defaultSelection(diff);
+
+		expect(selection.declined.size).toBe(0);
+		expect(isEmptySelection(selection)).toBe(true);
 	});
 
 	it("is empty when the document changed nothing this collection holds", () => {
@@ -488,6 +512,58 @@ describe("buildSyncPayload", () => {
 		const patch = payload(diff).update.find((item) => item.id === "req_0");
 
 		expect(patch?.examples).toBe(true);
+	});
+
+	describe("a declined operation (issue #3031)", () => {
+		const diff = diffOf({
+			declined: [
+				declined(GET_VET, "vets", { name: "Get a vet", url: "{{baseUrl}}/vets/{{vetId}}" }),
+			],
+		});
+
+		it("is not created until it is ticked", () => {
+			expect(payload(diff).create).toEqual([]);
+		});
+
+		it("becomes an ordinary create carrying its operation once ticked", () => {
+			// The engine forgets the record because this `create` names the
+			// operation, so the identity on the item is the whole of the tick.
+			// Mutation check: drop the `diff.declined` loop in `buildSyncPayload`
+			// and this reddens.
+			const body = payload(diff, (base) => ({
+				...base,
+				declined: new Set(["GET /vets/{vetId}"]),
+			}));
+
+			expect(body.create).toHaveLength(1);
+			expect(body.create[0]).toMatchObject({
+				tempId: "tmp_req_0",
+				name: "Get a vet",
+				specOperation: GET_VET,
+			});
+			expect(body.collections).toEqual([
+				{ tempId: "tmp_col_0", name: "vets", parentId: "col_root" },
+			]);
+		});
+
+		it("counts as a row, so the apply is not the document-level one", () => {
+			const ticked = { ...defaultSelection(diff), declined: new Set(["GET /vets/{vetId}"]) };
+
+			expect(isEmptySelection(ticked)).toBe(false);
+		});
+
+		it("numbers its temp ids after the added creates", () => {
+			const both = diffOf({
+				added: [added(LIST_VETS, "vets")],
+				declined: [declined(GET_VET, "vets")],
+			});
+			const body = payload(both, (base) => ({
+				...base,
+				declined: new Set(["GET /vets/{vetId}"]),
+			}));
+
+			expect(body.create.map((item) => item.tempId)).toEqual(["tmp_req_0", "tmp_req_1"]);
+		});
 	});
 
 	it("keys an added operation the way the checklist does", () => {

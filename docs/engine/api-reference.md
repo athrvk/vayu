@@ -1642,7 +1642,9 @@ explicit `null` on update both resolve to - so **unbinding is
 object (`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is
 a binding and is validated further: `specId` must be a non-empty string that
 resolves to a stored [spec document](#specs) (`400` naming the id otherwise),
-`specHash` a string, `syncedAt` a number.
+`specHash` a string, `syncedAt` a number. A write that unbinds, or binds bytes
+with another `specHash`, forgets the operations deletes declined under the old
+document (issue #3031; see [`DELETE /requests/:id`](#delete-requestsid)).
 
 `specHash` records which *version* of the document the collection was last synced
 to; a scenario run of a bound collection stamps both values into its snapshot and
@@ -1696,6 +1698,14 @@ The walk terminates even if the stored `parent_id` tree contains a cycle (see
 Restore it with [`POST /trash/:id/restore`](#post-trashidrestore); destroy it
 for good with [`DELETE /trash/:id`](#delete-trashid), which is also what the
 startup sweep does once `trashRetentionDays` has passed.
+
+**Beneath a bound collection, the delete declines operations** (issue #3031),
+as [`DELETE /requests/:id`](#delete-requestsid) does for one request: each
+request it stamps that records an operation is recorded under the nearest bound
+ancestor, in the same transaction. Deleting a tag folder is the user declining
+everything in it. Deleting the bound collection itself records nothing - that
+is the whole contract going, not a choice about any operation of it - and a
+purge of a bound collection takes its records with it.
 
 **Response:**
 ```json
@@ -2144,6 +2154,19 @@ every read of them is by request id and runs the owner check first, so they are
 as unreachable as the request is, and a restore gets them back with it. A purge
 takes them.
 
+**Deleting the request for an operation declines the operation** (issue
+#3031). When the request records an operation (`specOperation`) and a
+collection above it binds a document, the same transaction records that
+operation under the nearest bound ancestor in `spec_declined_operations`.
+[`POST /specs/diff`](#post-specsdiff) then lists the operation as `declined`
+rather than `added`, and a `policy: "safe"` [sync](#post-specssync) never
+re-creates it, so a sync of the unchanged document cannot bring the request
+back. Restoring the request from the trash forgets the record, and so does a
+sync that creates the operation on purpose; purging the request, by hand or by
+`trashRetentionDays`, does not - the decision outlives the row it was made on.
+Unbinding the collection, or binding it to a document with other bytes, forgets
+every record under it. A sync's own deletes record nothing.
+
 **Response:**
 ```json
 {
@@ -2342,7 +2365,9 @@ back, with everything the same delete took. Takes no body. An environment comes
 back exactly as it was deleted except that it is inactive (see [Trash](#trash)),
 and its answer carries `variables` like its list entry. An example comes back
 exactly as it was deleted, `order` included, and so does a client certificate,
-passphrase included.
+passphrase included. A restored request, alone or with its collection, takes
+back the operation its delete declined (issue #3031), so the next sync sees it
+claimed again.
 
 **Response:** the entry that was restored, plus what happened to it:
 ```json
@@ -2383,6 +2408,10 @@ is reachable by no read and restorable by nothing. It takes deleted rows only
 (issue #1883): a live collection under the purged one, which no trash entry ever
 listed, is moved to the tree root (`parentId` cleared) with everything under it
 left as it was.
+
+A purged request's declined operation (issue #3031) stays declined: purging is
+emptying the trash, not changing one's mind. A purged *bound* collection takes
+the declined operations recorded under it, which nothing could read any more.
 
 **Response:** the entry that was purged, with `"purged": true`. Its
 `collections` / `requests` are the deleted row's own cohort, so they are a floor
@@ -3062,6 +3091,14 @@ own edits into the document's - by accident, with a stale copy.
       }
     }
   ],
+  "declined": [
+    {
+      "operation": { "operationId": "getPet", "method": "GET", "path": "/pets/{petId}" },
+      "folder": "pets",
+      "safe": false,
+      "draft": { "name": "Get a pet", "...": "as in added" }
+    }
+  ],
   "removed": [
     {
       "requestId": "req_7b21...",
@@ -3112,18 +3149,29 @@ come off the document it stores, so this is what an apply would write, shown.
 comparison, but stated, because a sync that silently ignores half a collection is
 one nobody can read.
 
+**`declined` is an operation nobody claims because a person deleted its
+request** (issue #3031). Its entries are shaped like `added` ones, because
+ticking one is the same create, and an operation is in one bucket or the other,
+never both. The record a delete left (see
+[`DELETE /requests/:id`](#delete-requestsid)) is followed into the new document
+by the rule a request's own identity is, below, so an operation the document
+renamed is still the declined one. A live request claiming the operation - one
+restored from the trash, or created again by hand - outranks the record, and
+the operation is in neither bucket.
+
 **`safe` is what an apply with no ticks would do to that entry** (issue #871),
 and `safeFields` is which of a changed request's fields it would write - empty
 for a pure rename, which is a real selection rather than an absence. It is
 `core::safe_spec_apply`: **every operation the document adds, every field it
-moved that nobody here had edited, no deletions, and a request whose bound
-document could not be read left alone whole.** Reported rather than left to the
+moved that nobody here had edited, no deletions, nothing a person declined, and
+a request whose bound document could not be read left alone whole.** Reported rather than left to the
 caller because the rules are the ones whose silent failure costs somebody their
 work, and because the same function decides what
 [`POST /specs/sync`](#post-specssync)'s `policy` applies - so the app's
 pre-ticked boxes and a caller that ticks nothing are one answer rather than two
-that agree today. `safe` on a removal is always `false` and is carried anyway,
-so that a reader marking the bucket reads the rule instead of writing it.
+that agree today. `safe` on a removal and on a declined operation is always
+`false` and is carried anyway, so that a reader marking the bucket reads the
+rule instead of writing it.
 
 **How it compares.** An operation is followed by its `operationId` first and by
 method + path shape second (the same flattening `POST /specs/match` binds with),
@@ -3217,6 +3265,12 @@ operation of the new document shares the id rather than going unread.
 a request under another collection keeps its own stamp even when it would have
 matched.
 
+**A bind to other bytes forgets the declined operations** (issue #3031). The
+operations deletes declined under the collection (see
+[`DELETE /requests/:id`](#delete-requestsid)) were decisions about the document
+it was bound to, so a bind whose document hashes differently from the bound one
+forgets them in the same transaction; a bind to the same bytes keeps them.
+
 **Errors:** `400` for a malformed body, an engine-owned field, a document over
 the cap, or one that cannot be read as JSON or YAML - and in that last case
 nothing is written, so the collection stays bound to whatever it was bound to.
@@ -3224,7 +3278,8 @@ nothing is written, so the collection stays bound to whatever it was bound to.
 
 Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null`, which
 writes one row, leaves every stamp in place - so unbind-then-rebind of the same
-document is lossless - and has no document to read.
+document is lossless - and has no document to read. It does forget the declined
+operations, in the same transaction, as a bind to other bytes does.
 
 ### POST /specs/export
 
@@ -3559,7 +3614,7 @@ behind it. A sync updates and deletes rows that already exist.
   "collections": [                                     // Optional - tag folders to create
     {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}
   ],
-  "create": [                                          // Optional - operations the document added
+  "create": [                                          // Optional - operations the document added, or declined ones ticked
     {"tempId": "t_req", "collectionTempId": "t_col", "name": "Get a pet",
      "method": "GET", "url": "https://api.example.com/pets/{{petId}}",
      "specOperation": {"operationId": "getPet", "method": "GET", "path": "/pets/{petId}"}}
@@ -3579,7 +3634,7 @@ behind it. A sync updates and deletes rows that already exist.
   "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "syncedAt": 1730000000000,
   "created": 1, "updated": 1, "deleted": 1,
-  "skipped": {"requests": 2, "fields": 3, "deletions": 1}  // Only for a `policy` call - see below
+  "skipped": {"requests": 2, "fields": 3, "deletions": 1, "declined": 1}  // Only for a `policy` call - see below
 }
 ```
 
@@ -3587,8 +3642,9 @@ behind it. A sync updates and deletes rows that already exist.
 only one - is `core::safe_spec_apply`, the same answer
 [`POST /specs/diff`](#post-specsdiff) reports per entry as `safe` /
 `safeFields`: **every operation the document adds, every field it moved that
-nobody here had edited, no deletions, and a request whose bound document could
-not be read left alone whole.** The engine works out the rows, mints the tag
+nobody here had edited, no deletions, none of the operations a person declined
+by deleting their request (issue #3031), and a request whose bound document
+could not be read left alone whole.** The engine works out the rows, mints the tag
 folders an added operation needs (matching an existing direct child by name,
 creating one at most once per call), and writes them through everything below -
 the same validation, the same id minting, the same transaction. It exists
@@ -3605,8 +3661,8 @@ a user changes a tick.
 
 `skipped` comes back **only** for a `policy` call and counts what it refused:
 `requests` left untouched entirely, `fields` the document moved that were not
-written (whether their request was skipped whole or applied around them), and
-`deletions` not made. An explicit payload gets no such key - nothing was
+written (whether their request was skipped whole or applied around them),
+`deletions` not made, and `declined` operations not re-created. An explicit payload gets no such key - nothing was
 declined, because the caller chose the rows. It is reported for the reason the
 diff bounds its buckets rather than dropping entries: a call that answered only
 with what it wrote would read as "applied the drift", and the part it did not
@@ -3652,6 +3708,13 @@ Five rules the payload cannot opt out of:
   description and moves when the document rewords it.
 - **A request cannot be moved here.** `collectionId` inside an `update` item is a
   `400`; use `PUT /requests/:id`.
+- **Creating a declined operation takes the decline back** (issue #3031). A
+  `create` item whose `specOperation` names the operation a
+  [`declined`](#post-specsdiff) entry stands for - followed into the document
+  being stored by the diff's own identity rule - forgets that record in the same
+  transaction, so ticking the entry is the user changing their mind and a later
+  delete of the new request records afresh. The deletes in `delete` record
+  nothing: the document dropped those operations, nobody declined them.
 
 **Errors:** `404` when the collection does not exist. `400` when it is bound to
 no spec, when `policy` is not `"safe"` or arrives beside a row section, when a

@@ -299,6 +299,23 @@ caller that wants those rows recoverable leaves them out of the sync payload and
 deletes them with `DELETE /requests/:id`, which is soft like every other delete
 a person makes.
 
+**Deleting the request for an operation is a decision that lasts** (#3031),
+as deleting an imported example has been since #722. A person's delete of a
+request whose `spec_operation` names an operation of the document a collection
+above it binds - one request, or every request a deleted tag folder stamps -
+records that operation in `spec_declined_operations` under the nearest bound
+collection, in the delete's own transaction. A row of its own rather than a
+flag on the request, because the decision outlives the row: purging the
+request, or retention purging it, keeps the record. `POST /specs/diff` lists
+the operation as `declined` instead of `added`, and `policy: "safe"` never
+re-creates it, so a sync of an unchanged document cannot bring the request
+back. The decision is taken back by restoring the request from the trash, by a
+sync that creates the operation on purpose (the user ticking it), and by
+unbinding the collection or binding it to different bytes; purging the bound
+collection takes its records with it. Deleting the bound collection itself
+records nothing, and a sync's own hard deletes record nothing either: the
+document dropped those operations, nobody declined them.
+
 **An environment goes to the same trash** (#2970), by the simplest form of the
 same mechanism. `DELETE /environments/:id` stamps `deleted_at` on its one row
 and every read (`GET /environments`, composition, a run's variable scopes, the

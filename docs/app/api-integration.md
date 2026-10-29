@@ -636,6 +636,15 @@ have one author: `core::safe_spec_apply`, which `POST /specs/sync`'s
 still sends explicit rows from here, since the ticks a person changed are not a
 policy.
 
+The diff's **`declined`** bucket (issue #3031) lists operations whose request the
+user deleted: entries shaped like `added`'s, `safe` always `false`. It is
+separate so nothing pre-ticks it. `SpecApplySelection.declined` starts empty
+whatever `safe` says, and a tick goes out as an ordinary `create[]` item built
+by the same `draftOf` / `createItem` path as an added operation, carrying
+`specOperation`. No flag marks it a revival: the engine sees a create naming a
+declined operation and clears the record in the same transaction. A `policy:
+"safe"` response's `skipped` counts what it left as `declined`.
+
 The one field of that draft `spec-apply.ts` does **not** send back is
 `examples` (issue #869): an update carries `examples: true` - refresh this
 request's imported examples - and the engine writes the responses the document it

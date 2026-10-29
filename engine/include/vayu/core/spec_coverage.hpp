@@ -89,6 +89,21 @@ struct DeclaredOperation {
 parse_declared_operations (const std::string& stored);
 
 /**
+ * @brief A stored `requests.spec_operation`, or absent for a request that
+ *        answers to none.
+ *
+ * Half an identity identifies nothing - the sync comparison follows a stamp by
+ * its method and path when it has no id - so a value missing either is a
+ * request with no operation rather than one with a partial match, the reading
+ * `POST /specs/export` gives the column too. `responses` is left empty: a stamp
+ * records which operation a request is, never what it declares. Shared by the
+ * diff and by the delete that records a declined operation (#3031), so the two
+ * agree about which requests carry one.
+ */
+[[nodiscard]] std::optional<DeclaredOperation> parse_spec_identity (
+const std::optional<std::string>& stored);
+
+/**
  * @brief Validate an `operations` index on the way in.
  *
  * Returns the caller-facing `400` sentence, or `std::nullopt` when the value is

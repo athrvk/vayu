@@ -236,9 +236,15 @@ export function describeSpecDiff(answer: Record<string, unknown>): string {
 
 	const changed = Array.isArray(answer.changed) ? answer.changed : [];
 	const edited = changed.filter((item) => hasUserEdit(asRecord(item))).length;
+	const declined = bucket(answer.declined);
 	const parts = [
 		`${plural(bucket(answer.added), "operation")} added, ${plural(bucket(answer.removed), "request")} no longer declared, ${plural(changed.length, "request")} changed, ${count(answer.unchanged)} unchanged.`,
 	];
+	if (declined > 0) {
+		parts.push(
+			`\`declined\` holds ${plural(declined, "operation")} the user deleted the request for. They are not new operations, the safe sync never creates one, and bringing one back is the user's call.`
+		);
+	}
 	if (edited > 0) {
 		parts.push(
 			`${plural(edited, "changed request")} hold a field somebody edited by hand (userTouched) - applying the document there overwrites a person's work, not an import's.`
@@ -250,7 +256,7 @@ export function describeSpecDiff(answer: Record<string, unknown>): string {
 		);
 	}
 	parts.push(
-		"Nothing was written: this is the read half of a sync. `sync_spec` applies the safe half of it - everything the document adds, every field it moved that nobody had edited by hand, and no deletions."
+		"Nothing was written: this is the read half of a sync. `sync_spec` applies the safe half of it - everything the document adds except what the user deleted, every field it moved that nobody had edited by hand, and no deletions."
 	);
 	return parts.join(" ");
 }
@@ -551,7 +557,8 @@ export function describeSync(answer: unknown, host: McpHost): string {
 	const held = count(skipped.requests);
 	const fields = count(skipped.fields);
 	const deletions = count(skipped.deletions);
-	if (held > 0 || fields > 0 || deletions > 0) {
+	const declined = count(skipped.declined);
+	if (held > 0 || fields > 0 || deletions > 0 || declined > 0) {
 		const left: string[] = [];
 		if (held > 0)
 			left.push(
@@ -561,6 +568,10 @@ export function describeSync(answer: unknown, host: McpHost): string {
 		if (deletions > 0)
 			left.push(
 				`${plural(deletions, "request")} the document no longer declares but which was NOT deleted`
+			);
+		if (declined > 0)
+			left.push(
+				`${plural(declined, "operation")} whose request the user deleted and which was NOT created again`
 			);
 		parts.push(
 			`The safe policy declined the rest: ${left.join(", ")}. Applying any of that ${SPEC_SYNC_TOKEN}; \`diff_spec\` shows exactly which entries they are.`

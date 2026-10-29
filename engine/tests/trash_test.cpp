@@ -1592,5 +1592,142 @@ TEST_F (TrashTest, RetentionPurgesAClientCertificatePastTheWindowAndKeepsARecent
     EXPECT_TRUE (db_->get_client_certificate ("cert_live").has_value ());
 }
 
+// ---------------------------------------------------------------------------
+// Declined operations (#3031): what deleting a spec-bound request records,
+// and which of the trash's three verbs take it back
+// ---------------------------------------------------------------------------
+
+/// Stamps the live request @p request_id with the operation `GET @p path`,
+/// and @p operation_id when one is given.
+void stamp_operation (Database& db,
+const std::string& request_id,
+const std::string& path,
+const std::string& operation_id = {}) {
+    auto request = db.get_request (request_id);
+    if (!request) {
+        ADD_FAILURE () << "no live request " << request_id << " to stamp";
+        return;
+    }
+    json identity{ { "method", "GET" }, { "path", path } };
+    if (!operation_id.empty ()) {
+        identity["operationId"] = operation_id;
+    }
+    request->spec_operation = identity.dump ();
+    db.save_request (*request);
+}
+
+TEST_F (TrashTest, DeletingAStampedRequestRecordsItsOperationUnderTheBinding) {
+    make_collection ("col_api", "API");
+    make_request ("req_pets", "col_api");
+    stamp_operation (*db_, "req_pets", "/pets", "listPets");
+    make_request ("req_plain", "col_api"); // records no operation
+
+    db_->delete_request ("req_pets", "col_api");
+    db_->delete_request ("req_plain", "col_api");
+
+    const auto records = db_->get_declined_operations ("col_api");
+    ASSERT_EQ (records.size (), 1U)
+    << "a request with no identity declines nothing";
+    EXPECT_EQ (records[0].operation_id, "listPets");
+    EXPECT_EQ (records[0].method, "GET");
+    EXPECT_EQ (records[0].path, "/pets");
+    EXPECT_EQ (records[0].request_id, "req_pets");
+}
+
+TEST_F (TrashTest, ADeleteWithNoBindingRecordsNothing) {
+    make_collection ("col_api", "API");
+    make_request ("req_pets", "col_api");
+    stamp_operation (*db_, "req_pets", "/pets", "listPets");
+
+    db_->delete_request ("req_pets");
+
+    EXPECT_TRUE (db_->get_declined_operations ("col_api").empty ());
+}
+
+// A collection delete records each request it stamps, and not one an earlier
+// delete already took: that one's decision was recorded then, under its own
+// stamp, and restoring the collection leaves it in the trash.
+TEST_F (TrashTest, DeletingAFolderRecordsOnlyTheRequestsItsOwnDeleteStamps) {
+    make_collection ("col_api", "API");
+    make_collection ("col_pets", "pets", "col_api");
+    make_request ("req_list", "col_pets");
+    make_request ("req_get", "col_pets");
+    stamp_operation (*db_, "req_list", "/pets", "listPets");
+    stamp_operation (*db_, "req_get", "/pets/{petId}", "getPet");
+    db_->delete_request ("req_get"); // trashed earlier, recording nothing
+
+    db_->delete_collection ("col_pets", "col_api");
+
+    const auto records = db_->get_declined_operations ("col_api");
+    ASSERT_EQ (records.size (), 1U);
+    EXPECT_EQ (records[0].request_id, "req_list");
+}
+
+// Mutation check: drop `forget_declined_by_locked` from `restore_request_locked`
+// and the record survives the restore.
+TEST_F (TrashTest, RestoringARequestForgetsTheOperationItsDeleteDeclined) {
+    make_collection ("col_api", "API");
+    make_request ("req_pets", "col_api");
+    make_request ("req_owners", "col_api");
+    stamp_operation (*db_, "req_pets", "/pets", "listPets");
+    stamp_operation (*db_, "req_owners", "/owners", "listOwners");
+    db_->delete_request ("req_pets", "col_api");
+    db_->delete_request ("req_owners", "col_api");
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("req_pets"));
+
+    const auto records = db_->get_declined_operations ("col_api");
+    ASSERT_EQ (records.size (), 1U)
+    << "only the restored request's record goes";
+    EXPECT_EQ (records[0].request_id, "req_owners");
+}
+
+// Mutation check: drop the same call from `restore_collection_locked`.
+TEST_F (TrashTest, RestoringAFolderForgetsWhatItsCohortDeclined) {
+    make_collection ("col_api", "API");
+    make_collection ("col_pets", "pets", "col_api");
+    make_request ("req_list", "col_pets");
+    stamp_operation (*db_, "req_list", "/pets", "listPets");
+    db_->delete_collection ("col_pets", "col_api");
+    ASSERT_EQ (db_->get_declined_operations ("col_api").size (), 1U);
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("col_pets"));
+
+    EXPECT_TRUE (db_->get_declined_operations ("col_api").empty ());
+}
+
+// The decision outlives the row it was made on: a purge, by hand or by
+// retention, is the trash being emptied, not the person changing their mind.
+TEST_F (TrashTest, PurgingOrExpiringADeclinedRequestKeepsTheRecord) {
+    make_collection ("col_api", "API");
+    make_request ("req_pets", "col_api");
+    make_request ("req_owners", "col_api");
+    stamp_operation (*db_, "req_pets", "/pets", "listPets");
+    stamp_operation (*db_, "req_owners", "/owners", "listOwners");
+    db_->delete_request ("req_pets", "col_api");
+    db_->delete_request ("req_owners", "col_api");
+
+    ASSERT_HAS_VALUE (db_->purge_deleted ("req_pets"));
+    const auto expiring = entry_for ("req_owners");
+    ASSERT_HAS_VALUE (expiring);
+    ASSERT_EQ (db_->purge_expired_trash (30, expiring->deleted_at + (31 * DAY_MS)), 1);
+
+    EXPECT_EQ (db_->get_declined_operations ("col_api").size (), 2U);
+}
+
+// Mutation check: drop the `DeclinedOperation` removal from
+// `purge_collection_locked` and the records outlive their collection.
+TEST_F (TrashTest, PurgingTheBoundCollectionTakesItsRecordsWithIt) {
+    make_collection ("col_api", "API");
+    make_request ("req_pets", "col_api");
+    stamp_operation (*db_, "req_pets", "/pets", "listPets");
+    db_->delete_request ("req_pets", "col_api");
+    db_->delete_collection ("col_api");
+
+    ASSERT_HAS_VALUE (db_->purge_deleted ("col_api"));
+
+    EXPECT_TRUE (db_->get_declined_operations ("col_api").empty ());
+}
+
 } // namespace
 } // namespace vayu::db

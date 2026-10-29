@@ -274,13 +274,18 @@ document it stores rather than a copy the app sends it. That is what makes
 agent over MCP asks the same question the button does - and it is why the app
 holds no second opinion about what a document produces.
 
-### The three buckets
+### The four buckets
 
 Otherwise the difference is reported by **operation identity** - the
 `operationId`, method and templated path each request recorded when it was
 bound:
 
 - **New operations** the document declares that no request in this collection is.
+- **Operations whose request you deleted**: operations the document declares and
+  no request claims *because you deleted that request* (issue #3031). They are
+  listed apart from the new ones, so a sync does not bring a request back just
+  because its operation has no request. See
+  [Deleting a request is a decision that lasts](#deleting-a-request-is-a-decision-that-lasts).
 - **Operations the document no longer declares**, listed by the request that
   still claims them. Those requests are not going anywhere; they are simply no
   longer described by the contract.
@@ -292,7 +297,7 @@ Everything else is counted as unchanged, and requests carrying no operation at
 all are counted separately: the contract never described them, so the comparison
 leaves them out and says how many it left out.
 
-Every operation row in the three lists carries a **Copy for agent** button: it
+Every operation row in the four lists carries a **Copy for agent** button: it
 puts `Vayu spec operation "GET /pets/{petId}" in collection "<name>" (<id>)`,
 followed by `("<operationId>")` when the document declares one, on the
 clipboard, so an agent can be pointed at the operation without retyping it.
@@ -300,12 +305,12 @@ clipboard, so an agent can be pointed at the operation without retyping it.
 collection being synced and the templated path as the document writes it, and
 carries nothing the draft or the field diff holds - no URL, header or body.
 
-### The fourth kind: a change no request row can carry
+### A change no request row can carry
 
-The three buckets describe operations, and plenty of contract changes are not
+The buckets describe operations, and plenty of contract changes are not
 about an operation's request shape at all - a tightened response schema, a newly
 documented `429`, an edited `servers` block. Those move the document without
-moving a single request, so all three buckets come back empty and the summary
+moving a single request, so every bucket comes back empty and the summary
 reads `0 new · 0 gone · 0 changed · N unchanged`.
 
 That is a real change, and it is applyable. The section names it
@@ -367,6 +372,7 @@ destroy:
 | Item | Ticked by default? |
 |---|---|
 | A new operation | Yes - it creates a request that was not there |
+| An operation whose request you deleted | **No** - you removed that request on purpose; tick one to create it again |
 | A changed field the document moved | Yes |
 | A changed field marked **edited here** | **No** - your value is only overwritten if you tick it |
 | Every field of a request whose bound document could not be read | **No** - see below |
@@ -413,7 +419,31 @@ declares no tag, the one named after the first meaningful segment of its path -
 exactly where an import would have filed it. The folder is matched by name
 against those the bound collection already has, and created once when there is
 none. An operation that gets neither name (a path like `/` or `/{id}`) lands on
-the bound collection itself.
+the bound collection itself. A deleted operation you tick lands the same way.
+
+### Deleting a request is a decision that lasts
+
+Deleting the request for an operation - to Trash, from the tree or a folder
+delete - records that choice (issue #3031), as deleting an imported example
+does. The next check lists that operation under **Operations whose request you
+deleted**, unticked, with the line "you deleted these requests, so a sync does
+not bring them back". Nothing creates it again unless you do:
+
+- **Ticking it** creates the request like any new operation and clears the
+  record, so deleting the new request is a fresh decision.
+- **Restoring the request from Trash** clears the record too. The request is
+  back and the operation is no longer listed.
+- An agent's `sync_spec` never creates one: its safe policy skips them and says
+  how many (`skipped.declined`). `diff_spec` lists them in `declined`, but no
+  MCP tool can tick one, so bringing one back is done here.
+- Purging the deleted request keeps the record. Unbinding the collection, or
+  binding it to a different document, clears it.
+
+The record follows the operation through a rename the way a request's identity
+does: if the document moves a deleted operation's path under a stable
+`operationId`, the entry is still the one you deleted. What was deleted by a sync
+itself (an operation the document dropped) is not remembered - nobody declined
+it.
 
 ### What applying does to examples
 
@@ -443,6 +473,10 @@ Nothing outside the collection being synced. The engine checks that every
 request an apply updates or deletes lives beneath that collection, so a sync is
 an operation on one contract's collection and cannot reach anything else -
 including a second collection bound to the same document.
+
+A sync never brings back a request you deleted either: the operation is listed
+unticked, and only your tick creates it (see
+[Deleting a request is a decision that lasts](#deleting-a-request-is-a-decision-that-lasts)).
 
 Auth and scripts are never written by a sync. An import sets each operation's
 auth from its own `security` when the document declares one - `none` for an

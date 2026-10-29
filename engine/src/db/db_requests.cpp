@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
@@ -218,7 +219,8 @@ std::vector<Request> Database::get_requests_in_subtree (const std::string& root_
 // where they are - every read of them is by request id and goes through a
 // request this stamp has made unreadable, so they are as gone as the request
 // is, and a restore that had to re-create them could not.
-void Database::delete_request (const std::string& id) {
+void Database::delete_request (const std::string& id,
+const std::optional<std::string>& declined_under) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Deleting request (soft)", { { "id", id } });
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -229,9 +231,47 @@ void Database::delete_request (const std::string& id) {
              where (c (&Request::id) == id && is_null (&Request::deleted_at)))) {
             request.deleted_at = stamp;
             impl_->storage.update (request);
+            if (declined_under) {
+                record_declined_operation_locked (*declined_under, request);
+            }
         }
         return true; // Commit
     });
+}
+
+void Database::record_declined_operation_locked (const std::string& collection_id,
+const Request& request) {
+    const auto identity = vayu::core::parse_spec_identity (request.spec_operation);
+    if (!identity) {
+        return;
+    }
+    // Remove-then-insert rather than an upsert on the UNIQUE key: the row's
+    // `request_id` moves to the latest delete, and the id is autoincrement.
+    impl_->storage.remove_all<DeclinedOperation> (
+    where (c (&DeclinedOperation::collection_id) == collection_id &&
+    c (&DeclinedOperation::method) == identity->method &&
+    c (&DeclinedOperation::path) == identity->path &&
+    c (&DeclinedOperation::operation_id) == identity->operation_id));
+    DeclinedOperation record;
+    record.collection_id = collection_id;
+    record.operation_id  = identity->operation_id;
+    record.method        = identity->method;
+    record.path          = identity->path;
+    record.request_id    = request.id;
+    impl_->storage.insert (record);
+}
+
+void Database::forget_declined_by_locked (const std::string& request_id) {
+    impl_->storage.remove_all<DeclinedOperation> (
+    where (c (&DeclinedOperation::request_id) == request_id));
+}
+
+std::vector<DeclinedOperation> Database::get_declined_operations (
+const std::string& collection_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<DeclinedOperation> (
+    where (c (&DeclinedOperation::collection_id) == collection_id),
+    order_by (&DeclinedOperation::id));
 }
 
 // ============================================================================

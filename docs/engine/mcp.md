@@ -302,10 +302,10 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch, with `If-Match` after that read; a `412` re-reads and merges once) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
-| `diff_spec`            | read     | `POST /specs/diff` + `GET /requests/:id` (×N, reveal off, one per entry with a `headers`, `url` or `params` change) | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped; the current side of a `headers`, `url` or `params` change that could carry a credential withheld unless revealed) |
+| `diff_spec`            | read     | `POST /specs/diff` + `GET /requests/:id` (×N, reveal off, one per entry with a `headers`, `url` or `params` change) | - (each bucket - `added`, `declined`, `removed`, `changed` - capped at 50 entries, with `summary` carrying the true totals; `declined` lists operations whose request the user deleted, which `sync_spec` never re-creates; the per-entry `draft` is dropped; the current side of a `headers`, `url` or `params` change that could carry a credential withheld unless revealed) |
 | `preview_spec_bind`    | read     | `POST /specs/describe` + `POST /specs/match` + `GET /collections` + `GET /requests?…` (×N) | - (stores nothing; relays the `basePaths` describe answers to match, so literal-URL requests under a server's base path pair as the bind would (#3030); `wouldClear` names the requests a bind would strip of the operation they carry; lists capped at 50, counts true) |
 | `bind_spec`            | write    | `POST /specs/bind`                           | write toggle; one transaction - stores the document, moves the binding, stamps what matched and **clears** what no longer does |
-| `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing and overwrites no hand-edited field, with `skipped` counting what it declined |
+| `sync_spec`            | write    | `POST /specs/sync` (`policy: "safe"`)        | write toggle; one transaction - stores the document, moves the binding, creates and updates requests; deletes nothing, overwrites no hand-edited field and re-creates no request the user deleted, with `skipped` counting what it declined (`declined` for the last) |
 | `export_spec`          | read     | `POST /specs/export`                         | - (`mode`: `contract` by default, `full` to write every edit into a bound document; document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry and how many credentials it left out in `secretsOmitted`) |
 | `export_postman`       | read     | `POST /export/postman`                       | - (credentials always written empty - auth, secret variables, and by name header, parameter, URL and cookie values - counted in `notes.secretsOmitted`; bodies and scripts are not judged; including them is a choice the app's dialog asks a person for; `notes.notCarried` names what Postman has no place for; document text capped at 32 KB, with `contentBytes` for the true size) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept; the returned row is withheld as `list_collections` answers it |
@@ -488,7 +488,13 @@ Notes:
   rendered `current` / `next` pair, which is what says what moved, survives. Each
   bucket is capped at 50 entries while `summary` keeps the engine's true totals,
   so a document that renamed every operation comes back described rather than
-  whole. And a field flagged `userTouched` is named in the caveat sentence, not
+  whole. The **`declined`** bucket (issue
+  [#3031](https://github.com/athrvk/vayu/issues/3031)) is the operations whose
+  request the user deleted: shaped like `added`, counted in
+  `summary.declined`, and described in the caveat sentence as the user's call
+  rather than an omission. It is the same entries the Spec tab lists unticked,
+  and no MCP tool can tick one - `sync_spec` takes no rows, and the person
+  brings one back in the app. And a field flagged `userTouched` is named in the caveat sentence, not
   just carried in the JSON: it is the one part of a drift an apply may not take
   silently, and an agent reading "6 changed" would otherwise propose overwriting
   somebody's edit.
@@ -497,9 +503,10 @@ Notes:
   `policy: "safe"` and nothing else: the engine works out the rows from
   `core::safe_spec_apply`, the same function whose answer `diff_spec` reports
   per entry as `safe` / `safeFields`. That is the whole design. Which of a drift
-  is safe to write - **every operation the document adds, every field it moved
-  that nobody had edited by hand, no deletions, and a request whose bound
-  document could not be read left alone whole** - used to live in the renderer
+  is safe to write - **every operation the document adds (never one whose
+  request the user deleted, issue #3031), every field it moved that nobody had
+  edited by hand, no deletions, and a request whose bound document could not be
+  read left alone whole** - used to live in the renderer
   alone (`spec-apply.ts`, `defaultSelection`), which is why applying a drift was
   app-only through phase 1: `electron/` may not import `src/`, so any tool would
   have needed a copy, and a copy of *that* rule is a second opinion about which
@@ -508,7 +515,7 @@ Notes:
   Spec tab's pre-ticked boxes and an agent's sync are one answer. A person who
   changes a tick still sends explicit rows - a choice a person made is not a
   policy. The tool result's `skipped` (requests untouched, fields not written,
-  deletions not made) is named in the caveat sentence for `diff_spec`'s reason:
+  deletions not made, declined operations not re-created) is named in the caveat sentence for `diff_spec`'s reason:
   a caller that stated no ticks cannot see what it did not tick, and "5 updated"
   alone reads as "applied the drift".
 - **A report read mid-run says so, and `get_run` is the status read** (#2436).

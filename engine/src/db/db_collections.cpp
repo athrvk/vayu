@@ -50,6 +50,17 @@ void Database::create_collection (const Collection& c) {
     impl_->storage.replace (c);
 }
 
+void Database::rebind_collection (const Collection& collection) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("db", "Rebinding collection", { { "id", collection.id } });
+    impl_->storage.transaction ([&] {
+        impl_->storage.replace (collection);
+        impl_->storage.remove_all<DeclinedOperation> (
+        where (c (&DeclinedOperation::collection_id) == collection.id));
+        return true; // Commit
+    });
+}
+
 std::vector<Collection> Database::get_collections () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     // The tie rule is pinned to three keys, not left to the implicit rowid.
@@ -192,6 +203,11 @@ void Database::purge_collection_locked (const std::string& id) {
             }
             impl_->storage.remove_all<Request> (
             where (c (&Request::collection_id) == *it));
+            // A purged bound collection's declined operations go with it; the
+            // records of a purged *request* stay, the decision outliving the
+            // row it was made on (#3031).
+            impl_->storage.remove_all<DeclinedOperation> (
+            where (c (&DeclinedOperation::collection_id) == *it));
             impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
         }
         return true; // Commit
@@ -212,7 +228,8 @@ void Database::purge_collection_locked (const std::string& id) {
 // cascade left - but `GET /trash` can still find it, `POST /trash/:id/restore`
 // can put it back, and only a purge (explicit, or retention at startup) is
 // what finally destroys it.
-void Database::delete_collection (const std::string& id) {
+void Database::delete_collection (const std::string& id,
+const std::optional<std::string>& declined_under) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Deleting collection (soft, cascade)", { { "id", id } });
 
@@ -254,6 +271,11 @@ void Database::delete_collection (const std::string& id) {
                  is_null (&Request::deleted_at)))) {
                 request.deleted_at = stamp;
                 impl_->storage.update (request);
+                // Only the rows this delete stamps: one an earlier delete took
+                // recorded its own decision then, or none.
+                if (declined_under) {
+                    record_declined_operation_locked (*declined_under, request);
+                }
             }
             for (auto& collection : impl_->storage.get_all<Collection> (where (
                  c (&Collection::id) == collection_id && is_null (&Collection::deleted_at)))) {
@@ -596,6 +618,9 @@ const TrashEntry& entry) {
                 request.headers = std::move (*rewritten);
             }
             impl_->storage.update (request);
+            // Back in the subtree, the request claims its operation again, and
+            // the decision its delete recorded is taken back with it (#3031).
+            forget_declined_by_locked (request.id);
         }
         return true; // Commit
     });
@@ -624,6 +649,7 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
                     request.headers = std::move (*rewritten);
                 }
                 impl_->storage.update (request);
+                forget_declined_by_locked (request.id); // As `restore_request_locked`.
             }
             for (auto& collection : impl_->storage.get_all<Collection> (
                  where (c (&Collection::id) == collection_id &&

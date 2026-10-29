@@ -12,6 +12,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/http/list_page.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
@@ -505,7 +506,14 @@ const std::function<void ()>& before_write) {
     if (before_write) {
         before_write ();
     }
-    db.create_collection (c);
+    // Unbinding, or binding other bytes, forgets the operations deletes
+    // declined under the old document (#3031).
+    if (json.contains ("openapi") &&
+    binding_leaves_document (existing->openapi, c.openapi)) {
+        db.rebind_collection (c);
+    } else {
+        db.create_collection (c);
+    }
     return { 200, vayu::json::serialize (c) };
 }
 
@@ -557,6 +565,37 @@ std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& d
 const std::string& id,
 const nlohmann::json& json) {
     return update_collection_response (db, id, json, std::nullopt, nullptr);
+}
+
+/**
+ * Testable core of DELETE /collections/:id, returning {http_status,
+ * json_body}.
+ *
+ * Deleting a tag folder of a bound collection declines every operation its
+ * requests record (#3031), the decision `delete_request_response` records for
+ * one request, made for a folderful; the delete records them under the binding
+ * above the folder. Deleting the bound collection itself records nothing:
+ * that is the whole contract going, not a choice about any operation of it,
+ * and its records would have no collection to be read under.
+ */
+std::pair<int, nlohmann::json>
+delete_collection_response (vayu::db::Database& db, const std::string& id) {
+    std::pair<int, nlohmann::json> result;
+    db.with_lock ([&] {
+        if (!db.get_collection (id)) {
+            result = { 404, error_body (404, "Collection not found") };
+            return;
+        }
+        std::optional<std::string> declined_under;
+        if (const auto bound = vayu::core::nearest_spec_binding (db, id);
+        bound && bound->collection_id != id) {
+            declined_under = bound->collection_id;
+        }
+        db.delete_collection (id, declined_under);
+        result = { 200,
+            nlohmann::json{ { "message", "Collection deleted successfully" }, { "id", id } } };
+    });
+    return result;
 }
 
 /**
@@ -703,7 +742,9 @@ void register_collection_routes (RouteContext& ctx) {
 
     /**
      * DELETE /collections/:id
-     * Deletes a collection and all its requests.
+     * Moves a collection and its whole subtree to the trash; beneath a bound
+     * collection, the operations its requests record are recorded as
+     * declined (#3031).
      * Path params: id - The collection ID to delete.
      * Returns: Success message or 404 if not found.
      */
@@ -713,22 +754,16 @@ void register_collection_routes (RouteContext& ctx) {
         vayu::utils::log_info ("http",
         "DELETE /collections/:id - Deleting collection: " + collection_id);
         try {
-            auto collection = ctx.db.get_collection (collection_id);
-            if (!collection) {
+            auto [status, body] = delete_collection_response (ctx.db, collection_id);
+            if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "DELETE /collections/:id - Collection not found: " + collection_id);
-                send_error (res, 404, "Collection not found");
-                return;
+            } else {
+                vayu::utils::log_info ("http",
+                "Successfully deleted collection", { { "id", collection_id } });
             }
-
-            ctx.db.delete_collection (collection_id);
-            vayu::utils::log_info ("http", "Successfully deleted collection",
-            { { "id", collection_id }, { "name", collection->name } });
-
-            nlohmann::json response;
-            response["message"] = "Collection deleted successfully";
-            response["id"]      = collection_id;
-            res.set_content (response.dump (), "application/json");
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
             "DELETE /collections/:id - Error: " + std::string (e.what ()));

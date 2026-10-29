@@ -69,6 +69,14 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id);
+// Defined in requests.cpp / collections.cpp / spec_bind.cpp - the deletes that
+// record a declined operation (#3031), and the bind that forgets them.
+std::pair<int, nlohmann::json>
+delete_request_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json>
+delete_collection_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json>
+bind_spec_response (vayu::db::Database& db, const nlohmann::json& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -1106,6 +1114,174 @@ TEST_F (SpecSyncRouteTest, AnExplicitPayloadIsToldNothingAboutWhatAPolicyWouldHa
     ASSERT_EQ (status, 200) << response.dump ();
 
     EXPECT_FALSE (response.contains ("skipped"));
+}
+
+// ---------------------------------------------------------------------------
+// Declined operations (#3031) - a request a person deleted stays deleted
+// ---------------------------------------------------------------------------
+
+class DeclinedOperationTest : public SpecSyncRouteTest {
+    protected:
+    // `listPets` has its request throughout, so every operation of
+    // `FETCHED_DOC` but `listOwners` is claimed and a `created` count is
+    // about `listOwners` alone.
+    void SetUp () override {
+        SpecSyncRouteTest::SetUp ();
+        create_request (root_,
+        json{ { "name", "listPets" }, { "specOperation", list_pets () } });
+    }
+
+    /** The request an import of `FETCHED_DOC` would build for `listOwners`. */
+    std::string create_owners_request (const std::string& collection_id) {
+        return create_request (collection_id,
+        json{ { "name", "list owners" }, { "url", "https://example.test/owners" },
+        { "specOperation", list_owners () } });
+    }
+
+    void delete_request (const std::string& id) {
+        auto [status, response] = routes::delete_request_response (*db_, id);
+        ASSERT_EQ (status, 200) << response.dump ();
+    }
+
+    json policy_sync () {
+        auto [status, response] =
+        routes::spec_sync_response (*db_, body (json{ { "policy", "safe" } }));
+        EXPECT_EQ (status, 200) << response.dump ();
+        return response;
+    }
+
+    /** How many live requests beneath the root record `listOwners`. */
+    size_t owners_requests () {
+        size_t count = 0;
+        for (const auto& request : db_->get_requests_in_subtree (root_)) {
+            const auto identity = vayu::core::parse_spec_identity (request.spec_operation);
+            if (identity && identity->operation_id == "listOwners") {
+                ++count;
+            }
+        }
+        return count;
+    }
+};
+
+// The issue's acceptance: the user deleted the request for an operation the
+// document still declares, and the sync that follows leaves it deleted.
+// Mutation check: skip the record in `Database::delete_request` and `created`
+// is 1.
+TEST_F (DeclinedOperationTest, APolicySyncLeavesARequestTheUserDeletedDeleted) {
+    const std::string owners = create_owners_request (root_);
+    delete_request (owners);
+
+    const json response = policy_sync ();
+
+    EXPECT_EQ (response["created"].get<size_t> (), 0u);
+    EXPECT_EQ (response["skipped"]["declined"].get<size_t> (), 1u);
+    EXPECT_FALSE (db_->get_request (owners).has_value ());
+    EXPECT_EQ (owners_requests (), 0u);
+    EXPECT_EQ (db_->get_declined_operations (root_).size (), 1u)
+    << "a sync that declined to create it is not the user changing their mind";
+}
+
+TEST_F (DeclinedOperationTest, RestoringTheRequestThenSyncingLeavesOneRequestForTheOperation) {
+    const std::string owners = create_owners_request (root_);
+    delete_request (owners);
+    ASSERT_HAS_VALUE (db_->restore_deleted (owners));
+
+    const json response = policy_sync ();
+
+    EXPECT_EQ (response["created"].get<size_t> (), 0u);
+    EXPECT_EQ (response["skipped"]["declined"].get<size_t> (), 0u);
+    EXPECT_EQ (owners_requests (), 1u);
+}
+
+// The other half of the acceptance. Mutation check: drop
+// `plan_taken_back_declines` from the sync and the record survives the create.
+TEST_F (DeclinedOperationTest, TickingADeclinedOperationCreatesItAndForgetsTheRecord) {
+    delete_request (create_owners_request (root_));
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "create",
+    json::array ({ json{ { "tempId", "t_owners" }, { "collectionId", root_ },
+    { "name", "list owners" }, { "method", "GET" }, { "url", "https://example.test/owners" },
+    { "specOperation", list_owners () } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_EQ (response["created"].get<size_t> (), 1u);
+    EXPECT_TRUE (db_->get_declined_operations (root_).empty ());
+    const json next = policy_sync ();
+    EXPECT_EQ (next["created"].get<size_t> (), 0u);
+    EXPECT_EQ (next["skipped"]["declined"].get<size_t> (), 0u);
+    EXPECT_EQ (owners_requests (), 1u);
+}
+
+// A sync's own deletions are hard and record nothing (#1046): the document is
+// what the collection is reconciled to, and nobody declined anything.
+TEST_F (DeclinedOperationTest, ASyncsOwnDeleteDeclinesNothing) {
+    const std::string owners = create_owners_request (root_);
+
+    auto [status, response] = routes::spec_sync_response (
+    *db_, body (json{ { "delete", json::array ({ owners }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    EXPECT_TRUE (db_->get_declined_operations (root_).empty ());
+    EXPECT_EQ (policy_sync ()["created"].get<size_t> (), 1u);
+}
+
+TEST_F (DeclinedOperationTest, DeletingATagFolderDeclinesItsOperationsUnderTheBinding) {
+    const std::string folder =
+    create_collection (json{ { "name", "owners" }, { "parentId", root_ } });
+    create_owners_request (folder);
+    auto [status, deleted] = routes::delete_collection_response (*db_, folder);
+    ASSERT_EQ (status, 200) << deleted.dump ();
+
+    const json response = policy_sync ();
+
+    EXPECT_EQ (response["created"].get<size_t> (), 0u);
+    EXPECT_EQ (response["skipped"]["declined"].get<size_t> (), 1u);
+}
+
+// Mutation check: drop the `bound->collection_id != id` guard in
+// `delete_collection_response` and the root's own delete records its requests.
+TEST_F (DeclinedOperationTest, DeletingTheBoundCollectionItselfDeclinesNothing) {
+    create_owners_request (root_);
+
+    auto [status, deleted] = routes::delete_collection_response (*db_, root_);
+    ASSERT_EQ (status, 200) << deleted.dump ();
+
+    EXPECT_TRUE (db_->get_declined_operations (root_).empty ());
+}
+
+// The records were decisions about the document the collection was bound to.
+// Unbinding forgets them, and so does a bind to other bytes; a bind to the
+// same bytes is the same document and keeps them. Mutation checks: drop the
+// `binding_leaves_document` branch in `update_collection_locked` or in
+// `bind_locked` and the matching half fails; make it always true and the last
+// assertion does.
+TEST_F (DeclinedOperationTest, UnbindingOrBindingOtherBytesForgetsTheDeclinedOperations) {
+    delete_request (create_owners_request (root_));
+    ASSERT_EQ (routes::update_collection_response (*db_, root_, json{ { "openapi", nullptr } })
+               .first,
+    200);
+    EXPECT_TRUE (db_->get_declined_operations (root_).empty ())
+    << "unbinding forgets them";
+
+    ASSERT_EQ (routes::update_collection_response (*db_, root_,
+               json{ { "openapi", json{ { "specId", bound_spec_ } } } })
+               .first,
+    200);
+    delete_request (create_owners_request (root_));
+    ASSERT_EQ (db_->get_declined_operations (root_).size (), 1u);
+    const json bind_body{ { "collectionId", root_ },
+        { "spec", json{ { "content", FETCHED_DOC } } } };
+    auto [bound, bind_response] = routes::bind_spec_response (*db_, bind_body);
+    ASSERT_EQ (bound, 200) << bind_response.dump ();
+    EXPECT_TRUE (db_->get_declined_operations (root_).empty ())
+    << "other bytes forget them";
+
+    delete_request (create_owners_request (root_));
+    auto [rebound, rebind_response] = routes::bind_spec_response (*db_, bind_body);
+    ASSERT_EQ (rebound, 200) << rebind_response.dump ();
+    EXPECT_EQ (db_->get_declined_operations (root_).size (), 1u)
+    << "the same bytes keep them";
 }
 
 } // namespace

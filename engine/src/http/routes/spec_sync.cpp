@@ -175,6 +175,22 @@ std::string bound_spec_id (const std::string& openapi) {
     }
 }
 
+bool binding_leaves_document (const std::string& before, const std::string& after) {
+    if (bound_spec_id (after).empty ()) {
+        return true;
+    }
+    const auto hash_of = [] (const std::string& openapi) {
+        const auto parsed =
+        nlohmann::json::parse (openapi, nullptr, /*allow_exceptions=*/false);
+        const auto hash = parsed.find ("specHash"); // end () for a non-object
+        return hash != parsed.end () && hash->is_string () ?
+        hash->get<std::string> () :
+        std::string ();
+    };
+    const std::string kept = hash_of (after);
+    return kept.empty () || kept != hash_of (before);
+}
+
 namespace {
 
 /**
@@ -368,10 +384,9 @@ class DocumentedExamples {
      */
     std::optional<nlohmann::json> rows_for (const std::string& spec_operation) {
         if (!index_) {
-            drafts_ = vayu::core::spec_request_drafts_of (document_);
             std::vector<vayu::core::DeclaredOperation> declared;
-            declared.reserve (drafts_.size ());
-            for (const vayu::core::SpecRequestDraft& draft : drafts_) {
+            declared.reserve (drafts ().size ());
+            for (const vayu::core::SpecRequestDraft& draft : drafts ()) {
                 declared.push_back (draft.operation);
             }
             index_.emplace (declared);
@@ -384,12 +399,20 @@ class DocumentedExamples {
         // `optional<json>` from a `json` puts nlohmann's `operator ValueType()`
         // up against `optional`'s converting constructor, which GCC reports as
         // -Wconversion. Direct-initializing considers the constructor alone.
-        return std::make_optional (draft_example_rows (drafts_[*found].draft.examples));
+        return std::make_optional (draft_example_rows (drafts ()[*found].draft.examples));
+    }
+
+    /// The document's drafts, read on the first call and kept.
+    const std::vector<vayu::core::SpecRequestDraft>& drafts () {
+        if (!drafts_) {
+            drafts_ = vayu::core::spec_request_drafts_of (document_);
+        }
+        return *drafts_;
     }
 
     private:
     const nlohmann::ordered_json& document_;
-    std::vector<vayu::core::SpecRequestDraft> drafts_;
+    std::optional<std::vector<vayu::core::SpecRequestDraft>> drafts_;
     std::optional<vayu::core::OperationIndex> index_;
 };
 
@@ -536,12 +559,9 @@ const SpecComparison& comparison) {
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
     FolderResolver folders (root_id, collections);
 
-    nlohmann::json create = nlohmann::json::array ();
-    for (size_t i = 0; i < diff.added.size (); ++i) {
-        if (!safe.create[i]) {
-            continue;
-        }
-        const vayu::core::SpecRequestDraft& entry = comparison.fetched[diff.added[i]];
+    nlohmann::json create   = nlohmann::json::array ();
+    const auto create_draft = [&] (size_t draft) {
+        const vayu::core::SpecRequestDraft& entry = comparison.fetched[draft];
         // The same builder the diff reports its `draft` with, so the request an
         // apply creates is the one the preview described. `auth` and the two
         // scripts are left unset, taking the plain create default (`inherit`,
@@ -555,6 +575,21 @@ const SpecComparison& comparison) {
         item["specOperation"] = spec_operation_json (entry.operation);
         item.update (folders.owner_of (entry.folder));
         create.push_back (std::move (item));
+    };
+    for (size_t i = 0; i < diff.added.size (); ++i) {
+        if (safe.create[i]) {
+            create_draft (diff.added[i]);
+        }
+    }
+    // Read from the policy like the deletions below: it never re-creates what
+    // somebody deleted (#3031), and that is its rule to state.
+    size_t declined = 0;
+    for (size_t i = 0; i < diff.declined.size (); ++i) {
+        if (safe.recreate[i]) {
+            create_draft (diff.declined[i]);
+        } else {
+            declined += 1;
+        }
     }
 
     nlohmann::json update = nlohmann::json::array ();
@@ -609,7 +644,8 @@ const SpecComparison& comparison) {
         nlohmann::json{ { "requests", left_alone },
         // Every field the document moved that this apply does not write -
         // whether its request was left alone whole or applied around it.
-        { "fields", offered_fields - written_fields }, { "deletions", kept } } } };
+        { "fields", offered_fields - written_fields }, { "deletions", kept },
+        { "declined", declined } } } };
 }
 
 /**
@@ -862,7 +898,7 @@ nlohmann::json& policy_rows) {
     }
     SpecComparison comparison;
     if (auto outcome = compare_bound_spec (db, scope.stored_collections,
-        scope.subtree, scope.bound_id, document, comparison);
+        scope.subtree, request.collection_id, scope.bound_id, document, comparison);
     !outcome) {
         return outcome;
     }
@@ -1256,6 +1292,36 @@ SyncPlan& plan) {
 }
 
 /**
+ * The declined operations (#3031) the requests this sync creates take back.
+ *
+ * Ticking a declined entry is a create like any other, and the person changing
+ * their mind: the record behind the entry goes in the same transaction, so
+ * deleting the new request later is a fresh decision with a record of its own.
+ */
+void plan_taken_back_declines (vayu::db::Database& db,
+const std::string& root_id,
+DocumentedExamples& documented,
+SyncPlan& plan) {
+    const auto records = db.get_declined_operations (root_id);
+    if (records.empty ()) {
+        return; // The usual case, and it costs no read of the document.
+    }
+    std::vector<vayu::core::DeclaredOperation> created;
+    for (const auto& row : plan.batch.created) {
+        if (auto identity = vayu::core::parse_spec_identity (row.spec_operation)) {
+            created.push_back (std::move (*identity));
+        }
+    }
+    if (created.empty ()) {
+        return;
+    }
+    for (const size_t i : vayu::core::declines_taken_back (
+         documented.drafts (), declined_identities (records), created)) {
+        plan.batch.cleared_declines.push_back (records[i].id);
+    }
+}
+
+/**
  * The whole write, under the lock its caller holds.
  *
  * Read-decide-write in one scope, on `delete_spec_document`'s rule (#386): the
@@ -1286,6 +1352,7 @@ apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
     if (auto outcome = plan_sync_rows (db, request, scope, documented, plan); !outcome) {
         return as_response (outcome.error ());
     }
+    plan_taken_back_declines (db, request.collection_id, documented, plan);
 
     // The same limit as the payload check before the lock, applied to what will
     // actually be written: the example rows are derived rather than sent (issue
@@ -1348,12 +1415,14 @@ void register_spec_sync_routes (RouteContext& ctx) {
      * sourceUrl?} - `id`, `hash` and `fetchedAt` are engine-computed and
      * rejected), policy ("safe" - apply the ticks a caller with no opinion would
      * make, which is every operation the document adds, every field it moved
-     * that nobody here had edited, and no deletions; the engine works the rows
-     * out itself and the four sections below are then rejected), collections
-     * (new tag folders, each with a `tempId` and an
+     * that nobody here had edited, no deletions, and none of the operations a
+     * person declined by deleting their request (#3031); the engine works the
+     * rows out itself and the four sections below are then rejected),
+     * collections (new tag folders, each with a `tempId` and an
      * optional `parentId` inside the synced subtree), create (requests, each
      * with a `tempId` and either `collectionId` or `collectionTempId`; the
-     * examples come from the document, so `examples` is rejected), update
+     * examples come from the document, so `examples` is rejected; creating a
+     * declined operation forgets that it was declined), update
      * (requests by `id`, merge-patch, with an optional boolean `examples` -
      * true refreshes this request's imported examples from the document being
      * stored, never the saved ones and never a status the user deleted; absent

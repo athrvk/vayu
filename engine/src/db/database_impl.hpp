@@ -371,6 +371,21 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("response_schemas", &SpecDocument::response_schemas,
     default_value (std::string ()))),
 
+    // Operations a person declined by deleting their request (schema version
+    // 10, #3031). A new table, created outright by sync_schema() like
+    // `file_roots`. The UNIQUE key is the identity under one binding, so a
+    // second delete for one operation is one row; it also serves every read,
+    // which is by `collection_id`.
+    make_table ("spec_declined_operations",
+    make_column ("id", &DeclinedOperation::id, primary_key ().autoincrement ()),
+    make_column ("collection_id", &DeclinedOperation::collection_id),
+    make_column ("operation_id", &DeclinedOperation::operation_id),
+    make_column ("method", &DeclinedOperation::method),
+    make_column ("path", &DeclinedOperation::path),
+    make_column ("request_id", &DeclinedOperation::request_id),
+    unique (&DeclinedOperation::collection_id, &DeclinedOperation::method,
+    &DeclinedOperation::path, &DeclinedOperation::operation_id)),
+
     // Environments: Named variable sets (dev, staging, prod)
     make_table ("environments", make_column ("id", &Environment::id, primary_key ()),
     make_column ("name", &Environment::name),

@@ -1531,7 +1531,8 @@ const std::function<void (sqlite3*)>& on_connection) {
         // `file_roots` table and 5 -> 6 the new `file_grants`, which
         // `sync_schema ()` creates outright; 7 -> 8 is `collections.spec_file`
         // and `data_file`, NOT NULL with a default, which it adds and
-        // backfills to `{}`. A chosen file that is gone
+        // backfills to `{}`; 9 -> 10 is the new `spec_declined_operations`,
+        // which it creates outright. A chosen file that is gone
         // changes nothing stored, but is still reported.
         stamp_schema_version (connection.get (), path);
         log_file_trust_plan (trust_plan);

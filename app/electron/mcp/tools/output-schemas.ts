@@ -202,6 +202,7 @@ export const specDiffSchema = z.looseObject({
 	identical: optBool,
 	summary: anyRecord.optional(),
 	added: anyList,
+	declined: anyList,
 	removed: anyList,
 	changed: anyList,
 	entriesTruncated: optBool,
