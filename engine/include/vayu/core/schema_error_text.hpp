@@ -23,9 +23,21 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <optional>
 #include <string>
 
 namespace vayu::core {
+
+/**
+ * Whose schema a failure came from, which decides the vocabulary. An element
+ * kind's config schema describes settings a person fills into a form; a
+ * response schema describes a body, where "a setting this element has" and
+ * "a number" for an integer both misname the problem (#3037).
+ */
+enum class SchemaErrorContext {
+    ElementSettings,
+    ResponseBody,
+};
 
 /**
  * valijson's own wording for one schema-constraint failure, translated into
@@ -48,9 +60,23 @@ namespace vayu::core {
  * degrades gracefully to the property's raw key rather than a title, and a
  * constraint outside the set above, or a description this cannot match,
  * falls back to valijson's own text rather than showing nothing.
+ *
+ * @p context picks the wording for what only a settings form or only a body
+ * has: a property the schema does not declare, an integer, `null`, the
+ * document root. A response-body message never names a setting or an element.
  */
 std::string humanize_schema_error (const nlohmann::json& schema,
 const std::string& error_description,
-const std::string& error_json_pointer);
+const std::string& error_json_pointer,
+SchemaErrorContext context = SchemaErrorContext::ElementSettings);
+
+/**
+ * The property name valijson's `additionalProperties` failure rejected, or
+ * nothing when @p error_description is another failure. valijson's error
+ * location names the *object* holding the property; this is the one place the
+ * property itself is recorded, so a caller that wants its own location (a
+ * response failure's path) reads it from here.
+ */
+std::optional<std::string> unexpected_property_name (const std::string& error_description);
 
 } // namespace vayu::core

@@ -7965,7 +7965,7 @@ nothing.
 | `checked` | Whether anything was actually validated |
 | `valid` | Present only when `checked`. A body with no failures |
 | `reason` | Present only when **not** `checked` - the code, see below |
-| `failures[]` | `path` (a JSON Pointer into the body) and `message`, capped at 10 |
+| `failures[]` | `path` (a JSON Pointer into the body; an unexpected property is at its own pointer, `/o/z` with `unexpected property 'z'`) and `message`, capped at 10 |
 | `failuresTotal` | Every failure found, including any past the cap |
 | `unevaluatedKeywords[]` | Schema keywords the validator could not evaluate, by name and count |
 | `matchedStatus` / `matchedContentType` | Which declared response answered, verbatim |
