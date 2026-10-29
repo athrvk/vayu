@@ -203,7 +203,12 @@ already there:
   fragment are dropped, and every placeholder - Vayu's `{{petId}}` and the
   document's `{petId}` - is flattened, so a renamed path parameter still matches.
 - A request with the id **written in** (`/pets/42`) matches `/pets/{petId}`, as
-  long as no literal path in the document claims it first.
+  long as no literal path in the document claims it first. A segment that mixes
+  literal text with a placeholder matches too: `/users/42.json` is
+  `/users/{id}.json`, `/v1/operations/abc:cancel` is `/v1/operations/{name}:cancel`
+  and `/files/7/meta-3` is `/files/{id}/meta-{ver}`. The text must appear in
+  order and each placeholder must stand for something, so `/users/42.xml` and
+  `/files/7/meta` match neither.
 - A request that writes the **server's base path** into its URL
   (`https://api.example.com/v1/pets`) matches `/pets` under a server of
   `https://api.example.com/v1` (a Swagger 2.0 `basePath` likewise). Every server
